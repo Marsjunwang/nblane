@@ -1,4 +1,8 @@
-"""Resolve skill-node evidence: pool refs plus inline rows."""
+"""Resolve skill-node evidence: pool refs plus inline rows.
+
+Pool rows with ``deprecated: true`` are skipped for materialization
+(context / gap counts) but ids remain valid for validate.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +35,8 @@ def resolve_node_evidence_dict(
             seen.add(key)
             rec = index.get(key)
             if rec is None:
+                continue
+            if rec.deprecated:
                 continue
             out.append(rec.to_evidence())
 

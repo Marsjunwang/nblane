@@ -109,11 +109,37 @@ nblane evidence <profile> pool add \
 nblane evidence <profile> link <skill_id> <evidence_id>
 ```
 
+**Unlink** (remove that pool id from one node’s `evidence_refs` only):
+
+```bash
+nblane evidence <profile> unlink <skill_id> <evidence_id>
+```
+
+**Remove a pool row** — fails if any node still references the id unless you
+pass `--prune-refs` (strips the id from every node’s `evidence_refs`, then
+deletes the row). Writes YAML, validates, syncs generated SKILL.md blocks
+(rollback on validate error).
+
+```bash
+nblane evidence <profile> pool remove <evidence_id>
+nblane evidence <profile> pool remove <evidence_id> --prune-refs
+```
+
+**Soft-retire a pool row** (id stays valid for validate; materialized evidence
+for context / gap **omits** deprecated rows):
+
+```bash
+nblane evidence <profile> pool deprecate <evidence_id>
+nblane evidence <profile> pool deprecate <evidence_id> --replaced-by NEW_ID
+```
+
 ## Web UI
 
 On **Skill Tree**:
 
-- Expand **Evidence pool** to add catalogued rows.
+- Expand **Evidence pool** to add catalogued rows, list existing rows, and
+  **Delete row** (optionally remove the id from all skills’ refs first via the
+  checkbox). Click **Save** to persist.
 - On each skill card, use **From pool (refs)** multiselect plus inline
   evidence rows as before.
 - **Save skill-tree.yaml** writes both YAML files when a pool file already
@@ -128,7 +154,8 @@ On **Skill Tree**:
   custom tooling.
 - **`nblane validate [profile]`** — Unknown inline `type` or empty inline
   `title` → **warning**. Unknown `evidence_refs` id (or refs with no
-  `evidence-pool.yaml`) → **error**.
+  `evidence-pool.yaml`) → **error**. Pool rows marked `deprecated: true` still
+  satisfy refs but do not appear in materialized evidence lists.
 
 ## Migration notes
 

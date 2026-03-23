@@ -105,7 +105,7 @@
 
 <!-- BEGIN GENERATED:current_focus -->
 **Active** (this week):
-- none
+- pi0.5复现以及基于spatial forcing的3d增强
 
 **Queued** (next):
 - {Task title}

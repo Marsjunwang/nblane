@@ -218,6 +218,33 @@ class TestEvidenceResolve(unittest.TestCase):
             1,
         )
 
+    def test_deprecated_pool_row_skipped(self) -> None:
+        """Deprecated pool records do not materialize."""
+        pool = EvidencePool.from_dict(
+            {
+                "evidence_entries": [
+                    {
+                        "id": "old",
+                        "type": "project",
+                        "title": "Retired",
+                        "deprecated": True,
+                    },
+                    {
+                        "id": "new",
+                        "type": "project",
+                        "title": "Active",
+                    },
+                ],
+            }
+        )
+        node = {
+            "evidence_refs": ["old", "new"],
+            "evidence": [],
+        }
+        got = resolve_node_evidence_dict(node, pool)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0].title, "Active")
+
 
 class TestGapEvidenceFormatting(unittest.TestCase):
     """CLI gap output includes evidence counts."""

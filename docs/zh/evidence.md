@@ -64,10 +64,34 @@ nblane evidence <profile> pool add --type project --title "共享项目" \
 nblane evidence <profile> link <skill_id> <evidence_id>
 ```
 
+**取消引用**（只从某一技能的 `evidence_refs` 去掉该池 id）：
+
+```bash
+nblane evidence <profile> unlink <skill_id> <evidence_id>
+```
+
+**删除池中的一行** — 若有技能仍引用该 id 则默认报错；加 `--prune-refs` 会先从
+所有节点的 `evidence_refs` 去掉该 id 再删池行。会校验并在成功时同步 SKILL.md
+生成块（校验失败会回滚写入）。
+
+```bash
+nblane evidence <profile> pool remove <evidence_id>
+nblane evidence <profile> pool remove <evidence_id> --prune-refs
+```
+
+**软下线池条目**（id 仍存在以满足 validate；context / gap 物化时**跳过**
+`deprecated: true` 的行）：
+
+```bash
+nblane evidence <profile> pool deprecate <evidence_id>
+nblane evidence <profile> pool deprecate <evidence_id> --replaced-by NEW_ID
+```
+
 ## Web
 
-在 **Skill Tree**：展开 **证据池** 可新增池条目；技能卡片上 **来自证据池（引用）**
-多选 + 内联证据行；保存时若已有池文件或池非空，会一并写入
+在 **Skill Tree**：展开 **证据池** 可新增池条目、查看已登记条目并**删除行**
+（可勾选先从所有技能移除该 id 再删）；需点击**保存**写入 YAML。技能卡片上
+**来自证据池（引用）**多选 + 内联证据行；保存时若已有池文件或池非空，会一并写入
 `evidence-pool.yaml`。
 
 ## 与其它功能的关系
@@ -75,7 +99,8 @@ nblane evidence <profile> link <skill_id> <evidence_id>
 - **`nblane context`** — 物化后的证据用于 **Skill evidence (solid / expert)**。
 - **`nblane gap`** — 显示如 `solid (4 evidence)`（内联 + 引用合计）。
 - **`nblane validate`** — 内联非法 type / 空 title → **WARN**；未知
-  `evidence_refs` id 或缺池文件却写了引用 → **ERROR**。
+  `evidence_refs` id 或缺池文件却写了引用 → **ERROR**。池行 `deprecated: true`
+  仍算有效引用，但不出现在物化证据列表中。
 
 **迁移：** 仅内联的旧数据行为不变；若要把重复条目迁入池，先写入
 `evidence-pool.yaml`，再把节点改为 `evidence_refs`，最后跑 `nblane validate`。

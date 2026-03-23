@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import streamlit as st
 
+from nblane.core.evidence_ops import (
+    pool_id_referenced_by_nodes,
+    prune_pool_id_in_rows,
+)
 from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.evidence_resolve import (
     resolve_node_evidence_dict,
@@ -416,6 +420,62 @@ with st.expander(ui["pool_expander"], expanded=False):
                     st.session_state["_skill_tree_save_toast"] = (
                         ui["pool_added"]
                     )
+                    st.rerun()
+
+    st.markdown(f"**{ui['pool_list_heading']}**")
+    prune_refs_del = st.checkbox(
+        ui["pool_prune_refs"],
+        key=f"pool_delete_prune_{selected}",
+        value=False,
+    )
+    if pool_entries:
+        st.caption(ui["pool_delete_hint"])
+    for idx, prow in enumerate(pool_entries):
+        pid = str(prow.get("id", "") or "").strip()
+        if not pid:
+            continue
+        title_s = str(prow.get("title", "") or "").strip()
+        label = (
+            f"`{pid}` — {title_s}" if title_s else f"`{pid}`"
+        )
+        c_del_l, c_del_r = st.columns([5, 1])
+        with c_del_l:
+            st.markdown(label)
+        with c_del_r:
+            if st.button(
+                ui["pool_delete_remove"],
+                key=f"pool_del_{selected}_{idx}",
+            ):
+                ref_tree = {
+                    "nodes": _rows_to_nodes(rows),
+                }
+                refs = pool_id_referenced_by_nodes(
+                    ref_tree,
+                    pid,
+                )
+                if refs and not prune_refs_del:
+                    st.error(
+                        ui["pool_delete_blocked"].format(
+                            pid=pid,
+                            nodes=", ".join(refs),
+                        )
+                    )
+                else:
+                    if refs and prune_refs_del:
+                        prune_pool_id_in_rows(
+                            rows,
+                            pid,
+                        )
+                    for j, e in enumerate(pool_entries):
+                        eid = str(
+                            e.get("id", "") or ""
+                        ).strip()
+                        if eid == pid:
+                            pool_entries.pop(j)
+                            break
+                    st.session_state[
+                        "_skill_tree_save_toast"
+                    ] = ui["pool_deleted_session"]
                     st.rerun()
 
 # -- Global metrics -----------------------------------------------

@@ -336,6 +336,23 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
         "pool_empty_hint": (
             "No pool rows yet — add entries in the expander above."
         ),
+        "pool_list_heading": "Catalogued rows",
+        "pool_delete_hint": (
+            "Deleting removes the row from this editor; "
+            "click Save to write YAML."
+        ),
+        "pool_prune_refs": (
+            "When deleting: also remove this pool id from "
+            "all skills (evidence_refs)"
+        ),
+        "pool_delete_remove": "Delete row",
+        "pool_delete_blocked": (
+            "Cannot delete `{pid}` — still linked from skills: "
+            "{nodes}. Enable the option above or unlink first."
+        ),
+        "pool_deleted_session": (
+            "Removed pool row from editor; click **Save** to persist."
+        ),
     },
     "zh": {
         "page_title": "技能树 · nblane",
@@ -392,6 +409,21 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
         "evidence_refs_label": "引用池 id",
         "evidence_refs_help": "选择已有池条目挂到此技能。",
         "pool_empty_hint": "尚无池条目 — 请在上方可折叠区添加。",
+        "pool_list_heading": "已登记条目",
+        "pool_delete_hint": (
+            "删除会从当前编辑区移除该行；需点击「保存」写入 YAML。"
+        ),
+        "pool_prune_refs": (
+            "删除时同时从所有技能的 evidence_refs 中移除此池 id"
+        ),
+        "pool_delete_remove": "删除此行",
+        "pool_delete_blocked": (
+            "无法删除 `{pid}` — 以下技能仍引用：{nodes}。"
+            "请勾选上方选项或先取消引用。"
+        ),
+        "pool_deleted_session": (
+            "已从编辑区移除池条目；请点击**保存**以写入文件。"
+        ),
     },
 }
 

@@ -61,7 +61,4 @@ evidence_entries:
 - type: practice
   title: OpenPI0.5 Reproduction (LA model)
   id: 20260322_openpi0_5_reproduction_la_model
-- type: practice
-  title: VGGT Reproduction
-  id: 20260322_vggt_reproduction
 updated: '2026-03-23'

@@ -70,6 +70,10 @@ nblane evidence yourname ros2_basics add \
 nblane evidence yourname pool add \
   --type project --title "Shared milestone demo"
 nblane evidence yourname link ros2_basics <evidence_id>
+nblane evidence yourname unlink ros2_basics <evidence_id>
+nblane evidence yourname pool remove <evidence_id>
+# With refs elsewhere: add --prune-refs to strip refs then remove row
+nblane evidence yourname pool deprecate <evidence_id>
 
 # LLM-assisted ingest (requires LLM_API_KEY in .env)
 nblane ingest-resume yourname --file resume.txt
