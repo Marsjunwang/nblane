@@ -1,28 +1,4 @@
 act_policy:
-- transformer decoding
-- 时间嵌入
-- temporal embedding
-- 多模态融合
-- multimodal fusion
-- 跨模态注意力
-- cross-modal attention
-- 序列到动作
-- sequence-to-action
-- action_tokenization
-- 时序建模
-- temporal_modeling
-- 变压器策略
-- transformer_policy
-- 条件生成
-- conditional_generation
-- 多模态对齐
-- multimodal_alignment
-- 变换器策略
-- 潜在动作空间
-- latent_action_space
-- 交叉注意力注入
-- cross-attention injection
-- 时空标记化
 - temporal tokenization
 - latent action space
 - 动作令牌
@@ -99,6 +75,30 @@ act_policy:
 - hiddens-caching
 - 时间注意力
 - temporal-attention
+- ACT算法实现
+- ACT algorithm implementation
+- Transformer策略建模
+- Transformer-based policy modeling
+- 端到端机器人控制
+- end-to-end robot control
+- 行为克隆与泛化
+- behavior cloning and generalization
+- 隐空间动作
+- latent_action
+- 时间卷积
+- temporal_convolution
+- 视觉-动作对齐
+- vision_action_alignment
+- RT-2 架构
+- RT_2_architecture
+- 动作令牌化
+- behavior_cloning
+- 自回归动作生成
+- autoregressive_action_generation
+- token化动作空间
+- tokenized_action_space
+- 视觉-语言-动作对齐
+- vlm_action_alignment
 bimanual:
 - 双臂操作
 - Bimanual Manipulation
@@ -111,16 +111,6 @@ bimanual:
 - 机械臂协同
 - Robotic Arm Coordination
 diffusion_policy:
-- 扩散采样
-- diffusion sampling
-- 去噪网络
-- denoising network
-- 调度器
-- scheduler
-- 动作扩散
-- action diffusion
-- 逐步生成
-- iterative generation
 - 扩散策略
 - diffusion policy
 - 噪声调度
@@ -191,6 +181,36 @@ diffusion_policy:
 - timestep-scheduling
 - 潜在动作空间
 - latent-action-space
+- 扩散模型策略
+- 生成式动作规划
+- generative action planning
+- 多步轨迹建模
+- multi-step trajectory modeling
+- 高维动作空间处理
+- high-dimensional action space handling
+- 去噪调度器
+- denoising_scheduler
+- 扩散步骤采样
+- diffusion_step_sampling
+- 条件扩散
+- conditional_diffusion
+- 接触力预测
+- contact_force_prediction
+- 双手协同建模
+- bimanual_modeling
+- diffusion policy modeling
+- SOTA性能提升路径
+- SOTA performance improvement path
+- 时序动作建模
+- temporal action modeling
+- 扩散逆过程
+- diffusion_reverse_process
+- 去噪轨迹采样
+- denoised_trajectory_sampling
+- 多步动作先验
+- multi_step_action_prior
+- 条件生成建模
+- conditional_generation_modeling
 docker_deploy:
 - Docker & containerized robot stacks
 - container deployment
@@ -210,22 +230,21 @@ experiment_design:
 - ablation study design
 - 超参敏感性分析
 - hyperparameter sensitivity analysis
+- SOTA对比基准
+- SOTA benchmarking
+- 指标选择与验证
+- metric selection and validation
+- 可复现性控制
+- reproducibility control
+- 控制变量法
+- control_variable_method
+- 跨数据集泛化
+- cross_dataset_generalization
+- sim2real gap量化
+- sim2real_gap_quantification
+- 指标敏感性分析
+- metric_sensitivity_analysis
 foundation_models_perception:
-- 视觉基础模型
-- vision foundation model
-- 掩码引导
-- mask-guided
-- 三维空间感知
-- 3D spatial perception
-- 掩码分割
-- mask_segmentation
-- 空间接地
-- spatial_grounding
-- foundation_model
-- SAM
-- 几何先验
-- geometric_prior
-- 空间感知
 - spatial_awareness
 - 掩码生成
 - mask_generation
@@ -295,6 +314,37 @@ foundation_models_perception:
 - semantic segmentation
 - 6D位姿估计
 - 6d_pose_estimation
+- visual foundation models
+- SAM分割引导
+- SAM-based segmentation guidance
+- 具身感知-动作联合建模
+- perception-action joint modeling
+- 开放词汇场景理解
+- open-vocabulary scene understanding
+- SAM 掩码生成
+- SAM_mask_generation
+- 视觉接地
+- visual_grounding
+- Grounded-SAM 文本框
+- text_box
+- 开放词汇检测
+- open_vocabulary_detection
+- 多模态特征对齐
+- multimodal_feature_alignment
+- Grounded-SAM感知基础
+- Grounded-SAM perception foundation
+- 开放词汇理解
+- open-vocabulary understanding
+- 视觉表征迁移
+- visual representation transfer
+- 零样本分割
+- zero_shot_segmentation
+- 指代分割
+- referring_segmentation
+- 掩码引导动作
+- mask_guided_action
+- SAM嵌入重用
+- SAM_embedding_reuse
 gazebo_basics:
 - Gazebo仿真
 - Gazebo_simulation
@@ -319,33 +369,17 @@ gazebo_basics:
 - sensor_plugin
 - 关节控制
 - joint_control
+- 物理引擎插件
+- physics_plugin
+- SDF 模型
+- SDF_model
+- 仿真时钟
+- sim_time
+- 传感器噪声建模
+- sensor_noise_modeling
+- world 文件
+- world_file
 imitation_learning:
-- IRL
-- 示教数据
-- trajectory demonstration
-- behavior cloning
-- teleoperation data
-- 轨迹对齐
-- trajectory alignment
-- DAgger迭代
-- DAgger iteration
-- 演示预处理
-- demonstration preprocessing
-- 数据集偏差
-- dataset bias
-- DAgger 迭代采样
-- DAgger iterative sampling
-- behavioral_cloning
-- 示教学习
-- imitation_learning
-- 轨迹预测
-- trajectory_prediction
-- 数据增强
-- data_augmentation
-- 模仿偏差
-- imitation_bias
-- trajectory_alignment
-- 动作分块
 - action_chunking
 - 错误恢复
 - error_recovery
@@ -420,6 +454,32 @@ imitation_learning:
 - 动作分布建模
 - action-distribution-modeling
 - policy-distillation
+- imitation learning framework
+- DAgger迭代优化
+- DAgger iterative optimization
+- 专家示范数据利用
+- expert demonstration data utilization
+- DAgger 迭代数据收集
+- DAgger_iterative_collection
+- GAIL 对抗训练
+- GAIL_adversarial_training
+- 示教轨迹
+- demonstration_trajectory
+- 模仿泛化
+- imitation_generalization
+- behavior cloning
+- expert demonstration utilization
+- DAgger
+- GAIL等范式
+- GAIL paradigms
+- 策略初始化与微调
+- policy initialization and fine-tuning
+- DAgger迭代
+- DAgger_iteration
+- 分布偏移校正
+- distribution_shift_correction
+- 专家轨迹对齐
+- expert_trajectory_alignment
 linux_basics:
 - Linux
 - Shell
@@ -437,6 +497,15 @@ linux_basics:
 - 进程调试
 - process_debugging
 - log_analysis
+- 命令行脚本
+- bash_script
+- CI
+- CD 流水线
+- CI_CD_pipeline
+- ROS2 编译
+- ros2_build
+- 机器人部署
+- robot_deployment
 math_optimization:
 - 凸优化
 - convex optimization
@@ -494,6 +563,10 @@ math_optimization:
 - convergence analysis
 - 拉格朗日对偶
 - lagrangian_duality
+- PPO 损失函数
+- PPO_loss
+- 动作空间约束
+- action_space_constraint
 math_probability:
 - 概率分布
 - probability distribution
@@ -510,6 +583,23 @@ math_probability:
 - mle
 - KL散度
 - kl_divergence
+- Bayesian_inference
+- 马尔可夫决策过程
+- MDP
+- 似然函数
+- likelihood_function
+- uncertainty_modeling
+- GAIL 判别器
+- GAIL_discriminator
+object_detection:
+- YOLO检测头
+- YOLO_head
+- 边界框到6D姿态
+- bbox_to_6d_pose
+- 多类别开放词汇
+- multi_class_open_vocabulary
+- 检测-分割联合训练
+- detection_segmentation_joint_training
 paper_reading:
 - pi系列论文精读
 - pi-series paper deep reading
@@ -525,6 +615,14 @@ paper_reading:
 - experiment-config-reproduction
 - Trick清单
 - trick-checklist
+- SOTA对比分析
+- SOTA_comparison_analysis
+- 方法论解构
+- methodology_deconstruction
+- 实验设置复现
+- experiment_setup_replication
+- 消融表解读
+- ablation_table_interpretation
 point_cloud:
 - 点云配准
 - point cloud registration
@@ -588,6 +686,21 @@ python_core:
 - hdf5-dataloader
 - PyTorch-Diffusers集成
 - pytorch-diffusers-integration
+- NumPy 张量操作
+- NumPy_tensor_ops
+- SciPy 数值积分
+- SciPy_numerical_integration
+- Matplotlib 可视化
+- matplotlib_visualization
+- ROS2 消息解析
+- ROS2_message_parsing
+- point_cloud_processing
+- NumPy_tensor_operation
+- scipy_optimizer
+- Matplotlib注意力热力图
+- matplotlib_attention_heatmap
+- PyTorch数据管道
+- PyTorch_dataloader_pipeline
 real_robot_ops:
 - 真实机器人部署
 - real-robot deployment
@@ -677,6 +790,13 @@ rl_basics:
 - mdp
 - 优势函数
 - advantage_function
+- episode 截断
+- episode_truncation
+- state_representation
+- PPO clip loss
+- PPO_clip_loss
+- MuJoCo XML
+- mujoco_xml
 rl_for_robotics:
 - pi0.5 模型
 - VGGT 隐式3D蒸馏
@@ -685,6 +805,24 @@ rl_for_robotics:
 - MuJoCo
 - 强化学习训练平台
 - RL training platform
+- 机器人强化学习
+- robotic reinforcement learning
+- Isaac Lab仿真训练
+- Isaac Lab simulation training
+- 稀疏奖励环境
+- sparse reward environments
+- 真实机器人策略迁移
+- sim-to-real policy transfer
+- Isaac Lab 环境
+- Isaac_Lab_env
+- MuJoCo 逆动力学
+- IDM
+- 仿真-现实差距
+- sim2real_gap
+- 物理参数随机化
+- physics_randomization
+- 实时控制频率
+- realtime_control_frequency
 ros2_basics:
 - openpi05
 - ROS2 basics for robot control
@@ -717,6 +855,14 @@ ros2_basics:
 - parameter-server
 - 生命周期管理
 - lifecycle-management
+- Topic 发布订阅
+- topic_pubsub
+- Service 同步调用
+- service_sync_call
+- Lifecycle 管理
+- lifecycle_management
+- DDS 配置
+- DDS_configuration
 sim2real:
 - 仿真到真实
 - sim-to-real
@@ -788,6 +934,14 @@ sim2real:
 - latency-compensation
 - 真实机器人接口
 - real-robot-interface
+- 真实机器人标定
+- real_robot_calibration
+- 安全监控
+- safety_monitoring
+- 硬件接口延迟
+- hardware_latency
+- 现实世界扰动
+- real_world_disturbance
 urdf_modeling:
 - URDF建模
 - URDF_modeling
@@ -811,9 +965,15 @@ urdf_modeling:
 - sensor_pose
 - 碰撞几何
 - collision_geometry
+- 物理惯性参数
+- inertial_parameters
+- 关节限位
+- joint_limits
+- XACRO 宏定义
+- XACRO_macro
+- 传感器坐标系
+- sensor_frame
 vlm_robot:
-- VLA
-- Visual-Language Action
 - RT-2
 - OpenVLA
 - 视觉语言动作
@@ -890,3 +1050,27 @@ vlm_robot:
 - instruction_grounding
 - 多模态动作规划
 - multimodal_action_planning
+- RT-2 指令跟随
+- RT_2_instruction_following
+- OpenVLA 开源框架
+- OpenVLA_framework
+- 任务分解
+- task_decomposition
+- 自然语言动作映射
+- natural_language_to_action
+- VLA算法设计
+- VLA algorithm design
+- SOTA视觉语言动作模型
+- SOTA vision-language-action models
+- OpenVLA架构参考
+- OpenVLA architecture reference
+- 多模态策略学习
+- multimodal policy learning
+- 指令调优
+- instruction_tuning
+- 视觉语言动作联合嵌入
+- vlm_action_joint_embedding
+- RT-2架构
+- RT-2_architecture
+- OpenVLA数据协议
+- OpenVLA_data_protocol

@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 *.egg-info/
@@ -6,3 +8,12 @@ dist/
 build/
 .venv/
 .streamlit/
+
+# Personal profiles (SKILL.md, skill-tree, evidence-pool, kanban, etc.)
+# Keep only profiles/template/ in the repo as a reference layout.
+profiles/*
+!profiles/template/
+!profiles/template/**
+
+# Local / learned schema expansion (can mirror private skill choices)
+schemas/.learned/
