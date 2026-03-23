@@ -1,0 +1,892 @@
+act_policy:
+- transformer decoding
+- 时间嵌入
+- temporal embedding
+- 多模态融合
+- multimodal fusion
+- 跨模态注意力
+- cross-modal attention
+- 序列到动作
+- sequence-to-action
+- action_tokenization
+- 时序建模
+- temporal_modeling
+- 变压器策略
+- transformer_policy
+- 条件生成
+- conditional_generation
+- 多模态对齐
+- multimodal_alignment
+- 变换器策略
+- 潜在动作空间
+- latent_action_space
+- 交叉注意力注入
+- cross-attention injection
+- 时空标记化
+- temporal tokenization
+- latent action space
+- 动作令牌
+- action token
+- 交叉注意力
+- cross-attention
+- 时序条件建模
+- temporal conditional modeling
+- 隐空间引导
+- latent guidance
+- transformer策略头
+- transformer policy head
+- 自回归解码
+- autoregressive decoding
+- 动作序列建模
+- action sequence modeling
+- Transformer policy
+- 端到端策略
+- End-to-end policy
+- 序列建模
+- sequence modeling
+- ACT policy
+- 端到端动作生成
+- end-to-end action generation
+- ACT_policy
+- Transformer_policy
+- end-to-end_control
+- pi
+- ACT策略
+- Transformer-based_policy
+- 视觉动作对齐
+- visual-action_alignment
+- transformer policy
+- 机器人控制
+- robotic control
+- 端到端学习
+- end-to-end learning
+- 行为克隆
+- behavior cloning
+- Transformer-based Policy
+- End-to-End Control
+- 行动序列建模
+- Action Sequence Modeling
+- 多模态输入
+- Modal Input
+- end-to-end policy
+- multimodal input
+- ACT架构
+- ACT Architecture
+- Temporal Modeling
+- Vision-Language Action Mapping
+- ACT architecture
+- 编码器-解码器结构
+- encoder-decoder structure
+- ACT 架构
+- temporal modeling
+- 任务分块
+- task chunking
+- 多模态输入融合
+- ACT架构是pi0.5核心基础
+- ACT architecture is the core foundation of PI-0.5
+- Transformer-based动作序列建模
+- Transformer-based action sequence modeling
+- 自回归轨迹建模
+- autoregressive_trajectory_modeling
+- 时间一致性
+- temporal_coherence
+- action-chunking
+- 视觉-动作联合建模
+- vision-action-fusion
+- transformer解码器
+- transformer-decoder
+- 隐藏状态缓存
+- hiddens-caching
+- 时间注意力
+- temporal-attention
+bimanual:
+- 双臂操作
+- Bimanual Manipulation
+- 协同控制
+- Collaborative Control
+- 动作协调
+- Action Coordination
+- 任务规划
+- Task Planning
+- 机械臂协同
+- Robotic Arm Coordination
+diffusion_policy:
+- 扩散采样
+- diffusion sampling
+- 去噪网络
+- denoising network
+- 调度器
+- scheduler
+- 动作扩散
+- action diffusion
+- 逐步生成
+- iterative generation
+- 扩散策略
+- diffusion policy
+- 噪声调度
+- noise schedule
+- 逆向过程
+- reverse process
+- 动作采样
+- action sampling
+- 条件生成
+- conditional generation
+- 逆向扩散
+- latent diffusion
+- diffusion_policy
+- 生成式策略
+- generative_policy
+- latent_diffusion
+- pi
+- generative policy
+- 随机策略生成
+- stochastic_policy_generation
+- forward_diffusion
+- 生成式控制
+- generative control
+- 随机策略
+- stochastic policy
+- 采样轨迹
+- sampling trajectory
+- Diffusion Policy
+- 随机动作生成
+- Stochastic Action Generation
+- 高维控制
+- High-Dimensional Control
+- 生成式政策
+- Generative Policy
+- Reverse Diffusion
+- score-based modeling
+- trajectory generation
+- PyTorch模型
+- 3D蒸馏
+- 扩散策略中的3D特征表示
+- 基于VGGT的隐式3D建模
+- 生成式策略与3D感知融合
+- pi0.5 模型
+- VGGT 隐式3D蒸馏
+- 扩散策略架构
+- 反向扩散过程
+- forward diffusion process
+- pi0.5模型扩展
+- 3D蒸馏集成
+- transformer-based policy
+- pi0.5复现需扩散策略建模
+- PI-0.5 reproduction requires diffusion policy modeling
+- 扩散模型时序生成能力
+- diffusion model temporal generation capability
+- 分数匹配
+- score_matching
+- 动作分布建模
+- action_distribution_modeling
+- pi0.5复现
+- diffusion policy variant
+- 扩散策略建模
+- diffusion-based trajectory generation
+- diffusion-policy
+- 去噪采样
+- denoising-sampling
+- conditional-generation
+- 时间步调度
+- timestep-scheduling
+- 潜在动作空间
+- latent-action-space
+docker_deploy:
+- Docker & containerized robot stacks
+- container deployment
+- containerized deployment
+domain_randomization:
+- 域随机化增强泛化能力
+- 3D蒸馏在多样化环境中的适应性
+- 跨域迁移中的特征一致性
+experiment_design:
+- 实验设计
+- 消融研究
+- 模型性能评估
+- ablation study
+- controlled experiment
+- performance validation
+- 消融实验设计
+- ablation study design
+- 超参敏感性分析
+- hyperparameter sensitivity analysis
+foundation_models_perception:
+- 视觉基础模型
+- vision foundation model
+- 掩码引导
+- mask-guided
+- 三维空间感知
+- 3D spatial perception
+- 掩码分割
+- mask_segmentation
+- 空间接地
+- spatial_grounding
+- foundation_model
+- SAM
+- 几何先验
+- geometric_prior
+- 空间感知
+- spatial_awareness
+- 掩码生成
+- mask_generation
+- 几何接地
+- geometric_grounding
+- 多模态分割
+- multimodal_segmentation
+- 空间锚点
+- spatial anchor
+- mask grounding
+- 几何感知
+- geometry-aware perception
+- spatial grounding
+- 可操作区域
+- affordance mask
+- 视觉提示工程
+- vision prompt engineering
+- SAM掩码
+- SAM mask
+- Grounded-SAM定位
+- Grounded-SAM localization
+- mask segmentation
+- 视觉提示
+- visual prompting
+- 物体中心特征
+- object-centric feature
+- SAM嵌入
+- SAM embedding
+- 多模态对齐
+- multimodal alignment
+- Segment Anything Model
+- 视觉语言模型
+- VLM
+- 基础模型感知
+- foundation model perception
+- 基础模型
+- Semantic_Aware_Model
+- Foundational Models
+- Grounded-SAM
+- 视觉理解
+- Visual Understanding
+- 语义分割
+- Semantic Segmentation
+- zero-shot perception
+- prompt-based segmentation
+- VGGT
+- 隐式3D表示
+- visual foundation model
+- Foundation Models
+- Semantic Segmentation Model
+- 多模态感知
+- Multimodal Perception
+- pi0.5 模型
+- VGGT 隐式3D蒸馏
+- 基础模型感知能力
+- SAM分割
+- SAM segmentation
+- 语义-几何对齐
+- semantic-geometric alignment
+- VGGT特征提取
+- 3D隐式表示
+- Grounded-SAM应用
+- implicit 3D representation
+- 视觉-语言对齐
+- visual-language alignment
+- multimodal perception
+- semantic segmentation
+- 6D位姿估计
+- 6d_pose_estimation
+gazebo_basics:
+- Gazebo仿真
+- Gazebo_simulation
+- IsaacSim基础
+- IsaacSim_basics
+- 环境模拟
+- environment_simulation
+- Gazebo basics
+- simulation environment setup
+- Gazebo
+- IsaacSim
+- physics engine
+- simulation environment
+- spawn model
+- Gazebo simulation
+- IsaacSim环境
+- IsaacSim environment
+- 物理引擎
+- 物理仿真
+- physics_simulation
+- 传感器插件
+- sensor_plugin
+- 关节控制
+- joint_control
+imitation_learning:
+- IRL
+- 示教数据
+- trajectory demonstration
+- behavior cloning
+- teleoperation data
+- 轨迹对齐
+- trajectory alignment
+- DAgger迭代
+- DAgger iteration
+- 演示预处理
+- demonstration preprocessing
+- 数据集偏差
+- dataset bias
+- DAgger 迭代采样
+- DAgger iterative sampling
+- behavioral_cloning
+- 示教学习
+- imitation_learning
+- 轨迹预测
+- trajectory_prediction
+- 数据增强
+- data_augmentation
+- 模仿偏差
+- imitation_bias
+- trajectory_alignment
+- 动作分块
+- action_chunking
+- 错误恢复
+- error_recovery
+- 行为克隆增强
+- BC augmentation
+- 在线修正
+- online correction
+- 强制策略
+- forcing policy
+- 分布偏移
+- distribution shift
+- DAgger查询
+- DAgger querying
+- 专家轨迹
+- expert trajectory
+- 监督增强
+- supervision augmentation
+- 专家示范
+- expert demonstration
+- 模仿误差
+- imitation error
+- dagger
+- generative adversarial imitation learning
+- 策略迁移
+- strategy transfer
+- 仿学习
+- Imitation Learning
+- Behavior Cloning
+- 演示学习
+- Demonstration Learning
+- 模仿学习策略
+- imitation policy
+- Generative Adversarial Imitation Learning
+- Dataset Aggregation
+- Generative_Adversarial_Imitation_Learning
+- pi
+- Behavioral_Cloning
+- 示范学习
+- 策略蒸馏
+- strategy distillation
+- BC
+- demonstration learning
+- pi0.5 模型
+- VGGT 隐式3D蒸馏
+- VGGT隐式3d蒸馏
+- 模仿学习中的特征蒸馏
+- 模型压缩与知识迁移
+- 教师-学生蒸馏
+- Teacher-Student Distillation
+- Inverse Reinforcement Learning
+- 模仿学习框架
+- DAgger algorithm
+- 模仿学习训练循环
+- imitation training loop
+- pi0.5 pytorch模型
+- pi0.5基于行为克隆训练
+- PI-0.5 trained via behavioral cloning
+- 人类演示数据驱动
+- human demonstration data driven
+- behavior_cloning
+- demonstration_learning
+- 模仿损失
+- imitation_loss
+- 行为克隆复现
+- behavior cloning for pi0.5
+- 专家示范学习
+- expert demonstration learning
+- 行为克隆
+- behavior-cloning
+- dagger-iteration
+- teleop-dataset
+- 动作分布建模
+- action-distribution-modeling
+- policy-distillation
+linux_basics:
+- Linux
+- Shell
+- 命令行
+- Command Line
+- 进程管理
+- Process Management
+- 日志分析
+- Log Analysis
+- Linux & Shell
+- command-line operations
+- command line operations
+- 终端操作
+- terminal_operation
+- 进程调试
+- process_debugging
+- log_analysis
+math_optimization:
+- 凸优化
+- convex optimization
+- 梯度下降
+- gradient descent
+- 拉格朗日乘子
+- Lagrange multiplier
+- 约束优化
+- constrained optimization
+- 损失函数最小化
+- loss minimization
+- 非线性优化
+- nonlinear optimization
+- 损失函数设计
+- loss function design
+- 梯度下降收敛性
+- gradient descent convergence
+- convex_optimization
+- loss_design
+- Lagrange_multiplier
+- 正则化
+- regularization
+- 收敛性分析
+- convergence_analysis
+- gradient_descent
+- 正则化项
+- regularization_term
+- 梯度对齐
+- gradient alignment
+- 损失加权
+- loss weighting
+- 多目标优化
+- multi-objective optimization
+- KL散度
+- KL divergence
+- score matching
+- 损失函数
+- loss function
+- Lagrangian multiplier
+- 参数更新
+- parameter update
+- Convex Optimization
+- Gradient Descent
+- Loss Function
+- Parameter Update
+- Lagrangian Multiplier
+- 损失函数优化
+- loss optimization
+- 优化理论
+- optimization_theory
+- loss_function
+- Lagrangian
+- Loss Optimization
+- Constrained Optimization
+- convergence analysis
+- 拉格朗日对偶
+- lagrangian_duality
+math_probability:
+- 概率分布
+- probability distribution
+- 不确定性建模
+- uncertainty modeling
+- 贝叶斯推断
+- Bayesian inference
+- 传感器噪声
+- sensor noise
+- 置信区间
+- confidence interval
+- bayesian_inference
+- 最大似然估计
+- mle
+- KL散度
+- kl_divergence
+paper_reading:
+- pi系列论文精读
+- pi-series paper deep reading
+- 扩散策略前沿进展
+- latest diffusion policy advances
+- ICRA论文精读
+- icra-paper-close-reading
+- 附录公式推导
+- appendix-derivation
+- 开源代码对照
+- code-repo-alignment
+- 实验配置复现
+- experiment-config-reproduction
+- Trick清单
+- trick-checklist
+point_cloud:
+- 点云配准
+- point cloud registration
+- 6D位姿估计
+- 6D pose estimation
+- 体素化
+- voxelization
+- 几何一致性
+- geometry consistency
+pose_estimation:
+- 位姿优化
+- pose optimization
+- PnP求解
+- PnP solving
+- 对极几何
+- epipolar geometry
+- 不确定性建模
+- uncertainty modeling
+python_core:
+- 点云处理
+- point cloud processing
+- NumPy数组操作
+- NumPy array manipulation
+- SciPy优化
+- scipy optimization
+- Matplotlib可视化
+- matplotlib visualization
+- Open3D接口
+- Open3D API
+- openpi05
+- Python scripting for robotics tasks
+- Python
+- NumPy
+- Matplotlib
+- 科学计算
+- Scientific computing
+- 数据处理
+- Data processing
+- Python core
+- numpy
+- scipy
+- matplotlib
+- numpy, scipy, matplotlib
+- 张量运算
+- tensor_computation
+- 数值优化
+- numerical_optimization
+- 可视化调试
+- visualization_debugging
+- scipy数值实现
+- numerical implementation
+- pytorch张量操作
+- tensor ops for diffusion steps
+- NumPy张量操作
+- numpy-tensor-op
+- SciPy优化器
+- scipy-optimizer
+- Matplotlib轨迹绘图
+- matplotlib-trajectory-plot
+- HDF5数据加载
+- hdf5-dataloader
+- PyTorch-Diffusers集成
+- pytorch-diffusers-integration
+real_robot_ops:
+- 真实机器人部署
+- real-robot deployment
+- 安全闭环
+- safety-closed-loop
+- 位姿一致性
+- pose consistency
+- openpi05
+- real robot operations and calibration
+- 实体机器人
+- Real Robot
+- 标定
+- Calibration
+- 安全机制
+- Safety
+- 控制链路
+- Control Chain
+- 操作规程
+- Operating Procedure
+rl_basics:
+- 马尔可夫决策过程
+- MDP
+- Q-learning
+- PPO
+- Q学习
+- 策略梯度
+- policy gradient
+- 奖励塑形
+- reward shaping
+- PPO算法
+- PPO algorithm
+- 状态表示
+- state representation
+- 策略评估
+- policy evaluation
+- 离线强化学习
+- offline RL
+- policy_gradient
+- reward_shaping
+- 探索-利用
+- exploitation_exploration
+- 稀疏奖励
+- sparse_reward
+- 优势估计
+- advantage_estimation
+- 约束优化
+- constrained_optimization
+- 状态条件监督
+- state-conditioned supervision
+- 伪奖励
+- pseudo-reward
+- PPO裁剪
+- PPO clipping
+- 辅助任务
+- auxiliary task
+- 行为克隆
+- behavior cloning
+- 折扣回报
+- discounted return
+- 轨迹分布
+- trajectory distribution
+- markov decision process
+- proximal policy optimization
+- Policy gradient
+- 奖励函数
+- reward function
+- Policy Gradient
+- 强化学习
+- Reinforcement Learning
+- 策略优化
+- Policy Optimization
+- 强化学习策略
+- reinforcement learning policy
+- 强化学习奖励函数
+- reinforcement learning
+- Markov Decision Process
+- reinforcement_learning
+- pi
+- PPO, Q-learning
+- Reinforcement_Learning
+- MDP建模
+- MDP_modeling
+- q-learning
+- exploration-exploitation
+- MDP formulation
+- PPO策略梯度
+- mdp
+- 优势函数
+- advantage_function
+rl_for_robotics:
+- pi0.5 模型
+- VGGT 隐式3D蒸馏
+- 强化学习在机器人中的应用
+- Isaac Lab
+- MuJoCo
+- 强化学习训练平台
+- RL training platform
+ros2_basics:
+- openpi05
+- ROS2 basics for robot control
+- ROS2
+- 节点
+- Node
+- 主题
+- Topic
+- 服务
+- Service
+- 生命周期
+- Lifecycle
+- ROS2 basics
+- nodes
+- topics
+- services
+- nodes, topics, services
+- 节点通信
+- node_communication
+- 参数管理
+- parameter_management
+- 实时数据流
+- realtime_data_stream
+- node-communication
+- 主题桥接
+- topic-bridge
+- 服务调用
+- service-call
+- 参数服务器
+- parameter-server
+- 生命周期管理
+- lifecycle-management
+sim2real:
+- 仿真到真实
+- sim-to-real
+- 跨域迁移
+- cross-domain transfer
+- 域自适应
+- domain adaptation
+- 仿真到现实
+- Sim-to-Real
+- 域迁移
+- Domain Transfer
+- 现实偏差
+- Real-world Bias
+- pi
+- sim-to-real transfer
+- 泛化能力
+- generalization
+- 域偏移
+- domain_shift
+- 现实迁移
+- real-world transfer
+- 物理仿真
+- physical simulation
+- 跨域泛化
+- cross-domain generalization
+- Sim-to-Real Transfer
+- bridge simulation to real robot
+- domain randomization
+- reality gap
+- policy robustness
+- camera jitter
+- 模拟到真实迁移
+- 模型增强
+- 蒸馏有效性验证
+- domain gap
+- 模拟到真实迁移中的3D特征对齐
+- VGGT隐式3D蒸馏在真实机器人中的应用
+- 仿真中3D知识的可迁移性
+- pi0.5 模型
+- VGGT 隐式3D蒸馏
+- 仿真到现实的迁移
+- 域随机化
+- 对抗训练
+- adversarial training
+- 仿真-真实差距
+- sim-to-real gap
+- pi0.5模型泛化
+- 域随机化支持
+- 真实机器人部署
+- 模拟到现实转移
+- 真实世界泛化
+- real-world generalization
+- 仿真验证
+- simulation validation
+- pi0.5部署需sim2real适配
+- PI-0.5 deployment requires sim2real adaptation
+- 仿真到真实世界泛化
+- simulation-to-real world generalization
+- sim_to_real
+- domain_randomization
+- 系统辨识
+- system_identification
+- domain-randomization
+- 相机标定
+- camera-calibration
+- URDF对齐
+- urdf-alignment
+- 延迟补偿
+- latency-compensation
+- 真实机器人接口
+- real-robot-interface
+urdf_modeling:
+- URDF建模
+- URDF_modeling
+- 机器人结构定义
+- robot_structure_definition
+- XACRO语法
+- XACRO_syntax
+- URDF
+- XACRO
+- robot kinematics
+- joint definition
+- link hierarchy
+- URDF modeling
+- 机器人本体定义
+- robotic kinematics
+- XACRO配置
+- XACRO configuration
+- 机器人描述
+- robot_description
+- 传感器位姿
+- sensor_pose
+- 碰撞几何
+- collision_geometry
+vlm_robot:
+- VLA
+- Visual-Language Action
+- RT-2
+- OpenVLA
+- 视觉语言动作
+- 推理即控制
+- reasoning-as-control
+- 多模态提示
+- multimodal prompting
+- 开放词汇操控
+- open-vocabulary manipulation
+- 视觉语言模型
+- VLM
+- 机器人控制
+- robot_control
+- 开放词汇控制
+- open_vocabulary_control
+- 真实世界执行
+- real_world_execution
+- 任务泛化
+- task_generalization
+- 视觉语言动作桥
+- vision-language-action bridge
+- 补丁级对齐
+- patch-level alignment
+- 指令条件强制
+- instruction-conditioned forcing
+- 视觉-语言-动作
+- VGGT特征
+- VGGT feature
+- 空间强制
+- spatial forcing
+- 指令到轨迹
+- instruction-to-trajectory
+- 机器人控制闭环
+- robot control loop
+- 指令跟随
+- instruction following
+- open-vocabulary control
+- 机器人策略泛化
+- robot policy generalization
+- 端到端具身推理
+- end-to-end embodied reasoning
+- robotic control
+- Robot Control
+- 多模态指令
+- Multimodal Instruction
+- VLA控制
+- VLA-guided control
+- 机器人视觉语言对齐
+- robotic vision-language alignment
+- VLM机器人控制
+- VLM-guided_robot_control
+- Vision-Language Model
+- 指令执行
+- Instruction Following
+- VLM-guided control
+- vision-language model
+- PI0.5
+- VLM-guided Control
+- 语言-视觉-动作对齐
+- Language-Vision-Action Alignment
+- 机器人指令执行
+- 语言-动作对齐
+- language-action alignment
+- 视觉语言模型控制
+- OpenVLA集成
+- 3D蒸馏语义对齐
+- 多模态指令理解
+- 语言指令解析
+- language instruction parsing
+- 机器人操作
+- robot manipulation
+- visual_language_model
+- 指令接地
+- instruction_grounding
+- 多模态动作规划
+- multimodal_action_planning

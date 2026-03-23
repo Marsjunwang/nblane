@@ -1,0 +1,67 @@
+# Evidence pool for 王军
+# Shared records; skill-tree nodes reference ids via evidence_refs
+
+profile: 王军
+evidence_entries:
+- type: paper
+  title: 'IUP-Pose: Decoupled Iterative Uncertainty Propagation for Real-time Relative
+    Pose Regression via Implicit Dense Alignment'
+  date: '2025'
+  summary: First-author paper on 6D pose estimation; title and context indicate real-time,
+    relative pose regression with implicit alignment — implies technical novelty and
+    peer-reviewed contribution. Venue not specified, but 'IUP-Pose' naming convention
+    and domain alignment suggest ICRA/IROS-level scope.
+  id: ev_pose_paper
+- type: paper
+  title: 基于6D位姿与特征匹配的鞋子摆放
+  date: '2025'
+  summary: Patent (CN) on robot manipulation task using 6D pose + feature matching
+    for shoe placement — formal IP registration, directly tied to bimanual/contact-rich
+    manipulation in home environments. Demonstrates applied robotics innovation with
+    real-world deployment intent.
+  id: ev_shoe_patent
+- type: project
+  title: PI0.5 Reproduction on Piper Arm
+  date: '2025'
+  summary: Reproduction of PI0.5 (a known open-source imitation learning policy) on
+    Piper robotic arm — implies hands-on ROS2 integration, hardware interface adaptation,
+    and validation of learned policies on real robot. No GitHub link stated, but 'reproduce'
+    + specific platform strongly suggests executable, verifiable work.
+  id: ev_piper_repro
+- type: project
+  title: First-Gen Robot Perception System Architecture (CloudMile)
+  date: '2025'
+  summary: Led layered perception architecture design and ROS system integration for
+    home robot; includes modular sensor fusion (2D/3D/VLA/OCC), URDF-based modeling,
+    and real-robot ops (calibration, safety). Evidence supports ros2_basics, ros2_advanced,
+    urdf_modeling, real_robot_ops, and problem_framing.
+  id: ev_ros_arch
+- type: project
+  title: Far-range Monocular Detection Optimization (GAC)
+  date: '2024'
+  summary: Improved far-range monocular detection by +15 AP and reduced latency to
+    20 FPS vs baseline — quantified, comparative metric with clear performance gain.
+    Indicates experiment_design, object_detection, and optimization rigor.
+  id: ev_ap_boost
+- type: project
+  title: End-to-End Model Training Acceleration (GAC)
+  date: '2024'
+  summary: Achieved 60% training speedup and 87% AP on end-to-end perception model
+    — concrete metrics across efficiency and accuracy. Supports experiment_design,
+    rl_basics (if RL-informed), and math_optimization.
+  id: ev_training_speedup
+- type: project
+  title: Self-supervised Gaussian 3D Pretraining (GAC)
+  date: '2024'
+  summary: Developed depth self-supervised pretraining for surround-view models using
+    Gaussian 3D; improved base model by +2 AP — measurable ablation-style gain from
+    architectural/learning strategy choice. Supports foundation_models_perception,
+    experiment_design, and sim2real (via 3D priors).
+  id: ev_gaussian_3d
+- type: practice
+  title: OpenPI0.5 Reproduction (LA model)
+  id: 20260322_openpi0_5_reproduction_la_model
+- type: practice
+  title: VGGT Reproduction
+  id: 20260322_vggt_reproduction
+updated: '2026-03-23'

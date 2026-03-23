@@ -1,0 +1,15 @@
+# Optional: structured Agent-side prior (v0.2+). Merged into `nblane context` when present.
+# Edit to reflect how the agent should model its understanding of you.
+
+schema_version: "1.0"
+
+understanding_of_user:
+  strengths: []
+  weaknesses: []
+  current_focus: []
+
+working_style:
+  prefers: []
+  avoids: []
+
+confidence: 0.5

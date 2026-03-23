@@ -1,0 +1,12 @@
+schema_version: "1.0"
+problem_pool:
+  - "How to share evidence across profiles without a server?"
+project_pool:
+  - "nblane team OS file layout"
+evidence_pool:
+  - "docs/zh/design.md"
+method_pool:
+  - "python nblane.py validate"
+  - "python nblane.py gap <name> \"task\""
+decision_pool:
+  - "Use YAML on disk before building a hosted service"

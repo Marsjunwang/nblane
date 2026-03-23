@@ -1,0 +1,382 @@
+# Robotics Engineer · Skill Tree Schema
+# nblane shared schema — robotics-engineer.yaml
+#
+# This defines ALL nodes in the tree.
+# Each person's skill-tree.yaml references node IDs from here.
+#
+# NOTE:
+# - Keep `id` in ASCII snake_case for CLI compatibility.
+# - Keep `label` English or bilingual so `gap` token matching still works.
+# - Chinese comments below are for readability only.
+#
+# levels:
+#   1 = foundation (unlock first)
+#   2 = intermediate (requires level-1 parents)
+#   3 = advanced
+#   4 = expert / research frontier / industry leverage
+
+schema_version: "1.0"
+domain: "Robotics Engineer / 机器人与具身智能工程师"
+description: >
+  Skill tree for engineers building intelligent physical systems:
+  manipulation, navigation, perception, control, embodied AI,
+  research expression, public influence, leadership, and strategic judgment.
+
+nodes:
+
+  # ── FOUNDATIONS / 基础能力 ───────────────────────────────────────────────────
+
+  - id: linux_basics
+    label: Linux & Shell
+    level: 1
+    category: foundations
+
+  - id: python_core
+    label: Python (numpy, scipy, matplotlib)
+    level: 1
+    category: foundations
+
+  - id: cpp_core
+    label: C++ (modern, real-time aware)
+    level: 1
+    category: foundations
+
+  - id: git_workflow
+    label: Git / GitHub workflow
+    level: 1
+    category: foundations
+
+  - id: math_linalg
+    label: Linear Algebra
+    level: 1
+    category: foundations
+
+  - id: math_probability
+    label: Probability & Statistics
+    level: 1
+    category: foundations
+
+  - id: math_optimization
+    label: Optimization (convex basics)
+    level: 1
+    category: foundations
+
+  # ── ROS / MIDDLEWARE / 机器人中间件 ───────────────────────────────────────────
+
+  - id: ros2_basics
+    label: ROS2 Basics (nodes, topics, services)
+    level: 1
+    category: middleware
+    requires: [linux_basics]
+
+  - id: ros2_advanced
+    label: ROS2 Advanced (lifecycle, DDS tuning)
+    level: 2
+    category: middleware
+    requires: [ros2_basics]
+
+  - id: urdf_modeling
+    label: URDF / XACRO modeling
+    level: 1
+    category: middleware
+    requires: [ros2_basics]
+
+  - id: launch_system
+    label: Launch system & param management
+    level: 2
+    category: middleware
+    requires: [ros2_basics]
+
+  - id: custom_interfaces
+    label: Custom messages & services
+    level: 1
+    category: middleware
+    requires: [ros2_basics]
+
+  # ── SIMULATION / 仿真 ────────────────────────────────────────────────────────
+
+  - id: gazebo_basics
+    label: Gazebo / IsaacSim basics
+    level: 1
+    category: simulation
+    requires: [urdf_modeling]
+
+  - id: sim2real
+    label: Sim-to-Real Transfer
+    level: 3
+    category: simulation
+    requires: [gazebo_basics]
+    keywords: [仿真到实物, 迁移, transfer]
+
+  - id: domain_randomization
+    label: Domain Randomization
+    level: 3
+    category: simulation
+    requires: [sim2real]
+
+  # ── PERCEPTION / 感知 ────────────────────────────────────────────────────────
+
+  - id: camera_calibration
+    label: Camera Calibration & Projection
+    level: 1
+    category: perception
+
+  - id: point_cloud
+    label: Point Cloud Processing (PCL / Open3D)
+    level: 2
+    category: perception
+    requires: [camera_calibration]
+
+  - id: object_detection
+    label: 2D Object Detection (YOLO family)
+    level: 2
+    category: perception
+    requires: [python_core]
+
+  - id: pose_estimation
+    label: 6-DoF Pose Estimation
+    level: 3
+    category: perception
+    requires: [object_detection, point_cloud]
+
+  - id: foundation_models_perception
+    label: Foundation Models for Perception (SAM, Grounded-SAM)
+    level: 3
+    category: perception
+    requires: [object_detection]
+    keywords: [基础模型, vlm, 视觉语言模型, dino, clip]
+
+  # ── MANIPULATION / 操作 ──────────────────────────────────────────────────────
+
+  - id: kinematics
+    label: Forward & Inverse Kinematics
+    level: 2
+    category: manipulation
+    requires: [math_linalg, urdf_modeling]
+
+  - id: moveit2
+    label: MoveIt2 (planning pipelines)
+    level: 2
+    category: manipulation
+    requires: [kinematics, ros2_basics]
+
+  - id: grasp_planning
+    label: Grasp Planning (GraspNet / analytical)
+    level: 3
+    category: manipulation
+    requires: [moveit2, pose_estimation]
+
+  - id: contact_rich
+    label: Contact-Rich Manipulation
+    level: 4
+    category: manipulation
+    requires: [grasp_planning]
+
+  - id: bimanual
+    label: Bimanual Manipulation
+    level: 4
+    category: manipulation
+    requires: [moveit2]
+    keywords: [双臂, aloha, 双臂协作]
+
+  # ── LEARNING-BASED CONTROL / 学习式控制 ──────────────────────────────────────
+
+  - id: rl_basics
+    label: Reinforcement Learning (MDP, Q-learning, PPO)
+    level: 2
+    category: learning
+    requires: [math_probability, math_optimization, python_core]
+
+  - id: rl_for_robotics
+    label: RL for Robotics (Isaac Lab / MuJoCo)
+    level: 3
+    category: learning
+    requires: [rl_basics, gazebo_basics]
+
+  - id: imitation_learning
+    label: Imitation Learning (BC, GAIL, DAgger)
+    level: 3
+    category: learning
+    requires: [rl_basics]
+    keywords: [模仿学习, 行为克隆, teleoperation, 遥操作]
+
+  - id: diffusion_policy
+    label: Diffusion Policy
+    level: 3
+    category: learning
+    requires: [imitation_learning]
+    keywords: [pi0, pi0.5, ddpm, 扩散策略]
+
+  - id: act_policy
+    label: ACT / Transformer-based Policy
+    level: 3
+    category: learning
+    requires: [imitation_learning]
+    keywords: [aloha, 动作分块, action chunking]
+
+  - id: vlm_robot
+    label: VLM-guided Robot Control (RT-2, OpenVLA)
+    level: 4
+    category: learning
+    requires: [act_policy, foundation_models_perception]
+    keywords:
+      [vla, pi0, pi0.5, octo, rt2, openvla, openpi, 大模型控制]
+
+  # ── NAVIGATION / SLAM / 导航定位 ─────────────────────────────────────────────
+
+  - id: slam_basics
+    label: SLAM Fundamentals (occupancy grid, EKF-SLAM)
+    level: 2
+    category: navigation
+    requires: [math_probability, ros2_basics]
+
+  - id: nav2
+    label: Nav2 Stack
+    level: 2
+    category: navigation
+    requires: [slam_basics]
+
+  - id: lidar_slam
+    label: LiDAR SLAM (Cartographer / LIO-SAM)
+    level: 3
+    category: navigation
+    requires: [slam_basics]
+
+  - id: visual_slam
+    label: Visual SLAM (ORB-SLAM3 / DROID-SLAM)
+    level: 3
+    category: navigation
+    requires: [slam_basics, camera_calibration]
+
+  # ── RESEARCH SKILLS / 研究能力 ───────────────────────────────────────────────
+
+  - id: paper_reading
+    label: Paper Reading (structured, systematic)
+    level: 1
+    category: research
+
+  - id: experiment_design
+    label: Experiment Design & Ablation Studies
+    level: 2
+    category: research
+    requires: [paper_reading]
+
+  - id: paper_writing
+    label: Paper Writing (ICRA / IROS / RSS level)
+    level: 3
+    category: research
+    requires: [experiment_design]
+
+  - id: first_author_pub
+    label: First-Author Publication (top venue)
+    level: 4
+    category: research
+    requires: [paper_writing]
+
+  - id: open_source_impact
+    label: Open Source Project with Real Users
+    level: 3
+    category: research
+
+  # ── SYSTEMS & DEPLOYMENT / 系统与部署 ────────────────────────────────────────
+
+  - id: real_robot_ops
+    label: Real Robot Operations (calibration, safety)
+    level: 2
+    category: systems
+    requires: [ros2_basics]
+
+  - id: docker_deploy
+    label: Docker & containerized robot stacks
+    level: 2
+    category: systems
+    requires: [linux_basics]
+
+  - id: hardware_interface
+    label: Hardware Interface (ros2_control)
+    level: 3
+    category: systems
+    requires: [ros2_advanced, cpp_core]
+
+  # ── INFLUENCE & PUBLIC PRESENCE / 影响力与公开表达 ───────────────────────────
+
+  - id: technical_writing
+    label: Technical Writing / 技术写作
+    level: 1
+    category: influence
+
+  - id: public_sharing
+    label: Public Sharing / 公开分享
+    level: 2
+    category: influence
+    requires: [technical_writing]
+
+  - id: peer_networking
+    label: Peer Networking / 同行连接
+    level: 2
+    category: influence
+    requires: [public_sharing]
+
+  - id: personal_brand
+    label: Personal Brand Positioning / 个人品牌定位
+    level: 3
+    category: influence
+    requires: [technical_writing, public_sharing, peer_networking]
+
+  - id: industry_trust
+    label: Industry Trust & Recognition / 行业信任与认可
+    level: 4
+    category: influence
+    requires: [personal_brand, technical_strategy, open_source_impact]
+
+  # ── COLLABORATION & LEADERSHIP / 协作与领导力 ───────────────────────────────
+
+  - id: cross_team_collaboration
+    label: Cross-Team Collaboration / 跨团队协作
+    level: 2
+    category: leadership
+    requires: [git_workflow]
+
+  - id: project_leadership
+    label: Project Leadership / 项目带领
+    level: 2
+    category: leadership
+    requires: [experiment_design]
+
+  - id: mentoring
+    label: Mentoring / 带人与反馈
+    level: 3
+    category: leadership
+    requires: [project_leadership]
+
+  - id: team_building
+    label: Team Building / 团队搭建
+    level: 4
+    category: leadership
+    requires: [mentoring, cross_team_collaboration]
+
+  # ── STRATEGY & PRODUCT JUDGMENT / 方向感与产品判断 ──────────────────────────
+
+  - id: problem_framing
+    label: Problem Framing / 问题定义与范围界定
+    level: 2
+    category: strategy
+    requires: [paper_reading]
+
+  - id: product_judgment
+    label: Product Judgment for AI Systems / AI 产品判断
+    level: 2
+    category: strategy
+    requires: [problem_framing]
+
+  - id: technical_strategy
+    label: Technical Strategy / 技术路线判断
+    level: 3
+    category: strategy
+    requires: [problem_framing, experiment_design]
+
+  - id: ecosystem_leverage
+    label: Ecosystem Leverage / 生态位与资源整合
+    level: 4
+    category: strategy
+    requires: [technical_strategy, peer_networking, project_leadership]

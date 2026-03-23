@@ -1,0 +1,10 @@
+# Copy to teams/<team_id>/team.yaml
+
+schema_version: "1.0"
+team_name: "Example Team"
+shared_focus: []
+members: []
+shared_rules:
+  - "private by default"
+  - "evidence before opinion"
+current_priorities: []

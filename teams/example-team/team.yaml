@@ -1,0 +1,12 @@
+schema_version: "1.0"
+team_name: "Example Embodied Team"
+shared_focus:
+  - "embodied AI"
+  - "robot learning"
+members:
+  - "narwal"
+shared_rules:
+  - "private by default"
+  - "humans approve public release"
+current_priorities:
+  - "shared product pool adoption"

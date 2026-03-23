@@ -1,0 +1,7 @@
+# Evidence pool for {Name}
+# Shared records; skill-tree nodes reference ids via evidence_refs
+
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+
+evidence_entries: []

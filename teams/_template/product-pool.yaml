@@ -1,0 +1,8 @@
+# Copy to teams/<team_id>/product-pool.yaml
+
+schema_version: "1.0"
+problem_pool: []
+project_pool: []
+evidence_pool: []
+method_pool: []
+decision_pool: []
