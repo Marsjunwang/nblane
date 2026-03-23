@@ -84,11 +84,11 @@ nblane ingest-kanban yourname --dry-run
 
 ### MCP (Cursor)
 
-Read-only **resources** over stdio: `profile://context`, `profile://summary`,
-`profile://kanban`, `profile://gap/{task}` (URL-encode the task segment). Same
-idea as `nblane context` / `nblane gap` for reads; **no** writes, **no** ingest.
-Gap via MCP is natural-language tasks only (`--node` remains CLI). See
-[docs/mcp.md](docs/mcp.md) · [中文](docs/zh/mcp.md).
+**Resources** over stdio: `profile://context`, `profile://summary`,
+`profile://kanban`, `profile://gap/{task}` (URL-encode the task segment).
+**Tools** can append growth log rows, inline evidence, interaction JSONL, and
+method drafts (see [docs/mcp.md](docs/mcp.md) · [中文](docs/zh/mcp.md)).
+Ingest and full evidence editing remain **CLI / Web**.
 
 ### Web UI
 
@@ -96,7 +96,10 @@ Gap via MCP is natural-language tasks only (`--node` remains CLI). See
 streamlit run app.py
 ```
 
-Pages: **Skill Tree** (status, notes, **Evidence pool** expander, per-skill inline evidence + **refs** multiselect, save/sync), **Gap Analysis** (rules + AI-enhanced), **Kanban** (including **Done → evidence** ingest), **Team View** (team.yaml + product pool). **Home** includes **Resume / long text** AI ingest under Overview.
+Five surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
+View**. Step-by-step usage: [docs/web-ui.md](docs/web-ui.md) ·
+[中文](docs/zh/web-ui.md). Product IA and backlog:
+[docs/web-ui-product.md](docs/web-ui-product.md).
 
 ---
 
@@ -184,6 +187,9 @@ nblane/
 - [Documentation index (English)](docs/README.md)
 - [Installation & LLM Configuration](docs/setup.md)
 - [Product Design (v0.2)](docs/product.md)
+- [Web experience design (Streamlit)](docs/web-ui-product.md) · [中文](docs/zh/web-ui-product.md)
+- [Web UI user guide](docs/web-ui.md) · [中文](docs/zh/web-ui.md)
+- Kanban user guide · [中文](docs/zh/kanban.md)
 - [Design Manual & Milestones](docs/design.md) · [中文](docs/zh/design.md)
 - [Architecture & Design Principles](docs/architecture.md)
 - [SKILL.md Format Reference](docs/profile-format.md)

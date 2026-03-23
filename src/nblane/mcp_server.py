@@ -18,7 +18,10 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 
 from nblane.core.context import generate
+from nblane.core.crystallize import write_method_draft
 from nblane.core.gap import analyze, format_text
+from nblane.core.growth_log import append_growth_log_row
+from nblane.core.interaction import append_interaction_record
 from nblane.core.io import (
     list_profiles,
     load_skill_tree_raw,
@@ -26,6 +29,7 @@ from nblane.core.io import (
     profile_dir,
 )
 from nblane.core.paths import PROFILES_DIR
+from nblane.core.skill_evidence_inline import add_inline_evidence
 from nblane.core.status import STATUS_ICONS, count_nodes, lit_fraction
 
 _PROFILE_ENV_KEYS = ("NBLANE_PROFILE", "NBLANE_MCP_PROFILE")
@@ -243,6 +247,105 @@ def resource_gap(task: str) -> str:
     if result.error:
         return f"ERROR [profile://gap]: {result.error}\n"
     return format_text(result) + "\n"
+
+
+def _tool_profile_or_error() -> tuple[str | None, str | None]:
+    """Return ``(name, None)`` or ``(None, error)`` for MCP tools."""
+    return resolve_active_profile()
+
+
+@mcp.tool(name="append_growth_log")
+def tool_append_growth_log(event: str) -> str:
+    """Append one row to the Growth Log table in SKILL.md."""
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    try:
+        append_growth_log_row(profile_dir(name), event.strip())
+    except (OSError, ValueError) as exc:
+        return f"ERROR: {exc}\n"
+    return f"OK: growth log updated for profile {name!r}.\n"
+
+
+@mcp.tool(name="log_skill_evidence")
+def tool_log_skill_evidence(
+    skill_id: str,
+    title: str,
+    evidence_type: str = "practice",
+    date: str = "",
+    url: str = "",
+    summary: str = "",
+) -> str:
+    """Add one inline evidence item to a skill-tree node."""
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    try:
+        add_inline_evidence(
+            name,
+            skill_id.strip(),
+            type_=evidence_type.strip() or "practice",
+            title=title,
+            date=date,
+            url=url,
+            summary=summary,
+        )
+    except ValueError as exc:
+        return f"ERROR: {exc}\n"
+    return (
+        f"OK: evidence on {skill_id!r} "
+        f"({title.strip()!r}) for {name!r}.\n"
+    )
+
+
+@mcp.tool(name="log_interaction")
+def tool_log_interaction(
+    question: str,
+    answer: str,
+    skill_ids: list[str] | None = None,
+) -> str:
+    """Append Q/A JSONL under profiles/<name>/interactions/."""
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    ids = skill_ids if skill_ids is not None else []
+    path = append_interaction_record(
+        name,
+        question=question,
+        answer=answer,
+        skill_ids=ids,
+    )
+    return f"OK: appended to {path}\n"
+
+
+@mcp.tool(name="suggest_skill_upgrade")
+def tool_suggest_skill_upgrade(
+    skill_id: str,
+    proposed_status: str,
+    rationale: str,
+) -> str:
+    """Suggest a status change (does not write YAML)."""
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    return (
+        f"SUGGESTION only (no write) for profile {name!r}: "
+        f"set {skill_id!r} -> {proposed_status!r}. "
+        f"Reason: {rationale.strip()}\n"
+    )
+
+
+@mcp.tool(name="crystallize_method_draft")
+def tool_crystallize_method_draft(
+    project: str,
+    body: str,
+) -> str:
+    """Write a human-editable method draft under profiles/.../methods/."""
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    path = write_method_draft(name, project, body)
+    return f"OK: wrote {path}\n"
 
 
 def main() -> None:

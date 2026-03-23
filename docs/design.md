@@ -9,7 +9,7 @@ contracts, and acceptance criteria**.
 |------|---------------|
 | Document version | `v0.2.0` |
 | Status | Active |
-| Last updated | `2026-03-22` |
+| Last updated | `2026-03-23` |
 
 ---
 
@@ -67,7 +67,7 @@ before Demo 1 in the product manual.
 | Status summary | Counts by status + coverage | `core/status.py` |
 | Team summary | Read team.yaml + product-pool → summary | `core/team.py` |
 
-### 3.3 CLI (11 commands)
+### 3.3 CLI (13 commands)
 
 | Command | Status | Description |
 |---------|--------|-------------|
@@ -82,6 +82,8 @@ before Demo 1 in the product manual.
 | `evidence` | Shipped | Inline / pool / link skill evidence (see §5) |
 | `ingest-resume` | Shipped | LLM: resume or long text → pool + tree patch (`--dry-run`, `--allow-status-change`) |
 | `ingest-kanban` | Shipped | LLM: kanban **Done** column → pool + tree patch (same flags) |
+| `sync-cursor` | Shipped | Write `.cursor/rules/nblane-context.mdc` from profile summary |
+| `crystallize` | Shipped | Write `profiles/.../methods/*_draft.md` (`--file` / `--stdin`) |
 
 ### 3.4 Web UI (Streamlit)
 
@@ -92,6 +94,10 @@ before Demo 1 in the product manual.
 | Gap Analysis | Task text + rules analysis + AI analysis + write-back panel | `pages/2_Gap_Analysis.py` |
 | Kanban | Four-column board + task CRUD/move + **Done → evidence** AI ingest (multi-select, draft → apply) | `pages/3_Kanban.py` |
 | Team View | Team metadata edit + product pool CRUD | `pages/4_Team_View.py` |
+
+Sidebar order `pages/1_`–`4_` matches the recommended journey (Skill Tree → Gap
+→ Kanban → Team). UX copy and layout rules:
+[web-ui-product.md](web-ui-product.md); operator steps: [web-ui.md](web-ui.md).
 
 ### 3.5 AI layer
 
@@ -117,10 +123,10 @@ The project **has finished all groundwork before Demo 1** and **Demo 1 Phase 1
 [Done] App-layer: Profile ingest (resume + kanban Done → YAML, same validate/sync path)
                  |
                  v   <-- you are here
-[Not started] Demo 1 Phase 2: MCP Server — Read Path
-[Not started] Demo 1 Phase 3: MCP Server — Write Path
-[Not started] Demo 1 Phase 4: Method crystallization
-[Not started] Demo 1 Phase 5: Cursor Skill integration
+[Initial delivery] Demo 1 Phase 2: MCP Server — Read Path (resources + stdio)
+[Initial delivery] Demo 1 Phase 3: MCP Server — Write Path (tools: log, growth, …)
+[Initial delivery] Demo 1 Phase 4: Method crystallization (draft files + MCP tool; LLM TBD)
+[Initial delivery] Demo 1 Phase 5: Cursor Skill integration (`sync-cursor` → rule file)
 ```
 
 Phase dependencies:
@@ -416,8 +422,8 @@ read-path closure in Cursor.
 | `gap` | Shipped | S1 update | Task gaps; evidence in output after S1 |
 | `team` | Shipped | — | Team pool summary |
 | `evidence` | Shipped | S1 | Inline + `pool add` + `link` (see §5) |
-| `sync-cursor` | Sprint 3 | S3 | Refresh Cursor rule |
-| `crystallize` | Sprint 5 | S5 | Trigger crystallization |
+| `sync-cursor` | **Shipped** | S3 | Refresh Cursor rule |
+| `crystallize` | **Shipped** | S5 | Write methods draft |
 
 ---
 
@@ -432,10 +438,10 @@ read-path closure in Cursor.
 | Web UI | `app.py` + `pages/` | Shipped |
 | LLM-enhanced gap | `core/llm.py` + Gap Analysis page | Shipped |
 | Skill Provenance (evidence + pool + refs) | `core/models.py`, `evidence_resolve.py`, `io.py`, `cli.py`, Skill Tree | Shipped |
-| MCP Server (Read) | New `mcp_server.py` | Sprint 2 |
-| Cursor Skill integration | `.cursor/rules/` + `sync-cursor` | Sprint 3 |
-| MCP Server (Write) | `mcp_server.py` + `core/interaction.py` | Sprint 4 |
-| Method crystallization | `core/crystallize.py` | Sprint 5 |
+| MCP Server (Read) | `mcp_server.py` | **Initial delivery** |
+| Cursor Skill integration | `.cursor/rules/` + `sync-cursor` | **Initial delivery** |
+| MCP Server (Write) | `mcp_server.py` + `core/interaction.py` | **Initial delivery** |
+| Method crystallization | `core/crystallize.py` | **Initial delivery** (draft files; LLM later) |
 | `sync_team_pool` / `route_to_best_owner` | Not implemented | Roadmap |
 | Public page export | Not implemented | Roadmap |
 

@@ -7,30 +7,32 @@
 
 ## Doing
 
-- [ ] pi0.5复现以及基于spatial forcing的3d增强
-  - 1、完成openpi0.5的训练；
-  - 2、完成piper的头部及腕部双目的搭建，并和嵌入式及标定同学完成软件及硬件的准备工作；
-  - 3、复现pytorch模型版本，对齐到jax精度，因为spatial forcing模型需要pytorch版本的vggt；
+- [x] pi05复现
+  - context: vla算法
+  - outcome: 提交台架搭建及部署最新代码，支持同事复用
+  - started_on: 2026-03-23
+  - completed_on: 2026-03-23
+  - crystallized: true
+  - [x] piper和双目完成测试台架搭建
+  - [x] 跑通data_collection_ws的数据流
+  - [x] 使用已经采集的数据复现现有方案作为baseline
 
 ---
 
 ## Done
 
-- [x] {复现pi0.5模型} — finished {20200319}
-  - 我大概了解了数据格式和网络架构，以及如何训练。
+- (empty)
 
 ---
 
 ## Queue
 
-- [ ] {Task title}
-  - why: {why this matters}
-  - blocked by: {dependency, if any}
+- (empty)
 
 ---
 
 ## Someday / Maybe
 
-- {Idea or stretch goal — low commitment, high aspiration}
+- (empty)
 
 ---

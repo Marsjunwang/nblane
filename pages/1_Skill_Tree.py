@@ -1,4 +1,8 @@
-"""Skill Tree -- visual editor for skill-tree.yaml."""
+"""Skill Tree -- visual editor for skill-tree.yaml.
+
+Primary persist action is the title-row **Save** (not a separate toolbar).
+Kanban uses **Reload** / **Save** in a toolbar; see docs/zh/web-ui-product.md.
+"""
 
 from __future__ import annotations
 
@@ -26,14 +30,7 @@ from nblane.core.io import (
 from nblane.core.models import EVIDENCE_TYPES, EvidencePool
 from nblane.core.sync import write_generated_blocks
 from nblane.web_i18n import skill_tree_ui, status_label
-from nblane.web_shared import select_profile
-
-_STATUS_EMOJI = {
-    "expert": "🔵",
-    "solid": "🟢",
-    "learning": "🟡",
-    "locked": "⬜",
-}
+from nblane.web_shared import select_profile, skill_status_emoji
 
 _LEVEL_KEYS = {
     1: "level_l1",
@@ -298,6 +295,7 @@ selected = select_profile()
 tree = load_skill_tree_raw(selected)
 if tree is None:
     st.title(ui["title"])
+    st.caption(ui["page_context_line"])
     st.error(
         ui["error_no_tree"].format(profile=selected)
     )
@@ -324,6 +322,7 @@ if _save_toast:
 _head_l, _head_r = st.columns([5, 1])
 with _head_l:
     st.title(ui["title"])
+    st.caption(ui["page_context_line"])
 with _head_r:
     if st.button(
         ui["save_button"],
@@ -565,11 +564,10 @@ for cat_tab, cat in zip(cat_tabs, categories):
                     )
 
                     with c_info:
-                        em = _STATUS_EMOJI.get(
-                            r["status"], "⬜"
-                        )
+                        em = skill_status_emoji(r["status"])
+                        em_pre = f"{em} " if em else ""
                         st.markdown(
-                            f"{em} **{r['label']}**"
+                            f"{em_pre}**{r['label']}**"
                         )
                         cap_l, cap_r = st.columns([5, 1])
                         with cap_l:

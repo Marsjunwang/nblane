@@ -96,6 +96,34 @@ class TestCoreImports(unittest.TestCase):
 
         self.assertTrue(callable(merge_ingest_patch))
 
+    def test_import_growth_log(self) -> None:
+        """nblane.core.growth_log should expose append helper."""
+        from nblane.core.growth_log import append_growth_log_row
+
+        self.assertTrue(callable(append_growth_log_row))
+
+    def test_import_skill_evidence_inline(self) -> None:
+        """nblane.core.skill_evidence_inline should expose add helper."""
+        from nblane.core.skill_evidence_inline import (
+            add_inline_evidence,
+        )
+
+        self.assertTrue(callable(add_inline_evidence))
+
+    def test_import_interaction(self) -> None:
+        """nblane.core.interaction should expose append helper."""
+        from nblane.core.interaction import (
+            append_interaction_record,
+        )
+
+        self.assertTrue(callable(append_interaction_record))
+
+    def test_import_crystallize(self) -> None:
+        """nblane.core.crystallize should expose draft writer."""
+        from nblane.core.crystallize import write_method_draft
+
+        self.assertTrue(callable(write_method_draft))
+
 
 if __name__ == "__main__":
     unittest.main()

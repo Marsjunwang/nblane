@@ -32,7 +32,10 @@ from nblane.web_i18n import home_ui
 from nblane.web_shared import (
     drop_streamlit_widget_keys,
     remember_allow_and_drop_yaml_preview_keys,
+    render_llm_unavailable,
     select_profile,
+    skill_status_emoji,
+    ui_emoji_enabled,
 )
 
 ui = home_ui()
@@ -45,14 +48,6 @@ st.set_page_config(
 )
 
 selected = select_profile()
-
-_STATUS_EMOJI = {
-    "expert": "🔵",
-    "solid": "🟢",
-    "learning": "🟡",
-    "locked": "⬜",
-}
-
 
 def _parse_skill_md_sections(
     text: str,
@@ -98,6 +93,7 @@ def _rejoin_sections(
 
 st.title(ui["app_page_title"])
 st.caption(ui["app_caption"].format(profile=selected))
+st.caption(ui["page_context_line"])
 
 # -- Tabs: Overview | Editor | Raw ----------------------------
 
@@ -125,19 +121,63 @@ with tab_overview:
             schema_node_index(schema) if schema else {}
         )
 
+        node_status = {
+            n["id"]: n.get("status", "locked")
+            for n in (tree.get("nodes") or [])
+            if "id" in n
+        }
+
+        # Count over the same universe as the category breakdown: every
+        # schema node defaults to locked if absent from skill-tree.yaml.
         counts: dict[str, int] = {s: 0 for s in STATUSES}
-        for n in tree.get("nodes") or []:
-            st_val = n.get("status", "locked")
-            counts[st_val] = counts.get(st_val, 0) + 1
+        if index:
+            for nid in index:
+                st_val = node_status.get(nid, "locked")
+                counts[st_val] = counts.get(st_val, 0) + 1
+        else:
+            for n in tree.get("nodes") or []:
+                if "id" not in n:
+                    continue
+                st_val = n.get("status", "locked")
+                counts[st_val] = counts.get(st_val, 0) + 1
         total = sum(counts.values())
         lit = counts["expert"] + counts["solid"]
 
         st.subheader(ui["sub_overview"])
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric(ui["metric_expert"], counts["expert"])
-        c2.metric(ui["metric_solid"], counts["solid"])
-        c3.metric(ui["metric_learning"], counts["learning"])
-        c4.metric(ui["metric_locked"], counts["locked"])
+        use_emoji = ui_emoji_enabled()
+        c1.metric(
+            (
+                ui["metric_expert"]
+                if use_emoji
+                else ui["status_expert"]
+            ),
+            counts["expert"],
+        )
+        c2.metric(
+            (
+                ui["metric_solid"]
+                if use_emoji
+                else ui["status_solid"]
+            ),
+            counts["solid"],
+        )
+        c3.metric(
+            (
+                ui["metric_learning"]
+                if use_emoji
+                else ui["status_learning"]
+            ),
+            counts["learning"],
+        )
+        c4.metric(
+            (
+                ui["metric_locked"]
+                if use_emoji
+                else ui["status_locked"]
+            ),
+            counts["locked"],
+        )
         c5.metric(
             ui["metric_lit_rate"],
             f"{lit}/{total}" if total else "—",
@@ -155,11 +195,6 @@ with tab_overview:
         st.divider()
 
         cats: dict[str, list[dict]] = {}
-        node_status = {
-            n["id"]: n.get("status", "locked")
-            for n in (tree.get("nodes") or [])
-            if "id" in n
-        }
         for nid, meta in index.items():
             cat = meta.get("category", "other")
             status = node_status.get(nid, "locked")
@@ -202,11 +237,10 @@ with tab_overview:
                 )
             ):
                 for n in nodes:
-                    em = _STATUS_EMOJI.get(
-                        n["status"], "⬜"
-                    )
+                    em = skill_status_emoji(n["status"])
+                    prefix = f"{em} " if em else ""
                     st.markdown(
-                        f"{em} **{n['label']}** "
+                        f"{prefix}**{n['label']}** "
                         f"`{n['id']}`"
                     )
     else:
@@ -234,7 +268,7 @@ with tab_overview:
         )
         if rgen and resume_text.strip():
             if not llm_client.is_configured():
-                st.warning(ui["resume_no_ai"])
+                render_llm_unavailable(ui)
             else:
                 with st.spinner(ui["resume_spinner"]):
                     patch, err = ingest_resume_json(
@@ -370,7 +404,10 @@ with tab_overview:
                             st.warning(w)
 
     st.divider()
-    st.markdown(ui["home_nav"])
+    st.info(ui["home_nav_compact"])
+    with st.expander(ui["home_nav_expander"], expanded=False):
+        st.markdown(ui["home_nav_detail"])
+
 
 # ── TAB 2: Structured SKILL.md editor ────────────────────────
 

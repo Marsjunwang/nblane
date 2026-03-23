@@ -15,14 +15,11 @@ from nblane.core.io import (
     schema_node_index,
 )
 from nblane.web_i18n import gap_ui, status_label
-from nblane.web_shared import select_profile
-
-_STATUS_EMOJI = {
-    "expert": "🔵",
-    "solid": "🟢",
-    "learning": "🟡",
-    "locked": "⬜",
-}
+from nblane.web_shared import (
+    render_llm_unavailable,
+    select_profile,
+    skill_status_emoji,
+)
 
 _STATUS_COLOR = {
     "expert": "#1a73e8",
@@ -190,9 +187,10 @@ if "gap_result" not in st.session_state:
 if "gap_coach_messages" not in st.session_state:
     st.session_state.gap_coach_messages = []
 
-st.title(ui["title"])
-
 selected = select_profile()
+
+st.title(ui["title"])
+st.caption(ui["page_context_line"])
 
 tree_for_opts = load_skill_tree_raw(selected)
 schema_name_opts = (
@@ -216,11 +214,7 @@ with col_right_top:
             f"AI: {llm_client.model_label()}", icon="🤖"
         )
     else:
-        st.warning(
-            ui["ai_not_configured"],
-            icon="⚠️",
-        )
-        st.caption(ui["ai_add_key_caption"])
+        render_llm_unavailable(ui)
 
 with col_left:
     task = st.text_area(
@@ -377,14 +371,15 @@ with left:
 
     st.subheader(ui["subheader_closure"])
     for n in result.closure:
-        em = _STATUS_EMOJI.get(n["status"], "⬜")
+        em = skill_status_emoji(n["status"])
+        em_pre = f"{em} " if em else ""
         gap_flag = n.get("is_gap", False)
         st_disp = status_label(ui, n["status"])
         with st.container(border=True):
             gc1, gc2 = st.columns([4, 1])
             with gc1:
                 label = (
-                    f"{em} **{n['label']}** "
+                    f"{em_pre}**{n['label']}** "
                     f"`{n['id']}` *({st_disp})*"
                 )
                 if gap_flag:
@@ -478,9 +473,10 @@ if result.gaps:
                         label_visibility="collapsed",
                     )
                 with gc2:
-                    em = _STATUS_EMOJI.get(cur, "⬜")
+                    em = skill_status_emoji(cur)
+                    em_pre = f"{em} " if em else ""
                     st.markdown(
-                        f"{em} **{gap_id}**"
+                        f"{em_pre}**{gap_id}**"
                     )
                 with gc3:
                     cur_disp = status_label(ui, cur)

@@ -6,7 +6,7 @@
 |------|--------|
 | 文档版本 | `v0.2.0` |
 | 状态 | Active |
-| 最近更新 | `2026-03-22` |
+| 最近更新 | `2026-03-23` |
 
 ---
 
@@ -57,7 +57,7 @@
 | 状态摘要 | 按状态统计 + 点亮率 | `core/status.py` |
 | 团队汇总 | team.yaml + product-pool → 摘要 | `core/team.py` |
 
-### 3.3 CLI（11 条命令）
+### 3.3 CLI（13 条命令）
 
 | 命令 | 状态 | 说明 |
 |------|------|------|
@@ -72,6 +72,8 @@
 | `evidence` | 已实现 | 内联 / `pool add` / `link`（见 §5） |
 | `ingest-resume` | 已实现 | LLM：简历或长文本 → 池 + 树补丁（`--dry-run`、`--allow-status-change`） |
 | `ingest-kanban` | 已实现 | LLM：看板 **Done** 列 → 池 + 树补丁（同上） |
+| `sync-cursor` | 已实现 | 从 profile 摘要生成 `.cursor/rules/nblane-context.mdc` |
+| `crystallize` | 已实现 | 写入 `profiles/.../methods/*_draft.md`（`--file` / `--stdin`） |
 
 ### 3.4 Web UI（Streamlit）
 
@@ -82,6 +84,8 @@
 | Gap Analysis | 任务文本 + 规则分析 + AI 分析 + 写回面板 | `pages/2_Gap_Analysis.py` |
 | Kanban | 四列看板 + 任务增删移动 + **已完成 → 证据** AI 摄入（多选、草案 → 写入） | `pages/3_Kanban.py` |
 | Team View | 团队信息 + 产品池 CRUD | `pages/4_Team_View.py` |
+
+侧栏顺序 `1_`–`4_` 与推荐动线（技能树 → 差距 → 看板 → 团队）一致。体验与文案约定见 [web-ui-product.md](web-ui-product.md)；操作步骤见 [web-ui.md](web-ui.md)。
 
 ### 3.5 AI 层
 
@@ -106,10 +110,10 @@
 [已完成] 应用层：Profile 摄入（简历 + 看板 Done → YAML，同一 validate/sync 路径）
                  |
                  v   <-- 你在这里
-[未开始] Demo 1 Phase 2：MCP Server — Read Path
-[未开始] Demo 1 Phase 3：MCP Server — Write Path
-[未开始] Demo 1 Phase 4：方法结晶
-[未开始] Demo 1 Phase 5：Cursor Skill 集成
+[已交付初版] Demo 1 Phase 2：MCP Server — Read Path（resources + stdio）
+[已交付初版] Demo 1 Phase 3：MCP Server — Write Path（tools：log / growth / interaction 等）
+[已交付初版] Demo 1 Phase 4：方法结晶（草案落盘 + MCP tool；LLM 深化待续）
+[已交付初版] Demo 1 Phase 5：Cursor Skill 集成（`sync-cursor` → rule 文件）
 ```
 
 阶段依赖：
@@ -374,8 +378,8 @@ Phase 5 安排在 Sprint 3 因仅依赖 Phase 1 + 2，可先于 Phase 3/4 闭合
 | `gap` | 已实现 | S1 更新 | 输出含物化证据计数 |
 | `team` | 已实现 | — | 团队池 |
 | `evidence` | **已实现** | S1 | 内联 + `pool add` + `link`（见 §5） |
-| `sync-cursor` | Sprint 3 | S3 | 刷新 Cursor rule |
-| `crystallize` | Sprint 5 | S5 | 触发结晶 |
+| `sync-cursor` | **已实现** | S3 | 刷新 Cursor rule |
+| `crystallize` | **已实现** | S5 | 写入 methods 草案 |
 
 ---
 
@@ -390,10 +394,10 @@ Phase 5 安排在 Sprint 3 因仅依赖 Phase 1 + 2，可先于 Phase 3/4 闭合
 | Web UI | `app.py`、`pages/` | 已实现 |
 | LLM 增强 gap | `llm.py`、Gap 页 | 已实现 |
 | Skill Provenance（内联 + 池 + 引用） | `models.py`、`evidence_resolve.py`、`io.py`、`cli`、Skill Tree | **已实现** |
-| MCP Server (Read) | `mcp_server.py` | Sprint 2 |
-| Cursor Skill | `.cursor/rules/`、`sync-cursor` | Sprint 3 |
-| MCP Server (Write) | `mcp_server.py`、`interaction.py` | Sprint 4 |
-| 方法结晶 | `crystallize.py` | Sprint 5 |
+| MCP Server (Read) | `mcp_server.py` | **初版已落地** |
+| Cursor Skill | `.cursor/rules/`、`sync-cursor` | **初版已落地** |
+| MCP Server (Write) | `mcp_server.py`、`interaction.py` | **初版已落地** |
+| 方法结晶 | `crystallize.py` | **初版已落地**（草案文件；LLM 可后续接入） |
 | `sync_team_pool` / `route_to_best_owner` | 未实现 | 路线图 |
 | 公开页导出 | 未实现 | 路线图 |
 

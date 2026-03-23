@@ -12,7 +12,7 @@ from nblane.core.io import (
     save_team,
 )
 from nblane.web_i18n import all_pool_keys, pool_label, team_ui
-from nblane.web_shared import select_profile
+from nblane.web_shared import select_profile, ui_emoji_enabled
 
 _POOL_EMOJI = {
     "problem_pool": "🔍",
@@ -30,9 +30,13 @@ st.set_page_config(
     page_title=ui["page_title"], layout="wide"
 )
 
-st.title(ui["title"])
+selected_profile = select_profile()
 
-select_profile()
+st.title(ui["title"])
+st.caption(ui["page_context_line"])
+st.caption(
+    ui["team_profile_scope"].format(profile=selected_profile)
+)
 
 teams = list_teams()
 if not teams:
@@ -148,8 +152,11 @@ pool_state = st.session_state[pool_state_key]
 
 pool_tabs = st.tabs(
     [
-        f"{_POOL_EMOJI.get(k, '📦')} "
-        f"{pool_label(k)}"
+        (
+            f"{_POOL_EMOJI.get(k, '📦')} {pool_label(k)}"
+            if ui_emoji_enabled()
+            else pool_label(k)
+        )
         for k in pool_keys
     ]
 )

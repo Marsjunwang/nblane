@@ -11,6 +11,7 @@ from unittest.mock import patch
 import yaml
 
 from nblane.core.profile_ingest import (
+    filter_ingest_patch,
     ingest_preview_delta,
     merge_ingest_patch,
     parse_ingest_patch,
@@ -573,6 +574,52 @@ class TestRunIngestPatchDryRun(unittest.TestCase):
             self.assertTrue(apply.dry_run)
             after_pool = (prof / "evidence-pool.yaml").read_text()
             self.assertEqual(before_pool, after_pool)
+
+
+class TestFilterIngestPatch(unittest.TestCase):
+    """Selective ingest rows remap first_N ordinals."""
+
+    def test_remaps_ordinal_when_subset(self) -> None:
+        """Keeping only row 2 turns first_2 into first_1."""
+        raw = {
+            "evidence_entries": [
+                {"id": "a", "title": "A"},
+                {"id": "b", "title": "B"},
+            ],
+            "node_updates": [
+                {"id": "n1", "evidence_refs": ["first_2"]},
+            ],
+        }
+        fp, _warn = filter_ingest_patch(
+            raw,
+            include_evidence=[False, True],
+            include_nodes=None,
+        )
+        self.assertEqual(len(fp.evidence_entries), 1)
+        self.assertEqual(fp.evidence_entries[0]["id"], "b")
+        self.assertEqual(
+            fp.node_updates[0].get("evidence_refs"),
+            ["first_1"],
+        )
+
+    def test_drops_excluded_ordinal_with_warning(self) -> None:
+        """Excluding the only evidence row drops first_1 ref."""
+        raw = {
+            "evidence_entries": [
+                {"id": "a", "title": "A"},
+            ],
+            "node_updates": [
+                {"id": "n1", "evidence_refs": ["first_1"]},
+            ],
+        }
+        fp, warn = filter_ingest_patch(
+            raw,
+            include_evidence=[False],
+            include_nodes=None,
+        )
+        self.assertEqual(len(fp.evidence_entries), 0)
+        self.assertIsNone(fp.node_updates[0].get("evidence_refs"))
+        self.assertTrue(any("not selected" in x for x in warn))
 
 
 if __name__ == "__main__":

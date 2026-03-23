@@ -1,6 +1,6 @@
 # MCP 服务器（Cursor 等客户端）
 
-nblane 提供 **只读** MCP 服务：`python -m nblane.mcp_server`，通过 **stdio** 与 Cursor 通信，暴露 `profile://…` 等资源，供 Agent 拉取当前 profile 的上下文。
+nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，通过 **stdio** 与 Cursor 通信。客户端可读 **Resources**（如 `profile://context`），也可调用 **Tools** 写入部分 profile 文件。
 
 ## 当前实现范围（给集成方 / 其他 Agent）
 
@@ -9,8 +9,9 @@ nblane 提供 **只读** MCP 服务：`python -m nblane.mcp_server`，通过 **s
 | 类别 | 说明 |
 |------|------|
 | 传输 | **stdio**（由 Cursor 等客户端拉起子进程） |
-| MCP 原语 | 仅 **Resources（只读）**；**未**注册 Tools、Prompts |
-| 数据方向 | 全部 **读**：从本机 `profiles/` 等文件生成文本；**不**修改仓库 |
+| MCP 原语 | **Resources（读）** + **Tools（写 / 建议）** |
+| 读 | `profile://summary`、`profile://kanban`、`profile://context`、`profile://gap/{task}` |
+| 写（Tools） | `append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`（仅文本建议）、`crystallize_method_draft` |
 
 ### 已实现的具体功能（与 CLI / Web 的对应关系）
 
@@ -30,10 +31,9 @@ nblane 提供 **只读** MCP 服务：`python -m nblane.mcp_server`，通过 **s
   - Gap 的 LLM 路由在 MCP 里由环境变量 **`NBLANE_GAP_USE_LLM`** 开关；为免污染本机学习词表，MCP 调用时 **`persist_router_keywords=False`**（不向 `learned_keywords` 持久化），与 CLI 默认持久化行为不同。
 - **仍需要：** 本机已有 `skill-tree.yaml`、schema 可加载；任务非空。错误时响应正文以 `ERROR [profile://gap]: ...` 开头。
 
-### 明确未实现（勿在文档中误传）
+### 未通过 MCP 暴露（请用 CLI 或 Web）
 
-- 写入：`SKILL.md`、`skill-tree.yaml`、`evidence-pool.yaml`、`kanban.md` 等 **均不能** 通过本 MCP 修改。
-- 无 **`nblane ingest-resume` / `ingest-kanban`**、无 **`nblane evidence`**、无 **`nblane team`**、无 **`nblane sync` / `validate`** 的 MCP 封装。
+- **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync`**、**`validate`**、看板**正文编辑** — 请用 **CLI** 或 **Streamlit**（见 [web-ui.md](web-ui.md)）。
 - `nblane context --no-kanban`：MCP 的 `profile://context` **固定带 kanban**；若不要看板请用 CLI 或本地文件。
 
 ---
@@ -80,7 +80,7 @@ pip install -e .
 
 ## 在 Cursor 里怎么用、能帮你什么
 
-**它是什么：** MCP 把 nblane 里的 **profile 数据**暴露成一组 **只读资源**（URI）。Cursor 连上后，**Agent 可以按需读取**这些资源，相当于在对话里「附带一份你的 SKILL / 看板 / 技能树摘要」，而不必每次手动粘贴 `nblane context` 的输出。
+**它是什么：** MCP 把 nblane 的 **profile 数据**暴露为 **Resources（URI）**，并提供可选 **Tools** 写入部分产物。Agent 可**按需读取**上下文（类似粘贴 `nblane context`）；**Tools** 仅在明确指令下调用，会改 `profiles/` 下文件。
 
 **你怎么做（操作顺序）：**
 
@@ -100,7 +100,7 @@ pip install -e .
 | 对齐本周事项 | `profile://kanban` | 原始 `kanban.md` |
 | 准备做一件大活（选型 / 攻坚） | `profile://gap/任务描述`（注意 URL 编码） | 与 CLI **`nblane gap <profile> "<task>"`** 的自然语言模式基本一致（见上文与 CLI 的差异） |
 
-**注意：** MCP 这里是 **读路径**，不会替你改仓库文件；改 `SKILL.md`、看板、技能树仍用你平时的编辑方式或 nblane CLI / Web。
+**注意：** **Tools** 会修改 `profiles/` 内部分文件（Growth Log、技能树证据行、`interactions/*.jsonl`、方法草案等）。大量编辑（摄入、完整 evidence、团队池）请用 **CLI** 或 **Web**。
 
 ## 环境变量
 
@@ -182,5 +182,6 @@ pip install -e .
 
 ## 另见
 
-- 设计：[设计手册与里程碑](design.md) 中 Demo 1 Phase 2（MCP 读路径）
+- 设计：[设计手册与里程碑](design.md) 中 Demo 1 Phase 2–5（MCP 与 Cursor）
 - 命令行对照：`nblane context`、`nblane gap`
+- Streamlit：[Web 使用手册](web-ui.md)

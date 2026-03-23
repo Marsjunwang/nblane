@@ -7,12 +7,12 @@ updated: '2026-03-23'
 nodes:
 - id: git_workflow
   status: learning
-  note: 对git add, commit, branch,checkout,cherry pick,push, pull经常
+  note: 对git add, commit, branch,checkout,cherry pick,push, pull(https://zhuanlan.zhihu.com/p/266916800;https://zhuanlan.zhihu.com/p/374250000)
 - id: linux_basics
   status: learning
   note: 作为常用的开发环境，对ls、grep、cp、mv等基础命令有一定使用，ubuntu是主要的使用系统
 - id: math_optimization
-  status: locked
+  status: learning
   evidence_refs:
   - ev_training_speedup
 - id: python_core
@@ -99,13 +99,10 @@ nodes:
   - ev_piper_repro
 - id: diffusion_policy
   status: learning
-  evidence_refs:
-  - 20260322_openpi0_5_reproduction_la_model
 - id: imitation_learning
   status: learning
   evidence_refs:
   - ev_piper_repro
-  - 20260322_openpi0_5_reproduction_la_model
 - id: foundation_models_perception
   status: learning
   evidence_refs:

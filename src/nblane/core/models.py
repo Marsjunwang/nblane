@@ -280,11 +280,27 @@ class Schema:
 
 
 @dataclass
+class KanbanSubtask:
+    """Checkbox sub-item under a kanban task."""
+
+    title: str
+    done: bool = False
+
+
+@dataclass
 class KanbanTask:
     """One task entry in a kanban board."""
 
     title: str
     done: bool = False
+    context: str = ""
+    why: str = ""
+    blocked_by: str = ""
+    outcome: str = ""
+    started_on: str | None = None
+    completed_on: str | None = None
+    crystallized: bool = False
+    subtasks: list[KanbanSubtask] = field(default_factory=list)
     details: list[str] = field(default_factory=list)
 
 

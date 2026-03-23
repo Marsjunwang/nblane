@@ -8,15 +8,15 @@
 
 **大致对应：**
 
-- **当前代码：** Profile 数据层 + 规则层 + 薄 CLI（**11 条子命令**）+ 完整 Web UI；
+- **当前代码：** Profile 数据层 + 规则层 + 薄 CLI（**13 条子命令**）+ 完整 Web UI；
   已完成 Demo 1 之前的全部地基工作（M0–M3），包括 `gap` 规则层分析、
   `context` 系统提示生成（含 agent-profile 拼入）、Streamlit 四页交互界面、
   团队共享池目录约定；**Skill Provenance**（证据池、引用、物化）已落地；
   **Profile 摄入**（简历 / 看板 Done → LLM JSON → 合并池与树 → `validate` + `sync`）
   已作为应用层交付。详见 [设计手册 §5–5.4](design.md)、
   [Profile 文档关系](../profile-documents-relationship.md)。
-- **下一步（Demo 1）：** MCP Read → MCP Write → 方法结晶 → Cursor Skill 集成
-  （证据与摄入路径已就绪）。详见 [设计手册 §6–9](design.md)。
+- **下一步（Demo 1）：** MCP 已提供 **Read（resources）+ Write（tools）** 初版，
+  `crystallize` / `sync-cursor` CLI 已接好；可按 [设计手册 §6–9](design.md) 继续加深。
 - **仍属路线图：** `sync_team_pool` / `route_to_best_owner` 的完整产品化、
   公开页导出与托管服务。
 
@@ -29,7 +29,7 @@
 |------|------|----------|
 | Profile 结构 (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile) | 已实现 | `profiles/`, `core/models.py`, `core/io.py` |
 | 领域关卡图 (Schema) | 已实现 | `schemas/*.yaml`, `core/models.py` |
-| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** | 已实现 | `cli.py`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py` |
+| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`sync-cursor`** / **`crystallize`** | 已实现 | `cli.py`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/cursor_rule.py`, `core/crystallize.py` |
 | `validate`（skill-tree 校验） | 已实现 | `core/validate.py` |
 | `gap`（规则层任务缺口） | 已实现 | `core/gap.py` |
 | `team`（团队池汇总） | 已实现 | `core/team.py` |
@@ -41,9 +41,9 @@
 | LLM 教练与追问（可选） | 已实现 | `core/llm.py`、`pages/2_Gap_Analysis.py` |
 | Skill Provenance（内联 + 池 + `evidence_refs` + 物化） | 已实现 | `core/models.py`、`core/evidence_resolve.py`、`core/evidence_pool_id.py` 等 |
 | Profile 摄入（合并 + 校验 + sync；简历/看板提示） | 已实现 | `core/profile_ingest.py`、`core/profile_ingest_llm.py`、`core/jsonutil.py` |
-| MCP Server (Read + Write) | **未实现** | Demo 1 Phase 2–3 |
-| 交互日志 + 方法结晶 | **未实现** | Demo 1 Phase 3–4 |
-| Cursor Skill 集成 | **未实现** | Demo 1 Phase 5 |
+| MCP Server (Read + Write) | **初版已实现** | `mcp_server.py`（stdio）；可执行 `nblane-mcp` |
+| 交互日志 + 方法结晶 | **初版已实现** | `core/interaction.py`、`core/crystallize.py`；MCP tool + `crystallize` CLI |
+| Cursor Skill 集成 | **初版已实现** | `nblane sync-cursor` → `.cursor/rules/nblane-context.mdc` |
 | 公开页导出、托管服务 | **未实现** | 路线图 M5+ |
 
 ## 核心想法
@@ -77,7 +77,8 @@ profiles/{name}/
 ```
 src/nblane/
 ├── __init__.py         # 版本号
-├── cli.py              # CLI 入口（11 条子命令）
+├── cli.py              # CLI 入口（13 条子命令）
+├── mcp_server.py       # MCP stdio：resources + write tools
 ├── web_shared.py       # Streamlit 共享工具（profile 选择器）
 ├── web_i18n.py         # 界面文案（en/zh），由 LLM_REPLY_LANG 决定
 └── core/
@@ -113,6 +114,10 @@ Streamlit 文案集中在 **`web_i18n.py`**。当前语言**不是**页面内单
 `llm.reply_language()` 供 `home_ui()`、`gap_ui()`、`skill_tree_ui()`、
 `kanban_ui()`、`team_ui()`、`common_ui()` 使用。差距分析与 **LLM 路由**
 使用对应语言的 system prompt，保证界面语言与模型行为一致。
+
+**布局约定：** 各页在 `select_profile()` 之后再渲染主标题；团队页说明侧栏档案与
+`teams/` 数据的关系。可选 **`NBLANE_UI_EMOJI=0`** 关闭指标与状态行前的 emoji。
+信息架构与动线见 [web-ui-product.md](web-ui-product.md)；使用步骤见 [web-ui.md](web-ui.md)。
 
 ## Profile 摄入管线（当前实现）
 

@@ -1,6 +1,8 @@
 # MCP server (Cursor & other clients)
 
-The nblane package exposes a **read-only** MCP server (`python -m nblane.mcp_server`) that serves profile context over **stdio**. Cursor (and any MCP client) starts this process and reads **resources** such as `profile://context`.
+The nblane package exposes an MCP server (`python -m nblane.mcp_server` or
+`nblane-mcp`) over **stdio**. Clients read **resources** (e.g.
+`profile://context`) and may call **tools** that write profile files.
 
 ## Scope (for integrators and other agents)
 
@@ -9,8 +11,9 @@ The nblane package exposes a **read-only** MCP server (`python -m nblane.mcp_ser
 | Aspect | Detail |
 |--------|--------|
 | Transport | **stdio** (client spawns a subprocess) |
-| MCP primitives | **Resources only** (read); no Tools or Prompts |
-| Writes | **None** — all responses are derived from local files under `profiles/` etc. |
+| MCP primitives | **Resources** (read) + **Tools** (write / suggest) |
+| Reads | `profile://summary`, `profile://kanban`, `profile://context`, `profile://gap/{task}` |
+| Writes (tools) | `append_growth_log`, `log_skill_evidence`, `log_interaction`, `suggest_skill_upgrade` (text-only suggestion), `crystallize_method_draft` |
 
 ### Feature matrix (MCP vs CLI)
 
@@ -28,9 +31,11 @@ The nblane package exposes a **read-only** MCP server (`python -m nblane.mcp_ser
 - **Fixed in MCP:** rule matching is **on** (no `--no-rule` equivalent).
 - **LLM router:** controlled by **`NBLANE_GAP_USE_LLM`**. MCP sets **`persist_router_keywords=False`** so router keywords are not persisted (CLI may persist by default).
 
-### Not implemented (do not assume)
+### Not exposed over MCP (use CLI or Web)
 
-- No writes to `SKILL.md`, YAML, or kanban; no `ingest-*`, `evidence`, `team`, `sync`, or `validate` over MCP.
+- `ingest-resume` / `ingest-kanban`, full `evidence` subcommands, `team`, `sync`,
+  `validate`, and kanban **editing** — use **CLI** or **Streamlit** (see
+  [web-ui.md](web-ui.md)).
 - `profile://context` always includes kanban (no `--no-kanban` switch).
 
 ## API reference (how to call each resource)
@@ -65,7 +70,10 @@ Use MCP **ReadResource** with these URIs. Except for `gap`, URIs are fixed (no p
 
 ## Using it in Cursor (what you do, what you get)
 
-**What it is:** MCP exposes your nblane profile as **read-only resources** (URIs). Once Cursor connects, the **agent can read** them on demand—similar to pasting `nblane context` into the session, without doing it by hand every time.
+**What it is:** MCP exposes your nblane profile as **resources** (URIs) and
+optional **tools** that write selected artifacts. Once Cursor connects, the
+agent can **read** context on demand—similar to pasting `nblane context`—and
+**invoke tools** only when you ask it to.
 
 **Steps:**
 
@@ -76,7 +84,10 @@ Use MCP **ReadResource** with these URIs. Except for `gap`, URIs are fixed (no p
 
 **Typical uses:** `profile://context` for full prompt-style context; `profile://summary` for a quick tree + focus snapshot; `profile://kanban` for the board; `profile://gap/{task}` (URL-encoded) before a large task—same idea as `nblane gap`.
 
-**Note:** This MCP path is **read-only**; it does not edit your repo. Edit profiles / kanban / tree as you usually do (editor, CLI, or Streamlit).
+**Note:** **Tools** change files under `profiles/` (growth log, skill-tree
+evidence, `interactions/*.jsonl`, method drafts). Prefer explicit agent
+instructions before calling them. Heavy edits (ingest, full evidence CLI, team
+pool) stay on **CLI** or **Streamlit**.
 
 ## Environment variables
 
@@ -156,5 +167,6 @@ If both the nblane workspace and the user config define a server named `nblane`,
 
 ## See also
 
-- Design: [design.md](design.md) (Demo 1 Phase 2 — MCP read path)
+- Design: [design.md](design.md) (Demo 1 Phase 2–5 — MCP + Cursor)
 - CLI parity: `nblane context`, `nblane gap`
+- Streamlit UI: [web-ui.md](web-ui.md)

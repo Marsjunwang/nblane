@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -50,6 +51,47 @@ def _sync_to_persistent() -> None:
     st.session_state[_PERSIST_KEY] = (
         st.session_state["selected_profile"]
     )
+
+
+def ui_emoji_enabled() -> bool:
+    """Return False when ``NBLANE_UI_EMOJI`` disables emoji prefixes."""
+    raw = os.environ.get("NBLANE_UI_EMOJI", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+_SKILL_STATUS_EMOJI: dict[str, str] = {
+    "expert": "🔵",
+    "solid": "🟢",
+    "learning": "🟡",
+    "locked": "⬜",
+}
+
+_KANBAN_SECTION_EMOJI: dict[str, str] = {
+    "Doing": "🔄",
+    "Done": "✅",
+    "Queue": "📋",
+    "Someday / Maybe": "💡",
+}
+
+
+def skill_status_emoji(status: str) -> str:
+    """Prefix char for skill status columns; empty when emoji disabled."""
+    if not ui_emoji_enabled():
+        return ""
+    return _SKILL_STATUS_EMOJI.get(status, "⬜")
+
+
+def kanban_section_emoji(section: str) -> str:
+    """Prefix for kanban section headers; empty when emoji disabled."""
+    if not ui_emoji_enabled():
+        return ""
+    return _KANBAN_SECTION_EMOJI.get(section, "")
+
+
+def render_llm_unavailable(ui: dict[str, str]) -> None:
+    """Standard Streamlit callout when the LLM client is not configured."""
+    st.warning(ui["ai_not_configured"], icon="⚠️")
+    st.caption(ui["ai_add_key_caption"])
 
 
 def select_profile() -> str:

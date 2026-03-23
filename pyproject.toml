@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 nblane = "nblane.cli:main"
+nblane-mcp = "nblane.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

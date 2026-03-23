@@ -58,7 +58,4 @@ evidence_entries:
     architectural/learning strategy choice. Supports foundation_models_perception,
     experiment_design, and sim2real (via 3D priors).
   id: ev_gaussian_3d
-- type: practice
-  title: OpenPI0.5 Reproduction (LA model)
-  id: 20260322_openpi0_5_reproduction_la_model
 updated: '2026-03-23'

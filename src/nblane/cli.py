@@ -152,41 +152,18 @@ def cmd_status(name: str | None) -> None:
 
 def cmd_log(name: str, event: str) -> None:
     """Append a dated entry to the growth log in SKILL.md."""
+    from nblane.core.growth_log import append_growth_log_row
+
     profile_dir = _require_profile(name)
-    skill_md = profile_dir / "SKILL.md"
-    content = skill_md.read_text(encoding="utf-8")
-
-    today = date.today().strftime("%Y-%m")
-    new_row = f"| {today} | {event} | — |"
-
-    log_header = "## Growth Log"
-    table_header = "| Date | Event | Why it matters |"
-
-    if log_header not in content:
-        print(
-            "Could not find '## Growth Log' section "
-            "in SKILL.md.",
-            file=sys.stderr,
-        )
+    try:
+        append_growth_log_row(profile_dir, event)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         sys.exit(1)
-
-    insert_after = (
-        table_header + "\n|------|-------|----------------|"
-    )
-    if insert_after in content:
-        content = content.replace(
-            insert_after,
-            insert_after + "\n" + new_row,
-        )
-    else:
-        content = content.replace(
-            table_header,
-            table_header
-            + "\n|------|-------|----------------|\n"
-            + new_row,
-        )
-
-    skill_md.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    today = date.today().strftime("%Y-%m")
     print(f"Logged [{today}]: {event}")
 
 
@@ -276,85 +253,24 @@ def cmd_evidence_add(
     summary: str,
 ) -> None:
     """Append one evidence item to a skill-tree node."""
-    from nblane.core.io import (
-        load_schema_raw,
-        load_skill_tree_raw,
-        save_skill_tree,
-        schema_node_index,
+    from nblane.core.skill_evidence_inline import (
+        add_inline_evidence,
     )
 
-    profile_dir = _require_profile(name)
-    tree = load_skill_tree_raw(profile_dir)
-    if tree is None:
-        print(
-            "skill-tree.yaml not found.",
-            file=sys.stderr,
+    _require_profile(name)
+    try:
+        add_inline_evidence(
+            name,
+            skill_id,
+            type_=type_,
+            title=title,
+            date=date,
+            url=url,
+            summary=summary,
         )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         sys.exit(1)
-
-    schema_name = tree.get("schema")
-    if not schema_name:
-        print(
-            "skill-tree.yaml has no 'schema' field.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    schema_data = load_schema_raw(str(schema_name))
-    if schema_data is None:
-        print(
-            f"Schema not found: {schema_name!r}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    index = schema_node_index(schema_data)
-    if skill_id not in index:
-        print(
-            f"Unknown skill id (not in schema): {skill_id!r}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if not title.strip():
-        print(
-            "--title must be non-empty.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    nodes = list(tree.get("nodes") or [])
-    found: dict | None = None
-    for n in nodes:
-        if n.get("id") == skill_id:
-            found = n
-            break
-
-    ev_item: dict = {
-        "type": type_,
-        "title": title.strip(),
-    }
-    if date.strip():
-        ev_item["date"] = date.strip()
-    if url.strip():
-        ev_item["url"] = url.strip()
-    if summary.strip():
-        ev_item["summary"] = summary.strip()
-
-    if found is None:
-        nodes.append(
-            {
-                "id": skill_id,
-                "status": "learning",
-                "evidence": [ev_item],
-            }
-        )
-    else:
-        evs = found.setdefault("evidence", [])
-        evs.append(ev_item)
-
-    tree["nodes"] = nodes
-    save_skill_tree(name, tree)
     print(
         f"Evidence added on {skill_id!r}: {title.strip()!r}"
     )
@@ -1108,6 +1024,28 @@ def cmd_ingest_kanban(
     )
 
 
+def cmd_sync_cursor(name: str) -> None:
+    """Write ``.cursor/rules/nblane-context.mdc`` from profile data."""
+    from nblane.core.cursor_rule import write_nblane_context_rule
+
+    _require_profile(name)
+    path = write_nblane_context_rule(name)
+    print(f"Wrote {path}")
+
+
+def cmd_crystallize(
+    name: str,
+    project: str,
+    body: str,
+) -> None:
+    """Write a method draft markdown file."""
+    from nblane.core.crystallize import write_method_draft
+
+    _require_profile(name)
+    path = write_method_draft(name, project, body)
+    print(f"Wrote {path}")
+
+
 # -- main -------------------------------------------------------------------
 
 
@@ -1330,6 +1268,37 @@ def main() -> None:
         ),
     )
 
+    p_sync_cur = sub.add_parser(
+        "sync-cursor",
+        help=(
+            "Write .cursor/rules/nblane-context.mdc from profile "
+            "summary"
+        ),
+    )
+    p_sync_cur.add_argument("name", help="Profile name")
+
+    p_cryst = sub.add_parser(
+        "crystallize",
+        help="Write a method draft under profiles/<name>/methods/",
+    )
+    p_cryst.add_argument("name", help="Profile name")
+    p_cryst.add_argument(
+        "project",
+        help="Project or session label (used in filename)",
+    )
+    p_cryst.add_argument(
+        "--file",
+        dest="crystallize_file",
+        metavar="PATH",
+        default=None,
+        help="Read draft body from file (utf-8)",
+    )
+    p_cryst.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read draft body from stdin",
+    )
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -1377,6 +1346,23 @@ def main() -> None:
             allow_status_change=args.allow_status_change,
             bump_locked_with_evidence=not args.no_bump_locked,
         )
+    elif args.command == "sync-cursor":
+        cmd_sync_cursor(args.name)
+    elif args.command == "crystallize":
+        if args.stdin:
+            body = sys.stdin.read()
+        elif args.crystallize_file:
+            from pathlib import Path
+
+            body = Path(
+                args.crystallize_file
+            ).read_text(encoding="utf-8")
+        else:
+            body = (
+                "_Add playbook notes here. "
+                "Re-run with --file or --stdin for content._\n"
+            )
+        cmd_crystallize(args.name, args.project, body)
 
 
 if __name__ == "__main__":

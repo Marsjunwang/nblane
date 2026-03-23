@@ -34,9 +34,9 @@
 <!-- Format: - [x] lit  - [ ] in_progress  - [~] blocked -->
 
 <!-- BEGIN GENERATED:skill_tree -->
-- [ ] Git / GitHub workflow (`git_workflow`): 对git add, commit, branch,checkout,cherry pick,push, pull经常
+- [ ] Git / GitHub workflow (`git_workflow`): 对git add, commit, branch,checkout,cherry pick,push, pull(https://zhuanlan.zhihu.com/p/266916800;https://zhuanlan.zhihu.com/p/374250000)
 - [ ] Linux & Shell (`linux_basics`): 作为常用的开发环境，对ls、grep、cp、mv等基础命令有一定使用，ubuntu是主要的使用系统
-- [~] Optimization (convex basics) (`math_optimization`)
+- [ ] Optimization (convex basics) (`math_optimization`)
 - [ ] Python (numpy, scipy, matplotlib) (`python_core`)
 - [x] Technical Writing / 技术写作 (`technical_writing`)
 - [ ] Custom messages & services (`custom_interfaces`)
@@ -105,10 +105,10 @@
 
 <!-- BEGIN GENERATED:current_focus -->
 **Active** (this week):
-- pi0.5复现以及基于spatial forcing的3d增强
+- none
 
 **Queued** (next):
-- {Task title}
+- none
 
 **Blocked**:
 - none

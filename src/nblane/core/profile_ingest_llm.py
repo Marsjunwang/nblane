@@ -218,6 +218,13 @@ def _system_prompt_kanban_zh() -> str:
         "证据池与技能树摘要。\n"
         "只输出一个 JSON：evidence_entries、node_updates。\n"
         "node id 只能从允许列表选取。\n\n"
+        "### 出处（必填）\n\n"
+        "- evidence_entries 每项必须含 **source_excerpt**：从对应 Done 任务原文"
+        "（title/context/outcome/notes/subtask）中**照抄或极短摘录**一两句，"
+        "证明该条证据不是臆测。\n"
+        "- node_updates 每项必须含 **rationale**（1–3 句）：说明为何更新该节点，"
+        "并引用任务中的具体事实（可与 source_excerpt 呼应）。\n"
+        "禁止空 rationale 或空 source_excerpt（若无把握则不要输出该条）。\n\n"
         + _kanban_evidence_contract_zh()
         + "\n"
         + _status_rubric_kanban_zh()
@@ -231,6 +238,14 @@ def _system_prompt_kanban_en() -> str:
         "You map completed kanban tasks to evidence and skill nodes. "
         "Output one JSON: evidence_entries, node_updates.\n"
         "Allowed node ids only.\n\n"
+        "### Provenance (required)\n\n"
+        "- Each evidence_entries item MUST include **source_excerpt**: "
+        "a short literal quote from the Done task (title/context/outcome/"
+        "notes/subtasks) proving the row is grounded.\n"
+        "- Each node_updates item MUST include **rationale** (1–3 sentences): "
+        "why this node changes, citing concrete task facts.\n"
+        "Do not emit empty rationale or source_excerpt (omit the row if "
+        "unsure).\n\n"
         + _kanban_evidence_contract_en()
         + "\n"
         + _status_rubric_kanban_en()
@@ -304,15 +319,30 @@ def _user_message_resume(
 
 
 def _format_done_tasks(tasks: list[KanbanTask]) -> str:
-    """Serialize Done tasks for the prompt."""
+    """Serialize Done tasks for the prompt (full structured context)."""
     lines: list[str] = []
     for t in tasks:
         lines.append(f"- title: {t.title}")
         if t.done:
             lines.append("  done: true")
+        if t.context.strip():
+            lines.append(f"  context: {t.context.strip()}")
+        if t.why.strip():
+            lines.append(f"  why: {t.why.strip()}")
+        if t.outcome.strip():
+            lines.append(f"  outcome: {t.outcome.strip()}")
+        if t.blocked_by.strip():
+            lines.append(f"  blocked_by: {t.blocked_by.strip()}")
+        if t.started_on:
+            lines.append(f"  started_on: {t.started_on}")
+        if t.completed_on:
+            lines.append(f"  completed_on: {t.completed_on}")
+        for st in t.subtasks:
+            mark = "x" if st.done else " "
+            lines.append(f"  subtask [{mark}] {st.title}")
         if t.details:
             joined = "; ".join(t.details)
-            lines.append(f"  details: {joined}")
+            lines.append(f"  notes: {joined}")
     return "\n".join(lines) if lines else "(no tasks)"
 
 

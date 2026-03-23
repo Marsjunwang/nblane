@@ -1,6 +1,9 @@
 """Streamlit UI strings for ``LLM_REPLY_LANG`` (en / zh).
 
 Centralizes copy so all pages stay consistent with Gap Analysis.
+
+Set ``NBLANE_UI_EMOJI=0`` (or ``false`` / ``no`` / ``off``) to drop
+emoji prefixes in metrics and skill-status rows (see ``web_shared``).
 """
 
 from __future__ import annotations
@@ -54,13 +57,13 @@ _COMMON: dict[str, dict[str, str]] = {
         "status_learning": "Learning",
         "status_solid": "Solid",
         "status_expert": "Expert",
-        "profile_header": "### Profile",
+        "profile_header": "## Current profile",
         "no_profiles_yet": "No profiles yet.",
         "no_profiles_main": (
             "No profiles. Create one in the sidebar."
         ),
-        "select_profile_aria": "Profile",
-        "expander_create": "➕ Create new profile",
+        "select_profile_aria": "Active profile",
+        "expander_create": "➕ New profile",
         "profile_name_label": "Profile name",
         "profile_name_ph": "e.g. alice",
         "create": "Create",
@@ -94,17 +97,17 @@ _COMMON: dict[str, dict[str, str]] = {
         "status_learning": "学习中",
         "status_solid": "扎实",
         "status_expert": "专家",
-        "profile_header": "### Profile",
-        "no_profiles_yet": "暂无 Profile。",
-        "no_profiles_main": "暂无 Profile，请在侧边栏创建。",
-        "select_profile_aria": "选择 Profile",
-        "expander_create": "➕ 新建 Profile",
-        "profile_name_label": "Profile 名称",
+        "profile_header": "## 当前档案",
+        "no_profiles_yet": "暂无档案。",
+        "no_profiles_main": "暂无档案，请在侧边栏创建。",
+        "select_profile_aria": "当前档案",
+        "expander_create": "➕ 新建档案",
+        "profile_name_label": "档案名称",
         "profile_name_ph": "例如 alice",
         "create": "创建",
         "name_empty": "名称不能为空。",
         "name_exists": "「{name}」已存在。",
-        "profile_created": "已创建 Profile「{name}」。",
+        "profile_created": "已创建档案「{name}」。",
         "ai_not_configured": "未配置 AI（仅规则模式）",
         "ai_add_key_caption": (
             "在 `.env` 中设置 `LLM_API_KEY` 以启用 AI。"
@@ -131,6 +134,10 @@ _GAP: dict[str, dict[str, str]] = {
     "en": {
         "page_title": "Gap Analysis · nblane",
         "title": "Gap Analysis",
+        "page_context_line": (
+            "Agent OS: map a task to your skill tree; use rules "
+            "and optional AI to plan next steps with your coding agent."
+        ),
         "task_label": "Task description",
         "task_placeholder": (
             "Describe your task in natural language, e.g.:\n"
@@ -205,6 +212,10 @@ _GAP: dict[str, dict[str, str]] = {
     "zh": {
         "page_title": "差距分析 · nblane",
         "title": "差距分析",
+        "page_context_line": (
+            "Agent 操作系统：将任务映射到技能树；结合规则与可选 AI，"
+            "为与编程 Agent 协作准备下一步。"
+        ),
         "task_label": "任务描述",
         "task_placeholder": (
             "用自然语言描述你想做的任务，例如：\n"
@@ -276,6 +287,10 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
     "en": {
         "page_title": "Skill Tree · nblane",
         "title": "Skill Tree",
+        "page_context_line": (
+            "Private OS: edit structured skills, inline evidence, "
+            "and the shared evidence pool for this profile."
+        ),
         "error_no_tree": "skill-tree.yaml not found for '{profile}'.",
         "metric_expert": "🔵 Expert",
         "metric_solid": "🟢 Solid",
@@ -357,6 +372,9 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
     "zh": {
         "page_title": "技能树 · nblane",
         "title": "技能树",
+        "page_context_line": (
+            "私人操作系统：编辑结构化技能、内联证据与本档案的共享证据池。"
+        ),
         "error_no_tree": "未找到「{profile}」的 skill-tree.yaml。",
         "metric_expert": "🔵 专家",
         "metric_solid": "🟢 扎实",
@@ -429,7 +447,11 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
 
 _HOME: dict[str, dict[str, str]] = {
     "en": {
-        "app_page_title": "NBL",
+        "app_page_title": "Home · nblane",
+        "page_context_line": (
+            "Private OS: skills, evidence, and SKILL.md for this "
+            "profile — all plain files."
+        ),
         "app_caption": (
             "Current profile: **{profile}** · "
             "Data is plain YAML / Markdown; "
@@ -446,7 +468,13 @@ _HOME: dict[str, dict[str, str]] = {
             "Edit `profiles/{profile}/skill-tree.yaml` "
             "to add nodes."
         ),
-        "home_nav": (
+        "home_nav_compact": (
+            "**Sidebar:** Skill Tree · Gap Analysis · Kanban · "
+            "Team View. More: `docs/design.md`, "
+            "`docs/web-ui-product.md`."
+        ),
+        "home_nav_expander": "Page map (detail)",
+        "home_nav_detail": (
             "**Page navigation** (left sidebar):\n\n"
             "- **Skill Tree** — Visual tree and status editor\n"
             "- **Gap Analysis** — Task-to-skill matching "
@@ -493,9 +521,13 @@ _HOME: dict[str, dict[str, str]] = {
         "resume_warn": "Warnings",
     },
     "zh": {
-        "app_page_title": "NBL",
+        "app_page_title": "首页 · nblane",
+        "page_context_line": (
+            "私人操作系统：本档案的技能、证据与 SKILL.md——"
+            "均以本地文件为准。"
+        ),
         "app_caption": (
-            "当前 Profile：**{profile}** · "
+            "当前档案：**{profile}** · "
             "数据以 YAML / Markdown 明文存储，"
             "Git 是唯一的 source of truth。"
         ),
@@ -510,12 +542,17 @@ _HOME: dict[str, dict[str, str]] = {
             "请编辑 `profiles/{profile}/skill-tree.yaml` "
             "添加节点。"
         ),
-        "home_nav": (
+        "home_nav_compact": (
+            "**侧栏：** 技能树 · 差距分析 · 看板 · 团队视图。"
+            "详见 `docs/zh/design.md`、`docs/zh/web-ui-product.md`。"
+        ),
+        "home_nav_expander": "页面说明（详细）",
+        "home_nav_detail": (
             "**页面导航**（左侧菜单）：\n\n"
-            "- **Skill Tree** — 技能树可视化与状态编辑\n"
-            "- **Gap Analysis** — 任务-能力匹配与缺口分析\n"
-            "- **Kanban** — 任务看板\n"
-            "- **Team View** — 团队共享产品池"
+            "- **技能树** — 可视化与状态编辑\n"
+            "- **差距分析** — 任务与能力匹配、缺口\n"
+            "- **看板** — 当前任务\n"
+            "- **团队视图** — 团队共享产品池"
         ),
         "warning_no_skill_md": "未找到 SKILL.md。",
         "gen_caption": (
@@ -558,6 +595,11 @@ _KANBAN: dict[str, dict[str, str]] = {
     "en": {
         "page_title": "Kanban · nblane",
         "title": "Kanban",
+        "page_context_line": (
+            "Private OS: weekly execution board. Done items can be "
+            "draft-ingested into evidence — review each proposal before "
+            "apply."
+        ),
         "reload": "Reload from file",
         "save": "Save",
         "saved": "Saved to kanban.md",
@@ -570,13 +612,57 @@ _KANBAN: dict[str, dict[str, str]] = {
         "detail": "Detail",
         "detail_ph": "context / why...",
         "add": "Add",
-        "title": "Title",
+        "task_field_title": "Title",
         "details": "details",
         "details_ph": (
             "context / outcome / why / blocked by..."
         ),
         "move_to": "Move to",
         "kb_stay": "(stay)",
+        "kb_move_help": (
+            "Buttons below only change which **column** the task is in "
+            "(not a “completion status” menu)."
+        ),
+        "kb_auto_dates": "Auto-set started / completed dates on column move",
+        "kb_auto_dates_help": (
+            "When moving into Doing, sets started_on if empty. "
+            "When moving into Done, sets completed_on if empty."
+        ),
+        "kb_more_fields": "More fields",
+        "kb_more_fields_help": (
+            "Optional notes, dates, or values kept when moving across "
+            "columns."
+        ),
+        "new_context": "Context",
+        "new_context_ph": "What this is / background",
+        "new_why": "Why",
+        "new_why_ph": "Why this matters",
+        "new_blocked": "Blocked by",
+        "new_blocked_ph": "Dependency or blocker",
+        "new_outcome": "Outcome",
+        "new_outcome_ph": "What you delivered",
+        "field_context": "context",
+        "field_why": "why",
+        "field_blocked": "blocked by",
+        "field_outcome": "outcome",
+        "field_started": "started_on",
+        "field_completed": "completed_on",
+        "subtasks_label": "Subtasks (checkbox)",
+        "add_subtask": "+ Subtask",
+        "crystallized": "Crystallized (ingested)",
+        "done_bulk_title": "Done column housekeeping",
+        "done_bulk_pick": "Select Done tasks",
+        "archive_done": "Archive selected",
+        "delete_done": "Delete selected",
+        "ingest_select_rows": "Choose which draft rows to apply",
+        "ingest_adopt_evidence": "Adopt evidence row",
+        "ingest_adopt_node": "Adopt node update",
+        "ingest_apply_selected": "Apply selected rows",
+        "ingest_apply_all": "Apply full draft",
+        "ingest_mark_crystallized": (
+            "After apply, mark source Done tasks as crystallized"
+        ),
+        "ingest_filter_warn": "Subset filter",
         "ingest_expander": "Done → evidence (AI)",
         "ingest_pick_done": "Select Done tasks",
         "ingest_generate": "Generate draft",
@@ -601,10 +687,16 @@ _KANBAN: dict[str, dict[str, str]] = {
         "ingest_preview_source_done": (
             "Draft from Done tasks: {sources}"
         ),
+        "ingest_rationale": "Rationale",
+        "ingest_excerpt": "Source excerpt",
     },
     "zh": {
         "page_title": "看板 · nblane",
         "title": "看板",
+        "page_context_line": (
+            "私人操作系统 · 执行面：本周任务看板。「已完成」可经 AI 生成摄入草案，"
+            "请按条审阅后再写入。"
+        ),
         "reload": "从文件重新加载",
         "save": "保存",
         "saved": "已保存到 kanban.md",
@@ -617,11 +709,51 @@ _KANBAN: dict[str, dict[str, str]] = {
         "detail": "详情",
         "detail_ph": "背景 / 原因…",
         "add": "添加",
-        "title": "标题",
+        "task_field_title": "标题",
         "details": "详情",
         "details_ph": "背景 / 结果 / 阻塞…",
         "move_to": "移动到",
-        "kb_stay": "（保持）",
+        "kb_stay": "（留在本列）",
+        "kb_move_help": (
+            "下方按钮只改变任务所在**列**，不是「完成状态」菜单。"
+        ),
+        "kb_auto_dates": "移动列时自动填写开始/结束日期",
+        "kb_auto_dates_help": (
+            "移入「进行中」时若 started_on 为空则填当天；"
+            "移入「已完成」时若 completed_on 为空则填当天。"
+        ),
+        "kb_more_fields": "更多字段",
+        "kb_more_fields_help": (
+            "可选补充、日期，或从其他列带过来需要保留的字段。"
+        ),
+        "new_context": "背景",
+        "new_context_ph": "这件事是什么 / 上下文",
+        "new_why": "原因",
+        "new_why_ph": "为什么要做",
+        "new_blocked": "阻塞",
+        "new_blocked_ph": "依赖或阻塞项",
+        "new_outcome": "结果",
+        "new_outcome_ph": "交付或产出",
+        "field_context": "背景 context",
+        "field_why": "原因 why",
+        "field_blocked": "阻塞 blocked by",
+        "field_outcome": "结果 outcome",
+        "field_started": "开始日 started_on",
+        "field_completed": "结束日 completed_on",
+        "subtasks_label": "子任务（可勾选）",
+        "add_subtask": "+ 子任务",
+        "crystallized": "已结晶（已摄入）",
+        "done_bulk_title": "「已完成」列整理",
+        "done_bulk_pick": "选择已完成任务",
+        "archive_done": "归档所选",
+        "delete_done": "删除所选",
+        "ingest_select_rows": "选择要应用的草案条目",
+        "ingest_adopt_evidence": "采纳该证据行",
+        "ingest_adopt_node": "采纳该节点更新",
+        "ingest_apply_selected": "应用所选条目",
+        "ingest_apply_all": "应用完整草案",
+        "ingest_mark_crystallized": "应用后将来源「已完成」任务标为已结晶",
+        "ingest_filter_warn": "子集过滤",
         "ingest_expander": "已完成 → 证据（AI）",
         "ingest_pick_done": "选择「已完成」任务",
         "ingest_generate": "生成草案",
@@ -645,6 +777,8 @@ _KANBAN: dict[str, dict[str, str]] = {
         "ingest_preview_source_done": (
             "草案依据的「已完成」任务：{sources}"
         ),
+        "ingest_rationale": "理由",
+        "ingest_excerpt": "原文摘录",
     },
 }
 
@@ -652,6 +786,10 @@ _TEAM: dict[str, dict[str, str]] = {
     "en": {
         "page_title": "Team View · nblane",
         "title": "Team View",
+        "page_context_line": (
+            "Team OS: edit shared team.yaml and product pool files "
+            "under teams/."
+        ),
         "no_teams": (
             "No teams found. Create a team under `teams/` "
             "from the template."
@@ -674,10 +812,18 @@ _TEAM: dict[str, dict[str, str]] = {
         "add": "Add",
         "save_pool": "Save product-pool.yaml",
         "pool_saved": "product-pool.yaml saved.",
+        "team_profile_scope": (
+            "Sidebar profile **{profile}** applies to Home, Skill Tree, "
+            "Gap, and Kanban. Team data is stored under **teams/** and is "
+            "not filtered by profile."
+        ),
     },
     "zh": {
         "page_title": "团队视图 · nblane",
         "title": "团队视图",
+        "page_context_line": (
+            "团队操作系统：维护 teams/ 下的 team.yaml 与共享产品池。"
+        ),
         "no_teams": (
             "未找到团队。请从模板在 `teams/` 下创建团队。"
         ),
@@ -699,6 +845,10 @@ _TEAM: dict[str, dict[str, str]] = {
         "add": "添加",
         "save_pool": "保存 product-pool.yaml",
         "pool_saved": "已保存 product-pool.yaml。",
+        "team_profile_scope": (
+            "侧栏所选档案 **{profile}** 用于首页、技能树、差距分析与看板。"
+            "团队数据在 **teams/** 下，不按档案过滤。"
+        ),
     },
 }
 
