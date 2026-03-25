@@ -140,14 +140,14 @@ def _render_compact_body(
     """Dense read-only body (no title; no subtasks — those use widgets)."""
     esc = html.escape
     wrap = (
-        "line-height:1.32;font-size:0.92rem;margin:0;padding:0.05em 0;"
+        "line-height:1.28;font-size:0.92rem;margin:0;padding:0.02em 0;"
     )
     chunks: list[str] = [f"<div style=\"{wrap}\">"]
 
     if section == "Doing":
         if task.context.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;opacity:0.92\">"
+                "<p style=\"margin:0.05em 0;opacity:0.92\">"
                 f"{esc(task.context.strip())}</p>"
             )
         so = (task.started_on or "").strip()
@@ -163,19 +163,19 @@ def _render_compact_body(
                     f"{esc(ui['field_completed'])} {esc(co)}"
                 )
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.86rem;opacity:0.85\">"
+                "<p style=\"margin:0.05em 0;font-size:0.86rem;opacity:0.85\">"
                 + " · ".join(bits)
                 + "</p>"
             )
         if task.why.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.88rem\">"
+                "<p style=\"margin:0.05em 0;font-size:0.88rem\">"
                 f"<em>{esc(ui['field_why'])}</em> "
                 f"{esc(task.why.strip())}</p>"
             )
         if task.blocked_by.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.88rem\">"
+                "<p style=\"margin:0.05em 0;font-size:0.88rem\">"
                 f"<em>{esc(ui['field_blocked'])}</em> "
                 f"{esc(task.blocked_by.strip())}</p>"
             )
@@ -183,7 +183,7 @@ def _render_compact_body(
             nd = sum(1 for x in task.subtasks if x.done)
             na = len(task.subtasks)
             chunks.append(
-                "<p style=\"margin:0.08em 0;font-size:0.85rem;opacity:0.9\">"
+                "<p style=\"margin:0.04em 0;font-size:0.85rem;opacity:0.9\">"
                 + esc(
                     ui["kb_subtask_progress"].format(done=nd, total=na),
                 )
@@ -193,7 +193,7 @@ def _render_compact_body(
         if joined:
             prev = joined if len(joined) <= 220 else joined[:217] + "…"
             chunks.append(
-                "<p style=\"margin:0.15em 0 0 0;font-size:0.84rem;"
+                "<p style=\"margin:0.08em 0 0 0;font-size:0.84rem;"
                 "opacity:0.88;white-space:pre-wrap\">"
                 f"{esc(prev)}</p>"
             )
@@ -203,12 +203,12 @@ def _render_compact_body(
             one = (task.blocked_by or task.why or "").strip()
             cap = one if len(one) <= 160 else one[:157] + "…"
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.88rem;opacity:0.9\">"
+                "<p style=\"margin:0.05em 0;font-size:0.88rem;opacity:0.9\">"
                 f"{esc(cap)}</p>"
             )
         if task.context.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;opacity:0.92\">"
+                "<p style=\"margin:0.05em 0;opacity:0.92\">"
                 f"{esc(task.context.strip())}</p>"
             )
         so = (task.started_on or "").strip()
@@ -224,7 +224,7 @@ def _render_compact_body(
                     f"{esc(ui['field_completed'])} {esc(co)}"
                 )
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.86rem;opacity:0.85\">"
+                "<p style=\"margin:0.05em 0;font-size:0.86rem;opacity:0.85\">"
                 + " · ".join(bits2)
                 + "</p>"
             )
@@ -232,7 +232,7 @@ def _render_compact_body(
         if joined_q:
             pq = joined_q if len(joined_q) <= 220 else joined_q[:217] + "…"
             chunks.append(
-                "<p style=\"margin:0.12em 0 0 0;font-size:0.84rem;"
+                "<p style=\"margin:0.06em 0 0 0;font-size:0.84rem;"
                 "opacity:0.88;white-space:pre-wrap\">"
                 f"{esc(pq)}</p>"
             )
@@ -240,12 +240,12 @@ def _render_compact_body(
     elif section == "Done":
         if task.context.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;opacity:0.92\">"
+                "<p style=\"margin:0.05em 0;opacity:0.92\">"
                 f"{esc(task.context.strip())}</p>"
             )
         if task.outcome.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.88rem\">"
+                "<p style=\"margin:0.05em 0;font-size:0.88rem\">"
                 f"<em>{esc(ui['field_outcome'])}</em> "
                 f"{esc(task.outcome.strip())}</p>"
             )
@@ -262,19 +262,19 @@ def _render_compact_body(
                     f"{esc(ui['field_completed'])} {esc(co)}"
                 )
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.86rem;opacity:0.85\">"
+                "<p style=\"margin:0.05em 0;font-size:0.86rem;opacity:0.85\">"
                 + " · ".join(bits3)
                 + "</p>"
             )
         if task.why.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.88rem\">"
+                "<p style=\"margin:0.05em 0;font-size:0.88rem\">"
                 f"<em>{esc(ui['field_why'])}</em> "
                 f"{esc(task.why.strip())}</p>"
             )
         if task.blocked_by.strip():
             chunks.append(
-                "<p style=\"margin:0.1em 0;font-size:0.88rem\">"
+                "<p style=\"margin:0.05em 0;font-size:0.88rem\">"
                 f"<em>{esc(ui['field_blocked'])}</em> "
                 f"{esc(task.blocked_by.strip())}</p>"
             )
@@ -282,7 +282,7 @@ def _render_compact_body(
         if joined_d:
             pd = joined_d if len(joined_d) <= 220 else joined_d[:217] + "…"
             chunks.append(
-                "<p style=\"margin:0.12em 0 0 0;font-size:0.84rem;"
+                "<p style=\"margin:0.06em 0 0 0;font-size:0.84rem;"
                 "opacity:0.88;white-space:pre-wrap\">"
                 f"{esc(pd)}</p>"
             )
@@ -292,7 +292,7 @@ def _render_compact_body(
         if joined_s:
             ps = joined_s if len(joined_s) <= 280 else joined_s[:277] + "…"
             chunks.append(
-                "<p style=\"margin:0.12em 0 0 0;font-size:0.84rem;"
+                "<p style=\"margin:0.06em 0 0 0;font-size:0.84rem;"
                 "opacity:0.88;white-space:pre-wrap\">"
                 f"{esc(ps)}</p>"
             )
@@ -309,9 +309,12 @@ def _render_read_subtasks(
     tasks: list[KanbanTask],
     sections: dict[str, list[KanbanTask]],
     ui: dict[str, str],
+    *,
+    show_section_hint: bool = True,
 ) -> KanbanTask:
     """Read-mode subtask checkboxes; persist when done flags change."""
-    st.caption(ui["kb_read_subtasks_hint"])
+    if show_section_hint:
+        st.caption(ui["kb_read_subtasks_hint"])
     new_subs: list[KanbanSubtask] = []
     for si, st_item in enumerate(task.subtasks):
         lab = st_item.title.strip() or "·"
@@ -333,7 +336,47 @@ def _render_read_subtasks(
     return task
 
 
-def _read_mode_card_actions(
+def _render_move_in_popover(
+    section: str,
+    idx: int,
+    tasks: list[KanbanTask],
+    sections: dict[str, list[KanbanTask]],
+    profile: str,
+    auto_dates: bool,
+    ui: dict[str, str],
+    key_prefix: str,
+) -> None:
+    """Select column and confirm move (used inside popovers)."""
+    others = [s for s in KANBAN_SECTIONS if s != section]
+    if not others:
+        return
+    pick = st.selectbox(
+        ui["kb_move_to_label"],
+        options=list(range(len(others))),
+        format_func=lambda i: kanban_section_label(others[i]),
+        key=f"{key_prefix}mvsb_{profile}_{section}_{idx}",
+        label_visibility="visible",
+    )
+    if st.button(
+        ui["kb_confirm_move"],
+        key=f"{key_prefix}mvb_{profile}_{section}_{idx}",
+        type="primary",
+    ):
+        dest = others[int(pick)]
+        moved = tasks.pop(idx)
+        moved = _apply_column_move(
+            moved,
+            section,
+            dest,
+            auto_dates,
+        )
+        sections[section] = tasks
+        sections.setdefault(dest, []).append(moved)
+        _auto_save(profile, sections)
+        st.rerun()
+
+
+def _read_mode_popover_body(
     section: str,
     idx: int,
     tasks: list[KanbanTask],
@@ -343,42 +386,25 @@ def _read_mode_card_actions(
     ui: dict[str, str],
     to_delete: list[int],
 ) -> None:
-    """Popover: delete and move (compact read-mode chrome)."""
-    with st.popover(ui["kb_card_actions"]):
-        st.caption(ui["kb_card_delete_hint"])
-        if st.button(
-            ui["kb_delete_card"],
-            key=f"rd_del_{profile}_{section}_{idx}",
-            type="secondary",
-        ):
-            to_delete.append(idx)
-        st.divider()
-        others = [s for s in KANBAN_SECTIONS if s != section]
-        if others:
-            pick = st.selectbox(
-                ui["kb_move_to_label"],
-                options=list(range(len(others))),
-                format_func=lambda i: kanban_section_label(others[i]),
-                key=f"rd_mvsb_{profile}_{section}_{idx}",
-                label_visibility="visible",
-            )
-            if st.button(
-                ui["kb_confirm_move"],
-                key=f"rd_mvb_{profile}_{section}_{idx}",
-                type="primary",
-            ):
-                dest = others[int(pick)]
-                moved = tasks.pop(idx)
-                moved = _apply_column_move(
-                    moved,
-                    section,
-                    dest,
-                    auto_dates,
-                )
-                sections[section] = tasks
-                sections.setdefault(dest, []).append(moved)
-                _auto_save(profile, sections)
-                st.rerun()
+    """Delete + move inside read-mode ⋯ popover."""
+    st.caption(ui["kb_card_delete_hint"])
+    if st.button(
+        ui["kb_delete_card"],
+        key=f"rd_del_{profile}_{section}_{idx}",
+        type="secondary",
+    ):
+        to_delete.append(idx)
+    st.divider()
+    _render_move_in_popover(
+        section,
+        idx,
+        tasks,
+        sections,
+        profile,
+        auto_dates,
+        ui,
+        key_prefix="rd_",
+    )
 
 
 def _render_kanban_link_preview(
@@ -428,7 +454,7 @@ def _render_kanban_link_preview(
         inner = linkify_plain_to_html(text)
         lab = html.escape(label)
         blocks.append(
-            "<p style='margin:0.15em 0;font-size:0.9em'>"
+            "<p style='margin:0.08em 0;font-size:0.9em'>"
             "<strong>"
             + lab
             + "</strong><br>"
@@ -632,40 +658,6 @@ def _render_new_task_form(
             st.rerun()
 
 
-def _move_buttons(
-    section: str,
-    idx: int,
-    tasks: list[KanbanTask],
-    sections: dict[str, list[KanbanTask]],
-    profile: str,
-    auto_dates: bool,
-    ui: dict[str, str],
-) -> None:
-    """Render move-to-column buttons for the task at *idx*."""
-    other_sections = [s for s in KANBAN_SECTIONS if s != section]
-    st.caption(ui["kb_move_help"])
-    ncols = len(other_sections)
-    btn_cols = st.columns(ncols)
-    for bi, dest in enumerate(other_sections):
-        with btn_cols[bi]:
-            lbl = kanban_section_label(dest)
-            if st.button(
-                lbl,
-                key=f"mvbtn_{section}_{idx}_{dest}",
-            ):
-                moved = tasks.pop(idx)
-                moved = _apply_column_move(
-                    moved,
-                    section,
-                    dest,
-                    auto_dates,
-                )
-                sections[section] = tasks
-                sections.setdefault(dest, []).append(moved)
-                _auto_save(profile, sections)
-                st.rerun()
-
-
 def _render_subtasks_and_details(
     section: str,
     idx: int,
@@ -701,6 +693,7 @@ def _render_subtasks_and_details(
     if st.button(
         ui["add_subtask"],
         key=f"addst_{section}_{idx}",
+        type="tertiary",
     ):
         task = replace(
             task,
@@ -739,6 +732,8 @@ def _render_task_cards(
     profile: str,
     auto_dates: bool,
     ui: dict[str, str],
+    *,
+    doing_focus_two_col: bool = False,
 ) -> None:
     """Render all task cards for one section."""
     tasks = sections.get(section, [])
@@ -747,22 +742,99 @@ def _render_task_cards(
     if section == "Doing" and len(tasks) > _WIP_HINT_THRESHOLD:
         st.caption(ui["kb_wip_hint"].format(n=len(tasks)))
 
-    for idx, task in enumerate(tasks):
+    n_tasks = len(tasks)
+    if doing_focus_two_col and section == "Doing" and n_tasks > 0:
+        mid = (n_tasks + 1) // 2
+        index_batches = [list(range(mid)), list(range(mid, n_tasks))]
+        c_left, c_right = st.columns(2)
+        with c_left:
+            _render_task_index_batch(
+                index_batches[0],
+                section,
+                tasks,
+                sections,
+                profile,
+                auto_dates,
+                ui,
+                to_delete,
+            )
+        with c_right:
+            _render_task_index_batch(
+                index_batches[1],
+                section,
+                tasks,
+                sections,
+                profile,
+                auto_dates,
+                ui,
+                to_delete,
+            )
+    else:
+        _render_task_index_batch(
+            list(range(n_tasks)),
+            section,
+            tasks,
+            sections,
+            profile,
+            auto_dates,
+            ui,
+            to_delete,
+        )
+
+    for jdx in reversed(to_delete):
+        tasks.pop(jdx)
+        _auto_save(profile, sections)
+        st.rerun()
+
+    sections[section] = tasks
+
+
+def _render_task_index_batch(
+    indices: list[int],
+    section: str,
+    tasks: list[KanbanTask],
+    sections: dict[str, list[KanbanTask]],
+    profile: str,
+    auto_dates: bool,
+    ui: dict[str, str],
+    to_delete: list[int],
+) -> None:
+    """Render cards for global indices *indices* within *tasks*."""
+    first_idx = indices[0] if indices else None
+    for idx in indices:
+        show_read_subtask_hint = idx == first_idx
         ek = _task_editing_key(profile, section, idx)
         editing = bool(st.session_state.get(ek, False))
+        task = tasks[idx]
 
         with st.container(border=True):
             if not editing:
-                task = tasks[idx]
-                if st.button(
-                    _read_title_label(task.title),
-                    key=f"kb_title_{profile}_{section}_{idx}",
-                    type="tertiary",
-                    use_container_width=True,
-                    help=ui["kb_tap_title_to_edit"],
-                ):
-                    st.session_state[ek] = True
-                    st.rerun()
+                t1, t2 = st.columns([7, 1])
+                with t1:
+                    if st.button(
+                        _read_title_label(task.title),
+                        key=f"kb_title_{profile}_{section}_{idx}",
+                        type="tertiary",
+                        use_container_width=True,
+                        help=ui["kb_tap_title_to_edit"],
+                    ):
+                        st.session_state[ek] = True
+                        st.rerun()
+                with t2:
+                    with st.popover(
+                        ui["kb_card_actions"],
+                        help=ui["kb_card_actions_help"],
+                    ):
+                        _read_mode_popover_body(
+                            section,
+                            idx,
+                            tasks,
+                            sections,
+                            profile,
+                            auto_dates,
+                            ui,
+                            to_delete,
+                        )
                 _render_compact_body(task, section, ui)
                 _render_kanban_link_preview(ui, section, task)
                 if task.crystallized:
@@ -775,50 +847,46 @@ def _render_task_cards(
                     tasks,
                     sections,
                     ui,
+                    show_section_hint=show_read_subtask_hint,
                 )
                 ns_key = f"rd_newst_{profile}_{section}_{idx}"
-                r1, r2 = st.columns([6, 1])
-                with r1:
-                    st.text_input(
-                        "sub",
-                        key=ns_key,
-                        placeholder=ui["kb_read_new_subtask_ph"],
-                        label_visibility="collapsed",
-                    )
-                with r2:
-                    if st.button(
-                        "＋",
-                        key=f"rd_addst_{profile}_{section}_{idx}",
-                        type="secondary",
-                        help=ui["add_subtask"],
-                    ):
-                        raw = st.session_state.get(ns_key, "")
-                        title = str(raw).strip()
-                        task = replace(
-                            task,
-                            subtasks=task.subtasks
-                            + [KanbanSubtask(title=title, done=False)],
+                with st.expander(
+                    ui["kb_read_add_subtask_expander"],
+                    expanded=False,
+                ):
+                    r1, r2 = st.columns([14, 1])
+                    with r1:
+                        st.text_input(
+                            "sub",
+                            key=ns_key,
+                            placeholder=ui["kb_read_new_subtask_ph"],
+                            label_visibility="collapsed",
                         )
-                        tasks[idx] = task
-                        sections[section] = tasks
-                        if ns_key in st.session_state:
-                            del st.session_state[ns_key]
-                        _auto_save(profile, sections)
-                        st.rerun()
+                    with r2:
+                        if st.button(
+                            "＋",
+                            key=f"rd_addst_{profile}_{section}_{idx}",
+                            type="tertiary",
+                            use_container_width=True,
+                            help=ui["add_subtask"],
+                        ):
+                            raw = st.session_state.get(ns_key, "")
+                            title = str(raw).strip()
+                            task = replace(
+                                task,
+                                subtasks=task.subtasks
+                                + [KanbanSubtask(title=title, done=False)],
+                            )
+                            tasks[idx] = task
+                            sections[section] = tasks
+                            if ns_key in st.session_state:
+                                del st.session_state[ns_key]
+                            _auto_save(profile, sections)
+                            st.rerun()
                 tasks[idx] = task
-                _read_mode_card_actions(
-                    section,
-                    idx,
-                    tasks,
-                    sections,
-                    profile,
-                    auto_dates,
-                    ui,
-                    to_delete,
-                )
                 continue
 
-            hdr1, hdr2 = st.columns([8, 1])
+            hdr1, hdr2, hdr3 = st.columns([6, 1, 1])
             with hdr1:
                 new_title_val = st.text_input(
                     ui["task_field_title"],
@@ -829,6 +897,21 @@ def _render_task_cards(
             with hdr2:
                 if st.button("✕", key=f"del_{section}_{idx}"):
                     to_delete.append(idx)
+            with hdr3:
+                with st.popover(
+                    ui["kb_edit_move"],
+                    help=ui["kb_edit_move_help"],
+                ):
+                    _render_move_in_popover(
+                        section,
+                        idx,
+                        tasks,
+                        sections,
+                        profile,
+                        auto_dates,
+                        ui,
+                        key_prefix="ed_",
+                    )
             task = replace(task, title=new_title_val)
             st.caption(ui["kb_edit_exit_hint"])
 
@@ -856,9 +939,6 @@ def _render_task_cards(
                 ):
                     st.session_state[ek] = False
                     st.rerun()
-                _move_buttons(
-                    section, idx, tasks, sections, profile, auto_dates, ui,
-                )
                 continue
 
             if section == "Doing":
@@ -937,9 +1017,6 @@ def _render_task_cards(
                 ):
                     st.session_state[ek] = False
                     st.rerun()
-                _move_buttons(
-                    section, idx, tasks, sections, profile, auto_dates, ui,
-                )
                 continue
 
             if section == "Queue":
@@ -1008,9 +1085,6 @@ def _render_task_cards(
                 ):
                     st.session_state[ek] = False
                     st.rerun()
-                _move_buttons(
-                    section, idx, tasks, sections, profile, auto_dates, ui,
-                )
                 continue
 
             if section == "Done":
@@ -1095,6 +1169,7 @@ def _render_task_cards(
                 if st.button(
                     ui["add_subtask"],
                     key=f"addst_{section}_{idx}",
+                    type="tertiary",
                 ):
                     task = replace(
                         task,
@@ -1131,17 +1206,6 @@ def _render_task_cards(
                 ):
                     st.session_state[ek] = False
                     st.rerun()
-                _move_buttons(
-                    section, idx, tasks, sections, profile, auto_dates, ui,
-                )
-
-    for jdx in reversed(to_delete):
-        tasks.pop(jdx)
-        _auto_save(profile, sections)
-        st.rerun()
-
-    sections[section] = tasks
-
 
 
 def _render_section_column(
@@ -1163,16 +1227,16 @@ def _render_section_column(
             ui["kb_done_column_expander"].format(n=len(tasks)),
             expanded=False,
         ):
-            _render_new_task_form(
+            _render_task_cards(
                 section, sections, profile, auto_dates, ui,
             )
-            _render_task_cards(
+            _render_new_task_form(
                 section, sections, profile, auto_dates, ui,
             )
         return
 
-    _render_new_task_form(section, sections, profile, auto_dates, ui)
     _render_task_cards(section, sections, profile, auto_dates, ui)
+    _render_new_task_form(section, sections, profile, auto_dates, ui)
 
 
 def render_kanban_board(
@@ -1186,10 +1250,15 @@ def render_kanban_board(
     if focus_mode:
         doing_sec = "Doing"
         _column_header(doing_sec, ui, len(sections.get(doing_sec, [])))
-        _render_new_task_form(
-            doing_sec, sections, profile, auto_dates, ui,
-        )
         _render_task_cards(
+            doing_sec,
+            sections,
+            profile,
+            auto_dates,
+            ui,
+            doing_focus_two_col=True,
+        )
+        _render_new_task_form(
             doing_sec, sections, profile, auto_dates, ui,
         )
 
