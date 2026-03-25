@@ -633,6 +633,35 @@ _KANBAN: dict[str, dict[str, str]] = {
             "Optional notes, dates, or values kept when moving across "
             "columns."
         ),
+        "kb_focus_mode": "Focus mode (Doing full width; other columns in tabs)",
+        "kb_focus_mode_help": (
+            "Hides the four-column grid. Use tabs for Queue, Done, and "
+            "Someday / Maybe when you only want to execute."
+        ),
+        "kb_links_preview": "Links (click to open)",
+        "kb_subtask_progress": "{done} / {total} subtasks done",
+        "kb_wip_hint": (
+            "Doing has {n} tasks — consider limiting work in progress."
+        ),
+        "kb_done_column_expander": "Show and edit Done ({n})",
+        "kb_done_column_hint": (
+            "Expand to add, edit, or archive completed tasks."
+        ),
+        "kb_task_details": "Details & subtasks",
+        "kb_edit_task": "Edit",
+        "kb_done_editing": "Done editing",
+        "kb_tap_title_to_edit": "Click the title to edit this task",
+        "kb_read_subtasks_hint": "Subtasks — check off when done",
+        "kb_edit_exit_hint": (
+            "Click outside the board cannot close edit mode. "
+            "Use \"Done editing\" below (Enter does not apply to all fields)."
+        ),
+        "kb_card_actions": "⋯",
+        "kb_card_delete_hint": "Removing a task cannot be undone here.",
+        "kb_delete_card": "Delete task",
+        "kb_move_to_label": "Move to",
+        "kb_confirm_move": "Move",
+        "kb_read_new_subtask_ph": "New subtask…",
         "new_context": "Context",
         "new_context_ph": "What this is / background",
         "new_why": "Why",
@@ -726,6 +755,32 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_more_fields_help": (
             "可选补充、日期，或从其他列带过来需要保留的字段。"
         ),
+        "kb_focus_mode": "专注模式（进行中全宽，其余列在标签页）",
+        "kb_focus_mode_help": (
+            "隐藏四列并排布局；需要时再在标签中打开「排队」「已完成」「以后再说」。"
+        ),
+        "kb_links_preview": "链接（点击打开）",
+        "kb_subtask_progress": "子任务 {done} / {total} 已完成",
+        "kb_wip_hint": (
+            "「进行中」已有 {n} 项，可考虑控制并行数量（WIP）。"
+        ),
+        "kb_done_column_expander": "展开查看并编辑「已完成」（{n} 项）",
+        "kb_done_column_hint": "展开后可添加、编辑或配合上方区块归档已完成任务。",
+        "kb_task_details": "详情与子任务",
+        "kb_edit_task": "编辑",
+        "kb_done_editing": "收起编辑",
+        "kb_tap_title_to_edit": "点击标题进入编辑",
+        "kb_read_subtasks_hint": "子任务 — 完成后可勾选",
+        "kb_edit_exit_hint": (
+            "无法在空白处退出编辑；请点下方「收起编辑」"
+            "（Enter 不会对所有字段生效）。"
+        ),
+        "kb_card_actions": "⋯",
+        "kb_card_delete_hint": "删除后无法在此恢复。",
+        "kb_delete_card": "删除任务",
+        "kb_move_to_label": "移动到",
+        "kb_confirm_move": "移动",
+        "kb_read_new_subtask_ph": "新子任务…",
         "new_context": "背景",
         "new_context_ph": "这件事是什么 / 上下文",
         "new_why": "原因",
