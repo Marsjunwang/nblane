@@ -50,6 +50,7 @@
 3. 大任务前打开 **差距分析** — 填写任务、分析；若已配置 LLM 可开 AI 教练。
 4. **看板** 管理日常推进；**已完成** 任务可通过折叠区 **摄入为证据**。
 5. 协作编辑共享池时用 **团队视图**。
+6. 导出上下文前或阶段复盘时打开 **Profile Health**。
 
 产品层地图见 [web-ui-product.md §4](web-ui-product.md)。
 
@@ -103,6 +104,12 @@
 - 编辑团队字段与各 **产品池** tab，保存 `team.yaml` 与
   `product-pool.yaml`。
 
+### 5.6 Profile Health（`pages/5_Profile_Health.py`）
+
+- 只读报告，与 `nblane health <名称>` 同源。
+- 检查校验结果、生成块 drift、solid/expert 节点缺证据、Done 任务未结晶。
+- 不写入 profile 文件。
+
 ---
 
 ## 6. 与 CLI 的对照
@@ -114,6 +121,7 @@
 | 导出上下文 | `nblane context <名称>` |
 | 差距结果 | `nblane gap <名称> "…"` |
 | 编辑后检查 | `nblane validate <名称>` |
+| 成长体检 / Profile Health | `nblane health <名称>` |
 | SKILL.md 生成块 | `nblane sync <名称> --write` |
 | 证据池 / 内联 | `nblane evidence <名称> …` |
 

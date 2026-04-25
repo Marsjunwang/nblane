@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from nblane.core.io import (
+from nblane.core.kanban_io import (
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SOMEDAY,
-    KanbanTask,
     save_kanban,
 )
+from nblane.core.models import KanbanTask
 
 _BOARD_ORDER = (
     KANBAN_DOING,

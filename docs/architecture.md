@@ -36,18 +36,19 @@ as **intent** until code lands.
 |------------|--------|----------|
 | Profile layout (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile) | Shipped | `profiles/`, `core/models.py`, `core/io.py` |
 | Domain schema graph | Shipped | `schemas/*.yaml`, `core/models.py` |
-| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`sync-cursor`** / **`crystallize`** | Shipped | `cli.py`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/cursor_rule.py`, `core/crystallize.py` |
+| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`health`** / **`sync-cursor`** / **`crystallize`** | Shipped | `cli.py`, `commands/`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/profile_health.py`, `core/cursor_rule.py`, `core/crystallize.py` |
 | `validate` (skill-tree + evidence + **evidence_refs → pool**) | Shipped | `core/validate.py` |
 | `gap` (rules task gaps; **materialized evidence counts**) | Shipped | `core/gap.py`, `core/evidence_resolve.py` |
 | `team` (pool summary) | Shipped | `core/team.py` |
 | `agent-profile.yaml` merged into `context` | Shipped | `core/context.py` |
 | **Skill Provenance** — `Evidence` / `EvidenceRecord` / `EvidencePool`, inline + pool + refs | Shipped | `core/models.py`, `core/evidence_resolve.py`, `core/evidence_pool_id.py`, `core/io.py` |
 | `teams/` shared pool (team.yaml + product-pool.yaml) | Shipped | `teams/`, `core/io.py`, `core/team.py` |
-| Web UI (Skill Tree / Gap / Kanban / Team View / SKILL.md) | Shipped | `app.py`, `pages/` (4 pages); Skill Tree includes **pool + multiselect refs**; Home **resume ingest**; Kanban **Done → evidence ingest** |
+| Web UI (Skill Tree / Gap / Kanban / Team View / Profile Health / SKILL.md) | Shipped | `app.py`, `pages/` (5 pages); Skill Tree includes **pool + multiselect refs**; Home **resume ingest**; Kanban **Done → evidence ingest**; Profile Health is read-only |
 | Web UI i18n (en / zh, single switch) | Shipped | `core/llm.py` (`LLM_REPLY_LANG`), `web_i18n.py` |
 | Gap analysis (rules + optional LLM router + learned keywords) | Shipped | `core/gap.py`, `core/gap_llm_router.py`, `core/learned_keywords.py`, `pages/2_Gap_Analysis.py` |
 | LLM coach + follow-up chat (optional) | Shipped | `core/llm.py`, `pages/2_Gap_Analysis.py` |
-| Profile ingest (merge + validate + sync; resume / kanban prompts) | Shipped | `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/jsonutil.py` |
+| Profile ingest (merge + validate + sync; resume / kanban prompts) | Shipped | `core/profile_ingest.py`, `core/ingest_*.py`, `core/profile_ingest_llm.py`, `core/jsonutil.py` |
+| Profile Health / Growth Review (validate + sync + evidence + kanban checks) | Shipped | `core/profile_health.py`, `commands/health.py`, `pages/5_Profile_Health.py` |
 | MCP Server (Read + Write) | **Initial version shipped** | `mcp_server.py` (stdio); `nblane-mcp` entry point |
 | Interaction logs + crystallization | **Initial version shipped** | `core/interaction.py`, `core/crystallize.py`; MCP tools + `crystallize` CLI |
 | Cursor Skill integration | **Initial version shipped** | `nblane sync-cursor` → `.cursor/rules/nblane-context.mdc` |
@@ -92,7 +93,11 @@ src/nblane/
 ├── web_i18n.py         # UI strings (en/zh) keyed by LLM_REPLY_LANG
 └── core/
     ├── models.py       # SkillNode / SkillTree / Evidence / EvidencePool / Schema / GapResult
-    ├── io.py           # Read/write profiles, skill-tree, evidence-pool, schemas, kanban, teams
+    ├── io.py           # Compatibility facade for file I/O
+    ├── profile_io.py   # Profiles, SKILL.md, skill-tree, evidence-pool
+    ├── schema_io.py    # Schema loading and raw schema helpers
+    ├── kanban_io.py    # Kanban parse/render/save/archive
+    ├── team_io.py      # team.yaml and product-pool.yaml
     ├── paths.py        # Repo path constants
     ├── growth_log.py   # Append Growth Log rows in SKILL.md (shared with CLI / MCP)
     ├── skill_evidence_inline.py  # Append inline evidence (shared with CLI / MCP)
@@ -110,7 +115,13 @@ src/nblane/
     ├── sync.py         # SKILL.md generated-block sync
     ├── status.py       # Skill-tree summary stats
     ├── team.py         # Team aggregation
-    ├── profile_ingest.py   # Merge ingest patches; validate + sync; rollback on error
+    ├── profile_ingest.py   # Compatibility facade for ingest APIs
+    ├── ingest_models.py    # Ingest dataclasses
+    ├── ingest_parse.py     # Parse/filter ingest patches
+    ├── ingest_merge.py     # Merge ingest patches into pool + tree
+    ├── ingest_preview.py   # Preview deltas and prompt summaries
+    ├── ingest_apply.py     # Validate + sync + rollback
+    ├── profile_health.py   # Read-only growth review checks
     ├── profile_ingest_llm.py  # Resume + kanban Done → structured JSON (en/zh)
     └── llm.py          # OpenAI-compatible LLM client + reply language
 ```
@@ -120,7 +131,8 @@ pages/
 ├── 1_Skill_Tree.py     # Skill tree + inline evidence + evidence pool + ref multiselect
 ├── 2_Gap_Analysis.py   # Rules + optional LLM router + AI coach + write-back
 ├── 3_Kanban.py         # Kanban editing + Done → evidence ingest expander
-└── 4_Team_View.py      # Team + product pool editing
+├── 4_Team_View.py      # Team + product pool editing
+└── 5_Profile_Health.py # Read-only health / growth review
 ```
 
 ## Web UI language (en / zh)

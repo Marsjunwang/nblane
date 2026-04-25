@@ -40,6 +40,18 @@ class TestCoreImports(unittest.TestCase):
         self.assertIsInstance(list_schemas(), list)
         self.assertIsInstance(list_teams(), list)
 
+    def test_import_split_io_modules(self) -> None:
+        """Split I/O modules should expose domain-specific loaders."""
+        from nblane.core.kanban_io import parse_kanban
+        from nblane.core.profile_io import load_skill_tree_raw
+        from nblane.core.schema_io import load_schema_raw
+        from nblane.core.team_io import load_team
+
+        self.assertTrue(callable(parse_kanban))
+        self.assertTrue(callable(load_skill_tree_raw))
+        self.assertTrue(callable(load_schema_raw))
+        self.assertTrue(callable(load_team))
+
     def test_import_gap(self) -> None:
         """nblane.core.gap should expose analyze."""
         from nblane.core.gap import analyze
@@ -95,6 +107,30 @@ class TestCoreImports(unittest.TestCase):
         from nblane.core.profile_ingest import merge_ingest_patch
 
         self.assertTrue(callable(merge_ingest_patch))
+
+    def test_import_split_ingest_modules(self) -> None:
+        """Split ingest modules should expose their public API."""
+        from nblane.core.ingest_apply import run_ingest_patch
+        from nblane.core.ingest_merge import merge_ingest_patch
+        from nblane.core.ingest_models import IngestPatch
+        from nblane.core.ingest_parse import parse_ingest_patch
+        from nblane.core.ingest_preview import ingest_preview_delta
+
+        self.assertTrue(callable(run_ingest_patch))
+        self.assertTrue(callable(merge_ingest_patch))
+        self.assertTrue(callable(parse_ingest_patch))
+        self.assertTrue(callable(ingest_preview_delta))
+        self.assertEqual(IngestPatch().evidence_entries, [])
+
+    def test_import_profile_health(self) -> None:
+        """Profile health should expose analyzer and formatter."""
+        from nblane.core.profile_health import (
+            analyze_profile_health,
+            format_health_text,
+        )
+
+        self.assertTrue(callable(analyze_profile_health))
+        self.assertTrue(callable(format_health_text))
 
     def test_import_growth_log(self) -> None:
         """nblane.core.growth_log should expose append helper."""

@@ -31,7 +31,7 @@ class TestGapAnalyze(unittest.TestCase):
     def test_openpi_matches_via_synonym(self) -> None:
         """openpi synonym links to schema tokens."""
         result = analyze(
-            "王军",
+            "template",
             "openpi",
             use_llm_router=False,
         )
@@ -41,7 +41,7 @@ class TestGapAnalyze(unittest.TestCase):
     def test_no_roots_when_both_matchers_off(self) -> None:
         """Neither rule nor LLM yields an error."""
         result = analyze(
-            "王军",
+            "template",
             "something obscure xyz123",
             use_rule_match=False,
             use_llm_router=False,
@@ -63,7 +63,7 @@ class TestGapAnalyze(unittest.TestCase):
             },
         )
         result = analyze(
-            "王军",
+            "template",
             "custom router task",
             use_rule_match=False,
             use_llm_router=True,

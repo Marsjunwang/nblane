@@ -60,6 +60,7 @@ First-time flow (about one minute to orientation):
 4. Use **Kanban** for day-to-day work; promote **Done** items to evidence via
    the expander when ready.
 5. Use **Team View** when editing shared `team.yaml` / `product-pool.yaml`.
+6. Open **Profile Health** before exporting context or after a work session.
 
 See [web-ui-product.md §4](web-ui-product.md) for the product map.
 
@@ -115,6 +116,13 @@ See [web-ui-product.md §4](web-ui-product.md) for the product map.
 - Edit team fields and **product pool** tabs; saves `team.yaml` and
   `product-pool.yaml`.
 
+### 5.6 Profile Health (`pages/5_Profile_Health.py`)
+
+- Read-only report built from `nblane health <name>`.
+- Checks validation, generated block drift, solid/expert nodes without
+  evidence, and Done tasks not yet crystallized.
+- Does not write profile files.
+
 ---
 
 ## 6. CLI equivalence (quick map)
@@ -126,6 +134,7 @@ See [web-ui-product.md §4](web-ui-product.md) for the product map.
 | Context text | `nblane context <name>` |
 | Gap output | `nblane gap <name> "…"` |
 | Validate after edits | `nblane validate <name>` |
+| Profile health / growth review | `nblane health <name>` |
 | SKILL.md generated blocks | `nblane sync <name> --write` |
 | Evidence pool / inline | `nblane evidence <name> …` |
 

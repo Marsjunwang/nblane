@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import streamlit as st
 
-from nblane.core.io import (
+from nblane.core.kanban_io import (
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SOMEDAY,
-    KanbanTask,
 )
+from nblane.core.models import KanbanTask
 from nblane.web_i18n import kanban_section_label
 
 from ._edit_mode import _render_new_task_form, render_edit_card

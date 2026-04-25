@@ -7,15 +7,14 @@ from dataclasses import replace
 
 import streamlit as st
 
-from nblane.core.io import (
+from nblane.core.kanban_io import (
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SECTIONS,
     KANBAN_SOMEDAY,
-    KanbanSubtask,
-    KanbanTask,
 )
+from nblane.core.models import KanbanSubtask, KanbanTask
 from nblane.web_i18n import kanban_section_label
 from nblane.web_linkify import linkify_plain_to_html, text_contains_linkified_url
 from nblane.web_shared import kanban_section_emoji

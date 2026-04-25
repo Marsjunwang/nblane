@@ -7,15 +7,14 @@ from datetime import date
 
 import streamlit as st
 
-from nblane.core.io import (
+from nblane.core.kanban_io import (
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SECTIONS,
     KANBAN_SOMEDAY,
-    KanbanSubtask,
-    KanbanTask,
 )
+from nblane.core.models import KanbanSubtask, KanbanTask
 
 from ._helpers import (
     _apply_column_move,

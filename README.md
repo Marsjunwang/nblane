@@ -56,6 +56,9 @@ nblane sync yourname --write   # rewrite the generated block
 nblane validate
 nblane validate yourname
 
+# Read-only profile health / growth review
+nblane health yourname
+
 # Find skill gaps for a natural-language task
 nblane gap yourname "OpenVLA robot control"
 nblane gap yourname --node grasp_planning
@@ -96,8 +99,8 @@ Ingest and full evidence editing remain **CLI / Web**.
 streamlit run app.py
 ```
 
-Five surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
-View**. Step-by-step usage: [docs/web-ui.md](docs/web-ui.md) ·
+Six surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
+View**, **Profile Health**. Step-by-step usage: [docs/web-ui.md](docs/web-ui.md) ·
 [中文](docs/zh/web-ui.md). Product IA and backlog:
 [docs/web-ui-product.md](docs/web-ui-product.md).
 
@@ -160,7 +163,9 @@ nblane/
 │   ├── cli.py           # CLI entry point
 │   └── core/            # All business logic
 │       ├── models.py    # Data classes
-│       ├── io.py        # File I/O (profiles, schemas, teams)
+│       ├── io.py        # File I/O compatibility facade
+│       ├── profile_io.py / schema_io.py / kanban_io.py / team_io.py
+│       │                # Domain-specific file I/O
 │       ├── gap.py       # Task → skill match & gap detection
 │       ├── evidence_resolve.py  # Pool refs + inline → materialized evidence
 │       ├── context.py   # Agent system prompt generation
@@ -169,7 +174,9 @@ nblane/
 │       ├── status.py    # Skill tree summary
 │       ├── team.py      # Team operations
 │       ├── llm.py       # LLM client wrapper
-│       ├── profile_ingest.py      # Merge pool → tree; validate + sync
+│       ├── profile_ingest.py      # Ingest compatibility facade
+│       ├── ingest_*.py            # Parse / merge / preview / apply ingest
+│       ├── profile_health.py      # Read-only growth review
 │       └── profile_ingest_llm.py  # Resume / kanban Done → JSON
 ├── app.py + pages/      # Streamlit Web UI
 ├── profiles/            # User data (SKILL.md, skill-tree.yaml, evidence-pool.yaml, kanban.md)

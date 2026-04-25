@@ -61,6 +61,41 @@ nodes:
     level: 1
     category: foundations
 
+  - id: math_calculus_ode
+    label: Calculus & ODE
+    level: 1
+    category: foundations
+
+  # ── CONTROL / 经典控制 ───────────────────────────────────────────────────────
+
+  - id: classical_control
+    label: Classical Control (PID, state-space)
+    level: 1
+    category: control
+    requires: [math_linalg, math_calculus_ode]
+    keywords: [pid, 状态空间, 经典控制]
+
+  - id: optimal_control
+    label: Optimal Control & MPC (LQR / MPC)
+    level: 2
+    category: control
+    requires: [classical_control, math_optimization]
+    keywords: [lqr, mpc, 模型预测控制, 最优控制]
+
+  - id: nonlinear_control
+    label: Nonlinear & Robust Control
+    level: 3
+    category: control
+    requires: [optimal_control]
+    keywords: [非线性控制, 鲁棒控制, lyapunov]
+
+  - id: whole_body_control
+    label: Whole-Body Control (humanoid / WBC)
+    level: 3
+    category: control
+    requires: [optimal_control, kinematics]
+    keywords: [全身控制, wbc, 人形控制]
+
   # ── ROS / MIDDLEWARE / 机器人中间件 ───────────────────────────────────────────
 
   - id: ros2_basics
@@ -146,6 +181,20 @@ nodes:
     requires: [object_detection]
     keywords: [基础模型, vlm, 视觉语言模型, dino, clip]
 
+  - id: tactile_sensing
+    label: Tactile & Force Sensing (GelSight / F-T)
+    level: 2
+    category: perception
+    requires: [real_robot_ops]
+    keywords: [触觉, 力传感, gelsight, digit, 力反馈]
+
+  - id: multimodal_fusion
+    label: Multimodal Fusion (vision + tactile + proprio)
+    level: 3
+    category: perception
+    requires: [tactile_sensing, point_cloud]
+    keywords: [多模态融合, 本体感知, proprioception]
+
   # ── MANIPULATION / 操作 ──────────────────────────────────────────────────────
 
   - id: kinematics
@@ -170,7 +219,7 @@ nodes:
     label: Contact-Rich Manipulation
     level: 4
     category: manipulation
-    requires: [grasp_planning]
+    requires: [grasp_planning, tactile_sensing]
 
   - id: bimanual
     label: Bimanual Manipulation
@@ -178,6 +227,27 @@ nodes:
     category: manipulation
     requires: [moveit2]
     keywords: [双臂, aloha, 双臂协作]
+
+  - id: mobile_manipulation
+    label: Mobile Manipulation
+    level: 3
+    category: manipulation
+    requires: [moveit2, nav2]
+    keywords: [移动操作, 移动机械臂]
+
+  - id: dexterous_manipulation
+    label: Dexterous Multi-Finger Manipulation
+    level: 4
+    category: manipulation
+    requires: [contact_rich, tactile_sensing]
+    keywords: [灵巧手, 多指, dexterous, leap hand]
+
+  - id: long_horizon_tamp
+    label: Long-Horizon TAMP / LLM Planners
+    level: 3
+    category: manipulation
+    requires: [moveit2, foundation_models_perception]
+    keywords: [tamp, 长时序规划, 任务规划, llm planner]
 
   # ── LEARNING-BASED CONTROL / 学习式控制 ──────────────────────────────────────
 
@@ -222,6 +292,57 @@ nodes:
     keywords:
       [vla, pi0, pi0.5, octo, rt2, openvla, openpi, 大模型控制]
 
+  - id: model_based_rl
+    label: Model-Based RL (Dreamer family)
+    level: 3
+    category: learning
+    requires: [rl_basics]
+    keywords: [model-based rl, 模型预测, dreamer, mbrl]
+
+  - id: world_models
+    label: World Models for Control (Dreamer, V-JEPA-2)
+    level: 4
+    category: learning
+    requires: [model_based_rl, foundation_models_perception]
+    keywords: [world model, 世界模型, v-jepa, genie, dreamer-v3]
+
+  - id: foundation_policy_pretrain
+    label: Generalist / Foundation Policy Training
+    level: 4
+    category: learning
+    requires: [vlm_robot, imitation_learning]
+    keywords: [generalist policy, 通用策略, openvla, rdt, octo, pi0.5]
+
+  # ── LOCOMOTION / 足式运动与人形 ─────────────────────────────────────────────
+
+  - id: legged_basics
+    label: Legged Robotics Fundamentals (gait, ZMP, balance)
+    level: 2
+    category: locomotion
+    requires: [classical_control, kinematics]
+    keywords: [足式, 步态, zmp, 平衡控制]
+
+  - id: quadruped_control
+    label: Quadruped Locomotion (RL + MPC)
+    level: 3
+    category: locomotion
+    requires: [legged_basics, rl_for_robotics]
+    keywords: [四足, 四足运动, 宇树, anymal, spot]
+
+  - id: humanoid_locomotion
+    label: Humanoid Locomotion
+    level: 4
+    category: locomotion
+    requires: [whole_body_control, quadruped_control]
+    keywords: [人形, 人形行走, h1, optimus, figure]
+
+  - id: loco_manipulation
+    label: Loco-Manipulation / 移动操作一体化
+    level: 4
+    category: locomotion
+    requires: [humanoid_locomotion, mobile_manipulation]
+    keywords: [loco-manip, 移动操作, 全身协调]
+
   # ── NAVIGATION / SLAM / 导航定位 ─────────────────────────────────────────────
 
   - id: slam_basics
@@ -247,6 +368,13 @@ nodes:
     level: 3
     category: navigation
     requires: [slam_basics, camera_calibration]
+
+  - id: vln
+    label: Vision-Language Navigation
+    level: 3
+    category: navigation
+    requires: [foundation_models_perception, nav2]
+    keywords: [vln, 视觉语言导航, 语言指令导航]
 
   # ── RESEARCH SKILLS / 研究能力 ───────────────────────────────────────────────
 
@@ -297,6 +425,55 @@ nodes:
     level: 3
     category: systems
     requires: [ros2_advanced, cpp_core]
+
+  - id: realtime_systems
+    label: Real-Time Systems (RTOS, deterministic latency)
+    level: 3
+    category: systems
+    requires: [cpp_core, hardware_interface]
+    keywords: [rtos, 实时系统, 确定性延迟, preempt-rt]
+
+  - id: edge_inference
+    label: Edge Inference (TensorRT / ONNX / quantization)
+    level: 3
+    category: systems
+    requires: [docker_deploy]
+    keywords: [边缘推理, tensorrt, onnx, 量化, jetson, orin]
+
+  - id: model_distillation
+    label: Model Compression & Distillation
+    level: 3
+    category: systems
+    requires: [edge_inference]
+    keywords: [模型蒸馏, 压缩, 剪枝, distillation]
+
+  - id: teleop_data_collection
+    label: Teleoperation & Data Collection Infra
+    level: 2
+    category: systems
+    requires: [real_robot_ops]
+    keywords: [遥操作, 数据采集, aloha, gello, 数据基础设施]
+
+  - id: robot_dataset_curation
+    label: Robot Dataset Curation & Replay
+    level: 3
+    category: systems
+    requires: [teleop_data_collection]
+    keywords: [数据集, open-x-embodiment, lerobot, 数据 curation]
+
+  - id: failure_recovery
+    label: Failure Recovery & Robustness
+    level: 3
+    category: systems
+    requires: [real_robot_ops]
+    keywords: [失败恢复, 鲁棒性, 异常处理, recovery policy]
+
+  - id: safety_certification
+    label: Robot Safety & Certification (ISO 13482, ISO 10218)
+    level: 4
+    category: systems
+    requires: [real_robot_ops, hardware_interface]
+    keywords: [iso 13482, iso 10218, 功能安全, 安全认证]
 
   # ── INFLUENCE & PUBLIC PRESENCE / 影响力与公开表达 ───────────────────────────
 
@@ -380,3 +557,10 @@ nodes:
     level: 4
     category: strategy
     requires: [technical_strategy, peer_networking, project_leadership]
+
+  - id: robot_productization
+    label: Robot Productization & Shipping / 机器人产品化与量产
+    level: 3
+    category: strategy
+    requires: [product_judgment, real_robot_ops]
+    keywords: [产品化, 量产, 工程化交付, dfm]

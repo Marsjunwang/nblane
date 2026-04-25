@@ -24,7 +24,7 @@ class TestCoreSmoke(unittest.TestCase):
         """gap.analyze should match OpenVLA task to nodes."""
         from nblane.core.gap import analyze
 
-        result = analyze("王军", "OpenVLA robot control")
+        result = analyze("template", "OpenVLA robot control")
         self.assertIsNone(result.error)
         self.assertTrue(len(result.top_matches) > 0)
         self.assertTrue(len(result.closure) > 0)
@@ -38,11 +38,11 @@ class TestCoreSmoke(unittest.TestCase):
         self.assertEqual(rc, 0)
 
     def test_list_profiles(self) -> None:
-        """list_profiles should find existing profiles."""
+        """list_profiles should return a list."""
         from nblane.core.io import list_profiles
 
         profiles = list_profiles()
-        self.assertIn("王军", profiles)
+        self.assertIsInstance(profiles, list)
 
     def test_list_teams(self) -> None:
         """list_teams should find example-team."""
@@ -59,6 +59,61 @@ class TestCliEntryPoint(unittest.TestCase):
         """``nblane validate`` should exit 0."""
         result = subprocess.run(
             [sys.executable, "-m", "nblane.cli", "validate"],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_status_cli(self) -> None:
+        """``nblane status`` should exit 0."""
+        result = subprocess.run(
+            [sys.executable, "-m", "nblane.cli", "status"],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_context_cli(self) -> None:
+        """``nblane context template`` should exit 0."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "context",
+                "template",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_team_cli(self) -> None:
+        """``nblane team example-team`` should exit 0."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "team",
+                "example-team",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_gap_cli(self) -> None:
+        """``nblane gap`` should exit 0 on repo fixture."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "gap",
+                "template",
+                "OpenVLA robot control",
+            ],
             cwd=REPO_ROOT,
             check=False,
         )

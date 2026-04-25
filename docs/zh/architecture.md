@@ -29,18 +29,19 @@
 |------|------|----------|
 | Profile 结构 (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile) | 已实现 | `profiles/`, `core/models.py`, `core/io.py` |
 | 领域关卡图 (Schema) | 已实现 | `schemas/*.yaml`, `core/models.py` |
-| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`sync-cursor`** / **`crystallize`** | 已实现 | `cli.py`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/cursor_rule.py`, `core/crystallize.py` |
+| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`health`** / **`sync-cursor`** / **`crystallize`** | 已实现 | `cli.py`, `commands/`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/profile_health.py`, `core/cursor_rule.py`, `core/crystallize.py` |
 | `validate`（skill-tree 校验） | 已实现 | `core/validate.py` |
 | `gap`（规则层任务缺口） | 已实现 | `core/gap.py` |
 | `team`（团队池汇总） | 已实现 | `core/team.py` |
 | `agent-profile.yaml` 拼入 `context` | 已实现 | `core/context.py` |
 | `teams/` 共享池 (team.yaml + product-pool.yaml) | 已实现 | `teams/`, `core/io.py`, `core/team.py` |
-| Web UI (Skill Tree / Gap / Kanban / Team View / SKILL.md) | 已实现 | `app.py`, `pages/`（4 页）；Home **简历摄入**；Kanban **已完成→证据摄入** |
+| Web UI (Skill Tree / Gap / Kanban / Team View / Profile Health / SKILL.md) | 已实现 | `app.py`, `pages/`（5 页）；Home **简历摄入**；Kanban **已完成→证据摄入**；Profile Health 只读 |
 | Web UI 中英文（单一开关） | 已实现 | `core/llm.py`（`LLM_REPLY_LANG`）、`web_i18n.py` |
 | Gap 分析（规则 + 可选 LLM 路由 + 学习关键词） | 已实现 | `core/gap.py`、`core/gap_llm_router.py`、`core/learned_keywords.py`、`pages/2_Gap_Analysis.py` |
 | LLM 教练与追问（可选） | 已实现 | `core/llm.py`、`pages/2_Gap_Analysis.py` |
 | Skill Provenance（内联 + 池 + `evidence_refs` + 物化） | 已实现 | `core/models.py`、`core/evidence_resolve.py`、`core/evidence_pool_id.py` 等 |
-| Profile 摄入（合并 + 校验 + sync；简历/看板提示） | 已实现 | `core/profile_ingest.py`、`core/profile_ingest_llm.py`、`core/jsonutil.py` |
+| Profile 摄入（合并 + 校验 + sync；简历/看板提示） | 已实现 | `core/profile_ingest.py`、`core/ingest_*.py`、`core/profile_ingest_llm.py`、`core/jsonutil.py` |
+| Profile Health / Growth Review（校验 + sync + 证据 + 看板检查） | 已实现 | `core/profile_health.py`、`commands/health.py`、`pages/5_Profile_Health.py` |
 | MCP Server (Read + Write) | **初版已实现** | `mcp_server.py`（stdio）；可执行 `nblane-mcp` |
 | 交互日志 + 方法结晶 | **初版已实现** | `core/interaction.py`、`core/crystallize.py`；MCP tool + `crystallize` CLI |
 | Cursor Skill 集成 | **初版已实现** | `nblane sync-cursor` → `.cursor/rules/nblane-context.mdc` |
@@ -77,13 +78,18 @@ profiles/{name}/
 ```
 src/nblane/
 ├── __init__.py         # 版本号
-├── cli.py              # CLI 入口（13 条子命令）
+├── cli.py              # CLI 入口（解析与分发）
+├── commands/           # CLI 命令实现
 ├── mcp_server.py       # MCP stdio：resources + write tools
 ├── web_shared.py       # Streamlit 共享工具（profile 选择器）
 ├── web_i18n.py         # 界面文案（en/zh），由 LLM_REPLY_LANG 决定
 └── core/
     ├── models.py       # SkillNode / SkillTree / Schema / GapResult 等数据类
-    ├── io.py           # Profile / Schema / Kanban / Team 的读写
+    ├── io.py           # 文件 I/O 兼容 facade
+    ├── profile_io.py   # Profile / SKILL.md / skill-tree / evidence-pool
+    ├── schema_io.py    # Schema 加载与原始 schema helper
+    ├── kanban_io.py    # Kanban parse/render/save/archive
+    ├── team_io.py      # team.yaml 与 product-pool.yaml
     ├── paths.py        # 仓库路径常量
     ├── gap.py          # 任务-技能匹配 + 前置闭包 + 缺口检测
     ├── gap_llm_router.py  # LLM：任务 → schema 节点 id（+ keywords JSON）
@@ -94,7 +100,9 @@ src/nblane/
     ├── sync.py         # SKILL.md 生成块同步
     ├── status.py       # 技能树摘要统计
     ├── team.py         # 团队汇总
-    ├── profile_ingest.py   # 合并摄入补丁；validate + sync；失败回滚
+    ├── profile_ingest.py   # 摄入 API 兼容 facade
+    ├── ingest_*.py         # 摄入 parse / merge / preview / apply
+    ├── profile_health.py   # 只读成长体检
     ├── profile_ingest_llm.py  # 简历 / 看板 Done → 结构化 JSON（中/英）
     └── llm.py          # OpenAI 兼容 LLM 客户端 + 回复语言
 ```
@@ -104,7 +112,8 @@ pages/
 ├── 1_Skill_Tree.py     # 技能树可视化编辑 + 证据池与引用
 ├── 2_Gap_Analysis.py   # 规则 + 可选 LLM 首轮路由 + AI 教练 + 写回
 ├── 3_Kanban.py         # 看板编辑 + 已完成→证据摄入
-└── 4_Team_View.py      # 团队与产品池编辑
+├── 4_Team_View.py      # 团队与产品池编辑
+└── 5_Profile_Health.py # 只读成长体检
 ```
 
 ## Web 界面语言（中 / 英）
