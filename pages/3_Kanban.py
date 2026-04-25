@@ -20,7 +20,7 @@ from nblane.core.io import (
     parse_kanban,
     save_kanban,
 )
-from nblane.kanban_board_ui import render_kanban_board
+from nblane.kanban_ui import render_kanban_board
 from nblane.core.profile_ingest import (
     filter_ingest_patch,
     ingest_preview_delta,
