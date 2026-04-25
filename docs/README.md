@@ -5,6 +5,7 @@ Chinese readers: [zh/README.md](zh/README.md).
 | Doc | Description |
 |-----|-------------|
 | [Installation & LLM configuration](setup.md) | Install, dependencies, `.env`, non-OpenAI providers |
+| [Tencent Cloud small-team deployment](deploy-tencent-cloud.md) | HTTPS, login, permissions, Git backup, systemd / Caddy |
 | [Product design (v0.2)](product.md) | Human + Agent + Team co-evolution, structure, roadmap, repo mapping |
 | [Web experience design (Streamlit)](web-ui-product.md) | IA, first-screen narrative, brand, journeys, backlog · [中文](zh/web-ui-product.md) |
 | [Web UI user guide](web-ui.md) | Run Streamlit, sidebar, each page, CLI parity · [中文](zh/web-ui.md) |

@@ -18,6 +18,7 @@ from nblane.core.io import (
     KanbanTask,
     append_kanban_archive,
     parse_kanban,
+    profile_dir,
     save_kanban,
 )
 from nblane.kanban_ui import render_kanban_board
@@ -39,11 +40,17 @@ from nblane.web_i18n import (
     kanban_section_label,
     kanban_ui,
 )
+from nblane.web_auth import require_login
 from nblane.web_shared import (
+    assert_files_current,
     drop_streamlit_widget_keys,
+    ensure_file_snapshot,
     remember_allow_and_drop_yaml_preview_keys,
+    refresh_file_snapshots,
+    render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
+    stash_git_backup_results,
     ui_emoji_enabled,
 )
 
@@ -71,7 +78,11 @@ def _auto_save(
     sections: dict[str, list[KanbanTask]],
 ) -> None:
     """Persist changes to kanban.md."""
+    path = profile_dir(profile) / "kanban.md"
+    assert_files_current([path])
     save_kanban(profile, sections)
+    refresh_file_snapshots([path])
+    stash_git_backup_results()
     clear_web_cache()
 
 
@@ -94,7 +105,23 @@ st.set_page_config(
     layout="wide",
 )
 
+require_login()
 selected = select_profile()
+render_git_backup_notices()
+_pdir = profile_dir(selected)
+_kanban_path = _pdir / "kanban.md"
+_archive_path = _pdir / "kanban-archive.md"
+_pool_path = _pdir / "evidence-pool.yaml"
+_tree_path = _pdir / "skill-tree.yaml"
+_skill_path = _pdir / "SKILL.md"
+for _path in (
+    _kanban_path,
+    _archive_path,
+    _pool_path,
+    _tree_path,
+    _skill_path,
+):
+    ensure_file_snapshot(_path)
 
 st.title(ui["title"])
 st.caption(ui["page_context_line"])
@@ -118,12 +145,12 @@ tb1, tb2, tb3 = st.columns([1, 1, 3])
 with tb1:
     if st.button(ui["reload"]):
         _load_into_state(selected)
+        refresh_file_snapshots([_kanban_path])
         st.rerun()
 with tb2:
     if st.button(ui["save"], type="primary"):
         sections = _get_sections(selected)
-        save_kanban(selected, sections)
-        clear_web_cache()
+        _auto_save(selected, sections)
         st.success(ui["saved"])
 
 sections = _get_sections(selected)
@@ -163,8 +190,11 @@ with st.expander(ui["done_bulk_title"], expanded=False):
         with b1:
             if st.button(ui["archive_done"], key=f"arch_{selected}"):
                 if pick_bulk:
+                    assert_files_current([_archive_path, _kanban_path])
                     to_arc = [done_tasks_bulk[i] for i in pick_bulk]
                     append_kanban_archive(selected, to_arc)
+                    refresh_file_snapshots([_archive_path])
+                    stash_git_backup_results()
                     for j in sorted(pick_bulk, reverse=True):
                         done_tasks_bulk.pop(j)
                     sections[KANBAN_DONE] = done_tasks_bulk
@@ -415,6 +445,9 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         key=f"ingest_apply_all_{selected}",
                     )
                 if apply_sel:
+                    assert_files_current(
+                        [_pool_path, _tree_path, _skill_path]
+                    )
                     _, apply = run_ingest_patch(
                         selected,
                         filtered,
@@ -424,6 +457,10 @@ with st.expander(ui["ingest_expander"], expanded=False):
                     )
                     if apply.ok:
                         clear_web_cache()
+                        refresh_file_snapshots(
+                            [_pool_path, _tree_path, _skill_path]
+                        )
+                        stash_git_backup_results()
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
                             titles = {str(x) for x in src_done}
@@ -441,6 +478,9 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         for w in apply.warnings:
                             st.warning(w)
                 if apply_all:
+                    assert_files_current(
+                        [_pool_path, _tree_path, _skill_path]
+                    )
                     _, apply = run_ingest_patch(
                         selected,
                         raw_patch,
@@ -450,6 +490,10 @@ with st.expander(ui["ingest_expander"], expanded=False):
                     )
                     if apply.ok:
                         clear_web_cache()
+                        refresh_file_snapshots(
+                            [_pool_path, _tree_path, _skill_path]
+                        )
+                        stash_git_backup_results()
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
                             titles = {str(x) for x in src_done}

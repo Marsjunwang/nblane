@@ -5,6 +5,7 @@
 | 文档 | 说明 |
 |------|------|
 | [安装与 LLM 配置](setup.md) | 安装方式、依赖说明、`.env` 配置、非 OpenAI 服务商 |
+| [腾讯云小团队部署](tencent-cloud-deploy.md) | 域名 HTTPS、账号登录、权限、Git 备份、systemd / Caddy |
 | [产品设计 (v0.2)](product.md) | Human + Agent + Team 共进化、四层结构、路线图与仓库映射 |
 | [Web 体验设计（Streamlit）](web-ui-product.md) | 信息架构、首屏与品牌、动线、与产品分层对齐；backlog |
 | [Web 使用手册（Streamlit）](web-ui.md) | 如何运行、侧栏档案、分页面操作、与 CLI 对照 |

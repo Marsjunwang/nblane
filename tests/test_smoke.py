@@ -119,6 +119,28 @@ class TestCliEntryPoint(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
 
+    def test_auth_hash_password_cli(self) -> None:
+        """``nblane auth hash-password`` prints a PBKDF2 hash."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "auth",
+                "hash-password",
+                "secret",
+                "--iterations",
+                "100000",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(result.stdout.startswith("pbkdf2_sha256$"))
+
 
 if __name__ == "__main__":
     unittest.main()

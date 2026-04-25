@@ -37,6 +37,9 @@ nblane reads these environment variables:
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | API base URL |
 | `LLM_MODEL` | `gpt-4o` | Model name |
 | `LLM_REPLY_LANG` | `en` | Reply language: `en` or `zh`. Also switches **Gap Analysis** UI copy and the AI system prompt (use `en` for international demos). |
+| `NBLANE_AUTH_FILE` | *(empty)* | Streamlit Web login config. Empty keeps local development mode; public deployments should point at private `auth/users.yaml`. |
+| `NBLANE_DATA_GIT_AUTOCOMMIT` | *(empty)* | Set to `1` to commit data-file writes automatically. |
+| `NBLANE_DATA_GIT_AUTOPUSH` | *(empty)* | Set to `1` to push after automatic commits. |
 
 `LLM_REPLY_LANG` controls the Streamlit UI (home `app.py`, sidebar Profile, Skill Tree, Gap Analysis, Kanban, Team View, etc.) and model output; no separate UI locale is required.
 
@@ -84,3 +87,14 @@ LLM_MODEL=llama3
 ### Verify configuration
 
 When AI is configured, the Gap Analysis page shows the active model in the sidebar. When `LLM_API_KEY` is not set, AI mode is disabled and a notice is displayed—all rule-based gap analysis still works normally.
+
+## Web Login And Deployment
+
+For public deployment, configure `NBLANE_AUTH_FILE`. See `auth/users.example.yaml`
+for the YAML shape and generate password hashes with:
+
+```bash
+nblane auth hash-password
+```
+
+Tencent Cloud deployment notes: [deploy-tencent-cloud.md](deploy-tencent-cloud.md).

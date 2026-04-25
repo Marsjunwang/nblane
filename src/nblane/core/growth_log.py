@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from nblane.core import git_backup
+
 
 def append_growth_log_row(profile_dir: Path, event: str) -> None:
     """Insert one dated row under ``## Growth Log`` in SKILL.md.
@@ -44,3 +46,7 @@ def append_growth_log_row(profile_dir: Path, event: str) -> None:
         )
 
     skill_md.write_text(content, encoding="utf-8")
+    git_backup.record_change(
+        [skill_md],
+        action=f"log growth event for {profile_dir.name}",
+    )

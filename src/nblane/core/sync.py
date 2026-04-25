@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from nblane.core import git_backup
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_QUEUE,
@@ -256,3 +257,7 @@ def write_generated_blocks(profile_dir: Path) -> None:
             updated, block_name, generated[block_name]
         )
     skill_md.write_text(updated, encoding="utf-8")
+    git_backup.record_change(
+        [skill_md],
+        action=f"sync {profile_dir.name}/SKILL.md",
+    )

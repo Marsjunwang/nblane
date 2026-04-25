@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from nblane.core import git_backup
 from nblane.core.models import EvidencePool, SkillTree
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict, _load_yaml_file
@@ -82,6 +83,10 @@ def save_skill_tree(name: str, data: dict) -> None:
         sort_keys=False,
     )
     path.write_text(header + body, encoding="utf-8")
+    git_backup.record_change(
+        [path],
+        action=f"update {name}/skill-tree.yaml",
+    )
 
 
 def load_evidence_pool(
@@ -123,6 +128,10 @@ def save_evidence_pool(name: str, data: dict) -> None:
         sort_keys=False,
     )
     path.write_text(header + body, encoding="utf-8")
+    git_backup.record_change(
+        [path],
+        action=f"update {name}/evidence-pool.yaml",
+    )
 
 
 def load_skill_md(name: str) -> str:
@@ -157,4 +166,8 @@ def init_profile(name: str) -> Path:
             text = text.replace("{Name}", name)
             filepath.write_text(text, encoding="utf-8")
 
+    git_backup.record_change(
+        list(dest.rglob("*")),
+        action=f"create profile {name}",
+    )
     return dest

@@ -8,6 +8,13 @@ from pathlib import Path
 
 import streamlit as st
 
+from nblane.core import git_backup
+from nblane.core.file_state import (
+    FileConflictError,
+    FileSnapshot,
+    assert_unchanged,
+    snapshot_file,
+)
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -16,6 +23,10 @@ from nblane.core.io import (
     init_profile,
     list_profiles,
     profile_dir,
+)
+from nblane.web_auth import (
+    allowed_profiles,
+    can_create_profiles,
 )
 from nblane.web_i18n import common_ui
 
@@ -52,6 +63,7 @@ def _latest_profile(profiles: list[str]) -> str:
 
 
 _PERSIST_KEY = "_profile_choice"
+_GIT_BACKUP_NOTICE_KEY = "_nblane_git_backup_notices"
 
 
 def _sync_to_persistent() -> None:
@@ -108,7 +120,7 @@ def select_profile() -> str:
     Includes a "Create new profile" form. Uses a non-widget
     session-state key so the selection survives page navigation.
     """
-    profiles = list_profiles()
+    profiles = allowed_profiles()
     u = common_ui()
 
     with st.sidebar:
@@ -147,36 +159,39 @@ def select_profile() -> str:
                 st.session_state["selected_profile"]
             )
 
-        with st.expander(u["expander_create"]):
-            new_name = st.text_input(
-                u["profile_name_label"],
-                placeholder=u["profile_name_ph"],
-                key="_new_profile_name",
-            )
-            if st.button(
-                u["create"], key="_btn_create_profile"
-            ):
-                name = new_name.strip()
-                if not name:
-                    st.warning(u["name_empty"])
-                elif name in profiles:
-                    st.warning(
-                        u["name_exists"].format(name=name)
-                    )
-                else:
-                    try:
-                        init_profile(name)
-                        st.session_state[
-                            _PERSIST_KEY
-                        ] = name
-                        st.success(
-                            u["profile_created"].format(
-                                name=name
-                            )
+        if can_create_profiles():
+            with st.expander(u["expander_create"]):
+                new_name = st.text_input(
+                    u["profile_name_label"],
+                    placeholder=u["profile_name_ph"],
+                    key="_new_profile_name",
+                )
+                if st.button(
+                    u["create"], key="_btn_create_profile"
+                ):
+                    name = new_name.strip()
+                    all_profiles = list_profiles()
+                    if not name:
+                        st.warning(u["name_empty"])
+                    elif name in all_profiles:
+                        st.warning(
+                            u["name_exists"].format(name=name)
                         )
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                    else:
+                        try:
+                            init_profile(name)
+                            st.session_state[
+                                _PERSIST_KEY
+                            ] = name
+                            stash_git_backup_results()
+                            st.success(
+                                u["profile_created"].format(
+                                    name=name
+                                )
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
 
     if (
         not profiles
@@ -189,6 +204,79 @@ def select_profile() -> str:
         _PERSIST_KEY,
         profiles[0] if profiles else "",
     )
+
+
+def _file_state_key(path: Path) -> str:
+    """Session key for one file snapshot."""
+    return "nblane_file_snapshot:" + str(path.resolve())
+
+
+def remember_file_snapshot(path: Path) -> FileSnapshot:
+    """Capture and store the latest fingerprint for *path*."""
+    snap = snapshot_file(path)
+    st.session_state[_file_state_key(path)] = snap.to_dict()
+    return snap
+
+
+def ensure_file_snapshot(path: Path) -> FileSnapshot:
+    """Store an initial fingerprint for *path* unless one already exists."""
+    key = _file_state_key(path)
+    raw = st.session_state.get(key)
+    if isinstance(raw, dict):
+        return FileSnapshot.from_dict(raw)
+    return remember_file_snapshot(path)
+
+
+def assert_file_snapshot_current(
+    path: Path,
+    *,
+    label: str | None = None,
+) -> None:
+    """Stop the Streamlit run if *path* changed since it was loaded."""
+    snap = ensure_file_snapshot(path)
+    try:
+        assert_unchanged(path, snap, label=label)
+    except FileConflictError as exc:
+        st.error(str(exc))
+        st.stop()
+
+
+def assert_files_current(paths: list[Path]) -> None:
+    """Check multiple file snapshots before a multi-file write."""
+    for path in paths:
+        assert_file_snapshot_current(path, label=path.name)
+
+
+def refresh_file_snapshots(paths: list[Path]) -> None:
+    """Refresh stored fingerprints after a successful write."""
+    for path in paths:
+        remember_file_snapshot(path)
+
+
+def stash_git_backup_results() -> None:
+    """Persist Git backup warnings across Streamlit reruns."""
+    notices = st.session_state.setdefault(
+        _GIT_BACKUP_NOTICE_KEY,
+        [],
+    )
+    for result in git_backup.consume_results():
+        if result.has_warning:
+            if result.error:
+                notices.append(f"Git backup failed: {result.error}")
+            if result.push_error:
+                notices.append(
+                    f"Git backup committed but push failed: "
+                    f"{result.push_error}"
+                )
+
+
+def render_git_backup_notices() -> None:
+    """Render and clear Git backup warnings for the current session."""
+    notices = st.session_state.pop(_GIT_BACKUP_NOTICE_KEY, [])
+    if not notices:
+        return
+    for msg in notices:
+        st.warning(msg)
 
 
 def drop_streamlit_widget_keys(keys: list[str]) -> None:

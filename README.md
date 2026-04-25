@@ -104,6 +104,11 @@ View**, **Profile Health**. Step-by-step usage: [docs/web-ui.md](docs/web-ui.md)
 [中文](docs/zh/web-ui.md). Product IA and backlog:
 [docs/web-ui-product.md](docs/web-ui-product.md).
 
+Small-team / cloud deployment adds app-level login, profile/team permissions,
+lightweight file conflict checks, and optional Git backup. Configure
+`NBLANE_AUTH_FILE` and see [docs/deploy-tencent-cloud.md](docs/deploy-tencent-cloud.md)
+· [中文](docs/zh/tencent-cloud-deploy.md).
+
 ---
 
 ## Typical workflow (cold start → plan → skills)

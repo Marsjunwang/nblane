@@ -33,7 +33,16 @@ from nblane.web_cache import (
     load_skill_tree_raw,
 )
 from nblane.web_i18n import skill_tree_ui, status_label
-from nblane.web_shared import select_profile, skill_status_emoji
+from nblane.web_auth import require_login
+from nblane.web_shared import (
+    assert_files_current,
+    ensure_file_snapshot,
+    refresh_file_snapshots,
+    render_git_backup_notices,
+    select_profile,
+    skill_status_emoji,
+    stash_git_backup_results,
+)
 
 _LEVEL_KEYS = {
     1: "level_l1",
@@ -172,8 +181,12 @@ def _save_and_sync(
     nodes = _rows_to_nodes(rows)
     new_tree = dict(tree)
     new_tree["nodes"] = nodes
-    save_skill_tree(profile, new_tree)
     pdir = profile_dir(profile)
+    tree_path = pdir / "skill-tree.yaml"
+    pool_path = pdir / EVIDENCE_POOL_FILENAME
+    skill_path = pdir / "SKILL.md"
+    assert_files_current([tree_path, pool_path, skill_path])
+    save_skill_tree(profile, new_tree)
     if pool_entries or (pdir / EVIDENCE_POOL_FILENAME).exists():
         save_evidence_pool(
             profile,
@@ -190,6 +203,8 @@ def _save_and_sync(
         msg = ui["saved_synced_path"].format(path=yaml_path)
     except Exception:
         msg = ui["saved_yaml_path"].format(path=yaml_path)
+    refresh_file_snapshots([tree_path, pool_path, skill_path])
+    stash_git_backup_results()
     clear_web_cache()
     return msg
 
@@ -296,7 +311,16 @@ st.set_page_config(
     page_title=ui["page_title"], layout="wide"
 )
 
+require_login()
 selected = select_profile()
+render_git_backup_notices()
+_pdir = profile_dir(selected)
+for _path in (
+    _pdir / "skill-tree.yaml",
+    _pdir / EVIDENCE_POOL_FILENAME,
+    _pdir / "SKILL.md",
+):
+    ensure_file_snapshot(_path)
 tree = load_skill_tree_raw(selected)
 if tree is None:
     st.title(ui["title"])

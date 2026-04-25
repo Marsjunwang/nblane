@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
+from nblane.core import git_backup
 from nblane.core.models import KanbanSubtask, KanbanTask
 from nblane.core.profile_io import profile_dir
 
@@ -247,6 +248,10 @@ def save_kanban(
     path.write_text(
         render_kanban(name, sections), encoding="utf-8"
     )
+    git_backup.record_change(
+        [path],
+        action=f"update {name}/kanban.md",
+    )
 
 
 def append_kanban_archive(
@@ -275,3 +280,7 @@ def append_kanban_archive(
             "---\n"
         )
         path.write_text(header + block, encoding="utf-8")
+    git_backup.record_change(
+        [path],
+        action=f"append {name}/kanban-archive.md",
+    )

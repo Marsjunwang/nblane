@@ -5,7 +5,8 @@ from __future__ import annotations
 import streamlit as st
 
 from nblane.core.profile_health import analyze_profile_health
-from nblane.web_shared import select_profile
+from nblane.web_auth import require_login
+from nblane.web_shared import render_git_backup_notices, select_profile
 
 
 st.set_page_config(
@@ -13,7 +14,9 @@ st.set_page_config(
     layout="wide",
 )
 
+require_login()
 selected = select_profile()
+render_git_backup_notices()
 report = analyze_profile_health(selected)
 counts = report.summary_counts
 

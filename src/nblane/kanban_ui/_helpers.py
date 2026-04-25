@@ -13,6 +13,12 @@ from nblane.core.kanban_io import (
     save_kanban,
 )
 from nblane.core.models import KanbanTask
+from nblane.core.profile_io import profile_dir
+from nblane.web_shared import (
+    assert_files_current,
+    refresh_file_snapshots,
+    stash_git_backup_results,
+)
 
 _BOARD_ORDER = (
     KANBAN_DOING,
@@ -35,7 +41,11 @@ def _auto_save(
     sections: dict[str, list[KanbanTask]],
 ) -> None:
     """Persist kanban to disk."""
+    path = profile_dir(profile) / "kanban.md"
+    assert_files_current([path])
     save_kanban(profile, sections)
+    refresh_file_snapshots([path])
+    stash_git_backup_results()
 
 
 def _apply_column_move(

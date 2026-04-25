@@ -37,6 +37,9 @@ nblane 读取以下环境变量：
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | API 基础地址 |
 | `LLM_MODEL` | `gpt-4o` | 模型名称 |
 | `LLM_REPLY_LANG` | `en` | 回复语言：`en` 或 `zh`。同时控制 **Gap Analysis** 页的界面文案与 AI 系统提示（国际演示可设为 `en`）。 |
+| `NBLANE_AUTH_FILE` | *(空)* | Streamlit Web 登录用户配置。为空时保持本地开发模式；公网部署时应指向私有数据仓库中的 `auth/users.yaml`。 |
+| `NBLANE_DATA_GIT_AUTOCOMMIT` | *(空)* | 设为 `1` 时，写入数据文件后自动生成 Git commit。 |
+| `NBLANE_DATA_GIT_AUTOPUSH` | *(空)* | 设为 `1` 时，自动 commit 后继续尝试 `git push`。 |
 
 `LLM_REPLY_LANG` 影响 **Streamlit 各页面**（含首页 `app.py`、侧边栏 Profile、Skill Tree、Gap Analysis、Kanban、Team View 等）的界面文案与 AI 输出语言；无需单独配置界面语言。
 
@@ -84,3 +87,14 @@ LLM_MODEL=llama3
 ### 验证配置是否生效
 
 配置完成后，Gap Analysis 页面的侧边栏会显示当前使用的模型名称。若 `LLM_API_KEY` 未设置，AI 模式会被禁用并显示提示——基于规则的 Gap 分析仍可正常使用。
+
+## Web 登录与小团队部署
+
+公网部署时建议配置 `NBLANE_AUTH_FILE`。用户文件示例见
+`auth/users.example.yaml`，密码哈希用：
+
+```bash
+nblane auth hash-password
+```
+
+腾讯云部署步骤见 [腾讯云小团队部署](tencent-cloud-deploy.md)。

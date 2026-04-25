@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 import streamlit as st
 
+from nblane.core import git_backup
 from nblane.core import llm as llm_client
 from nblane.core.io import (
     STATUSES,
@@ -34,13 +35,19 @@ from nblane.web_cache import (
 )
 from nblane.web_i18n import home_ui
 from nblane.web_shared import (
+    assert_files_current,
     drop_streamlit_widget_keys,
+    ensure_file_snapshot,
     remember_allow_and_drop_yaml_preview_keys,
+    refresh_file_snapshots,
+    render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
     skill_status_emoji,
+    stash_git_backup_results,
     ui_emoji_enabled,
 )
+from nblane.web_auth import require_login
 
 ui = home_ui()
 
@@ -51,7 +58,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+require_login()
 selected = select_profile()
+render_git_backup_notices()
+
+_skill_md_path = profile_dir(selected) / "SKILL.md"
+_tree_path = profile_dir(selected) / "skill-tree.yaml"
+_pool_path = profile_dir(selected) / "evidence-pool.yaml"
+for _path in (_skill_md_path, _tree_path, _pool_path):
+    ensure_file_snapshot(_path)
 
 def _parse_skill_md_sections(
     text: str,
@@ -99,7 +114,14 @@ def _save_skill_md(
     success_message: str,
 ) -> None:
     """Persist SKILL.md edits and refresh cached web reads."""
+    assert_files_current([path])
     path.write_text(content, encoding="utf-8")
+    git_backup.record_change(
+        [path],
+        action=f"update {path.parent.name}/SKILL.md",
+    )
+    refresh_file_snapshots([path])
+    stash_git_backup_results()
     clear_web_cache()
     st.success(success_message)
     st.rerun()
@@ -403,6 +425,9 @@ with tab_overview:
                     key=f"resume_apply_{selected}",
                     type="primary",
                 ):
+                    assert_files_current(
+                        [_pool_path, _tree_path, _skill_md_path]
+                    )
                     _, apply_r = run_ingest_patch(
                         selected,
                         patch,
@@ -412,8 +437,13 @@ with tab_overview:
                     )
                     if apply_r.ok:
                         clear_web_cache()
+                        refresh_file_snapshots(
+                            [_pool_path, _tree_path, _skill_md_path]
+                        )
+                        stash_git_backup_results()
                         st.success(ui["resume_applied"])
                         del st.session_state[rkey]
+                        render_git_backup_notices()
                     else:
                         for e in apply_r.errors:
                             st.error(e)

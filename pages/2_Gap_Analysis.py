@@ -9,6 +9,7 @@ from nblane.core import learned_keywords as lk_store
 from nblane.core import llm as llm_client
 from nblane.core.io import (
     STATUSES,
+    profile_dir,
     save_skill_tree,
     schema_node_index,
 )
@@ -18,10 +19,16 @@ from nblane.web_cache import (
     load_skill_tree_raw,
 )
 from nblane.web_i18n import gap_ui, status_label
+from nblane.web_auth import require_login
 from nblane.web_shared import (
+    assert_files_current,
+    ensure_file_snapshot,
+    refresh_file_snapshots,
+    render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
     skill_status_emoji,
+    stash_git_backup_results,
 )
 
 _STATUS_COLOR = {
@@ -185,12 +192,17 @@ st.set_page_config(
     page_title=ui["page_title"], layout="wide"
 )
 
+require_login()
+
 if "gap_result" not in st.session_state:
     st.session_state.gap_result = None
 if "gap_coach_messages" not in st.session_state:
     st.session_state.gap_coach_messages = []
 
 selected = select_profile()
+render_git_backup_notices()
+_tree_path = profile_dir(selected) / "skill-tree.yaml"
+ensure_file_snapshot(_tree_path)
 
 st.title(ui["title"])
 st.caption(ui["page_context_line"])
@@ -506,6 +518,7 @@ if result.gaps:
             ui["apply_button"].format(n=len(updates)),
             type="primary",
         ):
+            assert_files_current([_tree_path])
             nodes = list(tree.get("nodes") or [])
             node_index = {
                 n["id"]: i
@@ -526,6 +539,8 @@ if result.gaps:
             tree["nodes"] = nodes
             save_skill_tree(selected, tree)
             clear_web_cache()
+            refresh_file_snapshots([_tree_path])
+            stash_git_backup_results()
             st.success(
                 ui["success_updated"]
                 + " "

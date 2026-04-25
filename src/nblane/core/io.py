@@ -6,10 +6,7 @@ and team_io. Existing imports from nblane.core.io remain supported.
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
-
-import yaml
 
 from nblane.core import kanban_io, profile_io, schema_io, team_io
 from nblane.core.kanban_io import (
@@ -77,21 +74,7 @@ def load_skill_tree_raw(name_or_dir: str | Path) -> dict | None:
 
 def save_skill_tree(name: str, data: dict) -> None:
     """Write skill-tree.yaml with today's date updated."""
-    data = dict(data)
-    data["updated"] = date.today().isoformat()
-    path = profile_dir(name) / SKILL_TREE_FILENAME
-    header = (
-        f"# Skill tree for {name}\n"
-        "# Schema defined in schemas/ — "
-        "status: locked | learning | solid | expert\n\n"
-    )
-    body = yaml.dump(
-        data,
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-    path.write_text(header + body, encoding="utf-8")
+    return profile_io.save_skill_tree(name, data)
 
 
 def load_evidence_pool(name_or_dir: str | Path) -> EvidencePool | None:
@@ -111,21 +94,7 @@ def load_evidence_pool_raw(name_or_dir: str | Path) -> dict | None:
 
 def save_evidence_pool(name: str, data: dict) -> None:
     """Write evidence-pool.yaml with today's date updated."""
-    data = dict(data)
-    data["updated"] = date.today().isoformat()
-    path = profile_dir(name) / EVIDENCE_POOL_FILENAME
-    header = (
-        f"# Evidence pool for {name}\n"
-        "# Shared records; skill-tree nodes reference ids via "
-        "evidence_refs\n\n"
-    )
-    body = yaml.dump(
-        data,
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-    path.write_text(header + body, encoding="utf-8")
+    return profile_io.save_evidence_pool(name, data)
 
 
 def load_skill_md(name: str) -> str:

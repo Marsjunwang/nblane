@@ -27,6 +27,7 @@ Commands:
                                     Resume text → pool + tree (LLM)
     nblane ingest-kanban <name>     Done column → pool + tree (LLM)
     nblane health [name]            Profile health / growth review
+    nblane auth hash-password       Generate a password hash for Web auth
 
 Examples:
     nblane init alice
@@ -50,9 +51,11 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import getpass
 import sys
 from pathlib import Path
 
+from nblane.core.auth import DEFAULT_ITERATIONS, hash_password
 from nblane.commands.evidence import cmd_evidence_dispatch
 from nblane.commands.gap import cmd_gap
 from nblane.commands.health import cmd_health
@@ -339,6 +342,31 @@ def main() -> None:
         help="Read draft body from stdin",
     )
 
+    p_auth = sub.add_parser(
+        "auth",
+        help="Authentication helpers for the Streamlit Web UI",
+    )
+    auth_sub = p_auth.add_subparsers(
+        dest="auth_command",
+        required=True,
+    )
+    p_hash = auth_sub.add_parser(
+        "hash-password",
+        help="Generate a PBKDF2 password hash for auth/users.yaml",
+    )
+    p_hash.add_argument(
+        "password",
+        nargs="?",
+        default=None,
+        help="Password to hash; omit to enter it securely",
+    )
+    p_hash.add_argument(
+        "--iterations",
+        type=int,
+        default=DEFAULT_ITERATIONS,
+        help=f"PBKDF2 iterations (default: {DEFAULT_ITERATIONS})",
+    )
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -403,6 +431,20 @@ def main() -> None:
                 "Re-run with --file or --stdin for content._\n"
             )
         cmd_crystallize(args.name, args.project, body)
+    elif args.command == "auth":
+        if args.auth_command == "hash-password":
+            password = args.password
+            if password is None:
+                password = getpass.getpass("Password: ")
+                again = getpass.getpass("Confirm password: ")
+                if password != again:
+                    raise SystemExit("passwords do not match")
+            print(
+                hash_password(
+                    password,
+                    iterations=args.iterations,
+                )
+            )
 
 
 if __name__ == "__main__":

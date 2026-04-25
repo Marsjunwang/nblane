@@ -5,17 +5,26 @@ from __future__ import annotations
 import streamlit as st
 
 from nblane.core.io import (
-    list_teams,
     save_product_pool,
     save_team,
 )
+from nblane.core.paths import TEAMS_DIR
 from nblane.web_cache import (
     clear_web_cache,
     load_product_pool,
     load_team,
 )
 from nblane.web_i18n import all_pool_keys, pool_label, team_ui
-from nblane.web_shared import select_profile, ui_emoji_enabled
+from nblane.web_auth import allowed_teams, require_login
+from nblane.web_shared import (
+    assert_files_current,
+    ensure_file_snapshot,
+    refresh_file_snapshots,
+    render_git_backup_notices,
+    select_profile,
+    stash_git_backup_results,
+    ui_emoji_enabled,
+)
 
 _POOL_EMOJI = {
     "problem_pool": "🔍",
@@ -33,7 +42,9 @@ st.set_page_config(
     page_title=ui["page_title"], layout="wide"
 )
 
+require_login()
 selected_profile = select_profile()
+render_git_backup_notices()
 
 st.title(ui["title"])
 st.caption(ui["page_context_line"])
@@ -41,12 +52,16 @@ st.caption(
     ui["team_profile_scope"].format(profile=selected_profile)
 )
 
-teams = list_teams()
+teams = allowed_teams()
 if not teams:
     st.warning(ui["no_teams"])
     st.stop()
 
 selected_team = st.selectbox(ui["team_select"], teams)
+_team_path = TEAMS_DIR / selected_team / "team.yaml"
+_pool_path = TEAMS_DIR / selected_team / "product-pool.yaml"
+ensure_file_snapshot(_team_path)
+ensure_file_snapshot(_pool_path)
 
 team_data = load_team(selected_team) or {}
 pool_data = load_product_pool(selected_team) or {}
@@ -108,6 +123,7 @@ with st.container(border=True):
     if st.button(
         ui["save_team"], type="primary"
     ):
+        assert_files_current([_team_path])
         new_team = {
             "schema_version": team_data.get(
                 "schema_version", "1.0"
@@ -136,6 +152,8 @@ with st.container(border=True):
         }
         save_team(selected_team, new_team)
         clear_web_cache()
+        refresh_file_snapshots([_team_path])
+        stash_git_backup_results()
         st.success(ui["team_saved"])
         st.rerun()
 
@@ -271,6 +289,7 @@ st.divider()
 if st.button(
     ui["save_pool"], type="primary"
 ):
+    assert_files_current([_pool_path])
     save_data = {
         "schema_version": pool_data.get(
             "schema_version", "1.0"
@@ -284,5 +303,7 @@ if st.button(
         ]
     save_product_pool(selected_team, save_data)
     clear_web_cache()
+    refresh_file_snapshots([_pool_path])
+    stash_git_backup_results()
     st.success(ui["pool_saved"])
     st.rerun()
