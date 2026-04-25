@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 
 from nblane.core.io import (
+    KANBAN_DOING,
+    KANBAN_QUEUE,
     load_schema_raw,
     load_skill_tree_raw,
     schema_node_index,
@@ -139,7 +141,7 @@ def _render_focus_from_kanban(profile_dir: Path) -> str:
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("## "):
-            if section == "Queue" and current_task != "":
+            if section == KANBAN_QUEUE and current_task != "":
                 queue.append(current_task)
                 detail_text = (
                     " ".join(current_detail).strip().lower()
@@ -156,7 +158,7 @@ def _render_focus_from_kanban(profile_dir: Path) -> str:
 
         task = _top_level_task(line)
         if task is not None:
-            if section == "Queue" and current_task != "":
+            if section == KANBAN_QUEUE and current_task != "":
                 queue.append(current_task)
                 detail_text = (
                     " ".join(current_detail).strip().lower()
@@ -168,14 +170,14 @@ def _render_focus_from_kanban(profile_dir: Path) -> str:
                     blocked.append(current_task)
             current_task = task
             current_detail = []
-            if section == "Doing":
+            if section == KANBAN_DOING:
                 doing.append(task)
             continue
 
-        if section == "Queue" and current_task != "":
+        if section == KANBAN_QUEUE and current_task != "":
             current_detail.append(stripped)
 
-    if section == "Queue" and current_task != "":
+    if section == KANBAN_QUEUE and current_task != "":
         queue.append(current_task)
         detail_text = (
             " ".join(current_detail).strip().lower()

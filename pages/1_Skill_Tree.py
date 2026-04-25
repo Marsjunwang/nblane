@@ -19,9 +19,6 @@ from nblane.core.evidence_resolve import (
 from nblane.core.io import (
     EVIDENCE_POOL_FILENAME,
     STATUSES,
-    load_evidence_pool_raw,
-    load_schema_raw,
-    load_skill_tree_raw,
     profile_dir,
     save_evidence_pool,
     save_skill_tree,
@@ -29,6 +26,12 @@ from nblane.core.io import (
 )
 from nblane.core.models import EVIDENCE_TYPES, EvidencePool
 from nblane.core.sync import write_generated_blocks
+from nblane.web_cache import (
+    clear_web_cache,
+    load_evidence_pool_raw,
+    load_schema_raw,
+    load_skill_tree_raw,
+)
 from nblane.web_i18n import skill_tree_ui, status_label
 from nblane.web_shared import select_profile, skill_status_emoji
 
@@ -184,9 +187,11 @@ def _save_and_sync(
     )
     try:
         write_generated_blocks(profile_dir(profile))
-        return ui["saved_synced_path"].format(path=yaml_path)
+        msg = ui["saved_synced_path"].format(path=yaml_path)
     except Exception:
-        return ui["saved_yaml_path"].format(path=yaml_path)
+        msg = ui["saved_yaml_path"].format(path=yaml_path)
+    clear_web_cache()
+    return msg
 
 
 _ST_EDITOR = "nblane_skill_tree_editor_rows"

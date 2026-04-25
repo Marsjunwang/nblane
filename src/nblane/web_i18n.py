@@ -9,20 +9,26 @@ emoji prefixes in metrics and skill-status rows (see ``web_shared``).
 from __future__ import annotations
 
 from nblane.core import llm as llm_client
+from nblane.core.io import (
+    KANBAN_DOING,
+    KANBAN_DONE,
+    KANBAN_QUEUE,
+    KANBAN_SOMEDAY,
+)
 
 # Kanban file sections are English keys; this is display-only.
 _KANBAN_SEC: dict[str, dict[str, str]] = {
     "en": {
-        "Doing": "Doing",
-        "Done": "Done",
-        "Queue": "Queue",
-        "Someday / Maybe": "Someday / Maybe",
+        KANBAN_DOING: KANBAN_DOING,
+        KANBAN_DONE: KANBAN_DONE,
+        KANBAN_QUEUE: KANBAN_QUEUE,
+        KANBAN_SOMEDAY: KANBAN_SOMEDAY,
     },
     "zh": {
-        "Doing": "进行中",
-        "Done": "已完成",
-        "Queue": "队列",
-        "Someday / Maybe": "也许 / 将来",
+        KANBAN_DOING: "进行中",
+        KANBAN_DONE: "已完成",
+        KANBAN_QUEUE: "队列",
+        KANBAN_SOMEDAY: "也许 / 将来",
     },
 }
 

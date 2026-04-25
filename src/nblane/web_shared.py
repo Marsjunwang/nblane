@@ -8,7 +8,15 @@ from pathlib import Path
 
 import streamlit as st
 
-from nblane.core.io import init_profile, list_profiles, profile_dir
+from nblane.core.io import (
+    KANBAN_DOING,
+    KANBAN_DONE,
+    KANBAN_QUEUE,
+    KANBAN_SOMEDAY,
+    init_profile,
+    list_profiles,
+    profile_dir,
+)
 from nblane.web_i18n import common_ui
 
 
@@ -67,10 +75,10 @@ _SKILL_STATUS_EMOJI: dict[str, str] = {
 }
 
 _KANBAN_SECTION_EMOJI: dict[str, str] = {
-    "Doing": "🔄",
-    "Done": "✅",
-    "Queue": "📋",
-    "Someday / Maybe": "💡",
+    KANBAN_DOING: "🔄",
+    KANBAN_DONE: "✅",
+    KANBAN_QUEUE: "📋",
+    KANBAN_SOMEDAY: "💡",
 }
 
 

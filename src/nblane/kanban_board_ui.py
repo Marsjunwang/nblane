@@ -9,7 +9,11 @@ from datetime import date
 import streamlit as st
 
 from nblane.core.io import (
+    KANBAN_DOING,
+    KANBAN_DONE,
+    KANBAN_QUEUE,
     KANBAN_SECTIONS,
+    KANBAN_SOMEDAY,
     KanbanSubtask,
     KanbanTask,
     save_kanban,
@@ -18,15 +22,20 @@ from nblane.web_i18n import kanban_section_label
 from nblane.web_linkify import linkify_plain_to_html, text_contains_linkified_url
 from nblane.web_shared import kanban_section_emoji
 
-_BOARD_ORDER = ("Doing", "Queue", "Done", "Someday / Maybe")
+_BOARD_ORDER = (
+    KANBAN_DOING,
+    KANBAN_QUEUE,
+    KANBAN_DONE,
+    KANBAN_SOMEDAY,
+)
 _COL_WEIGHTS = [2.2, 1.0, 1.0, 1.0]
 _WIP_HINT_THRESHOLD = 5
 
 _SECTION_COLOR = {
-    "Doing": "#fbbc04",
-    "Queue": "#1a73e8",
-    "Done": "#34a853",
-    "Someday / Maybe": "#9aa0a6",
+    KANBAN_DOING: "#fbbc04",
+    KANBAN_QUEUE: "#1a73e8",
+    KANBAN_DONE: "#34a853",
+    KANBAN_SOMEDAY: "#9aa0a6",
 }
 
 
@@ -46,7 +55,7 @@ def _apply_column_move(
 ) -> KanbanTask:
     """Adjust done flag and optional dates when moving between columns."""
     t = task
-    if to_sec == "Done":
+    if to_sec == KANBAN_DONE:
         t = replace(t, done=True)
         if auto_dates:
             co = (t.completed_on or "").strip() if t.completed_on else ""
@@ -55,11 +64,11 @@ def _apply_column_move(
                     t,
                     completed_on=date.today().isoformat(),
                 )
-    elif from_sec == "Done":
+    elif from_sec == KANBAN_DONE:
         t = replace(t, done=False)
         if auto_dates:
             t = replace(t, completed_on=None)
-    if to_sec == "Doing" and from_sec != "Doing":
+    if to_sec == KANBAN_DOING and from_sec != KANBAN_DOING:
         if auto_dates:
             so = (t.started_on or "").strip() if t.started_on else ""
             if not so:
@@ -72,13 +81,13 @@ def _apply_column_move(
 
 def _kb_more_expanded(section: str, task: KanbanTask) -> bool:
     """Open legacy 'more fields' when folded slots hold data (Done / Queue)."""
-    if section == "Queue":
+    if section == KANBAN_QUEUE:
         return bool(
             task.context.strip()
             or (task.started_on or "").strip()
             or (task.completed_on or "").strip()
         )
-    if section == "Done":
+    if section == KANBAN_DONE:
         return bool(
             (task.started_on or "").strip()
             or (task.completed_on or "").strip()
@@ -144,7 +153,7 @@ def _render_compact_body(
     )
     chunks: list[str] = [f"<div style=\"{wrap}\">"]
 
-    if section == "Doing":
+    if section == KANBAN_DOING:
         if task.context.strip():
             chunks.append(
                 "<p style=\"margin:0.05em 0;opacity:0.92\">"
@@ -198,7 +207,7 @@ def _render_compact_body(
                 f"{esc(prev)}</p>"
             )
 
-    elif section == "Queue":
+    elif section == KANBAN_QUEUE:
         if task.blocked_by.strip() or task.why.strip():
             one = (task.blocked_by or task.why or "").strip()
             cap = one if len(one) <= 160 else one[:157] + "…"
@@ -237,7 +246,7 @@ def _render_compact_body(
                 f"{esc(pq)}</p>"
             )
 
-    elif section == "Done":
+    elif section == KANBAN_DONE:
         if task.context.strip():
             chunks.append(
                 "<p style=\"margin:0.05em 0;opacity:0.92\">"
@@ -416,7 +425,7 @@ def _render_kanban_link_preview(
     pairs: list[tuple[str, str]] = [
         (ui["task_field_title"], task.title),
     ]
-    if section == "Doing":
+    if section == KANBAN_DOING:
         pairs.extend(
             [
                 (ui["field_context"], task.context),
@@ -424,7 +433,7 @@ def _render_kanban_link_preview(
                 (ui["field_blocked"], task.blocked_by),
             ]
         )
-    elif section == "Queue":
+    elif section == KANBAN_QUEUE:
         pairs.extend(
             [
                 (ui["field_why"], task.why),
@@ -432,7 +441,7 @@ def _render_kanban_link_preview(
                 (ui["field_context"], task.context),
             ]
         )
-    elif section == "Done":
+    elif section == KANBAN_DONE:
         pairs.extend(
             [
                 (ui["field_context"], task.context),
@@ -502,7 +511,7 @@ def _render_new_task_form(
         ctx = why = blk = out = ""
         ds_new = dc_new = ""
         if new_title.strip():
-            if section == "Doing":
+            if section == KANBAN_DOING:
                 ctx = st.text_input(
                     ui["new_context"],
                     key=f"new_ctx_{section}",
@@ -538,7 +547,7 @@ def _render_new_task_form(
                         key=f"new_co_{section}",
                         label_visibility="collapsed",
                     )
-            elif section == "Queue":
+            elif section == KANBAN_QUEUE:
                 why = st.text_input(
                     ui["new_why"],
                     key=f"new_why_{section}",
@@ -574,7 +583,7 @@ def _render_new_task_form(
                         key=f"new_co_{section}",
                         label_visibility="collapsed",
                     )
-            elif section == "Done":
+            elif section == KANBAN_DONE:
                 out = st.text_input(
                     ui["new_outcome"],
                     key=f"new_out_{section}",
@@ -640,14 +649,14 @@ def _render_new_task_form(
                     nt,
                     completed_on=dc_new.strip(),
                 )
-            if section == "Done":
+            if section == KANBAN_DONE:
                 nt = replace(nt, done=True)
                 if auto_dates and not dc_new.strip():
                     nt = replace(
                         nt,
                         completed_on=date.today().isoformat(),
                     )
-            if section == "Doing" and auto_dates:
+            if section == KANBAN_DOING and auto_dates:
                 if not ds_new.strip():
                     nt = replace(
                         nt,
@@ -739,11 +748,11 @@ def _render_task_cards(
     tasks = sections.get(section, [])
     to_delete: list[int] = []
 
-    if section == "Doing" and len(tasks) > _WIP_HINT_THRESHOLD:
+    if section == KANBAN_DOING and len(tasks) > _WIP_HINT_THRESHOLD:
         st.caption(ui["kb_wip_hint"].format(n=len(tasks)))
 
     n_tasks = len(tasks)
-    if doing_focus_two_col and section == "Doing" and n_tasks > 0:
+    if doing_focus_two_col and section == KANBAN_DOING and n_tasks > 0:
         mid = (n_tasks + 1) // 2
         index_batches = [list(range(mid)), list(range(mid, n_tasks))]
         c_left, c_right = st.columns(2)
@@ -915,7 +924,7 @@ def _render_task_index_batch(
             task = replace(task, title=new_title_val)
             st.caption(ui["kb_edit_exit_hint"])
 
-            if section == "Someday / Maybe":
+            if section == KANBAN_SOMEDAY:
                 _render_kanban_link_preview(ui, section, task)
                 with st.expander(
                     ui["kb_task_details"],
@@ -941,7 +950,7 @@ def _render_task_index_batch(
                     st.rerun()
                 continue
 
-            if section == "Doing":
+            if section == KANBAN_DOING:
                 n_done = sum(1 for s in task.subtasks if s.done)
                 n_all = len(task.subtasks)
                 if n_all > 0:
@@ -1019,7 +1028,7 @@ def _render_task_index_batch(
                     st.rerun()
                 continue
 
-            if section == "Queue":
+            if section == KANBAN_QUEUE:
                 _render_kanban_link_preview(ui, section, task)
                 with st.expander(
                     ui["kb_task_details"],
@@ -1087,7 +1096,7 @@ def _render_task_index_batch(
                     st.rerun()
                 continue
 
-            if section == "Done":
+            if section == KANBAN_DONE:
                 c_ctx = st.text_input(
                     ui["field_context"],
                     value=task.context,
@@ -1221,7 +1230,7 @@ def _render_section_column(
     tasks = sections.get(section, [])
     _column_header(section, ui, len(tasks))
 
-    if section == "Done" and wrap_done_in_expander:
+    if section == KANBAN_DONE and wrap_done_in_expander:
         st.caption(ui["kb_done_column_hint"])
         with st.expander(
             ui["kb_done_column_expander"].format(n=len(tasks)),
@@ -1248,7 +1257,7 @@ def render_kanban_board(
 ) -> None:
     """Render the full board (weighted columns or focus layout)."""
     if focus_mode:
-        doing_sec = "Doing"
+        doing_sec = KANBAN_DOING
         _column_header(doing_sec, ui, len(sections.get(doing_sec, [])))
         _render_task_cards(
             doing_sec,
@@ -1263,14 +1272,14 @@ def render_kanban_board(
         )
 
         tab_labels = [
-            kanban_section_label("Queue"),
-            kanban_section_label("Done"),
-            kanban_section_label("Someday / Maybe"),
+            kanban_section_label(KANBAN_QUEUE),
+            kanban_section_label(KANBAN_DONE),
+            kanban_section_label(KANBAN_SOMEDAY),
         ]
         tq, td, ts = st.tabs(tab_labels)
         with tq:
             _render_section_column(
-                "Queue",
+                KANBAN_QUEUE,
                 sections,
                 profile,
                 auto_dates,
@@ -1279,7 +1288,7 @@ def render_kanban_board(
             )
         with td:
             _render_section_column(
-                "Done",
+                KANBAN_DONE,
                 sections,
                 profile,
                 auto_dates,
@@ -1288,7 +1297,7 @@ def render_kanban_board(
             )
         with ts:
             _render_section_column(
-                "Someday / Maybe",
+                KANBAN_SOMEDAY,
                 sections,
                 profile,
                 auto_dates,
@@ -1306,5 +1315,5 @@ def render_kanban_board(
                 profile,
                 auto_dates,
                 ui,
-                wrap_done_in_expander=(section == "Done"),
+                wrap_done_in_expander=(section == KANBAN_DONE),
             )

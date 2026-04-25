@@ -23,6 +23,7 @@ from nblane.core.gap import analyze, format_text
 from nblane.core.growth_log import append_growth_log_row
 from nblane.core.interaction import append_interaction_record
 from nblane.core.io import (
+    KANBAN_DOING,
     list_profiles,
     load_skill_tree_raw,
     parse_kanban,
@@ -134,7 +135,7 @@ def build_summary_text(profile_name: str) -> str:
             lines.append("")
 
     sections = parse_kanban(profile_name)
-    doing = sections.get("Doing") or []
+    doing = sections.get(KANBAN_DOING) or []
     titles = [
         t.title.strip()
         for t in doing

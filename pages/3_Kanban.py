@@ -13,10 +13,10 @@ import yaml
 
 from nblane.core import llm as llm_client
 from nblane.core.io import (
+    KANBAN_DOING,
+    KANBAN_DONE,
     KanbanTask,
     append_kanban_archive,
-    load_evidence_pool_raw,
-    load_skill_tree_raw,
     parse_kanban,
     save_kanban,
 )
@@ -30,6 +30,11 @@ from nblane.core.profile_ingest import (
     schema_node_labels,
 )
 from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+from nblane.web_cache import (
+    clear_web_cache,
+    load_evidence_pool_raw,
+    load_skill_tree_raw,
+)
 from nblane.web_i18n import (
     kanban_section_label,
     kanban_ui,
@@ -67,6 +72,7 @@ def _auto_save(
 ) -> None:
     """Persist changes to kanban.md."""
     save_kanban(profile, sections)
+    clear_web_cache()
 
 
 def _mark_done_crystallized(
@@ -74,7 +80,7 @@ def _mark_done_crystallized(
     titles: set[str],
 ) -> None:
     """Set crystallized on Done tasks whose titles are in *titles*."""
-    done_list = sections.get("Done") or []
+    done_list = sections.get(KANBAN_DONE) or []
     for i, t in enumerate(done_list):
         if t.title in titles:
             done_list[i] = replace(t, crystallized=True)
@@ -117,23 +123,24 @@ with tb2:
     if st.button(ui["save"], type="primary"):
         sections = _get_sections(selected)
         save_kanban(selected, sections)
+        clear_web_cache()
         st.success(ui["saved"])
 
 sections = _get_sections(selected)
 
 total_tasks = sum(len(tasks) for tasks in sections.values())
-doing_count = len(sections.get("Doing", []))
-done_count = len(sections.get("Done", []))
+doing_count = len(sections.get(KANBAN_DOING, []))
+done_count = len(sections.get(KANBAN_DONE, []))
 
 mc1, mc2, mc3 = st.columns(3)
 use_emoji = ui_emoji_enabled()
 mc1.metric(ui["metric_total"], total_tasks)
 mc2.metric(
-    ui["metric_doing"] if use_emoji else kanban_section_label("Doing"),
+    ui["metric_doing"] if use_emoji else kanban_section_label(KANBAN_DOING),
     doing_count,
 )
 mc3.metric(
-    ui["metric_done"] if use_emoji else kanban_section_label("Done"),
+    ui["metric_done"] if use_emoji else kanban_section_label(KANBAN_DONE),
     done_count,
 )
 
@@ -142,7 +149,7 @@ st.divider()
 # -- Done bulk ---------------------------------------------------
 
 with st.expander(ui["done_bulk_title"], expanded=False):
-    done_tasks_bulk = sections.get("Done") or []
+    done_tasks_bulk = sections.get(KANBAN_DONE) or []
     if not done_tasks_bulk:
         st.caption(ui["ingest_no_done"])
     else:
@@ -160,7 +167,7 @@ with st.expander(ui["done_bulk_title"], expanded=False):
                     append_kanban_archive(selected, to_arc)
                     for j in sorted(pick_bulk, reverse=True):
                         done_tasks_bulk.pop(j)
-                    sections["Done"] = done_tasks_bulk
+                    sections[KANBAN_DONE] = done_tasks_bulk
                     _auto_save(selected, sections)
                     st.rerun()
         with b2:
@@ -168,7 +175,7 @@ with st.expander(ui["done_bulk_title"], expanded=False):
                 if pick_bulk:
                     for j in sorted(pick_bulk, reverse=True):
                         done_tasks_bulk.pop(j)
-                    sections["Done"] = done_tasks_bulk
+                    sections[KANBAN_DONE] = done_tasks_bulk
                     _auto_save(selected, sections)
                     st.rerun()
 
@@ -186,7 +193,7 @@ render_kanban_board(
 
 st.divider()
 with st.expander(ui["ingest_expander"], expanded=False):
-    done_tasks = sections.get("Done") or []
+    done_tasks = sections.get(KANBAN_DONE) or []
     if not done_tasks:
         st.caption(ui["ingest_no_done"])
     else:
@@ -416,6 +423,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         dry_run=False,
                     )
                     if apply.ok:
+                        clear_web_cache()
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
                             titles = {str(x) for x in src_done}
@@ -441,6 +449,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         dry_run=False,
                     )
                     if apply.ok:
+                        clear_web_cache()
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
                             titles = {str(x) for x in src_done}

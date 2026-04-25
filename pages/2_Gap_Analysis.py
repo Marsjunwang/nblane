@@ -9,10 +9,13 @@ from nblane.core import learned_keywords as lk_store
 from nblane.core import llm as llm_client
 from nblane.core.io import (
     STATUSES,
-    load_schema_raw,
-    load_skill_tree_raw,
     save_skill_tree,
     schema_node_index,
+)
+from nblane.web_cache import (
+    clear_web_cache,
+    load_schema_raw,
+    load_skill_tree_raw,
 )
 from nblane.web_i18n import gap_ui, status_label
 from nblane.web_shared import (
@@ -522,6 +525,7 @@ if result.gaps:
                     )
             tree["nodes"] = nodes
             save_skill_tree(selected, tree)
+            clear_web_cache()
             st.success(
                 ui["success_updated"]
                 + " "

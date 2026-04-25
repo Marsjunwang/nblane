@@ -6,10 +6,13 @@ import streamlit as st
 
 from nblane.core.io import (
     list_teams,
-    load_product_pool,
-    load_team,
     save_product_pool,
     save_team,
+)
+from nblane.web_cache import (
+    clear_web_cache,
+    load_product_pool,
+    load_team,
 )
 from nblane.web_i18n import all_pool_keys, pool_label, team_ui
 from nblane.web_shared import select_profile, ui_emoji_enabled
@@ -132,6 +135,7 @@ with st.container(border=True):
             ],
         }
         save_team(selected_team, new_team)
+        clear_web_cache()
         st.success(ui["team_saved"])
         st.rerun()
 
@@ -279,5 +283,6 @@ if st.button(
             if item
         ]
     save_product_pool(selected_team, save_data)
+    clear_web_cache()
     st.success(ui["pool_saved"])
     st.rerun()

@@ -7,6 +7,7 @@ Run with:
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import yaml
 import streamlit as st
@@ -14,10 +15,6 @@ import streamlit as st
 from nblane.core import llm as llm_client
 from nblane.core.io import (
     STATUSES,
-    load_evidence_pool_raw,
-    load_schema_raw,
-    load_skill_md,
-    load_skill_tree_raw,
     profile_dir,
     schema_node_index,
 )
@@ -28,6 +25,13 @@ from nblane.core.profile_ingest import (
     schema_node_labels,
 )
 from nblane.core.profile_ingest_llm import ingest_resume_json
+from nblane.web_cache import (
+    clear_web_cache,
+    load_evidence_pool_raw,
+    load_schema_raw,
+    load_skill_md,
+    load_skill_tree_raw,
+)
 from nblane.web_i18n import home_ui
 from nblane.web_shared import (
     drop_streamlit_widget_keys,
@@ -87,6 +91,18 @@ def _rejoin_sections(
             parts.append(heading + "\n")
         parts.append(body)
     return "".join(parts)
+
+
+def _save_skill_md(
+    path: Path,
+    content: str,
+    success_message: str,
+) -> None:
+    """Persist SKILL.md edits and refresh cached web reads."""
+    path.write_text(content, encoding="utf-8")
+    clear_web_cache()
+    st.success(success_message)
+    st.rerun()
 
 
 # -- Page header -----------------------------------------------
@@ -395,6 +411,7 @@ with tab_overview:
                         dry_run=False,
                     )
                     if apply_r.ok:
+                        clear_web_cache()
                         st.success(ui["resume_applied"])
                         del st.session_state[rkey]
                     else:
@@ -471,11 +488,11 @@ with tab_editor:
                 merged = _rejoin_sections(
                     edited_sections
                 )
-                skill_path.write_text(
-                    merged, encoding="utf-8"
+                _save_skill_md(
+                    skill_path,
+                    merged,
+                    ui["home_saved"],
                 )
-                st.success(ui["home_saved"])
-                st.rerun()
         with col_hint:
             st.caption(
                 ui["hint_after_save"].format(
@@ -506,11 +523,11 @@ with tab_raw:
                 type="primary",
                 key="save_raw",
             ):
-                skill_path.write_text(
-                    edited_raw, encoding="utf-8"
+                _save_skill_md(
+                    skill_path,
+                    edited_raw,
+                    ui["home_saved"],
                 )
-                st.success(ui["home_saved"])
-                st.rerun()
         with col_hint2:
             st.caption(
                 ui["hint_after_save"].format(

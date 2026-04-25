@@ -23,9 +23,47 @@ from nblane.core.models import (
 from nblane.core.paths import PROFILES_DIR, SCHEMAS_DIR, TEAMS_DIR
 
 STATUSES = ("locked", "learning", "solid", "expert")
-KANBAN_SECTIONS = ("Doing", "Done", "Queue", "Someday / Maybe")
+KANBAN_DOING = "Doing"
+KANBAN_DONE = "Done"
+KANBAN_QUEUE = "Queue"
+KANBAN_SOMEDAY = "Someday / Maybe"
+KANBAN_SECTIONS = (
+    KANBAN_DOING,
+    KANBAN_DONE,
+    KANBAN_QUEUE,
+    KANBAN_SOMEDAY,
+)
 KANBAN_ARCHIVE_FILENAME = "kanban-archive.md"
 EVIDENCE_POOL_FILENAME = "evidence-pool.yaml"
+SKILL_TREE_FILENAME = "skill-tree.yaml"
+
+
+def _profile_file_path(
+    name_or_dir: str | Path,
+    filename: str,
+) -> Path:
+    """Resolve a profile-scoped file path from a name or profile directory."""
+    if isinstance(name_or_dir, Path):
+        return name_or_dir / filename
+    return profile_dir(name_or_dir) / filename
+
+
+def _load_yaml_file(path: Path) -> object | None:
+    """Load YAML from *path*, returning None when the file is absent or empty."""
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _load_yaml_dict(path: Path) -> dict | None:
+    """Load YAML from *path* only when the document is a mapping."""
+    raw = _load_yaml_file(path)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return raw
 
 
 # -- Profiles ---------------------------------------------------------------
@@ -57,14 +95,8 @@ def load_skill_tree(name_or_dir: str | Path) -> SkillTree | None:
     profile directory (for backward compatibility with tools that
     pass a resolved path).
     """
-    if isinstance(name_or_dir, Path):
-        path = name_or_dir / "skill-tree.yaml"
-    else:
-        path = profile_dir(name_or_dir) / "skill-tree.yaml"
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    path = _profile_file_path(name_or_dir, SKILL_TREE_FILENAME)
+    raw = _load_yaml_file(path)
     if raw is None:
         return None
     return SkillTree.from_dict(raw)
@@ -72,21 +104,18 @@ def load_skill_tree(name_or_dir: str | Path) -> SkillTree | None:
 
 def load_skill_tree_raw(name_or_dir: str | Path) -> dict | None:
     """Load skill-tree.yaml as a raw dict (for legacy callers)."""
-    if isinstance(name_or_dir, Path):
-        path = name_or_dir / "skill-tree.yaml"
-    else:
-        path = profile_dir(name_or_dir) / "skill-tree.yaml"
-    if not path.exists():
+    path = _profile_file_path(name_or_dir, SKILL_TREE_FILENAME)
+    raw = _load_yaml_file(path)
+    if raw is None:
         return None
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return raw
 
 
 def save_skill_tree(name: str, data: dict) -> None:
     """Write skill-tree.yaml with today's date updated."""
     data = dict(data)
     data["updated"] = date.today().isoformat()
-    path = profile_dir(name) / "skill-tree.yaml"
+    path = profile_dir(name) / SKILL_TREE_FILENAME
     header = (
         f"# Skill tree for {name}\n"
         "# Schema defined in schemas/ — "
@@ -111,17 +140,9 @@ def load_evidence_pool(
 
     Returns None if the file is missing.
     """
-    if isinstance(name_or_dir, Path):
-        path = name_or_dir / EVIDENCE_POOL_FILENAME
-    else:
-        path = profile_dir(name_or_dir) / EVIDENCE_POOL_FILENAME
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    path = _profile_file_path(name_or_dir, EVIDENCE_POOL_FILENAME)
+    raw = _load_yaml_dict(path)
     if raw is None:
-        return None
-    if not isinstance(raw, dict):
         return None
     return EvidencePool.from_dict(raw)
 
@@ -130,19 +151,8 @@ def load_evidence_pool_raw(
     name_or_dir: str | Path,
 ) -> dict | None:
     """Load evidence-pool.yaml as a raw dict."""
-    if isinstance(name_or_dir, Path):
-        path = name_or_dir / EVIDENCE_POOL_FILENAME
-    else:
-        path = profile_dir(name_or_dir) / EVIDENCE_POOL_FILENAME
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        return None
-    return raw
+    path = _profile_file_path(name_or_dir, EVIDENCE_POOL_FILENAME)
+    return _load_yaml_dict(path)
 
 
 def save_evidence_pool(name: str, data: dict) -> None:
@@ -170,10 +180,7 @@ def save_evidence_pool(name: str, data: dict) -> None:
 def load_schema(schema_name: str) -> Schema | None:
     """Load schemas/{schema_name}.yaml as a Schema object."""
     path = SCHEMAS_DIR / f"{schema_name}.yaml"
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    raw = _load_yaml_file(path)
     if raw is None:
         return None
     return Schema.from_dict(raw)
@@ -182,10 +189,10 @@ def load_schema(schema_name: str) -> Schema | None:
 def load_schema_raw(schema_name: str) -> dict | None:
     """Load schemas/{schema_name}.yaml as a raw dict."""
     path = SCHEMAS_DIR / f"{schema_name}.yaml"
-    if not path.exists():
+    raw = _load_yaml_file(path)
+    if raw is None:
         return None
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return raw
 
 
 def list_schemas() -> list[str]:
@@ -336,7 +343,7 @@ def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
             top_plain = re.match(r"^-\s+(.+)$", slim)
             if top_plain:
                 text = top_plain.group(1).strip()
-                if current_section != "Someday / Maybe":
+                if current_section != KANBAN_SOMEDAY:
                     continue
                 if current_task is not None:
                     sections[current_section].append(
@@ -389,7 +396,7 @@ def _render_kanban_task_lines(
 ) -> list[str]:
     """Emit markdown lines for one task under *section*."""
     lines: list[str] = []
-    if section == "Someday / Maybe":
+    if section == KANBAN_SOMEDAY:
         lines.append(f"- {task.title}")
         return lines
     check = "[x]" if task.done else "[ ]"
@@ -473,7 +480,7 @@ def append_kanban_archive(
     body_lines: list[str] = [f"\n## Archived · {today}\n"]
     for task in tasks:
         body_lines.extend(
-            _render_kanban_task_lines("Done", task)
+            _render_kanban_task_lines(KANBAN_DONE, task)
         )
         body_lines.append("")
     block = "\n".join(body_lines)
