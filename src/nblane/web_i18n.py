@@ -78,7 +78,28 @@ _COMMON: dict[str, dict[str, str]] = {
         "profile_created": "Profile '{name}' created.",
         "ai_not_configured": "AI not configured (rule-based only)",
         "ai_add_key_caption": (
-            "Add `LLM_API_KEY` to `.env` to enable AI features."
+            "Set an API key in the sidebar AI / LLM settings, "
+            "or add `LLM_API_KEY` to `.env`."
+        ),
+        "llm_settings_title": "AI / LLM",
+        "llm_provider": "Provider",
+        "llm_base_url": "Base URL",
+        "llm_model": "Model",
+        "llm_custom_model": "Custom model",
+        "llm_custom_model_choice": "Custom…",
+        "llm_api_key": "API key",
+        "llm_api_key_help": (
+            "Session only. Leave blank to keep an existing key from "
+            "this session or .env."
+        ),
+        "llm_reply_lang": "Reply language",
+        "llm_reply_lang_en": "English",
+        "llm_reply_lang_zh": "Chinese",
+        "llm_configured": "AI enabled: {label}",
+        "llm_not_configured": "API key is not set.",
+        "llm_session_only": (
+            "These settings apply to this app session and are not "
+            "written to disk."
         ),
         "merge_llm_status_applied": "applied",
         "merge_llm_status_ignored": "ignored",
@@ -116,8 +137,25 @@ _COMMON: dict[str, dict[str, str]] = {
         "profile_created": "已创建档案「{name}」。",
         "ai_not_configured": "未配置 AI（仅规则模式）",
         "ai_add_key_caption": (
-            "在 `.env` 中设置 `LLM_API_KEY` 以启用 AI。"
+            "可在侧边栏 AI / LLM 设置里填写 API key，"
+            "也可在 `.env` 中设置 `LLM_API_KEY`。"
         ),
+        "llm_settings_title": "AI / LLM",
+        "llm_provider": "服务商",
+        "llm_base_url": "Base URL",
+        "llm_model": "模型",
+        "llm_custom_model": "自定义模型",
+        "llm_custom_model_choice": "自定义…",
+        "llm_api_key": "API key",
+        "llm_api_key_help": (
+            "仅当前会话生效。留空会继续使用本会话或 .env 中已有的 key。"
+        ),
+        "llm_reply_lang": "回复语言",
+        "llm_reply_lang_en": "英文",
+        "llm_reply_lang_zh": "中文",
+        "llm_configured": "AI 已启用：{label}",
+        "llm_not_configured": "尚未设置 API key。",
+        "llm_session_only": "这些设置只应用到当前页面会话，不会写入磁盘。",
         "merge_llm_status_applied": "已应用",
         "merge_llm_status_ignored": "已忽略",
         "merge_preview_llm_status_line": (

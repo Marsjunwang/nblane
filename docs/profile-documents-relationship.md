@@ -151,3 +151,4 @@ flowchart LR
 - [Skill evidence](evidence.md)  
 - [Architecture](architecture.md)  
 - [SKILL.md format](profile-format.md)
+- [File storage evolution](file-storage-evolution.md) — public layer, personal website storage, media, and multi-user boundaries

@@ -27,6 +27,8 @@ Commands:
                                     Resume text → pool + tree (LLM)
     nblane ingest-kanban <name>     Done column → pool + tree (LLM)
     nblane health [name]            Profile health / growth review
+    nblane public init <name>       Initialize public site layer
+    nblane public build <name>      Build static public site
     nblane auth hash-password       Generate a password hash for Web auth
 
 Examples:
@@ -74,6 +76,22 @@ from nblane.commands.profile import (
     cmd_status,
     cmd_sync,
     cmd_validate,
+)
+from nblane.commands.public import (
+    cmd_public_build,
+    cmd_public_blog_list,
+    cmd_public_blog_media,
+    cmd_public_blog_new,
+    cmd_public_blog_publish,
+    cmd_public_draft_blog,
+    cmd_public_draft_project_update,
+    cmd_public_draft_resume,
+    cmd_public_group,
+    cmd_public_hydrate,
+    cmd_public_init,
+    cmd_public_resume,
+    cmd_public_suggest_groups,
+    cmd_public_validate,
 )
 from nblane.commands.team import cmd_team
 
@@ -342,6 +360,288 @@ def main() -> None:
         help="Read draft body from stdin",
     )
 
+    p_public = sub.add_parser(
+        "public",
+        help="Public personal site, blog, and resume tools",
+    )
+    public_sub = p_public.add_subparsers(
+        dest="public_command",
+        required=True,
+    )
+
+    p_pub_init = public_sub.add_parser(
+        "init",
+        help="Create missing public-layer files for a profile",
+    )
+    p_pub_init.add_argument("name", help="Profile name")
+
+    p_pub_validate = public_sub.add_parser(
+        "validate",
+        help="Validate public-profile, resume, projects, outputs, and blog",
+    )
+    p_pub_validate.add_argument("name", help="Profile name")
+    p_pub_validate.add_argument(
+        "--include-drafts",
+        action="store_true",
+        help="Also validate draft objects as publish candidates",
+    )
+
+    p_pub_build = public_sub.add_parser(
+        "build",
+        help="Build a static public site",
+    )
+    p_pub_build.add_argument("name", help="Profile name")
+    p_pub_build.add_argument(
+        "--out",
+        dest="public_out",
+        default=None,
+        help="Output directory (default: dist/public/<profile>)",
+    )
+    p_pub_build.add_argument(
+        "--include-drafts",
+        action="store_true",
+        help="Preview private/draft content in the generated site",
+    )
+    p_pub_build.add_argument(
+        "--base-url",
+        default="",
+        help="Absolute site URL for sitemap entries",
+    )
+
+    p_pub_resume = public_sub.add_parser(
+        "resume",
+        help="Generate resume HTML and Markdown",
+    )
+    p_pub_resume.add_argument("name", help="Profile name")
+    p_pub_resume.add_argument(
+        "--out",
+        dest="resume_out",
+        default=None,
+        help=(
+            "HTML output path "
+            "(default: profiles/<name>/resumes/generated/default.html)"
+        ),
+    )
+    p_pub_resume.add_argument(
+        "--target",
+        default="",
+        help="Optional target role or direction label",
+    )
+
+    p_pub_draft_blog = public_sub.add_parser(
+        "draft-blog",
+        help="Create a draft blog post from evidence or kanban Done",
+    )
+    p_pub_draft_blog.add_argument("name", help="Profile name")
+    blog_src = p_pub_draft_blog.add_mutually_exclusive_group(
+        required=True,
+    )
+    blog_src.add_argument(
+        "--from-evidence",
+        dest="draft_evidence_id",
+        default=None,
+        metavar="ID",
+        help="Evidence id to turn into a draft post",
+    )
+    blog_src.add_argument(
+        "--from-kanban-done",
+        action="store_true",
+        help="Turn current kanban Done tasks into a draft post",
+    )
+
+    p_pub_blog = public_sub.add_parser(
+        "blog",
+        help="Create, list, publish, and add media to blog posts",
+    )
+    pub_blog_sub = p_pub_blog.add_subparsers(
+        dest="public_blog_command",
+        required=True,
+    )
+
+    p_pub_blog_list = pub_blog_sub.add_parser(
+        "list",
+        help="List blog posts",
+    )
+    p_pub_blog_list.add_argument("name", help="Profile name")
+    p_pub_blog_list.add_argument(
+        "--include-drafts",
+        action="store_true",
+        help="Include draft posts",
+    )
+
+    p_pub_blog_new = pub_blog_sub.add_parser(
+        "new",
+        help="Create a new blog draft",
+    )
+    p_pub_blog_new.add_argument("name", help="Profile name")
+    p_pub_blog_new.add_argument(
+        "--title",
+        required=True,
+        help="Blog post title",
+    )
+    p_pub_blog_new.add_argument(
+        "--slug",
+        default=None,
+        help="Optional blog slug",
+    )
+    p_pub_blog_new.add_argument(
+        "--summary",
+        default="",
+        help="Optional summary",
+    )
+    p_pub_blog_new.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        dest="tags",
+        help="Optional tag; repeat for multiple tags",
+    )
+    blog_body = p_pub_blog_new.add_mutually_exclusive_group()
+    blog_body.add_argument(
+        "--body-file",
+        default=None,
+        help="Read Markdown body from a UTF-8 file",
+    )
+    blog_body.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read Markdown body from stdin",
+    )
+
+    p_pub_blog_media = pub_blog_sub.add_parser(
+        "media",
+        help="Copy media into media/blog/<slug>/",
+    )
+    p_pub_blog_media.add_argument("name", help="Profile name")
+    p_pub_blog_media.add_argument("slug", help="Blog slug")
+    p_pub_blog_media.add_argument(
+        "--file",
+        required=True,
+        dest="blog_media_file",
+        help="Image or short video file to copy",
+    )
+    p_pub_blog_media.add_argument(
+        "--kind",
+        required=True,
+        choices=["image", "video"],
+        help="Media kind",
+    )
+    p_pub_blog_media.add_argument(
+        "--alt",
+        default="",
+        help="Image alt text",
+    )
+    p_pub_blog_media.add_argument(
+        "--caption",
+        default="",
+        help="Video caption or image caption",
+    )
+    p_pub_blog_media.add_argument(
+        "--cover",
+        action="store_true",
+        help="Use an image as the post cover",
+    )
+    p_pub_blog_media.add_argument(
+        "--append",
+        action="store_true",
+        help="Append or marker-insert the snippet into the post body",
+    )
+
+    p_pub_blog_publish = pub_blog_sub.add_parser(
+        "publish",
+        help="Publish a blog post after validation",
+    )
+    p_pub_blog_publish.add_argument("name", help="Profile name")
+    p_pub_blog_publish.add_argument("slug", help="Blog slug")
+
+    p_pub_draft_resume = public_sub.add_parser(
+        "draft-resume",
+        help="Create a target-specific resume draft",
+    )
+    p_pub_draft_resume.add_argument("name", help="Profile name")
+    p_pub_draft_resume.add_argument(
+        "--target",
+        required=True,
+        help="Target role or direction",
+    )
+
+    p_pub_draft_update = public_sub.add_parser(
+        "draft-project-update",
+        help="Append a draft public update to a project",
+    )
+    p_pub_draft_update.add_argument("name", help="Profile name")
+    p_pub_draft_update.add_argument(
+        "--project",
+        required=True,
+        dest="project_id",
+        help="Project id in projects.yaml",
+    )
+
+    p_pub_suggest = public_sub.add_parser(
+        "suggest-groups",
+        help="Preview deterministic evidence grouping suggestions",
+    )
+    p_pub_suggest.add_argument("name", help="Profile name")
+    p_pub_suggest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview only; suggestions never write files",
+    )
+
+    p_pub_group = public_sub.add_parser(
+        "group",
+        help="Create a draft public project from selected evidence",
+    )
+    p_pub_group.add_argument("name", help="Profile name")
+    p_pub_group.add_argument(
+        "--id",
+        required=True,
+        dest="project_id",
+        help="New project id in projects.yaml",
+    )
+    p_pub_group.add_argument(
+        "--title",
+        required=True,
+        help="Public draft project title",
+    )
+    p_pub_group.add_argument(
+        "--evidence",
+        action="append",
+        required=True,
+        dest="evidence_ids",
+        metavar="ID",
+        help="Evidence id to include; repeat for multiple refs",
+    )
+    p_pub_group.add_argument(
+        "--summary",
+        default="",
+        help="Optional draft summary",
+    )
+    p_pub_group.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        dest="tags",
+        help="Optional project tag; repeat for multiple tags",
+    )
+
+    p_pub_hydrate = public_sub.add_parser(
+        "hydrate",
+        help="Preview or write obvious paper/patent output drafts",
+    )
+    p_pub_hydrate.add_argument("name", help="Profile name")
+    hydrate_mode = p_pub_hydrate.add_mutually_exclusive_group()
+    hydrate_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview output drafts without writing",
+    )
+    hydrate_mode.add_argument(
+        "--write-drafts",
+        action="store_true",
+        help="Write draft outputs to outputs.yaml",
+    )
+
     p_auth = sub.add_parser(
         "auth",
         help="Authentication helpers for the Streamlit Web UI",
@@ -431,6 +731,91 @@ def main() -> None:
                 "Re-run with --file or --stdin for content._\n"
             )
         cmd_crystallize(args.name, args.project, body)
+    elif args.command == "public":
+        if args.public_command == "init":
+            cmd_public_init(args.name)
+        elif args.public_command == "validate":
+            cmd_public_validate(
+                args.name,
+                include_drafts=args.include_drafts,
+            )
+        elif args.public_command == "build":
+            cmd_public_build(
+                args.name,
+                out_dir=args.public_out,
+                include_drafts=args.include_drafts,
+                base_url=args.base_url,
+            )
+        elif args.public_command == "resume":
+            cmd_public_resume(
+                args.name,
+                out_path=args.resume_out,
+                target=args.target,
+            )
+        elif args.public_command == "draft-blog":
+            cmd_public_draft_blog(
+                args.name,
+                evidence_id=args.draft_evidence_id,
+                from_kanban_done=args.from_kanban_done,
+            )
+        elif args.public_command == "blog":
+            if args.public_blog_command == "list":
+                cmd_public_blog_list(
+                    args.name,
+                    include_drafts=args.include_drafts,
+                )
+            elif args.public_blog_command == "new":
+                cmd_public_blog_new(
+                    args.name,
+                    title=args.title,
+                    slug=args.slug,
+                    summary=args.summary,
+                    tags=args.tags,
+                    body_file=args.body_file,
+                    use_stdin=args.stdin,
+                )
+            elif args.public_blog_command == "media":
+                cmd_public_blog_media(
+                    args.name,
+                    slug=args.slug,
+                    file_path=args.blog_media_file,
+                    kind=args.kind,
+                    alt=args.alt,
+                    caption=args.caption,
+                    cover=args.cover,
+                    append=args.append,
+                )
+            elif args.public_blog_command == "publish":
+                cmd_public_blog_publish(
+                    args.name,
+                    slug=args.slug,
+                )
+        elif args.public_command == "draft-resume":
+            cmd_public_draft_resume(
+                args.name,
+                target=args.target,
+            )
+        elif args.public_command == "draft-project-update":
+            cmd_public_draft_project_update(
+                args.name,
+                project_id=args.project_id,
+            )
+        elif args.public_command == "suggest-groups":
+            cmd_public_suggest_groups(args.name)
+        elif args.public_command == "group":
+            cmd_public_group(
+                args.name,
+                project_id=args.project_id,
+                title=args.title,
+                evidence_ids=args.evidence_ids,
+                summary=args.summary,
+                tags=args.tags,
+            )
+        elif args.public_command == "hydrate":
+            cmd_public_hydrate(
+                args.name,
+                write_drafts=args.write_drafts,
+            )
     elif args.command == "auth":
         if args.auth_command == "hash-password":
             password = args.password

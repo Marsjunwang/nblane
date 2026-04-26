@@ -1,11 +1,14 @@
 """Thin wrapper around any OpenAI-compatible chat API.
 
-Configuration via environment variables (or .env at repo root):
+Default configuration via environment variables (or .env at repo root):
 
     LLM_BASE_URL    API base URL  (default: https://api.openai.com/v1)
     LLM_API_KEY     API key       (required for AI features)
     LLM_MODEL       Model name    (default: gpt-4o)
     LLM_REPLY_LANG  Reply language: "en" (default) or "zh"
+
+Streamlit pages may also call ``configure`` to override these values
+for the current Python process/session.
 """
 
 from __future__ import annotations
@@ -23,14 +26,64 @@ try:
 except ImportError:
     pass
 
-_BASE_URL: str = os.getenv(
-    "LLM_BASE_URL", "https://api.openai.com/v1"
-)
+_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+_DEFAULT_MODEL = "gpt-4o"
+_DEFAULT_REPLY_LANG = "en"
+
+_BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
 _API_KEY: str = os.getenv("LLM_API_KEY", "")
-_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o")
+_MODEL: str = os.getenv("LLM_MODEL", _DEFAULT_MODEL)
 _REPLY_LANG: str = os.getenv(
     "LLM_REPLY_LANG", "en"
 ).strip().lower()
+
+
+def configure(
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    reply_lang: str | None = None,
+) -> None:
+    """Override LLM settings at runtime.
+
+    ``None`` means "leave the current value unchanged". Empty strings
+    for ``base_url`` and ``model`` fall back to the module defaults;
+    an empty ``api_key`` intentionally clears the key.
+    """
+    global _API_KEY, _BASE_URL, _MODEL, _REPLY_LANG
+
+    if base_url is not None:
+        _BASE_URL = base_url.strip() or _DEFAULT_BASE_URL
+    if api_key is not None:
+        _API_KEY = api_key.strip()
+    if model is not None:
+        _MODEL = model.strip() or _DEFAULT_MODEL
+    if reply_lang is not None:
+        _REPLY_LANG = reply_lang.strip().lower()
+
+
+def _masked_api_key(value: str) -> str:
+    """Return a display-safe representation of an API key."""
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "set"
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def current_config(
+    *, mask_key: bool = True
+) -> dict[str, str | bool]:
+    """Return the current runtime LLM configuration."""
+    key = _masked_api_key(_API_KEY) if mask_key else _API_KEY
+    return {
+        "base_url": _BASE_URL,
+        "api_key": key,
+        "model": _MODEL,
+        "reply_lang": reply_language(),
+        "configured": is_configured(),
+    }
 
 
 def is_configured() -> bool:
@@ -66,7 +119,8 @@ def chat(
     if not is_configured():
         return (
             "AI features not configured. "
-            "Add LLM_API_KEY to the .env file."
+            "Set an API key in the sidebar AI / LLM settings "
+            "or add LLM_API_KEY to the .env file."
         )
     try:
         from openai import OpenAI
@@ -101,7 +155,8 @@ def chat_messages(
     if not is_configured():
         return (
             "AI features not configured. "
-            "Add LLM_API_KEY to the .env file."
+            "Set an API key in the sidebar AI / LLM settings "
+            "or add LLM_API_KEY to the .env file."
         )
     api_messages: list[dict[str, str]] = [
         {"role": "system", "content": system},

@@ -141,6 +141,53 @@ class TestCliEntryPoint(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertTrue(result.stdout.startswith("pbkdf2_sha256$"))
 
+    def test_public_validate_cli(self) -> None:
+        """``nblane public validate`` should exit 0 on template."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "public",
+                "validate",
+                "template",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_public_curation_preview_cli(self) -> None:
+        """Public curation preview commands should be non-mutating."""
+        suggest = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "public",
+                "suggest-groups",
+                "template",
+                "--dry-run",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        hydrate = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "nblane.cli",
+                "public",
+                "hydrate",
+                "template",
+                "--dry-run",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(suggest.returncode, 0)
+        self.assertEqual(hydrate.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

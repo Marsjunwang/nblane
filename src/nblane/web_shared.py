@@ -9,6 +9,7 @@ from pathlib import Path
 import streamlit as st
 
 from nblane.core import git_backup
+from nblane.core import llm as llm_client
 from nblane.core.file_state import (
     FileConflictError,
     FileSnapshot,
@@ -64,6 +65,34 @@ def _latest_profile(profiles: list[str]) -> str:
 
 _PERSIST_KEY = "_profile_choice"
 _GIT_BACKUP_NOTICE_KEY = "_nblane_git_backup_notices"
+_LLM_CUSTOM_MODEL_CHOICE = "__custom_model__"
+_LLM_PROVIDER_KEY = "_nblane_llm_provider"
+_LLM_LAST_PROVIDER_KEY = "_nblane_llm_last_provider"
+_LLM_BASE_URL_KEY = "_nblane_llm_base_url"
+_LLM_MODEL_CHOICE_KEY = "_nblane_llm_model_choice"
+_LLM_CUSTOM_MODEL_KEY = "_nblane_llm_custom_model"
+_LLM_API_KEY_KEY = "_nblane_llm_api_key"
+_LLM_REPLY_LANG_KEY = "_nblane_llm_reply_lang"
+
+_LLM_PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "OpenAI": (
+        "https://api.openai.com/v1",
+        ("gpt-4o", "gpt-4o-mini"),
+    ),
+    "Qwen / DashScope": (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ("qwen-plus", "qwen-max", "qwen-turbo"),
+    ),
+    "DeepSeek": (
+        "https://api.deepseek.com",
+        ("deepseek-chat", "deepseek-reasoner"),
+    ),
+    "Ollama": (
+        "http://localhost:11434/v1",
+        ("llama3", "qwen2.5"),
+    ),
+    "Custom": ("", ()),
+}
 
 
 def _sync_to_persistent() -> None:
@@ -71,6 +100,178 @@ def _sync_to_persistent() -> None:
     st.session_state[_PERSIST_KEY] = (
         st.session_state["selected_profile"]
     )
+
+
+def _llm_provider_for(base_url: str) -> str:
+    """Infer the sidebar provider from a configured base URL."""
+    normalized = base_url.rstrip("/")
+    for provider, (preset_base, _models) in (
+        _LLM_PROVIDER_PRESETS.items()
+    ):
+        if provider == "Custom":
+            continue
+        if normalized == preset_base.rstrip("/"):
+            return provider
+    return "Custom"
+
+
+def _llm_model_options(provider: str) -> list[str]:
+    """Return model choices for a provider plus a custom option."""
+    _base_url, models = _LLM_PROVIDER_PRESETS.get(
+        provider, _LLM_PROVIDER_PRESETS["Custom"]
+    )
+    return [*models, _LLM_CUSTOM_MODEL_CHOICE]
+
+
+def _ensure_llm_session_defaults() -> None:
+    """Seed sidebar LLM widgets from the current runtime config."""
+    cfg = llm_client.current_config(mask_key=False)
+    base_url = str(cfg.get("base_url") or "")
+    model = str(cfg.get("model") or "")
+    reply_lang = str(cfg.get("reply_lang") or "en")
+    provider = _llm_provider_for(base_url)
+    model_options = _llm_model_options(provider)
+
+    st.session_state.setdefault(_LLM_PROVIDER_KEY, provider)
+    st.session_state.setdefault(_LLM_LAST_PROVIDER_KEY, provider)
+    st.session_state.setdefault(_LLM_BASE_URL_KEY, base_url)
+    st.session_state.setdefault(_LLM_CUSTOM_MODEL_KEY, model)
+    st.session_state.setdefault(
+        _LLM_MODEL_CHOICE_KEY,
+        model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE,
+    )
+    st.session_state.setdefault(
+        _LLM_REPLY_LANG_KEY,
+        reply_lang if reply_lang in ("en", "zh") else "en",
+    )
+
+
+def _sync_llm_provider_preset() -> None:
+    """When provider changes, load its default base URL and model."""
+    provider = st.session_state.get(_LLM_PROVIDER_KEY, "Custom")
+    previous = st.session_state.get(_LLM_LAST_PROVIDER_KEY)
+    if provider == previous:
+        return
+
+    base_url, models = _LLM_PROVIDER_PRESETS.get(
+        provider, _LLM_PROVIDER_PRESETS["Custom"]
+    )
+    if provider != "Custom":
+        st.session_state[_LLM_BASE_URL_KEY] = base_url
+        if models:
+            st.session_state[_LLM_MODEL_CHOICE_KEY] = models[0]
+            st.session_state[_LLM_CUSTOM_MODEL_KEY] = models[0]
+    else:
+        st.session_state[
+            _LLM_MODEL_CHOICE_KEY
+        ] = _LLM_CUSTOM_MODEL_CHOICE
+
+    st.session_state[_LLM_LAST_PROVIDER_KEY] = provider
+
+
+def _normalize_llm_model_choice(provider: str) -> None:
+    """Keep the model selectbox value valid for the current provider."""
+    options = _llm_model_options(provider)
+    choice = st.session_state.get(_LLM_MODEL_CHOICE_KEY)
+    if choice in options:
+        return
+    custom_model = st.session_state.get(_LLM_CUSTOM_MODEL_KEY, "")
+    st.session_state[_LLM_MODEL_CHOICE_KEY] = (
+        custom_model if custom_model in options else _LLM_CUSTOM_MODEL_CHOICE
+    )
+
+
+def _apply_llm_sidebar_config(
+    *,
+    base_url: str,
+    model: str,
+    api_key: str,
+    reply_lang: str,
+) -> None:
+    """Apply sidebar values to the process-wide LLM client."""
+    llm_client.configure(
+        base_url=base_url,
+        model=model,
+        api_key=api_key or None,
+        reply_lang=reply_lang,
+    )
+
+
+def render_llm_settings() -> None:
+    """Render app-wide LLM settings in the Streamlit sidebar."""
+    u = common_ui()
+    _ensure_llm_session_defaults()
+
+    with st.expander(u["llm_settings_title"]):
+        provider_names = list(_LLM_PROVIDER_PRESETS)
+        provider = st.selectbox(
+            u["llm_provider"],
+            provider_names,
+            key=_LLM_PROVIDER_KEY,
+        )
+        _sync_llm_provider_preset()
+        provider = st.session_state.get(_LLM_PROVIDER_KEY, provider)
+        _normalize_llm_model_choice(provider)
+
+        base_url = st.text_input(
+            u["llm_base_url"],
+            key=_LLM_BASE_URL_KEY,
+        ).strip()
+
+        model_options = _llm_model_options(provider)
+        model_choice = st.selectbox(
+            u["llm_model"],
+            model_options,
+            format_func=lambda value: (
+                u["llm_custom_model_choice"]
+                if value == _LLM_CUSTOM_MODEL_CHOICE
+                else value
+            ),
+            key=_LLM_MODEL_CHOICE_KEY,
+        )
+        if model_choice == _LLM_CUSTOM_MODEL_CHOICE:
+            model = st.text_input(
+                u["llm_custom_model"],
+                key=_LLM_CUSTOM_MODEL_KEY,
+            ).strip()
+        else:
+            model = model_choice
+            st.session_state[_LLM_CUSTOM_MODEL_KEY] = model_choice
+
+        api_key = st.text_input(
+            u["llm_api_key"],
+            type="password",
+            help=u["llm_api_key_help"],
+            key=_LLM_API_KEY_KEY,
+        ).strip()
+
+        reply_lang = st.selectbox(
+            u["llm_reply_lang"],
+            ["zh", "en"],
+            format_func=lambda value: (
+                u["llm_reply_lang_zh"]
+                if value == "zh"
+                else u["llm_reply_lang_en"]
+            ),
+            key=_LLM_REPLY_LANG_KEY,
+        )
+
+        _apply_llm_sidebar_config(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            reply_lang=reply_lang,
+        )
+
+        if llm_client.is_configured():
+            st.caption(
+                u["llm_configured"].format(
+                    label=llm_client.model_label()
+                )
+            )
+        else:
+            st.caption(u["llm_not_configured"])
+        st.caption(u["llm_session_only"])
 
 
 def ui_emoji_enabled() -> bool:
@@ -192,6 +393,8 @@ def select_profile() -> str:
                             st.rerun()
                         except Exception as exc:
                             st.error(str(exc))
+
+        render_llm_settings()
 
     if (
         not profiles

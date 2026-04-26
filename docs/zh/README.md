@@ -18,6 +18,8 @@
 | [技能树 Schema 指南](skill-tree-schema.md) | `schemas/` 与个人 `skill-tree.yaml` |
 | [技能证据 Skill evidence](evidence.md) | 字段说明、CLI、Web、`context` / `gap` / `validate` |
 | [Demo 1 · Profile 文档关系与闭环](../profile-documents-relationship.md) | 各文件职责、简历与看板闭环、更新顺序与 LLM 契约；**`ingest-resume` / `ingest-kanban` 与 Web 摄入**已对齐 |
+| [文件存储演进](file-storage-evolution.md) | 文件优先方案边界、个人网站 public layer、媒体与多用户演进 |
+| [Public Site Blog 编辑器设计](public-site-blog-editor-design.md) | BlockNote、可折叠布局、媒体与 AI 创作面板设计稿 |
 | [MCP 服务器（Cursor）](mcp.md) | stdio 资源、环境变量、**在非 nblane 工程窗口**通过用户级 MCP 连接本机同一仓库 |
 
 ## 推荐阅读顺序

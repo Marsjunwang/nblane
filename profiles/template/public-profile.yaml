@@ -1,0 +1,22 @@
+# Public profile for {Name}
+# Private by default. Set visibility: public when ready to publish.
+
+profile: "{Name}"
+visibility: private
+public_name: "{Name}"
+english_name: ""
+headline: ""
+avatar: ""
+bio_short: ""
+contacts:
+  email: ""
+  wechat: ""
+  github: ""
+  linkedin: ""
+  google_scholar: ""
+  zhihu: ""
+  website: ""
+featured:
+  projects: []
+  outputs: []
+  posts: []

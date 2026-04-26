@@ -1,0 +1,17 @@
+# Structured resume source for {Name}
+# This is the fact source for generated resumes. Keep it verified.
+
+profile: "{Name}"
+visibility: private
+basics:
+  name: "{Name}"
+  title: ""
+  location: ""
+  email: ""
+  website: ""
+summary: ""
+skills: []
+experiences: []
+projects: []
+outputs: []
+education: []
