@@ -22,6 +22,11 @@ from nblane.core.io import (
     save_kanban,
 )
 from nblane.kanban_ui import render_kanban_board
+from nblane.kanban_ui._helpers import (
+    _bump_kanban_widget_epoch,
+    _clear_kanban_dirty,
+    _kanban_is_dirty,
+)
 from nblane.core.profile_ingest import (
     filter_ingest_patch,
     ingest_preview_delta,
@@ -84,6 +89,7 @@ def _auto_save(
     refresh_file_snapshots([path])
     stash_git_backup_results()
     clear_web_cache()
+    _clear_kanban_dirty(profile)
 
 
 def _mark_done_crystallized(
@@ -145,6 +151,8 @@ tb1, tb2, tb3 = st.columns([1, 1, 3])
 with tb1:
     if st.button(ui["reload"]):
         _load_into_state(selected)
+        _clear_kanban_dirty(selected)
+        _bump_kanban_widget_epoch(selected)
         refresh_file_snapshots([_kanban_path])
         st.rerun()
 with tb2:
@@ -152,6 +160,9 @@ with tb2:
         sections = _get_sections(selected)
         _auto_save(selected, sections)
         st.success(ui["saved"])
+with tb3:
+    if _kanban_is_dirty(selected):
+        st.caption(ui["kb_unsaved_subtasks"])
 
 sections = _get_sections(selected)
 

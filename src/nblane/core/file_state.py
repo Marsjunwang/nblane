@@ -79,6 +79,12 @@ def assert_unchanged(
     current = snapshot_file(path)
     if current == expected:
         return
+    if (
+        current.exists
+        and expected.exists
+        and current.sha256 == expected.sha256
+    ):
+        return
     name = label or str(path)
     raise FileConflictError(
         f"{name} changed on disk after this page loaded. "

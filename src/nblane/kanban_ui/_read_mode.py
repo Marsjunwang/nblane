@@ -23,6 +23,8 @@ from ._helpers import (
     _SECTION_COLOR,
     _apply_column_move,
     _auto_save,
+    _kanban_widget_epoch,
+    _mark_kanban_dirty,
     _read_title_label,
     _task_editing_key,
 )
@@ -207,9 +209,10 @@ def _render_read_subtasks(
     *,
     show_section_hint: bool = True,
 ) -> KanbanTask:
-    """Read-mode subtask checkboxes; persist when done flags change."""
+    """Read-mode subtask checkboxes; keep changes in memory until Save."""
     if show_section_hint:
         st.caption(ui["kb_read_subtasks_hint"])
+    epoch = _kanban_widget_epoch(profile)
     new_subs: list[KanbanSubtask] = []
     for si, st_item in enumerate(task.subtasks):
         lab = st_item.title.strip() or "·"
@@ -218,7 +221,7 @@ def _render_read_subtasks(
         done = st.checkbox(
             lab,
             value=st_item.done,
-            key=f"rd_std_{profile}_{section}_{idx}_{si}",
+            key=f"rd_std_{profile}_{section}_{idx}_{si}_{epoch}",
         )
         new_subs.append(
             KanbanSubtask(title=st_item.title, done=done)
@@ -227,7 +230,7 @@ def _render_read_subtasks(
         task = replace(task, subtasks=new_subs)
         tasks[idx] = task
         sections[section] = tasks
-        _auto_save(profile, sections)
+        _mark_kanban_dirty(profile)
     return task
 
 
@@ -435,7 +438,8 @@ def render_read_card(
         ui,
         show_section_hint=show_section_hint,
     )
-    ns_key = f"rd_newst_{profile}_{section}_{idx}"
+    epoch = _kanban_widget_epoch(profile)
+    ns_key = f"rd_newst_{profile}_{section}_{idx}_{epoch}"
     with st.expander(
         ui["kb_read_add_subtask_expander"],
         expanded=False,
@@ -467,7 +471,7 @@ def render_read_card(
                 sections[section] = tasks
                 if ns_key in st.session_state:
                     del st.session_state[ns_key]
-                _auto_save(profile, sections)
+                _mark_kanban_dirty(profile)
                 st.rerun()
     tasks[idx] = task
     return task

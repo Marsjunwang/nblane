@@ -609,6 +609,9 @@ _KANBAN: dict[str, dict[str, str]] = {
         "reload": "Reload from file",
         "save": "Save",
         "saved": "Saved to kanban.md",
+        "kb_unsaved_subtasks": (
+            "Unsaved subtask changes — use Save to write them to kanban.md."
+        ),
         "metric_total": "Total",
         "metric_doing": "🔄 Doing",
         "metric_done": "✅ Done",
@@ -739,6 +742,7 @@ _KANBAN: dict[str, dict[str, str]] = {
         "reload": "从文件重新加载",
         "save": "保存",
         "saved": "已保存到 kanban.md",
+        "kb_unsaved_subtasks": "有未保存的子任务修改，请点「保存」写入 kanban.md。",
         "metric_total": "总计",
         "metric_doing": "🔄 进行中",
         "metric_done": "✅ 已完成",

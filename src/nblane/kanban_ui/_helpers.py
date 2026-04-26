@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
+import streamlit as st
+
 from nblane.core.kanban_io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -36,6 +38,48 @@ _SECTION_COLOR = {
     KANBAN_SOMEDAY: "#9aa0a6",
 }
 
+
+def _kanban_dirty_key(profile: str) -> str:
+    """Session key for unsaved in-browser kanban edits."""
+    return f"kanban_dirty_{profile}"
+
+
+def _kanban_widget_epoch_key(profile: str) -> str:
+    """Session key used to invalidate read-mode widget state."""
+    return f"kanban_widget_epoch_{profile}"
+
+
+def _kanban_is_dirty(profile: str) -> bool:
+    """Whether the current browser session has unsaved kanban edits."""
+    return bool(st.session_state.get(_kanban_dirty_key(profile), False))
+
+
+def _mark_kanban_dirty(profile: str) -> None:
+    """Mark kanban as changed in browser memory but not yet saved."""
+    st.session_state[_kanban_dirty_key(profile)] = True
+
+
+def _clear_kanban_dirty(profile: str) -> None:
+    """Clear the unsaved kanban flag after save or reload."""
+    st.session_state[_kanban_dirty_key(profile)] = False
+
+
+def _kanban_widget_epoch(profile: str) -> int:
+    """Return the read-mode widget epoch for this profile."""
+    raw = st.session_state.get(_kanban_widget_epoch_key(profile), 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _bump_kanban_widget_epoch(profile: str) -> None:
+    """Force read-mode widgets to forget stale values on reload."""
+    st.session_state[_kanban_widget_epoch_key(profile)] = (
+        _kanban_widget_epoch(profile) + 1
+    )
+
+
 def _auto_save(
     profile: str,
     sections: dict[str, list[KanbanTask]],
@@ -46,6 +90,7 @@ def _auto_save(
     save_kanban(profile, sections)
     refresh_file_snapshots([path])
     stash_git_backup_results()
+    _clear_kanban_dirty(profile)
 
 
 def _apply_column_move(
