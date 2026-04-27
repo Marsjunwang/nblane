@@ -2,9 +2,9 @@
 
 Default configuration via environment variables (or .env at repo root):
 
-    LLM_BASE_URL    API base URL  (default: https://api.openai.com/v1)
+    LLM_BASE_URL    API base URL  (default: DashScope compatible API)
     LLM_API_KEY     API key       (required for AI features)
-    LLM_MODEL       Model name    (default: gpt-4o)
+    LLM_MODEL       Model name    (default: qwen3.6-plus)
     LLM_REPLY_LANG  Reply language: "en" (default) or "zh"
 
 Streamlit pages may also call ``configure`` to override these values
@@ -26,8 +26,8 @@ try:
 except ImportError:
     pass
 
-_DEFAULT_BASE_URL = "https://api.openai.com/v1"
-_DEFAULT_MODEL = "gpt-4o"
+_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+_DEFAULT_MODEL = "qwen3.6-plus"
 _DEFAULT_REPLY_LANG = "en"
 
 _BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)

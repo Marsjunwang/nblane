@@ -7,6 +7,7 @@ Skill Tree uses a title-row **Save** instead; see docs/zh/web-ui-product.md.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 
 import streamlit as st
 import yaml
@@ -19,11 +20,22 @@ from nblane.core.kanban_io import (
     ensure_kanban_task_ids,
     kanban_snapshot_to_moves,
 )
+from nblane.core.kanban_events import (
+    alignment_context_from_payload as _alignment_context_from_payload,
+    apply_kanban_card_update as _apply_task_update,
+    discard_subtask_proposal_at as _discard_subtask_proposal_at,
+    discard_task_ai_state as _discard_task_ai_state,
+    event_subtask_index as _event_subtask_index,
+    subtask_proposals_from_payload as _subtask_proposals_from_payload,
+)
 from nblane.core.kanban_ai import (
+    KanbanTaskAlignment,
+    KanbanSubtaskGenerationResult,
     KanbanSubtaskProposal,
     analyze_kanban_task_gap,
     apply_kanban_subtask_proposals,
-    generate_kanban_subtask_proposals,
+    generate_kanban_task_alignment_options,
+    generate_kanban_subtask_proposals_detailed,
 )
 from nblane.core.io import (
     KANBAN_DOING,
@@ -149,6 +161,16 @@ def _subtask_proposals_key(profile: str) -> str:
     return f"kanban_subtask_proposals_{profile}"
 
 
+def _subtask_alignments_key(profile: str) -> str:
+    """Session key for per-task task-understanding alignment options."""
+    return f"kanban_subtask_alignments_{profile}"
+
+
+def _subtask_errors_key(profile: str) -> str:
+    """Session key for per-task AI subtask generation diagnostics."""
+    return f"kanban_subtask_errors_{profile}"
+
+
 def _task_text_fields(task: KanbanTask) -> list[str]:
     """Text fields used to extract task links."""
     fields = [
@@ -203,6 +225,135 @@ def _task_payload(task: KanbanTask) -> dict:
     }
 
 
+def _proposal_payload(proposal: KanbanSubtaskProposal) -> dict[str, str]:
+    """Serialize an AI subtask proposal for inline card review."""
+    draft_id = proposal.gap_node_id or proposal.title
+    return {
+        "id": draft_id,
+        "draft_id": draft_id,
+        "title": proposal.title,
+        "reason": proposal.reason,
+        "gap_node_id": proposal.gap_node_id,
+        "task_id": proposal.task_id,
+        "artifact": proposal.artifact,
+        "verification": proposal.verification,
+        "granularity": "milestone",
+    }
+
+
+def _subtask_error_message(
+    result: KanbanSubtaskGenerationResult,
+    ui: dict[str, str],
+) -> str:
+    """Return localized text for a subtask generation diagnostic."""
+    key = f"kb_subtask_error_{result.error_key or 'generic'}"
+    fallback = result.message or ui.get(
+        "kb_no_subtask_proposals",
+        "No usable subtask draft was generated.",
+    )
+    return ui.get(key, fallback)
+
+
+def _subtask_error_payload(
+    result: KanbanSubtaskGenerationResult,
+    ui: dict[str, str],
+) -> dict[str, object]:
+    """Serialize subtask generation diagnostics for card display."""
+    return {
+        "error_key": result.error_key,
+        "message": _subtask_error_message(result, ui),
+        "raw_count": result.raw_count,
+        "accepted_count": result.accepted_count,
+        "filtered_count": result.filtered_count,
+    }
+
+
+def _alignment_payload(alignment: KanbanTaskAlignment) -> dict:
+    """Serialize a task-understanding alignment candidate."""
+    return {
+        "label": alignment.label,
+        "goal": alignment.goal,
+        "assumptions": list(alignment.assumptions),
+        "subtask_style": alignment.subtask_style,
+        "task_id": alignment.task_id,
+    }
+
+
+def _gap_payload(result) -> dict:
+    """Serialize a GapResult for inline card preview."""
+    if result is None:
+        return {}
+    if getattr(result, "error", None):
+        return {"error": result.error}
+    return {
+        "task": result.task,
+        "can_solve": result.can_solve,
+        "gaps": list(result.gaps),
+        "next_steps": list(result.next_steps),
+        "top_matches": [
+            {
+                "id": m.get("id", ""),
+                "label": m.get("label", ""),
+                "score": m.get("score", 0),
+                "source": m.get("source", ""),
+            }
+            for m in result.top_matches
+        ],
+    }
+
+
+def _board_ai_state(profile: str, ui: dict[str, str]) -> dict:
+    """Return AI previews for the unified board component."""
+    proposals = st.session_state.get(_subtask_proposals_key(profile), {})
+    alignments = st.session_state.get(_subtask_alignments_key(profile), {})
+    errors = st.session_state.get(_subtask_errors_key(profile), {})
+    gaps = st.session_state.get(_gap_results_key(profile), {})
+    return {
+        "status": (
+            ui["llm_configured"].format(label=llm_client.model_label())
+            if llm_client.is_configured()
+            else ui["ai_not_configured"]
+        ),
+        "proposals_by_task": {
+            task_id: [
+                _proposal_payload(proposal)
+                for proposal in task_proposals
+                if isinstance(proposal, KanbanSubtaskProposal)
+            ]
+            for task_id, task_proposals in (
+                proposals.items()
+                if isinstance(proposals, dict)
+                else []
+            )
+        },
+        "gaps_by_task": {
+            task_id: _gap_payload(result)
+            for task_id, result in (
+                gaps.items() if isinstance(gaps, dict) else []
+            )
+        },
+        "alignment_by_task": {
+            task_id: [
+                _alignment_payload(alignment)
+                for alignment in task_alignments
+                if isinstance(alignment, KanbanTaskAlignment)
+            ]
+            for task_id, task_alignments in (
+                alignments.items()
+                if isinstance(alignments, dict)
+                else []
+            )
+        },
+        "subtask_errors_by_task": {
+            task_id: _subtask_error_payload(result, ui)
+            for task_id, result in (
+                errors.items() if isinstance(errors, dict) else []
+            )
+            if isinstance(result, KanbanSubtaskGenerationResult)
+        },
+    }
+
+
 def _sections_payload(
     sections: dict[str, list[KanbanTask]],
 ) -> dict[str, list[dict]]:
@@ -228,28 +379,112 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             "add": ui["add"],
             "ai_done": ui["ingest_generate"],
             "ai_gap": ui.get("kb_ai_gap", "Analyze gap"),
+            "ai_done_short": ui.get("kb_ai_done_short", "Evd"),
+            "ai_gap_short": ui.get("kb_ai_gap_short", "Gap"),
+            "ai_subtasks_short": ui.get("kb_ai_subtasks_short", "Sub"),
             "ai_subtasks": ui.get("kb_ai_subtasks", "Draft subtasks"),
+            "alignment_other": ui.get("kb_alignment_other", "Other"),
+            "alignment_other_hint": ui.get(
+                "kb_alignment_other_hint",
+                "Use only my note below",
+            ),
+            "alignment_title": ui.get(
+                "kb_alignment_title",
+                "Confirm task understanding",
+            ),
+            "alignment_custom": ui.get(
+                "kb_alignment_custom",
+                "Add detail or correction",
+            ),
+            "alignment_confirm": ui.get(
+                "kb_alignment_confirm",
+                "Use this understanding",
+            ),
+            "alignment_custom_only": ui.get(
+                "kb_alignment_custom_only",
+                "Use only my supplement",
+            ),
+            "alignment_assumptions": ui.get(
+                "kb_alignment_assumptions",
+                "Assumptions",
+            ),
+            "alignment_style": ui.get(
+                "kb_alignment_style",
+                "Subtask style",
+            ),
+            "alignment_goal": ui.get("kb_alignment_goal", "Goal"),
+            "alignment_label": ui.get("kb_alignment_label", "Label"),
+            "alignment_cancel": ui.get("cancel", "Cancel"),
             "blocked_by": ui["field_blocked"],
             "completed_on": ui["field_completed"],
             "context": ui["field_context"],
             "crystallize": ui.get("kb_mark_crystallized", "Mark crystallized"),
+            "crystallize_short": ui.get("kb_crystallize_short", "Cry"),
             "crystallized": ui["crystallized"],
+            "cancel": ui.get("cancel", "Cancel"),
+            "cancel_short": ui.get("kb_cancel_short", "Cancel"),
+            "delete_confirm": ui.get(
+                "kb_delete_confirm",
+                "Delete this task?",
+            ),
+            "delete_short": ui.get("kb_delete_short", "x"),
             "delete_task": ui["kb_delete_card"],
+            "delete_subtask": ui.get("kb_delete_subtask", "Delete subtask"),
             "details": ui["details"],
             "done_uncrystallized": ui.get(
                 "kb_done_uncrystallized",
                 "Done, not crystallized",
             ),
+            "edit": ui.get("kb_edit_task", "Edit"),
+            "edit_short": ui.get("kb_edit_short", "Edit"),
             "empty": ui.get("ingest_no_done", "No tasks."),
+            "error": ui.get("error", "Error"),
             "links": ui["kb_links_preview"],
             "new_subtask": ui["kb_read_new_subtask_ph"],
             "outcome": ui["field_outcome"],
+            "proposals": ui.get("kb_subtask_proposals_title", "AI subtask drafts"),
+            "apply_subtasks": ui.get("kb_apply_subtasks", "Apply selected"),
+            "discard_draft": ui.get("kb_discard_draft", "Discard draft"),
+            "discard_all_drafts": ui.get(
+                "kb_discard_all_drafts",
+                "Discard all",
+            ),
+            "no_selected_drafts": ui.get(
+                "kb_no_selected_drafts",
+                "Select at least one draft to apply.",
+            ),
+            "draft_status": ui.get("kb_draft_status", "{count} drafts"),
+            "alignment_status": ui.get(
+                "kb_alignment_status",
+                "Understanding ready",
+            ),
+            "ai_error_status": ui.get("kb_ai_error_status", "AI error"),
+            "granularity": ui.get("kb_granularity", "Granularity"),
+            "granularity_milestone": ui.get(
+                "kb_granularity_milestone",
+                "Milestone",
+            ),
+            "granularity_checklist": ui.get(
+                "kb_granularity_checklist",
+                "Checklist",
+            ),
+            "granularity_implementation": ui.get(
+                "kb_granularity_implementation",
+                "Implementation",
+            ),
+            "artifact": ui.get("kb_artifact", "Artifact"),
+            "gap_preview": ui.get("kb_gap_preview_title", "Task gap preview"),
+            "gap_next": ui.get("subheader_next", "Next steps"),
+            "gap_ok": ui.get("verdict_ok", "Can solve"),
+            "gap_missing": ui.get("verdict_gap", "Gaps remain"),
             "quick_add": ui.get("kb_quick_add", "+ Add task"),
             "save": ui["save"],
+            "save_short": ui.get("kb_save_short", "Save"),
             "started_on": ui["field_started"],
             "subtasks": ui["subtasks_label"],
             "title": ui["task_field_title"],
             "untitled": ui.get("kb_title_required", "Untitled"),
+            "verification": ui.get("kb_verification", "Verification"),
             "why": ui["field_why"],
         }
     )
@@ -283,47 +518,6 @@ def _event_task_id(event: dict, payload: dict) -> str:
         if value:
             return str(value)
     return ""
-
-
-def _split_details(value: object) -> list[str]:
-    """Split a textarea value into kanban detail bullet lines."""
-    if isinstance(value, list):
-        return [str(x).strip() for x in value if str(x).strip()]
-    text_value = str(value or "")
-    return [
-        line.strip()
-        for line in text_value.splitlines()
-        if line.strip()
-    ]
-
-
-def _apply_task_update(
-    task: KanbanTask,
-    card: dict,
-) -> KanbanTask | None:
-    """Return updated task or None when title is invalid."""
-    changes: dict[str, object] = {}
-    if "title" in card:
-        title = str(card.get("title") or "").strip()
-        if not title:
-            return None
-        changes["title"] = title
-    for field in ("context", "why", "blocked_by", "outcome"):
-        if field in card:
-            changes[field] = str(card.get(field) or "").strip()
-    if "started_on" in card:
-        changes["started_on"] = (
-            str(card.get("started_on") or "").strip() or None
-        )
-    if "completed_on" in card:
-        changes["completed_on"] = (
-            str(card.get("completed_on") or "").strip() or None
-        )
-    if "notes" in card:
-        changes["details"] = _split_details(card.get("notes"))
-    elif "details" in card:
-        changes["details"] = _split_details(card.get("details"))
-    return replace(task, **changes) if changes else task
 
 
 def _render_gap_previews(profile: str, ui: dict[str, str]) -> None:
@@ -391,6 +585,16 @@ def _render_subtask_proposals(
                 )
                 if proposal.reason:
                     st.caption(proposal.reason)
+                if proposal.artifact:
+                    st.caption(
+                        f"{ui.get('kb_artifact', 'Artifact')}: "
+                        f"{proposal.artifact}"
+                    )
+                if proposal.verification:
+                    st.caption(
+                        f"{ui.get('kb_verification', 'Verification')}: "
+                        f"{proposal.verification}"
+                    )
             if st.button(
                 ui.get("kb_apply_subtasks", "Apply selected subtasks"),
                 key=f"kb_ai_sub_apply_{profile}_{task_id}",
@@ -470,6 +674,10 @@ def _handle_board_event(
         task = KanbanTask(title=title)
         if section == KANBAN_DONE:
             task = replace(task, done=True)
+            if auto_dates:
+                task = replace(task, completed_on=date.today().isoformat())
+        if section == KANBAN_DOING and auto_dates:
+            task = replace(task, started_on=date.today().isoformat())
         sections.setdefault(section, []).append(task)
         _auto_save(profile, sections)
         st.rerun()
@@ -498,10 +706,7 @@ def _handle_board_event(
             st.warning(ui["kb_drag_stale"])
             return
         section, idx, task = found
-        try:
-            subtask_index = int(payload.get("subtask_index", -1))
-        except (TypeError, ValueError):
-            subtask_index = -1
+        subtask_index = _event_subtask_index(payload, task)
         if not 0 <= subtask_index < len(task.subtasks):
             return
         next_subtasks = list(task.subtasks)
@@ -509,6 +714,20 @@ def _handle_board_event(
             next_subtasks[subtask_index],
             done=bool(payload.get("done")),
         )
+        sections[section][idx] = replace(task, subtasks=next_subtasks)
+        _auto_save(profile, sections)
+        st.rerun()
+
+    if action == "delete_subtask":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        subtask_index = _event_subtask_index(payload, task)
+        if not 0 <= subtask_index < len(task.subtasks):
+            return
+        next_subtasks = list(task.subtasks)
+        next_subtasks.pop(subtask_index)
         sections[section][idx] = replace(task, subtasks=next_subtasks)
         _auto_save(profile, sections)
         st.rerun()
@@ -561,6 +780,7 @@ def _handle_board_event(
             )
         state = st.session_state.setdefault(_gap_results_key(profile), {})
         state[task_id] = result
+        st.rerun()
         return
 
     if action in ("request_subtasks", "ai_subtask_ingest"):
@@ -571,22 +791,216 @@ def _handle_board_event(
             render_llm_unavailable(ui)
             return
         with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
-            proposals = generate_kanban_subtask_proposals(
+            alignments = generate_kanban_task_alignment_options(
+                sections,
+                task_id,
+                profile_name=profile,
+            )
+        if not alignments:
+            st.warning(
+                ui.get(
+                    "kb_no_alignment_options",
+                    "No task understanding options were generated.",
+                )
+            )
+            return
+        alignments_by_task = st.session_state.setdefault(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        alignments_by_task[task_id] = alignments
+        proposals_by_task = st.session_state.get(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        _discard_task_ai_state(
+            proposals_by_task,
+            None,
+            errors_by_task,
+            task_id,
+            scope="drafts",
+        )
+        if isinstance(errors_by_task, dict):
+            errors_by_task.pop(task_id, None)
+        st.rerun()
+        return
+
+    if action == "confirm_subtask_alignment":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        if not llm_client.is_configured():
+            render_llm_unavailable(ui)
+            return
+        alignment_context = _alignment_context_from_payload(payload)
+        if not alignment_context:
+            st.warning(
+                ui.get(
+                    "kb_alignment_required",
+                    "Choose an understanding or add a clarification.",
+                )
+            )
+            return
+        with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
+            result = generate_kanban_subtask_proposals_detailed(
                 profile,
                 sections,
                 task_id,
                 use_rule_match=True,
                 use_llm_router=True,
                 persist_router_keywords=False,
+                alignment_context=alignment_context,
+                granularity=str(payload.get("granularity") or "milestone"),
             )
-        if not proposals:
-            st.warning(ui.get("kb_no_subtask_proposals", "No subtask draft was generated."))
+        if not result.proposals:
+            state = st.session_state.setdefault(_subtask_errors_key(profile), {})
+            state[task_id] = result
+            st.warning(_subtask_error_message(result, ui))
+            st.rerun()
             return
         state = st.session_state.setdefault(
             _subtask_proposals_key(profile),
             {},
         )
-        state[task_id] = proposals
+        state[task_id] = result.proposals
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        if isinstance(errors_by_task, dict):
+            errors_by_task.pop(task_id, None)
+        alignments_by_task = st.session_state.get(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        if isinstance(alignments_by_task, dict):
+            alignments_by_task.pop(task_id, None)
+        st.rerun()
+        return
+
+    if action == "cancel_subtask_alignment":
+        alignments_by_task = st.session_state.get(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        if isinstance(alignments_by_task, dict):
+            alignments_by_task.pop(task_id, None)
+        st.rerun()
+        return
+
+    if action == "discard_subtask_draft":
+        proposals_by_task = st.session_state.get(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        try:
+            index = int(payload.get("index", payload.get("draft_index", -1)))
+        except (TypeError, ValueError):
+            index = -1
+        if isinstance(proposals_by_task, dict):
+            _discard_subtask_proposal_at(proposals_by_task, task_id, index)
+        st.rerun()
+        return
+
+    if action == "discard_subtask_drafts":
+        proposals_by_task = st.session_state.get(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        _discard_task_ai_state(
+            proposals_by_task,
+            None,
+            errors_by_task,
+            task_id,
+            scope="drafts",
+        )
+        st.rerun()
+        return
+
+    if action == "discard_ai_generation":
+        proposals_by_task = st.session_state.get(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        alignments_by_task = st.session_state.get(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        _discard_task_ai_state(
+            proposals_by_task,
+            alignments_by_task,
+            errors_by_task,
+            task_id,
+            scope="all",
+        )
+        st.rerun()
+        return
+
+    if action == "apply_subtasks":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        proposals = _subtask_proposals_from_payload(payload, task_id)
+        if not proposals:
+            st.warning(
+                ui.get(
+                    "kb_no_selected_drafts",
+                    "Select at least one draft to apply.",
+                )
+            )
+            return
+        card = payload.get("card")
+        if isinstance(card, dict):
+            updated_task = _apply_task_update(task, card)
+            if updated_task is None:
+                st.warning(ui["kb_title_required"])
+                return
+            sections[section][idx] = updated_task
+        updated = apply_kanban_subtask_proposals(
+            sections,
+            task_id,
+            proposals,
+        )
+        sections.clear()
+        sections.update(updated)
+        _auto_save(profile, sections)
+        proposals_by_task = st.session_state.get(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        if isinstance(proposals_by_task, dict):
+            proposals_by_task.pop(task_id, None)
+        alignments_by_task = st.session_state.get(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        if isinstance(alignments_by_task, dict):
+            alignments_by_task.pop(task_id, None)
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        _discard_task_ai_state(
+            proposals_by_task,
+            alignments_by_task,
+            errors_by_task,
+            task_id,
+            scope="all",
+        )
+        st.rerun()
         return
 
     if action in ("request_done_ingest", "ai_done_ingest"):
@@ -710,13 +1124,7 @@ board_event = st_kanban_board(
         "auto_dates": auto_dates,
         "focus_mode": focus_mode,
     },
-    ai_state={
-        "status": (
-            ui["llm_configured"].format(label=llm_client.model_label())
-            if llm_client.is_configured()
-            else ui["ai_not_configured"]
-        )
-    },
+    ai_state=_board_ai_state(selected, ui),
     key=f"kanban_board_{selected}",
     height=820,
 )
@@ -742,8 +1150,6 @@ else:
         auto_dates=auto_dates,
         ui=ui,
     )
-    _render_gap_previews(selected, ui)
-    _render_subtask_proposals(selected, sections, ui)
 
 st.divider()
 

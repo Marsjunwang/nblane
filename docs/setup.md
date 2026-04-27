@@ -34,8 +34,8 @@ nblane reads these environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_API_KEY` | *(empty)* | API key — **required** to enable AI features |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` | API base URL |
-| `LLM_MODEL` | `gpt-4o` | Model name |
+| `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API base URL |
+| `LLM_MODEL` | `qwen3.6-plus` | Model name |
 | `LLM_REPLY_LANG` | `en` | Reply language: `en` or `zh`. Also switches **Gap Analysis** UI copy and the AI system prompt (use `en` for international demos). |
 | `NBLANE_AUTH_FILE` | *(empty)* | Streamlit Web login config. Empty keeps local development mode; public deployments should point at private `auth/users.yaml`. |
 | `NBLANE_DATA_GIT_AUTOCOMMIT` | *(empty)* | Set to `1` to commit data-file writes automatically. |
@@ -49,8 +49,8 @@ Create a `.env` file at the repo root (already in `.gitignore`):
 
 ```bash
 LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.6-plus
 ```
 
 nblane loads this file automatically on startup via `python-dotenv`.
@@ -59,7 +59,8 @@ nblane loads this file automatically on startup via `python-dotenv`.
 
 ```bash
 export LLM_API_KEY=sk-...
-export LLM_MODEL=gpt-4o
+export LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export LLM_MODEL=qwen3.6-plus
 streamlit run app.py
 ```
 
@@ -71,7 +72,7 @@ Any OpenAI-compatible endpoint works. Set `LLM_BASE_URL` to the provider's base 
 # Alibaba DashScope (阿里云百炼)
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_API_KEY=sk-xxx        # your DASHSCOPE_API_KEY
-LLM_MODEL=qwen-plus       # model list: https://help.aliyun.com/model-studio/getting-started/models
+LLM_MODEL=qwen3.6-plus    # model list: https://help.aliyun.com/model-studio/getting-started/models
 
 # DeepSeek
 LLM_BASE_URL=https://api.deepseek.com/v1

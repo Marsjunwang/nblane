@@ -85,7 +85,7 @@
     .kb-button.primary:hover, .kb-icon-button.primary:hover { background: var(--accent-strong); }
     .kb-icon-button { width: 38px; padding: 0; font-size: 1.15rem; }
     .kb-status { color: var(--muted); font-size: .84rem; }
-    .kb-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; align-items: start; }
+    .kb-workspace { display: grid; gap: 12px; align-items: start; }
     .kb-board {
       display: grid;
       grid-template-columns: repeat(4, minmax(210px, 1fr));
@@ -137,18 +137,100 @@
     }
     .kb-card:active { cursor: grabbing; }
     .kb-card.is-selected { border-color: rgba(33, 104, 91, .75); box-shadow: 0 0 0 3px rgba(33, 104, 91, .12); }
+    .kb-card.is-editing { cursor: default; }
     .kb-card.is-crystallized { background: #f2f7f5; }
+    .kb-card-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: start;
+      min-height: 30px;
+    }
     .kb-card-title { overflow-wrap: anywhere; font-size: .9rem; font-weight: 820; line-height: 1.25; }
+    .kb-title-input {
+      width: 100%;
+      min-height: 32px;
+      padding: 5px 7px;
+      border: 1px solid rgba(33, 104, 91, .45);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: .9rem;
+      font-weight: 820;
+      line-height: 1.2;
+    }
+    .kb-head-actions, .kb-quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .kb-head-button, .kb-action-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 800;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .kb-head-button { min-width: 28px; padding: 0 7px; }
+    .kb-action-chip { padding: 0 7px; }
+    .kb-head-button:hover, .kb-action-chip:hover {
+      border-color: rgba(33, 104, 91, .55);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .kb-head-button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    .kb-head-button.danger {
+      border-color: rgba(159, 29, 29, .35);
+      color: var(--danger);
+    }
+    .kb-head-button.danger:hover {
+      border-color: rgba(159, 29, 29, .65);
+      background: #fff0f0;
+    }
+    .kb-quick-actions { justify-content: flex-start; min-height: 28px; }
     .kb-card-context { color: var(--muted); display: -webkit-box; overflow: hidden; font-size: .78rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
     .kb-card-meta, .kb-chips, .kb-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .kb-read-body { display: grid; gap: 5px; }
+    .kb-read-extra { display: grid; gap: 8px; }
+    .kb-read-line {
+      color: var(--muted);
+      display: -webkit-box;
+      overflow: hidden;
+      font-size: .78rem;
+      line-height: 1.35;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow-wrap: anywhere;
+    }
+    .kb-read-line strong { color: var(--ink); font-weight: 780; }
+    .kb-read-subtasks { display: grid; gap: 5px; margin-top: 1px; }
+    .kb-check-row.is-compact { font-size: .78rem; min-height: 22px; }
+    .kb-check-row.is-compact input { height: 15px; width: 15px; }
     .kb-empty { color: var(--muted); font-size: .84rem; padding: 10px 2px; }
     .kb-detail {
-      position: sticky;
-      top: 64px;
       display: grid;
       gap: 10px;
-      max-height: calc(100vh - 84px);
-      overflow: auto;
+      margin-top: 4px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      cursor: default;
+    }
+    .kb-detail-empty {
+      display: grid;
+      gap: 10px;
       padding: 12px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -164,6 +246,40 @@
     .kb-check-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; min-height: 26px; color: var(--ink); font-size: .84rem; line-height: 1.35; overflow-wrap: anywhere; }
     .kb-check-row input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
     .kb-new-subtask { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 7px; }
+    .kb-subtask-edit-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 32px; gap: 7px; align-items: center; }
+    .kb-subtask-edit-row input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+    .kb-subtask-edit-row input[type="text"] {
+      min-height: 32px;
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .kb-delete-mini {
+      width: 32px;
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--danger);
+      font-weight: 850;
+    }
+    .kb-proposals { display: grid; gap: 7px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+    .kb-proposal-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 32px; gap: 8px; align-items: start; min-height: 34px; }
+    .kb-proposal-body { display: grid; gap: 5px; min-width: 0; }
+    .kb-proposal-row input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+    .kb-proposal-row input[type="text"] {
+      width: 100%;
+      min-height: 32px;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .kb-proposal-meta { color: var(--muted); font-size: .76rem; line-height: 1.35; overflow-wrap: anywhere; }
     .kb-chip {
       display: inline-flex;
       align-items: center;
@@ -182,17 +298,53 @@
     }
     .kb-chip.warn { border-color: #ead5ab; background: #fff7e8; color: var(--warn); }
     .kb-chip.action { cursor: pointer; }
+    .kb-alignment { display: grid; gap: 8px; padding: 9px; border: 1px solid #d8d0e8; border-radius: 8px; background: #f6f3fb; }
+    .kb-alignment-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; }
+    .kb-alignment-row input[type="radio"],
+    .kb-alignment-row input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
+    .kb-alignment-row strong { display: block; font-size: .82rem; line-height: 1.25; }
+    .kb-alignment-body { display: grid; gap: 6px; min-width: 0; }
+    .kb-alignment-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .kb-alignment input[type="text"],
+    .kb-alignment select,
+    .kb-alignment textarea {
+      min-height: 58px;
+      width: 100%;
+      padding: 7px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+      resize: vertical;
+    }
+    .kb-alignment input[type="text"],
+    .kb-alignment select { min-height: 32px; resize: none; }
+    .kb-gap { display: grid; gap: 6px; padding: 9px; border: 1px solid #c8d7e3; border-radius: 8px; background: #f1f6fa; }
+    .kb-gap .kb-section-title { color: var(--info); }
     .kb-alert { padding: 9px 10px; border-radius: 8px; background: var(--soft); color: var(--muted); font-size: .84rem; line-height: 1.4; }
     .kb-uncrystallized { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #ead5ab; border-radius: 8px; background: #fff9ed; }
-    @media (max-width: 1100px) {
-      .kb-workspace { grid-template-columns: 1fr; }
-      .kb-detail { position: relative; top: 0; max-height: none; }
+    .kb-focus-layout { display: grid; grid-template-columns: minmax(360px, 1.8fr) minmax(280px, .9fr); gap: 12px; align-items: start; }
+    .kb-focus-main .kb-column { min-height: 620px; }
+    .kb-focus-side { display: grid; gap: 8px; min-width: 0; }
+    .kb-focus-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .kb-tab {
+      min-height: 32px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: .8rem;
+      font-weight: 780;
     }
+    .kb-tab.is-active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
+    .kb-focus-side .kb-column { min-height: 460px; }
     @media (max-width: 760px) {
       .kb-topbar { grid-template-columns: 1fr; }
       .kb-quick { grid-template-columns: 1fr; }
       .kb-icon-button { width: 100%; }
       .kb-board { grid-template-columns: repeat(4, minmax(230px, 82vw)); }
+      .kb-focus-layout { grid-template-columns: 1fr; }
       .kb-grid-2 { grid-template-columns: 1fr; }
     }
   </style>
@@ -208,33 +360,79 @@
     const DEFAULT_LABELS = {
       add: "Add",
       ai_done: "Done -> evidence",
+      ai_done_short: "Evd",
       ai_gap: "Analyze gap",
+      ai_gap_short: "Gap",
       ai_subtasks: "Draft subtasks",
+      ai_subtasks_short: "Sub",
+      alignment_cancel: "Cancel",
+      alignment_assumptions: "Assumptions",
+      alignment_confirm: "Use this understanding",
+      alignment_custom: "Add detail or correction",
+      alignment_custom_only: "Use only my supplement",
+      alignment_goal: "Goal",
+      alignment_label: "Label",
+      alignment_other: "Other",
+      alignment_other_hint: "Use only my note below",
+      alignment_required: "Choose an understanding or add a clarification.",
+      alignment_status: "Understanding ready",
+      alignment_style: "Subtask style",
+      alignment_title: "Confirm task understanding",
+      artifact: "Artifact",
       blocked_by: "Blocked by",
+      cancel: "Cancel",
+      cancel_short: "Cancel",
       completed_on: "Completed",
       crystallize: "Mark crystallized",
+      crystallize_short: "Cry",
       crystallized: "Crystallized",
+      delete_confirm: "Delete this task?",
+      delete_short: "x",
+      discard_all_drafts: "Discard all",
+      discard_draft: "Discard draft",
+      delete_subtask: "Delete subtask",
       delete_task: "Delete task",
       details: "Details",
       done_uncrystallized: "Done, not crystallized",
+      edit: "Edit",
+      edit_short: "Edit",
       empty: "No tasks",
+      error: "Error",
+      gap_missing: "Gaps remain",
+      gap_next: "Next steps",
+      gap_ok: "Can solve",
+      gap_preview: "Task gap preview",
       links: "Links",
       new_subtask: "New subtask",
+      no_selected_drafts: "Select at least one draft to apply.",
       outcome: "Outcome",
+      proposals: "AI proposals",
+      apply_subtasks: "Apply selected",
+      draft_status: "{count} drafts",
+      granularity: "Granularity",
+      granularity_checklist: "Checklist",
+      granularity_implementation: "Implementation",
+      granularity_milestone: "Milestone",
+      ai_error_status: "AI error",
       quick_add: "Quick add",
       save: "Save",
+      save_short: "Save",
       section: "Section",
       started_on: "Started",
       subtasks: "Subtasks",
       title: "Title",
       untitled: "Untitled",
+      verification: "Verification",
       why: "Why",
       context: "Context",
     };
     let args = {};
     let board = [];
     let selectedId = "";
+    let editingId = "";
+    let focusSection = "";
     let quickSection = "";
+    let clickTimer = 0;
     let eventSeq = 0;
 
     function send(type, data) {
@@ -274,6 +472,12 @@
     function settings() {
       return asObj(args.settings || asObj(args.payload).settings);
     }
+    function aiState() {
+      return asObj(args.ai_state || asObj(args.payload).ai_state);
+    }
+    function focusMode() {
+      return Boolean(settings().focus_mode);
+    }
     function sectionOrder(rawSections) {
       const configured = asArr(settings().section_order || settings().sections)
         .map(text)
@@ -311,6 +515,43 @@
           done: Boolean(obj.done || obj.checked || obj.completed),
         };
       });
+    }
+    function normalizeProposals(taskId) {
+      const byTask = asObj(aiState().proposals_by_task);
+      return asArr(byTask[taskId]).map((item, index) => {
+        if (typeof item === "string") {
+          return { id: `proposal-${index}`, title: item };
+        }
+        const obj = asObj(item);
+        return {
+          id: text(obj.id || obj.key || `proposal-${index}`),
+          title: text(obj.title || obj.text || obj.name || ""),
+          reason: text(obj.reason || ""),
+          gap_node_id: text(obj.gap_node_id || obj.node_id || ""),
+          artifact: text(obj.artifact || obj.deliverable || obj.output || ""),
+          verification: text(obj.verification || obj.verify || obj.evidence || obj.validation || ""),
+        };
+      }).filter((item) => item.title);
+    }
+    function normalizeSubtaskError(taskId) {
+      return asObj(asObj(aiState().subtask_errors_by_task)[taskId]);
+    }
+    function normalizeGap(taskId) {
+      return asObj(asObj(aiState().gaps_by_task)[taskId]);
+    }
+    function normalizeAlignments(taskId) {
+      const byTask = asObj(aiState().alignment_by_task);
+      return asArr(byTask[taskId]).map((item, index) => {
+        const obj = asObj(item);
+        const assumptions = asArr(obj.assumptions).map(text).filter(Boolean);
+        return {
+          id: text(obj.id || obj.key || `alignment-${index}`),
+          label: text(obj.label || obj.title || `Option ${index + 1}`),
+          goal: text(obj.goal || obj.understanding || ""),
+          assumptions,
+          subtask_style: text(obj.subtask_style || obj.style || ""),
+        };
+      }).filter((item) => item.label || item.goal);
     }
     function normalizeTask(task, section, index) {
       const obj = asObj(task);
@@ -413,67 +654,239 @@
       emit("move_card", { card_id: taskId, from_section: fromSection, to_section: toSection });
       render();
     }
-    function renderCard(task) {
-      const done = task.subtasks.filter((item) => item.done).length;
-      const meta = [];
-      if (task.subtasks.length) meta.push(`<span class="kb-pill">${done}/${task.subtasks.length} ${esc(label("subtasks"))}</span>`);
-      if (task.links.length) meta.push(`<span class="kb-pill">${task.links.length} ${esc(label("links"))}</span>`);
-      if (task.crystallized) meta.push(`<span class="kb-pill">${esc(label("crystallized"))}</span>`);
-      return `
-        <button
-          class="kb-card ${task.id === selectedId ? "is-selected" : ""} ${task.crystallized ? "is-crystallized" : ""}"
-          draggable="true"
-          data-task-id="${attr(task.id)}"
-          type="button"
-        >
-          <span class="kb-card-title">${esc(task.title || label("untitled"))}</span>
-          ${task.context ? `<span class="kb-card-context">${esc(task.context)}</span>` : ""}
-          <span class="kb-card-meta">${meta.join("")}</span>
-        </button>
-      `;
+    function fieldLine(key, value) {
+      const clean = text(value).trim();
+      if (!clean) return "";
+      return `<div class="kb-read-line"><strong>${esc(label(key))}</strong> ${esc(clean)}</div>`;
     }
-    function renderColumn(section) {
-      return `
-        <section class="kb-column" data-section="${attr(section.key)}">
-          <div class="kb-column-head">
-            <strong>${esc(section.label)}</strong>
-            <span class="kb-count">${section.tasks.length}</span>
-          </div>
-          <div class="kb-card-list" data-section="${attr(section.key)}">
-            ${section.tasks.length ? section.tasks.map(renderCard).join("") : `<div class="kb-empty">${esc(label("empty"))}</div>`}
-          </div>
-        </section>
-      `;
+    function readFieldsHtml(task) {
+      const add = (rows, key, value) => {
+        const html = fieldLine(key, value);
+        if (html) rows.push(html);
+      };
+      const preferred = {
+        "Doing": ["context", "started_on", "blocked_by", "why", "outcome", "completed_on"],
+        "Queue": ["why", "blocked_by", "context", "outcome", "started_on", "completed_on"],
+        "Done": ["outcome", "completed_on", "context", "why", "blocked_by", "started_on"],
+      };
+      const values = {
+        context: task.context,
+        why: task.why,
+        blocked_by: task.blocked_by,
+        outcome: task.outcome,
+        started_on: task.started_on,
+        completed_on: task.completed_on,
+      };
+      const order = preferred[task.section] || ["context", "why", "blocked_by", "outcome", "started_on", "completed_on"];
+      const rows = [];
+      order.forEach((key) => add(rows, key, values[key]));
+      return rows.length ? `<div class="kb-read-body">${rows.join("")}</div>` : "";
     }
-    function detailHtml(task) {
-      if (!task) {
-        return `<aside class="kb-detail"><div class="kb-alert">${esc(label("empty"))}</div></aside>`;
-      }
-      const links = task.links.length
-        ? task.links.map((item) => `<a class="kb-chip" href="${attr(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.label || item.url)}</a>`).join("")
-        : `<span class="kb-status">${esc(label("empty"))}</span>`;
-      const subtasks = task.subtasks.length
-        ? task.subtasks.map((item) => `
-            <label class="kb-check-row">
-              <input type="checkbox" data-subtask-index="${item.index}" ${item.done ? "checked" : ""}>
+    function compactSubtasksHtml(task, limit) {
+      if (!task.subtasks.length) return "";
+      const visible = task.subtasks.slice(0, limit);
+      const remaining = task.subtasks.length - visible.length;
+      return `
+        <div class="kb-read-subtasks" data-subtask-task="${attr(task.id)}">
+          ${visible.map((item) => `
+            <label class="kb-check-row is-compact">
+              <input type="checkbox" data-subtask-index="${item.index}" data-subtask-title="${attr(item.title)}" ${item.done ? "checked" : ""}>
               <span>${esc(item.title || "·")}</span>
             </label>
-          `).join("")
-        : `<div class="kb-status">${esc(label("empty"))}</div>`;
+          `).join("")}
+          ${remaining > 0 ? `<span class="kb-status">+${remaining}</span>` : ""}
+        </div>
+      `;
+    }
+    function linksHtml(task) {
+      return task.links.length
+        ? task.links.map((item) => `<a class="kb-chip" href="${attr(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.label || item.url)}</a>`).join("")
+        : `<span class="kb-status">${esc(label("empty"))}</span>`;
+    }
+    function proposalBlockHtml(task) {
+      const proposals = normalizeProposals(task.id);
+      if (!proposals.length) return "";
+      return `
+        <div class="kb-proposals">
+          <div class="kb-section-title">${esc(label("proposals"))}</div>
+          ${proposals.map((item, index) => `
+            <div class="kb-proposal-row">
+              <input type="checkbox" data-proposal-check="${index}" checked>
+              <div class="kb-proposal-body">
+                <input type="text" data-proposal-title="${index}" value="${attr(item.title)}">
+                ${item.reason ? `<div class="kb-proposal-meta">${esc(item.reason)}</div>` : ""}
+                ${item.artifact ? `<div class="kb-proposal-meta"><strong>${esc(label("artifact"))}</strong> ${esc(item.artifact)}</div>` : ""}
+                ${item.verification ? `<div class="kb-proposal-meta"><strong>${esc(label("verification"))}</strong> ${esc(item.verification)}</div>` : ""}
+              </div>
+              <button type="button" class="kb-delete-mini" data-action="discard_subtask_draft" data-proposal-index="${index}" title="${attr(label("discard_draft"))}">x</button>
+            </div>
+          `).join("")}
+          <div class="kb-actions">
+            <button type="button" class="kb-button primary" data-action="apply_subtasks">${esc(label("apply_subtasks"))}</button>
+            <button type="button" class="kb-button" data-action="discard_subtask_drafts">${esc(label("discard_all_drafts"))}</button>
+          </div>
+        </div>
+      `;
+    }
+    function subtaskErrorBlockHtml(task) {
+      const error = normalizeSubtaskError(task.id);
+      if (!Object.keys(error).length) return "";
+      const counts = [];
+      if (Number(error.raw_count || 0) > 0) counts.push(`raw ${Number(error.raw_count)}`);
+      if (Number(error.filtered_count || 0) > 0) counts.push(`filtered ${Number(error.filtered_count)}`);
+      return `
+        <div class="kb-alert">
+          <strong>${esc(label("error"))}</strong> ${esc(error.message || error.error_key || "")}
+          ${counts.length ? `<span class="kb-status"> ${esc(counts.join(" / "))}</span>` : ""}
+        </div>
+      `;
+    }
+    function alignmentBlockHtml(task) {
+      const alignments = normalizeAlignments(task.id);
+      if (!alignments.length) return "";
+      return `
+        <div class="kb-alignment">
+          <div class="kb-section-title">${esc(label("alignment_title"))}</div>
+          ${alignments.map((item, index) => `
+            <div class="kb-alignment-row" data-alignment-card="${index}">
+              <input type="checkbox" data-alignment-index="${index}" ${index === 0 ? "checked" : ""}>
+              <div class="kb-alignment-body">
+                <input type="text" data-alignment-label value="${attr(item.label)}" aria-label="${attr(label("alignment_label"))}">
+                <textarea data-alignment-goal placeholder="${attr(label("alignment_goal"))}">${esc(item.goal)}</textarea>
+                <textarea data-alignment-assumptions placeholder="${attr(label("alignment_assumptions"))}">${esc(item.assumptions.join("\n"))}</textarea>
+                <input type="text" data-alignment-style value="${attr(item.subtask_style)}" placeholder="${attr(label("alignment_style"))}">
+              </div>
+            </div>
+          `).join("")}
+          <label class="kb-alignment-row">
+            <input type="checkbox" data-alignment-custom-only>
+            <span>
+              <strong>${esc(label("alignment_custom_only"))}</strong>
+              <span class="kb-read-line">${esc(label("alignment_other_hint"))}</span>
+            </span>
+          </label>
+          <label class="kb-field">
+            <span>${esc(label("granularity"))}</span>
+            <select data-alignment-granularity>
+              <option value="milestone" selected>${esc(label("granularity_milestone"))}</option>
+              <option value="checklist">${esc(label("granularity_checklist"))}</option>
+              <option value="implementation">${esc(label("granularity_implementation"))}</option>
+            </select>
+          </label>
+          <textarea data-alignment-custom placeholder="${attr(label("alignment_custom"))}"></textarea>
+          <div class="kb-actions">
+            <button type="button" class="kb-button primary" data-action="confirm_alignment">${esc(label("alignment_confirm"))}</button>
+            <button type="button" class="kb-button" data-action="cancel_alignment">${esc(label("alignment_cancel"))}</button>
+          </div>
+        </div>
+      `;
+    }
+    function aiStatusHtml(task) {
+      const statuses = [];
+      const proposals = normalizeProposals(task.id);
+      const alignments = normalizeAlignments(task.id);
+      const error = normalizeSubtaskError(task.id);
+      if (alignments.length) statuses.push(label("alignment_status"));
+      if (proposals.length) statuses.push(label("draft_status").replace("{count}", String(proposals.length)));
+      if (Object.keys(error).length) statuses.push(label("ai_error_status"));
+      return statuses.length ? `<span class="kb-card-meta">${statuses.map((item) => `<span class="kb-pill">${esc(item)}</span>`).join("")}</span>` : "";
+    }
+    function aiPanelHtml(task, expanded) {
+      if (!expanded) return aiStatusHtml(task);
+      return `
+        ${gapBlockHtml(task)}
+        ${alignmentBlockHtml(task)}
+        ${subtaskErrorBlockHtml(task)}
+        ${proposalBlockHtml(task)}
+      `;
+    }
+    function gapBlockHtml(task) {
+      const gap = normalizeGap(task.id);
+      if (!Object.keys(gap).length) return "";
+      if (gap.error) {
+        return `<div class="kb-gap"><div class="kb-section-title">${esc(label("gap_preview"))}</div><div class="kb-alert">${esc(gap.error)}</div></div>`;
+      }
+      const matches = asArr(gap.top_matches).slice(0, 3);
+      const gaps = asArr(gap.gaps).slice(0, 4);
+      const next = asArr(gap.next_steps).slice(0, 4);
+      return `
+        <div class="kb-gap">
+          <div class="kb-section-title">${esc(label("gap_preview"))}</div>
+          <div class="kb-chips">
+            <span class="kb-chip">${esc(gap.can_solve ? label("gap_ok") : label("gap_missing"))}</span>
+            ${matches.map((item) => `<span class="kb-chip">${esc(item.id || item.label || "")}</span>`).join("")}
+            ${gaps.map((item) => `<span class="kb-chip warn">${esc(item)}</span>`).join("")}
+          </div>
+          ${next.length ? `<div class="kb-read-line"><strong>${esc(label("gap_next"))}</strong> ${esc(next.join("; "))}</div>` : ""}
+        </div>
+      `;
+    }
+    function actionButton(action, shortKey, fullKey, extraClass) {
+      const full = label(fullKey || shortKey);
+      const short = label(shortKey || fullKey);
+      return `<button type="button" class="${extraClass || "kb-action-chip"}" data-action="${attr(action)}" title="${attr(full)}" aria-label="${attr(full)}">${esc(short)}</button>`;
+    }
+    function quickActionsHtml(task) {
       const doneActions = task.section === "Done" ? `
-        <button type="button" class="kb-button" data-action="ai_done">${esc(label("ai_done"))}</button>
-        ${task.crystallized ? "" : `<button type="button" class="kb-button" data-action="crystallize">${esc(label("crystallize"))}</button>`}
+        ${actionButton("ai_done", "ai_done_short", "ai_done")}
+      ` : "";
+      const crystallizeAction = task.crystallized ? "" : actionButton("crystallize", "crystallize_short", "crystallize");
+      return `
+        <div class="kb-quick-actions">
+          ${actionButton("ai_gap", "ai_gap_short", "ai_gap")}
+          ${actionButton("ai_subtasks", "ai_subtasks_short", "ai_subtasks")}
+          ${doneActions}
+          ${crystallizeAction}
+        </div>
+      `;
+    }
+    function cardHeaderHtml(task, editing) {
+      const title = editing
+        ? `<input class="kb-title-input" data-field="title" value="${attr(task.title)}" aria-label="${attr(label("title"))}">`
+        : `<span class="kb-card-title">${esc(task.title || label("untitled"))}</span>`;
+      const editControls = editing
+        ? `${actionButton("cancel_edit", "cancel_short", "cancel", "kb-head-button")}${actionButton("save", "save_short", "save", "kb-head-button primary")}`
+        : `${actionButton("edit", "edit_short", "edit", "kb-head-button primary")}`;
+      return `
+        <div class="kb-card-head">
+          ${title}
+          <div class="kb-head-actions">
+            ${editControls}
+            ${actionButton("delete", "delete_short", "delete_task", "kb-head-button danger")}
+          </div>
+        </div>
+      `;
+    }
+    function readExtraHtml(task, expanded) {
+      const detailRows = task.details.length
+        ? `<div class="kb-read-line"><strong>${esc(label("details"))}</strong> ${esc(task.details.join("; "))}</div>`
+        : "";
+      const links = task.links.length ? `
+        <div class="kb-subtasks">
+          <div class="kb-section-title">${esc(label("links"))}</div>
+          <div class="kb-chips">${linksHtml(task)}</div>
+        </div>
       ` : "";
       return `
-        <aside class="kb-detail" data-selected-task="${attr(task.id)}">
-          <div class="kb-detail-head">
-            <strong>${esc(label("details"))}</strong>
-            <button type="button" class="kb-button primary" data-action="save">${esc(label("save"))}</button>
-          </div>
-          <label class="kb-field">
-            <span>${esc(label("title"))}</span>
-            <input data-field="title" value="${attr(task.title)}">
-          </label>
+        <div class="kb-read-extra">
+          ${detailRows}
+          ${aiPanelHtml(task, expanded)}
+          ${links}
+        </div>
+      `;
+    }
+    function detailEditHtml(task) {
+      const subtaskRows = task.subtasks.length
+        ? task.subtasks.map((item) => `
+            <div class="kb-subtask-edit-row" data-subtask-row>
+              <input type="checkbox" data-subtask-done ${item.done ? "checked" : ""}>
+              <input type="text" data-subtask-title value="${attr(item.title)}">
+              <button type="button" class="kb-delete-mini" data-action="delete_subtask" title="${attr(label("delete_subtask"))}">x</button>
+            </div>
+          `).join("")
+        : `<div class="kb-status">${esc(label("empty"))}</div>`;
+      return `
+        <div class="kb-detail">
           <label class="kb-field">
             <span>${esc(label("context"))}</span>
             <textarea data-field="context">${esc(task.context)}</textarea>
@@ -508,23 +921,87 @@
           </label>
           <div class="kb-subtasks">
             <div class="kb-section-title">${esc(label("subtasks"))}</div>
-            ${subtasks}
+            ${subtaskRows}
             <div class="kb-new-subtask">
               <input data-new-subtask placeholder="${attr(label("new_subtask"))}">
               <button type="button" class="kb-icon-button" data-action="add_subtask">+</button>
             </div>
           </div>
+          ${aiPanelHtml(task, true)}
           <div class="kb-subtasks">
             <div class="kb-section-title">${esc(label("links"))}</div>
-            <div class="kb-chips">${links}</div>
+            <div class="kb-chips">${linksHtml(task)}</div>
           </div>
-          <div class="kb-actions">
-            <button type="button" class="kb-button" data-action="ai_gap">${esc(label("ai_gap"))}</button>
-            <button type="button" class="kb-button" data-action="ai_subtasks">${esc(label("ai_subtasks"))}</button>
-            ${doneActions}
-            <button type="button" class="kb-button" data-action="delete">${esc(label("delete_task"))}</button>
+        </div>
+      `;
+    }
+    function renderCard(task) {
+      const done = task.subtasks.filter((item) => item.done).length;
+      const meta = [];
+      if (task.subtasks.length) meta.push(`<span class="kb-pill">${done}/${task.subtasks.length} ${esc(label("subtasks"))}</span>`);
+      if (task.links.length) meta.push(`<span class="kb-pill">${task.links.length} ${esc(label("links"))}</span>`);
+      if (task.crystallized) meta.push(`<span class="kb-pill">${esc(label("crystallized"))}</span>`);
+      const selected = task.id === selectedId;
+      const editing = selected && task.id === editingId;
+      return `
+        <article
+          class="kb-card ${selected ? "is-selected" : ""} ${editing ? "is-editing" : ""} ${task.crystallized ? "is-crystallized" : ""}"
+          draggable="${editing ? "false" : "true"}"
+          data-task-id="${attr(task.id)}"
+          data-selected-task="${attr(task.id)}"
+          tabindex="0"
+        >
+          ${cardHeaderHtml(task, editing)}
+          ${readFieldsHtml(task)}
+          ${compactSubtasksHtml(task, task.subtasks.length)}
+          <span class="kb-card-meta">${meta.join("")}</span>
+          ${quickActionsHtml(task)}
+          ${editing ? detailEditHtml(task) : readExtraHtml(task, selected)}
+        </article>
+      `;
+    }
+    function renderColumn(section) {
+      return `
+        <section class="kb-column" data-section="${attr(section.key)}">
+          <div class="kb-column-head">
+            <strong>${esc(section.label)}</strong>
+            <span class="kb-count">${section.tasks.length}</span>
           </div>
-        </aside>
+          <div class="kb-card-list" data-section="${attr(section.key)}">
+            ${section.tasks.length ? section.tasks.map(renderCard).join("") : `<div class="kb-empty">${esc(label("empty"))}</div>`}
+          </div>
+        </section>
+      `;
+    }
+    function renderWorkspace() {
+      if (!focusMode()) {
+        return `<div class="kb-board">${board.map(renderColumn).join("")}</div>`;
+      }
+      const doing = board.find((section) => section.key === "Doing") || board[0];
+      if (!doing) return `<div class="kb-board"></div>`;
+      const secondary = board.filter((section) => section.key !== doing.key);
+      const selected = findTask(selectedId);
+      if (selected && selected.section !== doing.key && secondary.some((section) => section.key === selected.section)) {
+        focusSection = selected.section;
+      }
+      if (!focusSection || !secondary.some((section) => section.key === focusSection)) {
+        focusSection = secondary[0]?.key || "";
+      }
+      const active = secondary.find((section) => section.key === focusSection);
+      return `
+        <div class="kb-focus-layout">
+          <div class="kb-focus-main">${renderColumn(doing)}</div>
+          <div class="kb-focus-side">
+            <div class="kb-focus-tabs">
+              ${secondary.map((section) => `
+                <button type="button" class="kb-tab ${section.key === focusSection ? "is-active" : ""}" data-focus-section="${attr(section.key)}">
+                  ${esc(section.label)} · ${section.tasks.length}
+                </button>
+              `).join("")}
+            </div>
+            ${active ? renderColumn(active) : ""}
+          </div>
+        </div>
       `;
     }
     function renderUncrystallized() {
@@ -545,7 +1022,7 @@
       const root = document.getElementById("root");
       if (!quickSection) quickSection = board.find((s) => s.key === "Queue")?.key || board[0]?.key || "";
       if (!selectedId || !findTask(selectedId)) selectedId = board[0]?.tasks[0]?.id || "";
-      const selected = findTask(selectedId);
+      if (editingId && !findTask(editingId)) editingId = "";
       root.innerHTML = `
         <main class="kb-shell">
           <div class="kb-topbar">
@@ -556,17 +1033,59 @@
               </select>
               <button class="kb-icon-button primary" type="submit">+</button>
             </form>
-            <div class="kb-status">${esc(text(asObj(args.ai_state || asObj(args.payload).ai_state).status || ""))}</div>
+            <div class="kb-status">${esc(text(aiState().status || ""))}</div>
           </div>
           <div class="kb-workspace">
-            <div class="kb-board">${board.map(renderColumn).join("")}</div>
-            ${detailHtml(selected)}
+            ${renderWorkspace()}
           </div>
           ${renderUncrystallized()}
         </main>
       `;
       wire();
       setHeight();
+    }
+    function collectEditCard(panel, extraSubtask, skipRow) {
+      const card = {};
+      panel.querySelectorAll("[data-field]").forEach((field) => {
+        card[field.dataset.field] = field.value;
+      });
+      if (card.notes !== undefined) card.details = card.notes;
+      const subtasks = [];
+      panel.querySelectorAll("[data-subtask-row]").forEach((row) => {
+        if (row === skipRow) return;
+        const title = text(row.querySelector("[data-subtask-title]")?.value || "").trim();
+        if (!title) return;
+        subtasks.push({
+          title,
+          done: Boolean(row.querySelector("[data-subtask-done]")?.checked),
+        });
+      });
+      if (extraSubtask && text(extraSubtask.title).trim()) {
+        subtasks.push({
+          title: text(extraSubtask.title).trim(),
+          done: Boolean(extraSubtask.done),
+        });
+      }
+      card.subtasks = subtasks;
+      return card;
+    }
+    function collectReadSubtasks(cardEl) {
+      if (!cardEl) return [];
+      const wrap = cardEl.querySelector("[data-subtask-task]");
+      if (!wrap) return [];
+      return Array.from(wrap.querySelectorAll("[data-subtask-index]"))
+        .map((box) => {
+          const title = text(
+            box.dataset.subtaskTitle ||
+            box.closest("label")?.querySelector("span")?.textContent ||
+            "",
+          ).trim();
+          return { title, done: Boolean(box.checked) };
+        })
+        .filter((item) => item.title);
+    }
+    function collectReadCard(cardEl) {
+      return cardEl ? { subtasks: collectReadSubtasks(cardEl) } : {};
     }
     function wire() {
       const quick = document.querySelector(".kb-quick");
@@ -582,8 +1101,36 @@
           quickSection = event.target.value;
         });
       }
+      document.querySelectorAll("[data-focus-section]").forEach((button) => {
+        button.addEventListener("click", () => {
+          focusSection = button.dataset.focusSection;
+          render();
+        });
+      });
       document.querySelectorAll(".kb-card").forEach((card) => {
-        card.addEventListener("click", () => {
+        const isInteractive = (target) => Boolean(target.closest("input, textarea, select, button, a, label"));
+        card.addEventListener("click", (event) => {
+          if (isInteractive(event.target)) return;
+          const taskId = card.dataset.taskId;
+          window.clearTimeout(clickTimer);
+          clickTimer = window.setTimeout(() => {
+            selectedId = taskId;
+            clickTimer = 0;
+            render();
+          }, 180);
+        });
+        card.addEventListener("dblclick", (event) => {
+          if (isInteractive(event.target)) return;
+          window.clearTimeout(clickTimer);
+          clickTimer = 0;
+          selectedId = card.dataset.taskId;
+          editingId = card.dataset.taskId;
+          render();
+        });
+        card.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          if (isInteractive(event.target)) return;
+          event.preventDefault();
           selectedId = card.dataset.taskId;
           render();
         });
@@ -599,6 +1146,10 @@
           moveTask(draggedId, column ? column.dataset.section : "", card.dataset.taskId);
         });
         card.addEventListener("dragstart", (event) => {
+          if (isInteractive(event.target)) {
+            event.preventDefault();
+            return;
+          }
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", card.dataset.taskId);
         });
@@ -618,42 +1169,119 @@
       document.querySelectorAll("[data-crystallize-id]").forEach((button) => {
         button.addEventListener("click", () => emit("crystallize_card", { card_id: button.dataset.crystallizeId }));
       });
-      const panel = document.querySelector(".kb-detail[data-selected-task]");
-      if (!panel) return;
-      const taskId = panel.dataset.selectedTask;
-      panel.querySelectorAll("[data-subtask-index]").forEach((box) => {
+      document.querySelectorAll("[data-subtask-task] [data-subtask-index]").forEach((box) => {
         box.addEventListener("change", () => {
-          emit("toggle_subtask", {
+          const wrap = box.closest("[data-subtask-task]");
+          const taskId = wrap ? wrap.dataset.subtaskTask : "";
+          if (!taskId) return;
+          emit("edit_card", {
             card_id: taskId,
-            subtask_index: Number(box.dataset.subtaskIndex),
-            done: box.checked,
+            card: collectReadCard(box.closest(".kb-card")),
           });
         });
       });
-      panel.querySelectorAll("[data-action]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const action = button.dataset.action;
-          if (action === "save") {
-            const card = {};
-            panel.querySelectorAll("[data-field]").forEach((field) => {
-              card[field.dataset.field] = field.value;
-            });
-            emit("edit_card", { card_id: taskId, card });
-          } else if (action === "add_subtask") {
-            const input = panel.querySelector("[data-new-subtask]");
-            const title = input ? input.value.trim() : "";
-            if (title) emit("add_subtask", { card_id: taskId, title });
-          } else if (action === "ai_gap") {
-            emit("request_gap", { card_id: taskId });
-          } else if (action === "ai_subtasks") {
-            emit("request_subtasks", { card_id: taskId });
-          } else if (action === "ai_done") {
-            emit("request_done_ingest", { card_id: taskId });
-          } else if (action === "crystallize") {
-            emit("crystallize_card", { card_id: taskId });
-          } else if (action === "delete") {
-            emit("delete_task", { card_id: taskId });
-          }
+      document.querySelectorAll("[data-selected-task]").forEach((panel) => {
+        const taskId = panel.dataset.selectedTask;
+        panel.querySelectorAll("[data-action]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const action = button.dataset.action;
+            if (action === "save") {
+              const card = collectEditCard(panel);
+              editingId = "";
+              emit("edit_card", { card_id: taskId, card });
+            } else if (action === "edit") {
+              selectedId = taskId;
+              editingId = taskId;
+              render();
+            } else if (action === "cancel_edit") {
+              editingId = "";
+              render();
+            } else if (action === "add_subtask") {
+              const input = panel.querySelector("[data-new-subtask]");
+              const title = input ? input.value.trim() : "";
+              if (title) {
+                const card = collectEditCard(panel, { title, done: false });
+                editingId = taskId;
+                emit("edit_card", { card_id: taskId, card });
+              }
+            } else if (action === "delete_subtask") {
+              const row = button.closest("[data-subtask-row]");
+              const card = collectEditCard(panel, null, row);
+              editingId = taskId;
+              emit("edit_card", { card_id: taskId, card });
+            } else if (action === "discard_subtask_draft") {
+              const index = Number(button.dataset.proposalIndex);
+              emit("discard_subtask_draft", { card_id: taskId, index });
+            } else if (action === "discard_subtask_drafts") {
+              emit("discard_subtask_drafts", { card_id: taskId });
+            } else if (action === "apply_subtasks") {
+              const drafts = Array.from(panel.querySelectorAll("[data-proposal-title]"))
+                .map((input) => {
+                  const index = Number(input.dataset.proposalTitle);
+                  const check = panel.querySelector(`[data-proposal-check="${input.dataset.proposalTitle}"]`);
+                  return {
+                    index,
+                    title: input.value.trim(),
+                    selected: !check || check.checked,
+                  };
+                });
+              const titles = drafts
+                .filter((draft) => draft.selected && draft.title)
+                .map((draft) => draft.title);
+              if (!titles.length) {
+                window.alert(label("no_selected_drafts"));
+                return;
+              }
+              const cardEl = panel.closest(".kb-card");
+              const card = panel.querySelector("[data-field]")
+                ? collectEditCard(panel)
+                : collectReadCard(cardEl);
+              emit("apply_subtasks", { card_id: taskId, drafts, titles, card });
+            } else if (action === "confirm_alignment") {
+              const selectedAlignments = Array.from(panel.querySelectorAll("[data-alignment-card]"))
+                .filter((row) => Boolean(row.querySelector("[data-alignment-index]")?.checked))
+                .map((row) => ({
+                  label: text(row.querySelector("[data-alignment-label]")?.value || "").trim(),
+                  goal: text(row.querySelector("[data-alignment-goal]")?.value || "").trim(),
+                  assumptions: text(row.querySelector("[data-alignment-assumptions]")?.value || "")
+                    .split(/\n+/)
+                    .map((item) => item.trim())
+                    .filter(Boolean),
+                  subtask_style: text(row.querySelector("[data-alignment-style]")?.value || "").trim(),
+                }))
+                .filter((item) => item.label || item.goal || item.assumptions.length || item.subtask_style);
+              const customOnly = panel.querySelector("[data-alignment-custom-only]");
+              const useCustomOnly = Boolean(customOnly && customOnly.checked);
+              const custom = panel.querySelector("[data-alignment-custom]");
+              const customText = custom ? custom.value.trim() : "";
+              if ((useCustomOnly && !customText) || (!useCustomOnly && !selectedAlignments.length && !customText)) {
+                window.alert(label("alignment_required"));
+                return;
+              }
+              const granularity = text(panel.querySelector("[data-alignment-granularity]")?.value || "milestone");
+              emit("confirm_subtask_alignment", {
+                card_id: taskId,
+                alignment_mode: useCustomOnly ? "custom_only" : "selected_plus_custom",
+                selected_alignments: useCustomOnly ? [] : selectedAlignments,
+                custom_context: customText,
+                granularity,
+              });
+            } else if (action === "cancel_alignment") {
+              emit("cancel_subtask_alignment", { card_id: taskId });
+            } else if (action === "ai_gap") {
+              emit("request_gap", { card_id: taskId });
+            } else if (action === "ai_subtasks") {
+              emit("request_subtasks", { card_id: taskId });
+            } else if (action === "ai_done") {
+              emit("request_done_ingest", { card_id: taskId });
+            } else if (action === "crystallize") {
+              emit("crystallize_card", { card_id: taskId });
+            } else if (action === "delete") {
+              if (!window.confirm(label("delete_confirm"))) return;
+              editingId = "";
+              emit("delete_task", { card_id: taskId });
+            }
+          });
         });
       });
     }

@@ -81,7 +81,7 @@ _LLM_PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "Qwen / DashScope": (
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        ("qwen-plus", "qwen-max", "qwen-turbo"),
+        ("qwen3.6-plus", "qwen-plus", "qwen-max", "qwen-turbo"),
     ),
     "DeepSeek": (
         "https://api.deepseek.com",

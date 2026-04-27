@@ -34,8 +34,8 @@ nblane 读取以下环境变量：
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `LLM_API_KEY` | *(空)* | API Key — **开启 AI 功能的必要条件** |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` | API 基础地址 |
-| `LLM_MODEL` | `gpt-4o` | 模型名称 |
+| `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API 基础地址 |
+| `LLM_MODEL` | `qwen3.6-plus` | 模型名称 |
 | `LLM_REPLY_LANG` | `en` | 回复语言：`en` 或 `zh`。同时控制 **Gap Analysis** 页的界面文案与 AI 系统提示（国际演示可设为 `en`）。 |
 | `NBLANE_AUTH_FILE` | *(空)* | Streamlit Web 登录用户配置。为空时保持本地开发模式；公网部署时应指向私有数据仓库中的 `auth/users.yaml`。 |
 | `NBLANE_DATA_GIT_AUTOCOMMIT` | *(空)* | 设为 `1` 时，写入数据文件后自动生成 Git commit。 |
@@ -49,8 +49,8 @@ nblane 读取以下环境变量：
 
 ```bash
 LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.6-plus
 ```
 
 nblane 启动时会通过 `python-dotenv` 自动加载该文件。
@@ -59,7 +59,8 @@ nblane 启动时会通过 `python-dotenv` 自动加载该文件。
 
 ```bash
 export LLM_API_KEY=sk-...
-export LLM_MODEL=gpt-4o
+export LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export LLM_MODEL=qwen3.6-plus
 streamlit run app.py
 ```
 
@@ -71,7 +72,7 @@ streamlit run app.py
 # 阿里云百炼（DashScope）
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_API_KEY=sk-xxx        # 阿里云百炼 API Key（即 DASHSCOPE_API_KEY）
-LLM_MODEL=qwen-plus       # 模型列表: https://help.aliyun.com/model-studio/getting-started/models
+LLM_MODEL=qwen3.6-plus    # 模型列表: https://help.aliyun.com/model-studio/getting-started/models
 
 # DeepSeek
 LLM_BASE_URL=https://api.deepseek.com/v1
