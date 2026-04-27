@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date
 
 from nblane.core import git_backup
@@ -19,12 +23,20 @@ KANBAN_SECTIONS = (
     KANBAN_QUEUE,
     KANBAN_SOMEDAY,
 )
+KANBAN_BOARD_SECTIONS = (
+    KANBAN_DOING,
+    KANBAN_QUEUE,
+    KANBAN_DONE,
+    KANBAN_SOMEDAY,
+)
 KANBAN_ARCHIVE_FILENAME = "kanban-archive.md"
 
 
 def _normalize_kanban_meta_key(raw_key: str) -> str | None:
     """Map a detail key label to a KanbanTask field name."""
     k = raw_key.strip().lower().replace(" ", "_")
+    if k in ("id", "task_id"):
+        return "id"
     if k in ("context", "why", "outcome", "started_on", "completed_on"):
         return k
     if k in ("blocked_by", "blockedby"):
@@ -46,7 +58,9 @@ def _parse_kanban_meta_value(field: str, val: str) -> object:
 
 def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
     """Write a parsed meta key into *task*."""
-    if field == "context" and isinstance(val, str):
+    if field == "id" and isinstance(val, str):
+        task.id = val.strip()
+    elif field == "context" and isinstance(val, str):
         task.context = val
     elif field == "why" and isinstance(val, str):
         task.why = val
@@ -65,6 +79,365 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
 def _kanban_skip_placeholder_title(title: str) -> bool:
     """True if this task line is the empty-column placeholder."""
     return title.strip() == "(empty)"
+
+
+def _clean_task_text(value: object) -> str:
+    """Return a stripped string for id hashing and comparisons."""
+    return str(value or "").strip()
+
+
+def _copy_kanban_task(
+    task: KanbanTask,
+    **changes: object,
+) -> KanbanTask:
+    """Return a shallow task copy with independent child lists."""
+    copied = replace(
+        task,
+        subtasks=[replace(st) for st in task.subtasks],
+        details=list(task.details),
+    )
+    if changes:
+        copied = replace(copied, **changes)
+    return copied
+
+
+def _iter_kanban_section_names(
+    sections: dict[str, list[KanbanTask]],
+) -> list[str]:
+    """Known kanban sections first, then any extension sections."""
+    ordered = list(KANBAN_SECTIONS)
+    ordered.extend(s for s in sections if s not in KANBAN_SECTIONS)
+    return ordered
+
+
+def _kanban_task_id_payload(
+    profile: str,
+    section: str,
+    task: KanbanTask,
+) -> str:
+    """Canonical task content used for deterministic legacy ids."""
+    parts = [
+        _clean_task_text(profile),
+        section,
+        _clean_task_text(task.title),
+        "1" if task.done else "0",
+        _clean_task_text(task.context),
+        _clean_task_text(task.why),
+        _clean_task_text(task.blocked_by),
+        _clean_task_text(task.outcome),
+        _clean_task_text(task.started_on),
+        _clean_task_text(task.completed_on),
+        "1" if task.crystallized else "0",
+    ]
+    for subtask in task.subtasks:
+        parts.extend(
+            [
+                "subtask",
+                "1" if subtask.done else "0",
+                _clean_task_text(subtask.title),
+            ]
+        )
+    for detail in task.details:
+        parts.extend(["detail", _clean_task_text(detail)])
+    return "\x1f".join(parts)
+
+
+def _generated_kanban_task_id(
+    profile: str,
+    section: str,
+    task: KanbanTask,
+) -> str:
+    """Generate a deterministic compact id for a legacy task."""
+    payload = _kanban_task_id_payload(profile, section, task)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+    return f"kb_{digest}"
+
+
+def _unique_kanban_task_id(base: str, used: set[str]) -> str:
+    """Return *base* or a deterministic suffixed variant not in *used*."""
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def ensure_kanban_task_ids(
+    sections: dict[str, list[KanbanTask]],
+    profile: str,
+) -> dict[str, list[KanbanTask]]:
+    """Return a copy of *sections* where every task has a stable id.
+
+    Existing non-empty ids are preserved, except duplicate ids after the
+    first occurrence are replaced with deterministic generated ids.
+    """
+    out: dict[str, list[KanbanTask]] = {}
+    used: set[str] = set()
+    for section in _iter_kanban_section_names(sections):
+        next_tasks: list[KanbanTask] = []
+        for task in sections.get(section, []):
+            raw_id = getattr(task, "id", "")
+            task_id = _clean_task_text(raw_id)
+            if not task_id or task_id in used:
+                generated = _generated_kanban_task_id(
+                    profile,
+                    section,
+                    task,
+                )
+                task_id = _unique_kanban_task_id(generated, used)
+            if task_id == raw_id:
+                task = _copy_kanban_task(task)
+            else:
+                task = _copy_kanban_task(task, id=task_id)
+            used.add(task_id)
+            next_tasks.append(task)
+        out[section] = next_tasks
+    return out
+
+
+def _apply_kanban_column_move(
+    task: KanbanTask,
+    from_section: str,
+    to_section: str,
+    auto_dates: bool,
+) -> KanbanTask:
+    """Adjust done flag and dates when a task moves between columns."""
+    moved = task
+    if to_section == KANBAN_DONE:
+        moved = replace(moved, done=True)
+        if auto_dates:
+            completed = _clean_task_text(moved.completed_on)
+            if not completed:
+                moved = replace(
+                    moved,
+                    completed_on=date.today().isoformat(),
+                )
+    elif from_section == KANBAN_DONE:
+        moved = replace(moved, done=False)
+        if auto_dates:
+            moved = replace(moved, completed_on=None)
+    if to_section == KANBAN_DOING and from_section != KANBAN_DOING:
+        if auto_dates:
+            started = _clean_task_text(moved.started_on)
+            if not started:
+                moved = replace(
+                    moved,
+                    started_on=date.today().isoformat(),
+                )
+    return moved
+
+
+def _move_value(
+    move: Mapping[str, object],
+    *keys: str,
+) -> object | None:
+    """Return the first present value in a move mapping."""
+    for key in keys:
+        if key in move:
+            return move[key]
+    return None
+
+
+def _move_string(
+    move: Mapping[str, object],
+    *keys: str,
+) -> str:
+    """Return a stripped string field from a move mapping."""
+    value = _move_value(move, *keys)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _move_int(
+    move: Mapping[str, object],
+    *keys: str,
+) -> int | None:
+    """Return an int field from a move mapping, or None."""
+    value = _move_value(move, *keys)
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _find_move_source(
+    sections: dict[str, list[KanbanTask]],
+    move: Mapping[str, object],
+) -> tuple[str, int] | None:
+    """Resolve a move source by task id or by section/index."""
+    from_section = _move_string(
+        move,
+        "from_section",
+        "source_section",
+        "from",
+        "source",
+    )
+    task_id = _move_string(move, "task_id", "id")
+    if task_id:
+        section_names = (
+            [from_section] if from_section in sections else list(sections)
+        )
+        for section in section_names:
+            for idx, task in enumerate(sections.get(section, [])):
+                if _clean_task_text(task.id) == task_id:
+                    return section, idx
+
+    from_index = _move_int(move, "from_index", "source_index")
+    if from_section and from_index is not None:
+        tasks = sections.get(from_section, [])
+        if 0 <= from_index < len(tasks):
+            return from_section, from_index
+    return None
+
+
+def apply_kanban_reorder(
+    sections: dict[str, list[KanbanTask]],
+    moves: list[Mapping[str, object]],
+    auto_dates: bool,
+) -> dict[str, list[KanbanTask]]:
+    """Apply task moves without mutating *sections*.
+
+    Each move maps either ``id``/``task_id`` or
+    ``from_section`` + ``from_index`` to a destination ``to_section``.
+    ``to_index`` is optional and means the post-removal insertion index;
+    when absent, the task is appended. Stale or malformed moves are
+    ignored.
+    """
+    out: dict[str, list[KanbanTask]] = {}
+    for section, tasks in sections.items():
+        out[section] = [_copy_kanban_task(task) for task in tasks]
+    for section in KANBAN_SECTIONS:
+        out.setdefault(section, [])
+
+    for move in moves:
+        source = _find_move_source(out, move)
+        if source is None:
+            continue
+        from_section, from_index = source
+        to_section = _move_string(
+            move,
+            "to_section",
+            "destination_section",
+            "dest_section",
+            "to",
+            "destination",
+            "dest",
+        )
+        if not to_section:
+            to_section = from_section
+        if to_section not in KANBAN_SECTIONS:
+            continue
+        to_tasks = out.setdefault(to_section, [])
+        moved = out[from_section].pop(from_index)
+        moved = _apply_kanban_column_move(
+            moved,
+            from_section,
+            to_section,
+            auto_dates,
+        )
+        to_index = _move_int(
+            move,
+            "to_index",
+            "destination_index",
+            "dest_index",
+            "position",
+        )
+        if to_index is None:
+            to_index = len(to_tasks)
+        to_index = max(0, min(to_index, len(to_tasks)))
+        to_tasks.insert(to_index, moved)
+    return out
+
+
+def kanban_order_signature(
+    sections: dict[str, list[KanbanTask]],
+    section_order: tuple[str, ...] = KANBAN_BOARD_SECTIONS,
+) -> dict[str, tuple[str, ...]]:
+    """Return a stable section -> task-id order signature."""
+    return {
+        section: tuple(
+            task.id
+            for task in sections.get(section, [])
+            if _clean_task_text(task.id)
+        )
+        for section in section_order
+    }
+
+
+def kanban_snapshot_to_moves(
+    snapshot: Mapping[str, object],
+    sections: dict[str, list[KanbanTask]],
+    section_order: tuple[str, ...] = KANBAN_BOARD_SECTIONS,
+) -> list[dict[str, object]] | None:
+    """Convert a drag-board full-order snapshot into reorder moves.
+
+    Returns ``None`` for stale/malformed snapshots, ``[]`` when the snapshot
+    is current but does not change order, and a full list of id-based moves
+    otherwise.
+    """
+    raw_columns = snapshot.get("columns")
+    if not isinstance(raw_columns, list):
+        return None
+
+    expected_sections = set(section_order)
+    seen_sections: list[str] = []
+    known_ids = [
+        task.id
+        for section in section_order
+        for task in sections.get(section, [])
+        if _clean_task_text(task.id)
+    ]
+    known_counts = Counter(known_ids)
+    if any(count != 1 for count in known_counts.values()):
+        return None
+
+    next_sig: dict[str, tuple[str, ...]] = {}
+    seen_ids: list[str] = []
+    for raw_col in raw_columns:
+        if not isinstance(raw_col, Mapping):
+            return None
+        section = _clean_task_text(raw_col.get("section", ""))
+        if section not in expected_sections or section in seen_sections:
+            return None
+        seen_sections.append(section)
+        raw_ids = raw_col.get("task_ids")
+        if not isinstance(raw_ids, list):
+            return None
+        task_ids: list[str] = []
+        for raw_id in raw_ids:
+            task_id = _clean_task_text(raw_id)
+            if not task_id:
+                return None
+            task_ids.append(task_id)
+            seen_ids.append(task_id)
+        next_sig[section] = tuple(task_ids)
+
+    if set(seen_sections) != expected_sections:
+        return None
+    if Counter(seen_ids) != known_counts:
+        return None
+
+    current_sig = kanban_order_signature(sections, section_order)
+    ordered_next_sig = {
+        section: next_sig.get(section, ())
+        for section in section_order
+    }
+    if ordered_next_sig == current_sig:
+        return []
+
+    return [
+        {
+            "id": task_id,
+            "to_section": section,
+            "to_index": index,
+        }
+        for section in section_order
+        for index, task_id in enumerate(ordered_next_sig[section])
+    ]
 
 
 def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
@@ -169,7 +542,7 @@ def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
     if current_task is not None and current_section in sections:
         sections[current_section].append(current_task)
 
-    return sections
+    return ensure_kanban_task_ids(sections, name)
 
 
 def _render_kanban_task_lines(
@@ -180,10 +553,12 @@ def _render_kanban_task_lines(
     lines: list[str] = []
     if section == KANBAN_SOMEDAY:
         lines.append(f"- {task.title}")
-        return lines
-    check = "[x]" if task.done else "[ ]"
-    lines.append(f"- {check} {task.title}")
+    else:
+        check = "[x]" if task.done else "[ ]"
+        lines.append(f"- {check} {task.title}")
     meta_pairs: list[tuple[str, str]] = []
+    if task.id.strip():
+        meta_pairs.append(("id", task.id.strip()))
     if task.context.strip():
         meta_pairs.append(("context", task.context.strip()))
     if task.why.strip():
@@ -215,6 +590,7 @@ def render_kanban(
     sections: dict[str, list[KanbanTask]],
 ) -> str:
     """Render structured sections back to kanban.md text."""
+    render_sections = ensure_kanban_task_ids(sections, name)
     today = date.today().isoformat()
     lines = [
         f"# {name} · Kanban",
@@ -227,7 +603,7 @@ def render_kanban(
     ]
     for section in KANBAN_SECTIONS:
         lines += ["", f"## {section}", ""]
-        tasks = sections.get(section, [])
+        tasks = render_sections.get(section, [])
         if not tasks:
             lines.append("- (empty)")
         else:
@@ -264,7 +640,11 @@ def append_kanban_archive(
     path = profile_dir(name) / KANBAN_ARCHIVE_FILENAME
     today = date.today().isoformat()
     body_lines: list[str] = [f"\n## Archived · {today}\n"]
-    for task in tasks:
+    archive_tasks = ensure_kanban_task_ids(
+        {KANBAN_DONE: tasks},
+        name,
+    )[KANBAN_DONE]
+    for task in archive_tasks:
         body_lines.extend(
             _render_kanban_task_lines(KANBAN_DONE, task)
         )

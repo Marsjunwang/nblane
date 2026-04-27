@@ -8,7 +8,7 @@ information architecture, first-screen rules, and backlog live in
 | Item | Value |
 |------|--------|
 | Entry | `streamlit run app.py` (repo root) |
-| Scope | `app.py` + `pages/*.py` — file-backed; **not** a hosted public app |
+| Scope | `app.py` + `pages/*.py` — file-backed private workspace; the Public Site page builds static public output, but the Streamlit app itself is **not** a hosted public app |
 
 ---
 
@@ -61,6 +61,8 @@ First-time flow (about one minute to orientation):
    the expander when ready.
 5. Use **Team View** when editing shared `team.yaml` / `product-pool.yaml`.
 6. Open **Profile Health** before exporting context or after a work session.
+7. Open **Public Site** when curating the public profile, blog, resume,
+   project/output drafts, and static build.
 
 See [web-ui-product.md §4](web-ui-product.md) for the product map.
 
@@ -109,6 +111,12 @@ See [web-ui-product.md §4](web-ui-product.md) for the product map.
   `LLM_REPLY_LANG`).
 - **Done → evidence** expander — multi-select Done tasks, optional allow-status,
   same merge path as `nblane ingest-kanban`.
+- **This round's Kanban optimization track** uses stable task ids in
+  `kanban.md` (`id` meta lines are preserved; legacy tasks receive generated
+  ids) and clarifies drag direction: vertical pointer position controls the
+  insertion index, while dragging into another column maps to a column move and
+  normal auto-date rules. During rollout, explicit move controls remain the
+  reliable fallback.
 
 ### 5.5 Team View (`pages/4_Team_View.py`)
 
@@ -122,6 +130,22 @@ See [web-ui-product.md §4](web-ui-product.md) for the product map.
 - Checks validation, generated block drift, solid/expert nodes without
   evidence, and Done tasks not yet crystallized.
 - Does not write profile files.
+
+### 5.7 Public Site (`pages/6_Public_Site.py`)
+
+- Initializes missing public-layer files for the active profile.
+- **Profile** edits public name, headline, bio, contacts, avatar, raw YAML, and
+  shows a live full-site preview.
+- **Blog** manages drafts and published posts through the React / BlockNote
+  editor shell, with structured front matter, media insertion, AI candidates,
+  publish checks, public page preview, and Streamlit-backed create/upload
+  helpers.
+- **Resume** edits `resume-source.yaml`, previews generated Markdown, and can
+  create target-specific resume drafts.
+- **Known Info** turns selected evidence into draft public projects.
+- **Build** validates and writes a static site under `dist/public/<profile>` or
+  a chosen output directory, with optional production `Base URL` for SEO and
+  sub-path deployment links.
 
 ---
 
@@ -137,9 +161,11 @@ See [web-ui-product.md §4](web-ui-product.md) for the product map.
 | Profile health / growth review | `nblane health <name>` |
 | SKILL.md generated blocks | `nblane sync <name> --write` |
 | Evidence pool / inline | `nblane evidence <name> …` |
+| Public site validation / build | `nblane public validate <name>` / `nblane public build <name>` |
+| Blog and resume drafts | `nblane public blog …`, `nblane public draft-blog …`, `nblane public draft-resume …` |
 
 Details: [profile-documents-relationship.md](profile-documents-relationship.md),
-[evidence.md](evidence.md).
+[evidence.md](evidence.md), [public-site.md](public-site.md).
 
 ---
 
@@ -148,6 +174,7 @@ Details: [profile-documents-relationship.md](profile-documents-relationship.md),
 - [Web experience design (Streamlit)](web-ui-product.md) — IA, brand, backlog
 - [Design manual §3.4](design.md) — shipped page list
 - [Architecture — Web UI language](architecture.md)
+- [Public Site, Blog, and Resume](public-site.md) — public surface v1
 - [MCP server](mcp.md) — Cursor integration (not the Streamlit UI)
 
 **中文版：** [zh/web-ui.md](zh/web-ui.md)

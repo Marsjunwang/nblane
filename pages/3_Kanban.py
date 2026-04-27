@@ -11,16 +11,32 @@ from dataclasses import replace
 import streamlit as st
 import yaml
 
+from nblane.core import gap as gap_engine
 from nblane.core import llm as llm_client
+from nblane.core.kanban_io import (
+    KANBAN_BOARD_SECTIONS,
+    apply_kanban_reorder,
+    ensure_kanban_task_ids,
+    kanban_snapshot_to_moves,
+)
+from nblane.core.kanban_ai import (
+    KanbanSubtaskProposal,
+    analyze_kanban_task_gap,
+    apply_kanban_subtask_proposals,
+    generate_kanban_subtask_proposals,
+)
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
+    KANBAN_QUEUE,
+    KanbanSubtask,
     KanbanTask,
     append_kanban_archive,
     parse_kanban,
     profile_dir,
     save_kanban,
 )
+from nblane.kanban_board_component import st_kanban_board
 from nblane.kanban_ui import render_kanban_board
 from nblane.kanban_ui._helpers import (
     _bump_kanban_widget_epoch,
@@ -45,6 +61,7 @@ from nblane.web_i18n import (
     kanban_section_label,
     kanban_ui,
 )
+from nblane.web_linkify import extract_plain_urls
 from nblane.web_auth import require_login
 from nblane.web_shared import (
     assert_files_current,
@@ -67,7 +84,10 @@ def _state_key(profile: str) -> str:
 
 def _load_into_state(profile: str) -> None:
     """Load kanban from file into session state."""
-    st.session_state[_state_key(profile)] = parse_kanban(profile)
+    st.session_state[_state_key(profile)] = ensure_kanban_task_ids(
+        parse_kanban(profile),
+        profile,
+    )
 
 
 def _get_sections(profile: str) -> dict[str, list[KanbanTask]]:
@@ -75,6 +95,10 @@ def _get_sections(profile: str) -> dict[str, list[KanbanTask]]:
     key = _state_key(profile)
     if key not in st.session_state:
         _load_into_state(profile)
+    st.session_state[key] = ensure_kanban_task_ids(
+        st.session_state[key],
+        profile,
+    )
     return st.session_state[key]
 
 
@@ -85,6 +109,9 @@ def _auto_save(
     """Persist changes to kanban.md."""
     path = profile_dir(profile) / "kanban.md"
     assert_files_current([path])
+    ensured = ensure_kanban_task_ids(sections, profile)
+    sections.clear()
+    sections.update(ensured)
     save_kanban(profile, sections)
     refresh_file_snapshots([path])
     stash_git_backup_results()
@@ -94,13 +121,502 @@ def _auto_save(
 
 def _mark_done_crystallized(
     sections: dict[str, list[KanbanTask]],
-    titles: set[str],
+    task_ids: set[str],
+    titles: set[str] | None = None,
 ) -> None:
-    """Set crystallized on Done tasks whose titles are in *titles*."""
+    """Set crystallized on Done tasks by stable ids, with title fallback."""
     done_list = sections.get(KANBAN_DONE) or []
+    fallback_titles = titles or set()
     for i, t in enumerate(done_list):
-        if t.title in titles:
+        if (t.id and t.id in task_ids) or (
+            not task_ids and t.title in fallback_titles
+        ):
             done_list[i] = replace(t, crystallized=True)
+
+
+def _board_event_key(profile: str) -> str:
+    """Session key for the latest consumed unified-board event."""
+    return f"kanban_board_event_id_{profile}"
+
+
+def _gap_results_key(profile: str) -> str:
+    """Session key for per-task gap analysis previews."""
+    return f"kanban_gap_results_{profile}"
+
+
+def _subtask_proposals_key(profile: str) -> str:
+    """Session key for per-task AI subtask proposals."""
+    return f"kanban_subtask_proposals_{profile}"
+
+
+def _task_text_fields(task: KanbanTask) -> list[str]:
+    """Text fields used to extract task links."""
+    fields = [
+        task.title,
+        task.context,
+        task.why,
+        task.blocked_by,
+        task.outcome,
+        "\n".join(task.details),
+    ]
+    fields.extend(subtask.title for subtask in task.subtasks)
+    return fields
+
+
+def _task_links(task: KanbanTask) -> list[dict[str, str]]:
+    """Return URL chips extracted from a task."""
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for field in _task_text_fields(task):
+        for url in extract_plain_urls(field):
+            if url in seen:
+                continue
+            seen.add(url)
+            out.append({"label": url, "url": url})
+    return out
+
+
+def _task_payload(task: KanbanTask) -> dict:
+    """Serialize a KanbanTask for the unified board component."""
+    return {
+        "id": task.id,
+        "title": task.title,
+        "done": task.done,
+        "context": task.context,
+        "why": task.why,
+        "blocked_by": task.blocked_by,
+        "outcome": task.outcome,
+        "started_on": task.started_on or "",
+        "completed_on": task.completed_on or "",
+        "crystallized": task.crystallized,
+        "subtasks": [
+            {
+                "id": f"subtask-{i}",
+                "index": i,
+                "title": subtask.title,
+                "done": subtask.done,
+            }
+            for i, subtask in enumerate(task.subtasks)
+        ],
+        "details": list(task.details),
+        "links": _task_links(task),
+    }
+
+
+def _sections_payload(
+    sections: dict[str, list[KanbanTask]],
+) -> dict[str, list[dict]]:
+    """Serialize all board sections for the unified board component."""
+    return {
+        section: [
+            _task_payload(task)
+            for task in sections.get(section, [])
+            if task.id
+        ]
+        for section in KANBAN_BOARD_SECTIONS
+    }
+
+
+def _board_labels(ui: dict[str, str]) -> dict[str, str]:
+    """Labels consumed by the unified board component."""
+    labels = {
+        section: kanban_section_label(section)
+        for section in KANBAN_BOARD_SECTIONS
+    }
+    labels.update(
+        {
+            "add": ui["add"],
+            "ai_done": ui["ingest_generate"],
+            "ai_gap": ui.get("kb_ai_gap", "Analyze gap"),
+            "ai_subtasks": ui.get("kb_ai_subtasks", "Draft subtasks"),
+            "blocked_by": ui["field_blocked"],
+            "completed_on": ui["field_completed"],
+            "context": ui["field_context"],
+            "crystallize": ui.get("kb_mark_crystallized", "Mark crystallized"),
+            "crystallized": ui["crystallized"],
+            "delete_task": ui["kb_delete_card"],
+            "details": ui["details"],
+            "done_uncrystallized": ui.get(
+                "kb_done_uncrystallized",
+                "Done, not crystallized",
+            ),
+            "empty": ui.get("ingest_no_done", "No tasks."),
+            "links": ui["kb_links_preview"],
+            "new_subtask": ui["kb_read_new_subtask_ph"],
+            "outcome": ui["field_outcome"],
+            "quick_add": ui.get("kb_quick_add", "+ Add task"),
+            "save": ui["save"],
+            "started_on": ui["field_started"],
+            "subtasks": ui["subtasks_label"],
+            "title": ui["task_field_title"],
+            "untitled": ui.get("kb_title_required", "Untitled"),
+            "why": ui["field_why"],
+        }
+    )
+    return labels
+
+
+def _find_task_ref(
+    sections: dict[str, list[KanbanTask]],
+    task_id: str,
+) -> tuple[str, int, KanbanTask] | None:
+    """Find a task by id in session sections."""
+    wanted = str(task_id or "").strip()
+    if not wanted:
+        return None
+    for section, tasks in sections.items():
+        for idx, task in enumerate(tasks):
+            if task.id == wanted:
+                return section, idx, task
+    return None
+
+
+def _event_task_id(event: dict, payload: dict) -> str:
+    """Return task id from an event payload or selected UI state."""
+    for key in ("card_id", "task_id", "id"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+    ui_state = event.get("ui")
+    if isinstance(ui_state, dict):
+        value = ui_state.get("selected_card_id")
+        if value:
+            return str(value)
+    return ""
+
+
+def _split_details(value: object) -> list[str]:
+    """Split a textarea value into kanban detail bullet lines."""
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    text_value = str(value or "")
+    return [
+        line.strip()
+        for line in text_value.splitlines()
+        if line.strip()
+    ]
+
+
+def _apply_task_update(
+    task: KanbanTask,
+    card: dict,
+) -> KanbanTask | None:
+    """Return updated task or None when title is invalid."""
+    changes: dict[str, object] = {}
+    if "title" in card:
+        title = str(card.get("title") or "").strip()
+        if not title:
+            return None
+        changes["title"] = title
+    for field in ("context", "why", "blocked_by", "outcome"):
+        if field in card:
+            changes[field] = str(card.get(field) or "").strip()
+    if "started_on" in card:
+        changes["started_on"] = (
+            str(card.get("started_on") or "").strip() or None
+        )
+    if "completed_on" in card:
+        changes["completed_on"] = (
+            str(card.get("completed_on") or "").strip() or None
+        )
+    if "notes" in card:
+        changes["details"] = _split_details(card.get("notes"))
+    elif "details" in card:
+        changes["details"] = _split_details(card.get("details"))
+    return replace(task, **changes) if changes else task
+
+
+def _render_gap_previews(profile: str, ui: dict[str, str]) -> None:
+    """Render stored task-level gap results below the board."""
+    results = st.session_state.get(_gap_results_key(profile), {})
+    if not isinstance(results, dict) or not results:
+        return
+    with st.expander(ui.get("kb_gap_preview_title", "Task gap previews")):
+        for task_id, result in list(results.items()):
+            if getattr(result, "error", None):
+                st.error(f"{task_id}: {result.error}")
+                continue
+            st.markdown(f"**{result.task or task_id}**")
+            c1, c2, c3 = st.columns(3)
+            c1.metric(ui.get("metric_matches", "Matches"), len(result.top_matches))
+            c2.metric(ui.get("metric_gaps", "Gaps"), len(result.gaps))
+            c3.metric(
+                ui.get("metric_verdict", "Verdict"),
+                ui.get("verdict_ok", "OK")
+                if result.can_solve
+                else ui.get("verdict_gap", "Gaps remain"),
+            )
+            if result.top_matches:
+                st.caption("Matches: " + ", ".join(
+                    f"{m.get('id', '')}" for m in result.top_matches
+                ))
+            if result.gaps:
+                st.caption("Gaps: " + ", ".join(result.gaps))
+            if result.next_steps:
+                st.markdown(gap_engine.format_text(result))
+
+
+def _render_subtask_proposals(
+    profile: str,
+    sections: dict[str, list[KanbanTask]],
+    ui: dict[str, str],
+) -> None:
+    """Render AI subtask proposals and apply selected rows."""
+    proposals_by_task = st.session_state.get(
+        _subtask_proposals_key(profile),
+        {},
+    )
+    if not isinstance(proposals_by_task, dict) or not proposals_by_task:
+        return
+    with st.expander(
+        ui.get("kb_subtask_proposals_title", "AI subtask drafts"),
+        expanded=True,
+    ):
+        for task_id, proposals in list(proposals_by_task.items()):
+            if not isinstance(proposals, list) or not proposals:
+                continue
+            found = _find_task_ref(sections, task_id)
+            task_title = found[2].title if found else task_id
+            st.markdown(f"**{task_title}**")
+            include: list[bool] = []
+            for idx, proposal in enumerate(proposals):
+                if not isinstance(proposal, KanbanSubtaskProposal):
+                    continue
+                include.append(
+                    st.checkbox(
+                        proposal.title,
+                        value=True,
+                        key=f"kb_ai_sub_{profile}_{task_id}_{idx}",
+                    )
+                )
+                if proposal.reason:
+                    st.caption(proposal.reason)
+            if st.button(
+                ui.get("kb_apply_subtasks", "Apply selected subtasks"),
+                key=f"kb_ai_sub_apply_{profile}_{task_id}",
+                type="primary",
+            ):
+                selected_props = [
+                    proposal
+                    for proposal, ok in zip(proposals, include)
+                    if ok
+                ]
+                updated = apply_kanban_subtask_proposals(
+                    sections,
+                    task_id,
+                    selected_props,
+                )
+                sections.clear()
+                sections.update(updated)
+                _auto_save(profile, sections)
+                proposals_by_task.pop(task_id, None)
+                st.rerun()
+
+
+def _handle_board_event(
+    event: dict | None,
+    *,
+    profile: str,
+    sections: dict[str, list[KanbanTask]],
+    auto_dates: bool,
+    ui: dict[str, str],
+) -> None:
+    """Apply one event emitted by the unified board component."""
+    if not isinstance(event, dict):
+        return
+    action = str(event.get("action") or "")
+    if not action:
+        return
+    event_id = str(event.get("event_id") or "")
+    event_key = _board_event_key(profile)
+    if event_id and st.session_state.get(event_key) == event_id:
+        return
+    if event_id:
+        st.session_state[event_key] = event_id
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    if action in ("move_card", "reorder"):
+        snapshot = {"columns": event.get("sections") or []}
+        moves = kanban_snapshot_to_moves(
+            snapshot,
+            sections,
+            section_order=KANBAN_BOARD_SECTIONS,
+        )
+        if moves is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        if moves:
+            updated = apply_kanban_reorder(
+                sections,
+                moves,
+                auto_dates=auto_dates,
+            )
+            sections.clear()
+            sections.update(updated)
+            _auto_save(profile, sections)
+            st.rerun()
+        return
+
+    if action == "quick_add":
+        title = str(payload.get("title") or "").strip()
+        section = str(payload.get("section") or KANBAN_QUEUE)
+        if not title:
+            st.warning(ui["kb_title_required"])
+            return
+        if section not in KANBAN_BOARD_SECTIONS:
+            section = KANBAN_QUEUE
+        task = KanbanTask(title=title)
+        if section == KANBAN_DONE:
+            task = replace(task, done=True)
+        sections.setdefault(section, []).append(task)
+        _auto_save(profile, sections)
+        st.rerun()
+
+    task_id = _event_task_id(event, payload)
+    found = _find_task_ref(sections, task_id)
+
+    if action == "edit_card":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        card = payload.get("card")
+        if not isinstance(card, dict):
+            card = payload
+        updated_task = _apply_task_update(task, card)
+        if updated_task is None:
+            st.warning(ui["kb_title_required"])
+            return
+        sections[section][idx] = updated_task
+        _auto_save(profile, sections)
+        st.rerun()
+
+    if action == "toggle_subtask":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        try:
+            subtask_index = int(payload.get("subtask_index", -1))
+        except (TypeError, ValueError):
+            subtask_index = -1
+        if not 0 <= subtask_index < len(task.subtasks):
+            return
+        next_subtasks = list(task.subtasks)
+        next_subtasks[subtask_index] = replace(
+            next_subtasks[subtask_index],
+            done=bool(payload.get("done")),
+        )
+        sections[section][idx] = replace(task, subtasks=next_subtasks)
+        _auto_save(profile, sections)
+        st.rerun()
+
+    if action == "add_subtask":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            return
+        sections[section][idx] = replace(
+            task,
+            subtasks=task.subtasks + [KanbanSubtask(title=title)],
+        )
+        _auto_save(profile, sections)
+        st.rerun()
+
+    if action == "delete_task":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, _task = found
+        sections[section].pop(idx)
+        _auto_save(profile, sections)
+        st.rerun()
+
+    if action == "crystallize_card":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        sections[section][idx] = replace(task, crystallized=True)
+        _auto_save(profile, sections)
+        st.rerun()
+
+    if action in ("request_gap", "ai_gap_ingest"):
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        with st.spinner(ui.get("spinner_gap", "Running gap analysis...")):
+            result = analyze_kanban_task_gap(
+                profile,
+                sections,
+                task_id,
+                use_rule_match=True,
+                use_llm_router=llm_client.is_configured(),
+                persist_router_keywords=False,
+            )
+        state = st.session_state.setdefault(_gap_results_key(profile), {})
+        state[task_id] = result
+        return
+
+    if action in ("request_subtasks", "ai_subtask_ingest"):
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        if not llm_client.is_configured():
+            render_llm_unavailable(ui)
+            return
+        with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
+            proposals = generate_kanban_subtask_proposals(
+                profile,
+                sections,
+                task_id,
+                use_rule_match=True,
+                use_llm_router=True,
+                persist_router_keywords=False,
+            )
+        if not proposals:
+            st.warning(ui.get("kb_no_subtask_proposals", "No subtask draft was generated."))
+            return
+        state = st.session_state.setdefault(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        state[task_id] = proposals
+        return
+
+    if action in ("request_done_ingest", "ai_done_ingest"):
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        _section, _idx, task = found
+        if not llm_client.is_configured():
+            render_llm_unavailable(ui)
+            return
+        with st.spinner(ui["ingest_spinner"]):
+            patch, err = ingest_kanban_done_json(profile, [task])
+        if err is not None:
+            st.error(ui["ingest_err"].format(msg=err))
+            return
+        if patch is not None:
+            drop_streamlit_widget_keys(
+                [
+                    f"pv_pool_{profile}",
+                    f"pv_tree_{profile}",
+                ]
+            )
+            st.session_state[f"kanban_ingest_source_done_{profile}"] = [
+                task.title
+            ]
+            st.session_state[f"kanban_ingest_source_done_ids_{profile}"] = [
+                task.id
+            ]
+            st.session_state[f"kanban_ingest_patch_{profile}"] = patch
+            st.rerun()
 
 
 # -- Page --------------------------------------------------------
@@ -184,6 +700,53 @@ mc3.metric(
 
 st.divider()
 
+# -- Unified board -----------------------------------------------
+
+board_event = st_kanban_board(
+    sections=_sections_payload(sections),
+    labels=_board_labels(ui),
+    settings={
+        "section_order": list(KANBAN_BOARD_SECTIONS),
+        "auto_dates": auto_dates,
+        "focus_mode": focus_mode,
+    },
+    ai_state={
+        "status": (
+            ui["llm_configured"].format(label=llm_client.model_label())
+            if llm_client.is_configured()
+            else ui["ai_not_configured"]
+        )
+    },
+    key=f"kanban_board_{selected}",
+    height=820,
+)
+if board_event is None:
+    st.warning(
+        ui.get(
+            "kb_board_component_missing",
+            "Unified board component is unavailable; using the legacy editor.",
+        )
+    )
+    render_kanban_board(
+        sections,
+        selected,
+        auto_dates,
+        ui,
+        focus_mode,
+    )
+else:
+    _handle_board_event(
+        board_event,
+        profile=selected,
+        sections=sections,
+        auto_dates=auto_dates,
+        ui=ui,
+    )
+    _render_gap_previews(selected, ui)
+    _render_subtask_proposals(selected, sections, ui)
+
+st.divider()
+
 # -- Done bulk ---------------------------------------------------
 
 with st.expander(ui["done_bulk_title"], expanded=False):
@@ -219,16 +782,6 @@ with st.expander(ui["done_bulk_title"], expanded=False):
                     sections[KANBAN_DONE] = done_tasks_bulk
                     _auto_save(selected, sections)
                     st.rerun()
-
-# -- Board columns -----------------------------------------------
-
-render_kanban_board(
-    sections,
-    selected,
-    auto_dates,
-    ui,
-    focus_mode,
-)
 
 # -- Done → evidence (AI ingest) ---------------------------------
 
@@ -276,6 +829,9 @@ with st.expander(ui["ingest_expander"], expanded=False):
                     st.session_state[
                         f"kanban_ingest_source_done_{selected}"
                     ] = [t.title for t in chosen]
+                    st.session_state[
+                        f"kanban_ingest_source_done_ids_{selected}"
+                    ] = [t.id for t in chosen if t.id]
                     st.session_state[
                         f"kanban_ingest_patch_{selected}"
                     ] = patch
@@ -354,6 +910,9 @@ with st.expander(ui["ingest_expander"], expanded=False):
             tree_raw = load_skill_tree_raw(selected)
             src_done = st.session_state.get(
                 f"kanban_ingest_source_done_{selected}"
+            )
+            src_done_ids = st.session_state.get(
+                f"kanban_ingest_source_done_ids_{selected}"
             )
             if isinstance(src_done, list) and src_done:
                 st.caption(
@@ -475,13 +1034,21 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
                             titles = {str(x) for x in src_done}
+                            ids = (
+                                {str(x) for x in src_done_ids}
+                                if isinstance(src_done_ids, list)
+                                else set()
+                            )
                             secs = _get_sections(selected)
-                            _mark_done_crystallized(secs, titles)
+                            _mark_done_crystallized(secs, ids, titles)
                             _auto_save(selected, secs)
                         del st.session_state[patch_key]
-                        sk = f"kanban_ingest_source_done_{selected}"
-                        if sk in st.session_state:
-                            del st.session_state[sk]
+                        for sk in (
+                            f"kanban_ingest_source_done_{selected}",
+                            f"kanban_ingest_source_done_ids_{selected}",
+                        ):
+                            if sk in st.session_state:
+                                del st.session_state[sk]
                         st.rerun()
                     else:
                         for e in apply.errors:
@@ -508,13 +1075,21 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
                             titles = {str(x) for x in src_done}
+                            ids = (
+                                {str(x) for x in src_done_ids}
+                                if isinstance(src_done_ids, list)
+                                else set()
+                            )
                             secs = _get_sections(selected)
-                            _mark_done_crystallized(secs, titles)
+                            _mark_done_crystallized(secs, ids, titles)
                             _auto_save(selected, secs)
                         del st.session_state[patch_key]
-                        sk = f"kanban_ingest_source_done_{selected}"
-                        if sk in st.session_state:
-                            del st.session_state[sk]
+                        for sk in (
+                            f"kanban_ingest_source_done_{selected}",
+                            f"kanban_ingest_source_done_ids_{selected}",
+                        ):
+                            if sk in st.session_state:
+                                del st.session_state[sk]
                         st.rerun()
                     else:
                         for e in apply.errors:

@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17211f;
+      --muted: #60716e;
+      --line: #d8e0dc;
+      --paper: #ffffff;
+      --soft: #f6f8f7;
+      --soft-strong: #edf3f0;
+      --accent: #21685b;
+      --accent-strong: #174d43;
+      --accent-soft: #e3f2ee;
+      --warn: #8a5b12;
+      --danger: #9f1d1d;
+      --info: #295b82;
+      --shadow: 0 10px 28px rgba(23, 33, 31, .08);
+    }
+    * { box-sizing: border-box; }
+    html, body, #root {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background: transparent;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    button, input, textarea, select { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    .kb-shell { display: grid; gap: 12px; padding: 2px 0 16px; }
+    .kb-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 2px 10px rgba(23, 33, 31, .05);
+    }
+    .kb-quick { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(140px, 190px) 38px; gap: 8px; }
+    .kb-quick input, .kb-quick select, .kb-field input, .kb-field textarea {
+      width: 100%;
+      min-height: 36px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: 0;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .kb-quick input:focus, .kb-quick select:focus, .kb-field input:focus, .kb-field textarea:focus {
+      border-color: rgba(33, 104, 91, .65);
+      box-shadow: 0 0 0 3px rgba(33, 104, 91, .11);
+    }
+    .kb-button, .kb-icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: .86rem;
+      font-weight: 750;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .kb-button.primary, .kb-icon-button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    .kb-button:hover, .kb-icon-button:hover { border-color: rgba(33, 104, 91, .55); background: var(--accent-soft); }
+    .kb-button.primary:hover, .kb-icon-button.primary:hover { background: var(--accent-strong); }
+    .kb-icon-button { width: 38px; padding: 0; font-size: 1.15rem; }
+    .kb-status { color: var(--muted); font-size: .84rem; }
+    .kb-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; align-items: start; }
+    .kb-board {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(210px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .kb-column {
+      min-width: 210px;
+      min-height: 540px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+    .kb-column.is-over { outline: 2px dashed rgba(33, 104, 91, .45); outline-offset: -5px; }
+    .kb-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+    .kb-column-head strong { min-width: 0; overflow: hidden; font-size: .92rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+    .kb-count, .kb-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: .74rem;
+      font-weight: 780;
+      line-height: 1;
+    }
+    .kb-card-list { display: grid; align-content: start; gap: 8px; min-height: 420px; }
+    .kb-card {
+      display: grid;
+      gap: 7px;
+      width: 100%;
+      min-height: 92px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+      text-align: left;
+      box-shadow: 0 1px 2px rgba(23, 33, 31, .04);
+      cursor: grab;
+    }
+    .kb-card:active { cursor: grabbing; }
+    .kb-card.is-selected { border-color: rgba(33, 104, 91, .75); box-shadow: 0 0 0 3px rgba(33, 104, 91, .12); }
+    .kb-card.is-crystallized { background: #f2f7f5; }
+    .kb-card-title { overflow-wrap: anywhere; font-size: .9rem; font-weight: 820; line-height: 1.25; }
+    .kb-card-context { color: var(--muted); display: -webkit-box; overflow: hidden; font-size: .78rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+    .kb-card-meta, .kb-chips, .kb-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .kb-empty { color: var(--muted); font-size: .84rem; padding: 10px 2px; }
+    .kb-detail {
+      position: sticky;
+      top: 64px;
+      display: grid;
+      gap: 10px;
+      max-height: calc(100vh - 84px);
+      overflow: auto;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+    .kb-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; }
+    .kb-detail-head strong { font-size: .94rem; font-weight: 850; }
+    .kb-field { display: grid; gap: 6px; }
+    .kb-field span, .kb-section-title { color: var(--muted); font-size: .74rem; font-weight: 800; text-transform: uppercase; }
+    .kb-field textarea { min-height: 64px; resize: vertical; line-height: 1.4; }
+    .kb-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .kb-subtasks { display: grid; gap: 7px; }
+    .kb-check-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; min-height: 26px; color: var(--ink); font-size: .84rem; line-height: 1.35; overflow-wrap: anywhere; }
+    .kb-check-row input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
+    .kb-new-subtask { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 7px; }
+    .kb-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      max-width: 100%;
+      padding: 4px 9px;
+      border: 1px solid #c6dad3;
+      border-radius: 999px;
+      background: #eef7f4;
+      color: #174d43;
+      font-size: .76rem;
+      font-weight: 750;
+      line-height: 1.15;
+      overflow-wrap: anywhere;
+      text-decoration: none;
+    }
+    .kb-chip.warn { border-color: #ead5ab; background: #fff7e8; color: var(--warn); }
+    .kb-chip.action { cursor: pointer; }
+    .kb-alert { padding: 9px 10px; border-radius: 8px; background: var(--soft); color: var(--muted); font-size: .84rem; line-height: 1.4; }
+    .kb-uncrystallized { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #ead5ab; border-radius: 8px; background: #fff9ed; }
+    @media (max-width: 1100px) {
+      .kb-workspace { grid-template-columns: 1fr; }
+      .kb-detail { position: relative; top: 0; max-height: none; }
+    }
+    @media (max-width: 760px) {
+      .kb-topbar { grid-template-columns: 1fr; }
+      .kb-quick { grid-template-columns: 1fr; }
+      .kb-icon-button { width: 100%; }
+      .kb-board { grid-template-columns: repeat(4, minmax(230px, 82vw)); }
+      .kb-grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const READY = "streamlit:componentReady";
+    const SET_VALUE = "streamlit:setComponentValue";
+    const SET_HEIGHT = "streamlit:setFrameHeight";
+    const RENDER = "streamlit:render";
+    const DEFAULT_ORDER = ["Doing", "Queue", "Done", "Someday / Maybe"];
+    const DEFAULT_LABELS = {
+      add: "Add",
+      ai_done: "Done -> evidence",
+      ai_gap: "Analyze gap",
+      ai_subtasks: "Draft subtasks",
+      blocked_by: "Blocked by",
+      completed_on: "Completed",
+      crystallize: "Mark crystallized",
+      crystallized: "Crystallized",
+      delete_task: "Delete task",
+      details: "Details",
+      done_uncrystallized: "Done, not crystallized",
+      empty: "No tasks",
+      links: "Links",
+      new_subtask: "New subtask",
+      outcome: "Outcome",
+      quick_add: "Quick add",
+      save: "Save",
+      section: "Section",
+      started_on: "Started",
+      subtasks: "Subtasks",
+      title: "Title",
+      untitled: "Untitled",
+      why: "Why",
+      context: "Context",
+    };
+    let args = {};
+    let board = [];
+    let selectedId = "";
+    let quickSection = "";
+    let eventSeq = 0;
+
+    function send(type, data) {
+      window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
+    }
+    function setHeight() {
+      const requested = Number(args.height || 760);
+      const real = Math.max(420, document.body.scrollHeight + 12, requested);
+      send(SET_HEIGHT, { height: real });
+    }
+    function asObj(value) {
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    }
+    function asArr(value) {
+      return Array.isArray(value) ? value : [];
+    }
+    function text(value) {
+      return value == null ? "" : String(value);
+    }
+    function esc(value) {
+      return text(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+    function attr(value) {
+      return esc(value).replaceAll("'", "&#39;");
+    }
+    function label(key, fallback) {
+      const labels = asObj(args.labels || asObj(args.payload).labels);
+      return text(labels[key] || DEFAULT_LABELS[key] || fallback || key);
+    }
+    function labelsForSections() {
+      return asObj(args.labels || asObj(args.payload).labels);
+    }
+    function settings() {
+      return asObj(args.settings || asObj(args.payload).settings);
+    }
+    function sectionOrder(rawSections) {
+      const configured = asArr(settings().section_order || settings().sections)
+        .map(text)
+        .filter(Boolean);
+      if (configured.length) return configured;
+      if (rawSections && !Array.isArray(rawSections)) {
+        const keys = Object.keys(rawSections);
+        const ordered = DEFAULT_ORDER.filter((key) => keys.includes(key));
+        keys.forEach((key) => { if (!ordered.includes(key)) ordered.push(key); });
+        return ordered.length ? ordered : DEFAULT_ORDER;
+      }
+      return DEFAULT_ORDER;
+    }
+    function normalizeLinks(raw) {
+      return asArr(raw).map((item, index) => {
+        if (typeof item === "string") {
+          return { id: `link-${index}`, label: item, url: item };
+        }
+        const obj = asObj(item);
+        const url = text(obj.url || obj.href || obj.path || "");
+        return { id: text(obj.id || obj.key || url || `link-${index}`), label: text(obj.label || obj.title || url), url };
+      }).filter((item) => item.url);
+    }
+    function normalizeSubtasks(raw) {
+      return asArr(raw).map((item, index) => {
+        if (typeof item === "string") {
+          return { id: `subtask-${index}`, index, title: item, done: false };
+        }
+        const obj = asObj(item);
+        return {
+          ...obj,
+          id: text(obj.id || obj.key || `subtask-${index}`),
+          index: Number.isInteger(obj.index) ? obj.index : index,
+          title: text(obj.title || obj.text || ""),
+          done: Boolean(obj.done || obj.checked || obj.completed),
+        };
+      });
+    }
+    function normalizeTask(task, section, index) {
+      const obj = asObj(task);
+      const id = text(obj.id || obj.task_id || obj.key || `${section}-${index}`);
+      const details = asArr(obj.details).length ? asArr(obj.details).map(text).join("\n") : text(obj.notes || "");
+      return {
+        ...obj,
+        id,
+        section,
+        title: text(obj.title || obj.name || label("untitled")),
+        context: text(obj.context || obj.description || ""),
+        why: text(obj.why || ""),
+        blocked_by: text(obj.blocked_by || obj.blockedBy || ""),
+        outcome: text(obj.outcome || ""),
+        started_on: text(obj.started_on || obj.startedOn || ""),
+        completed_on: text(obj.completed_on || obj.completedOn || ""),
+        notes: details,
+        details: details ? details.split(/\n+/).map((x) => x.trim()).filter(Boolean) : [],
+        crystallized: Boolean(obj.crystallized),
+        subtasks: normalizeSubtasks(obj.subtasks),
+        links: normalizeLinks(obj.links),
+      };
+    }
+    function normalizeBoard() {
+      const payload = asObj(args.payload);
+      const rawSections = args.sections !== undefined ? args.sections : payload.sections;
+      const labels = labelsForSections();
+      if (Array.isArray(rawSections)) {
+        return rawSections.map((section, index) => {
+          const obj = asObj(section);
+          const key = text(obj.key || obj.id || obj.section || sectionOrder()[index] || `section-${index}`);
+          return {
+            key,
+            label: text(obj.label || obj.title || labels[key] || key),
+            tasks: asArr(obj.tasks || obj.cards || obj.items).map((task, taskIndex) => normalizeTask(task, key, taskIndex)),
+          };
+        });
+      }
+      const raw = asObj(rawSections);
+      return sectionOrder(raw).map((key) => ({
+        key,
+        label: text(labels[key] || key),
+        tasks: asArr(raw[key]).map((task, taskIndex) => normalizeTask(task, key, taskIndex)),
+      }));
+    }
+    function findTask(id) {
+      for (const section of board) {
+        const task = section.tasks.find((item) => item.id === id);
+        if (task) return task;
+      }
+      return null;
+    }
+    function snapshot() {
+      return board.map((section) => ({
+        section: section.key,
+        task_ids: section.tasks.map((task) => task.id),
+      }));
+    }
+    function emit(action, payload) {
+      send(SET_VALUE, {
+        dataType: "json",
+        value: {
+          action,
+          payload: payload || {},
+          sections: snapshot(),
+          ui: { selected_card_id: selectedId },
+          event_id: `${Date.now()}-${++eventSeq}`,
+        },
+      });
+    }
+    function moveTask(taskId, toSection, beforeId) {
+      if (!taskId || taskId === beforeId) return;
+      let moved = null;
+      let fromSection = "";
+      board = board.map((section) => {
+        const nextTasks = [];
+        for (const task of section.tasks) {
+          if (task.id === taskId) {
+            moved = { ...task, section: toSection };
+            fromSection = section.key;
+          } else {
+            nextTasks.push(task);
+          }
+        }
+        return { ...section, tasks: nextTasks };
+      });
+      if (!moved || !toSection) return;
+      board = board.map((section) => {
+        if (section.key !== toSection) return section;
+        const nextTasks = [...section.tasks];
+        const beforeIndex = beforeId ? nextTasks.findIndex((task) => task.id === beforeId) : -1;
+        if (beforeIndex >= 0 && beforeId !== taskId) {
+          nextTasks.splice(beforeIndex, 0, moved);
+        } else {
+          nextTasks.push(moved);
+        }
+        return { ...section, tasks: nextTasks };
+      });
+      selectedId = taskId;
+      emit("move_card", { card_id: taskId, from_section: fromSection, to_section: toSection });
+      render();
+    }
+    function renderCard(task) {
+      const done = task.subtasks.filter((item) => item.done).length;
+      const meta = [];
+      if (task.subtasks.length) meta.push(`<span class="kb-pill">${done}/${task.subtasks.length} ${esc(label("subtasks"))}</span>`);
+      if (task.links.length) meta.push(`<span class="kb-pill">${task.links.length} ${esc(label("links"))}</span>`);
+      if (task.crystallized) meta.push(`<span class="kb-pill">${esc(label("crystallized"))}</span>`);
+      return `
+        <button
+          class="kb-card ${task.id === selectedId ? "is-selected" : ""} ${task.crystallized ? "is-crystallized" : ""}"
+          draggable="true"
+          data-task-id="${attr(task.id)}"
+          type="button"
+        >
+          <span class="kb-card-title">${esc(task.title || label("untitled"))}</span>
+          ${task.context ? `<span class="kb-card-context">${esc(task.context)}</span>` : ""}
+          <span class="kb-card-meta">${meta.join("")}</span>
+        </button>
+      `;
+    }
+    function renderColumn(section) {
+      return `
+        <section class="kb-column" data-section="${attr(section.key)}">
+          <div class="kb-column-head">
+            <strong>${esc(section.label)}</strong>
+            <span class="kb-count">${section.tasks.length}</span>
+          </div>
+          <div class="kb-card-list" data-section="${attr(section.key)}">
+            ${section.tasks.length ? section.tasks.map(renderCard).join("") : `<div class="kb-empty">${esc(label("empty"))}</div>`}
+          </div>
+        </section>
+      `;
+    }
+    function detailHtml(task) {
+      if (!task) {
+        return `<aside class="kb-detail"><div class="kb-alert">${esc(label("empty"))}</div></aside>`;
+      }
+      const links = task.links.length
+        ? task.links.map((item) => `<a class="kb-chip" href="${attr(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.label || item.url)}</a>`).join("")
+        : `<span class="kb-status">${esc(label("empty"))}</span>`;
+      const subtasks = task.subtasks.length
+        ? task.subtasks.map((item) => `
+            <label class="kb-check-row">
+              <input type="checkbox" data-subtask-index="${item.index}" ${item.done ? "checked" : ""}>
+              <span>${esc(item.title || "·")}</span>
+            </label>
+          `).join("")
+        : `<div class="kb-status">${esc(label("empty"))}</div>`;
+      const doneActions = task.section === "Done" ? `
+        <button type="button" class="kb-button" data-action="ai_done">${esc(label("ai_done"))}</button>
+        ${task.crystallized ? "" : `<button type="button" class="kb-button" data-action="crystallize">${esc(label("crystallize"))}</button>`}
+      ` : "";
+      return `
+        <aside class="kb-detail" data-selected-task="${attr(task.id)}">
+          <div class="kb-detail-head">
+            <strong>${esc(label("details"))}</strong>
+            <button type="button" class="kb-button primary" data-action="save">${esc(label("save"))}</button>
+          </div>
+          <label class="kb-field">
+            <span>${esc(label("title"))}</span>
+            <input data-field="title" value="${attr(task.title)}">
+          </label>
+          <label class="kb-field">
+            <span>${esc(label("context"))}</span>
+            <textarea data-field="context">${esc(task.context)}</textarea>
+          </label>
+          <div class="kb-grid-2">
+            <label class="kb-field">
+              <span>${esc(label("why"))}</span>
+              <textarea data-field="why">${esc(task.why)}</textarea>
+            </label>
+            <label class="kb-field">
+              <span>${esc(label("blocked_by"))}</span>
+              <textarea data-field="blocked_by">${esc(task.blocked_by)}</textarea>
+            </label>
+          </div>
+          <label class="kb-field">
+            <span>${esc(label("outcome"))}</span>
+            <textarea data-field="outcome">${esc(task.outcome)}</textarea>
+          </label>
+          <div class="kb-grid-2">
+            <label class="kb-field">
+              <span>${esc(label("started_on"))}</span>
+              <input data-field="started_on" value="${attr(task.started_on)}">
+            </label>
+            <label class="kb-field">
+              <span>${esc(label("completed_on"))}</span>
+              <input data-field="completed_on" value="${attr(task.completed_on)}">
+            </label>
+          </div>
+          <label class="kb-field">
+            <span>${esc(label("details"))}</span>
+            <textarea data-field="notes">${esc(task.notes)}</textarea>
+          </label>
+          <div class="kb-subtasks">
+            <div class="kb-section-title">${esc(label("subtasks"))}</div>
+            ${subtasks}
+            <div class="kb-new-subtask">
+              <input data-new-subtask placeholder="${attr(label("new_subtask"))}">
+              <button type="button" class="kb-icon-button" data-action="add_subtask">+</button>
+            </div>
+          </div>
+          <div class="kb-subtasks">
+            <div class="kb-section-title">${esc(label("links"))}</div>
+            <div class="kb-chips">${links}</div>
+          </div>
+          <div class="kb-actions">
+            <button type="button" class="kb-button" data-action="ai_gap">${esc(label("ai_gap"))}</button>
+            <button type="button" class="kb-button" data-action="ai_subtasks">${esc(label("ai_subtasks"))}</button>
+            ${doneActions}
+            <button type="button" class="kb-button" data-action="delete">${esc(label("delete_task"))}</button>
+          </div>
+        </aside>
+      `;
+    }
+    function renderUncrystallized() {
+      const doneSection = board.find((section) => section.key === "Done");
+      if (!doneSection) return "";
+      const tasks = doneSection.tasks.filter((task) => !task.crystallized);
+      if (!tasks.length) return "";
+      return `
+        <section class="kb-uncrystallized">
+          <div class="kb-section-title">${esc(label("done_uncrystallized"))}</div>
+          <div class="kb-chips">
+            ${tasks.map((task) => `<button type="button" class="kb-chip warn action" data-crystallize-id="${attr(task.id)}">${esc(task.title)}</button>`).join("")}
+          </div>
+        </section>
+      `;
+    }
+    function render() {
+      const root = document.getElementById("root");
+      if (!quickSection) quickSection = board.find((s) => s.key === "Queue")?.key || board[0]?.key || "";
+      if (!selectedId || !findTask(selectedId)) selectedId = board[0]?.tasks[0]?.id || "";
+      const selected = findTask(selectedId);
+      root.innerHTML = `
+        <main class="kb-shell">
+          <div class="kb-topbar">
+            <form class="kb-quick">
+              <input name="quick-title" placeholder="${attr(label("quick_add"))}">
+              <select name="quick-section">
+                ${board.map((section) => `<option value="${attr(section.key)}" ${section.key === quickSection ? "selected" : ""}>${esc(section.label)}</option>`).join("")}
+              </select>
+              <button class="kb-icon-button primary" type="submit">+</button>
+            </form>
+            <div class="kb-status">${esc(text(asObj(args.ai_state || asObj(args.payload).ai_state).status || ""))}</div>
+          </div>
+          <div class="kb-workspace">
+            <div class="kb-board">${board.map(renderColumn).join("")}</div>
+            ${detailHtml(selected)}
+          </div>
+          ${renderUncrystallized()}
+        </main>
+      `;
+      wire();
+      setHeight();
+    }
+    function wire() {
+      const quick = document.querySelector(".kb-quick");
+      if (quick) {
+        quick.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const title = quick.elements["quick-title"].value.trim();
+          const section = quick.elements["quick-section"].value;
+          quickSection = section;
+          if (title) emit("quick_add", { section, title });
+        });
+        quick.elements["quick-section"].addEventListener("change", (event) => {
+          quickSection = event.target.value;
+        });
+      }
+      document.querySelectorAll(".kb-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          selectedId = card.dataset.taskId;
+          render();
+        });
+        card.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        card.addEventListener("drop", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const draggedId = event.dataTransfer.getData("text/plain");
+          const column = card.closest(".kb-column");
+          moveTask(draggedId, column ? column.dataset.section : "", card.dataset.taskId);
+        });
+        card.addEventListener("dragstart", (event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", card.dataset.taskId);
+        });
+      });
+      document.querySelectorAll(".kb-column").forEach((column) => {
+        column.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          column.classList.add("is-over");
+        });
+        column.addEventListener("dragleave", () => column.classList.remove("is-over"));
+        column.addEventListener("drop", (event) => {
+          event.preventDefault();
+          column.classList.remove("is-over");
+          moveTask(event.dataTransfer.getData("text/plain"), column.dataset.section);
+        });
+      });
+      document.querySelectorAll("[data-crystallize-id]").forEach((button) => {
+        button.addEventListener("click", () => emit("crystallize_card", { card_id: button.dataset.crystallizeId }));
+      });
+      const panel = document.querySelector(".kb-detail[data-selected-task]");
+      if (!panel) return;
+      const taskId = panel.dataset.selectedTask;
+      panel.querySelectorAll("[data-subtask-index]").forEach((box) => {
+        box.addEventListener("change", () => {
+          emit("toggle_subtask", {
+            card_id: taskId,
+            subtask_index: Number(box.dataset.subtaskIndex),
+            done: box.checked,
+          });
+        });
+      });
+      panel.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.dataset.action;
+          if (action === "save") {
+            const card = {};
+            panel.querySelectorAll("[data-field]").forEach((field) => {
+              card[field.dataset.field] = field.value;
+            });
+            emit("edit_card", { card_id: taskId, card });
+          } else if (action === "add_subtask") {
+            const input = panel.querySelector("[data-new-subtask]");
+            const title = input ? input.value.trim() : "";
+            if (title) emit("add_subtask", { card_id: taskId, title });
+          } else if (action === "ai_gap") {
+            emit("request_gap", { card_id: taskId });
+          } else if (action === "ai_subtasks") {
+            emit("request_subtasks", { card_id: taskId });
+          } else if (action === "ai_done") {
+            emit("request_done_ingest", { card_id: taskId });
+          } else if (action === "crystallize") {
+            emit("crystallize_card", { card_id: taskId });
+          } else if (action === "delete") {
+            emit("delete_task", { card_id: taskId });
+          }
+        });
+      });
+    }
+    window.addEventListener("message", (event) => {
+      const data = event.data || {};
+      if (data.type !== RENDER) return;
+      args = data.args || {};
+      board = normalizeBoard();
+      selectedId = text(asObj(args.ui || asObj(args.payload).ui).selected_card_id || selectedId);
+      quickSection = quickSection || board.find((s) => s.key === "Queue")?.key || board[0]?.key || "";
+      render();
+    });
+    send(READY, { apiVersion: 1 });
+    setHeight();
+  </script>
+</body>
+</html>

@@ -10,7 +10,8 @@ today** and the engineering rules behind it.
 
 **Rough mapping:**
 
-- **Current code:** Profile data layer + rules layer + thin CLI (**13 commands**)
+- **Current code:** Profile data layer + rules layer + thin CLI (**16 top-level
+  commands**)
   + full Web UI; all groundwork before Demo 1 is done (M0–M3), plus **Demo 1
   Phase 1 — Skill Provenance**: inline `evidence`, profile-level
   **`evidence-pool.yaml`**, node **`evidence_refs`**, materialization in
@@ -20,12 +21,16 @@ today** and the engineering rules behind it.
   LLM JSON patch → merge pool → tree → `validate` + `sync`) is shipped as an
   application layer on top of the same files; see [design.md §5.4](design.md)
   and [profile-documents-relationship.md](profile-documents-relationship.md).
+- **Public Surface v1:** profile-scoped public data files, the `public` CLI
+  family, static website build, blog/resume/project/output workflows, and the
+  Streamlit **Public Site** page are shipped. See [public-site.md](public-site.md).
 - **Demo 1 (initial delivery):** MCP **read resources** + **write tools** on
   stdio (`mcp_server.py`, `nblane-mcp`); **`crystallize`** and **`sync-cursor`**
   CLIs; deeper LLM crystallization and human-confirm flows remain incremental.
   See [design.md §6–9](design.md) and [mcp.md](mcp.md).
 - **Still roadmap:** Full productization of `sync_team_pool` /
-  `route_to_best_owner`, public export, and hosted services.
+  `route_to_best_owner`, hosted services, and production-grade public-site
+  SEO / deployment / presentation polish.
 
 If a capability appears only in [product.md](product.md) and not here, treat it
 as **intent** until code lands.
@@ -34,16 +39,16 @@ as **intent** until code lands.
 
 | Capability | Status | Location |
 |------------|--------|----------|
-| Profile layout (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile) | Shipped | `profiles/`, `core/models.py`, `core/io.py` |
+| Profile layout (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile / public layer files) | Shipped | `profiles/`, `core/models.py`, `core/io.py`, `core/public_site.py` |
 | Domain schema graph | Shipped | `schemas/*.yaml`, `core/models.py` |
-| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`health`** / **`sync-cursor`** / **`crystallize`** | Shipped | `cli.py`, `commands/`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/profile_health.py`, `core/cursor_rule.py`, `core/crystallize.py` |
+| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`health`** / **`sync-cursor`** / **`crystallize`** / **`public`** / **`auth`** | Shipped | `cli.py`, `commands/`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/profile_health.py`, `core/cursor_rule.py`, `core/crystallize.py`, `core/public_site.py`, `core/auth.py` |
 | `validate` (skill-tree + evidence + **evidence_refs → pool**) | Shipped | `core/validate.py` |
 | `gap` (rules task gaps; **materialized evidence counts**) | Shipped | `core/gap.py`, `core/evidence_resolve.py` |
 | `team` (pool summary) | Shipped | `core/team.py` |
 | `agent-profile.yaml` merged into `context` | Shipped | `core/context.py` |
 | **Skill Provenance** — `Evidence` / `EvidenceRecord` / `EvidencePool`, inline + pool + refs | Shipped | `core/models.py`, `core/evidence_resolve.py`, `core/evidence_pool_id.py`, `core/io.py` |
 | `teams/` shared pool (team.yaml + product-pool.yaml) | Shipped | `teams/`, `core/io.py`, `core/team.py` |
-| Web UI (Skill Tree / Gap / Kanban / Team View / Profile Health / SKILL.md) | Shipped | `app.py`, `pages/` (5 pages); Skill Tree includes **pool + multiselect refs**; Home **resume ingest**; Kanban **Done → evidence ingest**; Profile Health is read-only |
+| Web UI (Home / Skill Tree / Gap / Kanban / Team View / Profile Health / Public Site) | Shipped | `app.py`, `pages/` (6 pages plus Home); Skill Tree includes **pool + multiselect refs**; Home **resume ingest**; Kanban **Done → evidence ingest**; Public Site manages profile/blog/resume/build |
 | Web UI i18n (en / zh, single switch) | Shipped | `core/llm.py` (`LLM_REPLY_LANG`), `web_i18n.py` |
 | Gap analysis (rules + optional LLM router + learned keywords) | Shipped | `core/gap.py`, `core/gap_llm_router.py`, `core/learned_keywords.py`, `pages/2_Gap_Analysis.py` |
 | LLM coach + follow-up chat (optional) | Shipped | `core/llm.py`, `pages/2_Gap_Analysis.py` |
@@ -52,7 +57,8 @@ as **intent** until code lands.
 | MCP Server (Read + Write) | **Initial version shipped** | `mcp_server.py` (stdio); `nblane-mcp` entry point |
 | Interaction logs + crystallization | **Initial version shipped** | `core/interaction.py`, `core/crystallize.py`; MCP tools + `crystallize` CLI |
 | Cursor Skill integration | **Initial version shipped** | `nblane sync-cursor` → `.cursor/rules/nblane-context.mdc` |
-| Public export, hosted service | **Not shipped** | Roadmap M5+ |
+| Public Surface (public profile / resume / blog / projects / outputs + static build) | **Initial version shipped** | `core/public_site.py`, `core/public_curation.py`, `commands/public.py`, `pages/6_Public_Site.py` |
+| Hosted service / production public-site polish | **Not shipped** | Roadmap M5+ |
 
 ## Core idea
 
@@ -70,6 +76,12 @@ profiles/{name}/
 ├── evidence-pool.yaml   <- Shared evidence catalog (ids referenced from skill-tree)
 ├── kanban.md            <- Current work
 ├── agent-profile.yaml   <- Agent’s structured model of the user
+├── public-profile.yaml  <- Explicit public profile fields
+├── resume-source.yaml   <- Structured source for public resume output
+├── projects.yaml        <- Curated public project drafts / published rows
+├── outputs.yaml         <- Curated public outputs
+├── blog/                <- Public blog Markdown files
+├── media/               <- Public media referenced by profile/blog/projects
 ├── papers/              <- Research notes
 ├── projects/            <- Project records
 └── log.md               <- Optional overflow log
@@ -87,7 +99,7 @@ software.
 ```
 src/nblane/
 ├── __init__.py         # Version
-├── cli.py              # CLI entry (13 subcommands)
+├── cli.py              # CLI entry (16 top-level subcommands)
 ├── mcp_server.py       # MCP stdio: resources + write tools
 ├── web_shared.py       # Streamlit shared helpers (profile picker, LLM gate, emoji toggle)
 ├── web_i18n.py         # UI strings (en/zh) keyed by LLM_REPLY_LANG
@@ -123,6 +135,8 @@ src/nblane/
     ├── ingest_apply.py     # Validate + sync + rollback
     ├── profile_health.py   # Read-only growth review checks
     ├── profile_ingest_llm.py  # Resume + kanban Done → structured JSON (en/zh)
+    ├── public_site.py  # Public profile/blog/resume/project/output render + build
+    ├── public_curation.py  # Evidence grouping into public drafts
     └── llm.py          # OpenAI-compatible LLM client + reply language
 ```
 
@@ -132,7 +146,8 @@ pages/
 ├── 2_Gap_Analysis.py   # Rules + optional LLM router + AI coach + write-back
 ├── 3_Kanban.py         # Kanban editing + Done → evidence ingest expander
 ├── 4_Team_View.py      # Team + product pool editing
-└── 5_Profile_Health.py # Read-only health / growth review
+├── 5_Profile_Health.py # Read-only health / growth review
+└── 6_Public_Site.py    # Public profile, blog, resume, curation, static build
 ```
 
 ## Web UI language (en / zh)
@@ -152,6 +167,20 @@ Optional **`NBLANE_UI_EMOJI=0`** (or `false` / `no` / `off`) removes emoji
 prefixes from metrics and status rows. For IA and journeys see
 [web-ui-product.md](web-ui-product.md) and the operator guide
 [web-ui.md](web-ui.md).
+
+## Public Surface pipeline (current)
+
+`nblane public ...` initializes profile-scoped public files, validates
+visibility / status / media / evidence refs, renders pages in memory, copies
+referenced media, then atomically replaces the static output directory
+(`dist/public/<profile>` by default). The build writes the homepage, Blog,
+Projects, Outputs, optional Resume, `robots.txt`, `sitemap.xml`, and the shared
+CSS asset. The Streamlit **Public Site** page wraps the same functions with
+Profile, Blog, Resume, Known Info, and Build tabs.
+
+The shipped surface is intentionally conservative: public objects can reference
+evidence ids, but the private evidence pool, skill tree, kanban, agent profile,
+and auth files are not rendered directly.
 
 ## Evidence materialization (current)
 

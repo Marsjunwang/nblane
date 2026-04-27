@@ -8,10 +8,12 @@ from datetime import date
 import streamlit as st
 
 from nblane.core.kanban_io import (
+    KANBAN_BOARD_SECTIONS,
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SOMEDAY,
+    ensure_kanban_task_ids,
     save_kanban,
 )
 from nblane.core.models import KanbanTask
@@ -22,12 +24,7 @@ from nblane.web_shared import (
     stash_git_backup_results,
 )
 
-_BOARD_ORDER = (
-    KANBAN_DOING,
-    KANBAN_QUEUE,
-    KANBAN_DONE,
-    KANBAN_SOMEDAY,
-)
+_BOARD_ORDER = KANBAN_BOARD_SECTIONS
 _COL_WEIGHTS = [2.2, 1.0, 1.0, 1.0]
 _WIP_HINT_THRESHOLD = 5
 
@@ -87,6 +84,9 @@ def _auto_save(
     """Persist kanban to disk."""
     path = profile_dir(profile) / "kanban.md"
     assert_files_current([path])
+    ensured = ensure_kanban_task_ids(sections, profile)
+    sections.clear()
+    sections.update(ensured)
     save_kanban(profile, sections)
     refresh_file_snapshots([path])
     stash_git_backup_results()

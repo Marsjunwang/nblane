@@ -62,3 +62,20 @@ def text_contains_linkified_url(text: str) -> bool:
         if _href_allowed(m.group(0)):
             return True
     return False
+
+
+def extract_plain_urls(text: str) -> list[str]:
+    """Return allowed plain-text URLs in first-seen order."""
+    if not text or not text.strip():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _URL_RE.finditer(text):
+        raw = m.group(0).rstrip(".,;:")
+        if not _href_allowed(raw):
+            continue
+        if raw in seen:
+            continue
+        seen.add(raw)
+        out.append(raw)
+    return out

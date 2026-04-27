@@ -23,6 +23,9 @@ from ._helpers import (
 )
 from ._read_mode import _column_header, render_read_card
 
+_DONE_RENDER_LIMIT = 16
+
+
 def _render_task_cards(
     section: str,
     sections: dict[str, list[KanbanTask]],
@@ -31,6 +34,8 @@ def _render_task_cards(
     ui: dict[str, str],
     *,
     doing_focus_two_col: bool = False,
+    max_cards: int | None = None,
+    prefer_tail: bool = False,
 ) -> None:
     """Render all task cards for one section."""
     tasks = sections.get(section, [])
@@ -40,9 +45,21 @@ def _render_task_cards(
         st.caption(ui["kb_wip_hint"].format(n=len(tasks)))
 
     n_tasks = len(tasks)
+    indices = list(range(n_tasks))
+    if max_cards is not None and n_tasks > max_cards:
+        if prefer_tail:
+            indices = indices[-max_cards:]
+        else:
+            indices = indices[:max_cards]
+        st.caption(
+            ui["kb_done_render_limit"].format(
+                shown=len(indices),
+                total=n_tasks,
+            )
+        )
     if doing_focus_two_col and section == KANBAN_DOING and n_tasks > 0:
-        mid = (n_tasks + 1) // 2
-        index_batches = [list(range(mid)), list(range(mid, n_tasks))]
+        mid = (len(indices) + 1) // 2
+        index_batches = [indices[:mid], indices[mid:]]
         c_left, c_right = st.columns(2)
         with c_left:
             _render_task_index_batch(
@@ -68,7 +85,7 @@ def _render_task_cards(
             )
     else:
         _render_task_index_batch(
-            list(range(n_tasks)),
+            indices,
             section,
             tasks,
             sections,
@@ -155,14 +172,32 @@ def _render_section_column(
             expanded=False,
         ):
             _render_task_cards(
-                section, sections, profile, auto_dates, ui,
+                section,
+                sections,
+                profile,
+                auto_dates,
+                ui,
+                max_cards=_DONE_RENDER_LIMIT,
+                prefer_tail=True,
             )
             _render_new_task_form(
                 section, sections, profile, auto_dates, ui,
             )
         return
 
-    _render_task_cards(section, sections, profile, auto_dates, ui)
+    _render_task_cards(
+        section,
+        sections,
+        profile,
+        auto_dates,
+        ui,
+        max_cards=(
+            _DONE_RENDER_LIMIT
+            if section == KANBAN_DONE
+            else None
+        ),
+        prefer_tail=True,
+    )
     _render_new_task_form(section, sections, profile, auto_dates, ui)
 
 

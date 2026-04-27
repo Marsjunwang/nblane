@@ -36,6 +36,8 @@ def st_blocknote_markdown(
     key: str,
     height: int = 560,
     editable: bool = True,
+    math_safe: bool = False,
+    source_mode: bool = False,
 ) -> str | None:
     """Render BlockNote as a Markdown-in/Markdown-out editor.
 
@@ -46,13 +48,84 @@ def st_blocknote_markdown(
     if component_func is None:
         return None
     result: Any = component_func(
+        mode="markdown",
         initial_markdown=initial_markdown,
         document_id=document_id,
         height=height,
         editable=editable,
+        math_safe=math_safe,
+        source_mode=source_mode,
         key=key,
         default={"markdown": initial_markdown, "dirty": False},
     )
     if isinstance(result, dict) and isinstance(result.get("markdown"), str):
         return str(result["markdown"])
     return initial_markdown
+
+
+def st_public_blog_editor(
+    *,
+    posts: list[dict[str, Any]],
+    active_slug: str,
+    initial_markdown: str,
+    key: str,
+    active_post_meta: dict[str, Any] | None = None,
+    media_items: list[dict[str, Any]] | None = None,
+    ai_candidates: list[dict[str, Any]] | None = None,
+    validation_state: dict[str, Any] | None = None,
+    layout_state: dict[str, Any] | None = None,
+    ui_labels: dict[str, str] | None = None,
+    document_id: str | None = None,
+    layout_storage_key: str | None = None,
+    height: int = 720,
+    editable: bool = True,
+    math_safe: bool = False,
+    source_mode: bool = False,
+) -> dict[str, Any] | None:
+    """Render the full public blog editor shell.
+
+    React owns the editor chrome and returns event dictionaries such as
+    ``{"action": "save_post", "payload": {...}}``. Streamlit remains
+    responsible for persistence, uploads, AI calls, validation, and publish
+    side effects.
+    """
+    component_func = _get_component_func()
+    if component_func is None:
+        return None
+
+    clean_layout_state = dict(layout_state or {})
+    default = {
+        "action": None,
+        "payload": {},
+        "markdown": initial_markdown,
+        "dirty": False,
+        "layout_state": clean_layout_state,
+        "selected_block": None,
+        "insert_event": None,
+    }
+    result: Any = component_func(
+        mode="shell",
+        posts=list(posts or []),
+        active_slug=active_slug,
+        initial_markdown=initial_markdown,
+        active_post_meta=dict(active_post_meta or {}),
+        media_items=list(media_items or []),
+        ai_candidates=list(ai_candidates or []),
+        validation_state=dict(validation_state or {}),
+        layout_state=clean_layout_state,
+        ui_labels=dict(ui_labels or {}),
+        document_id=document_id or active_slug,
+        layout_storage_key=layout_storage_key,
+        height=height,
+        editable=editable,
+        math_safe=math_safe,
+        source_mode=source_mode,
+        key=key,
+        default=default,
+    )
+    if isinstance(result, dict):
+        merged = {**default, **result}
+        if not isinstance(merged.get("payload"), dict):
+            merged["payload"] = {}
+        return merged
+    return default

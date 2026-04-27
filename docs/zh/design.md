@@ -33,13 +33,13 @@
 
 ## 3. 已完成基线盘点（v0.2.0）
 
-以下为截至本版本**已实现且可用**的能力，对应产品手册中 Demo 1 之前的全部地基，以及 **Demo 1 Phase 1（技能来源 / 证据）**。
+以下为截至本版本**已实现且可用**的能力，对应产品手册中 Demo 1 之前的全部地基，以及 **Demo 1 Phase 1（技能来源 / 证据）**、Profile 摄入与 Public Surface 初版。
 
 ### 3.1 数据层
 
 | 组件 | 说明 | 位置 |
 |------|------|------|
-| Profile 结构 | SKILL.md / skill-tree.yaml / **evidence-pool.yaml** / kanban.md / agent-profile.yaml | `profiles/` |
+| Profile 结构 | SKILL.md / skill-tree.yaml / **evidence-pool.yaml** / kanban.md / agent-profile.yaml + 公开层文件（`public-profile.yaml`、`resume-source.yaml`、`projects.yaml`、`outputs.yaml`、`blog/`、`media/`） | `profiles/` |
 | Profile 模板 | `init` 脚手架并替换 `{Name}` | `profiles/template/` |
 | 领域 Schema | 节点 id / label / level / category / requires / keywords | `schemas/robotics-engineer.yaml` |
 | 团队共享池 | team.yaml + product-pool.yaml（problem / project / evidence / method / decision） | `teams/` |
@@ -57,7 +57,7 @@
 | 状态摘要 | 按状态统计 + 点亮率 | `core/status.py` |
 | 团队汇总 | team.yaml + product-pool → 摘要 | `core/team.py` |
 
-### 3.3 CLI（13 条命令）
+### 3.3 CLI（16 条顶层命令）
 
 | 命令 | 状态 | 说明 |
 |------|------|------|
@@ -74,6 +74,8 @@
 | `ingest-kanban` | 已实现 | LLM：看板 **Done** 列 → 池 + 树补丁（同上） |
 | `sync-cursor` | 已实现 | 从 profile 摘要生成 `.cursor/rules/nblane-context.mdc` |
 | `crystallize` | 已实现 | 写入 `profiles/.../methods/*_draft.md`（`--file` / `--stdin`） |
+| `public` | 已实现 | 公开资料 / 博客 / 简历 / 项目 / 成果层：初始化、校验、构建、草稿、媒体、整理 |
+| `auth` | 已实现 | Web auth 辅助命令，包括密码 hash |
 
 ### 3.4 Web UI（Streamlit）
 
@@ -84,8 +86,12 @@
 | Gap Analysis | 任务文本 + 规则分析 + AI 分析 + 写回面板 | `pages/2_Gap_Analysis.py` |
 | Kanban | 四列看板 + 任务增删移动 + **已完成 → 证据** AI 摄入（多选、草案 → 写入） | `pages/3_Kanban.py` |
 | Team View | 团队信息 + 产品池 CRUD | `pages/4_Team_View.py` |
+| Profile Health | 只读校验 / drift / 证据 / 看板结晶体检 | `pages/5_Profile_Health.py` |
+| Public Site | 公开资料 + 博客 + 简历 + 已知信息整理 + 静态构建 | `pages/6_Public_Site.py` |
 
-侧栏顺序 `1_`–`4_` 与推荐动线（技能树 → 差距 → 看板 → 团队）一致。体验与文案约定见 [web-ui-product.md](web-ui-product.md)；操作步骤见 [web-ui.md](web-ui.md)。
+侧栏顺序 `1_`–`6_` 扩展推荐动线（技能树 → 差距 → 看板 → 团队 → Health → Public Site）。体验与文案约定见 [web-ui-product.md](web-ui-product.md)；操作步骤见 [web-ui.md](web-ui.md)。
+
+看板本轮优化记录：稳定 task id 已进入任务模型与 Markdown 渲染（保留 `id` meta 行；无 id 的旧任务会生成兼容 id），并明确拖拽语义。纵向指针位置映射为 `to_index`；拖入另一列映射为 `to_section`，再沿用手动移动的 done flag / 自动日期规则。现有 `kanban.md` 保持兼容，页面级拖拽接入按此方向推进。
 
 ### 3.5 AI 层
 
@@ -108,6 +114,7 @@
 [已完成] M3 团队共享池 · teams/ + team 命令 + Web UI
 [已完成] Demo 1 Phase 1：Skill Provenance（evidence + evidence-pool + evidence_refs）
 [已完成] 应用层：Profile 摄入（简历 + 看板 Done → YAML，同一 validate/sync 路径）
+[已完成] Public Surface v1：公开资料/博客/简历/项目文件 + CLI + Public Site 页面 + 静态构建
                  |
                  v   <-- 你在这里
 [已交付初版] Demo 1 Phase 2：MCP Server — Read Path（resources + stdio）
@@ -380,6 +387,8 @@ Phase 5 安排在 Sprint 3 因仅依赖 Phase 1 + 2，可先于 Phase 3/4 闭合
 | `evidence` | **已实现** | S1 | 内联 + `pool add` + `link`（见 §5） |
 | `sync-cursor` | **已实现** | S3 | 刷新 Cursor rule |
 | `crystallize` | **已实现** | S5 | 写入 methods 草案 |
+| `public` | **已实现** | Public v1 | 公开资料、博客、简历、项目/成果、静态构建 |
+| `auth` | **已实现** | Web deploy | Web auth 辅助命令 |
 
 ---
 
@@ -398,8 +407,9 @@ Phase 5 安排在 Sprint 3 因仅依赖 Phase 1 + 2，可先于 Phase 3/4 闭合
 | Cursor Skill | `.cursor/rules/`、`sync-cursor` | **初版已落地** |
 | MCP Server (Write) | `mcp_server.py`、`interaction.py` | **初版已落地** |
 | 方法结晶 | `crystallize.py` | **初版已落地**（草案文件；LLM 可后续接入） |
+| Public Surface v1 | `public_site.py`、`commands/public.py`、`pages/6_Public_Site.py` | **初版已落地**（静态站 + Public Site 页面） |
 | `sync_team_pool` / `route_to_best_owner` | 未实现 | 路线图 |
-| 公开页导出 | 未实现 | 路线图 |
+| React Blog Shell / SEO / 部署 / 展示质量 | 部分已落地 | 持续优化 |
 
 ---
 

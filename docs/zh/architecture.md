@@ -8,17 +8,20 @@
 
 **大致对应：**
 
-- **当前代码：** Profile 数据层 + 规则层 + 薄 CLI（**13 条子命令**）+ 完整 Web UI；
+- **当前代码：** Profile 数据层 + 规则层 + 薄 CLI（**16 条顶层命令**）+ 完整 Web UI；
   已完成 Demo 1 之前的全部地基工作（M0–M3），包括 `gap` 规则层分析、
-  `context` 系统提示生成（含 agent-profile 拼入）、Streamlit 四页交互界面、
+  `context` 系统提示生成（含 agent-profile 拼入）、Streamlit 交互界面、
   团队共享池目录约定；**Skill Provenance**（证据池、引用、物化）已落地；
   **Profile 摄入**（简历 / 看板 Done → LLM JSON → 合并池与树 → `validate` + `sync`）
   已作为应用层交付。详见 [设计手册 §5–5.4](design.md)、
   [Profile 文档关系](../profile-documents-relationship.md)。
+- **Public Surface v1：** 公开 profile / 简历 / 博客 / 项目 / 成果数据文件、
+  `public` CLI、静态站构建与 Streamlit **Public Site** 页面已落地。详见
+  [public-site.md](public-site.md)。
 - **下一步（Demo 1）：** MCP 已提供 **Read（resources）+ Write（tools）** 初版，
   `crystallize` / `sync-cursor` CLI 已接好；可按 [设计手册 §6–9](design.md) 继续加深。
 - **仍属路线图：** `sync_team_pool` / `route_to_best_owner` 的完整产品化、
-  公开页导出与托管服务。
+  托管服务，以及生产级公开站 SEO / 部署 / 展示质量打磨。
 
 若某能力只出现在 [product.md](product.md) 而本文未写，在代码落地前视为
 **意图**。
@@ -27,15 +30,15 @@
 
 | 能力 | 状态 | 实现位置 |
 |------|------|----------|
-| Profile 结构 (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile) | 已实现 | `profiles/`, `core/models.py`, `core/io.py` |
+| Profile 结构 (SKILL.md / skill-tree / **evidence-pool** / kanban / agent-profile / 公开层文件) | 已实现 | `profiles/`, `core/models.py`, `core/io.py`, `core/public_site.py` |
 | 领域关卡图 (Schema) | 已实现 | `schemas/*.yaml`, `core/models.py` |
-| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`health`** / **`sync-cursor`** / **`crystallize`** | 已实现 | `cli.py`, `commands/`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/profile_health.py`, `core/cursor_rule.py`, `core/crystallize.py` |
+| `init` / `context` / `status` / `log` / `sync` / **`evidence`** / **`ingest-resume`** / **`ingest-kanban`** / **`health`** / **`sync-cursor`** / **`crystallize`** / **`public`** / **`auth`** | 已实现 | `cli.py`, `commands/`, `core/context.py`, `core/status.py`, `core/sync.py`, `core/profile_ingest.py`, `core/profile_ingest_llm.py`, `core/profile_health.py`, `core/cursor_rule.py`, `core/crystallize.py`, `core/public_site.py`, `core/auth.py` |
 | `validate`（skill-tree 校验） | 已实现 | `core/validate.py` |
 | `gap`（规则层任务缺口） | 已实现 | `core/gap.py` |
 | `team`（团队池汇总） | 已实现 | `core/team.py` |
 | `agent-profile.yaml` 拼入 `context` | 已实现 | `core/context.py` |
 | `teams/` 共享池 (team.yaml + product-pool.yaml) | 已实现 | `teams/`, `core/io.py`, `core/team.py` |
-| Web UI (Skill Tree / Gap / Kanban / Team View / Profile Health / SKILL.md) | 已实现 | `app.py`, `pages/`（5 页）；Home **简历摄入**；Kanban **已完成→证据摄入**；Profile Health 只读 |
+| Web UI (Home / Skill Tree / Gap / Kanban / Team View / Profile Health / Public Site) | 已实现 | `app.py`, `pages/`（6 个子页 + Home）；Home **简历摄入**；Kanban **已完成→证据摄入**；Public Site 管理公开资料、博客、简历与构建 |
 | Web UI 中英文（单一开关） | 已实现 | `core/llm.py`（`LLM_REPLY_LANG`）、`web_i18n.py` |
 | Gap 分析（规则 + 可选 LLM 路由 + 学习关键词） | 已实现 | `core/gap.py`、`core/gap_llm_router.py`、`core/learned_keywords.py`、`pages/2_Gap_Analysis.py` |
 | LLM 教练与追问（可选） | 已实现 | `core/llm.py`、`pages/2_Gap_Analysis.py` |
@@ -45,7 +48,8 @@
 | MCP Server (Read + Write) | **初版已实现** | `mcp_server.py`（stdio）；可执行 `nblane-mcp` |
 | 交互日志 + 方法结晶 | **初版已实现** | `core/interaction.py`、`core/crystallize.py`；MCP tool + `crystallize` CLI |
 | Cursor Skill 集成 | **初版已实现** | `nblane sync-cursor` → `.cursor/rules/nblane-context.mdc` |
-| 公开页导出、托管服务 | **未实现** | 路线图 M5+ |
+| Public Surface（公开资料 / 简历 / 博客 / 项目 / 成果 + 静态构建） | **初版已实现** | `core/public_site.py`、`core/public_curation.py`、`commands/public.py`、`pages/6_Public_Site.py` |
+| 托管服务 / 生产级公开站打磨 | **未实现** | 路线图 M5+ |
 
 ## 核心想法
 
@@ -63,6 +67,12 @@ profiles/{name}/
 ├── evidence-pool.yaml <- 共享证据目录（稳定 id）
 ├── kanban.md         <- 当前在做什么
 ├── agent-profile.yaml <- Agent 对用户的结构化理解
+├── public-profile.yaml <- 显式公开资料字段
+├── resume-source.yaml  <- 公开简历结构化事实源
+├── projects.yaml       <- 人工整理后的公开项目
+├── outputs.yaml        <- 人工整理后的公开成果
+├── blog/               <- 公开博客 Markdown
+├── media/              <- 公开资料 / 博客 / 项目引用的媒体
 ├── papers/           <- 研究笔记
 ├── projects/         <- 项目记录
 └── log.md            <- 可选溢出日志
@@ -104,6 +114,8 @@ src/nblane/
     ├── ingest_*.py         # 摄入 parse / merge / preview / apply
     ├── profile_health.py   # 只读成长体检
     ├── profile_ingest_llm.py  # 简历 / 看板 Done → 结构化 JSON（中/英）
+    ├── public_site.py      # 公开资料/博客/简历/项目/成果渲染与构建
+    ├── public_curation.py  # evidence 聚合成公开草稿
     └── llm.py          # OpenAI 兼容 LLM 客户端 + 回复语言
 ```
 
@@ -113,7 +125,8 @@ pages/
 ├── 2_Gap_Analysis.py   # 规则 + 可选 LLM 首轮路由 + AI 教练 + 写回
 ├── 3_Kanban.py         # 看板编辑 + 已完成→证据摄入
 ├── 4_Team_View.py      # 团队与产品池编辑
-└── 5_Profile_Health.py # 只读成长体检
+├── 5_Profile_Health.py # 只读成长体检
+└── 6_Public_Site.py    # 公开资料、博客、简历、整理与静态构建
 ```
 
 ## Web 界面语言（中 / 英）
@@ -127,6 +140,17 @@ Streamlit 文案集中在 **`web_i18n.py`**。当前语言**不是**页面内单
 **布局约定：** 各页在 `select_profile()` 之后再渲染主标题；团队页说明侧栏档案与
 `teams/` 数据的关系。可选 **`NBLANE_UI_EMOJI=0`** 关闭指标与状态行前的 emoji。
 信息架构与动线见 [web-ui-product.md](web-ui-product.md)；使用步骤见 [web-ui.md](web-ui.md)。
+
+## 公开面管线（当前实现）
+
+`nblane public ...` 初始化 profile 级公开文件，校验 visibility / status / 媒体 /
+evidence refs，在内存中渲染页面，复制被引用媒体，然后原子替换静态输出目录
+（默认 `dist/public/<profile>`）。构建产物包含首页、Blog、Projects、Outputs、
+可选 Resume、`robots.txt`、`sitemap.xml` 与共享 CSS。Streamlit **Public Site**
+页面复用同一组函数，提供 Profile、Blog、Resume、Known Info、Build 五个 tab。
+
+该公开面刻意保守：公开对象可以引用 evidence id，但不会直接渲染私有
+evidence pool、skill tree、kanban、agent profile 或 auth 文件。
 
 ## Profile 摄入管线（当前实现）
 

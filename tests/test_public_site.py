@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 import yaml
 
+from nblane.commands import public as public_commands
 from nblane.core import public_site
 
 
@@ -657,6 +660,163 @@ class TestPublicSite(unittest.TestCase):
             self.assertTrue(result.errors)
             self.assertIn("local video must stay under", "\n".join(result.errors))
 
+    def test_publish_blog_post_api_publishes_by_slug(self) -> None:
+        """The public API publishes a draft by slug and returns its path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            _write_blog(
+                profile / "blog" / "draft-post.md",
+                title="Draft Post",
+                status="draft",
+                evidence=[],
+                body="Draft body.",
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                path = public_site.publish_blog_post("alice", "draft-post")
+                post = public_site.parse_blog_post(path)
+
+            self.assertEqual(path, profile / "blog" / "draft-post.md")
+            self.assertEqual(post.status, "published")
+
+    def test_publish_blog_post_accepts_legacy_path_input(self) -> None:
+        """Legacy Path callers get a clear slug-compatible publish path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            post_path = profile / "blog" / "draft-post.md"
+            _write_blog(
+                post_path,
+                title="Draft Post",
+                status="draft",
+                evidence=[],
+                body="Draft body.",
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                path = public_site.publish_blog_post("alice", post_path)
+                post = public_site.parse_blog_post(path)
+
+            self.assertEqual(path, post_path)
+            self.assertEqual(post.status, "published")
+
+    def test_public_blog_publish_cli_handler_uses_slug_api(self) -> None:
+        """CLI publish delegates to the slug API instead of a Path overload."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            _write_blog(
+                profile / "blog" / "draft-post.md",
+                title="Draft Post",
+                status="draft",
+                evidence=[],
+                body="Draft body.",
+            )
+            out = io.StringIO()
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.commands.public._require_profile", lambda _n: profile),
+                redirect_stdout(out),
+            ):
+                public_commands.cmd_public_blog_publish(
+                    "alice",
+                    slug="draft-post",
+                )
+
+            post = public_site.parse_blog_post(profile / "blog" / "draft-post.md")
+            self.assertEqual(post.status, "published")
+            self.assertIn("Published blog post:", out.getvalue())
+            self.assertIn("draft-post.md", out.getvalue())
+
+    def test_unsafe_link_schemes_are_rejected_and_sanitized(self) -> None:
+        """Unsafe URL schemes fail validation and are stripped from HTML."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            public_profile = yaml.safe_load(
+                (profile / "public-profile.yaml").read_text(encoding="utf-8")
+            )
+            public_profile["contacts"]["website"] = "javascript:alert(1)"
+            _write_yaml(profile / "public-profile.yaml", public_profile)
+
+            projects = yaml.safe_load(
+                (profile / "projects.yaml").read_text(encoding="utf-8")
+            )
+            projects["projects"][0]["links"]["bad"] = "data:text/html,boom"
+            _write_yaml(profile / "projects.yaml", projects)
+            _write_blog(
+                profile / "blog" / "published-post.md",
+                title="Published Post",
+                status="published",
+                evidence=["ev_public"],
+                body=(
+                    "[unsafe](javascript:alert)\n\n"
+                    '<a href="data:text/html,boom">raw unsafe</a>\n'
+                ),
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                result = public_site.validate_public_layer("alice")
+                rendered = public_site.render_public_site_pages("alice")
+
+            errors = "\n".join(result.errors)
+            self.assertIn("unsafe URL scheme 'javascript'", errors)
+            self.assertIn("unsafe URL scheme 'data'", errors)
+            all_html = "\n".join(rendered.pages.values())
+            self.assertNotIn('href="javascript:', all_html)
+            self.assertNotIn('href="data:', all_html)
+            self.assertNotIn('src="data:', all_html)
+
+    def test_build_writes_seo_tags_and_base_url_sitemap(self) -> None:
+        """Build base_url feeds canonical URLs, OpenGraph, and sitemap."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            out = root / "dist"
+            base_url = "https://alice.example/site"
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                public_site.build_public_site(
+                    "alice",
+                    out_dir=out,
+                    base_url=base_url,
+                )
+
+            home = (out / "index.html").read_text(encoding="utf-8")
+            post = (
+                out / "blog" / "published-post" / "index.html"
+            ).read_text(encoding="utf-8")
+            sitemap = (out / "sitemap.xml").read_text(encoding="utf-8")
+            robots = (out / "robots.txt").read_text(encoding="utf-8")
+
+            self.assertIn(
+                '<link rel="canonical" href="https://alice.example/site/">',
+                home,
+            )
+            self.assertIn('href="/site/assets/site.css"', home)
+            self.assertIn('href="/site/blog/"', home)
+            self.assertIn(
+                '<meta property="og:url" content="https://alice.example/site/">',
+                home,
+            )
+            self.assertIn('<meta property="og:title" content="Home · Alice">', home)
+            self.assertIn('<meta name="twitter:card" content="summary">', home)
+            self.assertIn(
+                '<link rel="canonical" href="https://alice.example/site/blog/published-post/">',
+                post,
+            )
+            self.assertIn('<meta property="og:type" content="article">', post)
+            self.assertIn(
+                "<loc>https://alice.example/site/blog/published-post/</loc>",
+                sitemap,
+            )
+            self.assertIn(
+                "Sitemap: https://alice.example/site/sitemap.xml",
+                robots,
+            )
+
     def test_add_blog_media_appends_and_updates_cover(self) -> None:
         """CLI/Web media helper copies media and updates the blog document."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -749,6 +909,13 @@ class TestPublicSite(unittest.TestCase):
         self.assertIn("./assets/", html)
         self.assertNotIn('src="/assets/', html)
         self.assertNotIn('href="/assets/', html)
+        bundle_text = "\n".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in (static_index.parent / "assets").glob("index-*.js")
+        )
+        self.assertIn("nb-shell", bundle_text)
+        self.assertIn("save_post", bundle_text)
+        self.assertIn("publish_request", bundle_text)
 
 
 if __name__ == "__main__":

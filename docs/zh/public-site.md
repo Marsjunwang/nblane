@@ -5,6 +5,11 @@ YAML / Markdown 文件生成，不直接渲染内部 profile 文件。
 
 English version: [../public-site.md](../public-site.md).
 
+**当前状态：** Public Surface v1 已落地。仓库现在包含 profile 级公开数据文件、
+`nblane public ...` CLI、静态站构建器，以及 Streamlit **Public Site** 页面。
+后续重点不再是“是否有公开面”，而是继续打磨 React Blog Shell 工作流、
+更完整的 SEO、部署链路与展示质量。
+
 ## 数据层
 
 已有 profile 先执行一次：
@@ -66,7 +71,13 @@ nblane public validate <profile> --include-drafts
 nblane public build <profile>
 nblane public build <profile> --out dist/public/<profile>
 nblane public build <profile> --include-drafts
+nblane public build <profile> --base-url https://www.example.com
+nblane public build <profile> --base-url https://www.example.com/site
 ```
+
+`--base-url` 会用于 canonical / OpenGraph、`robots.txt`、`sitemap.xml`
+以及站内链接。若 URL 带有 `/site` 一类子路径，生成的 `href` / `src`
+会自动加上此前缀，便于子路径部署。
 
 生成简历 HTML 与 Markdown：
 
@@ -154,12 +165,10 @@ Web UI 新增 **Public Site** 页面：
   保存时会把头像写入 `media/` 并同步 `public-profile.yaml` 的 `avatar` 路径。
   右侧提供实时整站预览，未保存的文字和新上传头像也会进入预览；原始 YAML 仍
   在折叠区内可直接编辑。
-- **Blog** 创建、编辑、预览、生成草稿并发布博客。
-  front matter 使用结构化字段维护；正文在安装 `streamlit-crepe` 时使用富
-  文本 Markdown 编辑器，否则降级为 Markdown 文本框。编辑器会把粘贴的
-  base64 图片抽取到 `media/blog/<slug>/`，也支持上传图片、短视频或插入视
-  频 URL；媒体片段会插入 `<!-- nblane:insert -->` 标记处，没有标记时追加
-  到正文末尾。
+- **Blog** 通过 React / BlockNote 编辑器 shell 创建、编辑、检查并发布博客。
+  shell 包含文章列表、正文编辑区、Meta / Media / AI / Check 右侧抽屉、
+  专注模式和 browser `localStorage` 布局记忆。Streamlit 继续负责文件 I/O、
+  上传、AI 调用、发布校验、Git backup，以及辅助的新建/上传工具。
 - **Resume** 编辑 `resume-source.yaml`，预览生成简历，并生成定制简历草稿。
 - **Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
   生成 draft 项目。
@@ -167,6 +176,29 @@ Web UI 新增 **Public Site** 页面：
 
 该页面复用现有 profile 选择器、文件 snapshot 冲突保护、缓存清理与可选 Git
 备份。
+
+## 当前 v1 与下一步优化
+
+已落地的 v1 覆盖完整公开闭环：
+
+- **数据层：** `public-profile.yaml`、`resume-source.yaml`、`projects.yaml`、
+  `outputs.yaml`、`blog/*.md` 与 profile 媒体目录。
+- **CLI：** 初始化、校验、静态构建、简历生成、博客创建/媒体/发布、草稿生成、
+  evidence 到公开项目的人工整理。
+- **Web UI：** **Public Site** 页面，含 Profile、Blog、Resume、Known Info、
+  Build 五个 tab。
+- **静态输出：** 首页、Blog、Projects、Outputs、可选 Resume、复制后的媒体、
+  `robots.txt`、`sitemap.xml` 与页面 meta description。
+
+下一轮优化方向：
+
+- **React Blog Shell 打磨：** Markdown / front matter 仍是事实源，继续补齐
+  shell 内新建/上传流程、选中块媒体插入和更完整的 AI 候选生成。
+- **SEO 质量：** 继续优化 canonical、Open Graph、社交分享 metadata、按 profile
+  优化 title，并在部署时校验 `base-url` / base path。
+- **部署质量：** 补静态托管、缓存刷新、草稿预览 vs 公开构建、小团队受保护
+  Streamlit 工作台的生产说明。
+- **展示质量：** 改进生成主题、响应式布局、媒体展示、项目/成果详情页与简历可读性。
 
 ## 部署
 
@@ -206,3 +238,8 @@ app.example.com {
 
 小图片可以放在 `profiles/<name>/media/`。视频默认使用外链或对象存储。
 v1 也允许把小型 `mp4` / `webm` 短视频放在 `media/blog/<slug>/`。
+
+Public 层会拒绝博客 Markdown 和公开字段中的危险 `href` / `src` scheme，
+例如 `javascript:` 与 `data:`。但 Markdown 原始 HTML 仍按“可信本地作者”
+模型处理，并不是面向外部多人输入的完整 HTML sanitizer；若后续开放给外部
+作者，需要再加 allowlist sanitizer。

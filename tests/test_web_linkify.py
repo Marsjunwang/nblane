@@ -1,6 +1,7 @@
 """Tests for nblane.web_linkify."""
 
 from nblane.web_linkify import (
+    extract_plain_urls,
     linkify_plain_to_html,
     text_contains_linkified_url,
 )
@@ -49,3 +50,15 @@ def test_javascript_url_not_linked() -> None:
     s = "bad javascript:alert(1)"
     out = linkify_plain_to_html(s)
     assert "<a " not in out
+
+
+def test_extract_plain_urls_dedupes_and_trims_punctuation() -> None:
+    s = "see https://a.com, then https://a.com and mailto:u@example.com."
+    assert extract_plain_urls(s) == [
+        "https://a.com",
+        "mailto:u@example.com",
+    ]
+
+
+def test_extract_plain_urls_rejects_unsafe_schemes() -> None:
+    assert extract_plain_urls("bad javascript:alert(1)") == []

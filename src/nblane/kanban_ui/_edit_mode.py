@@ -21,6 +21,7 @@ from ._helpers import (
     _auto_save,
     _doing_body_expanded,
     _kb_more_expanded,
+    _mark_kanban_dirty,
     _queue_compact_body_expanded,
     _someday_body_expanded,
     _task_editing_key,
@@ -163,7 +164,11 @@ def _render_new_task_form(
             ui["add"],
             key=f"add_{section}",
             type="primary",
+            disabled=not bool(new_title.strip()),
         ):
+            if not new_title.strip():
+                st.warning(ui["kb_title_required"])
+                return
             nt = KanbanTask(title=new_title.strip())
             if ctx.strip():
                 nt = replace(nt, context=ctx.strip())
@@ -310,7 +315,10 @@ def _edit_card_header(
                 ui,
                 key_prefix="ed_",
             )
-    task = replace(task, title=new_title_val)
+    if new_title_val.strip():
+        task = replace(task, title=new_title_val.strip())
+    else:
+        st.warning(ui["kb_title_required"])
     st.caption(ui["kb_edit_exit_hint"])
     return task
 
@@ -328,6 +336,8 @@ def _edit_card_footer(
     ek = _task_editing_key(profile, section, idx)
     if task.crystallized:
         st.caption(ui["crystallized"])
+    if task != tasks[idx]:
+        _mark_kanban_dirty(profile)
     tasks[idx] = task
     done_clicked = False
     if suffix == "sd":

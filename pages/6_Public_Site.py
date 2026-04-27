@@ -16,9 +16,13 @@ except Exception:  # pragma: no cover - optional Streamlit component
     st_milkdown = None
 
 try:
-    from nblane.public_blog_editor_component import st_blocknote_markdown
+    from nblane.public_blog_editor_component import (
+        st_blocknote_markdown,
+        st_public_blog_editor,
+    )
 except Exception:  # pragma: no cover - optional Streamlit component
     st_blocknote_markdown = None
+    st_public_blog_editor = None
 
 from nblane.core import git_backup
 from nblane.core.public_curation import (
@@ -142,6 +146,8 @@ def _ui() -> dict[str, str]:
             "project_id": "Project ID",
             "draft_update": "生成项目更新草稿",
             "output_dir": "输出目录",
+            "base_url": "Base URL",
+            "base_url_help": "生产部署域名，可包含子路径，例如 https://www.example.com/site。",
             "avatar_upload": "上传头像",
             "profile_fields": "公开资料",
             "visibility": "可见性",
@@ -271,6 +277,8 @@ def _ui() -> dict[str, str]:
         "project_id": "Project ID",
         "draft_update": "Draft project update",
         "output_dir": "Output directory",
+        "base_url": "Base URL",
+        "base_url_help": "Production site URL, optionally with a sub-path, e.g. https://www.example.com/site.",
         "avatar_upload": "Upload avatar",
         "profile_fields": "Public profile fields",
         "visibility": "Visibility",
@@ -850,6 +858,113 @@ def _blog_ai_candidate_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_candidate")
 
 
+def _blog_shell_key(selected: str, slug: str, field: str) -> str:
+    return _blog_editor_key(selected, slug, f"shell_{field}")
+
+
+def _blog_shell_source_token(meta: dict, body: str) -> str:
+    text = format_blog_document(meta, body)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _blog_shell_prepare_state(
+    selected: str,
+    slug: str,
+    meta: dict,
+    body: str,
+) -> tuple[dict, str]:
+    """Return the current shell draft meta/body, initializing from disk."""
+    token = _blog_shell_source_token(meta, body)
+    source_key = _blog_shell_key(selected, slug, "source")
+    dirty_key = _blog_shell_key(selected, slug, "dirty")
+    meta_key = _blog_shell_key(selected, slug, "meta")
+    body_key = _blog_shell_key(selected, slug, "body")
+    if (
+        st.session_state.get(source_key) != token
+        and not st.session_state.get(dirty_key, False)
+    ):
+        st.session_state[source_key] = token
+        st.session_state[meta_key] = dict(meta)
+        st.session_state[body_key] = body
+    st.session_state.setdefault(meta_key, dict(meta))
+    st.session_state.setdefault(body_key, body)
+    return dict(st.session_state.get(meta_key) or {}), str(
+        st.session_state.get(body_key) or ""
+    )
+
+
+def _blog_shell_store_draft(
+    selected: str,
+    slug: str,
+    meta: dict,
+    body: str,
+    *,
+    dirty: bool,
+) -> None:
+    """Persist an in-browser React shell draft into session state."""
+    st.session_state[_blog_shell_key(selected, slug, "meta")] = dict(meta)
+    st.session_state[_blog_shell_key(selected, slug, "body")] = body
+    st.session_state[_blog_shell_key(selected, slug, "dirty")] = dirty
+
+
+def _blog_shell_clear_draft(selected: str, slug: str) -> None:
+    for field in ("source", "meta", "body", "dirty"):
+        key = _blog_shell_key(selected, slug, field)
+        if key in st.session_state:
+            del st.session_state[key]
+
+
+def _blog_shell_posts_payload(posts: list) -> list[dict]:
+    """Return compact post rows for the React shell."""
+    return [
+        {
+            "slug": post.slug,
+            "title": post.title,
+            "date": post.date,
+            "status": post.status,
+            "summary": post.summary,
+        }
+        for post in posts
+    ]
+
+
+def _blog_shell_ai_candidates(selected: str, slug: str) -> list[dict]:
+    """Return candidate rows stored by the Streamlit AI helpers."""
+    candidate = str(st.session_state.get(_blog_ai_candidate_key(selected, slug), "") or "")
+    meta_key = _blog_editor_key(selected, slug, "ai_candidate_meta")
+    candidate_meta = st.session_state.get(meta_key)
+    if not candidate.strip() and not isinstance(candidate_meta, dict):
+        return []
+    row = {
+        "id": "current",
+        "body": candidate,
+    }
+    if isinstance(candidate_meta, dict):
+        row.update(candidate_meta)
+    return [row]
+
+
+def _blog_shell_event_payload(
+    event: dict,
+    fallback_meta: dict,
+    fallback_body: str,
+) -> tuple[str, dict, str, bool]:
+    """Extract action/meta/body/dirty from a React shell event."""
+    action = str(event.get("action") or "")
+    payload = event.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        meta = fallback_meta
+    body = payload.get("markdown")
+    if not isinstance(body, str):
+        body = event.get("markdown")
+    if not isinstance(body, str):
+        body = fallback_body
+    dirty = bool(payload.get("dirty", event.get("dirty", False)))
+    return action, dict(meta), body, dirty
+
+
 def _blog_media_library(root: Path, slug: str, meta: dict, body: str) -> list[dict]:
     """Return local media rows for one blog post."""
     media_dir = root / MEDIA_DIRNAME / BLOG_DIRNAME / slug
@@ -1039,7 +1154,7 @@ def _blog_page_preview(selected: str, slug: str, ui: dict[str, str]) -> None:
     )
 
 
-def _save_blog_editor(
+def _persist_blog_editor(
     *,
     selected: str,
     post_path: Path,
@@ -1060,7 +1175,294 @@ def _save_blog_editor(
     stash_git_backup_results()
     clear_web_cache()
     st.success(ui["saved"])
+
+
+def _save_blog_editor(
+    *,
+    selected: str,
+    post_path: Path,
+    meta: dict,
+    body: str,
+    ui: dict[str, str],
+) -> None:
+    """Save one structured blog editor state and rerun."""
+    _persist_blog_editor(
+        selected=selected,
+        post_path=post_path,
+        meta=meta,
+        body=body,
+        ui=ui,
+    )
+    _blog_shell_clear_draft(selected, post_path.stem)
     st.rerun()
+
+
+def _render_blog_react_shell(
+    *,
+    selected: str,
+    root: Path,
+    posts: list,
+    latest_post,
+    original_meta: dict,
+    layout_state: dict,
+    ui: dict[str, str],
+) -> bool:
+    """Render the React Blog Editor shell and dispatch returned actions."""
+    if st_public_blog_editor is None:
+        return False
+
+    draft_meta, draft_body = _blog_shell_prepare_state(
+        selected,
+        latest_post.slug,
+        original_meta,
+        latest_post.body,
+    )
+    media_rows = _blog_media_library(
+        root,
+        latest_post.slug,
+        draft_meta,
+        draft_body,
+    )
+    check_state = st.session_state.get(
+        _blog_check_state_key(selected, latest_post.slug),
+        {"errors": [], "warnings": [], "quality": []},
+    )
+    math_safe = markdown_contains_math(draft_body)
+    event = st_public_blog_editor(
+        posts=_blog_shell_posts_payload(posts),
+        active_slug=latest_post.slug,
+        initial_markdown=draft_body,
+        active_post_meta=draft_meta,
+        media_items=media_rows,
+        ai_candidates=_blog_shell_ai_candidates(selected, latest_post.slug),
+        validation_state=check_state,
+        layout_state=layout_state,
+        ui_labels=ui,
+        document_id=f"{selected}:{latest_post.slug}",
+        layout_storage_key=_blog_layout_storage_key(selected, latest_post.slug),
+        key=_blog_editor_key(selected, latest_post.slug, "react_shell"),
+        height=760,
+        editable=True,
+        math_safe=math_safe,
+        source_mode=math_safe,
+    )
+
+    with st.expander(ui["new_blog"], expanded=False):
+        new_title = st.text_input(
+            ui["title_label"],
+            key=f"react_new_blog_title:{selected}",
+        )
+        if st.button(ui["create"], key=f"react_create_blog:{selected}"):
+            if new_title.strip():
+                path = create_blog_draft(
+                    selected,
+                    title=new_title.strip(),
+                    body=f"{BLOG_INSERT_MARKER}\n\n",
+                    summary="",
+                )
+                st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+                stash_git_backup_results()
+                clear_web_cache()
+                st.rerun()
+            st.warning(ui["title_label"])
+        evidence_id = st.text_input(
+            ui["evidence_id"],
+            key=f"react_blog_evidence_id:{selected}",
+        )
+        draft_cols = st.columns(2)
+        with draft_cols[0]:
+            if st.button(
+                ui["draft_from_evidence"],
+                key=f"react_blog_draft_from_evidence:{selected}",
+                use_container_width=True,
+            ):
+                try:
+                    path = draft_blog_from_evidence(selected, evidence_id.strip())
+                    st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with draft_cols[1]:
+            if st.button(
+                ui["draft_from_done"],
+                key=f"react_blog_draft_from_done:{selected}",
+                use_container_width=True,
+            ):
+                try:
+                    path = draft_blog_from_kanban_done(selected)
+                    st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+    with st.expander(ui["upload_media"], expanded=False):
+        _render_blog_media_panel(
+            selected=selected,
+            root=root,
+            latest_post=latest_post,
+            edited_meta=draft_meta,
+            edited_body=draft_body,
+            media_rows=media_rows,
+            ui=ui,
+        )
+
+    if not isinstance(event, dict):
+        return True
+
+    action, event_meta, event_body, dirty = _blog_shell_event_payload(
+        event,
+        draft_meta,
+        draft_body,
+    )
+    event_layout = event.get("layout_state")
+    if isinstance(event_layout, dict):
+        _persist_blog_layout_state(selected, latest_post.slug, event_layout)
+
+    if action in {
+        "markdown_changed",
+        "layout_state_changed",
+        "insert_media",
+        "insert_candidate",
+        "apply_candidate_meta",
+    }:
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        return True
+
+    if action == "select_post":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        payload = event.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
+        slug = str(payload.get("slug", "") or "")
+        if slug and slug != latest_post.slug:
+            st.session_state[f"blog_post_slug_select:{selected}"] = slug
+            st.rerun()
+        return True
+
+    if action == "generate_ai_candidate":
+        try:
+            candidate = blog_candidate_from_title(
+                selected,
+                str(event_meta.get("title", "") or latest_post.title),
+            )
+            st.session_state[
+                _blog_ai_candidate_key(selected, latest_post.slug)
+            ] = candidate.body
+            st.session_state[
+                _blog_editor_key(selected, latest_post.slug, "ai_candidate_meta")
+            ] = candidate.to_dict()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "run_check":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        _run_blog_publish_check(
+            selected=selected,
+            post_path=latest_post.path,
+            slug=latest_post.slug,
+            meta=event_meta,
+            body=event_body,
+            media_rows=media_rows,
+            ui=ui,
+        )
+        next_state = dict(layout_state)
+        next_state["right_open"] = True
+        next_state["active_right_tab"] = "Check"
+        next_state["focus_mode"] = False
+        _rerun_with_blog_layout(selected, latest_post.slug, next_state)
+        return True
+
+    if action == "save_post":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        try:
+            _persist_blog_editor(
+                selected=selected,
+                post_path=latest_post.path,
+                meta=event_meta,
+                body=event_body,
+                ui=ui,
+            )
+            _blog_shell_clear_draft(selected, latest_post.slug)
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "publish_request":
+        publish_meta = dict(event_meta)
+        publish_meta["status"] = "published"
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            publish_meta,
+            event_body,
+            dirty=True,
+        )
+        final_media_rows = _blog_media_library(
+            root,
+            latest_post.slug,
+            publish_meta,
+            event_body,
+        )
+        check = _run_blog_publish_check(
+            selected=selected,
+            post_path=latest_post.path,
+            slug=latest_post.slug,
+            meta=publish_meta,
+            body=event_body,
+            media_rows=final_media_rows,
+            ui=ui,
+        )
+        if check["errors"]:
+            next_state = dict(layout_state)
+            next_state["right_open"] = True
+            next_state["active_right_tab"] = "Check"
+            next_state["focus_mode"] = False
+            _rerun_with_blog_layout(selected, latest_post.slug, next_state)
+        try:
+            _persist_blog_editor(
+                selected=selected,
+                post_path=latest_post.path,
+                meta=publish_meta,
+                body=event_body,
+                ui=ui,
+            )
+            _blog_shell_clear_draft(selected, latest_post.slug)
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    return True
 
 
 def _blog_meta_from_state(
@@ -1948,6 +2350,17 @@ def _render_blog_tab(
     original_meta = dict(latest_post.meta)
     layout_state = _blog_layout_state(selected, latest_post.slug)
 
+    if _render_blog_react_shell(
+        selected=selected,
+        root=root,
+        posts=posts,
+        latest_post=latest_post,
+        original_meta=original_meta,
+        layout_state=layout_state,
+        ui=ui,
+    ):
+        return
+
     save_clicked, check_clicked, publish_clicked = _render_blog_toolbar(
         selected=selected,
         slug=latest_post.slug,
@@ -2391,6 +2804,11 @@ with tab_build:
         ui["output_dir"],
         value=str(REPO_ROOT / "dist" / "public" / selected),
     )
+    base_url = st.text_input(
+        ui["base_url"],
+        value="",
+        help=ui["base_url_help"],
+    )
     c_validate, c_build = st.columns(2)
     with c_validate:
         if st.button(ui["validate"]):
@@ -2411,6 +2829,7 @@ with tab_build:
                         selected,
                         out_dir=out_dir,
                         include_drafts=include_drafts,
+                        base_url=base_url,
                     )
                     st.success(str(result.output_dir))
                 except PublicSiteError as exc:

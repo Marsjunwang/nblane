@@ -293,6 +293,7 @@ class KanbanTask:
 
     title: str
     done: bool = False
+    id: str = ""
     context: str = ""
     why: str = ""
     blocked_by: str = ""

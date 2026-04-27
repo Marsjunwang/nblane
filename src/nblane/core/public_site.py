@@ -39,7 +39,21 @@ BLOG_DIRECT_VIDEO_EXTENSIONS = {"mp4", "webm", "ogg"}
 BLOG_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 BLOG_VIDEO_MAX_BYTES = 25 * 1024 * 1024
 BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES = 2 * 1024 * 1024
+SAFE_HREF_SCHEMES = {"http", "https", "mailto"}
+SAFE_SRC_SCHEMES = {"http", "https"}
 _FENCED_CODE_RE = re.compile(r"(?ms)^(```|~~~).*?^\1\s*$")
+_URL_CONTROL_RE = re.compile(r"[\x00-\x20\x7f]+")
+_URL_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):")
+_URL_ATTR_RE = re.compile(
+    r"(?P<prefix>\s)(?P<attr>href|src)\s*=\s*"
+    r"(?:(?P<quote>[\"'])(?P<quoted>.*?)(?P=quote)|"
+    r"(?P<bare>[^\s>]+))",
+    re.IGNORECASE | re.DOTALL,
+)
+_MARKDOWN_LINK_RE = re.compile(
+    r"(?<!!)\[[^\]]+\]\(\s*(?P<href><[^>]+>|[^)\s]+)"
+    r"(?:\s+[\"'][^\"']*[\"'])?\s*\)"
+)
 _DISPLAY_DOLLAR_MATH_BLOCK_RE = re.compile(
     r"(?ms)^[ \t]*\$\$[ \t]*(?:\n(?P<body_multi>.*?)\n[ \t]*|"
     r"(?P<body_single>.+?))[ \t]*\$\$[ \t]*$"
@@ -445,12 +459,112 @@ def _visibility_visible(visibility: str, *, include_drafts: bool) -> bool:
     return include_drafts and visibility == "private"
 
 
-def _is_external_url(value: str) -> bool:
-    return value.startswith("http://") or value.startswith("https://")
-
-
 def _looks_like_domain(value: str) -> bool:
     return bool(re.match(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(/.*)?$", value))
+
+
+def _strip_url_value(value: str) -> str:
+    clean = str(value or "").strip()
+    if clean.startswith("<") and clean.endswith(">"):
+        clean = clean[1:-1].strip()
+    return clean
+
+
+def _url_compact(value: str) -> str:
+    return _URL_CONTROL_RE.sub("", html.unescape(_strip_url_value(value)))
+
+
+def _url_scheme(value: str) -> str:
+    match = _URL_SCHEME_RE.match(_url_compact(value))
+    return match.group(1).lower() if match else ""
+
+
+def _is_protocol_relative_url(value: str) -> bool:
+    return _url_compact(value).startswith("//")
+
+
+def _unsafe_url_scheme(value: str, allowed_schemes: set[str]) -> str:
+    scheme = _url_scheme(value)
+    if scheme and scheme not in allowed_schemes:
+        return scheme
+    if _is_protocol_relative_url(value):
+        return "protocol-relative"
+    return ""
+
+
+def _is_external_url(value: str) -> bool:
+    return _url_scheme(value) in {"http", "https"}
+
+
+def _safe_url_attr(
+    value: str,
+    *,
+    allowed_schemes: set[str],
+    allow_relative: bool = True,
+) -> str:
+    clean = _strip_url_value(html.unescape(str(value or "")))
+    if not clean:
+        return ""
+    if _unsafe_url_scheme(clean, allowed_schemes):
+        return ""
+    if _url_scheme(clean):
+        return clean
+    if allow_relative:
+        return clean
+    return ""
+
+
+def _public_link_href(value: str) -> str:
+    clean = _strip_url_value(str(value or ""))
+    if not clean:
+        return ""
+    if _unsafe_url_scheme(clean, SAFE_HREF_SCHEMES):
+        return ""
+    if _url_scheme(clean):
+        return clean
+    if _looks_like_domain(clean):
+        return "https://" + clean
+    return clean
+
+
+def _validate_url_scheme(
+    diagnostics: list[str],
+    label: str,
+    value: object,
+    *,
+    allowed_schemes: set[str],
+) -> None:
+    raw = str(value or "").strip()
+    if not raw:
+        return
+    unsafe = _unsafe_url_scheme(raw, allowed_schemes)
+    if unsafe:
+        diagnostics.append(
+            f"{label}: unsafe URL scheme '{unsafe}' is not allowed: {raw}"
+        )
+
+
+def _sanitize_html_url_attrs(html_text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        attr = match.group("attr").lower()
+        raw = match.group("quoted")
+        if raw is None:
+            raw = match.group("bare") or ""
+        allowed = SAFE_HREF_SCHEMES if attr == "href" else SAFE_SRC_SCHEMES
+        clean = _safe_url_attr(
+            raw,
+            allowed_schemes=allowed,
+            allow_relative=True,
+        )
+        if not clean:
+            return ""
+        quote_char = match.group("quote") or '"'
+        return (
+            f"{match.group('prefix')}{attr}={quote_char}"
+            f"{html.escape(clean, quote=True)}{quote_char}"
+        )
+
+    return _URL_ATTR_RE.sub(repl, html_text)
 
 
 def _as_string_list(raw: object) -> list[str]:
@@ -496,6 +610,33 @@ def _links(raw: object) -> dict[str, str]:
         if text:
             out[str(key)] = text
     return out
+
+
+def _validate_link_map_schemes(
+    result: PublicValidationResult,
+    label: str,
+    raw: object,
+) -> None:
+    for key, value in _links(raw).items():
+        _validate_url_scheme(
+            result.errors,
+            f"{label}.links.{key}",
+            value,
+            allowed_schemes=SAFE_HREF_SCHEMES,
+        )
+
+
+def _validate_contact_schemes(
+    result: PublicValidationResult,
+    raw: object,
+) -> None:
+    for key, value in _links(raw).items():
+        _validate_url_scheme(
+            result.errors,
+            f"{PUBLIC_PROFILE_FILENAME}.contacts.{key}",
+            value,
+            allowed_schemes=SAFE_HREF_SCHEMES,
+        )
 
 
 def _evidence_ids(name: str) -> set[str]:
@@ -574,7 +715,15 @@ def _validate_media_path(
     if value is None:
         return
     rel = str(value).strip()
-    if not rel or _is_external_url(rel):
+    if not rel:
+        return
+    unsafe = _unsafe_url_scheme(rel, SAFE_SRC_SCHEMES)
+    if unsafe:
+        result.errors.append(
+            f"{label}: unsafe URL scheme '{unsafe}' is not allowed: {rel}"
+        )
+        return
+    if _is_external_url(rel):
         return
     media_root = (profile_root / MEDIA_DIRNAME).resolve()
     target = (profile_root / rel).resolve()
@@ -590,10 +739,7 @@ def _validate_media_path(
 
 
 def _strip_markdown_url(value: str) -> str:
-    clean = value.strip()
-    if clean.startswith("<") and clean.endswith(">"):
-        clean = clean[1:-1].strip()
-    return clean
+    return _strip_url_value(value)
 
 
 def _media_extension(value: str) -> str:
@@ -662,6 +808,26 @@ def _markdown_image_refs(text: str) -> list[str]:
     )
     for match in pattern.finditer(text):
         refs.append(_strip_markdown_url(match.group("src")))
+    return refs
+
+
+def _markdown_link_refs(text: str) -> list[str]:
+    return [
+        _strip_markdown_url(match.group("href"))
+        for match in _MARKDOWN_LINK_RE.finditer(text)
+    ]
+
+
+def _html_url_attr_refs(text: str, attr_name: str) -> list[str]:
+    refs: list[str] = []
+    for match in _URL_ATTR_RE.finditer(text):
+        attr = match.group("attr").lower()
+        if attr != attr_name:
+            continue
+        raw = match.group("quoted")
+        if raw is None:
+            raw = match.group("bare") or ""
+        refs.append(_strip_url_value(html.unescape(raw)))
     return refs
 
 
@@ -797,7 +963,37 @@ def _validate_blog_body_media(
     label: str,
     body: str,
 ) -> None:
-    for ref in _markdown_image_refs(body):
+    clean_body = _FENCED_CODE_RE.sub("", body)
+    for href in _markdown_link_refs(clean_body):
+        _validate_url_scheme(
+            diagnostics,
+            f"{label}.link",
+            href,
+            allowed_schemes=SAFE_HREF_SCHEMES,
+        )
+    for href in _html_url_attr_refs(clean_body, "href"):
+        _validate_url_scheme(
+            diagnostics,
+            f"{label}.html.href",
+            href,
+            allowed_schemes=SAFE_HREF_SCHEMES,
+        )
+    for src in _html_url_attr_refs(clean_body, "src"):
+        _validate_url_scheme(
+            diagnostics,
+            f"{label}.html.src",
+            src,
+            allowed_schemes=SAFE_SRC_SCHEMES,
+        )
+    for ref in _markdown_image_refs(clean_body):
+        _validate_url_scheme(
+            diagnostics,
+            f"{label}.image",
+            ref,
+            allowed_schemes=SAFE_SRC_SCHEMES,
+        )
+        if _unsafe_url_scheme(ref, SAFE_SRC_SCHEMES):
+            continue
         if _is_external_url(ref):
             continue
         if not _is_local_media_ref(ref):
@@ -813,7 +1009,15 @@ def _validate_blog_body_media(
             max_bytes=BLOG_IMAGE_MAX_BYTES,
             allowed_extensions=BLOG_IMAGE_EXTENSIONS,
         )
-    for _caption, src in _video_directives(body):
+    for _caption, src in _video_directives(clean_body):
+        _validate_url_scheme(
+            diagnostics,
+            f"{label}.video",
+            src,
+            allowed_schemes=SAFE_SRC_SCHEMES,
+        )
+        if _unsafe_url_scheme(src, SAFE_SRC_SCHEMES):
+            continue
         if _is_external_url(src):
             if _direct_video_allowed(src) or _whitelisted_video_embed(src):
                 continue
@@ -985,6 +1189,10 @@ def validate_public_layer(
             f"{PUBLIC_PROFILE_FILENAME}.avatar",
             public_profile.get("avatar", ""),
         )
+        _validate_contact_schemes(
+            result,
+            public_profile.get("contacts"),
+        )
 
     resume_source = load_resume_source(name)
     if not resume_source:
@@ -1026,6 +1234,7 @@ def validate_public_layer(
             f"{label}.cover",
             project.get("cover", ""),
         )
+        _validate_link_map_schemes(result, label, project.get("links"))
         if _status_visible(status, include_drafts=include_drafts):
             _validate_evidence_refs(
                 result,
@@ -1045,6 +1254,7 @@ def validate_public_layer(
         )
         status = str(output.get("status", "draft") or "draft")
         _validate_status(result, label, status)
+        _validate_link_map_schemes(result, label, output.get("links"))
         if _status_visible(status, include_drafts=include_drafts):
             _validate_evidence_refs(
                 result,
@@ -1084,7 +1294,9 @@ def _markdown_to_html(text: str) -> str:
             extensions=["extra", "sane_lists"],
             output_format="html5",
         )
-        return _restore_markdown_math(rendered, math_blocks, inline_math)
+        return _sanitize_html_url_attrs(
+            _restore_markdown_math(rendered, math_blocks, inline_math)
+        )
     except Exception:
         lines = []
         image_pattern = re.compile(
@@ -1120,7 +1332,9 @@ def _markdown_to_html(text: str) -> str:
                 lines.append(f"<p>• {html.escape(line[2:])}</p>")
             else:
                 lines.append(f"<p>{html.escape(line)}</p>")
-        return _restore_markdown_math("\n".join(lines), math_blocks, inline_math)
+        return _sanitize_html_url_attrs(
+            _restore_markdown_math("\n".join(lines), math_blocks, inline_math)
+        )
 
 
 def _extract_markdown_math(text: str) -> tuple[str, list[str], list[str]]:
@@ -1224,6 +1438,8 @@ def _html_page(
     public_profile: dict,
     current: str,
     description: str = "",
+    canonical_url: str = "",
+    og_type: str = "website",
     asset_href: str = "/assets/site.css",
     include_resume: bool = True,
     include_math: bool = False,
@@ -1254,14 +1470,36 @@ def _html_page(
     meta_description = description or str(
         public_profile.get("bio_short", "") or public_profile.get("headline", "")
     )
+    full_title = f"{title} · {site_name}"
+    canonical_html = (
+        f'  <link rel="canonical" href="{html.escape(canonical_url, quote=True)}">\n'
+        if canonical_url
+        else ""
+    )
+    seo_html = (
+        canonical_html
+        + f'  <meta property="og:type" content="{html.escape(og_type, quote=True)}">\n'
+        + f'  <meta property="og:title" content="{html.escape(full_title, quote=True)}">\n'
+        + f'  <meta property="og:description" content="{html.escape(meta_description, quote=True)}">\n'
+        + f'  <meta property="og:site_name" content="{html.escape(site_name, quote=True)}">\n'
+        + (
+            f'  <meta property="og:url" content="{html.escape(canonical_url, quote=True)}">\n'
+            if canonical_url
+            else ""
+        )
+        + '  <meta name="twitter:card" content="summary">\n'
+        + f'  <meta name="twitter:title" content="{html.escape(full_title, quote=True)}">\n'
+        + f'  <meta name="twitter:description" content="{html.escape(meta_description, quote=True)}">\n'
+    )
     math_head = _MATHJAX_HEAD if include_math else ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{html.escape(title)} · {html.escape(site_name)}</title>
-  <meta name="description" content="{html.escape(meta_description)}">
+  <title>{html.escape(full_title)}</title>
+  <meta name="description" content="{html.escape(meta_description, quote=True)}">
+{seo_html.rstrip()}
   <link rel="stylesheet" href="{html.escape(asset_href)}">
 {math_head}
 </head>
@@ -1615,8 +1853,11 @@ def _detail_url(kind: str, item: dict) -> str:
 def _render_project_item(project: dict) -> str:
     links = _links(project.get("links"))
     link_html = "".join(
-        f'<a class="pill" href="{html.escape(url)}">{html.escape(label)}</a>'
+        f'<a class="pill" href="{html.escape(href, quote=True)}">'
+        f"{html.escape(label)}</a>"
         for label, url in links.items()
+        for href in [_public_link_href(url)]
+        if href
     )
     summary = str(project.get("summary", "") or "")
     tags = _as_string_list(project.get("tags"))
@@ -1638,8 +1879,11 @@ def _render_project_item(project: dict) -> str:
 def _render_output_item(output: dict) -> str:
     links = _links(output.get("links"))
     link_html = "".join(
-        f'<a class="pill" href="{html.escape(url)}">{html.escape(label)}</a>'
+        f'<a class="pill" href="{html.escape(href, quote=True)}">'
+        f"{html.escape(label)}</a>"
         for label, url in links.items()
+        for href in [_public_link_href(url)]
+        if href
     )
     summary = str(output.get("summary", "") or "")
     kind = str(output.get("type", "") or "")
@@ -1667,8 +1911,11 @@ def _render_pills(values: list[str]) -> str:
 
 def _render_external_links(links: dict[str, str]) -> str:
     return "".join(
-        f'<a class="pill" href="{html.escape(url)}">{html.escape(label)}</a>'
+        f'<a class="pill" href="{html.escape(href, quote=True)}">'
+        f"{html.escape(label)}</a>"
         for label, url in links.items()
+        for href in [_public_link_href(url)]
+        if href
     )
 
 
@@ -2017,7 +2264,7 @@ def _render_contact(kind: str, value: str) -> str:
     label = html.escape(_contact_label(kind, value))
     href = _contact_url(kind, value)
     if href:
-        return f'<a class="pill" href="{html.escape(href)}">{label}</a>'
+        return f'<a class="pill" href="{html.escape(href, quote=True)}">{label}</a>'
     return f'<span class="pill">{label}</span>'
 
 
@@ -2025,12 +2272,14 @@ def _contact_url(kind: str, value: str) -> str:
     value = str(value or "").strip()
     if not value:
         return ""
+    if _unsafe_url_scheme(value, SAFE_HREF_SCHEMES):
+        return ""
     if kind == "email":
         if value.startswith("mailto:"):
             return value
         if "@" in value:
             return "mailto:" + value
-        return value
+        return _public_link_href(value)
     if _is_external_url(value):
         return value
     if _looks_like_domain(value):
@@ -2051,7 +2300,7 @@ def _contact_url(kind: str, value: str) -> str:
         return ""
     if kind == "website":
         return "https://" + value
-    return value
+    return _public_link_href(value)
 
 
 def _contact_label(kind: str, value: str) -> str:
@@ -2064,6 +2313,8 @@ def _contact_label(kind: str, value: str) -> str:
 
 def _contact_display_value(kind: str, value: str) -> str:
     value = str(value or "").strip()
+    if _unsafe_url_scheme(value, SAFE_HREF_SCHEMES):
+        return ""
     if kind == "email":
         return value.removeprefix("mailto:")
     if not value:
@@ -2149,6 +2400,84 @@ def _replace_directory(tmp_dir: Path, output_dir: Path) -> None:
         shutil.rmtree(old_dir)
 
 
+def _normalize_base_url(base_url: str) -> str:
+    clean = str(base_url or "").strip().rstrip("/")
+    if not clean:
+        return ""
+    parsed = urlparse(clean)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise PublicSiteError("--base-url must be an absolute http(s) URL")
+    if parsed.query or parsed.fragment:
+        raise PublicSiteError("--base-url must not include query or fragment")
+    return clean
+
+
+def _base_path_from_url(base_url: str) -> str:
+    """Return the deployment path prefix implied by an absolute base URL."""
+    if not base_url:
+        return ""
+    parsed = urlparse(base_url)
+    path = parsed.path.strip("/")
+    return f"/{path}" if path else ""
+
+
+def _url_path_for_page(rel: str | Path) -> str:
+    rel_text = str(rel).replace("\\", "/")
+    url_path = "/" if rel_text == "index.html" else "/" + rel_text
+    if url_path.endswith("/index.html"):
+        url_path = url_path[: -len("index.html")]
+    return url_path
+
+
+def _site_path(base_path: str, url_path: str) -> str:
+    """Prefix an absolute site path for sub-path deployments."""
+    prefix = str(base_path or "").strip().rstrip("/")
+    if prefix and not prefix.startswith("/"):
+        prefix = "/" + prefix
+    clean_path = str(url_path or "/").strip()
+    if not clean_path.startswith("/"):
+        clean_path = "/" + clean_path
+    if prefix and (clean_path == prefix or clean_path.startswith(prefix + "/")):
+        return clean_path
+    if clean_path == "/":
+        return prefix + "/" if prefix else "/"
+    return prefix + clean_path
+
+
+def _site_url(base_url: str, url_path: str) -> str:
+    clean_path = url_path if url_path.startswith("/") else "/" + url_path
+    return base_url + clean_path if base_url else clean_path
+
+
+def _apply_public_url_paths(html_text: str, *, base_path: str) -> str:
+    """Route generated local href/src values through the deployment prefix."""
+
+    def replace_attr(match: re.Match[str]) -> str:
+        attr = match.group("attr")
+        url = match.group("url")
+        clean = url.strip()
+        if (
+            not clean
+            or clean.startswith("#")
+            or clean.startswith("//")
+            or _url_scheme(clean)
+        ):
+            return match.group(0)
+        if clean.startswith("/"):
+            next_url = _site_path(base_path, clean)
+        elif clean.startswith("media/") or clean.startswith("assets/"):
+            next_url = _site_path(base_path, "/" + clean)
+        else:
+            return match.group(0)
+        return f'{attr}="{html.escape(next_url, quote=True)}"'
+
+    return re.sub(
+        r'(?P<attr>src|href)="(?P<url>[^"]*)"',
+        replace_attr,
+        html_text,
+    )
+
+
 def _merge_public_profile_override(base: dict, override: dict | None) -> dict:
     """Return a public profile copy with preview-only overrides applied."""
     merged = dict(base)
@@ -2179,9 +2508,16 @@ def render_public_site_pages(
     name: str,
     *,
     include_drafts: bool = False,
+    base_url: str = "",
     public_profile_override: dict | None = None,
 ) -> PublicSiteRenderResult:
     """Render public site pages in memory without writing files."""
+    base_url = _normalize_base_url(base_url)
+    base_path = _base_path_from_url(base_url)
+
+    def page_url(rel: str) -> str:
+        return _site_url(base_url, _url_path_for_page(rel))
+
     public_profile = _merge_public_profile_override(
         load_public_profile(name),
         public_profile_override,
@@ -2217,6 +2553,7 @@ def render_public_site_pages(
             ),
             public_profile=public_profile,
             current="home",
+            canonical_url=page_url("index.html"),
             include_resume=resume_visible,
         ),
     )
@@ -2237,6 +2574,7 @@ def render_public_site_pages(
             body=project_body,
             public_profile=public_profile,
             current="projects",
+            canonical_url=page_url("projects/index.html"),
             include_resume=resume_visible,
         ),
     )
@@ -2257,6 +2595,7 @@ def render_public_site_pages(
                 public_profile=public_profile,
                 current="projects",
                 description=str(project.get("summary", "") or ""),
+                canonical_url=page_url(f"projects/{segment}/index.html"),
                 include_resume=resume_visible,
             ),
         )
@@ -2277,6 +2616,7 @@ def render_public_site_pages(
             body=output_body,
             public_profile=public_profile,
             current="outputs",
+            canonical_url=page_url("outputs/index.html"),
             include_resume=resume_visible,
         ),
     )
@@ -2297,6 +2637,7 @@ def render_public_site_pages(
                 public_profile=public_profile,
                 current="outputs",
                 description=str(output.get("summary", "") or ""),
+                canonical_url=page_url(f"outputs/{segment}/index.html"),
                 include_resume=resume_visible,
             ),
         )
@@ -2317,6 +2658,7 @@ def render_public_site_pages(
             body=blog_body,
             public_profile=public_profile,
             current="blog",
+            canonical_url=page_url("blog/index.html"),
             include_resume=resume_visible,
         ),
     )
@@ -2339,6 +2681,8 @@ def render_public_site_pages(
                 public_profile=public_profile,
                 current="blog",
                 description=post.summary,
+                canonical_url=page_url(f"blog/{post.slug}/index.html"),
+                og_type="article",
                 include_resume=resume_visible,
                 include_math=markdown_contains_math(post.body),
             ),
@@ -2362,10 +2706,16 @@ def render_public_site_pages(
                 body=resume_html,
                 public_profile=public_profile,
                 current="resume",
+                canonical_url=page_url("resume/index.html"),
                 include_resume=True,
                 include_math=markdown_contains_math(resume_md),
             ),
         )
+
+    pages = {
+        rel: _apply_public_url_paths(text, base_path=base_path)
+        for rel, text in pages.items()
+    }
 
     return PublicSiteRenderResult(
         pages=pages,
@@ -2384,6 +2734,7 @@ def build_public_site(
     base_url: str = "",
 ) -> PublicBuildResult:
     """Build a static public site from the public layer."""
+    normalized_base_url = _normalize_base_url(base_url)
     result = validate_public_layer(name, include_drafts=include_drafts)
     result.raise_for_errors()
     profile_root = _profile_path(name)
@@ -2399,6 +2750,7 @@ def build_public_site(
     rendered = render_public_site_pages(
         name,
         include_drafts=include_drafts,
+        base_url=normalized_base_url,
     )
 
     output_dir = (
@@ -2438,13 +2790,16 @@ def build_public_site(
 
     _write_text(
         tmp_dir / "robots.txt",
-        "User-agent: *\nAllow: /\nSitemap: /sitemap.xml\n",
+        (
+            "User-agent: *\nAllow: /\n"
+            f"Sitemap: {_site_url(normalized_base_url, '/sitemap.xml')}\n"
+        ),
         pages,
     )
     sitemap = _render_sitemap(
         pages,
         tmp_dir,
-        base_url=base_url.strip().rstrip("/"),
+        base_url=normalized_base_url,
     )
     _write_text(tmp_dir / "sitemap.xml", sitemap, pages)
 
@@ -2598,10 +2953,7 @@ def _render_sitemap(
         if path.name not in ("index.html", "sitemap.xml"):
             continue
         rel = path.relative_to(root)
-        url_path = "/" if str(rel) == "index.html" else "/" + str(rel)
-        if url_path.endswith("/index.html"):
-            url_path = url_path[: -len("index.html")]
-        loc = base_url + url_path if base_url else url_path
+        loc = _site_url(base_url, _url_path_for_page(rel))
         urls.append(f"  <url><loc>{html.escape(loc)}</loc></url>")
     body = "\n".join(urls)
     return (
@@ -2749,6 +3101,15 @@ def _slugify(text: str) -> str:
     if not clean:
         clean = "draft"
     return clean[:72]
+
+
+def _blog_slug_text(slug: str | Path) -> str:
+    """Normalize public blog slug inputs for API compatibility."""
+    if isinstance(slug, Path):
+        return slug.stem
+    if not isinstance(slug, str):
+        raise PublicSiteError("Blog slug must be a string or Path.")
+    return slug
 
 
 def _safe_blog_path(name: str, slug: str) -> Path:
@@ -3038,9 +3399,10 @@ def add_blog_media_bytes(
     )
 
 
-def publish_blog_post(name: str, slug: str) -> Path:
+def publish_blog_post(name: str, slug: str | Path) -> Path:
     """Set a blog post status to published after publish validation."""
-    post = load_blog_post(name, slug)
+    slug_text = _blog_slug_text(slug)
+    post = load_blog_post(name, slug_text)
     meta = dict(post.meta)
     meta["status"] = "published"
     candidate = _format_front_matter(meta, post.body)
@@ -3412,21 +3774,6 @@ def draft_project_update(name: str, project_id: str) -> Path:
         action=f"draft {name} project update",
     )
     return path
-
-
-def publish_blog_post(name: str, blog_path: Path) -> None:
-    """Mark one blog post as published after validating the candidate."""
-    text = blog_path.read_text(encoding="utf-8")
-    meta, body = _parse_front_matter(text)
-    meta["status"] = "published"
-    candidate = _format_front_matter(meta, body)
-    result = validate_blog_text_for_publish(name, blog_path, candidate)
-    result.raise_for_errors()
-    blog_path.write_text(candidate, encoding="utf-8")
-    git_backup.record_change(
-        [blog_path],
-        action=f"publish {name} blog post",
-    )
 
 
 def blog_slug_from_path(path: Path) -> str:

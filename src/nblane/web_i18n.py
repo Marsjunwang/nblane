@@ -694,6 +694,20 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_done_column_hint": (
             "Expand to add, edit, or archive completed tasks."
         ),
+        "kb_drag_title": "Drag board",
+        "kb_drag_help": (
+            "Drag cards across columns or within a column, then apply. "
+            "The detailed card editor below remains the source for fields."
+        ),
+        "kb_drag_applied": "Applied the drag-board order.",
+        "kb_drag_stale": (
+            "Drag order was stale or incomplete; reload and try again."
+        ),
+        "kb_done_render_limit": (
+            "Showing {shown}/{total} Done cards here. Use housekeeping "
+            "or Done -> evidence above for the full list."
+        ),
+        "kb_title_required": "Task title is required.",
         "kb_task_details": "Details & subtasks",
         "kb_edit_task": "Edit",
         "kb_done_editing": "Done editing",
@@ -818,6 +832,18 @@ _KANBAN: dict[str, dict[str, str]] = {
         ),
         "kb_done_column_expander": "展开查看并编辑「已完成」（{n} 项）",
         "kb_done_column_hint": "展开后可添加、编辑或配合上方区块归档已完成任务。",
+        "kb_drag_title": "拖拽看板",
+        "kb_drag_help": (
+            "可在列内或跨列拖动卡片，然后应用排序。"
+            "下方详细卡片编辑器仍负责字段内容。"
+        ),
+        "kb_drag_applied": "已应用拖拽看板顺序。",
+        "kb_drag_stale": "拖拽结果已过期或不完整，请重新加载后再试。",
+        "kb_done_render_limit": (
+            "此处仅显示 {shown}/{total} 个「已完成」卡片。"
+            "完整列表请使用上方整理区或「已完成 → 证据」。"
+        ),
+        "kb_title_required": "任务标题不能为空。",
         "kb_task_details": "详情与子任务",
         "kb_edit_task": "编辑",
         "kb_done_editing": "收起编辑",

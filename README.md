@@ -83,6 +83,12 @@ nblane ingest-resume yourname --file resume.txt
 # nblane ingest-resume yourname --stdin --dry-run
 # Optional: --allow-status-change (LLM solid/learning rubric), --no-bump-locked
 nblane ingest-kanban yourname --dry-run
+
+# Public surface: profile-scoped public files -> static website
+nblane public init yourname
+nblane public validate yourname
+nblane public blog new yourname --title "My post"
+nblane public build yourname --out dist/public/yourname --base-url https://www.example.com
 ```
 
 ### MCP (Cursor)
@@ -99,9 +105,9 @@ Ingest and full evidence editing remain **CLI / Web**.
 streamlit run app.py
 ```
 
-Six surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
-View**, **Profile Health**. Step-by-step usage: [docs/web-ui.md](docs/web-ui.md) ·
-[中文](docs/zh/web-ui.md). Product IA and backlog:
+Seven surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
+View**, **Profile Health**, and **Public Site**. Step-by-step usage:
+[docs/web-ui.md](docs/web-ui.md) · [中文](docs/zh/web-ui.md). Product IA and backlog:
 [docs/web-ui-product.md](docs/web-ui-product.md).
 
 Small-team / cloud deployment adds app-level login, profile/team permissions,
@@ -184,7 +190,7 @@ nblane/
 │       ├── profile_health.py      # Read-only growth review
 │       └── profile_ingest_llm.py  # Resume / kanban Done → JSON
 ├── app.py + pages/      # Streamlit Web UI
-├── profiles/            # User data (SKILL.md, skill-tree.yaml, evidence-pool.yaml, kanban.md)
+├── profiles/            # User data + public layer (SKILL.md, skill-tree, kanban, public-profile, blog, media)
 ├── schemas/             # Domain skill-tree definitions
 ├── teams/               # Team data (team.yaml, product-pool.yaml)
 ├── tests/               # Tests
@@ -201,6 +207,7 @@ nblane/
 - [Product Design (v0.2)](docs/product.md)
 - [Web experience design (Streamlit)](docs/web-ui-product.md) · [中文](docs/zh/web-ui-product.md)
 - [Web UI user guide](docs/web-ui.md) · [中文](docs/zh/web-ui.md)
+- [Public Site, Blog, and Resume](docs/public-site.md) · [中文](docs/zh/public-site.md)
 - Kanban user guide · [中文](docs/zh/kanban.md)
 - [Design Manual & Milestones](docs/design.md) · [中文](docs/zh/design.md)
 - [Architecture & Design Principles](docs/architecture.md)

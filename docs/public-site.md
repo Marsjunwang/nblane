@@ -6,6 +6,13 @@ YAML/Markdown files and never renders private profile files directly.
 
 Chinese version: [zh/public-site.md](zh/public-site.md).
 
+**Current status:** Public Surface v1 is shipped. The repository now includes
+profile-scoped public data files, `nblane public ...` CLI workflows, a static
+site builder, and a Streamlit **Public Site** page. The remaining work is
+quality polish rather than first implementation: deeper React Blog Shell
+workflows, stronger SEO metadata, deployment recipes, and better visual
+presentation.
+
 ## Data Layer
 
 Run this once for an existing profile:
@@ -70,7 +77,13 @@ Build the static site:
 nblane public build <profile>
 nblane public build <profile> --out dist/public/<profile>
 nblane public build <profile> --include-drafts
+nblane public build <profile> --base-url https://www.example.com
+nblane public build <profile> --base-url https://www.example.com/site
 ```
+
+`--base-url` is used for canonical/OpenGraph URLs, `robots.txt`,
+`sitemap.xml`, and generated internal links. When it includes a path such as
+`/site`, generated `href` / `src` values are prefixed for sub-path deployment.
 
 Generate resume HTML and Markdown:
 
@@ -161,12 +174,11 @@ The Web UI includes a **Public Site** page:
   updates the `avatar` path in `public-profile.yaml`. The right side shows a
   live full-site preview, including unsaved text and newly uploaded avatars; raw
   YAML remains available in an expander.
-- **Blog** creates, edits, previews, drafts, and publishes blog posts.
-  The editor keeps front matter in structured fields, edits the body as rich
-  Markdown when `streamlit-crepe` is installed, falls back to a Markdown text
-  area otherwise, extracts pasted base64 images into `media/blog/<slug>/`, and
-  inserts uploaded images, short videos, or video URLs at the
-  `<!-- nblane:insert -->` marker or the end of the post.
+- **Blog** creates, edits, checks, and publishes blog posts through a React /
+  BlockNote editor shell with an article list, body editor, Meta / Media / AI /
+  Check drawer, focus mode, and browser `localStorage` layout persistence.
+  Streamlit remains responsible for file I/O, uploads, AI calls, validation,
+  Git backup, and the auxiliary create/upload tools.
 - **Resume** edits `resume-source.yaml`, previews the generated resume, and
   creates targeted resume drafts.
 - **Known Info** shows evidence context, suggested groups, and lets you create
@@ -175,6 +187,32 @@ The Web UI includes a **Public Site** page:
 
 The page uses the existing profile selector, file snapshot conflict checks,
 cache clearing, and optional Git backup.
+
+## Current v1 and Next Refinements
+
+Shipped v1 covers the end-to-end public loop:
+
+- **Data:** `public-profile.yaml`, `resume-source.yaml`, `projects.yaml`,
+  `outputs.yaml`, `blog/*.md`, and profile media directories.
+- **CLI:** initialization, validation, static build, resume generation, blog
+  create/media/publish, draft generation, and evidence-to-project curation.
+- **Web UI:** the **Public Site** page with Profile, Blog, Resume, Known Info,
+  and Build tabs.
+- **Static output:** homepage, Blog, Projects, Outputs, Resume, copied media,
+  `robots.txt`, `sitemap.xml`, and per-page meta descriptions.
+
+Next optimization track:
+
+- **React Blog Shell polish:** keep Markdown/front matter as the source of
+  truth, while improving shell-level create/upload flows, media insertion at
+  selected blocks, and richer AI candidate generation.
+- **SEO quality:** continue improving canonical / Open Graph / social metadata,
+  profile-aware titles, and deployment-time base URL/base path checks.
+- **Deployment quality:** document production recipes for static hosting,
+  cache invalidation, preview vs public builds, and small-team protected
+  Streamlit workspaces.
+- **Display quality:** improve the generated theme, responsive layouts,
+  media presentation, project/output detail pages, and resume readability.
 
 ## Deployment
 
@@ -201,6 +239,12 @@ app.example.com {
 The builder validates first and writes to a temporary directory before replacing
 the target output directory. If validation or rendering fails, the previous
 published directory is left in place.
+
+URL scheme hardening rejects unsafe `href` / `src` schemes such as
+`javascript:` and `data:` in public-layer fields and blog Markdown. Raw HTML in
+Markdown is still treated as trusted local-author input rather than sanitized as
+untrusted multi-user content; add an allowlist sanitizer before accepting
+external authors.
 
 ## Boundaries
 

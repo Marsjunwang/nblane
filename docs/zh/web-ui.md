@@ -7,7 +7,7 @@
 | 项目 | 说明 |
 |------|------|
 | 入口 | 在仓库根目录执行 `streamlit run app.py` |
-| 范围 | `app.py` + `pages/*.py`；数据为本地文件，**非**托管公开站点 |
+| 范围 | `app.py` + `pages/*.py`；这是文件驱动的私有工作台。Public Site 页面会构建静态公开产物，但 Streamlit 应用本身**不是**托管公开站点 |
 
 ---
 
@@ -51,6 +51,7 @@
 4. **看板** 管理日常推进；**已完成** 任务可通过折叠区 **摄入为证据**。
 5. 协作编辑共享池时用 **团队视图**。
 6. 导出上下文前或阶段复盘时打开 **Profile Health**。
+7. 整理公开资料、博客、简历、项目/成果草稿或构建静态站时打开 **Public Site**。
 
 产品层地图见 [web-ui-product.md §4](web-ui-product.md)。
 
@@ -97,6 +98,10 @@
 - **移动列** 用列名 **按钮**（非「完成状态」菜单）；可选 **自动填写开始/结束日期**（移入进行中/已完成时）。
 - **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [kanban-archive.md](kanban-archive.md)。
 - **已完成 → 证据** 折叠区 — 多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
+- **本轮看板优化方向**：`kanban.md` 使用稳定 task id（保留 `id` meta 行；
+  无 id 的旧任务会生成兼容 id），并明确拖拽方向：纵向指针位置决定插入
+  `to_index`；拖入另一列会映射为 `to_section`，再沿用手动移动的 done flag /
+  自动日期规则。页面级拖拽逐步接入期间，显式移动控件仍是可靠 fallback。
 
 ### 5.5 团队视图（`pages/4_Team_View.py`）
 
@@ -109,6 +114,19 @@
 - 只读报告，与 `nblane health <名称>` 同源。
 - 检查校验结果、生成块 drift、solid/expert 节点缺证据、Done 任务未结晶。
 - 不写入 profile 文件。
+
+### 5.7 Public Site（`pages/6_Public_Site.py`）
+
+- 为当前档案初始化缺失的公开层文件。
+- **Profile** 编辑公开姓名、headline、简介、联系方式、头像、原始 YAML，并提供
+  实时整站预览。
+- **Blog** 通过 React / BlockNote 编辑器 shell 管理 draft / published 文章，
+  支持结构化 front matter、媒体插入、AI 候选、发布检查、公开页预览，以及
+  Streamlit 承接的新建/上传辅助工具。
+- **Resume** 编辑 `resume-source.yaml`，预览生成 Markdown，并生成定制简历草稿。
+- **Known Info** 将选中的 evidence 整理成 draft 公开项目。
+- **Build** 校验并写出静态站，默认到 `dist/public/<profile>`，也可指定输出目录；
+  可填写生产 `Base URL` 以生成 SEO 与子路径部署链接。
 
 ---
 
@@ -124,9 +142,11 @@
 | 成长体检 / Profile Health | `nblane health <名称>` |
 | SKILL.md 生成块 | `nblane sync <名称> --write` |
 | 证据池 / 内联 | `nblane evidence <名称> …` |
+| 公开站校验 / 构建 | `nblane public validate <名称>` / `nblane public build <名称>` |
+| 博客与简历草稿 | `nblane public blog …`、`nblane public draft-blog …`、`nblane public draft-resume …` |
 
 详见 [profile-documents-relationship.md](../profile-documents-relationship.md)、
-[evidence.md](evidence.md)。
+[evidence.md](evidence.md)、[public-site.md](public-site.md)。
 
 ---
 
@@ -135,6 +155,7 @@
 - [Web 体验设计（Streamlit）](web-ui-product.md) — 信息架构、品牌、backlog
 - [设计手册 §3.4](design.md) — 已交付页面表
 - [架构 — Web 界面语言](architecture.md)
+- [公开个人网站、博客与简历](public-site.md) — Public Surface v1
 - [MCP 服务器](mcp.md) — Cursor 集成（非 Streamlit）
 
 **English:** [../web-ui.md](../web-ui.md)

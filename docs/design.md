@@ -49,7 +49,7 @@ before Demo 1 in the product manual.
 
 | Component | Description | Location |
 |-----------|-------------|----------|
-| Profile layout | SKILL.md / skill-tree.yaml / evidence-pool.yaml / kanban.md / agent-profile.yaml | `profiles/` |
+| Profile layout | SKILL.md / skill-tree.yaml / evidence-pool.yaml / kanban.md / agent-profile.yaml + public layer files (`public-profile.yaml`, `resume-source.yaml`, `projects.yaml`, `outputs.yaml`, `blog/`, `media/`) | `profiles/` |
 | Profile template | `init` scaffolds and replaces `{Name}` | `profiles/template/` |
 | Domain schema | Node id / label / level / category / requires / keywords | `schemas/robotics-engineer.yaml` |
 | Team shared pool | team.yaml + product-pool.yaml (problem / project / evidence / method / decision) | `teams/` |
@@ -67,7 +67,7 @@ before Demo 1 in the product manual.
 | Status summary | Counts by status + coverage | `core/status.py` |
 | Team summary | Read team.yaml + product-pool → summary | `core/team.py` |
 
-### 3.3 CLI (13 commands)
+### 3.3 CLI (16 top-level commands)
 
 | Command | Status | Description |
 |---------|--------|-------------|
@@ -84,6 +84,8 @@ before Demo 1 in the product manual.
 | `ingest-kanban` | Shipped | LLM: kanban **Done** column → pool + tree patch (same flags) |
 | `sync-cursor` | Shipped | Write `.cursor/rules/nblane-context.mdc` from profile summary |
 | `crystallize` | Shipped | Write `profiles/.../methods/*_draft.md` (`--file` / `--stdin`) |
+| `public` | Shipped | Public profile/blog/resume/project/output layer: init, validate, build, drafts, media, curation |
+| `auth` | Shipped | Web auth helper commands, including password hashing |
 
 ### 3.4 Web UI (Streamlit)
 
@@ -94,10 +96,19 @@ before Demo 1 in the product manual.
 | Gap Analysis | Task text + rules analysis + AI analysis + write-back panel | `pages/2_Gap_Analysis.py` |
 | Kanban | Four-column board + task CRUD/move + **Done → evidence** AI ingest (multi-select, draft → apply) | `pages/3_Kanban.py` |
 | Team View | Team metadata edit + product pool CRUD | `pages/4_Team_View.py` |
+| Profile Health | Read-only validation / drift / evidence / kanban crystallization review | `pages/5_Profile_Health.py` |
+| Public Site | Public profile + blog + resume + known-info curation + static build | `pages/6_Public_Site.py` |
 
-Sidebar order `pages/1_`–`4_` matches the recommended journey (Skill Tree → Gap
-→ Kanban → Team). UX copy and layout rules:
+Sidebar order `pages/1_`–`6_` extends the recommended journey (Skill Tree → Gap
+→ Kanban → Team → Health → Public Site). UX copy and layout rules:
 [web-ui-product.md](web-ui-product.md); operator steps: [web-ui.md](web-ui.md).
+
+Kanban optimization note for this round: stable task ids are part of the task
+model / Markdown renderer (`id` meta rows are preserved; legacy tasks receive
+generated ids), and drag semantics are explicit. Vertical pointer position maps
+to `to_index`; dragging into another column maps to `to_section` and then uses
+the same auto-date / done-flag rules as manual moves. Existing `kanban.md`
+files stay backward compatible while page-level drag wiring rolls out.
 
 ### 3.5 AI layer
 
@@ -121,6 +132,7 @@ The project **has finished all groundwork before Demo 1** and **Demo 1 Phase 1
 [Done] M3 Team shared pool · teams/ + team command + Web UI
 [Done] Demo 1 Phase 1: Skill Provenance (evidence + evidence-pool + evidence_refs)
 [Done] App-layer: Profile ingest (resume + kanban Done → YAML, same validate/sync path)
+[Done] Public Surface v1: public profile/blog/resume/project files + CLI + Public Site page + static build
                  |
                  v   <-- you are here
 [Initial delivery] Demo 1 Phase 2: MCP Server — Read Path (resources + stdio)
@@ -442,8 +454,9 @@ read-path closure in Cursor.
 | Cursor Skill integration | `.cursor/rules/` + `sync-cursor` | **Initial delivery** |
 | MCP Server (Write) | `mcp_server.py` + `core/interaction.py` | **Initial delivery** |
 | Method crystallization | `core/crystallize.py` | **Initial delivery** (draft files; LLM later) |
+| Public Surface v1 | `core/public_site.py`, `commands/public.py`, `pages/6_Public_Site.py` | **Initial delivery** (static site + Public Site page) |
 | `sync_team_pool` / `route_to_best_owner` | Not implemented | Roadmap |
-| Public page export | Not implemented | Roadmap |
+| Public-site React Blog Shell / SEO / deployment / display polish | Partially shipped | Ongoing optimization |
 
 ---
 
