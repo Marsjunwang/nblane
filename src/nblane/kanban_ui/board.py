@@ -211,52 +211,55 @@ def render_kanban_board(
     """Render the full board (weighted columns or focus layout)."""
     if focus_mode:
         doing_sec = KANBAN_DOING
-        _column_header(doing_sec, ui, len(sections.get(doing_sec, [])))
-        _render_task_cards(
-            doing_sec,
-            sections,
-            profile,
-            auto_dates,
-            ui,
-            doing_focus_two_col=True,
-        )
-        _render_new_task_form(
-            doing_sec, sections, profile, auto_dates, ui,
-        )
+        main_col, side_col = st.columns([3, 1])
+        with main_col:
+            _column_header(doing_sec, ui, len(sections.get(doing_sec, [])))
+            _render_task_cards(
+                doing_sec,
+                sections,
+                profile,
+                auto_dates,
+                ui,
+                doing_focus_two_col=True,
+            )
+            _render_new_task_form(
+                doing_sec, sections, profile, auto_dates, ui,
+            )
 
-        tab_labels = [
-            kanban_section_label(KANBAN_QUEUE),
-            kanban_section_label(KANBAN_DONE),
-            kanban_section_label(KANBAN_SOMEDAY),
-        ]
-        tq, td, ts = st.tabs(tab_labels)
-        with tq:
-            _render_section_column(
-                KANBAN_QUEUE,
-                sections,
-                profile,
-                auto_dates,
-                ui,
-                wrap_done_in_expander=False,
-            )
-        with td:
-            _render_section_column(
-                KANBAN_DONE,
-                sections,
-                profile,
-                auto_dates,
-                ui,
-                wrap_done_in_expander=False,
-            )
-        with ts:
-            _render_section_column(
-                KANBAN_SOMEDAY,
-                sections,
-                profile,
-                auto_dates,
-                ui,
-                wrap_done_in_expander=False,
-            )
+        with side_col:
+            tab_labels = [
+                kanban_section_label(KANBAN_QUEUE),
+                kanban_section_label(KANBAN_DONE),
+                kanban_section_label(KANBAN_SOMEDAY),
+            ]
+            tq, td, ts = st.tabs(tab_labels)
+            with tq:
+                _render_section_column(
+                    KANBAN_QUEUE,
+                    sections,
+                    profile,
+                    auto_dates,
+                    ui,
+                    wrap_done_in_expander=False,
+                )
+            with td:
+                _render_section_column(
+                    KANBAN_DONE,
+                    sections,
+                    profile,
+                    auto_dates,
+                    ui,
+                    wrap_done_in_expander=False,
+                )
+            with ts:
+                _render_section_column(
+                    KANBAN_SOMEDAY,
+                    sections,
+                    profile,
+                    auto_dates,
+                    ui,
+                    wrap_done_in_expander=False,
+                )
         return
 
     cols = st.columns(_COL_WEIGHTS)

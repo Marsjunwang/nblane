@@ -414,6 +414,10 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             ),
             "alignment_goal": ui.get("kb_alignment_goal", "Goal"),
             "alignment_label": ui.get("kb_alignment_label", "Label"),
+            "alignment_required": ui.get(
+                "kb_alignment_required",
+                "Choose an understanding or add a clarification.",
+            ),
             "alignment_cancel": ui.get("cancel", "Cancel"),
             "blocked_by": ui["field_blocked"],
             "completed_on": ui["field_completed"],

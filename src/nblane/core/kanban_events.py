@@ -119,6 +119,8 @@ def alignment_context_from_payload(payload: dict) -> str:
     granularity = _clean_text(payload.get("granularity"))
 
     if alignment_mode == "custom_only" or alignment_kind == "other":
+        if not custom:
+            return ""
         parts = []
         if granularity:
             parts.append(f"Granularity: {granularity}")
@@ -168,10 +170,13 @@ def alignment_context_from_payload(payload: dict) -> str:
         alignment = payload.get("alignment")
         add_alignment_block(alignment, None)
 
+    has_understanding = bool(parts)
     if granularity:
         parts.append(f"Granularity: {granularity}")
     if custom:
         parts.append(f"User clarification: {custom}")
+    if not has_understanding and not custom:
+        return ""
     return "\n".join(parts).strip()
 
 

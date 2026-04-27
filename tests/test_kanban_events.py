@@ -204,6 +204,29 @@ class TestKanbanEvents(unittest.TestCase):
 
         self.assertEqual(context, "User clarification: 只按我的理解生成。")
 
+    def test_alignment_context_requires_understanding_or_custom_text(self) -> None:
+        """Granularity alone is not enough to confirm task understanding."""
+        self.assertEqual(
+            alignment_context_from_payload(
+                {
+                    "alignment_mode": "custom_only",
+                    "granularity": "milestone",
+                    "custom_context": "",
+                }
+            ),
+            "",
+        )
+        self.assertEqual(
+            alignment_context_from_payload(
+                {
+                    "alignment_mode": "selected_plus_custom",
+                    "selected_alignments": [],
+                    "granularity": "milestone",
+                }
+            ),
+            "",
+        )
+
     def test_subtask_proposals_from_payload_uses_edited_selected_drafts(self) -> None:
         """Draft apply payloads keep edited titles and drop unchecked rows."""
         proposals = subtask_proposals_from_payload(

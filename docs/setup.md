@@ -36,12 +36,13 @@ nblane reads these environment variables:
 | `LLM_API_KEY` | *(empty)* | API key — **required** to enable AI features |
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API base URL |
 | `LLM_MODEL` | `qwen3.6-plus` | Model name |
-| `LLM_REPLY_LANG` | `en` | Reply language: `en` or `zh`. Also switches **Gap Analysis** UI copy and the AI system prompt (use `en` for international demos). |
+| `UI_LANG` | `en` | Streamlit interface language: `en` or `zh`. If unset, falls back to `LLM_REPLY_LANG` for compatibility. |
+| `LLM_REPLY_LANG` | `en` | Model reply language: `en` or `zh`. Controls AI prompts/output only. |
 | `NBLANE_AUTH_FILE` | *(empty)* | Streamlit Web login config. Empty keeps local development mode; public deployments should point at private `auth/users.yaml`. |
 | `NBLANE_DATA_GIT_AUTOCOMMIT` | *(empty)* | Set to `1` to commit data-file writes automatically. |
 | `NBLANE_DATA_GIT_AUTOPUSH` | *(empty)* | Set to `1` to push after automatic commits. |
 
-`LLM_REPLY_LANG` controls the Streamlit UI (home `app.py`, sidebar Profile, Skill Tree, Gap Analysis, Kanban, Team View, etc.) and model output; no separate UI locale is required.
+`UI_LANG` controls the Streamlit UI (home `app.py`, sidebar Profile, Skill Tree, Gap Analysis, Kanban, Team View, etc.). `LLM_REPLY_LANG` controls model output and AI prompt language, so the interface and model replies can be configured independently.
 
 ### Option A — `.env` file (recommended)
 
@@ -51,6 +52,8 @@ Create a `.env` file at the repo root (already in `.gitignore`):
 LLM_API_KEY=sk-...
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL=qwen3.6-plus
+UI_LANG=zh
+LLM_REPLY_LANG=en
 ```
 
 nblane loads this file automatically on startup via `python-dotenv`.
@@ -61,6 +64,8 @@ nblane loads this file automatically on startup via `python-dotenv`.
 export LLM_API_KEY=sk-...
 export LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 export LLM_MODEL=qwen3.6-plus
+export UI_LANG=zh
+export LLM_REPLY_LANG=en
 streamlit run app.py
 ```
 

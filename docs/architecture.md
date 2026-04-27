@@ -49,7 +49,7 @@ as **intent** until code lands.
 | **Skill Provenance** — `Evidence` / `EvidenceRecord` / `EvidencePool`, inline + pool + refs | Shipped | `core/models.py`, `core/evidence_resolve.py`, `core/evidence_pool_id.py`, `core/io.py` |
 | `teams/` shared pool (team.yaml + product-pool.yaml) | Shipped | `teams/`, `core/io.py`, `core/team.py` |
 | Web UI (Home / Skill Tree / Gap / Kanban / Team View / Profile Health / Public Site) | Shipped | `app.py`, `pages/` (6 pages plus Home); Skill Tree includes **pool + multiselect refs**; Home **resume ingest**; Kanban **Done → evidence ingest**; Public Site manages profile/blog/resume/build |
-| Web UI i18n (en / zh, single switch) | Shipped | `core/llm.py` (`LLM_REPLY_LANG`), `web_i18n.py` |
+| Web UI i18n (en / zh, independent from model reply language) | Shipped | `core/llm.py` (`UI_LANG`, `LLM_REPLY_LANG`), `web_i18n.py` |
 | Gap analysis (rules + optional LLM router + learned keywords) | Shipped | `core/gap.py`, `core/gap_llm_router.py`, `core/learned_keywords.py`, `pages/2_Gap_Analysis.py` |
 | LLM coach + follow-up chat (optional) | Shipped | `core/llm.py`, `pages/2_Gap_Analysis.py` |
 | Profile ingest (merge + validate + sync; resume / kanban prompts) | Shipped | `core/profile_ingest.py`, `core/ingest_*.py`, `core/profile_ingest_llm.py`, `core/jsonutil.py` |
@@ -102,7 +102,7 @@ src/nblane/
 ├── cli.py              # CLI entry (16 top-level subcommands)
 ├── mcp_server.py       # MCP stdio: resources + write tools
 ├── web_shared.py       # Streamlit shared helpers (profile picker, LLM gate, emoji toggle)
-├── web_i18n.py         # UI strings (en/zh) keyed by LLM_REPLY_LANG
+├── web_i18n.py         # UI strings (en/zh) keyed by UI_LANG
 └── core/
     ├── models.py       # SkillNode / SkillTree / Evidence / EvidencePool / Schema / GapResult
     ├── io.py           # Compatibility facade for file I/O
@@ -137,7 +137,7 @@ src/nblane/
     ├── profile_ingest_llm.py  # Resume + kanban Done → structured JSON (en/zh)
     ├── public_site.py  # Public profile/blog/resume/project/output render + build
     ├── public_curation.py  # Evidence grouping into public drafts
-    └── llm.py          # OpenAI-compatible LLM client + reply language
+    └── llm.py          # OpenAI-compatible LLM client + UI/reply languages
 ```
 
 ```
@@ -152,13 +152,16 @@ pages/
 
 ## Web UI language (en / zh)
 
-All Streamlit copy is centralized in **`web_i18n.py`**. The active locale is
-**not** a separate Streamlit widget: it follows **`LLM_REPLY_LANG`** in
-`.env` (`en` default, or `zh`), exposed as `llm.reply_language()` and read
-by `home_ui()`, `gap_ui()`, `skill_tree_ui()`, `kanban_ui()`, `team_ui()`, and
-`common_ui()`. Gap Analysis and the **LLM router** use **language-matched
-system prompts** (English vs Chinese) so the UI and model behavior stay
-aligned.
+All Streamlit copy is centralized in **`web_i18n.py`**. The active UI locale
+follows **`UI_LANG`** in `.env` (`en` default, or `zh`), exposed as
+`llm.ui_language()` and read by `home_ui()`, `gap_ui()`, `skill_tree_ui()`,
+`kanban_ui()`, `team_ui()`, and `common_ui()`. If `UI_LANG` is unset, it falls
+back to `LLM_REPLY_LANG` for compatibility with older deployments.
+
+Model output language is separate: **`LLM_REPLY_LANG`** controls Gap Analysis,
+LLM router, and ingest system prompts (English vs Chinese). The sidebar exposes
+both settings, so the interface can be Chinese while the model replies in
+English, or vice versa.
 
 **Layout:** Every page calls **`select_profile()`** before the main **`st.title`**
 so the active profile is clear first. **Team View** adds a caption that team

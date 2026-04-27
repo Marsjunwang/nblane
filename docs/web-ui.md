@@ -24,10 +24,13 @@ information architecture, first-screen rules, and backlog live in
 
 ## 2. Language and display options
 
-- **`LLM_REPLY_LANG`** in `.env`: `en` (default) or `zh`. Controls **all**
-  Streamlit strings from `web_i18n.py` and the **language of LLM system
-  prompts** used on Gap Analysis and ingest paths so UI and model stay
-  aligned.
+- **`UI_LANG`** in `.env`: `en` (default) or `zh`. Controls Streamlit
+  interface strings from `web_i18n.py`. If unset, it falls back to
+  `LLM_REPLY_LANG` for compatibility with older deployments.
+- **`LLM_REPLY_LANG`** in `.env`: `en` (default) or `zh`. Controls model
+  replies and LLM system prompts used on Gap Analysis, ingest, and other AI
+  paths. It can differ from `UI_LANG`, for example Chinese UI with English
+  model output.
 - **`NBLANE_UI_EMOJI`**: set to `0`, `false`, `no`, or `off` to drop emoji
   prefixes on home metrics, skill status rows, kanban column headers, and
   team pool tabs (see [architecture.md](architecture.md) Web UI section).
@@ -108,7 +111,7 @@ See [web-ui-product.md §4](web-ui-product.md) for the product map.
 
 - **Reload** / **Save** toolbar — loads or persists `kanban.md`.
 - Four columns: Doing, Queue, Done, Someday / Maybe (display labels follow
-  `LLM_REPLY_LANG`).
+  `UI_LANG`).
 - **Done → evidence** expander — multi-select Done tasks, optional allow-status,
   same merge path as `nblane ingest-kanban`.
 - **This round's Kanban optimization track** uses stable task ids in

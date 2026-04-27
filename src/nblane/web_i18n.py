@@ -1,4 +1,4 @@
-"""Streamlit UI strings for ``LLM_REPLY_LANG`` (en / zh).
+"""Streamlit UI strings for ``UI_LANG`` (en / zh).
 
 Centralizes copy so all pages stay consistent with Gap Analysis.
 
@@ -92,7 +92,8 @@ _COMMON: dict[str, dict[str, str]] = {
             "Session only. Leave blank to keep an existing key from "
             "this session or .env."
         ),
-        "llm_reply_lang": "Reply language",
+        "llm_ui_lang": "Interface language",
+        "llm_reply_lang": "Model reply language",
         "llm_reply_lang_en": "English",
         "llm_reply_lang_zh": "Chinese",
         "llm_configured": "AI enabled: {label}",
@@ -150,7 +151,8 @@ _COMMON: dict[str, dict[str, str]] = {
         "llm_api_key_help": (
             "仅当前会话生效。留空会继续使用本会话或 .env 中已有的 key。"
         ),
-        "llm_reply_lang": "回复语言",
+        "llm_ui_lang": "界面语言",
+        "llm_reply_lang": "模型回复语言",
         "llm_reply_lang_en": "英文",
         "llm_reply_lang_zh": "中文",
         "llm_configured": "AI 已启用：{label}",
@@ -1099,10 +1101,41 @@ _TEAM: dict[str, dict[str, str]] = {
     },
 }
 
+_PROFILE_HEALTH: dict[str, dict[str, str]] = {
+    "en": {
+        "page_title": "Profile Health",
+        "title": "Profile Health",
+        "errors": "Errors",
+        "warnings": "Warnings",
+        "info": "Info",
+        "context_ready": "Context ready",
+        "yes": "Yes",
+        "no": "No",
+        "no_issues": "No health issues found.",
+        "severity_error": "ERROR",
+        "severity_warning": "WARN",
+        "severity_info": "INFO",
+    },
+    "zh": {
+        "page_title": "档案健康检查",
+        "title": "档案健康检查",
+        "errors": "错误",
+        "warnings": "警告",
+        "info": "信息",
+        "context_ready": "上下文可发布",
+        "yes": "是",
+        "no": "否",
+        "no_issues": "未发现健康问题。",
+        "severity_error": "错误",
+        "severity_warning": "警告",
+        "severity_info": "信息",
+    },
+}
+
 
 def _lang() -> str:
     """Return ``en`` or ``zh``."""
-    return llm_client.reply_language()
+    return llm_client.ui_language()
 
 
 def common_ui() -> dict[str, str]:
@@ -1140,6 +1173,14 @@ def team_ui() -> dict[str, str]:
     lg = _lang()
     merged = dict(_COMMON.get(lg, _COMMON["en"]))
     merged.update(_TEAM.get(lg, _TEAM["en"]))
+    return merged
+
+
+def profile_health_ui() -> dict[str, str]:
+    """Profile Health page."""
+    lg = _lang()
+    merged = dict(_COMMON.get(lg, _COMMON["en"]))
+    merged.update(_PROFILE_HEALTH.get(lg, _PROFILE_HEALTH["en"]))
     return merged
 
 

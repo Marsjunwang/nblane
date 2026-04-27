@@ -5,6 +5,7 @@ Default configuration via environment variables (or .env at repo root):
     LLM_BASE_URL    API base URL  (default: DashScope compatible API)
     LLM_API_KEY     API key       (required for AI features)
     LLM_MODEL       Model name    (default: qwen3.6-plus)
+    UI_LANG         UI language: "en" (default) or "zh"
     LLM_REPLY_LANG  Reply language: "en" (default) or "zh"
 
 Streamlit pages may also call ``configure`` to override these values
@@ -28,13 +29,18 @@ except ImportError:
 
 _DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _DEFAULT_MODEL = "qwen3.6-plus"
+_DEFAULT_UI_LANG = "en"
 _DEFAULT_REPLY_LANG = "en"
 
 _BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
 _API_KEY: str = os.getenv("LLM_API_KEY", "")
 _MODEL: str = os.getenv("LLM_MODEL", _DEFAULT_MODEL)
+_UI_LANG: str = os.getenv(
+    "UI_LANG",
+    os.getenv("LLM_REPLY_LANG", _DEFAULT_UI_LANG),
+).strip().lower()
 _REPLY_LANG: str = os.getenv(
-    "LLM_REPLY_LANG", "en"
+    "LLM_REPLY_LANG", _DEFAULT_REPLY_LANG
 ).strip().lower()
 
 
@@ -43,6 +49,7 @@ def configure(
     base_url: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
+    ui_lang: str | None = None,
     reply_lang: str | None = None,
 ) -> None:
     """Override LLM settings at runtime.
@@ -51,7 +58,7 @@ def configure(
     for ``base_url`` and ``model`` fall back to the module defaults;
     an empty ``api_key`` intentionally clears the key.
     """
-    global _API_KEY, _BASE_URL, _MODEL, _REPLY_LANG
+    global _API_KEY, _BASE_URL, _MODEL, _REPLY_LANG, _UI_LANG
 
     if base_url is not None:
         _BASE_URL = base_url.strip() or _DEFAULT_BASE_URL
@@ -59,6 +66,8 @@ def configure(
         _API_KEY = api_key.strip()
     if model is not None:
         _MODEL = model.strip() or _DEFAULT_MODEL
+    if ui_lang is not None:
+        _UI_LANG = ui_lang.strip().lower()
     if reply_lang is not None:
         _REPLY_LANG = reply_lang.strip().lower()
 
@@ -81,6 +90,7 @@ def current_config(
         "base_url": _BASE_URL,
         "api_key": key,
         "model": _MODEL,
+        "ui_lang": ui_language(),
         "reply_lang": reply_language(),
         "configured": is_configured(),
     }
@@ -103,6 +113,16 @@ def reply_language() -> str:
     other than ``'zh'`` falls back to ``'en'``.
     """
     return "zh" if _REPLY_LANG == "zh" else "en"
+
+
+def ui_language() -> str:
+    """Return the configured UI language code ('en' or 'zh').
+
+    ``UI_LANG`` controls Streamlit interface text independently from model
+    reply language. When ``UI_LANG`` is absent, module initialization falls
+    back to ``LLM_REPLY_LANG`` for compatibility with older deployments.
+    """
+    return "zh" if _UI_LANG == "zh" else "en"
 
 
 def chat(

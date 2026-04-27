@@ -36,12 +36,13 @@ nblane 读取以下环境变量：
 | `LLM_API_KEY` | *(空)* | API Key — **开启 AI 功能的必要条件** |
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API 基础地址 |
 | `LLM_MODEL` | `qwen3.6-plus` | 模型名称 |
-| `LLM_REPLY_LANG` | `en` | 回复语言：`en` 或 `zh`。同时控制 **Gap Analysis** 页的界面文案与 AI 系统提示（国际演示可设为 `en`）。 |
+| `UI_LANG` | `en` | Streamlit 界面语言：`en` 或 `zh`。未设置时为兼容旧部署，会回退到 `LLM_REPLY_LANG`。 |
+| `LLM_REPLY_LANG` | `en` | 模型回复语言：`en` 或 `zh`。仅控制 AI prompt / 输出语言。 |
 | `NBLANE_AUTH_FILE` | *(空)* | Streamlit Web 登录用户配置。为空时保持本地开发模式；公网部署时应指向私有数据仓库中的 `auth/users.yaml`。 |
 | `NBLANE_DATA_GIT_AUTOCOMMIT` | *(空)* | 设为 `1` 时，写入数据文件后自动生成 Git commit。 |
 | `NBLANE_DATA_GIT_AUTOPUSH` | *(空)* | 设为 `1` 时，自动 commit 后继续尝试 `git push`。 |
 
-`LLM_REPLY_LANG` 影响 **Streamlit 各页面**（含首页 `app.py`、侧边栏 Profile、Skill Tree、Gap Analysis、Kanban、Team View 等）的界面文案与 AI 输出语言；无需单独配置界面语言。
+`UI_LANG` 影响 **Streamlit 各页面**（含首页 `app.py`、侧边栏 Profile、Skill Tree、Gap Analysis、Kanban、Team View 等）的界面文案；`LLM_REPLY_LANG` 只影响模型输出和 AI prompt 语言，因此界面语言与模型回复语言可以独立配置。
 
 ### 方式 A — `.env` 文件（推荐）
 
@@ -51,6 +52,8 @@ nblane 读取以下环境变量：
 LLM_API_KEY=sk-...
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL=qwen3.6-plus
+UI_LANG=zh
+LLM_REPLY_LANG=en
 ```
 
 nblane 启动时会通过 `python-dotenv` 自动加载该文件。
@@ -61,6 +64,8 @@ nblane 启动时会通过 `python-dotenv` 自动加载该文件。
 export LLM_API_KEY=sk-...
 export LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 export LLM_MODEL=qwen3.6-plus
+export UI_LANG=zh
+export LLM_REPLY_LANG=en
 streamlit run app.py
 ```
 

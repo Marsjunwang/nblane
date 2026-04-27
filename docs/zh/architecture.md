@@ -39,7 +39,7 @@
 | `agent-profile.yaml` 拼入 `context` | 已实现 | `core/context.py` |
 | `teams/` 共享池 (team.yaml + product-pool.yaml) | 已实现 | `teams/`, `core/io.py`, `core/team.py` |
 | Web UI (Home / Skill Tree / Gap / Kanban / Team View / Profile Health / Public Site) | 已实现 | `app.py`, `pages/`（6 个子页 + Home）；Home **简历摄入**；Kanban **已完成→证据摄入**；Public Site 管理公开资料、博客、简历与构建 |
-| Web UI 中英文（单一开关） | 已实现 | `core/llm.py`（`LLM_REPLY_LANG`）、`web_i18n.py` |
+| Web UI 中英文（独立于模型回复语言） | 已实现 | `core/llm.py`（`UI_LANG`、`LLM_REPLY_LANG`）、`web_i18n.py` |
 | Gap 分析（规则 + 可选 LLM 路由 + 学习关键词） | 已实现 | `core/gap.py`、`core/gap_llm_router.py`、`core/learned_keywords.py`、`pages/2_Gap_Analysis.py` |
 | LLM 教练与追问（可选） | 已实现 | `core/llm.py`、`pages/2_Gap_Analysis.py` |
 | Skill Provenance（内联 + 池 + `evidence_refs` + 物化） | 已实现 | `core/models.py`、`core/evidence_resolve.py`、`core/evidence_pool_id.py` 等 |
@@ -92,7 +92,7 @@ src/nblane/
 ├── commands/           # CLI 命令实现
 ├── mcp_server.py       # MCP stdio：resources + write tools
 ├── web_shared.py       # Streamlit 共享工具（profile 选择器）
-├── web_i18n.py         # 界面文案（en/zh），由 LLM_REPLY_LANG 决定
+├── web_i18n.py         # 界面文案（en/zh），由 UI_LANG 决定
 └── core/
     ├── models.py       # SkillNode / SkillTree / Schema / GapResult 等数据类
     ├── io.py           # 文件 I/O 兼容 facade
@@ -116,7 +116,7 @@ src/nblane/
     ├── profile_ingest_llm.py  # 简历 / 看板 Done → 结构化 JSON（中/英）
     ├── public_site.py      # 公开资料/博客/简历/项目/成果渲染与构建
     ├── public_curation.py  # evidence 聚合成公开草稿
-    └── llm.py          # OpenAI 兼容 LLM 客户端 + 回复语言
+    └── llm.py          # OpenAI 兼容 LLM 客户端 + 界面/回复语言
 ```
 
 ```
@@ -131,11 +131,14 @@ pages/
 
 ## Web 界面语言（中 / 英）
 
-Streamlit 文案集中在 **`web_i18n.py`**。当前语言**不是**页面内单独控件切换，
-而是与 **`.env` 中的 `LLM_REPLY_LANG`**（默认 `en`，或 `zh`）一致，经
-`llm.reply_language()` 供 `home_ui()`、`gap_ui()`、`skill_tree_ui()`、
-`kanban_ui()`、`team_ui()`、`common_ui()` 使用。差距分析与 **LLM 路由**
-使用对应语言的 system prompt，保证界面语言与模型行为一致。
+Streamlit 文案集中在 **`web_i18n.py`**。界面语言由 **`.env` 中的
+`UI_LANG`**（默认 `en`，或 `zh`）决定，经 `llm.ui_language()` 供
+`home_ui()`、`gap_ui()`、`skill_tree_ui()`、`kanban_ui()`、`team_ui()`、
+`common_ui()` 使用。若旧部署未设置 `UI_LANG`，会回退到 `LLM_REPLY_LANG`
+以保持兼容。
+
+模型输出语言独立由 **`LLM_REPLY_LANG`** 控制，用于差距分析、LLM 路由与摄入
+system prompt。侧边栏同时提供两个设置，因此可以中文界面配英文模型输出，或反过来。
 
 **布局约定：** 各页在 `select_profile()` 之后再渲染主标题；团队页说明侧栏档案与
 `teams/` 数据的关系。可选 **`NBLANE_UI_EMOJI=0`** 关闭指标与状态行前的 emoji。

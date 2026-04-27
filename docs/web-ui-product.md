@@ -61,7 +61,7 @@ mostly implicit in the UI.
 |----------|--------|--------|
 | Browser tab (Home) | `app_page_title` is **NBL** in `web_i18n` `_HOME` | **Brand split:** README uses “nblane · 大佬之路”; subpages use “· nblane” |
 | Sidebar | `### Profile` (same in en/zh) | Weak hierarchy; **Profile** stays English in many zh strings |
-| zh locale | `LLM_REPLY_LANG=zh` drives copy, but `home_nav` and similar blocks still list **Skill Tree / Gap Analysis** in English | **Mixed zh/en** in navigation prose |
+| zh locale | `UI_LANG=zh` drives copy, but `home_nav` and similar blocks still list **Skill Tree / Gap Analysis** in English | **Mixed zh/en** in navigation prose |
 | Page order | Kanban / Gap / Team: **`st.title` then `select_profile()`**; Home / Skill Tree: **`select_profile()` then title** | Subtle mismatch in **what appears first** (“which profile am I in?”) |
 
 **Document direction:** Adopt one **title formula** site-wide (e.g.
@@ -161,7 +161,7 @@ canonical in [design.md](design.md) §3.4.
 - **Sidebar:** Clear label for “profile / 档案” and hierarchy (not only
   `### Profile`).
 - **zh completeness:** Page names inside `home_nav` and common UI strings
-  should match `LLM_REPLY_LANG=zh` when that mode is on.
+  should match `UI_LANG=zh` when that mode is on.
 - **H1 vs sidebar:** One clear rule for what the main heading shows vs
   Streamlit’s auto sidebar labels (`pages/` filenames).
 

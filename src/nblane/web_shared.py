@@ -72,6 +72,7 @@ _LLM_BASE_URL_KEY = "_nblane_llm_base_url"
 _LLM_MODEL_CHOICE_KEY = "_nblane_llm_model_choice"
 _LLM_CUSTOM_MODEL_KEY = "_nblane_llm_custom_model"
 _LLM_API_KEY_KEY = "_nblane_llm_api_key"
+_UI_LANG_KEY = "_nblane_ui_lang"
 _LLM_REPLY_LANG_KEY = "_nblane_llm_reply_lang"
 
 _LLM_PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -128,6 +129,7 @@ def _ensure_llm_session_defaults() -> None:
     cfg = llm_client.current_config(mask_key=False)
     base_url = str(cfg.get("base_url") or "")
     model = str(cfg.get("model") or "")
+    ui_lang = str(cfg.get("ui_lang") or "en")
     reply_lang = str(cfg.get("reply_lang") or "en")
     provider = _llm_provider_for(base_url)
     model_options = _llm_model_options(provider)
@@ -139,6 +141,10 @@ def _ensure_llm_session_defaults() -> None:
     st.session_state.setdefault(
         _LLM_MODEL_CHOICE_KEY,
         model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE,
+    )
+    st.session_state.setdefault(
+        _UI_LANG_KEY,
+        ui_lang if ui_lang in ("en", "zh") else "en",
     )
     st.session_state.setdefault(
         _LLM_REPLY_LANG_KEY,
@@ -186,6 +192,7 @@ def _apply_llm_sidebar_config(
     base_url: str,
     model: str,
     api_key: str,
+    ui_lang: str,
     reply_lang: str,
 ) -> None:
     """Apply sidebar values to the process-wide LLM client."""
@@ -193,6 +200,7 @@ def _apply_llm_sidebar_config(
         base_url=base_url,
         model=model,
         api_key=api_key or None,
+        ui_lang=ui_lang,
         reply_lang=reply_lang,
     )
 
@@ -201,6 +209,7 @@ def render_llm_settings() -> None:
     """Render app-wide LLM settings in the Streamlit sidebar."""
     u = common_ui()
     _ensure_llm_session_defaults()
+    previous_ui_lang = llm_client.ui_language()
 
     with st.expander(u["llm_settings_title"]):
         provider_names = list(_LLM_PROVIDER_PRESETS)
@@ -245,9 +254,20 @@ def render_llm_settings() -> None:
             key=_LLM_API_KEY_KEY,
         ).strip()
 
+        ui_lang = st.selectbox(
+            u["llm_ui_lang"],
+            ["zh", "en"],
+            format_func=lambda value: (
+                u["llm_reply_lang_zh"]
+                if value == "zh"
+                else u["llm_reply_lang_en"]
+            ),
+            key=_UI_LANG_KEY,
+        )
+
         reply_lang = st.selectbox(
             u["llm_reply_lang"],
-            ["zh", "en"],
+            ["en", "zh"],
             format_func=lambda value: (
                 u["llm_reply_lang_zh"]
                 if value == "zh"
@@ -260,8 +280,11 @@ def render_llm_settings() -> None:
             base_url=base_url,
             model=model,
             api_key=api_key,
+            ui_lang=ui_lang,
             reply_lang=reply_lang,
         )
+        if ui_lang != previous_ui_lang:
+            st.rerun()
 
         if llm_client.is_configured():
             st.caption(

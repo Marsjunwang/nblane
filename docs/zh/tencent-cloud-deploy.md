@@ -47,6 +47,7 @@ User=nblane
 WorkingDirectory=/srv/nblane-app
 Environment=NBLANE_ROOT=/srv/nblane-data
 Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
+Environment=UI_LANG=zh
 Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
 Environment=NBLANE_DATA_GIT_AUTOPUSH=1
@@ -58,6 +59,9 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+`UI_LANG` 控制 Streamlit 界面文案；`LLM_REPLY_LANG` 控制模型输出和 AI
+prompt 语言。需要时二者可以分别设置。
 
 启动：
 

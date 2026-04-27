@@ -41,6 +41,7 @@ User=nblane
 WorkingDirectory=/srv/nblane-app
 Environment=NBLANE_ROOT=/srv/nblane-data
 Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
+Environment=UI_LANG=zh
 Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
 Environment=NBLANE_DATA_GIT_AUTOPUSH=1
@@ -52,6 +53,10 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+`UI_LANG` controls the Streamlit interface. `LLM_REPLY_LANG` controls model
+output and AI prompt language, so deployments can set them differently when
+needed.
 
 ## HTTPS
 
