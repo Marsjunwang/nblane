@@ -76,6 +76,7 @@ from nblane.web_i18n import (
 from nblane.web_linkify import extract_plain_urls
 from nblane.web_auth import require_login
 from nblane.web_shared import (
+    apply_ui_language_from_session,
     assert_files_current,
     drop_streamlit_widget_keys,
     ensure_file_snapshot,
@@ -87,6 +88,8 @@ from nblane.web_shared import (
     stash_git_backup_results,
     ui_emoji_enabled,
 )
+
+apply_ui_language_from_session()
 
 
 def _state_key(profile: str) -> str:

@@ -205,11 +205,20 @@ def _apply_llm_sidebar_config(
     )
 
 
+def apply_ui_language_from_session() -> None:
+    """Sync runtime UI language from session state before page UI is built."""
+    ui_lang = st.session_state.get(_UI_LANG_KEY)
+    if (
+        ui_lang in ("en", "zh")
+        and ui_lang != llm_client.ui_language()
+    ):
+        llm_client.configure(ui_lang=ui_lang)
+
+
 def render_llm_settings() -> None:
     """Render app-wide LLM settings in the Streamlit sidebar."""
     u = common_ui()
     _ensure_llm_session_defaults()
-    previous_ui_lang = llm_client.ui_language()
 
     with st.expander(u["llm_settings_title"]):
         provider_names = list(_LLM_PROVIDER_PRESETS)
@@ -283,8 +292,6 @@ def render_llm_settings() -> None:
             ui_lang=ui_lang,
             reply_lang=reply_lang,
         )
-        if ui_lang != previous_ui_lang:
-            st.rerun()
 
         if llm_client.is_configured():
             st.caption(

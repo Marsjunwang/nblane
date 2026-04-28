@@ -17,6 +17,7 @@ from nblane.web_cache import (
 from nblane.web_i18n import all_pool_keys, pool_label, team_ui
 from nblane.web_auth import allowed_teams, require_login
 from nblane.web_shared import (
+    apply_ui_language_from_session,
     assert_files_current,
     ensure_file_snapshot,
     refresh_file_snapshots,
@@ -36,6 +37,8 @@ _POOL_EMOJI = {
 
 
 # -- Page --------------------------------------------------------
+
+apply_ui_language_from_session()
 
 ui = team_ui()
 st.set_page_config(

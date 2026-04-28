@@ -10,6 +10,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yaml
 
+from nblane.core import llm as llm_client
+
 try:
     from streamlit_crepe import st_milkdown
 except Exception:  # pragma: no cover - optional Streamlit component
@@ -72,8 +74,8 @@ from nblane.core.io import profile_dir
 from nblane.core.paths import REPO_ROOT
 from nblane.web_auth import require_login
 from nblane.web_cache import clear_web_cache
-from nblane.web_i18n import common_ui
 from nblane.web_shared import (
+    apply_ui_language_from_session,
     assert_files_current,
     ensure_file_snapshot,
     refresh_file_snapshots,
@@ -82,10 +84,11 @@ from nblane.web_shared import (
     stash_git_backup_results,
 )
 
+apply_ui_language_from_session()
+
 
 def _ui() -> dict[str, str]:
-    common = common_ui()
-    if common["status_locked"] == "锁定":
+    if llm_client.ui_language() == "zh":
         return {
             "page_title": "公开站点 · nblane",
             "title": "公开站点",

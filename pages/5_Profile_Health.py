@@ -7,7 +7,13 @@ import streamlit as st
 from nblane.core.profile_health import analyze_profile_health
 from nblane.web_auth import require_login
 from nblane.web_i18n import profile_health_ui
-from nblane.web_shared import render_git_backup_notices, select_profile
+from nblane.web_shared import (
+    apply_ui_language_from_session,
+    render_git_backup_notices,
+    select_profile,
+)
+
+apply_ui_language_from_session()
 
 
 ui = profile_health_ui()

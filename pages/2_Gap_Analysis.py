@@ -21,6 +21,7 @@ from nblane.web_cache import (
 from nblane.web_i18n import gap_ui, status_label
 from nblane.web_auth import require_login
 from nblane.web_shared import (
+    apply_ui_language_from_session,
     assert_files_current,
     ensure_file_snapshot,
     refresh_file_snapshots,
@@ -30,6 +31,8 @@ from nblane.web_shared import (
     skill_status_emoji,
     stash_git_backup_results,
 )
+
+apply_ui_language_from_session()
 
 _STATUS_COLOR = {
     "expert": "#1a73e8",
