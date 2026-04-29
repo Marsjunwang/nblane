@@ -1,0 +1,21 @@
+# Learning log for {Name}
+# kind: paper | article | blog | interview | book | video | repo | course | other
+# status: unread | reading | processed | archived
+
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+
+# Example:
+# resources:
+#   - id: "resource-1"
+#     title: "Paper or book title"
+#     kind: "paper"
+#     status: "reading"
+#     tags: ["planning", "llm"]
+#     takeaways:
+#       - text: "One concrete insight worth keeping"
+#         kind: "claim"
+#     next_actions:
+#       - title: "Try the benchmark on our stack"
+#         target: "kanban_queue"
+resources: []

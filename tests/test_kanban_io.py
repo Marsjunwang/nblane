@@ -66,6 +66,7 @@ class TestKanbanParseRender(unittest.TestCase):
                     done=False,
                     context="ctx",
                     started_on="2026-03-01",
+                    tags="narwal",
                     subtasks=[
                         KanbanSubtask(title="a", done=False),
                         KanbanSubtask(title="b", done=True),
@@ -79,16 +80,40 @@ class TestKanbanParseRender(unittest.TestCase):
         }
         text = render_kanban("u1", sections)
         self.assertIn("  - id: kb_", text)
+        self.assertIn("  - tags: narwal", text)
         back = self._parse_markdown("u1", text)
         t = back[KANBAN_DOING][0]
         self.assertEqual(t.title, "Main")
         self.assertTrue(t.id.startswith("kb_"))
         self.assertEqual(t.context, "ctx")
         self.assertEqual(t.started_on, "2026-03-01")
+        self.assertEqual(t.tags, "narwal")
         self.assertEqual(len(t.subtasks), 2)
         self.assertFalse(t.subtasks[0].done)
         self.assertTrue(t.subtasks[1].done)
         self.assertEqual(t.details, ["free note"])
+
+    def test_existing_tags_line_parses_as_structured_meta(self) -> None:
+        """Existing `tags:` lines no longer fall through to free-form details."""
+        md = """# x · Kanban
+
+> Updated: 2026-01-01
+
+---
+
+## Doing
+
+- [ ] Tagged task
+  - id: kb_demo
+  - tags: GAC
+  - plain line
+
+---
+"""
+        parsed = self._parse_markdown("p", md)
+        task = parsed[KANBAN_DOING][0]
+        self.assertEqual(task.tags, "GAC")
+        self.assertEqual(task.details, ["plain line"])
 
     def test_legacy_tasks_get_deterministic_ids(self) -> None:
         """Old files without id meta receive stable generated ids."""

@@ -4,6 +4,8 @@
 
 - Python >= 3.11
 - Git
+- Node.js >= 18 and npm >= 9 are only needed when rebuilding bundled
+  Streamlit frontend components, such as the Kanban board component.
 
 ## Install
 
@@ -24,6 +26,27 @@ This installs all dependencies declared in `pyproject.toml`:
 | `pandas` | Data handling in Web UI |
 
 If you only need the CLI (no Web UI, no AI features), the minimal install is still `pip install -e .`—all packages are lightweight.
+
+### Rebuild bundled frontend components
+
+The committed `src/nblane/*/frontend/static/` assets are enough for normal
+Python package usage. Install Node.js/npm only when you change a bundled
+frontend component and need to regenerate its static asset.
+
+On Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y nodejs npm
+```
+
+For the Kanban board component:
+
+```bash
+cd src/nblane/kanban_board_component/frontend
+npm install
+npm run build
+```
 
 ## LLM Configuration
 

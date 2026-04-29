@@ -301,6 +301,7 @@ class KanbanTask:
     started_on: str | None = None
     completed_on: str | None = None
     crystallized: bool = False
+    tags: str = ""
     subtasks: list[KanbanSubtask] = field(default_factory=list)
     details: list[str] = field(default_factory=list)
 

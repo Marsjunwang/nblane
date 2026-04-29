@@ -60,7 +60,7 @@ def apply_kanban_card_update(
         if not title:
             return None
         changes["title"] = title
-    for field in ("context", "why", "blocked_by", "outcome"):
+    for field in ("context", "why", "blocked_by", "outcome", "tags"):
         if field in card:
             changes[field] = _clean_text(card.get(field))
     if "started_on" in card:

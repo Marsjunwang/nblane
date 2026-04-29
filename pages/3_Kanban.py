@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+from html import escape
+from urllib.parse import urlencode
 
 import streamlit as st
 import yaml
@@ -50,6 +52,12 @@ from nblane.core.io import (
 )
 from nblane.kanban_board_component import st_kanban_board
 from nblane.kanban_ui import render_kanban_board
+from nblane.kanban_ui.personal_workspace import (
+    checkin_month_payload,
+    delete_workspace_checkin,
+    record_exercise_checkin,
+    record_learning_checkin,
+)
 from nblane.kanban_ui._helpers import (
     _bump_kanban_widget_epoch,
     _clear_kanban_dirty,
@@ -624,6 +632,667 @@ def _render_subtask_proposals(
                 st.rerun()
 
 
+def _checkin_lines(value: object) -> list[str]:
+    """Return non-empty unique lines from text input."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in str(value or "").splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        key = clean.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(clean)
+    return out
+
+
+def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
+    """Return year/month shifted by whole months."""
+    total = year * 12 + (month - 1) + offset
+    return total // 12, total % 12 + 1
+
+
+def _month_state(profile: str) -> tuple[int, int]:
+    """Return the toolbar calendar month from session state."""
+    today = date.today()
+    raw = str(
+        st.session_state.get(
+            f"kb_toolbar_checkin_month_{profile}",
+            f"{today.year:04d}-{today.month:02d}",
+        )
+    )
+    try:
+        year_text, month_text = raw[:7].split("-", 1)
+        year = int(year_text)
+        month = int(month_text)
+        date(year, month, 1)
+    except (TypeError, ValueError):
+        year, month = today.year, today.month
+    st.session_state[f"kb_toolbar_checkin_month_{profile}"] = (
+        f"{year:04d}-{month:02d}"
+    )
+    return year, month
+
+
+def _set_month_state(profile: str, year: int, month: int) -> None:
+    """Store the toolbar calendar month."""
+    st.session_state[f"kb_toolbar_checkin_month_{profile}"] = (
+        f"{year:04d}-{month:02d}"
+    )
+
+
+def _selected_checkin_day(profile: str, payload: dict) -> date:
+    """Return the selected toolbar calendar day."""
+    day_map = {
+        str(day["date"]): day
+        for day in payload.get("days", [])
+        if isinstance(day, dict)
+    }
+    selected_key = f"kb_toolbar_checkin_day_{profile}"
+    selected_raw = str(st.session_state.get(selected_key, "")).strip()
+    today = date.today()
+    fallback = (
+        today.isoformat()
+        if today.isoformat() in day_map
+        else next(iter(day_map), today.isoformat())
+    )
+    selected_iso = selected_raw if selected_raw in day_map else fallback
+    st.session_state[selected_key] = selected_iso
+    return date.fromisoformat(selected_iso)
+
+
+def _day_payload(payload: dict, day: date) -> dict:
+    """Return one day payload from a month payload."""
+    for item in payload.get("days", []):
+        if isinstance(item, dict) and item.get("date") == day.isoformat():
+            return item
+    return {
+        "date": day.isoformat(),
+        "day": day.day,
+        "counts": {"learning": 0, "exercise": 0},
+        "records": [],
+        "summary": "",
+    }
+
+
+def _month_marker_html(counts: dict, ui: dict[str, str]) -> str:
+    """Return compact colored HTML markers for one date cell."""
+    learning = int(counts.get("learning") or 0)
+    exercise = int(counts.get("exercise") or 0)
+    badges: list[str] = []
+    if learning:
+        text = ui.get("kb_checkin_month_learning_short", "学{count}").format(
+            count=learning
+        )
+        badges.append(
+            f'<span class="kb-cal-badge learning">{escape(text)}</span>'
+        )
+    if exercise:
+        text = ui.get("kb_checkin_month_exercise_short", "练{count}").format(
+            count=exercise
+        )
+        badges.append(
+            f'<span class="kb-cal-badge exercise">{escape(text)}</span>'
+        )
+    return "".join(badges)
+
+
+def _checkin_query_value(name: str) -> str:
+    """Return one toolbar check-in query parameter value."""
+    try:
+        raw = st.query_params.get(name)
+    except Exception:
+        return ""
+    if isinstance(raw, list):
+        raw = raw[-1] if raw else ""
+    return str(raw or "").strip()
+
+
+def _checkin_query_href(**updates: str) -> str:
+    """Build a same-page link that updates toolbar check-in state."""
+    try:
+        params = dict(st.query_params)
+    except Exception:
+        params = {}
+    for key in ("kb_ci_month", "kb_ci_day", "kb_ci_open"):
+        params.pop(key, None)
+    params.update({key: value for key, value in updates.items() if value})
+    query = urlencode(params, doseq=True)
+    return f"?{query}" if query else "?"
+
+
+def _sync_checkin_query_state(profile: str) -> None:
+    """Apply toolbar check-in query parameters to session state."""
+    raw_month = _checkin_query_value("kb_ci_month")
+    if raw_month:
+        try:
+            year_text, month_text = raw_month[:7].split("-", 1)
+            year = int(year_text)
+            month = int(month_text)
+            date(year, month, 1)
+        except (TypeError, ValueError):
+            pass
+        else:
+            _set_month_state(profile, year, month)
+
+    raw_day = _checkin_query_value("kb_ci_day")
+    if raw_day:
+        try:
+            selected = date.fromisoformat(raw_day)
+        except ValueError:
+            pass
+        else:
+            st.session_state[f"kb_toolbar_checkin_day_{profile}"] = (
+                selected.isoformat()
+            )
+
+    raw_open = _checkin_query_value("kb_ci_open")
+    if raw_open:
+        st.session_state[f"kb_toolbar_checkin_detail_open_{profile}"] = (
+            raw_open == "1"
+        )
+
+
+def _month_calendar_html(
+    profile: str,
+    payload: dict,
+    selected_day: date,
+    today: date,
+    ui: dict[str, str],
+) -> str:
+    """Return the compact toolbar month calendar HTML."""
+    year = int(payload["year"])
+    month = int(payload["month"])
+    prev_year, prev_month = _shift_month(year, month, -1)
+    next_year, next_month = _shift_month(year, month, 1)
+    prev_month_label = f"{prev_year:04d}-{prev_month:02d}"
+    next_month_label = f"{next_year:04d}-{next_month:02d}"
+    today_month_label = f"{today.year:04d}-{today.month:02d}"
+    prev_href = _checkin_query_href(
+        kb_ci_month=prev_month_label,
+        kb_ci_day=f"{prev_month_label}-01",
+        kb_ci_open="0",
+    )
+    next_href = _checkin_query_href(
+        kb_ci_month=next_month_label,
+        kb_ci_day=f"{next_month_label}-01",
+        kb_ci_open="0",
+    )
+    today_href = _checkin_query_href(
+        kb_ci_month=today_month_label,
+        kb_ci_day=today.isoformat(),
+        kb_ci_open="0",
+    )
+    title = escape(str(payload.get("month_label") or f"{year:04d}-{month:02d}"))
+    profile_label = escape(profile)
+
+    weekday_cells = "".join(
+        f'<span class="kb-cal-weekday">{escape(str(weekday))}</span>'
+        for weekday in payload.get("weekdays", [])
+    )
+    day_cells: list[str] = []
+    selected_iso = selected_day.isoformat()
+    for item in payload.get("days", []):
+        if not isinstance(item, dict):
+            day_cells.append('<span class="kb-cal-cell kb-cal-empty"></span>')
+            continue
+        day_iso = str(item.get("date") or "")
+        day_href = _checkin_query_href(
+            kb_ci_month=f"{year:04d}-{month:02d}",
+            kb_ci_day=day_iso,
+            kb_ci_open="1",
+        )
+        classes = ["kb-cal-cell", "kb-cal-day"]
+        if day_iso == selected_iso:
+            classes.append("selected")
+        if item.get("is_today"):
+            classes.append("today")
+        counts = item.get("counts") or {}
+        if int(counts.get("learning") or 0):
+            classes.append("has-learning")
+        if int(counts.get("exercise") or 0):
+            classes.append("has-exercise")
+        marker_html = _month_marker_html(counts, ui)
+        count_title = escape(str(item.get("summary") or ""))
+        day_title = escape(
+            f"{day_iso} {item.get('summary') or ''}".strip()
+        )
+        day_cells.append(
+            '<a class="'
+            + " ".join(classes)
+            + f'" href="{escape(day_href, quote=True)}"'
+            + f' title="{day_title}" aria-label="{day_title}">'
+            + f'<span class="kb-cal-num">{escape(str(item.get("day") or ""))}</span>'
+            + f'<span class="kb-cal-badges" title="{count_title}">'
+            + marker_html
+            + "</span></a>"
+        )
+
+    return (
+        f'<div class="kb-cal-mini" data-profile="{profile_label}">'
+        '<div class="kb-cal-nav">'
+        f'<a class="kb-cal-nav-btn" href="{escape(prev_href, quote=True)}" '
+        'aria-label="Previous month">‹</a>'
+        f'<a class="kb-cal-title" href="{escape(today_href, quote=True)}" '
+        f'title="{escape(ui.get("kb_checkin_today_short", "Today"))}" '
+        f'aria-label="{escape(ui.get("kb_checkin_today_short", "Today"))}">'
+        f"{title}</a>"
+        f'<a class="kb-cal-nav-btn" href="{escape(next_href, quote=True)}" '
+        'aria-label="Next month">›</a>'
+        "</div>"
+        f'<div class="kb-cal-grid kb-cal-weekdays">{weekday_cells}</div>'
+        '<div class="kb-cal-grid kb-cal-days">'
+        + "".join(day_cells)
+        + "</div></div>"
+    )
+
+
+def _render_month_calendar_styles() -> None:
+    """Inject compact styles for the toolbar month calendar."""
+    st.markdown(
+        """
+        <style>
+        .kb-cal-mini {
+          aspect-ratio: 2 / 1;
+          box-sizing: border-box;
+          display: grid;
+          gap: 2px;
+          grid-template-rows: 1.55rem 1.05rem minmax(0, 1fr);
+          margin: 0;
+          min-height: 0;
+          overflow: hidden;
+          width: 100%;
+        }
+        .kb-cal-nav {
+          align-items: center;
+          display: grid;
+          gap: 2px;
+          grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+          min-height: 0;
+        }
+        .kb-cal-nav-btn {
+          align-items: center;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 5px;
+          color: #334155;
+          display: flex;
+          font-size: 2rem;
+          font-weight: 900;
+          height: 1.45rem;
+          justify-content: center;
+          line-height: 0.75;
+          overflow: hidden;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+        .kb-cal-nav-btn:hover {
+          background: #eef2ff;
+          border-color: #c7d2fe;
+          color: #1d4ed8;
+          text-decoration: none;
+        }
+        .kb-cal-title {
+          color: #0f172a;
+          font-size: 1.08rem;
+          font-weight: 900;
+          line-height: 1.55rem;
+          overflow: hidden;
+          text-align: center;
+          text-overflow: ellipsis;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+        .kb-cal-title:hover {
+          color: #1d4ed8;
+          text-decoration: none;
+        }
+        .kb-cal-grid {
+          display: grid;
+          gap: 1px;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          min-height: 0;
+        }
+        .kb-cal-weekday {
+          color: #64748b;
+          font-size: 1rem;
+          font-weight: 900;
+          line-height: 1.05rem;
+          min-width: 0;
+          overflow: hidden;
+          text-align: center;
+        }
+        .kb-cal-days {
+          grid-template-rows: repeat(6, minmax(0, 1fr));
+        }
+        .kb-cal-cell {
+          min-height: 0;
+          min-width: 0;
+        }
+        .kb-cal-day {
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          border-radius: 3px;
+          color: #334155;
+          display: block;
+          overflow: hidden;
+          position: relative;
+          text-decoration: none;
+        }
+        .kb-cal-day:hover {
+          background: #f8fafc;
+          border-color: #94a3b8;
+          color: #0f172a;
+          text-decoration: none;
+        }
+        .kb-cal-day.selected {
+          background: #eef2ff;
+          border-color: #4f46e5;
+          color: #312e81;
+        }
+        .kb-cal-day.today .kb-cal-num {
+          color: #be123c;
+          font-weight: 900;
+        }
+        .kb-cal-day.has-learning,
+        .kb-cal-day.has-exercise {
+          background: #fbfdff;
+          border-color: #cbd5e1;
+        }
+        .kb-cal-day.has-learning.has-exercise {
+          background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+        }
+        .kb-cal-day.selected.has-learning,
+        .kb-cal-day.selected.has-exercise {
+          background: #eef2ff;
+          border-color: #4f46e5;
+        }
+        .kb-cal-num {
+          align-items: center;
+          display: flex;
+          font-size: 0.78rem;
+          font-weight: 900;
+          height: 50%;
+          justify-content: center;
+          left: 0;
+          line-height: 1;
+          position: absolute;
+          top: 0;
+          width: 50%;
+        }
+        .kb-cal-badges {
+          inset: 0;
+          min-height: 0;
+          pointer-events: none;
+          position: absolute;
+        }
+        .kb-cal-badge {
+          align-items: center;
+          border: 1px solid transparent;
+          border-radius: 0;
+          box-sizing: border-box;
+          display: flex;
+          font-size: 0.62rem;
+          font-weight: 900;
+          height: 50%;
+          justify-content: center;
+          line-height: 1;
+          max-width: none;
+          overflow: hidden;
+          padding: 0;
+          position: absolute;
+          text-overflow: clip;
+          white-space: nowrap;
+          width: 50%;
+        }
+        .kb-cal-badge.learning {
+          background: #bfdbfe;
+          border-color: #93c5fd;
+          color: #1e40af;
+          right: 0;
+          top: 0;
+        }
+        .kb-cal-badge.exercise {
+          background: #bbf7d0;
+          border-color: #86efac;
+          color: #166534;
+          bottom: 0;
+          right: 0;
+        }
+        .st-key-kb_toolbar_checkin_calendar {
+          container-type: inline-size;
+          margin: 0;
+          min-height: 0;
+          overflow: hidden;
+          padding: 0;
+        }
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stElementContainer"],
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stMarkdownContainer"],
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stVerticalBlock"] {
+          gap: 0;
+          margin: 0;
+          min-height: 0;
+          padding: 0;
+        }
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stMarkdownContainer"] p {
+          margin: 0;
+        }
+        .st-key-kb_toolbar_checkin_detail {
+          margin-top: 0.25rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_checkin_records(
+    profile: str,
+    profile_path,
+    selected_payload: dict,
+    ui: dict[str, str],
+) -> None:
+    """Render records for the selected calendar day."""
+    records = selected_payload.get("records") or []
+    st.caption(
+        selected_payload.get("summary")
+        or ui.get("kb_checkin_no_marks", "No marks")
+    )
+    if not records:
+        st.caption(
+            ui.get(
+                "kb_checkin_day_records_empty",
+                "No learning/exercise records on this day.",
+            )
+        )
+        return
+
+    for index, record in enumerate(records):
+        item = record if isinstance(record, dict) else {}
+        cols = st.columns([0.85, 2.2, 0.55], gap="small")
+        cols[0].caption(str(item.get("label") or ""))
+        cols[1].caption(str(item.get("detail") or ""))
+        can_delete = bool(item.get("can_delete") and item.get("id"))
+        if cols[2].button(
+            "x",
+            key=(
+                f"kb_toolbar_checkin_delete_{profile}_"
+                f"{item.get('id') or index}"
+            ),
+            help=ui.get("kb_checkin_delete", "Delete"),
+            disabled=not can_delete,
+        ):
+            deleted = delete_workspace_checkin(profile_path, str(item["id"]))
+            if not deleted:
+                st.warning(
+                    ui.get(
+                        "kb_checkin_delete_missing",
+                        "That check-in was already gone.",
+                    )
+                )
+                return
+            st.rerun()
+
+
+def _render_add_learning_form(
+    profile: str,
+    profile_path,
+    selected_day: date,
+    ui: dict[str, str],
+) -> None:
+    """Render the selected-day learning check-in form."""
+    with st.form(
+        f"kb_toolbar_learning_form_{profile}_{selected_day.isoformat()}",
+        clear_on_submit=True,
+    ):
+        note = st.text_area(
+            ui.get("kb_learning_checkin_note", "Learning note"),
+            key=f"kb_toolbar_learning_note_{profile}_{selected_day.isoformat()}",
+            height=76,
+            placeholder=ui.get(
+                "kb_learning_checkin_note_placeholder",
+                "What did you study, and what is worth remembering?",
+            ),
+        )
+        links_text = st.text_area(
+            ui.get("kb_learning_checkin_links", "Links"),
+            key=f"kb_toolbar_learning_links_{profile}_{selected_day.isoformat()}",
+            height=58,
+            placeholder=ui.get(
+                "kb_learning_checkin_links_placeholder",
+                "One link per line.",
+            ),
+        )
+        submitted = st.form_submit_button(
+            ui.get("kb_checkin_add_learning", "Add learning"),
+            type="primary",
+            use_container_width=True,
+        )
+    if not submitted:
+        return
+    links = _checkin_lines(links_text)
+    if not str(note or "").strip() and not links:
+        st.warning(
+            ui.get(
+                "kb_learning_checkin_required",
+                "Add a note or at least one link.",
+            )
+        )
+        return
+    record_learning_checkin(
+        profile_path,
+        when=selected_day,
+        note=str(note or "").strip(),
+        links=links,
+    )
+    st.rerun()
+
+
+def _render_add_exercise_form(
+    profile: str,
+    profile_path,
+    selected_day: date,
+    ui: dict[str, str],
+) -> None:
+    """Render the selected-day exercise check-in form."""
+    with st.form(
+        f"kb_toolbar_exercise_form_{profile}_{selected_day.isoformat()}",
+        clear_on_submit=True,
+    ):
+        duration_min = st.number_input(
+            ui.get("kb_exercise_duration", "Duration (min)"),
+            key=f"kb_toolbar_exercise_duration_{profile}_{selected_day.isoformat()}",
+            min_value=0.0,
+            step=5.0,
+            value=0.0,
+        )
+        note = st.text_area(
+            ui.get("kb_capture_note", "Note"),
+            key=f"kb_toolbar_exercise_note_{profile}_{selected_day.isoformat()}",
+            height=58,
+        )
+        submitted = st.form_submit_button(
+            ui.get("kb_checkin_add_exercise", "Add exercise"),
+            type="primary",
+            use_container_width=True,
+        )
+    if not submitted:
+        return
+    record_exercise_checkin(
+        profile_path,
+        when=selected_day,
+        workout_type="other",
+        duration_min=float(duration_min or 0.0),
+        intensity="moderate",
+        note=str(note or "").strip(),
+    )
+    st.rerun()
+
+
+def _render_toolbar_checkin(
+    profile: str,
+    profile_path,
+    ui: dict[str, str],
+) -> None:
+    """Render the compact top-right month check-in calendar."""
+    _render_month_calendar_styles()
+    _sync_checkin_query_state(profile)
+    today = date.today()
+    year, month = _month_state(profile)
+    payload = checkin_month_payload(
+        profile,
+        profile_path,
+        ui,
+        year=year,
+        month=month,
+    )
+    selected_day = _selected_checkin_day(profile, payload)
+    selected_payload = _day_payload(payload, selected_day)
+    detail_key = f"kb_toolbar_checkin_detail_open_{profile}"
+
+    with st.container(key="kb_toolbar_checkin_calendar"):
+        st.markdown(
+            _month_calendar_html(profile, payload, selected_day, today, ui),
+            unsafe_allow_html=True,
+        )
+
+    if not st.session_state.get(detail_key):
+        return
+
+    with st.container(key="kb_toolbar_checkin_detail"):
+        title_col, close_col = st.columns(
+            [1, 0.28],
+            gap="small",
+            vertical_alignment="center",
+        )
+        title_col.markdown(f"**{selected_day.isoformat()}**")
+        if close_col.button(
+            "x",
+            key=f"kb_toolbar_checkin_close_{profile}",
+            help=ui.get("kb_checkin_close_detail", "Hide details"),
+            use_container_width=True,
+        ):
+            st.session_state[detail_key] = False
+            try:
+                st.query_params["kb_ci_open"] = "0"
+            except Exception:
+                pass
+            st.rerun()
+        _render_checkin_records(profile, profile_path, selected_payload, ui)
+        with st.expander(
+            ui.get("kb_checkin_add_learning", "Add learning"),
+            expanded=False,
+        ):
+            _render_add_learning_form(profile, profile_path, selected_day, ui)
+        with st.expander(
+            ui.get("kb_checkin_add_exercise", "Add exercise"),
+            expanded=False,
+        ):
+            _render_add_exercise_form(profile, profile_path, selected_day, ui)
+
+
 def _handle_board_event(
     event: dict | None,
     *,
@@ -1057,49 +1726,76 @@ _archive_path = _pdir / "kanban-archive.md"
 _pool_path = _pdir / "evidence-pool.yaml"
 _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
+_activity_path = _pdir / "activity-log.yaml"
 for _path in (
     _kanban_path,
     _archive_path,
     _pool_path,
     _tree_path,
     _skill_path,
+    _activity_path,
 ):
     ensure_file_snapshot(_path)
 
-st.title(ui["title"])
-st.caption(ui["page_context_line"])
+# -- Header / Toolbar -------------------------------------------
 
-auto_dates = st.checkbox(
-    ui["kb_auto_dates"],
-    value=True,
-    key=f"kanban_auto_dates_{selected}",
-    help=ui["kb_auto_dates_help"],
+header_left, header_calendar = st.columns(
+    [3, 1],
+    gap="medium",
+    vertical_alignment="top",
 )
-focus_mode = st.checkbox(
-    ui["kb_focus_mode"],
-    value=False,
-    key=f"kanban_focus_{selected}",
-    help=ui["kb_focus_mode_help"],
-)
-
-# -- Toolbar -----------------------------------------------------
-
-tb1, tb2, tb3 = st.columns([1, 1, 3])
-with tb1:
-    if st.button(ui["reload"]):
-        _load_into_state(selected)
-        _clear_kanban_dirty(selected)
-        _bump_kanban_widget_epoch(selected)
-        refresh_file_snapshots([_kanban_path])
-        st.rerun()
-with tb2:
-    if st.button(ui["save"], type="primary"):
-        sections = _get_sections(selected)
-        _auto_save(selected, sections)
-        st.success(ui["saved"])
-with tb3:
-    if _kanban_is_dirty(selected):
-        st.caption(ui["kb_unsaved_subtasks"])
+with header_left:
+    st.title(ui["title"])
+    st.caption(ui["page_context_line"])
+    settings_col, _spacer_col = st.columns(
+        [2, 1],
+        gap="small",
+        vertical_alignment="bottom",
+    )
+    with settings_col:
+        auto_dates = st.checkbox(
+            ui["kb_auto_dates"],
+            value=True,
+            key=f"kanban_auto_dates_{selected}",
+            help=ui["kb_auto_dates_help"],
+        )
+        focus_mode = st.checkbox(
+            ui["kb_focus_mode"],
+            value=False,
+            key=f"kanban_focus_{selected}",
+            help=ui["kb_focus_mode_help"],
+        )
+        actions_col, _actions_spacer = st.columns(
+            [1, 2],
+            gap="small",
+            vertical_alignment="bottom",
+        )
+        with actions_col:
+            reload_col, save_col = st.columns(
+                [1, 1],
+                gap="small",
+                vertical_alignment="bottom",
+            )
+            with reload_col:
+                if st.button(ui["reload"], use_container_width=True):
+                    _load_into_state(selected)
+                    _clear_kanban_dirty(selected)
+                    _bump_kanban_widget_epoch(selected)
+                    refresh_file_snapshots([_kanban_path, _activity_path])
+                    st.rerun()
+            with save_col:
+                if st.button(
+                    ui["save"],
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    sections = _get_sections(selected)
+                    _auto_save(selected, sections)
+                    st.success(ui["saved"])
+        if _kanban_is_dirty(selected):
+            st.caption(ui["kb_unsaved_subtasks"])
+with header_calendar:
+    _render_toolbar_checkin(selected, _pdir, ui)
 
 sections = _get_sections(selected)
 

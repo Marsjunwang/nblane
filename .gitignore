@@ -8,6 +8,7 @@ dist/
 build/
 .venv/
 .streamlit/
+node_modules/
 
 # Personal profiles (SKILL.md, skill-tree, evidence-pool, kanban, etc.)
 # Keep only profiles/template/ in the repo as a reference layout.

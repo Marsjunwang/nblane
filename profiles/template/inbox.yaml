@@ -1,0 +1,22 @@
+# Inbox for {Name}
+# status: inbox | clarified | archived | discarded
+# Each item keeps its own history so capture, triage, and closure stay visible.
+
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+
+# Example:
+# items:
+#   - id: "inbox_20260428_001"
+#     type: "note"
+#     title: "Follow up on the failed eval run"
+#     source: "retro"
+#     captured_by: "human"
+#     tags: ["company/openai", "person/sam"]
+#     visibility: "private"
+#     status: "inbox"
+#     history:
+#       - at: "{YYYY-MM-DD}"
+#         action: "added"
+#         to_status: "inbox"
+items: []

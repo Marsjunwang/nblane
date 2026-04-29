@@ -22,6 +22,7 @@ As you update the files, the agent updates too. This is co-evolution.
 
 ```bash
 # Full setup and LLM config: docs/setup.md
+# Rebuilding bundled frontend components also needs Node.js/npm; see docs/setup.md
 pip install -e .
 
 # Create your profile

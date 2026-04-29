@@ -28,6 +28,7 @@ class TestKanbanEvents(unittest.TestCase):
             title="Original",
             id="task-1",
             context="old",
+            tags="old-tag",
             subtasks=[KanbanSubtask("Old item", done=True)],
             details=["old detail"],
         )
@@ -37,6 +38,7 @@ class TestKanbanEvents(unittest.TestCase):
             {
                 "title": " Updated ",
                 "context": " new context ",
+                "tags": " GAC ",
                 "notes": "line one\n\nline two",
                 "started_on": "",
                 "completed_on": "2026-04-27",
@@ -53,6 +55,7 @@ class TestKanbanEvents(unittest.TestCase):
         assert updated is not None
         self.assertEqual(updated.title, "Updated")
         self.assertEqual(updated.context, "new context")
+        self.assertEqual(updated.tags, "GAC")
         self.assertIsNone(updated.started_on)
         self.assertEqual(updated.completed_on, "2026-04-27")
         self.assertEqual(updated.details, ["line one", "line two"])

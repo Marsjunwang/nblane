@@ -1,0 +1,34 @@
+# Activity log for {Name}
+# Habits define the stable catalog. Checkins append dated entries.
+# Weekly summaries are optional Monday-based rollups.
+# Keep this lightweight: add only the habits and daily check-in fields you need.
+
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+
+# Example habit:
+# - id: exercise
+#   title: Exercise
+#   kind: health
+#   cadence: weekly
+#   tags: [health]
+#   target:
+#     count: 3
+#     unit: session
+habits: []
+
+# Example check-in:
+# - date: "{YYYY-MM-DD}"
+#   habits: [exercise]
+#   tags: [health, energy]
+#   summary: "Short note about today's activity."
+#   metrics:
+#     minutes: 30
+checkins: []
+
+# Example weekly summary:
+# - week_start: "{YYYY-MM-DD}"
+#   summary: "What changed this week?"
+#   wins: []
+#   tags: []
+weekly_summaries: []

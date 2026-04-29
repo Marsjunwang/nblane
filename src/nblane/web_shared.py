@@ -208,6 +208,12 @@ def _apply_llm_sidebar_config(
 def apply_ui_language_from_session() -> None:
     """Sync runtime UI language from session state before page UI is built."""
     ui_lang = st.session_state.get(_UI_LANG_KEY)
+    if ui_lang not in ("en", "zh"):
+        cfg_lang = str(
+            llm_client.current_config().get("ui_lang") or "en"
+        )
+        ui_lang = cfg_lang if cfg_lang in ("en", "zh") else "en"
+        st.session_state[_UI_LANG_KEY] = ui_lang
     if (
         ui_lang in ("en", "zh")
         and ui_lang != llm_client.ui_language()

@@ -171,6 +171,8 @@ def _ui() -> dict[str, str]:
             "preview_page": "预览页面",
             "preview_warnings": "预览提示",
             "save_profile": "保存公开资料",
+            "confirm_public_profile": "我确认将公开此资料页的姓名、简介、头像和联系方式。",
+            "confirm_public_required": "从 private 切换到 public 需要先勾选公开确认。",
             "curation_caption": "把零散 evidence 人工聚合成公开项目草稿。",
             "evidence": "Evidence",
             "suggest_groups": "推荐分组",
@@ -216,6 +218,7 @@ def _ui() -> dict[str, str]:
             "missing_tags": "缺少标签。",
             "leftover_insert_marker": "正文仍包含插入位置标记。",
             "privacy_hint": "正文疑似引用了内部原始文件或私密路径。",
+            "privacy_publish_blocked": "发布已暂停：正文疑似包含内部路径或私密引用，请先清理后重新检查。",
             "markdown_downgrade": "当前使用 Markdown 兼容编辑器；块级编辑会在 React / BlockNote 组件落地后启用。",
             "candidate_saved": "候选已写入正文。",
             "compact_layout": "窄屏模式",
@@ -302,6 +305,8 @@ def _ui() -> dict[str, str]:
         "preview_page": "Preview page",
         "preview_warnings": "Preview warnings",
         "save_profile": "Save public profile",
+        "confirm_public_profile": "I confirm this profile page will expose the name, bio, avatar, and contact fields.",
+        "confirm_public_required": "Switching from private to public requires explicit confirmation first.",
         "curation_caption": "Manually aggregate atomic evidence into public project drafts.",
         "evidence": "Evidence",
         "suggest_groups": "Suggested groups",
@@ -347,6 +352,7 @@ def _ui() -> dict[str, str]:
         "missing_tags": "Tags are missing.",
         "leftover_insert_marker": "Body still contains the insert marker.",
         "privacy_hint": "Body may reference internal raw files or private paths.",
+        "privacy_publish_blocked": "Publish paused: the body appears to reference internal paths or private material. Clean it up and run the check again.",
         "markdown_downgrade": "Using the Markdown-compatible editor; block editing will be enabled by the future React / BlockNote component.",
         "candidate_saved": "Candidate was written into the body.",
         "compact_layout": "Compact layout",
@@ -459,6 +465,13 @@ def _render_profile_form(
         index=visibility_options.index(visibility),
         key=_profile_widget_key(selected, "visibility"),
     )
+    public_visibility_confirmed = True
+    if visibility != "public" and new_visibility == "public":
+        public_visibility_confirmed = st.checkbox(
+            ui["confirm_public_profile"],
+            value=False,
+            key=_profile_widget_key(selected, "confirm_public"),
+        )
     new_public_name = st.text_input(
         ui["public_name"],
         value=str(profile_data.get("public_name", "") or selected),
@@ -563,6 +576,9 @@ def _render_profile_form(
     }
 
     if st.button(ui["save_profile"], type="primary"):
+        if not public_visibility_confirmed:
+            st.warning(ui["confirm_public_required"])
+            return profile_override, media_overrides
         assert_files_current([public_path])
         latest = load_public_profile(selected)
         latest.update(profile_override)
@@ -1067,6 +1083,14 @@ def _run_blog_publish_check(
     return check_state
 
 
+def _blog_publish_blocked(check_state: dict, ui: dict[str, str]) -> bool:
+    """Return True when publish must pause for errors or privacy warnings."""
+    if check_state.get("errors"):
+        return True
+    quality = check_state.get("quality")
+    return isinstance(quality, list) and ui["privacy_hint"] in quality
+
+
 def _render_body_editor(
     *,
     selected: str,
@@ -1445,7 +1469,9 @@ def _render_blog_react_shell(
             media_rows=final_media_rows,
             ui=ui,
         )
-        if check["errors"]:
+        if _blog_publish_blocked(check, ui):
+            if ui["privacy_hint"] in check.get("quality", []):
+                st.warning(ui["privacy_publish_blocked"])
             next_state = dict(layout_state)
             next_state["right_open"] = True
             next_state["active_right_tab"] = "Check"
@@ -2530,7 +2556,9 @@ def _render_blog_tab(
             media_rows=final_media_rows,
             ui=ui,
         )
-        if check_state["errors"]:
+        if _blog_publish_blocked(check_state, ui):
+            if ui["privacy_hint"] in check_state.get("quality", []):
+                st.warning(ui["privacy_publish_blocked"])
             next_state = dict(layout_state)
             next_state["right_open"] = True
             next_state["active_right_tab"] = "Check"

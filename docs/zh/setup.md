@@ -4,6 +4,8 @@
 
 - Python >= 3.11
 - Git
+- Node.js >= 18 与 npm >= 9 仅在重新构建内置 Streamlit 前端组件时需要，
+  例如 Kanban 看板组件。
 
 ## 安装
 
@@ -24,6 +26,27 @@ pip install -e .
 | `pandas` | Web UI 数据处理 |
 
 如果只使用 CLI（不需要 Web UI 和 AI 功能），同样执行 `pip install -e .` 即可，所有依赖都很轻量。
+
+### 重新构建内置前端组件
+
+普通 Python 包使用只需要仓库中已提交的 `src/nblane/*/frontend/static/`
+静态资源。只有在修改内置前端组件、需要重新生成静态资源时，才需要安装
+Node.js/npm。
+
+Ubuntu 环境可执行：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y nodejs npm
+```
+
+Kanban 看板组件的构建命令：
+
+```bash
+cd src/nblane/kanban_board_component/frontend
+npm install
+npm run build
+```
 
 ## LLM 配置
 

@@ -39,6 +39,8 @@ def _normalize_kanban_meta_key(raw_key: str) -> str | None:
         return "id"
     if k in ("context", "why", "outcome", "started_on", "completed_on"):
         return k
+    if k == "tags":
+        return "tags"
     if k in ("blocked_by", "blockedby"):
         return "blocked_by"
     if raw_key.strip().lower() == "blocked by":
@@ -74,6 +76,8 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
         task.completed_on = val
     elif field == "crystallized" and isinstance(val, bool):
         task.crystallized = val
+    elif field == "tags" and isinstance(val, str):
+        task.tags = val.strip()
 
 
 def _kanban_skip_placeholder_title(title: str) -> bool:
@@ -573,6 +577,8 @@ def _render_kanban_task_lines(
         meta_pairs.append(("completed_on", task.completed_on.strip()))
     if task.crystallized:
         meta_pairs.append(("crystallized", "true"))
+    if task.tags.strip():
+        meta_pairs.append(("tags", task.tags.strip()))
     for mk, mv in meta_pairs:
         lines.append(f"  - {mk}: {mv}")
     for st in task.subtasks:
