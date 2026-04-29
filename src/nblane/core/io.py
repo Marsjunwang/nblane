@@ -30,6 +30,8 @@ from nblane.core.profile_io import (
     EVIDENCE_POOL_FILENAME,
     SKILL_TREE_FILENAME,
     STATUSES,
+    safe_profile_dir,
+    validate_profile_name,
 )
 from nblane.core.yaml_io import _load_yaml_dict, _load_yaml_file
 
@@ -45,8 +47,8 @@ def _profile_file_path(
 
 
 def profile_dir(name: str) -> Path:
-    """Return path to profiles/{name}."""
-    return PROFILES_DIR / name
+    """Return the resolved safe path to profiles/{name}."""
+    return safe_profile_dir(name, PROFILES_DIR)
 
 
 def list_profiles() -> list[str]:
@@ -143,12 +145,22 @@ def status_by_node_id(tree_data: dict | None) -> dict[str, str]:
     return schema_io.status_by_node_id(tree_data)
 
 
-def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
+def parse_kanban(name: str | Path) -> dict[str, list[KanbanTask]]:
     """Parse kanban.md into section -> task list."""
     old = kanban_io.profile_dir
-    kanban_io.profile_dir = profile_dir
+    if isinstance(name, Path):
+        profile_path = name
+        profile_name = profile_path.name
+
+        def _path_profile_dir(_name: str) -> Path:
+            return profile_path
+
+        kanban_io.profile_dir = _path_profile_dir
+    else:
+        profile_name = validate_profile_name(name)
+        kanban_io.profile_dir = profile_dir
     try:
-        return kanban_io.parse_kanban(name)
+        return kanban_io.parse_kanban(profile_name)
     finally:
         kanban_io.profile_dir = old
 
@@ -183,6 +195,24 @@ def append_kanban_archive(
     kanban_io.profile_dir = profile_dir
     try:
         return kanban_io.append_kanban_archive(name, tasks)
+    finally:
+        kanban_io.profile_dir = old
+
+
+def archive_kanban_done_tasks(
+    name: str,
+    sections: dict[str, list[KanbanTask]],
+    done_indexes: list[int],
+) -> dict[str, list[KanbanTask]]:
+    """Archive selected Done tasks and remove them from kanban.md."""
+    old = kanban_io.profile_dir
+    kanban_io.profile_dir = profile_dir
+    try:
+        return kanban_io.archive_kanban_done_tasks(
+            name,
+            sections,
+            done_indexes,
+        )
     finally:
         kanban_io.profile_dir = old
 
@@ -256,6 +286,7 @@ __all__ = [
     "SkillTree",
     "TEAMS_DIR",
     "append_kanban_archive",
+    "archive_kanban_done_tasks",
     "init_profile",
     "list_profiles",
     "list_schemas",
@@ -277,6 +308,8 @@ __all__ = [
     "save_product_pool",
     "save_skill_tree",
     "save_team",
+    "safe_profile_dir",
     "schema_node_index",
     "status_by_node_id",
+    "validate_profile_name",
 ]

@@ -10,6 +10,7 @@ from dataclasses import replace
 from datetime import date
 
 from nblane.core import git_backup
+from nblane.core.file_write import atomic_write_text
 from nblane.core.models import KanbanSubtask, KanbanTask
 from nblane.core.profile_io import profile_dir
 
@@ -30,6 +31,15 @@ KANBAN_BOARD_SECTIONS = (
     KANBAN_SOMEDAY,
 )
 KANBAN_ARCHIVE_FILENAME = "kanban-archive.md"
+_KANBAN_MULTILINE_META_FIELDS = frozenset(
+    {"context", "why", "blocked_by", "outcome"}
+)
+_KANBAN_META_BULLET_RE = re.compile(
+    r"^-\s+([a-zA-Z][^:]*?):\s*(.*)$"
+)
+_KANBAN_DETAIL_PREFIX_RE = re.compile(
+    r"^([a-zA-Z][^:]*?):\s*(.*)$"
+)
 
 
 def _normalize_kanban_meta_key(raw_key: str) -> str | None:
@@ -78,6 +88,91 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
         task.crystallized = val
     elif field == "tags" and isinstance(val, str):
         task.tags = val.strip()
+
+
+def _kanban_tags_text(value: object) -> str:
+    """Return canonical comma-separated tag text for render-time compatibility."""
+    if isinstance(value, (list, tuple, set)):
+        tags: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            tag = _clean_task_text(item)
+            key = tag.casefold()
+            if not tag or key in seen:
+                continue
+            seen.add(key)
+            tags.append(tag)
+        return ", ".join(tags)
+    return _clean_task_text(value)
+
+
+def _looks_like_kanban_detail_escape_payload(text: str) -> bool:
+    """True when *text* starts with a key that needs detail escaping."""
+    mb = _KANBAN_DETAIL_PREFIX_RE.match(text.strip())
+    if not mb:
+        return False
+    raw_key = mb.group(1).strip()
+    if raw_key.lower() == "detail":
+        return True
+    return _normalize_kanban_meta_key(raw_key) is not None
+
+
+def _parse_kanban_detail_escape(value: str) -> str | None:
+    """Return the original detail text from a detail escape if present."""
+    text = value.strip()
+    if _looks_like_kanban_detail_escape_payload(text):
+        return text
+    return None
+
+
+def _kanban_detail_needs_escape(detail: str) -> bool:
+    """True if rendering *detail* directly could be parsed as metadata."""
+    text = detail.strip()
+    mb = _KANBAN_DETAIL_PREFIX_RE.match(text)
+    if not mb:
+        return False
+    raw_key = mb.group(1).strip()
+    if _normalize_kanban_meta_key(raw_key) is not None:
+        return True
+    if raw_key.lower() == "detail":
+        return _looks_like_kanban_detail_escape_payload(mb.group(2))
+    return False
+
+
+def _dedent_kanban_block_line(line: str, bullet_indent: int) -> str:
+    """Remove the expected content indent for a Kanban literal block."""
+    content_indent = bullet_indent + 2
+    lead = len(line) - len(line.lstrip(" \t"))
+    if lead >= content_indent:
+        return line[content_indent:]
+    return line[lead:]
+
+
+def _collect_kanban_literal_block(
+    lines: list[str],
+    start_index: int,
+    bullet_indent: int,
+) -> tuple[str, int]:
+    """Collect lines following a ``- key: |`` metadata bullet."""
+    block_lines: list[str] = []
+    index = start_index
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if stripped:
+            lead = len(line) - len(line.lstrip(" \t"))
+            if lead <= bullet_indent:
+                break
+        if not stripped:
+            block_lines.append("")
+        else:
+            block_lines.append(
+                _dedent_kanban_block_line(line, bullet_indent)
+            )
+        index += 1
+    while block_lines and block_lines[-1] == "":
+        block_lines.pop()
+    return "\n".join(block_lines), index
 
 
 def _kanban_skip_placeholder_title(title: str) -> bool:
@@ -444,24 +539,22 @@ def kanban_snapshot_to_moves(
     ]
 
 
-def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
-    """Parse kanban.md into section -> task list."""
-    path = profile_dir(name) / "kanban.md"
+def parse_kanban_text(
+    content: str,
+    profile: str,
+) -> dict[str, list[KanbanTask]]:
+    """Parse raw kanban markdown into section -> task list."""
     sections: dict[str, list[KanbanTask]] = {
         s: [] for s in KANBAN_SECTIONS
     }
-    if not path.exists():
-        return sections
-
-    content = path.read_text(encoding="utf-8")
     current_section = ""
     current_task: KanbanTask | None = None
 
-    meta_bullet = re.compile(
-        r"^-\s+([a-zA-Z][^:]*?):\s*(.*)$"
-    )
-
-    for line in content.splitlines():
+    lines = content.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         stripped = line.strip()
         lead = len(line) - len(line.lstrip(" \t"))
         slim = line.lstrip(" \t")
@@ -531,13 +624,32 @@ def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
         ind_bullet = re.match(r"^-\s+(.+)$", slim)
         if ind_bullet and current_task is not None:
             rest = ind_bullet.group(1).strip()
-            mb = meta_bullet.match(slim)
+            mb = _KANBAN_META_BULLET_RE.match(slim)
             if mb:
                 raw_key = mb.group(1).strip()
                 val_part = mb.group(2).strip()
+                if raw_key.lower() == "detail":
+                    detail = _parse_kanban_detail_escape(val_part)
+                    if detail is not None:
+                        current_task.details.append(detail)
+                        continue
                 nk = _normalize_kanban_meta_key(raw_key)
                 if nk is not None:
-                    typed = _parse_kanban_meta_value(nk, val_part)
+                    is_literal_block = False
+                    if (
+                        nk in _KANBAN_MULTILINE_META_FIELDS
+                        and val_part == "|"
+                    ):
+                        val_part, index = _collect_kanban_literal_block(
+                            lines,
+                            index,
+                            lead,
+                        )
+                        is_literal_block = True
+                    if is_literal_block:
+                        typed = val_part
+                    else:
+                        typed = _parse_kanban_meta_value(nk, val_part)
                     _kanban_apply_meta(current_task, nk, typed)
                     continue
             current_task.details.append(rest)
@@ -546,7 +658,16 @@ def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
     if current_task is not None and current_section in sections:
         sections[current_section].append(current_task)
 
-    return ensure_kanban_task_ids(sections, name)
+    return ensure_kanban_task_ids(sections, profile)
+
+
+def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
+    """Parse kanban.md into section -> task list."""
+    path = profile_dir(name) / "kanban.md"
+    if not path.exists():
+        return {s: [] for s in KANBAN_SECTIONS}
+    content = path.read_text(encoding="utf-8")
+    return parse_kanban_text(content, name)
 
 
 def _render_kanban_task_lines(
@@ -577,17 +698,27 @@ def _render_kanban_task_lines(
         meta_pairs.append(("completed_on", task.completed_on.strip()))
     if task.crystallized:
         meta_pairs.append(("crystallized", "true"))
-    if task.tags.strip():
-        meta_pairs.append(("tags", task.tags.strip()))
+    tags_text = _kanban_tags_text(task.tags)
+    if tags_text:
+        meta_pairs.append(("tags", tags_text))
     for mk, mv in meta_pairs:
-        lines.append(f"  - {mk}: {mv}")
+        field = _normalize_kanban_meta_key(mk)
+        if field in _KANBAN_MULTILINE_META_FIELDS and "\n" in mv:
+            lines.append(f"  - {mk}: |")
+            for block_line in mv.splitlines():
+                lines.append(f"    {block_line}")
+        else:
+            lines.append(f"  - {mk}: {mv}")
     for st in task.subtasks:
         if not st.title.strip():
             continue
         ch = "[x]" if st.done else "[ ]"
         lines.append(f"  - {ch} {st.title}")
     for detail in task.details:
-        lines.append(f"  - {detail}")
+        text = detail.strip()
+        if _kanban_detail_needs_escape(text):
+            text = f"detail: {text}"
+        lines.append(f"  - {text}")
     return lines
 
 
@@ -627,23 +758,18 @@ def save_kanban(
 ) -> None:
     """Write kanban.md back from structured sections."""
     path = profile_dir(name) / "kanban.md"
-    path.write_text(
-        render_kanban(name, sections), encoding="utf-8"
-    )
+    atomic_write_text(path, render_kanban(name, sections))
     git_backup.record_change(
         [path],
         action=f"update {name}/kanban.md",
     )
 
 
-def append_kanban_archive(
+def _render_kanban_archive_append(
     name: str,
     tasks: list[KanbanTask],
-) -> None:
-    """Append Done tasks to kanban-archive.md under today's heading."""
-    if not tasks:
-        return
-    path = profile_dir(name) / KANBAN_ARCHIVE_FILENAME
+) -> str:
+    """Render an archive block for Done tasks."""
     today = date.today().isoformat()
     body_lines: list[str] = [f"\n## Archived · {today}\n"]
     archive_tasks = ensure_kanban_task_ids(
@@ -655,18 +781,91 @@ def append_kanban_archive(
             _render_kanban_task_lines(KANBAN_DONE, task)
         )
         body_lines.append("")
-    block = "\n".join(body_lines)
+    return "\n".join(body_lines)
+
+
+def _render_kanban_archive_text(
+    name: str,
+    path,
+    tasks: list[KanbanTask],
+) -> str:
+    """Return full archive file text with *tasks* appended."""
+    block = _render_kanban_archive_append(name, tasks)
     if path.exists():
-        prev = path.read_text(encoding="utf-8")
-        path.write_text(prev + block, encoding="utf-8")
-    else:
-        header = (
-            f"# {name} · Kanban archive\n\n"
-            "> Tasks moved here from kanban.md (Done column).\n\n"
-            "---\n"
-        )
-        path.write_text(header + block, encoding="utf-8")
+        return path.read_text(encoding="utf-8") + block
+    header = (
+        f"# {name} · Kanban archive\n\n"
+        "> Tasks moved here from kanban.md (Done column).\n\n"
+        "---\n"
+    )
+    return header + block
+
+
+def append_kanban_archive(
+    name: str,
+    tasks: list[KanbanTask],
+) -> None:
+    """Append Done tasks to kanban-archive.md under today's heading."""
+    if not tasks:
+        return
+    path = profile_dir(name) / KANBAN_ARCHIVE_FILENAME
+    atomic_write_text(path, _render_kanban_archive_text(name, path, tasks))
     git_backup.record_change(
         [path],
         action=f"append {name}/kanban-archive.md",
     )
+
+
+def archive_kanban_done_tasks(
+    name: str,
+    sections: dict[str, list[KanbanTask]],
+    done_indexes: list[int],
+) -> dict[str, list[KanbanTask]]:
+    """Archive selected Done tasks and remove them from kanban.md.
+
+    The archive and kanban file contents are both computed before writing.
+    The kanban file is only replaced after the archive write succeeds, so a
+    failed archive append cannot silently delete Done tasks.
+    """
+    normalized = ensure_kanban_task_ids(sections, name)
+    done_tasks = list(normalized.get(KANBAN_DONE, []))
+    valid_indexes: list[int] = []
+    for raw_index in done_indexes:
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= index < len(done_tasks) and index not in valid_indexes:
+            valid_indexes.append(index)
+    if not valid_indexes:
+        return normalized
+
+    index_set = set(valid_indexes)
+    to_archive = [done_tasks[i] for i in sorted(index_set)]
+    updated_sections = {
+        section: list(normalized.get(section, []))
+        for section in KANBAN_SECTIONS
+    }
+    updated_sections[KANBAN_DONE] = [
+        task
+        for i, task in enumerate(done_tasks)
+        if i not in index_set
+    ]
+
+    profile_path = profile_dir(name)
+    archive_path = profile_path / KANBAN_ARCHIVE_FILENAME
+    kanban_path = profile_path / "kanban.md"
+    archive_text = _render_kanban_archive_text(
+        name,
+        archive_path,
+        to_archive,
+    )
+    kanban_text = render_kanban(name, updated_sections)
+
+    atomic_write_text(archive_path, archive_text)
+    atomic_write_text(kanban_path, kanban_text)
+    git_backup.record_change(
+        [archive_path, kanban_path],
+        action=f"archive {name}/Done tasks",
+    )
+    return updated_sections

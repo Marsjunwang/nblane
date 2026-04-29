@@ -40,14 +40,15 @@ class TestInbox(unittest.TestCase):
             items=[InboxItem(id="item-2", title="Existing")],
         )
 
-        item = add_inbox_item(
-            inbox,
-            " Follow up with paper authors ",
-            tags=["company/openai", "person/sam", "company/openai"],
-            metadata={"source": "email"},
-            note="captured from notes",
-            at="2026-04-20",
-        )
+        with patch("nblane.core.inbox.date", _FakeDate):
+            item = add_inbox_item(
+                inbox,
+                " Follow up with paper authors ",
+                tags=["company/openai", "person/sam", "company/openai"],
+                metadata={"source": "email"},
+                note="captured from notes",
+                at="2026-04-20",
+            )
 
         self.assertEqual(item.id, "inbox_20260428_003")
         self.assertEqual(item.title, "Follow up with paper authors")

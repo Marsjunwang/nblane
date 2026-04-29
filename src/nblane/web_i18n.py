@@ -916,6 +916,7 @@ _KANBAN: dict[str, dict[str, str]] = {
             "or Done -> evidence above for the full list."
         ),
         "kb_title_required": "Task title is required.",
+        "kb_invalid_date": "Use YYYY-MM-DD for date fields: {fields}.",
         "kb_task_details": "Details & subtasks",
         "kb_edit_task": "Edit",
         "kb_done_editing": "Done editing",
@@ -944,6 +945,7 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_done_short": "Evd",
         "kb_mark_crystallized": "Mark crystallized",
         "kb_crystallize_short": "Cry",
+        "kb_crystallize_done_only": "Only Done tasks can be crystallized.",
         "kb_artifact": "Artifact",
         "kb_verification": "Verification",
         "kb_move_to_label": "Move to",
@@ -1303,6 +1305,7 @@ _KANBAN: dict[str, dict[str, str]] = {
             "完整列表请使用上方整理区或「已完成 → 证据」。"
         ),
         "kb_title_required": "任务标题不能为空。",
+        "kb_invalid_date": "日期字段请使用 YYYY-MM-DD：{fields}。",
         "kb_task_details": "详情与子任务",
         "kb_edit_task": "编辑",
         "kb_done_editing": "收起编辑",
@@ -1331,6 +1334,7 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_done_short": "证",
         "kb_mark_crystallized": "标记已结晶",
         "kb_crystallize_short": "晶",
+        "kb_crystallize_done_only": "只有「已完成」任务可以标记为已结晶。",
         "kb_artifact": "产物",
         "kb_verification": "验证",
         "kb_move_to_label": "移动到",

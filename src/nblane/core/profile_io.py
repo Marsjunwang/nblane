@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import unicodedata
 
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_write import atomic_write_text
 from nblane.core.models import EvidencePool, SkillTree
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict, _load_yaml_file
@@ -15,6 +17,45 @@ from nblane.core.yaml_io import _load_yaml_dict, _load_yaml_file
 STATUSES = ("locked", "learning", "solid", "expert")
 EVIDENCE_POOL_FILENAME = "evidence-pool.yaml"
 SKILL_TREE_FILENAME = "skill-tree.yaml"
+
+
+def validate_profile_name(name: str) -> str:
+    """Return a normalized safe profile name or raise ValueError.
+
+    Profile names may use ordinary display text, including Chinese
+    characters. They may not be empty, path segments, or contain path
+    separators/control characters.
+    """
+    if not isinstance(name, str):
+        raise ValueError("Profile name must be a string.")
+
+    clean = name.strip()
+    if not clean:
+        raise ValueError("Profile name cannot be empty.")
+    if clean in (".", ".."):
+        raise ValueError("Profile name cannot be '.' or '..'.")
+    if "/" in clean or "\\" in clean:
+        raise ValueError("Profile name cannot contain path separators.")
+    if any(unicodedata.category(char) == "Cc" for char in clean):
+        raise ValueError("Profile name cannot contain control characters.")
+    return clean
+
+
+def safe_profile_dir(
+    name: str,
+    profiles_dir: Path | None = None,
+) -> Path:
+    """Resolve a profile directory and enforce containment in profiles/."""
+    clean = validate_profile_name(name)
+    root = (profiles_dir or PROFILES_DIR).resolve()
+    candidate = (root / clean).resolve(strict=False)
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Profile path for '{clean}' escapes profiles directory."
+        ) from exc
+    return candidate
 
 
 def _profile_file_path(
@@ -31,16 +72,23 @@ def list_profiles() -> list[str]:
     """Return profile names (non-template subdirs of profiles/)."""
     if not PROFILES_DIR.exists():
         return []
-    return sorted(
-        d.name
-        for d in PROFILES_DIR.iterdir()
-        if d.is_dir() and d.name != "template"
-    )
+    names: list[str] = []
+    for d in PROFILES_DIR.iterdir():
+        if not d.is_dir() or d.name == "template":
+            continue
+        try:
+            if validate_profile_name(d.name) != d.name:
+                continue
+            safe_profile_dir(d.name)
+        except ValueError:
+            continue
+        names.append(d.name)
+    return sorted(names)
 
 
 def profile_dir(name: str) -> Path:
-    """Return path to profiles/{name}."""
-    return PROFILES_DIR / name
+    """Return the resolved safe path to profiles/{name}."""
+    return safe_profile_dir(name)
 
 
 def load_skill_tree(name_or_dir: str | Path) -> SkillTree | None:
@@ -82,7 +130,7 @@ def save_skill_tree(name: str, data: dict) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    path.write_text(header + body, encoding="utf-8")
+    atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {name}/skill-tree.yaml",
@@ -127,7 +175,7 @@ def save_evidence_pool(name: str, data: dict) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    path.write_text(header + body, encoding="utf-8")
+    atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {name}/evidence-pool.yaml",
@@ -152,10 +200,11 @@ def init_profile(name: str) -> Path:
 
     from nblane.core.paths import TEMPLATE_DIR
 
-    dest = PROFILES_DIR / name
+    profile_name = validate_profile_name(name)
+    dest = safe_profile_dir(profile_name)
     if dest.exists():
         raise FileExistsError(
-            f"Profile '{name}' already exists."
+            f"Profile '{profile_name}' already exists."
         )
 
     shutil.copytree(TEMPLATE_DIR, dest)
@@ -163,11 +212,11 @@ def init_profile(name: str) -> Path:
     for filepath in dest.rglob("*"):
         if filepath.is_file():
             text = filepath.read_text(encoding="utf-8")
-            text = text.replace("{Name}", name)
+            text = text.replace("{Name}", profile_name)
             filepath.write_text(text, encoding="utf-8")
 
     git_backup.record_change(
         list(dest.rglob("*")),
-        action=f"create profile {name}",
+        action=f"create profile {profile_name}",
     )
     return dest

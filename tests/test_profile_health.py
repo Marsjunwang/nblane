@@ -118,6 +118,31 @@ class TestProfileHealth(unittest.TestCase):
                 report = analyze_profile_health("kanbanuser")
         self.assertTrue(any(i.category == "kanban" for i in report.issues))
 
+    def test_non_done_task_marked_crystallized_is_warning(self) -> None:
+        """Only Done tasks may carry crystallized true."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._template_profile(Path(tmp_s), "kanbanuser")
+            (profile / "kanban.md").write_text(
+                "# kanbanuser · Kanban\n\n"
+                "## Doing\n\n"
+                "- [ ] Still active\n"
+                "  - crystallized: true\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.profile_health.profile_dir",
+                lambda _name: profile,
+            ):
+                report = analyze_profile_health("kanbanuser")
+
+        self.assertTrue(
+            any(
+                issue.title == "Non-Done tasks marked crystallized"
+                and issue.severity == "warning"
+                for issue in report.issues
+            )
+        )
+
 
 class TestHealthCliExit(unittest.TestCase):
     """CLI exit policy for health reports."""

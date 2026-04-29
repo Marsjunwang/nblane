@@ -12,6 +12,7 @@ from unittest.mock import patch
 from nblane.core.activity_log import (
     ACTIVITY_LOG_FILENAME,
     ActivityLog,
+    ActivityLogParseError,
     Checkin,
     add_activity_checkin,
     activity_summary,
@@ -45,6 +46,50 @@ class TestActivityLog(unittest.TestCase):
         self.assertEqual(log.habits, [])
         self.assertEqual(log.checkins, [])
         self.assertEqual(log.weekly_summaries, [])
+
+    def test_load_invalid_yaml_raises_parse_error(self) -> None:
+        """Malformed YAML is fail-closed instead of returning an empty log."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ACTIVITY_LOG_FILENAME
+            path.write_text("checkins:\n  - [\n", encoding="utf-8")
+
+            with self.assertRaises(ActivityLogParseError) as ctx:
+                load(path)
+
+        self.assertEqual(ctx.exception.path, path)
+
+    def test_save_refuses_to_overwrite_invalid_existing_yaml(self) -> None:
+        """Direct saves also fail closed when the existing file is malformed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ACTIVITY_LOG_FILENAME
+            original = "checkins:\n  - [\n"
+            path.write_text(original, encoding="utf-8")
+
+            with self.assertRaises(ActivityLogParseError):
+                save(path, {"profile": "demo"})
+
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_load_refuses_non_mapping_yaml(self) -> None:
+        """Schema-shaped failures also fail closed instead of becoming empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ACTIVITY_LOG_FILENAME
+            path.write_text("- not a mapping\n", encoding="utf-8")
+
+            with self.assertRaises(ActivityLogParseError):
+                load(path)
+
+    def test_save_refuses_to_overwrite_non_mapping_yaml(self) -> None:
+        """Existing scalar/null YAML is treated as unsafe to overwrite."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ACTIVITY_LOG_FILENAME
+            original = "null\n"
+            path.write_text(original, encoding="utf-8")
+
+            with self.assertRaises(ActivityLogParseError):
+                save(path, {"profile": "demo"})
+
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_load_tolerates_legacy_shapes_and_dedupes_tags(self) -> None:
         """String habits, singular keys, and weekly maps normalize cleanly."""

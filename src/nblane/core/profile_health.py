@@ -182,7 +182,7 @@ def _evidence_issues(
 
 
 def _kanban_issues(profile_name: str, profile_path) -> list[HealthIssue]:
-    """Surface Done tasks that have not been crystallized into evidence."""
+    """Surface inconsistent Kanban crystallization state."""
     old_profile_dir = io_facade.profile_dir
     try:
         io_facade.profile_dir = lambda _name: profile_path
@@ -199,6 +199,28 @@ def _kanban_issues(profile_name: str, profile_path) -> list[HealthIssue]:
         ]
     finally:
         io_facade.profile_dir = old_profile_dir
+    issues: list[HealthIssue] = []
+    non_done_crystallized: list[str] = []
+    for section, tasks in sections.items():
+        if section == KANBAN_DONE:
+            continue
+        for task in tasks:
+            if getattr(task, "crystallized", False):
+                non_done_crystallized.append(f"{task.title} ({section})")
+    if non_done_crystallized:
+        preview = ", ".join(non_done_crystallized[:5])
+        if len(non_done_crystallized) > 5:
+            preview += f", ... (+{len(non_done_crystallized) - 5} more)"
+        issues.append(
+            _issue(
+                "warning",
+                "kanban",
+                "Non-Done tasks marked crystallized",
+                f"{len(non_done_crystallized)} task(s): {preview}",
+                "Remove crystallized: true outside Done tasks.",
+            )
+        )
+
     done = sections.get(KANBAN_DONE) or []
     pending = [
         task.title
@@ -206,11 +228,11 @@ def _kanban_issues(profile_name: str, profile_path) -> list[HealthIssue]:
         if not getattr(task, "crystallized", False)
     ]
     if not pending:
-        return []
+        return issues
     preview = ", ".join(pending[:5])
     if len(pending) > 5:
         preview += f", ... (+{len(pending) - 5} more)"
-    return [
+    issues.append(
         _issue(
             "info",
             "kanban",
@@ -218,7 +240,8 @@ def _kanban_issues(profile_name: str, profile_path) -> list[HealthIssue]:
             f"{len(pending)} Done task(s): {preview}",
             "Use Kanban Done -> evidence to crystallize finished work.",
         )
-    ]
+    )
+    return issues
 
 
 def _tree_shape_issues(tree_raw: dict | None) -> list[HealthIssue]:

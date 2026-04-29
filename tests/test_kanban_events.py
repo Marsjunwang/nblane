@@ -9,11 +9,13 @@ from nblane.core.kanban_ai import (
     apply_kanban_subtask_proposals,
 )
 from nblane.core.kanban_events import (
+    append_ai_proposal_details,
     alignment_context_from_payload,
     apply_kanban_card_update,
     discard_subtask_proposal_at,
     discard_task_ai_state,
     event_subtask_index,
+    invalid_kanban_card_date_fields,
     subtask_proposals_from_payload,
 )
 from nblane.core.models import KanbanSubtask, KanbanTask
@@ -109,6 +111,30 @@ class TestKanbanEvents(unittest.TestCase):
             apply_kanban_card_update(
                 KanbanTask(title="Task", id="task-1"),
                 {"title": "   "},
+            )
+        )
+
+    def test_apply_card_update_rejects_invalid_iso_dates(self) -> None:
+        """Date fields must be strict YYYY-MM-DD calendar dates."""
+        task = KanbanTask(title="Task", id="task-1")
+
+        bad = {
+            "started_on": "2026-2-3",
+            "completed_on": "2026-02-31",
+        }
+
+        self.assertEqual(
+            invalid_kanban_card_date_fields(bad),
+            ["started_on", "completed_on"],
+        )
+        self.assertIsNone(apply_kanban_card_update(task, bad))
+        self.assertIsNotNone(
+            apply_kanban_card_update(
+                task,
+                {
+                    "started_on": "2026-02-03",
+                    "completed_on": "",
+                },
             )
         )
 
@@ -231,7 +257,7 @@ class TestKanbanEvents(unittest.TestCase):
         )
 
     def test_subtask_proposals_from_payload_uses_edited_selected_drafts(self) -> None:
-        """Draft apply payloads keep edited titles and drop unchecked rows."""
+        """Draft apply payloads keep edited titles, metadata, and selection."""
         proposals = subtask_proposals_from_payload(
             {
                 "drafts": [
@@ -239,6 +265,8 @@ class TestKanbanEvents(unittest.TestCase):
                         "index": 0,
                         "title": " 跑通完整训练评测 ",
                         "selected": True,
+                        "artifact": "report.md",
+                        "verification": "reviewed by human",
                     },
                     {
                         "index": 1,
@@ -257,7 +285,52 @@ class TestKanbanEvents(unittest.TestCase):
             [proposal.title for proposal in proposals],
             ["跑通完整训练评测", "对齐 baseline 效果和训练时间"],
         )
+        self.assertEqual(proposals[0].artifact, "report.md")
+        self.assertEqual(proposals[0].verification, "reviewed by human")
         self.assertTrue(all(proposal.task_id == "task-1" for proposal in proposals))
+
+    def test_append_ai_proposal_details_preserves_artifact_metadata(self) -> None:
+        """Applied AI proposal metadata is retained on the task details."""
+        task = KanbanTask(title="Task", id="task-1", details=["existing"])
+
+        updated = append_ai_proposal_details(
+            task,
+            [
+                KanbanSubtaskProposal(
+                    title="Run eval",
+                    artifact="eval.md",
+                    verification="metrics reviewed",
+                    task_id="task-1",
+                ),
+                KanbanSubtaskProposal(
+                    title="No metadata",
+                    task_id="task-1",
+                ),
+            ],
+        )
+        updated_again = append_ai_proposal_details(
+            updated,
+            [
+                KanbanSubtaskProposal(
+                    title="Run eval",
+                    artifact="eval.md",
+                    verification="metrics reviewed",
+                    task_id="task-1",
+                )
+            ],
+        )
+
+        self.assertEqual(
+            updated.details,
+            [
+                "existing",
+                (
+                    "AI subtask: Run eval | Artifact: eval.md | "
+                    "Verification: metrics reviewed"
+                ),
+            ],
+        )
+        self.assertEqual(updated_again.details, updated.details)
 
     def test_subtask_proposals_from_payload_supports_legacy_titles(self) -> None:
         """Older static component title payloads remain supported."""

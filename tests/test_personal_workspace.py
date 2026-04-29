@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import types
 import unittest
 from datetime import date
+from pathlib import Path
+from unittest.mock import patch
 
 try:
     import streamlit  # noqa: F401
@@ -17,9 +20,11 @@ from nblane.kanban_ui.personal_workspace import (
     EXERCISE_HABIT_ID,
     LEARNING_HABIT_ID,
     checkin_calendar_payload_from_activity,
+    checkin_month_payload,
     checkin_month_payload_from_activity,
     daily_workspace_counts,
     month_day_window,
+    record_learning_checkin,
     recent_day_window,
     workspace_habit_id,
 )
@@ -240,6 +245,58 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                 },
             ],
         )
+
+    def test_invalid_activity_yaml_marks_payload_unwritable(self) -> None:
+        """The workspace catches malformed YAML instead of returning records."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "demo"
+            profile_path.mkdir()
+            (profile_path / "activity-log.yaml").write_text(
+                "checkins:\n  - [\n",
+                encoding="utf-8",
+            )
+            with patch("nblane.kanban_ui.personal_workspace.st") as mock_st:
+                payload = checkin_month_payload(
+                    "demo",
+                    profile_path,
+                    {},
+                    year=2026,
+                    month=4,
+                    today=date(2026, 4, 28),
+                )
+
+        self.assertFalse(payload["activity_log_writable"])
+        self.assertIn("activity-log.yaml", payload["activity_log_error"])
+        mock_st.error.assert_called_once()
+
+    def test_invalid_activity_yaml_blocks_workspace_writes(self) -> None:
+        """Malformed activity-log.yaml stays untouched on check-in attempts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "demo"
+            profile_path.mkdir()
+            path = profile_path / "activity-log.yaml"
+            original = "checkins:\n  - [\n"
+            path.write_text(original, encoding="utf-8")
+
+            with (
+                patch("nblane.kanban_ui.personal_workspace.st") as mock_st,
+                patch(
+                    "nblane.kanban_ui.personal_workspace.assert_files_current"
+                ),
+                patch(
+                    "nblane.kanban_ui.personal_workspace.refresh_file_snapshots"
+                ) as mock_refresh,
+            ):
+                record_learning_checkin(
+                    profile_path,
+                    when=date(2026, 4, 28),
+                    note="Should not write",
+                    links=[],
+                )
+
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+        mock_st.error.assert_called_once()
+        mock_refresh.assert_not_called()
 
 
 if __name__ == "__main__":

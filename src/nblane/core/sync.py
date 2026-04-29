@@ -6,11 +6,13 @@ import re
 from pathlib import Path
 
 from nblane.core import git_backup
+from nblane.core.file_write import atomic_write_text
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_QUEUE,
     load_schema_raw,
     load_skill_tree_raw,
+    parse_kanban,
     schema_node_index,
 )
 
@@ -110,18 +112,15 @@ def _render_skill_tree_block(profile_dir: Path) -> str:
     return "\n".join(lines)
 
 
-def _top_level_task(line: str) -> str | None:
-    """Return task title if line is a top-level checkbox."""
-    match = re.match(r"^\s*-\s\[[ xX]\]\s+(.*)$", line)
-    if match is None:
-        return None
-    return match.group(1).strip()
+def _is_placeholder_blocker(value: str) -> bool:
+    """Return true for template-only blocker placeholders."""
+    text = value.strip().lower()
+    return not text or "{dependency" in text
 
 
 def _render_focus_from_kanban(profile_dir: Path) -> str:
     """Render Current Focus block from kanban.md."""
-    kanban_path = profile_dir / "kanban.md"
-    if not kanban_path.exists():
+    if not (profile_dir / "kanban.md").exists():
         return (
             "**Active** (this week):\n"
             "- kanban.md not found.\n\n"
@@ -131,63 +130,30 @@ def _render_focus_from_kanban(profile_dir: Path) -> str:
             "- none"
         )
 
-    section = ""
-    doing: list[str] = []
-    queue: list[str] = []
-    blocked: list[str] = []
-    current_task = ""
-    current_detail: list[str] = []
-
-    text = kanban_path.read_text(encoding="utf-8")
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            if section == KANBAN_QUEUE and current_task != "":
-                queue.append(current_task)
-                detail_text = (
-                    " ".join(current_detail).strip().lower()
-                )
-                if (
-                    "blocked by:" in detail_text
-                    and "{dependency" not in detail_text
-                ):
-                    blocked.append(current_task)
-            section = stripped.replace("## ", "", 1).strip()
-            current_task = ""
-            current_detail = []
-            continue
-
-        task = _top_level_task(line)
-        if task is not None:
-            if section == KANBAN_QUEUE and current_task != "":
-                queue.append(current_task)
-                detail_text = (
-                    " ".join(current_detail).strip().lower()
-                )
-                if (
-                    "blocked by:" in detail_text
-                    and "{dependency" not in detail_text
-                ):
-                    blocked.append(current_task)
-            current_task = task
-            current_detail = []
-            if section == KANBAN_DOING:
-                doing.append(task)
-            continue
-
-        if section == KANBAN_QUEUE and current_task != "":
-            current_detail.append(stripped)
-
-    if section == KANBAN_QUEUE and current_task != "":
-        queue.append(current_task)
-        detail_text = (
-            " ".join(current_detail).strip().lower()
+    sections = parse_kanban(profile_dir)
+    focus_tasks = (
+        sections.get(KANBAN_DOING, [])
+        + sections.get(KANBAN_QUEUE, [])
+    )
+    doing = [
+        task.title.strip()
+        for task in sections.get(KANBAN_DOING, [])
+        if task.title.strip()
+    ]
+    queue = [
+        task.title.strip()
+        for task in sections.get(KANBAN_QUEUE, [])
+        if task.title.strip()
+    ]
+    blocked = [
+        (
+            f"{task.title.strip()} — blocked by: "
+            f"{task.blocked_by.strip()}"
         )
-        if (
-            "blocked by:" in detail_text
-            and "{dependency" not in detail_text
-        ):
-            blocked.append(current_task)
+        for task in focus_tasks
+        if task.title.strip()
+        and not _is_placeholder_blocker(task.blocked_by)
+    ]
 
     doing_lines = doing if doing else ["none"]
     queue_lines = queue if queue else ["none"]
@@ -256,7 +222,7 @@ def write_generated_blocks(profile_dir: Path) -> None:
         updated = _replace_block_body(
             updated, block_name, generated[block_name]
         )
-    skill_md.write_text(updated, encoding="utf-8")
+    atomic_write_text(skill_md, updated)
     git_backup.record_change(
         [skill_md],
         action=f"sync {profile_dir.name}/SKILL.md",

@@ -16,6 +16,26 @@ from nblane.core.profile_io import profile_dir
 _HELPER_ARG_MISSING = object()
 
 
+def _tags_list(value: object) -> list[str]:
+    """Return tags as a de-duplicated list from strings or sequences."""
+    raw_items: list[object]
+    if isinstance(value, str):
+        raw_items = value.replace(";", ",").split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        tag = str(item or "").strip()
+        if not tag or tag.casefold() in seen:
+            continue
+        seen.add(tag.casefold())
+        out.append(tag)
+    return out
+
+
 @dataclass
 class DoneTaskReview:
     """Read-only snapshot of one Done kanban task."""
@@ -249,7 +269,7 @@ def _parse_done_tasks(
             outcome=task.outcome,
             completed_on=task.completed_on or "",
             crystallized=task.crystallized,
-            tags=list(getattr(task, "tags", [])),
+            tags=_tags_list(getattr(task, "tags", [])),
             details=list(task.details),
         )
         for task in done_tasks
@@ -360,9 +380,13 @@ def _summary_to_dict(value: object) -> dict[str, object]:
     return {}
 
 
-def _source_is_public_candidate(tags: list[str], visibility: str = "") -> bool:
+def _source_is_public_candidate(tags: object, visibility: str = "") -> bool:
     """Return True only for explicitly public-candidate sources."""
-    return visibility == "public_candidate" or "visibility/public_candidate" in tags
+    tag_values = _tags_list(tags)
+    return (
+        visibility == "public_candidate"
+        or "visibility/public_candidate" in tag_values
+    )
 
 
 def build_weekly_review(

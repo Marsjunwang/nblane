@@ -11,6 +11,7 @@ from typing import Any, Mapping
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir
 
 ACTIVITY_LOG_FILENAME = "activity-log.yaml"
@@ -22,6 +23,16 @@ ACTIVITY_HABIT_KINDS = (
     "maintenance",
     "avoid",
 )
+
+
+class ActivityLogParseError(ValueError):
+    """Raised when activity-log.yaml exists but is invalid YAML."""
+
+    def __init__(self, path: Path, error: object):
+        """Build an error with the failing path and YAML parser detail."""
+        self.path = path
+        self.error = error
+        super().__init__(f"Could not parse {path}: {error}")
 
 
 def _clean_text(value: object) -> str:
@@ -68,6 +79,37 @@ def _normalize_text_list(value: object) -> list[str]:
         return _dedupe_texts(out)
     clean = _clean_text(value)
     return [clean] if clean else []
+
+
+def _has_non_comment_yaml_content(text: str) -> bool:
+    """Return True when YAML text contains meaningful non-comment content."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return True
+    return False
+
+
+def _load_activity_yaml(path: Path) -> dict | None:
+    """Load and validate activity-log YAML top-level shape."""
+    text = path.read_text(encoding="utf-8")
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ActivityLogParseError(path, exc) from exc
+    if raw is None:
+        if _has_non_comment_yaml_content(text):
+            raise ActivityLogParseError(
+                path,
+                ValueError("activity-log.yaml must be a YAML mapping"),
+            )
+        return None
+    if not isinstance(raw, dict):
+        raise ActivityLogParseError(
+            path,
+            ValueError("activity-log.yaml must be a YAML mapping"),
+        )
+    return raw
 
 
 def _parse_nonnegative_float(value: object, default: float = 0.0) -> float:
@@ -831,10 +873,7 @@ def load(path_or_dir: str | Path) -> ActivityLog:
             if "/" not in raw and not raw.endswith((".yaml", ".yml")):
                 profile = raw
         return ActivityLog(profile=profile)
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
-        return ActivityLog(profile=path.parent.name)
+    raw = _load_activity_yaml(path)
     log = ActivityLog.from_dict(raw)
     if not log.profile:
         log.profile = path.parent.name
@@ -847,6 +886,8 @@ def save(
 ) -> ActivityLog:
     """Write an activity log with today's updated date."""
     path = _activity_log_path(path_or_dir)
+    if path.exists():
+        _load_activity_yaml(path)
     if isinstance(data, ActivityLog):
         log = data
     else:
@@ -866,7 +907,7 @@ def save(
         default_flow_style=False,
         sort_keys=False,
     )
-    path.write_text(header + body, encoding="utf-8")
+    atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {path.name}",
@@ -1547,6 +1588,7 @@ __all__ = [
     "ACTIVITY_LOG_FILENAME",
     "ACTIVITY_HABIT_KINDS",
     "ActivityCheckin",
+    "ActivityLogParseError",
     "ActivityLog",
     "ActivitySummary",
     "Checkin",

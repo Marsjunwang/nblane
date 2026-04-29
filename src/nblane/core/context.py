@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from nblane.core.evidence_resolve import resolve_skill_node
 from nblane.core.io import (
     load_evidence_pool,
@@ -12,6 +14,7 @@ from nblane.core.io import (
 )
 from nblane.core.models import Evidence
 from nblane.core.paths import PROFILES_DIR
+from nblane.core.profile_io import safe_profile_dir
 
 PREAMBLE = """\
 You are a specialized AI assistant operating as a projection \
@@ -56,6 +59,98 @@ def _load_text(path: Path) -> str | None:
     if path.exists():
         return path.read_text(encoding="utf-8")
     return None
+
+
+def _public_profile_scalar(value: object) -> object | None:
+    """Return a scalar value safe to render from agent-profile.yaml."""
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return None
+
+
+def _public_profile_value(value: object) -> object | None:
+    """Keep only scalar or list-of-scalar public profile values."""
+    scalar = _public_profile_scalar(value)
+    if scalar is not None:
+        return scalar
+    if isinstance(value, (list, tuple, set)):
+        out = [
+            item
+            for item in (
+                _public_profile_scalar(entry)
+                for entry in value
+            )
+            if item is not None
+        ]
+        return out or None
+    return None
+
+
+def _copy_allowed_mapping(
+    raw: dict,
+    key: str,
+    allowed_keys: tuple[str, ...],
+) -> dict | None:
+    """Copy whitelisted nested keys from a YAML mapping."""
+    value = raw.get(key)
+    if not isinstance(value, dict):
+        return None
+    out: dict[str, object] = {}
+    for child_key in allowed_keys:
+        if child_key not in value:
+            continue
+        public_value = _public_profile_value(value[child_key])
+        if public_value is not None:
+            out[child_key] = public_value
+    return out or None
+
+
+def _render_agent_profile(path: Path) -> str | None:
+    """Render only public whitelisted agent-profile.yaml fields."""
+    if not path.exists():
+        return None
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+
+    out: dict[str, object] = {}
+    if "schema_version" in raw:
+        schema_version = _public_profile_scalar(raw["schema_version"])
+        if schema_version is not None:
+            out["schema_version"] = schema_version
+
+    understanding = _copy_allowed_mapping(
+        raw,
+        "understanding_of_user",
+        ("strengths", "weaknesses", "current_focus"),
+    )
+    if understanding is not None:
+        out["understanding_of_user"] = understanding
+
+    working_style = _copy_allowed_mapping(
+        raw,
+        "working_style",
+        ("prefers", "avoids"),
+    )
+    if working_style is not None:
+        out["working_style"] = working_style
+
+    if "confidence" in raw:
+        confidence = _public_profile_scalar(raw["confidence"])
+        if confidence is not None:
+            out["confidence"] = confidence
+
+    if not out:
+        return None
+    return yaml.dump(
+        out,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    ).strip()
 
 
 def _format_evidence_lines(
@@ -169,7 +264,7 @@ def generate(
     include_kanban: bool = True,
 ) -> str:
     """Load profile files and return a complete system prompt."""
-    pdir = PROFILES_DIR / profile_name
+    pdir = safe_profile_dir(profile_name, PROFILES_DIR)
 
     skill_md = pdir / "SKILL.md"
     if not skill_md.exists():
@@ -178,7 +273,7 @@ def generate(
         )
 
     profile_text = skill_md.read_text(encoding="utf-8")
-    agent_profile_text = _load_text(
+    agent_profile_text = _render_agent_profile(
         pdir / "agent-profile.yaml"
     )
     kanban_text = (

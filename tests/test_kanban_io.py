@@ -17,9 +17,11 @@ from nblane.core.kanban_io import (
     apply_kanban_reorder,
     ensure_kanban_task_ids,
     kanban_snapshot_to_moves,
+    parse_kanban_text,
 )
 from nblane.core.io import (
     append_kanban_archive,
+    archive_kanban_done_tasks,
     parse_kanban,
     render_kanban,
     save_kanban,
@@ -93,6 +95,117 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertTrue(t.subtasks[1].done)
         self.assertEqual(t.details, ["free note"])
 
+    def test_multiline_meta_roundtrip(self) -> None:
+        """Literal blocks preserve multi-line task metadata."""
+        sections = {
+            KANBAN_DOING: [
+                KanbanTask(
+                    title="Deep work",
+                    id="deep-1",
+                    context="first line\nsecond line",
+                    why="north star\n\nwith blank",
+                    blocked_by="missing dataset\nowner reply",
+                    outcome="ship the demo\nwrite notes",
+                )
+            ],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [],
+            KANBAN_SOMEDAY: [],
+        }
+        text = render_kanban("p", sections)
+        self.assertIn("  - context: |\n    first line\n    second line", text)
+        self.assertIn("  - why: |\n    north star\n    \n    with blank", text)
+        self.assertIn("  - blocked by: |\n    missing dataset", text)
+        back = parse_kanban_text(text, "p")
+        task = back[KANBAN_DOING][0]
+        self.assertEqual(task.context, "first line\nsecond line")
+        self.assertEqual(task.why, "north star\n\nwith blank")
+        self.assertEqual(task.blocked_by, "missing dataset\nowner reply")
+        self.assertEqual(task.outcome, "ship the demo\nwrite notes")
+
+        md = """# p · Kanban
+
+---
+
+## Doing
+
+- [ ] Blocked
+  - blocked_by: |
+    first blocker
+    second blocker
+
+---
+"""
+        manual = parse_kanban_text(md, "p")[KANBAN_DOING][0]
+        self.assertEqual(
+            manual.blocked_by,
+            "first blocker\nsecond blocker",
+        )
+
+    def test_detail_escape_roundtrip(self) -> None:
+        """Details that look like metadata stay free-form details."""
+        sections = {
+            KANBAN_DOING: [
+                KanbanTask(
+                    title="Notes",
+                    id="notes-1",
+                    details=[
+                        "context: not structured",
+                        "tags: also just a note",
+                        "detail: context: nested note",
+                    ],
+                )
+            ],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [],
+            KANBAN_SOMEDAY: [],
+        }
+        text = render_kanban("p", sections)
+        self.assertIn("  - detail: context: not structured", text)
+        self.assertIn("  - detail: tags: also just a note", text)
+        self.assertIn("  - detail: detail: context: nested note", text)
+        back = parse_kanban_text(text, "p")
+        task = back[KANBAN_DOING][0]
+        self.assertEqual(task.context, "")
+        self.assertEqual(task.tags, "")
+        self.assertEqual(
+            task.details,
+            [
+                "context: not structured",
+                "tags: also just a note",
+                "detail: context: nested note",
+            ],
+        )
+
+    def test_legacy_single_line_meta_still_parses(self) -> None:
+        """Old one-line metadata remains accepted."""
+        md = """# p · Kanban
+
+> Updated: 2026-01-01
+
+---
+
+## Doing
+
+- [ ] Legacy
+  - id: legacy-1
+  - context: one-line ctx
+  - why: one-line why
+  - blocked_by: old blocker spelling
+  - outcome: one-line outcome
+  - detail: ordinary legacy detail
+
+---
+"""
+        parsed = parse_kanban_text(md, "p")
+        task = parsed[KANBAN_DOING][0]
+        self.assertEqual(task.id, "legacy-1")
+        self.assertEqual(task.context, "one-line ctx")
+        self.assertEqual(task.why, "one-line why")
+        self.assertEqual(task.blocked_by, "old blocker spelling")
+        self.assertEqual(task.outcome, "one-line outcome")
+        self.assertEqual(task.details, ["detail: ordinary legacy detail"])
+
     def test_existing_tags_line_parses_as_structured_meta(self) -> None:
         """Existing `tags:` lines no longer fall through to free-form details."""
         md = """# x · Kanban
@@ -114,6 +227,25 @@ class TestKanbanParseRender(unittest.TestCase):
         task = parsed[KANBAN_DOING][0]
         self.assertEqual(task.tags, "GAC")
         self.assertEqual(task.details, ["plain line"])
+
+    def test_list_tags_render_as_canonical_meta(self) -> None:
+        """Queue creators that pass list tags still render valid kanban metadata."""
+        sections = {
+            KANBAN_DOING: [
+                KanbanTask(
+                    title="Tagged from flow",
+                    id="tag-list",
+                    tags=["research", "robotics", "research", ""],
+                )
+            ],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [],
+            KANBAN_SOMEDAY: [],
+        }
+        text = render_kanban("p", sections)
+        self.assertIn("  - tags: research, robotics", text)
+        parsed = parse_kanban_text(text, "p")
+        self.assertEqual(parsed[KANBAN_DOING][0].tags, "research, robotics")
 
     def test_legacy_tasks_get_deterministic_ids(self) -> None:
         """Old files without id meta receive stable generated ids."""
@@ -454,6 +586,47 @@ class TestKanbanParseRender(unittest.TestCase):
             self.assertIn("Old done", body)
             self.assertIn("  - id: kb_", body)
             self.assertIn("Archived", body)
+
+    def test_archive_done_tasks_writes_archive_and_kanban_together(self) -> None:
+        """Bulk archive removes selected Done tasks only after archive write."""
+        sections = {
+            KANBAN_DOING: [],
+            KANBAN_DONE: [
+                KanbanTask(title="Keep done", done=True, id="keep"),
+                KanbanTask(title="Archive done", done=True, id="archive"),
+            ],
+            KANBAN_QUEUE: [],
+            KANBAN_SOMEDAY: [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "p3"
+            prof.mkdir()
+            (prof / "kanban.md").write_text(
+                render_kanban("p3", sections),
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.io.profile_dir",
+                lambda _n: prof,
+            ):
+                updated = archive_kanban_done_tasks("p3", sections, [1])
+
+            self.assertEqual(
+                [task.title for task in updated[KANBAN_DONE]],
+                ["Keep done"],
+            )
+            self.assertIn(
+                "Archive done",
+                (prof / "kanban-archive.md").read_text(encoding="utf-8"),
+            )
+            saved = parse_kanban_text(
+                (prof / "kanban.md").read_text(encoding="utf-8"),
+                "p3",
+            )
+            self.assertEqual(
+                [task.title for task in saved[KANBAN_DONE]],
+                ["Keep done"],
+            )
 
 
 if __name__ == "__main__":

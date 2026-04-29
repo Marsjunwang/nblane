@@ -4,16 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite --host 0.0.0.0"
+    "build": "node build.mjs",
+    "verify": "node build.mjs --verify"
   },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "streamlit-component-lib": "^2.0.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.3.0"
+  "engines": {
+    "node": ">=18"
   }
 }

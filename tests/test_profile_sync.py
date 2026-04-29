@@ -90,6 +90,57 @@ class TestProfileSync(unittest.TestCase):
             final_text = skill_md.read_text(encoding="utf-8")
             self.assertIn(manual_line, final_text)
 
+    def test_current_focus_uses_structured_top_level_kanban(self) -> None:
+        """Current Focus uses parsed Doing/Queue tasks and blocked_by only."""
+        from nblane.core.sync import _render_focus_from_kanban
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_dir = Path(tmp) / "demo"
+            profile_dir.mkdir()
+            (profile_dir / "kanban.md").write_text(
+                """# demo · Kanban
+
+## Doing
+
+- [ ] Ship release
+  - [ ] Nested doing step
+  - note blocked by: this is just detail text
+
+## Queue
+
+- [ ] Collect dataset
+  - why: unlock evaluation
+  - blocked by: data access
+  - [ ] Nested queue step
+- [ ] Write docs
+  - note blocked by: not structured metadata
+
+## Done
+
+- [x] Old task
+
+## Someday / Maybe
+
+- Future idea
+""",
+                encoding="utf-8",
+            )
+
+            focus = _render_focus_from_kanban(profile_dir)
+
+        self.assertIn("- Ship release", focus)
+        self.assertIn("- Collect dataset", focus)
+        self.assertIn("- Write docs", focus)
+        self.assertIn(
+            "- Collect dataset — blocked by: data access",
+            focus,
+        )
+        self.assertNotIn("Nested doing step", focus)
+        self.assertNotIn("Nested queue step", focus)
+        self.assertNotIn("Old task", focus)
+        self.assertNotIn("Future idea", focus)
+        self.assertNotIn("Write docs — blocked by", focus)
+
 
 if __name__ == "__main__":
     unittest.main()

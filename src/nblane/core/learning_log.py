@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_write import atomic_write_text
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict
 
@@ -509,7 +510,7 @@ def save_learning_log(
         default_flow_style=False,
         sort_keys=False,
     )
-    path.write_text(header + body, encoding="utf-8")
+    atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {path.parent.name}/learning-log.yaml",

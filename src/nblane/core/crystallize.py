@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from nblane.core.file_write import atomic_write_text
 from nblane.core.io import profile_dir
 
 
@@ -30,5 +31,5 @@ def write_method_draft(
         "_Edit freely; this file is not overwritten "
         "automatically._\n\n"
     )
-    path.write_text(header + body.strip() + "\n", encoding="utf-8")
+    atomic_write_text(path, header + body.strip() + "\n")
     return path

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
+from datetime import date
 
 from nblane.core.kanban_ai import KanbanSubtaskProposal
 from nblane.core.models import KanbanSubtask, KanbanTask
+
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _clean_text(value: object) -> str:
@@ -44,6 +49,29 @@ def _bool_from_payload(value: object) -> bool:
     return False
 
 
+def _valid_iso_date(value: str) -> bool:
+    """Return True for strict YYYY-MM-DD calendar dates."""
+    if not _ISO_DATE_RE.match(value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def invalid_kanban_card_date_fields(card: dict) -> list[str]:
+    """Return date fields whose non-empty values are not ISO YYYY-MM-DD."""
+    out: list[str] = []
+    for field in ("started_on", "completed_on"):
+        if field not in card:
+            continue
+        value = _clean_text(card.get(field))
+        if value and not _valid_iso_date(value):
+            out.append(field)
+    return out
+
+
 def apply_kanban_card_update(
     task: KanbanTask,
     card: dict,
@@ -63,6 +91,8 @@ def apply_kanban_card_update(
     for field in ("context", "why", "blocked_by", "outcome", "tags"):
         if field in card:
             changes[field] = _clean_text(card.get(field))
+    if invalid_kanban_card_date_fields(card):
+        return None
     if "started_on" in card:
         changes["started_on"] = _clean_text(card.get("started_on")) or None
     if "completed_on" in card:
@@ -228,6 +258,53 @@ def subtask_proposals_from_payload(
             )
         )
     return proposals
+
+
+def ai_proposal_detail_lines(
+    proposals: list[KanbanSubtaskProposal],
+) -> list[str]:
+    """Return detail lines that preserve proposal artifact/verification."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for proposal in proposals:
+        title = _clean_text(proposal.title)
+        artifact = _clean_text(proposal.artifact)
+        verification = _clean_text(proposal.verification)
+        if not title or not (artifact or verification):
+            continue
+        parts = [f"AI subtask: {title}"]
+        if artifact:
+            parts.append(f"Artifact: {artifact}")
+        if verification:
+            parts.append(f"Verification: {verification}")
+        line = " | ".join(parts)
+        key = line.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(line)
+    return lines
+
+
+def append_ai_proposal_details(
+    task: KanbanTask,
+    proposals: list[KanbanSubtaskProposal],
+) -> KanbanTask:
+    """Return a task with selected AI proposal metadata kept in details."""
+    lines = ai_proposal_detail_lines(proposals)
+    if not lines:
+        return task
+    details = list(task.details)
+    existing = {line.casefold() for line in details}
+    changed = False
+    for line in lines:
+        key = line.casefold()
+        if key in existing:
+            continue
+        details.append(line)
+        existing.add(key)
+        changed = True
+    return replace(task, details=details) if changed else task
 
 
 def discard_subtask_proposal_at(

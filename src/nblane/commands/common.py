@@ -5,12 +5,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from nblane.core.paths import PROFILES_DIR
+from nblane.core.profile_io import safe_profile_dir
 
 
 def _profile_dir(name: str) -> Path:
     """Return the profile directory path."""
-    return PROFILES_DIR / name
+    try:
+        return safe_profile_dir(name)
+    except ValueError as exc:
+        print(f"Invalid profile name: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _require_profile(name: str) -> Path:

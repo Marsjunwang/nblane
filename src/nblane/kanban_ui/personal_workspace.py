@@ -11,6 +11,7 @@ import streamlit as st
 from nblane.core.activity_log import (
     ACTIVITY_LOG_FILENAME,
     ActivityLog,
+    ActivityLogParseError,
     Checkin,
     HabitTarget,
     add_activity_checkin,
@@ -146,6 +147,35 @@ def _refresh_activity(path: Path) -> None:
     """Refresh file snapshots and preserve Git backup notices."""
     refresh_file_snapshots([path])
     stash_git_backup_results()
+
+
+def _show_activity_log_parse_error(
+    exc: ActivityLogParseError,
+    ui: dict[str, str] | None = None,
+) -> None:
+    """Show a stable UI error for a malformed activity log."""
+    labels = ui or {}
+    message = labels.get(
+        "kb_activity_log_parse_error",
+        "activity-log.yaml could not be parsed. Fix it before adding "
+        "or deleting check-ins.",
+    )
+    error = getattr(st, "error", None)
+    if callable(error):
+        error(message)
+    caption = getattr(st, "caption", None)
+    if callable(caption):
+        caption(str(exc.path))
+
+
+def _mark_activity_unwritable(
+    payload: dict[str, Any],
+    exc: ActivityLogParseError,
+) -> dict[str, Any]:
+    """Annotate a calendar payload when activity-log writes are blocked."""
+    payload["activity_log_writable"] = False
+    payload["activity_log_error"] = str(exc)
+    return payload
 
 
 def _load_activity(profile: str, profile_path: Path) -> ActivityLog:
@@ -354,8 +384,21 @@ def checkin_calendar_payload(
     days: int = 14,
 ) -> dict[str, Any]:
     """Load activity-log.yaml and return the compact calendar payload."""
+    try:
+        activity = _load_activity(profile, profile_path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc, ui)
+        return _mark_activity_unwritable(
+            checkin_calendar_payload_from_activity(
+                ActivityLog(profile=profile),
+                ui,
+                today=today,
+                days=days,
+            ),
+            exc,
+        )
     return checkin_calendar_payload_from_activity(
-        _load_activity(profile, profile_path),
+        activity,
         ui,
         today=today,
         days=days,
@@ -421,8 +464,22 @@ def checkin_month_payload(
     today: date | None = None,
 ) -> dict[str, Any]:
     """Load activity-log.yaml and return the toolbar month payload."""
+    try:
+        activity = _load_activity(profile, profile_path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc, ui)
+        return _mark_activity_unwritable(
+            checkin_month_payload_from_activity(
+                ActivityLog(profile=profile),
+                ui,
+                year=year,
+                month=month,
+                today=today,
+            ),
+            exc,
+        )
     return checkin_month_payload_from_activity(
-        _load_activity(profile, profile_path),
+        activity,
         ui,
         year=year,
         month=month,
@@ -491,14 +548,17 @@ def record_learning_checkin(
 ) -> None:
     """Persist one learning check-in and refresh file state."""
     path = _activity_log_path(profile_path)
-    assert_files_current([path])
-    _record_learning(
-        profile_path,
-        when=when,
-        note=str(note or "").strip(),
-        links=_clean_lines(links),
-    )
-    _refresh_activity(path)
+    try:
+        assert_files_current([path])
+        _record_learning(
+            profile_path,
+            when=when,
+            note=str(note or "").strip(),
+            links=_clean_lines(links),
+        )
+        _refresh_activity(path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc)
 
 
 def record_exercise_checkin(
@@ -512,16 +572,19 @@ def record_exercise_checkin(
 ) -> None:
     """Persist one exercise check-in and refresh file state."""
     path = _activity_log_path(profile_path)
-    assert_files_current([path])
-    _record_exercise(
-        profile_path,
-        when=when,
-        workout_type=str(workout_type or "").strip() or "other",
-        duration_min=float(duration_min or 0.0),
-        intensity=str(intensity or "").strip() or "moderate",
-        note=str(note or "").strip(),
-    )
-    _refresh_activity(path)
+    try:
+        assert_files_current([path])
+        _record_exercise(
+            profile_path,
+            when=when,
+            workout_type=str(workout_type or "").strip() or "other",
+            duration_min=float(duration_min or 0.0),
+            intensity=str(intensity or "").strip() or "moderate",
+            note=str(note or "").strip(),
+        )
+        _refresh_activity(path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc)
 
 
 def delete_workspace_checkin(
@@ -530,10 +593,14 @@ def delete_workspace_checkin(
 ) -> bool:
     """Delete one workspace check-in by id and refresh file state."""
     path = _activity_log_path(profile_path)
-    assert_files_current([path])
-    deleted = delete_checkin(path, checkin_id)
-    _refresh_activity(path)
-    return deleted
+    try:
+        assert_files_current([path])
+        deleted = delete_checkin(path, checkin_id)
+        _refresh_activity(path)
+        return deleted
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc)
+        return False
 
 
 def _checkin_kind_label(checkin: Checkin, ui: dict[str, str]) -> str:
@@ -609,9 +676,13 @@ def _render_day_records(
             disabled=disabled,
         ):
             path = _activity_log_path(profile_path)
-            assert_files_current([path])
-            deleted = delete_checkin(path, checkin.id)
-            _refresh_activity(path)
+            try:
+                assert_files_current([path])
+                deleted = delete_checkin(path, checkin.id)
+                _refresh_activity(path)
+            except ActivityLogParseError as exc:
+                _show_activity_log_parse_error(exc, ui)
+                return
             if deleted:
                 st.success(ui.get("kb_checkin_deleted", "Check-in deleted."))
             else:
@@ -667,14 +738,18 @@ def _render_learning_form(
         )
         return
     path = _activity_log_path(profile_path)
-    assert_files_current([path])
-    _record_learning(
-        profile_path,
-        when=day,
-        note=note.strip(),
-        links=links,
-    )
-    _refresh_activity(path)
+    try:
+        assert_files_current([path])
+        _record_learning(
+            profile_path,
+            when=day,
+            note=note.strip(),
+            links=links,
+        )
+        _refresh_activity(path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc, ui)
+        return
     st.success(ui.get("kb_checkin_saved", "Check-in saved."))
 
 
@@ -718,16 +793,20 @@ def _render_exercise_form(
         return
 
     path = _activity_log_path(profile_path)
-    assert_files_current([path])
-    _record_exercise(
-        profile_path,
-        when=day,
-        workout_type=workout_type,
-        duration_min=float(duration_min),
-        intensity=intensity,
-        note=note.strip(),
-    )
-    _refresh_activity(path)
+    try:
+        assert_files_current([path])
+        _record_exercise(
+            profile_path,
+            when=day,
+            workout_type=workout_type,
+            duration_min=float(duration_min),
+            intensity=intensity,
+            note=note.strip(),
+        )
+        _refresh_activity(path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc, ui)
+        return
     st.success(ui.get("kb_checkin_saved", "Check-in saved."))
 
 
@@ -767,7 +846,11 @@ def render_checkin_strip(
     ui: dict[str, str],
 ) -> None:
     """Render a compact 14-day check-in strip."""
-    activity = _load_activity(profile, profile_path)
+    try:
+        activity = _load_activity(profile, profile_path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc, ui)
+        return
     today = date.today()
     days = recent_day_window(today=today, days=14)
     counts = daily_workspace_counts(activity, days)

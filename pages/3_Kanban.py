@@ -24,10 +24,12 @@ from nblane.core.kanban_io import (
 )
 from nblane.core.kanban_events import (
     alignment_context_from_payload as _alignment_context_from_payload,
+    append_ai_proposal_details as _append_ai_proposal_details,
     apply_kanban_card_update as _apply_task_update,
     discard_subtask_proposal_at as _discard_subtask_proposal_at,
     discard_task_ai_state as _discard_task_ai_state,
     event_subtask_index as _event_subtask_index,
+    invalid_kanban_card_date_fields as _invalid_card_date_fields,
     subtask_proposals_from_payload as _subtask_proposals_from_payload,
 )
 from nblane.core.kanban_ai import (
@@ -45,7 +47,7 @@ from nblane.core.io import (
     KANBAN_QUEUE,
     KanbanSubtask,
     KanbanTask,
-    append_kanban_archive,
+    archive_kanban_done_tasks,
     parse_kanban,
     profile_dir,
     save_kanban,
@@ -219,6 +221,7 @@ def _task_payload(task: KanbanTask) -> dict:
         "why": task.why,
         "blocked_by": task.blocked_by,
         "outcome": task.outcome,
+        "tags": task.tags,
         "started_on": task.started_on or "",
         "completed_on": task.completed_on or "",
         "crystallized": task.crystallized,
@@ -492,11 +495,15 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             "gap_next": ui.get("subheader_next", "Next steps"),
             "gap_ok": ui.get("verdict_ok", "Can solve"),
             "gap_missing": ui.get("verdict_gap", "Gaps remain"),
+            "html_lang": llm_client.ui_language(),
             "quick_add": ui.get("kb_quick_add", "+ Add task"),
+            "move_to": ui.get("kb_move_to_label", ui.get("move_to", "Move to")),
+            "confirm_move": ui.get("kb_confirm_move", "Move"),
             "save": ui["save"],
             "save_short": ui.get("kb_save_short", "Save"),
             "started_on": ui["field_started"],
             "subtasks": ui["subtasks_label"],
+            "tags": ui.get("kb_tags", ui.get("task_tags", "Tags")),
             "title": ui["task_field_title"],
             "untitled": ui.get("kb_title_required", "Untitled"),
             "verification": ui.get("kb_verification", "Verification"),
@@ -533,6 +540,43 @@ def _event_task_id(event: dict, payload: dict) -> str:
         if value:
             return str(value)
     return ""
+
+
+def _card_date_error_message(fields: list[str], ui: dict[str, str]) -> str:
+    """Return a localized invalid date warning."""
+    labels = {
+        "started_on": ui.get("field_started", "started_on"),
+        "completed_on": ui.get("field_completed", "completed_on"),
+    }
+    field_list = ", ".join(labels.get(field, field) for field in fields)
+    fallback = "Use YYYY-MM-DD for date fields: {fields}."
+    return ui.get("kb_invalid_date", fallback).format(fields=field_list)
+
+
+def _apply_board_card_payload(
+    *,
+    card: dict | None,
+    found: tuple[str, int, KanbanTask] | None,
+    sections: dict[str, list[KanbanTask]],
+    ui: dict[str, str],
+) -> tuple[tuple[str, int, KanbanTask] | None, bool, bool]:
+    """Apply an optional card payload and return found/applied/ok flags."""
+    if not isinstance(card, dict):
+        return found, False, True
+    if found is None:
+        st.warning(ui["kb_drag_stale"])
+        return found, False, False
+    invalid_dates = _invalid_card_date_fields(card)
+    if invalid_dates:
+        st.warning(_card_date_error_message(invalid_dates, ui))
+        return found, False, False
+    section, idx, task = found
+    updated_task = _apply_task_update(task, card)
+    if updated_task is None:
+        st.warning(ui["kb_title_required"])
+        return found, False, False
+    sections[section][idx] = updated_task
+    return (section, idx, updated_task), True, True
 
 
 def _render_gap_previews(profile: str, ui: dict[str, str]) -> None:
@@ -1317,7 +1361,18 @@ def _handle_board_event(
     if not isinstance(payload, dict):
         payload = {}
 
+    task_id = _event_task_id(event, payload)
+    found = _find_task_ref(sections, task_id)
+
     if action in ("move_card", "reorder"):
+        found, card_applied, ok = _apply_board_card_payload(
+            card=payload.get("card"),
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok:
+            return
         snapshot = {"columns": event.get("sections") or []}
         moves = kanban_snapshot_to_moves(
             snapshot,
@@ -1335,6 +1390,9 @@ def _handle_board_event(
             )
             sections.clear()
             sections.update(updated)
+            _auto_save(profile, sections)
+            st.rerun()
+        if card_applied:
             _auto_save(profile, sections)
             st.rerun()
         return
@@ -1358,22 +1416,18 @@ def _handle_board_event(
         _auto_save(profile, sections)
         st.rerun()
 
-    task_id = _event_task_id(event, payload)
-    found = _find_task_ref(sections, task_id)
-
     if action == "edit_card":
-        if found is None:
-            st.warning(ui["kb_drag_stale"])
-            return
-        section, idx, task = found
         card = payload.get("card")
         if not isinstance(card, dict):
             card = payload
-        updated_task = _apply_task_update(task, card)
-        if updated_task is None:
-            st.warning(ui["kb_title_required"])
+        _found, _card_applied, ok = _apply_board_card_payload(
+            card=card,
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok:
             return
-        sections[section][idx] = updated_task
         _auto_save(profile, sections)
         st.rerun()
 
@@ -1436,7 +1490,25 @@ def _handle_board_event(
         if found is None:
             st.warning(ui["kb_drag_stale"])
             return
+        found, card_applied, ok = _apply_board_card_payload(
+            card=payload.get("card"),
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok or found is None:
+            return
         section, idx, task = found
+        if section != KANBAN_DONE:
+            if card_applied:
+                _auto_save(profile, sections)
+            st.warning(
+                ui.get(
+                    "kb_crystallize_done_only",
+                    "Only Done tasks can be crystallized.",
+                )
+            )
+            return
         sections[section][idx] = replace(task, crystallized=True)
         _auto_save(profile, sections)
         st.rerun()
@@ -1445,6 +1517,16 @@ def _handle_board_event(
         if found is None:
             st.warning(ui["kb_drag_stale"])
             return
+        found, card_applied, ok = _apply_board_card_payload(
+            card=payload.get("card"),
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok:
+            return
+        if card_applied:
+            _auto_save(profile, sections)
         with st.spinner(ui.get("spinner_gap", "Running gap analysis...")):
             result = analyze_kanban_task_gap(
                 profile,
@@ -1463,6 +1545,16 @@ def _handle_board_event(
         if found is None:
             st.warning(ui["kb_drag_stale"])
             return
+        found, card_applied, ok = _apply_board_card_payload(
+            card=payload.get("card"),
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok:
+            return
+        if card_applied:
+            _auto_save(profile, sections)
         if not llm_client.is_configured():
             render_llm_unavailable(ui)
             return
@@ -1628,7 +1720,6 @@ def _handle_board_event(
         if found is None:
             st.warning(ui["kb_drag_stale"])
             return
-        section, idx, task = found
         proposals = _subtask_proposals_from_payload(payload, task_id)
         if not proposals:
             st.warning(
@@ -1639,12 +1730,14 @@ def _handle_board_event(
             )
             return
         card = payload.get("card")
-        if isinstance(card, dict):
-            updated_task = _apply_task_update(task, card)
-            if updated_task is None:
-                st.warning(ui["kb_title_required"])
-                return
-            sections[section][idx] = updated_task
+        found, _card_applied, ok = _apply_board_card_payload(
+            card=card if isinstance(card, dict) else None,
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok:
+            return
         updated = apply_kanban_subtask_proposals(
             sections,
             task_id,
@@ -1652,6 +1745,12 @@ def _handle_board_event(
         )
         sections.clear()
         sections.update(updated)
+        applied_found = _find_task_ref(sections, task_id)
+        if applied_found is not None:
+            applied_section, applied_idx, applied_task = applied_found
+            sections[applied_section][applied_idx] = (
+                _append_ai_proposal_details(applied_task, proposals)
+            )
         _auto_save(profile, sections)
         proposals_by_task = st.session_state.get(
             _subtask_proposals_key(profile),
@@ -1683,6 +1782,16 @@ def _handle_board_event(
         if found is None:
             st.warning(ui["kb_drag_stale"])
             return
+        found, card_applied, ok = _apply_board_card_payload(
+            card=payload.get("card"),
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok or found is None:
+            return
+        if card_applied:
+            _auto_save(profile, sections)
         _section, _idx, task = found
         if not llm_client.is_configured():
             render_llm_unavailable(ui)
@@ -1826,6 +1935,7 @@ board_event = st_kanban_board(
         "section_order": list(KANBAN_BOARD_SECTIONS),
         "auto_dates": auto_dates,
         "focus_mode": focus_mode,
+        "lang": llm_client.ui_language(),
     },
     ai_state=_board_ai_state(selected, ui),
     key=f"kanban_board_{selected}",
@@ -1874,14 +1984,13 @@ with st.expander(ui["done_bulk_title"], expanded=False):
             if st.button(ui["archive_done"], key=f"arch_{selected}"):
                 if pick_bulk:
                     assert_files_current([_archive_path, _kanban_path])
-                    to_arc = [done_tasks_bulk[i] for i in pick_bulk]
-                    append_kanban_archive(selected, to_arc)
-                    refresh_file_snapshots([_archive_path])
+                    sections = archive_kanban_done_tasks(
+                        selected,
+                        sections,
+                        pick_bulk,
+                    )
+                    refresh_file_snapshots([_archive_path, _kanban_path])
                     stash_git_backup_results()
-                    for j in sorted(pick_bulk, reverse=True):
-                        done_tasks_bulk.pop(j)
-                    sections[KANBAN_DONE] = done_tasks_bulk
-                    _auto_save(selected, sections)
                     st.rerun()
         with b2:
             if st.button(ui["delete_done"], key=f"delbulk_{selected}"):
