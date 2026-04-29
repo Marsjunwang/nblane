@@ -570,7 +570,7 @@ textarea:read-only {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1180px) {
   .nb-shell {
     padding-bottom: 16px;
   }

@@ -12,6 +12,7 @@ from nblane.core.kanban_events import (
     append_ai_proposal_details,
     alignment_context_from_payload,
     apply_kanban_card_update,
+    apply_kanban_subtask_toggle,
     discard_subtask_proposal_at,
     discard_task_ai_state,
     event_subtask_index,
@@ -149,6 +150,99 @@ class TestKanbanEvents(unittest.TestCase):
         self.assertEqual(event_subtask_index({"subtask_index": 1}, task), 1)
         self.assertEqual(event_subtask_index({"subtask_id": "subtask-0"}, task), 0)
         self.assertEqual(event_subtask_index({"subtask_index": 4}, task), -1)
+
+    def test_apply_subtask_toggle_updates_by_index_and_title(self) -> None:
+        """Read-mode checkbox toggles only the intended subtask."""
+        sections = {
+            "Doing": [
+                KanbanTask(
+                    title="Task",
+                    id="task-1",
+                    context="keep context",
+                    started_on="2026-04-01",
+                    subtasks=[
+                        KanbanSubtask("A", done=False),
+                        KanbanSubtask("B", done=True),
+                    ],
+                    details=["keep detail"],
+                )
+            ],
+            "Queue": [KanbanTask(title="Other", id="task-2")],
+        }
+
+        updated, ok = apply_kanban_subtask_toggle(
+            sections,
+            "task-1",
+            0,
+            "A",
+            True,
+        )
+
+        self.assertTrue(ok)
+        self.assertFalse(sections["Doing"][0].subtasks[0].done)
+        task = updated["Doing"][0]
+        self.assertEqual(task.context, "keep context")
+        self.assertEqual(task.started_on, "2026-04-01")
+        self.assertEqual(task.details, ["keep detail"])
+        self.assertTrue(task.subtasks[0].done)
+        self.assertTrue(task.subtasks[1].done)
+        self.assertEqual(updated["Queue"][0].title, "Other")
+
+    def test_apply_subtask_toggle_falls_back_to_unique_title(self) -> None:
+        """A stale index can still update when title uniquely identifies the row."""
+        sections = {
+            "Doing": [
+                KanbanTask(
+                    title="Task",
+                    id="task-1",
+                    subtasks=[
+                        KanbanSubtask("A", done=False),
+                        KanbanSubtask("B", done=False),
+                    ],
+                )
+            ],
+        }
+
+        updated, ok = apply_kanban_subtask_toggle(
+            sections,
+            "task-1",
+            0,
+            "B",
+            True,
+        )
+
+        self.assertTrue(ok)
+        self.assertFalse(updated["Doing"][0].subtasks[0].done)
+        self.assertTrue(updated["Doing"][0].subtasks[1].done)
+
+    def test_apply_subtask_toggle_rejects_ambiguous_title(self) -> None:
+        """Ambiguous stale payloads do not update the wrong checkbox."""
+        sections = {
+            "Doing": [
+                KanbanTask(
+                    title="Task",
+                    id="task-1",
+                    subtasks=[
+                        KanbanSubtask("A", done=False),
+                        KanbanSubtask("B", done=False),
+                        KanbanSubtask("B", done=False),
+                    ],
+                )
+            ],
+        }
+
+        updated, ok = apply_kanban_subtask_toggle(
+            sections,
+            "task-1",
+            0,
+            "B",
+            True,
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(updated, sections)
+        self.assertFalse(sections["Doing"][0].subtasks[1].done)
+        self.assertFalse(sections["Doing"][0].subtasks[2].done)
 
     def test_alignment_context_from_payload(self) -> None:
         """Confirmed candidate plus user clarification become prompt context."""

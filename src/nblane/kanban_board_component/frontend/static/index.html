@@ -702,6 +702,37 @@
       }
       return null;
     }
+    function updateLocalSubtaskDone(taskId, subtaskIndex, subtaskTitle, done) {
+      const wantedTitle = text(subtaskTitle);
+      let changed = false;
+      board = board.map((section) => ({
+        ...section,
+        tasks: section.tasks.map((task) => {
+          if (task.id !== taskId) return task;
+          let targetIndex = Number.isInteger(subtaskIndex) ? subtaskIndex : -1;
+          if (
+            targetIndex < 0 ||
+            targetIndex >= task.subtasks.length ||
+            text(task.subtasks[targetIndex]?.title || "") !== wantedTitle
+          ) {
+            const matches = task.subtasks
+              .map((item, index) => ({ item, index }))
+              .filter(({ item }) => text(item.title || "") === wantedTitle)
+              .map(({ index }) => index);
+            targetIndex = matches.length === 1 ? matches[0] : -1;
+          }
+          if (targetIndex < 0) return task;
+          changed = true;
+          return {
+            ...task,
+            subtasks: task.subtasks.map((item, index) => (
+              index === targetIndex ? { ...item, done } : item
+            )),
+          };
+        }),
+      }));
+      return changed;
+    }
     function snapshot() {
       return board.map((section) => ({
         section: section.key,
@@ -1319,9 +1350,15 @@
           const wrap = box.closest("[data-subtask-task]");
           const taskId = wrap ? wrap.dataset.subtaskTask : "";
           if (!taskId) return;
-          emit("edit_card", {
+          const subtaskIndex = Number(box.dataset.subtaskIndex);
+          const subtaskTitle = text(box.dataset.subtaskTitle || "");
+          const done = Boolean(box.checked);
+          updateLocalSubtaskDone(taskId, subtaskIndex, subtaskTitle, done);
+          emit("toggle_subtask", {
             card_id: taskId,
-            card: collectReadCard(box.closest(".kb-card")),
+            subtask_index: subtaskIndex,
+            subtask_title: subtaskTitle,
+            done,
           });
         });
       });

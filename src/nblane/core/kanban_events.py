@@ -118,6 +118,79 @@ def apply_kanban_card_update(
     return replace(task, **changes) if changes else task
 
 
+def _copy_task(task: KanbanTask) -> KanbanTask:
+    """Return a task copy with independent child lists."""
+    return replace(
+        task,
+        subtasks=[replace(item) for item in task.subtasks],
+        details=list(task.details),
+    )
+
+
+def apply_kanban_subtask_toggle(
+    sections: dict[str, list[KanbanTask]],
+    task_id: str,
+    subtask_index: int,
+    subtask_title: str,
+    done: bool,
+) -> tuple[dict[str, list[KanbanTask]], bool]:
+    """Return sections with one subtask checkbox state merged.
+
+    The target subtask is accepted when the supplied index and title agree.
+    If the index is stale, a unique title match within the task is used as a
+    fallback. Ambiguous or missing targets return ``False`` without mutating
+    the input sections.
+    """
+    out = {
+        section: [_copy_task(task) for task in tasks]
+        for section, tasks in sections.items()
+    }
+    wanted_task_id = _clean_text(task_id)
+    wanted_title = _clean_text(subtask_title)
+    if not wanted_task_id or not wanted_title:
+        return out, False
+
+    try:
+        index = int(subtask_index)
+    except (TypeError, ValueError):
+        index = -1
+
+    target_done = _bool_from_payload(done)
+    for section, tasks in out.items():
+        for task_pos, task in enumerate(tasks):
+            if _clean_text(task.id) != wanted_task_id:
+                continue
+
+            target_index = -1
+            if 0 <= index < len(task.subtasks):
+                current = task.subtasks[index]
+                if _clean_text(current.title) == wanted_title:
+                    target_index = index
+
+            if target_index < 0:
+                matches = [
+                    idx
+                    for idx, item in enumerate(task.subtasks)
+                    if _clean_text(item.title) == wanted_title
+                ]
+                if len(matches) == 1:
+                    target_index = matches[0]
+
+            if target_index < 0:
+                return out, False
+
+            next_subtasks = list(task.subtasks)
+            next_subtasks[target_index] = replace(
+                next_subtasks[target_index],
+                done=target_done,
+            )
+            tasks[task_pos] = replace(task, subtasks=next_subtasks)
+            out[section] = tasks
+            return out, True
+
+    return out, False
+
+
 def event_subtask_index(
     payload: dict,
     task: KanbanTask,

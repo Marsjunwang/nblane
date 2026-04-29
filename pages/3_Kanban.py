@@ -16,6 +16,11 @@ import yaml
 
 from nblane.core import gap as gap_engine
 from nblane.core import llm as llm_client
+from nblane.core.file_state import (
+    FileConflictError,
+    assert_unchanged,
+    snapshot_file,
+)
 from nblane.core.kanban_io import (
     KANBAN_BOARD_SECTIONS,
     apply_kanban_reorder,
@@ -142,6 +147,142 @@ def _auto_save(
     stash_git_backup_results()
     clear_web_cache()
     _clear_kanban_dirty(profile)
+
+
+def _sync_kanban_sections_state(
+    profile: str,
+    sections: dict[str, list[KanbanTask]],
+    latest_sections: dict[str, list[KanbanTask]],
+) -> None:
+    """Replace in-memory board state with the supplied latest sections."""
+    ensured = ensure_kanban_task_ids(latest_sections, profile)
+    sections.clear()
+    sections.update(ensured)
+    st.session_state[_state_key(profile)] = sections
+
+
+def _copy_task_for_subtask_toggle(task: KanbanTask) -> KanbanTask:
+    """Return a task copy with child lists detached for local merging."""
+    return replace(
+        task,
+        subtasks=[replace(item) for item in task.subtasks],
+        details=list(task.details),
+    )
+
+
+def _apply_subtask_toggle_for_page(
+    sections: dict[str, list[KanbanTask]],
+    task_id: str,
+    subtask_index: int,
+    subtask_title: str,
+    done: bool,
+) -> tuple[dict[str, list[KanbanTask]], bool]:
+    """Merge one subtask checkbox without requiring a freshly reloaded module."""
+    out = {
+        section: [_copy_task_for_subtask_toggle(task) for task in tasks]
+        for section, tasks in sections.items()
+    }
+    wanted_task_id = str(task_id or "").strip()
+    wanted_title = str(subtask_title or "").strip()
+    if not wanted_task_id or not wanted_title:
+        return out, False
+
+    for section, tasks in out.items():
+        for task_pos, task in enumerate(tasks):
+            if str(task.id or "").strip() != wanted_task_id:
+                continue
+
+            target_index = -1
+            if 0 <= subtask_index < len(task.subtasks):
+                current = task.subtasks[subtask_index]
+                if str(current.title or "").strip() == wanted_title:
+                    target_index = subtask_index
+
+            if target_index < 0:
+                matches = [
+                    idx
+                    for idx, item in enumerate(task.subtasks)
+                    if str(item.title or "").strip() == wanted_title
+                ]
+                if len(matches) == 1:
+                    target_index = matches[0]
+
+            if target_index < 0:
+                return out, False
+
+            next_subtasks = list(task.subtasks)
+            next_subtasks[target_index] = replace(
+                next_subtasks[target_index],
+                done=bool(done),
+            )
+            tasks[task_pos] = replace(task, subtasks=next_subtasks)
+            out[section] = tasks
+            return out, True
+
+    return out, False
+
+
+def _auto_save_subtask_toggle(
+    profile: str,
+    sections: dict[str, list[KanbanTask]],
+    task_id: str,
+    subtask_index: object,
+    subtask_title: str,
+    done: bool,
+    ui: dict[str, str],
+) -> bool:
+    """Persist one read-mode subtask checkbox against latest kanban.md."""
+    path = profile_dir(profile) / "kanban.md"
+    for attempt in range(2):
+        before = snapshot_file(path)
+        latest_sections = ensure_kanban_task_ids(
+            parse_kanban(profile),
+            profile,
+        )
+        try:
+            index = int(subtask_index)
+        except (TypeError, ValueError):
+            index = -1
+        updated_sections, ok = _apply_subtask_toggle_for_page(
+            latest_sections,
+            task_id,
+            index,
+            subtask_title,
+            done,
+        )
+        if not ok:
+            _sync_kanban_sections_state(profile, sections, latest_sections)
+            refresh_file_snapshots([path])
+            st.warning(ui["kb_drag_stale"])
+            return False
+        if updated_sections == latest_sections:
+            _sync_kanban_sections_state(profile, sections, latest_sections)
+            refresh_file_snapshots([path])
+            clear_web_cache()
+            _clear_kanban_dirty(profile)
+            return True
+        try:
+            assert_unchanged(path, before, label=path.name)
+        except FileConflictError:
+            if attempt == 0:
+                continue
+            latest_sections = ensure_kanban_task_ids(
+                parse_kanban(profile),
+                profile,
+            )
+            _sync_kanban_sections_state(profile, sections, latest_sections)
+            refresh_file_snapshots([path])
+            st.warning(ui["kb_drag_stale"])
+            return False
+
+        save_kanban(profile, updated_sections)
+        refresh_file_snapshots([path])
+        stash_git_backup_results()
+        clear_web_cache()
+        _clear_kanban_dirty(profile)
+        _sync_kanban_sections_state(profile, sections, updated_sections)
+        return True
+    return False
 
 
 def _mark_done_crystallized(
@@ -1432,20 +1573,15 @@ def _handle_board_event(
         st.rerun()
 
     if action == "toggle_subtask":
-        if found is None:
-            st.warning(ui["kb_drag_stale"])
-            return
-        section, idx, task = found
-        subtask_index = _event_subtask_index(payload, task)
-        if not 0 <= subtask_index < len(task.subtasks):
-            return
-        next_subtasks = list(task.subtasks)
-        next_subtasks[subtask_index] = replace(
-            next_subtasks[subtask_index],
-            done=bool(payload.get("done")),
+        _auto_save_subtask_toggle(
+            profile,
+            sections,
+            task_id,
+            payload.get("subtask_index", -1),
+            str(payload.get("subtask_title") or ""),
+            bool(payload.get("done")),
+            ui,
         )
-        sections[section][idx] = replace(task, subtasks=next_subtasks)
-        _auto_save(profile, sections)
         st.rerun()
 
     if action == "delete_subtask":
