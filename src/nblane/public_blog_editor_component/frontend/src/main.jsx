@@ -55,6 +55,8 @@ const DEFAULT_LABELS = {
   create: "Create",
   create_post: "New",
   candidate_warnings: "Candidate warnings",
+  close_left_panel: "Collapse articles",
+  close_right_panel: "Collapse tools",
   date: "Date",
   discard_candidate: "Discard candidate",
   delete_media: "Delete media",
@@ -112,6 +114,7 @@ const DEFAULT_LABELS = {
   related_kanban: "Related kanban",
   right_panel: "Tools",
   run_check: "Run check",
+  rerun_check: "Run check again",
   save: "Save",
   save_to_media: "Save to media",
   selected_media: "Selected media",
@@ -198,10 +201,6 @@ function normalizeLayout(raw) {
   }
   if ("right_before_focus" in source) {
     next.right_before_focus = Boolean(source.right_before_focus);
-  }
-  if (next.focus_mode) {
-    next.left_open = false;
-    next.right_open = false;
   }
   return next;
 }
@@ -870,6 +869,19 @@ function ShellEditor(props) {
     [documentId],
   );
 
+  const applyLayoutLocal = useCallback(
+    (updater) => {
+      const next = normalizeLayout(
+        typeof updater === "function" ? updater(layoutRef.current) : updater,
+      );
+      layoutRef.current = next;
+      setLayoutState(next);
+      persistLayout(layoutStorageKey, next);
+      return next;
+    },
+    [layoutStorageKey],
+  );
+
   const emitAction = useCallback(
     async (action, extraPayload = {}) => {
       if (!editable && WRITE_ACTIONS.has(action)) {
@@ -906,16 +918,11 @@ function ShellEditor(props) {
 
   const updateLayout = useCallback(
     (updater, action = "layout_state_changed") => {
-      const next = normalizeLayout(
-        typeof updater === "function" ? updater(layoutRef.current) : updater,
-      );
-      layoutRef.current = next;
-      setLayoutState(next);
-      persistLayout(layoutStorageKey, next);
+      const next = applyLayoutLocal(updater);
       emitAction(action, { layout_state: next });
       return next;
     },
-    [emitAction, layoutStorageKey],
+    [applyLayoutLocal, emitAction],
   );
 
   const syncMarkdown = useCallback(
@@ -1047,8 +1054,6 @@ function ShellEditor(props) {
         focus_mode: true,
         left_before_focus: Boolean(current.left_open),
         right_before_focus: Boolean(current.right_open),
-        left_open: false,
-        right_open: false,
       };
     });
   }
@@ -1058,10 +1063,13 @@ function ShellEditor(props) {
   }
 
   function openRightTab(tab, collapseCurrent = false) {
+    let nextRightOpen = true;
     updateLayout((current) => {
       if (collapseCurrent && current.right_open && current.active_right_tab === tab) {
+        nextRightOpen = false;
         return { ...current, right_open: false, focus_mode: false };
       }
+      nextRightOpen = true;
       return {
         ...current,
         right_open: true,
@@ -1069,11 +1077,55 @@ function ShellEditor(props) {
         focus_mode: false,
       };
     });
-    setMobileView("Tools");
+    setMobileView(nextRightOpen ? "Tools" : "Editor");
   }
 
   function closeRightPanel() {
     updateLayout((current) => ({ ...current, right_open: false, focus_mode: false }));
+    setMobileView("Editor");
+  }
+
+  function exitFocusLayout(current) {
+    if (!current.focus_mode) {
+      return current;
+    }
+    return {
+      ...current,
+      focus_mode: false,
+      left_open:
+        current.left_before_focus === undefined
+          ? current.left_open
+          : current.left_before_focus,
+      right_open:
+        current.right_before_focus === undefined
+          ? current.right_open
+          : current.right_before_focus,
+    };
+  }
+
+  function switchMobileView(tab) {
+    if (tab === "Preview") {
+      requestPreview();
+      return;
+    }
+    if (tab === "Articles") {
+      applyLayoutLocal((current) => ({
+        ...exitFocusLayout(current),
+        left_open: true,
+      }));
+      setMobileView("Articles");
+      return;
+    }
+    if (tab === "Tools") {
+      applyLayoutLocal((current) => ({
+        ...exitFocusLayout(current),
+        right_open: true,
+      }));
+      setMobileView("Tools");
+      return;
+    }
+    applyLayoutLocal((current) => exitFocusLayout(current));
+    setMobileView("Editor");
   }
 
   function setPreviewOpen(open) {
@@ -1330,12 +1382,13 @@ function ShellEditor(props) {
             className="nb-icon-button"
             title={label(labels, "left_panel")}
             onClick={() => {
-              updateLayout((current) => ({
-                ...current,
-                left_open: !current.left_open,
+              const nextOpen = !layoutRef.current.left_open;
+              updateLayout({
+                ...layoutRef.current,
+                left_open: nextOpen,
                 focus_mode: false,
-              }));
-              setMobileView("Articles");
+              });
+              setMobileView(nextOpen ? "Articles" : "Editor");
             }}
           >
             A
@@ -1345,12 +1398,13 @@ function ShellEditor(props) {
             className="nb-icon-button"
             title={label(labels, "right_panel")}
             onClick={() => {
-              updateLayout((current) => ({
-                ...current,
-                right_open: !current.right_open,
+              const nextOpen = !layoutRef.current.right_open;
+              updateLayout({
+                ...layoutRef.current,
+                right_open: nextOpen,
                 focus_mode: false,
-              }));
-              setMobileView("Tools");
+              });
+              setMobileView(nextOpen ? "Tools" : "Editor");
             }}
           >
             T
@@ -1373,17 +1427,7 @@ function ShellEditor(props) {
             type="button"
             key={tab}
             className={mobileView === tab ? "is-active" : ""}
-            onClick={() => {
-              if (layout.focus_mode) {
-                setMobileView("Editor");
-                return;
-              }
-              if (tab === "Preview") {
-                requestPreview();
-                return;
-              }
-              setMobileView(tab);
-            }}
+            onClick={() => switchMobileView(tab)}
           >
             {label(labels, tab.toLowerCase())}
           </button>
@@ -1397,16 +1441,17 @@ function ShellEditor(props) {
             <button
               type="button"
               className="nb-icon-button"
-              title={label(labels, "left_panel")}
-              onClick={() =>
+              title={label(labels, "close_left_panel")}
+              onClick={() => {
                 updateLayout((current) => ({
                   ...current,
                   left_open: false,
                   focus_mode: false,
-                }))
-              }
+                }));
+                setMobileView("Editor");
+              }}
             >
-              L
+              x
             </button>
           </div>
           <div className="nb-left-tools">
@@ -1634,7 +1679,7 @@ function ShellEditor(props) {
             <button
               type="button"
               className="nb-icon-button"
-              title={label(labels, "right_panel")}
+              title={label(labels, "close_right_panel")}
               onClick={closeRightPanel}
             >
               x
@@ -2696,7 +2741,7 @@ function CheckDrawer({ labels, state, onRun }) {
   return (
     <div className="nb-drawer-body">
       <button type="button" className="nb-button wide" onClick={onRun}>
-        {label(labels, "validate", "Check")}
+        {label(labels, "rerun_check", "Run check again")}
       </button>
       <CheckList title={label(labels, "validation_errors")} items={errors} tone="danger" />
       <CheckList title={label(labels, "validation_warnings")} items={warnings} tone="warn" />
