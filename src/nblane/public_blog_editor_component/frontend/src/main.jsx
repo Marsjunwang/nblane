@@ -688,7 +688,6 @@ function ShellEditor(props) {
   const draftMetaRef = useRef(draftMeta);
   const initialMetaSignatureRef = useRef(deepStableStringify(draftMeta));
   const initialMarkdownRef = useRef(initialMarkdown);
-  const sendTimerRef = useRef(null);
   const eventCounterRef = useRef(0);
   const lastCursorBlockIdRef = useRef("");
   const sourceTextareaRef = useRef(null);
@@ -801,14 +800,6 @@ function ShellEditor(props) {
       cancelled = true;
     };
   }, [documentId, editor, initialMarkdown, sourceMode]);
-
-  useEffect(() => {
-    return () => {
-      if (sendTimerRef.current !== null) {
-        window.clearTimeout(sendTimerRef.current);
-      }
-    };
-  }, []);
 
   const computeDirty = useCallback((markdown, meta = draftMetaRef.current) => {
     return (
@@ -928,7 +919,7 @@ function ShellEditor(props) {
   );
 
   const syncMarkdown = useCallback(
-    async (immediate = false) => {
+    async () => {
       if (!ready || !editable) {
         return;
       }
@@ -938,61 +929,12 @@ function ShellEditor(props) {
         : await getCurrentMarkdown();
       const nextDirty = computeDirty(markdown, draftMetaRef.current);
       setDirty(nextDirty);
-      if (sendTimerRef.current !== null) {
-        window.clearTimeout(sendTimerRef.current);
-      }
-      if (!immediate) {
-        sendTimerRef.current = window.setTimeout(() => {
-          const eventId = nextEventId("markdown_changed");
-          Streamlit.setComponentValue({
-            action: "markdown_changed",
-            event_id: eventId,
-            payload: {
-              slug: activeSlug,
-              document_id: documentId,
-              markdown,
-              meta: draftMetaRef.current,
-              layout_state: layoutRef.current,
-              dirty: nextDirty,
-              event_id: eventId,
-            },
-            markdown,
-            dirty: nextDirty,
-            layout_state: layoutRef.current,
-            selected_block: null,
-            insert_event: null,
-          });
-        }, 900);
-        return;
-      }
-      const eventId = nextEventId("markdown_changed");
-      Streamlit.setComponentValue({
-        action: "markdown_changed",
-        event_id: eventId,
-        payload: {
-          slug: activeSlug,
-          document_id: documentId,
-          markdown,
-          meta: draftMetaRef.current,
-          layout_state: layoutRef.current,
-          dirty: nextDirty,
-          event_id: eventId,
-        },
-        markdown,
-        dirty: nextDirty,
-        layout_state: layoutRef.current,
-        selected_block: null,
-        insert_event: null,
-      });
     },
     [
-      activeSlug,
       computeDirty,
-      documentId,
       editable,
       getCurrentMarkdown,
       rememberCursorBlock,
-      nextEventId,
       ready,
       sourceMode,
     ],
@@ -1579,14 +1521,14 @@ function ShellEditor(props) {
                   setSourceMarkdown(next);
                   latestMarkdownRef.current = next;
                   setDirty(computeDirty(next, draftMetaRef.current));
-                  syncMarkdown(false);
+                  syncMarkdown();
                 }}
                 onSelect={rememberSourceSelection}
                 onKeyUp={rememberSourceSelection}
                 onMouseUp={rememberSourceSelection}
                 onBlur={() => {
                   rememberSourceSelection();
-                  syncMarkdown(true);
+                  syncMarkdown();
                 }}
                 style={{ minHeight: `${Math.max(360, height - 190)}px` }}
               />
@@ -1604,11 +1546,11 @@ function ShellEditor(props) {
                   theme="light"
                   onChange={() => {
                     rememberCursorBlock();
-                    syncMarkdown(false);
+                    syncMarkdown();
                   }}
                   onBlur={() => {
                     rememberCursorBlock();
-                    syncMarkdown(true);
+                    syncMarkdown();
                   }}
                 />
               </div>
