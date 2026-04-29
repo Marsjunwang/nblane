@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, TypeVar
 
 from nblane.core import io
@@ -11,7 +12,12 @@ from nblane.core.paths import SCHEMAS_DIR, TEAMS_DIR
 try:
     import streamlit as st
 except ImportError:  # pragma: no cover - Streamlit is a web dependency.
-    st = None  # type: ignore[assignment]
+    st = SimpleNamespace()  # type: ignore[assignment]
+
+if st is not None and not hasattr(st, "cache_data"):
+    st.cache_data = SimpleNamespace(  # type: ignore[attr-defined]
+        clear=lambda: None,
+    )
 
 _T = TypeVar("_T")
 

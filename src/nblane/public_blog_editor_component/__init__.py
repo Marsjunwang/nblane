@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import streamlit.components.v1 as components
+try:
+    import streamlit.components.v1 as components
+except Exception:  # pragma: no cover - optional web dependency
+    components = None
 
 _FRONTEND_DIR = Path(__file__).parent / "frontend" / "static"
 
@@ -21,6 +24,8 @@ _component_func = None
 def _get_component_func():
     """Declare the Streamlit component lazily to keep CLI imports quiet."""
     global _component_func
+    if components is None:
+        return None
     if _component_func is None and blocknote_component_available():
         _component_func = components.declare_component(
             "nblane_blocknote_markdown",
@@ -73,6 +78,11 @@ def st_public_blog_editor(
     media_items: list[dict[str, Any]] | None = None,
     ai_candidates: list[dict[str, Any]] | None = None,
     validation_state: dict[str, Any] | None = None,
+    visual_config: dict[str, Any] | None = None,
+    visual_results: list[dict[str, Any]] | None = None,
+    visual_guidance: dict[str, Any] | None = None,
+    preview_html: str = "",
+    status_filter: str = "all",
     layout_state: dict[str, Any] | None = None,
     ui_labels: dict[str, str] | None = None,
     document_id: str | None = None,
@@ -96,6 +106,7 @@ def st_public_blog_editor(
     clean_layout_state = dict(layout_state or {})
     default = {
         "action": None,
+        "event_id": "",
         "payload": {},
         "markdown": initial_markdown,
         "dirty": False,
@@ -112,6 +123,11 @@ def st_public_blog_editor(
         media_items=list(media_items or []),
         ai_candidates=list(ai_candidates or []),
         validation_state=dict(validation_state or {}),
+        visual_config=dict(visual_config or {}),
+        visual_results=list(visual_results or []),
+        visual_guidance=dict(visual_guidance or {}),
+        preview_html=preview_html,
+        status_filter=status_filter,
         layout_state=clean_layout_state,
         ui_labels=dict(ui_labels or {}),
         document_id=document_id or active_slug,

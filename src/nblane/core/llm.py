@@ -96,6 +96,30 @@ def current_config(
     }
 
 
+def api_key_unmasked() -> str:
+    """Return the raw runtime API key for modules that reuse LLM credentials."""
+    return _API_KEY
+
+
+def base_url() -> str:
+    """Return the runtime API base URL."""
+    return _BASE_URL
+
+
+def is_dashscope_base_url(url: str) -> bool:
+    """Return True when *url* points at a DashScope / Bailian endpoint."""
+    clean = str(url or "").strip().lower()
+    return any(
+        marker in clean
+        for marker in (
+            "dashscope.aliyuncs.com",
+            "dashscope-intl.aliyuncs.com",
+            "bailian.aliyuncs.com",
+            "bailian.console.aliyun.com",
+        )
+    )
+
+
 def is_configured() -> bool:
     """Return True if an API key is set."""
     return bool(_API_KEY)

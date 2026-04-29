@@ -22,6 +22,7 @@ This installs all dependencies declared in `pyproject.toml`:
 | `pyyaml` | Profile / schema / team YAML parsing |
 | `streamlit` | Web UI |
 | `openai` | LLM client (OpenAI-compatible) |
+| `Pillow` | Image thumbnail generation for blog / visual previews |
 | `python-dotenv` | `.env` file loading |
 | `pandas` | Data handling in Web UI |
 
@@ -59,6 +60,12 @@ nblane reads these environment variables:
 | `LLM_API_KEY` | *(empty)* | API key — **required** to enable AI features |
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API base URL |
 | `LLM_MODEL` | `qwen3.6-plus` | Model name |
+| `VISUAL_PROVIDER` | `dashscope_wan` | Blog visual generation provider. Other providers are reserved for future adapters. |
+| `VISUAL_API_KEY` | *(empty)* | Optional image/video key. If empty, visual generation tries `DASHSCOPE_API_KEY`, then `LLM_API_KEY`. |
+| `DASHSCOPE_API_KEY` | *(empty)* | Optional DashScope key used before `LLM_API_KEY` for visual generation. |
+| `VISUAL_BASE_URL` | *(empty)* | Optional visual task endpoint override. Leave empty to use DashScope visual task APIs. |
+| `VISUAL_IMAGE_MODEL` | `wan2.7-image-pro` | Default Blog image / cover model. |
+| `VISUAL_VIDEO_MODEL` | `wan2.7-videoedit` | Default Blog video-edit model. |
 | `UI_LANG` | `en` | Streamlit interface language: `en` or `zh`. If unset, falls back to `LLM_REPLY_LANG` for compatibility. |
 | `LLM_REPLY_LANG` | `en` | Model reply language: `en` or `zh`. Controls AI prompts/output only. |
 | `NBLANE_AUTH_FILE` | *(empty)* | Streamlit Web login config. Empty keeps local development mode; public deployments should point at private `auth/users.yaml`. |
@@ -77,6 +84,11 @@ LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL=qwen3.6-plus
 UI_LANG=zh
 LLM_REPLY_LANG=en
+
+# Optional visual overrides
+VISUAL_IMAGE_MODEL=wan2.7-image-pro
+VISUAL_VIDEO_MODEL=wan2.7-videoedit
+VISUAL_API_KEY=
 ```
 
 nblane loads this file automatically on startup via `python-dotenv`.
@@ -101,6 +113,12 @@ Any OpenAI-compatible endpoint works. Set `LLM_BASE_URL` to the provider's base 
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_API_KEY=sk-xxx        # your DASHSCOPE_API_KEY
 LLM_MODEL=qwen3.6-plus    # model list: https://help.aliyun.com/model-studio/getting-started/models
+
+# Blog cover/image/video generation uses the same key by default.
+# Add VISUAL_API_KEY only if image/video tasks use a different credential.
+VISUAL_IMAGE_MODEL=wan2.7-image-pro
+VISUAL_VIDEO_MODEL=wan2.7-videoedit
+VISUAL_API_KEY=
 
 # DeepSeek
 LLM_BASE_URL=https://api.deepseek.com/v1

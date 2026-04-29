@@ -5,9 +5,13 @@ from __future__ import annotations
 import html
 import base64
 import hashlib
+import io
+import json
 import mimetypes
 import re
 import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -15,7 +19,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import yaml
 
-from nblane.core import git_backup, llm
+from nblane.core import git_backup, llm, visual_generation
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_io import profile_dir
@@ -39,6 +43,12 @@ BLOG_DIRECT_VIDEO_EXTENSIONS = {"mp4", "webm", "ogg"}
 BLOG_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 BLOG_VIDEO_MAX_BYTES = 25 * 1024 * 1024
 BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES = 2 * 1024 * 1024
+BLOG_IMAGE_PREVIEW_MAX_EDGE = 640
+BLOG_IMAGE_PREVIEW_QUALITY = 55
+BLOG_BROWSER_VIDEO_CODECS = {
+    "mp4": {"h264"},
+    "webm": {"vp8", "vp9", "av1"},
+}
 SAFE_HREF_SCHEMES = {"http", "https", "mailto"}
 SAFE_SRC_SCHEMES = {"http", "https"}
 _FENCED_CODE_RE = re.compile(r"(?ms)^(```|~~~).*?^\1\s*$")
@@ -577,6 +587,32 @@ def _as_string_list(raw: object) -> list[str]:
     return out
 
 
+def _coerce_string_list(raw: object) -> list[str]:
+    """Return a clean list from list, comma text, or newline text."""
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        return [
+            item.strip()
+            for chunk in raw.splitlines()
+            for item in chunk.split(",")
+            if item.strip()
+        ]
+    return []
+
+
+def _normalize_blog_meta(meta: dict) -> dict:
+    """Normalize structured blog front matter fields before writing."""
+    clean = dict(meta or {})
+    for field_name in ("tags", "related_evidence", "related_kanban"):
+        clean[field_name] = _coerce_string_list(clean.get(field_name))
+    for field_name in ("title", "date", "status", "summary", "cover"):
+        if clean.get(field_name) is None:
+            clean[field_name] = ""
+    clean["status"] = str(clean.get("status", "") or "draft")
+    return clean
+
+
 def markdown_contains_math(text: str) -> bool:
     """Return True when Markdown appears to contain LaTeX math delimiters."""
     clean = _FENCED_CODE_RE.sub("", text)
@@ -738,6 +774,68 @@ def _validate_media_path(
         result.errors.append(f"{label}: media file does not exist: {rel}")
 
 
+def _validate_blog_cover(
+    result: PublicValidationResult,
+    profile_root: Path,
+    label: str,
+    value: object,
+) -> None:
+    rel = str(value or "").strip()
+    if not rel:
+        return
+    _validate_url_scheme(
+        result.errors,
+        label,
+        rel,
+        allowed_schemes=SAFE_SRC_SCHEMES,
+    )
+    if _unsafe_url_scheme(rel, SAFE_SRC_SCHEMES):
+        return
+    if _is_external_url(rel):
+        return
+    if not _is_local_media_ref(rel):
+        result.errors.append(
+            f"{label}: cover image must stay under '{MEDIA_DIRNAME}/': {rel}"
+        )
+        return
+    _validate_local_media_ref(
+        result.errors,
+        profile_root,
+        label,
+        rel,
+        max_bytes=BLOG_IMAGE_MAX_BYTES,
+        allowed_extensions=BLOG_IMAGE_EXTENSIONS,
+    )
+
+
+def _valid_blog_cover_ref(profile_root: Path, value: object) -> str:
+    rel = str(value or "").strip()
+    if not rel or _unsafe_url_scheme(rel, SAFE_SRC_SCHEMES):
+        return ""
+    if _is_external_url(rel):
+        return rel
+    clean = _strip_markdown_url(rel).lstrip("/")
+    if not _is_local_media_ref(clean):
+        return ""
+    target = _local_media_target(profile_root, clean)
+    if target is None or not target.exists() or not target.is_file():
+        return ""
+    if _media_extension(clean) not in BLOG_IMAGE_EXTENSIONS:
+        return ""
+    if target.stat().st_size > BLOG_IMAGE_MAX_BYTES:
+        return ""
+    return clean
+
+
+def _media_src(ref: str) -> str:
+    clean = str(ref or "").strip()
+    if not clean:
+        return ""
+    if _is_external_url(clean):
+        return clean
+    return "/" + clean.lstrip("/")
+
+
 def _strip_markdown_url(value: str) -> str:
     return _strip_url_value(value)
 
@@ -896,6 +994,163 @@ def _direct_video_allowed(src: str) -> bool:
     return ext in BLOG_VIDEO_EXTENSIONS
 
 
+def _ffprobe_video_stream(path: Path) -> dict:
+    """Return the first video stream metadata when ffprobe is available."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return {}
+    try:
+        result = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name,codec_tag_string,profile,width,height",
+                "-of",
+                "json",
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return {}
+    streams = payload.get("streams")
+    if not isinstance(streams, list) or not streams:
+        return {}
+    stream = streams[0]
+    return stream if isinstance(stream, dict) else {}
+
+
+def _browser_video_compatible(path: Path, stream: dict) -> bool | None:
+    codec = str(stream.get("codec_name", "") or "").strip().lower()
+    if not codec:
+        return None
+    ext = path.suffix.lower().lstrip(".")
+    compatible = BLOG_BROWSER_VIDEO_CODECS.get(ext)
+    if compatible is None:
+        return False
+    return codec in compatible
+
+
+def _video_compatibility_payload(path: Path) -> dict:
+    stream = _ffprobe_video_stream(path)
+    if not stream:
+        return {}
+    codec = str(stream.get("codec_name", "") or "").strip()
+    tag = str(stream.get("codec_tag_string", "") or "").strip()
+    compatible = _browser_video_compatible(path, stream)
+    payload: dict = {
+        "video_codec": codec,
+        "video_codec_tag": tag,
+        "video_profile": str(stream.get("profile", "") or "").strip(),
+        "video_browser_compatible": compatible,
+        "needs_video_conversion": compatible is False,
+    }
+    if compatible is False:
+        label = codec or tag or "unknown"
+        payload["video_compatibility_warning"] = (
+            f"Video codec '{label}' may not play in browsers. Convert it to "
+            "H.264 MP4 before publishing."
+        )
+    return payload
+
+
+def _video_compatibility_payload_from_bytes(data: bytes, filename: str) -> dict:
+    suffix = Path(filename).suffix.lower() or ".mp4"
+    if suffix.lstrip(".") not in BLOG_VIDEO_EXTENSIONS:
+        return {}
+    with tempfile.TemporaryDirectory(prefix="nblane-video-probe-") as tmp:
+        target = Path(tmp) / f"probe{suffix}"
+        target.write_bytes(data)
+        return _video_compatibility_payload(target)
+
+
+def _transcode_video_file(source: Path, target: Path) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise PublicSiteError(
+            "ffmpeg is required to convert videos to browser-compatible MP4."
+        )
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(source),
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                "-c:v",
+                "libx264",
+                "-profile:v",
+                "high",
+                "-pix_fmt",
+                "yuv420p",
+                "-preset",
+                "medium",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                str(target),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PublicSiteError(f"Video conversion failed: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        message = detail[-1] if detail else "unknown ffmpeg error"
+        raise PublicSiteError(f"Video conversion failed: {message}")
+    if not target.exists() or target.stat().st_size <= 0:
+        raise PublicSiteError("Video conversion produced an empty file.")
+
+
+def _browser_compatible_video_data(data: bytes, filename: str) -> tuple[bytes, str]:
+    """Transcode uploaded/generated videos to H.264 MP4 when needed and possible."""
+    suffix = Path(filename).suffix.lower()
+    if suffix.lstrip(".") not in BLOG_VIDEO_EXTENSIONS:
+        return data, filename
+    with tempfile.TemporaryDirectory(prefix="nblane-video-") as tmp:
+        tmp_dir = Path(tmp)
+        source = tmp_dir / f"source{suffix or '.mp4'}"
+        source.write_bytes(data)
+        compatibility = _video_compatibility_payload(source)
+        if compatibility.get("video_browser_compatible") is not False:
+            return data, filename
+        if not shutil.which("ffmpeg"):
+            return data, filename
+        target = tmp_dir / "browser-compatible.mp4"
+        _transcode_video_file(source, target)
+        converted = target.read_bytes()
+    if len(converted) > BLOG_VIDEO_MAX_BYTES:
+        return data, filename
+    stem = _safe_media_filename(filename, fallback="video")
+    clean_stem = Path(stem).stem[:52].rstrip(".-") or "video"
+    return converted, f"{clean_stem}-h264.mp4"
+
+
 def _render_video_block(caption: str, src: str) -> str:
     clean = _strip_markdown_url(src)
     escaped_caption = html.escape(caption)
@@ -1038,6 +1293,14 @@ def _validate_blog_body_media(
             max_bytes=BLOG_VIDEO_MAX_BYTES,
             allowed_extensions=BLOG_VIDEO_EXTENSIONS,
         )
+        target = _local_media_target(profile_root, src)
+        if target is not None and target.exists() and target.is_file():
+            compatibility = _video_compatibility_payload(target)
+            if compatibility.get("video_browser_compatible") is False:
+                diagnostics.append(
+                    f"{label}: video may not play in browsers; convert to "
+                    f"H.264 MP4: {src}"
+                )
 
 
 def _validate_evidence_refs(
@@ -1133,7 +1396,7 @@ def _validate_blog_post(
         type_diagnostics.append(f"{label}: 'related_kanban' must be a list")
     cover = post.meta.get("cover", "")
     if require_publish_ready or str(cover or "").strip():
-        _validate_media_path(
+        _validate_blog_cover(
             result,
             profile_root,
             f"{label}.cover",
@@ -1443,6 +1706,7 @@ def _html_page(
     asset_href: str = "/assets/site.css",
     include_resume: bool = True,
     include_math: bool = False,
+    image_url: str = "",
 ) -> str:
     site_name = _site_name(public_profile)
     avatar = str(public_profile.get("avatar", "") or "")
@@ -1476,6 +1740,17 @@ def _html_page(
         if canonical_url
         else ""
     )
+    image = _safe_url_attr(
+        image_url,
+        allowed_schemes=SAFE_SRC_SCHEMES,
+        allow_relative=True,
+    )
+    image_html = ""
+    if image:
+        image_html = (
+            f'  <meta property="og:image" content="{html.escape(image, quote=True)}">\n'
+            f'  <meta name="twitter:image" content="{html.escape(image, quote=True)}">\n'
+        )
     seo_html = (
         canonical_html
         + f'  <meta property="og:type" content="{html.escape(og_type, quote=True)}">\n'
@@ -1487,7 +1762,8 @@ def _html_page(
             if canonical_url
             else ""
         )
-        + '  <meta name="twitter:card" content="summary">\n'
+        + image_html
+        + f'  <meta name="twitter:card" content="{"summary_large_image" if image else "summary"}">\n'
         + f'  <meta name="twitter:title" content="{html.escape(full_title, quote=True)}">\n'
         + f'  <meta name="twitter:description" content="{html.escape(meta_description, quote=True)}">\n'
     )
@@ -1683,6 +1959,15 @@ h3 { margin: 0 0 8px; letter-spacing: 0; }
   border-radius: 8px;
   background: #fff;
 }
+.item-cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: -4px 0 14px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+}
 .portal {
   display: flex;
   min-height: 150px;
@@ -1744,6 +2029,18 @@ h3 { margin: 0 0 8px; letter-spacing: 0; }
   margin-top: 4px;
 }
 .prose img { max-width: 100%; border-radius: 8px; }
+.blog-header {
+  margin-bottom: 26px;
+}
+.blog-cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 24px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  object-fit: cover;
+}
 .media-block {
   margin: 28px 0;
 }
@@ -2016,19 +2313,70 @@ def _render_output_detail(
 """
 
 
-def _render_post_item(post: BlogPost) -> str:
+def _blog_cover_img(
+    profile_root: Path,
+    post: BlogPost,
+    *,
+    css_class: str,
+    alt: str = "",
+) -> str:
+    cover = _valid_blog_cover_ref(profile_root, post.meta.get("cover"))
+    if not cover:
+        return ""
+    src = _media_src(cover)
+    return (
+        f'<img class="{html.escape(css_class)}" '
+        f'src="{html.escape(src, quote=True)}" '
+        f'alt="{html.escape(alt or post.title, quote=True)}">'
+    )
+
+
+def _seo_image_url(base_url: str, cover_ref: str) -> str:
+    if not cover_ref:
+        return ""
+    if _is_external_url(cover_ref):
+        return cover_ref
+    return _site_url(base_url, "/" + cover_ref.lstrip("/"))
+
+
+def _render_post_item(post: BlogPost, profile_root: Path | None = None) -> str:
     tags = _as_string_list(post.meta.get("tags"))
     tag_html = "".join(
         f'<span class="pill">{html.escape(t)}</span>' for t in tags
     )
+    cover_html = (
+        _blog_cover_img(profile_root, post, css_class="item-cover")
+        if profile_root is not None
+        else ""
+    )
     return f"""
 <article class="item">
+  {cover_html}
   <div class="meta">{html.escape(post.date)}</div>
   <h3><a href="/{post.url_path}">{html.escape(post.title)}</a></h3>
   <p>{html.escape(post.summary)}</p>
   <div class="tag-row">{tag_html}</div>
 </article>
 """
+
+
+def _render_blog_article(profile_root: Path, post: BlogPost) -> str:
+    cover_html = _blog_cover_img(profile_root, post, css_class="blog-cover")
+    summary_html = (
+        f'<p class="lead">{html.escape(post.summary)}</p>'
+        if post.summary
+        else ""
+    )
+    return (
+        '<article class="prose blog-article">'
+        '<header class="blog-header">'
+        f'<p class="meta">{html.escape(post.date)}</p>'
+        f"<h1>{html.escape(post.title)}</h1>"
+        f"{summary_html}{cover_html}"
+        "</header>"
+        + _markdown_to_html(post.body)
+        + "</article>"
+    )
 
 
 def _render_portal_card(
@@ -2514,6 +2862,7 @@ def render_public_site_pages(
     """Render public site pages in memory without writing files."""
     base_url = _normalize_base_url(base_url)
     base_path = _base_path_from_url(base_url)
+    profile_root = _profile_path(name)
 
     def page_url(rel: str) -> str:
         return _site_url(base_url, _url_path_for_page(rel))
@@ -2645,7 +2994,7 @@ def render_public_site_pages(
     blog_body = (
         '<section class="section"><div class="section-inner">'
         "<h1>Blog</h1><div class=\"grid\">"
-        + "".join(_render_post_item(p) for p in posts)
+        + "".join(_render_post_item(p, profile_root) for p in posts)
         + "</div></div></section>"
     )
     _add_render_page(
@@ -2663,13 +3012,11 @@ def render_public_site_pages(
         ),
     )
     for post in posts:
-        article = (
-            '<article class="prose">'
-            f'<p class="meta">{html.escape(post.date)}</p>'
-            f"<h1>{html.escape(post.title)}</h1>"
-            + _markdown_to_html(post.body)
-            + "</article>"
+        cover_ref = _valid_blog_cover_ref(
+            profile_root,
+            post.meta.get("cover"),
         )
+        article = _render_blog_article(profile_root, post)
         _add_render_page(
             pages,
             page_titles,
@@ -2685,6 +3032,7 @@ def render_public_site_pages(
                 og_type="article",
                 include_resume=resume_visible,
                 include_math=markdown_contains_math(post.body),
+                image_url=_seo_image_url(base_url, cover_ref),
             ),
         )
 
@@ -2817,11 +3165,223 @@ def _normalize_media_ref(value: str) -> str:
     return clean
 
 
+def _normalize_preview_quality(value: str) -> str:
+    return "full" if str(value or "").strip().lower() == "full" else "fast"
+
+
+def _data_uri(data: bytes, mime: str) -> str:
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _svg_placeholder_data_uri(label: str) -> str:
+    safe = html.escape(str(label or "Missing media")[:120])
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" '
+        'viewBox="0 0 960 540" role="img">'
+        '<rect width="960" height="540" fill="#f6f8f7"/>'
+        '<rect x="24" y="24" width="912" height="492" rx="18" '
+        'fill="none" stroke="#d8e0dc" stroke-width="4"/>'
+        '<text x="480" y="258" text-anchor="middle" '
+        'font-family="Inter, Arial, sans-serif" font-size="28" '
+        'font-weight="700" fill="#60716e">Preview media unavailable</text>'
+        f'<text x="480" y="306" text-anchor="middle" '
+        'font-family="Inter, Arial, sans-serif" font-size="20" '
+        f'fill="#60716e">{safe}</text>'
+        "</svg>"
+    )
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _image_preview_from_bytes(
+    data: bytes,
+    source_name: str,
+    *,
+    preview_quality: str = "fast",
+) -> tuple[str, str, int, int]:
+    """Return an image data URI, using a small preview when Pillow is available."""
+    source_mime = mimetypes.guess_type(source_name)[0] or "application/octet-stream"
+    quality = _normalize_preview_quality(preview_quality)
+    width = 0
+    height = 0
+    if quality == "full":
+        return _data_uri(data, source_mime), source_mime, width, height
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+            width, height = image.size
+            preview = image.copy()
+        preview.thumbnail(
+            (BLOG_IMAGE_PREVIEW_MAX_EDGE, BLOG_IMAGE_PREVIEW_MAX_EDGE),
+            Image.Resampling.LANCZOS,
+        )
+        has_alpha = preview.mode in {"RGBA", "LA"} or (
+            preview.mode == "P" and "transparency" in preview.info
+        )
+        out = io.BytesIO()
+        try:
+            if has_alpha:
+                preview.save(out, format="WEBP", quality=BLOG_IMAGE_PREVIEW_QUALITY)
+                return _data_uri(out.getvalue(), "image/webp"), "image/webp", width, height
+            rgb = preview.convert("RGB")
+            rgb.save(
+                out,
+                format="JPEG",
+                quality=BLOG_IMAGE_PREVIEW_QUALITY,
+                optimize=True,
+            )
+            return _data_uri(out.getvalue(), "image/jpeg"), "image/jpeg", width, height
+        except Exception:
+            out = io.BytesIO()
+            if has_alpha:
+                preview.save(out, format="PNG", optimize=True)
+                return _data_uri(out.getvalue(), "image/png"), "image/png", width, height
+            rgb = preview.convert("RGB")
+            rgb.save(out, format="JPEG", quality=BLOG_IMAGE_PREVIEW_QUALITY)
+            return _data_uri(out.getvalue(), "image/jpeg"), "image/jpeg", width, height
+    except Exception:
+        return _data_uri(data, source_mime), source_mime, width, height
+
+
+def _image_dimensions_from_bytes(data: bytes) -> tuple[int, int]:
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+            return image.size
+    except Exception:
+        return 0, 0
+
+
+def _media_preview_payload_from_bytes(
+    data: bytes,
+    *,
+    source_name: str,
+    kind: str,
+    mime: str = "",
+    preview_quality: str = "fast",
+) -> dict:
+    clean_kind = str(kind or "").strip().lower() or "image"
+    clean_mime = mime or mimetypes.guess_type(source_name)[0] or "application/octet-stream"
+    size_kb = round(len(data) / 1024, 1)
+    if clean_kind == "image" or clean_mime.startswith("image/"):
+        src, preview_mime, width, height = _image_preview_from_bytes(
+            data,
+            source_name,
+            preview_quality=preview_quality,
+        )
+        if not width or not height:
+            width, height = _image_dimensions_from_bytes(data)
+        return {
+            "preview_src": src,
+            "preview_mime": preview_mime,
+            "preview_width": width,
+            "preview_height": height,
+            "original_size_kb": size_kb,
+            "full_preview_available": len(data) <= BLOG_IMAGE_MAX_BYTES,
+        }
+    inline_available = len(data) <= BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES
+    full_available = len(data) <= BLOG_VIDEO_MAX_BYTES
+    return {
+        "preview_src": _data_uri(data, clean_mime) if inline_available else "",
+        "preview_mime": clean_mime,
+        "preview_width": 0,
+        "preview_height": 0,
+        "original_size_kb": size_kb,
+        "full_preview_available": full_available,
+        **_video_compatibility_payload_from_bytes(data, source_name),
+    }
+
+
+def _blog_media_preview_payload(
+    path: Path,
+    kind: str,
+    *,
+    preview_quality: str = "fast",
+) -> dict:
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if kind == "video" and path.stat().st_size > BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES:
+        return {
+            "preview_src": "",
+            "preview_mime": mime,
+            "preview_width": 0,
+            "preview_height": 0,
+            "original_size_kb": round(path.stat().st_size / 1024, 1),
+            "full_preview_available": path.stat().st_size <= BLOG_VIDEO_MAX_BYTES,
+            **_video_compatibility_payload(path),
+        }
+    return _media_preview_payload_from_bytes(
+        path.read_bytes(),
+        source_name=path.name,
+        kind=kind,
+        mime=mime,
+        preview_quality=preview_quality,
+    )
+
+
+def blog_media_full_preview_payload(
+    profile_root: Path,
+    rel: str,
+    *,
+    data: bytes | None = None,
+    filename: str = "",
+    kind: str = "",
+    mime: str = "",
+) -> dict:
+    """Return an on-demand full preview payload for one local media item."""
+    clean = _normalize_media_ref(_strip_markdown_url(rel))
+    source_name = filename or Path(clean).name or "media.bin"
+    payload_data = data
+    if payload_data is None:
+        if not clean or _is_external_url(clean):
+            return {}
+        target = _local_media_target(profile_root, clean)
+        if target is None or not target.exists() or not target.is_file():
+            return {}
+        source_name = target.name
+        payload_data = target.read_bytes()
+    clean_mime = mime or mimetypes.guess_type(source_name)[0] or "application/octet-stream"
+    clean_kind = str(kind or "").strip().lower()
+    if not clean_kind:
+        clean_kind = "video" if clean_mime.startswith("video/") else "image"
+    if clean_kind == "video" and len(payload_data) > BLOG_VIDEO_MAX_BYTES:
+        return {
+            "full_preview_available": False,
+            "full_preview_src": "",
+            "full_preview_mime": clean_mime,
+        }
+    if clean_kind == "image" and len(payload_data) > BLOG_IMAGE_MAX_BYTES:
+        return {
+            "full_preview_available": False,
+            "full_preview_src": "",
+            "full_preview_mime": clean_mime,
+        }
+    width, height = (
+        _image_dimensions_from_bytes(payload_data)
+        if clean_kind == "image" or clean_mime.startswith("image/")
+        else (0, 0)
+    )
+    return {
+        "full_preview_available": True,
+        "full_preview_src": _data_uri(payload_data, clean_mime),
+        "full_preview_mime": clean_mime,
+        "full_preview_width": width,
+        "full_preview_height": height,
+        "original_size_kb": round(len(payload_data) / 1024, 1),
+    }
+
+
 def _data_uri_for_media(
     profile_root: Path,
     rel: str,
     media_overrides: dict[str, bytes],
     warnings: list[str],
+    *,
+    preview_quality: str = "fast",
 ) -> str:
     clean = _normalize_media_ref(rel)
     if not clean or _is_external_url(clean):
@@ -2845,13 +3405,28 @@ def _data_uri_for_media(
         data = target.read_bytes()
         suffix_source = target.name
     mime = mimetypes.guess_type(suffix_source)[0] or "application/octet-stream"
-    if mime.startswith("video/") and len(data) > BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES:
+    if mime.startswith("image/"):
+        src, _preview_mime, _width, _height = _image_preview_from_bytes(
+            data,
+            suffix_source,
+            preview_quality=preview_quality,
+        )
+        return src
+    if (
+        mime.startswith("video/")
+        and _normalize_preview_quality(preview_quality) == "fast"
+        and len(data) > BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES
+    ):
         warnings.append(
-            f"preview skipped large video media; build will copy it: {clean}"
+            f"fast preview skipped large video media; use full preview to play it: {clean}"
         )
         return ""
-    encoded = base64.b64encode(data).decode("ascii")
-    return f"data:{mime};base64,{encoded}"
+    if mime.startswith("video/") and len(data) > BLOG_VIDEO_MAX_BYTES:
+        warnings.append(
+            f"preview skipped video larger than {BLOG_VIDEO_MAX_BYTES // (1024 * 1024)}MB: {clean}"
+        )
+        return ""
+    return _data_uri(data, mime)
 
 
 def _inline_preview_assets(
@@ -2861,6 +3436,7 @@ def _inline_preview_assets(
     profile_root: Path,
     media_overrides: dict[str, bytes],
     warnings: list[str],
+    preview_quality: str = "fast",
 ) -> str:
     text = html_text.replace(
         '<link rel="stylesheet" href="/assets/site.css">',
@@ -2879,7 +3455,10 @@ def _inline_preview_assets(
             url,
             media_overrides,
             warnings,
+            preview_quality=preview_quality,
         )
+        if not uri and attr == "src":
+            uri = _svg_placeholder_data_uri(_normalize_media_ref(url))
         return f'{attr}="{html.escape(uri, quote=True)}"' if uri else f'{attr}=""'
 
     text = re.sub(
@@ -2908,6 +3487,7 @@ def render_public_site_preview(
     include_drafts: bool = True,
     public_profile_override: dict | None = None,
     media_overrides: dict[str, bytes] | None = None,
+    preview_quality: str = "fast",
 ) -> PublicSitePreviewResult:
     """Render preview pages with inline CSS and media data URIs."""
     profile_root = _profile_path(name)
@@ -2930,6 +3510,7 @@ def render_public_site_preview(
             profile_root=profile_root,
             media_overrides=normalized_overrides,
             warnings=warnings,
+            preview_quality=preview_quality,
         )
         for rel, text in rendered.pages.items()
     }
@@ -2937,6 +3518,89 @@ def render_public_site_preview(
         pages=pages,
         page_titles=dict(rendered.page_titles),
         warnings=warnings,
+    )
+
+
+def blog_preview_fingerprint(
+    profile_root: Path,
+    meta: dict,
+    body: str,
+    *,
+    preview_quality: str = "fast",
+) -> str:
+    """Return a stable fingerprint for one in-editor blog preview."""
+    refs = set(_blog_body_media_refs(str(body or "")))
+    cover = _strip_markdown_url(str((meta or {}).get("cover", "") or "")).lstrip("/")
+    if cover and _is_local_media_ref(cover):
+        refs.add(cover)
+    media_state: list[dict] = []
+    for ref in sorted(refs):
+        target = _local_media_target(profile_root, ref)
+        if target is None:
+            media_state.append({"ref": ref, "state": "outside"})
+            continue
+        if not target.exists() or not target.is_file():
+            media_state.append({"ref": ref, "state": "missing"})
+            continue
+        stat = target.stat()
+        media_state.append(
+            {
+                "ref": ref,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    raw = json.dumps(
+        {
+            "meta": _normalize_blog_meta(meta or {}),
+            "body": str(body or ""),
+            "preview_quality": _normalize_preview_quality(preview_quality),
+            "media": media_state,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def render_blog_post_preview(
+    name: str,
+    slug: str,
+    meta: dict,
+    body: str,
+    *,
+    preview_quality: str = "fast",
+) -> str:
+    """Render one blog post preview from unsaved meta/body without writing files."""
+    profile_root = _profile_path(name)
+    public_profile = load_public_profile(name)
+    clean_slug = _slugify(slug)
+    post = BlogPost(
+        slug=clean_slug,
+        path=profile_root / BLOG_DIRNAME / f"{clean_slug}.md",
+        meta=_normalize_blog_meta(meta),
+        body=str(body or ""),
+    )
+    cover_ref = _valid_blog_cover_ref(profile_root, post.meta.get("cover"))
+    html_text = _html_page(
+        title=post.title,
+        body=_render_blog_article(profile_root, post),
+        public_profile=public_profile,
+        current="blog",
+        description=post.summary,
+        og_type="article",
+        include_math=markdown_contains_math(post.body),
+        image_url=_media_src(cover_ref) if cover_ref else "",
+    )
+    warnings: list[str] = []
+    return _inline_preview_assets(
+        html_text,
+        css=_site_css(),
+        profile_root=profile_root,
+        media_overrides={},
+        warnings=warnings,
+        preview_quality=preview_quality,
     )
 
 
@@ -3178,6 +3842,150 @@ def _media_relative_path(name: str, path: Path) -> str:
     return path.resolve().relative_to(root).as_posix()
 
 
+def blog_media_library_rows(
+    profile_root: Path,
+    slug: str,
+    meta: dict,
+    body: str,
+) -> list[dict]:
+    """Return local blog media rows with preview data for editor components."""
+    media_dir = profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify(slug)
+    if not media_dir.exists():
+        return []
+    cover = str((meta or {}).get("cover", "") or "")
+    rows: list[dict] = []
+    for path in sorted(media_dir.iterdir()):
+        if not path.is_file():
+            continue
+        ext = path.suffix.lower().lstrip(".")
+        if ext in BLOG_IMAGE_EXTENSIONS:
+            kind = "image"
+        elif ext in BLOG_VIDEO_EXTENSIONS:
+            kind = "video"
+        else:
+            continue
+        rel = path.resolve().relative_to(profile_root.resolve()).as_posix()
+        preview_payload = _blog_media_preview_payload(path, kind)
+        rows.append(
+            {
+                "name": path.name,
+                "kind": kind,
+                "relative_path": rel,
+                "size_kb": round(path.stat().st_size / 1024, 1),
+                "referenced": rel in body or rel == cover,
+                **preview_payload,
+            }
+        )
+    return rows
+
+
+def blog_visual_result_rows(
+    profile_root: Path,
+    slug: str,
+    results: list[BlogMediaResult],
+    *,
+    asset_type: str,
+    alt: str = "",
+    caption: str = "",
+    meta: dict | None = None,
+    body: str = "",
+) -> list[dict]:
+    """Return editor payload rows for newly generated visual candidates."""
+    media_rows = blog_media_library_rows(
+        profile_root,
+        slug,
+        meta or {},
+        body,
+    )
+    rows_by_rel = {str(row.get("relative_path", "")): row for row in media_rows}
+    payload: list[dict] = []
+    for result in results:
+        row = dict(rows_by_rel.get(result.relative_path, {}))
+        if not row:
+            path = result.path
+            kind = "video" if path.suffix.lower().lstrip(".") in BLOG_VIDEO_EXTENSIONS else "image"
+            preview_payload = _blog_media_preview_payload(path, kind)
+            row = {
+                "name": path.name,
+                "kind": kind,
+                "relative_path": result.relative_path,
+                "size_kb": round(path.stat().st_size / 1024, 1),
+                "referenced": result.relative_path in body
+                or result.relative_path == str((meta or {}).get("cover", "") or ""),
+                **preview_payload,
+            }
+        row.update(
+            {
+                "asset_type": str(asset_type or "").strip().lower() or "cover",
+                "alt": str(alt or ""),
+                "caption": str(caption or ""),
+                "snippet": result.snippet,
+                "generated": True,
+            }
+        )
+        payload.append(row)
+    return payload
+
+
+def blog_visual_candidate_rows(
+    slug: str,
+    assets: list[visual_generation.GeneratedVisualAsset],
+    *,
+    asset_type: str,
+    alt: str = "",
+    caption: str = "",
+) -> list[dict]:
+    """Return editor rows for unsaved visual candidates."""
+    clean_type = str(asset_type or "").strip().lower() or "cover"
+    kind = _generated_media_kind(clean_type)
+    rows: list[dict] = []
+    for index, asset in enumerate(assets):
+        filename = visual_generation.generated_filename(
+            clean_type,
+            asset.data,
+            asset.extension,
+        )
+        rel = f"{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify(slug)}/{filename}"
+        preview_payload = _media_preview_payload_from_bytes(
+            asset.data,
+            source_name=filename,
+            kind=kind,
+            mime=asset.mime_type,
+        )
+        candidate_id = hashlib.sha256(
+            b"|".join(
+                [
+                    clean_type.encode("utf-8"),
+                    str(index).encode("ascii"),
+                    asset.data,
+                ]
+            )
+        ).hexdigest()[:16]
+        rows.append(
+            {
+                "id": candidate_id,
+                "name": filename,
+                "kind": kind,
+                "relative_path": rel,
+                "size_kb": round(len(asset.data) / 1024, 1),
+                "referenced": False,
+                **preview_payload,
+                "asset_type": clean_type,
+                "alt": str(alt or ""),
+                "caption": str(caption or ""),
+                "snippet": _blog_media_snippet(
+                    kind=kind,
+                    rel=rel,
+                    alt=alt,
+                    caption=caption,
+                ),
+                "generated": True,
+                "unsaved": True,
+            }
+        )
+    return rows
+
+
 def _image_ext_from_data_uri(kind: str) -> str:
     ext = kind.lower()
     return "jpg" if ext == "jpeg" else ext
@@ -3232,6 +4040,7 @@ def save_blog_post(
     if not path.exists():
         raise PublicSiteError(f"Unknown blog post: {slug}")
     changed: list[Path] = []
+    meta = _normalize_blog_meta(meta)
     if extract_inline_images:
         body, changed = extract_blog_base64_images(name, path.stem, body)
     _write_blog_post_file(
@@ -3300,11 +4109,24 @@ def _add_blog_media_data(
         raise PublicSiteError(
             f"{media_kind.title()} is larger than {max_bytes // (1024 * 1024)}MB"
         )
+    media_data = data
+    media_filename = filename
+    if media_kind == "video":
+        media_data, media_filename = _browser_compatible_video_data(data, filename)
+        ext = Path(media_filename).suffix.lower().lstrip(".")
+        if ext not in allowed:
+            raise PublicSiteError(
+                f"Unsupported {media_kind} extension '.{ext}'"
+            )
+        if len(media_data) > max_bytes:
+            raise PublicSiteError(
+                f"{media_kind.title()} is larger than {max_bytes // (1024 * 1024)}MB"
+            )
     media_dir = _blog_media_dir(name, post.slug)
-    clean_filename = _safe_media_filename(filename, fallback=media_kind)
-    target = _unique_media_path(media_dir, clean_filename, data)
+    clean_filename = _safe_media_filename(media_filename, fallback=media_kind)
+    target = _unique_media_path(media_dir, clean_filename, media_data)
     if not target.exists():
-        target.write_bytes(data)
+        target.write_bytes(media_data)
     rel = _media_relative_path(name, target)
     snippet = _blog_media_snippet(
         kind=media_kind,
@@ -3399,6 +4221,226 @@ def add_blog_media_bytes(
     )
 
 
+def delete_blog_media(
+    name: str,
+    slug: str,
+    rel: str,
+    *,
+    meta: dict | None = None,
+    body: str | None = None,
+    allow_referenced: bool = False,
+) -> Path:
+    """Delete one local blog media file after safety checks."""
+    post = load_blog_post(name, slug)
+    profile_root = _profile_path(name)
+    clean = _normalize_media_ref(_strip_markdown_url(str(rel or ""))).lstrip("/")
+    if not clean or _is_external_url(clean):
+        raise PublicSiteError("Media path is missing or external.")
+    target = _local_media_target(profile_root, clean)
+    if target is None:
+        raise PublicSiteError(f"Media path must stay under '{MEDIA_DIRNAME}/': {clean}")
+    media_dir = (
+        profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify(post.slug)
+    ).resolve()
+    try:
+        target.resolve().relative_to(media_dir)
+    except ValueError as exc:
+        raise PublicSiteError(
+            f"Blog media must stay under '{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify(post.slug)}/': {clean}"
+        ) from exc
+    if not target.exists() or not target.is_file():
+        raise PublicSiteError(f"Media file does not exist: {clean}")
+    ext = target.suffix.lower().lstrip(".")
+    if ext not in BLOG_IMAGE_EXTENSIONS and ext not in BLOG_VIDEO_EXTENSIONS:
+        raise PublicSiteError(f"Unsupported media file: {clean}")
+    active_meta = post.meta if meta is None else meta
+    active_body = post.body if body is None else body
+    cover = _normalize_media_ref(
+        _strip_markdown_url(str((active_meta or {}).get("cover", "") or ""))
+    ).lstrip("/")
+    referenced = clean == cover or clean in str(active_body or "")
+    if referenced and not allow_referenced:
+        raise PublicSiteError(
+            "Media is still referenced by this post; remove it from the body or cover before deleting."
+        )
+    target.unlink()
+    try:
+        target.parent.rmdir()
+    except OSError:
+        pass
+    git_backup.record_change(
+        [target],
+        action=f"delete {name}/blog/{post.slug} media",
+    )
+    return target
+
+
+def _unique_transcoded_video_path(source: Path) -> Path:
+    stem = source.stem[:52].rstrip(".-") or "video"
+    base = source.with_name(f"{stem}-h264.mp4")
+    if not base.exists():
+        return base
+    for index in range(2, 100):
+        candidate = source.with_name(f"{stem}-h264-{index}.mp4")
+        if not candidate.exists():
+            return candidate
+    raise PublicSiteError("Could not choose a unique converted video filename.")
+
+
+def convert_blog_media_video(name: str, slug: str, rel: str) -> BlogMediaResult:
+    """Create a browser-compatible H.264 MP4 copy of a blog video."""
+    post = load_blog_post(name, slug)
+    profile_root = _profile_path(name)
+    clean = _normalize_media_ref(_strip_markdown_url(str(rel or ""))).lstrip("/")
+    if not clean or _is_external_url(clean):
+        raise PublicSiteError("Media path is missing or external.")
+    target = _local_media_target(profile_root, clean)
+    if target is None or not target.exists() or not target.is_file():
+        raise PublicSiteError(f"Media file does not exist: {clean}")
+    media_dir = (
+        profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify(post.slug)
+    ).resolve()
+    try:
+        target.resolve().relative_to(media_dir)
+    except ValueError as exc:
+        raise PublicSiteError(
+            f"Blog media must stay under '{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify(post.slug)}/': {clean}"
+        ) from exc
+    if target.suffix.lower().lstrip(".") not in BLOG_VIDEO_EXTENSIONS:
+        raise PublicSiteError(f"Media is not a supported blog video: {clean}")
+    output = _unique_transcoded_video_path(target)
+    with tempfile.NamedTemporaryFile(
+        dir=target.parent,
+        prefix=f".{target.stem}-h264-",
+        suffix=".mp4",
+        delete=False,
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        _transcode_video_file(target, tmp_path)
+        if tmp_path.stat().st_size > BLOG_VIDEO_MAX_BYTES:
+            raise PublicSiteError(
+                f"Converted video is larger than {BLOG_VIDEO_MAX_BYTES // (1024 * 1024)}MB"
+            )
+        tmp_path.replace(output)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+    new_rel = _media_relative_path(name, output)
+    git_backup.record_change(
+        [output],
+        action=f"convert {name}/blog/{post.slug} video",
+    )
+    return BlogMediaResult(
+        path=output,
+        relative_path=new_rel,
+        snippet=_blog_media_snippet(kind="video", rel=new_rel),
+        changed_paths=[output],
+    )
+
+
+def _generated_media_kind(asset_type: str) -> str:
+    return "video" if str(asset_type or "").strip().lower() == "video_edit" else "image"
+
+
+def generate_blog_visual_asset(
+    name: str,
+    slug: str,
+    asset_type: str,
+    prompt: str,
+    *,
+    style: str = "",
+    size: str = "",
+    alt: str = "",
+    caption: str = "",
+    source_video: str = "",
+    reference_image: str = "",
+) -> list[BlogMediaResult]:
+    """Generate visual assets into media/blog/<slug>/ without editing the post."""
+    post = load_blog_post(name, slug)
+    clean_type = str(asset_type or "").strip().lower() or "cover"
+    generated = visual_generation.generate_visual_asset(
+        clean_type,
+        prompt,
+        style=style,
+        size=size,
+        title=post.title,
+        summary=post.summary,
+        tags=_coerce_string_list(post.meta.get("tags")),
+        body=post.body,
+        source_video=source_video,
+        reference_image=reference_image,
+    )
+    results: list[BlogMediaResult] = []
+    kind = _generated_media_kind(clean_type)
+    for asset in generated:
+        filename = visual_generation.generated_filename(
+            clean_type,
+            asset.data,
+            asset.extension,
+        )
+        results.append(
+            _add_blog_media_data(
+                name,
+                post.slug,
+                data=asset.data,
+                filename=filename,
+                kind=kind,
+                alt=alt,
+                caption=caption,
+                cover=False,
+                append=False,
+            )
+        )
+    return results
+
+
+def generate_blog_cover_image(
+    name: str,
+    slug: str,
+    prompt: str,
+    *,
+    style: str = "",
+    size: str = "",
+    alt: str = "",
+    caption: str = "",
+) -> list[BlogMediaResult]:
+    """Generate cover image candidates into the blog media library."""
+    return generate_blog_visual_asset(
+        name,
+        slug,
+        "cover",
+        prompt,
+        style=style,
+        size=size,
+        alt=alt,
+        caption=caption,
+    )
+
+
+def generate_blog_video_edit_candidate(
+    name: str,
+    slug: str,
+    prompt: str,
+    *,
+    source_video: str,
+    reference_image: str = "",
+    style: str = "",
+    caption: str = "",
+) -> list[BlogMediaResult]:
+    """Generate a video-edit candidate with the configured video model."""
+    return generate_blog_visual_asset(
+        name,
+        slug,
+        "video_edit",
+        prompt,
+        style=style,
+        caption=caption,
+        source_video=source_video,
+        reference_image=reference_image,
+    )
+
+
 def publish_blog_post(name: str, slug: str | Path) -> Path:
     """Set a blog post status to published after publish validation."""
     slug_text = _blog_slug_text(slug)
@@ -3411,6 +4453,24 @@ def publish_blog_post(name: str, slug: str | Path) -> Path:
     post.path.write_text(candidate, encoding="utf-8")
     git_backup.record_change(
         [post.path],
+        action=f"publish {name}/blog/{post.path.name}",
+    )
+    return post.path
+
+
+def publish_blog_text(name: str, slug: str, meta: dict, body: str) -> Path:
+    """Publish unsaved structured blog text after full validation."""
+    post = load_blog_post(name, slug)
+    publish_meta = _normalize_blog_meta(meta)
+    publish_meta["status"] = "published"
+    candidate = _format_front_matter(publish_meta, body)
+    result = validate_blog_text_for_publish(name, post.path, candidate)
+    result.raise_for_errors()
+    _write_blog_post_file(
+        name,
+        post.path,
+        publish_meta,
+        body,
         action=f"publish {name}/blog/{post.path.name}",
     )
     return post.path

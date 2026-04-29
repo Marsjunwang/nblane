@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -27,6 +29,7 @@ except Exception:  # pragma: no cover - optional Streamlit component
     st_public_blog_editor = None
 
 from nblane.core import git_backup
+from nblane.core import visual_generation
 from nblane.core.public_curation import (
     evidence_contexts,
     group_project,
@@ -49,8 +52,15 @@ from nblane.core.public_site import (
     blog_candidate_from_evidence,
     blog_candidate_from_kanban_done,
     blog_candidate_from_title,
+    blog_media_full_preview_payload,
+    blog_visual_candidate_rows,
+    blog_media_library_rows,
+    blog_preview_fingerprint,
+    blog_visual_result_rows,
     build_public_site,
+    convert_blog_media_video,
     create_blog_draft,
+    delete_blog_media,
     draft_blog_from_evidence,
     draft_blog_from_kanban_done,
     draft_project_update,
@@ -64,6 +74,8 @@ from nblane.core.public_site import (
     load_resume_source,
     markdown_contains_math,
     parse_blog_post,
+    publish_blog_text,
+    render_blog_post_preview,
     render_public_site_preview,
     render_resume_markdown,
     save_blog_post,
@@ -202,10 +214,22 @@ def _ui() -> dict[str, str]:
             "draft_from_title": "根据当前标题生成完整候选",
             "generate_candidate": "生成候选",
             "insert_candidate": "插入标记处",
+            "insert_placement": "插入位置",
+            "insert_at_cursor": "最近光标处",
+            "insert_at_marker": "插入标记处",
+            "insert_at_end": "文末",
             "append_candidate": "追加到文末",
             "apply_candidate_meta": "应用摘要和标签",
             "use_full_candidate": "使用完整候选",
             "discard_candidate": "丢弃候选",
+            "delete_media": "删除媒体",
+            "delete_media_confirm": "确认删除这个媒体文件？如果已插入正文或设为封面，请先移除引用。",
+            "delete_media_referenced": "此媒体仍被正文或封面引用，请先移除引用后再删除。",
+            "convert_video": "转换为兼容 MP4",
+            "convert_video_confirm": "将此视频转为浏览器兼容的 H.264 MP4？原文件会保留，正文引用会改到新文件。",
+            "video_codec": "编码",
+            "video_incompatible": "此视频编码可能无法在浏览器播放，请转换为 H.264 MP4。",
+            "video_playback_failed": "浏览器无法播放此视频，可能是编码不兼容。",
             "candidate_empty": "候选内容为空。",
             "cover_prompt": "封面 Prompt",
             "candidate_warnings": "候选风险提示",
@@ -222,6 +246,48 @@ def _ui() -> dict[str, str]:
             "markdown_downgrade": "当前使用 Markdown 兼容编辑器；块级编辑会在 React / BlockNote 组件落地后启用。",
             "candidate_saved": "候选已写入正文。",
             "compact_layout": "窄屏模式",
+            "visual": "Visual",
+            "visual_prompt": "视觉 Prompt",
+            "visual_style": "风格",
+            "visual_size": "尺寸",
+            "visual_provider": "视觉生成",
+            "generate_visual": "生成视觉素材",
+            "generate_cover_image": "生成封面候选",
+            "recent_visuals": "最近生成",
+            "save_to_media": "存到媒体",
+            "visual_prompt_suggestions": "Prompt 建议",
+            "visual_suggest_cover": "使用封面建议",
+            "visual_suggest_cover_subject": "主体封面",
+            "visual_suggest_cover_diagram": "技术插画",
+            "visual_suggest_flow": "流程图",
+            "visual_suggest_flow_compare": "对比流程",
+            "visual_suggest_example": "事例场景",
+            "visual_suggest_example_system": "系统示意",
+            "visual_suggest_video": "视频优化",
+            "visual_size_default": "默认尺寸",
+            "visual_style_default": "默认风格",
+            "visual_custom": "自定义",
+            "visual_size_custom": "自定义尺寸",
+            "visual_default": "默认",
+            "visual_size_help": "尺寸可留空使用默认，或填写 width*height / widthxheight / 1K / 2K / 4K；最小 768*768，比例 1:8 到 8:1。",
+            "visual_style_help": "选择预设风格，或用自定义补充材质、镜头、图表风格等偏好。",
+            "visual_alt_help": "插入正文时写入 Markdown 图片替代文本；设为封面时不用此字段，封面 alt 使用文章标题。",
+            "visual_caption_help": "插入正文时显示为图片下方说明或视频标题；设为封面时不用此字段。",
+            "preview_unavailable": "此媒体没有可内联预览，可通过文件名和片段确认。",
+            "update_preview": "更新预览",
+            "high_quality_preview": "高清预览",
+            "fast_preview": "快速预览",
+            "view_full_preview": "查看大图",
+            "load_full_preview": "加载高清",
+            "close": "关闭",
+            "flowchart": "流程图",
+            "example": "事例图",
+            "video_edit": "视频编辑",
+            "missing_visual_key": "缺少 VISUAL_API_KEY / DASHSCOPE_API_KEY / LLM_API_KEY。",
+            "using_key_from": "使用 key 来源",
+            "preview_empty": "暂无预览。",
+            "create_post": "新建",
+            "filter_posts": "筛选",
         }
     return {
         "page_title": "Public Site · nblane",
@@ -336,10 +402,22 @@ def _ui() -> dict[str, str]:
         "draft_from_title": "Generate full candidate from current title",
         "generate_candidate": "Generate candidate",
         "insert_candidate": "Insert at marker",
+        "insert_placement": "Insert position",
+        "insert_at_cursor": "Recent cursor",
+        "insert_at_marker": "Insert marker",
+        "insert_at_end": "End",
         "append_candidate": "Append to end",
         "apply_candidate_meta": "Apply summary and tags",
         "use_full_candidate": "Use full candidate",
         "discard_candidate": "Discard candidate",
+        "delete_media": "Delete media",
+        "delete_media_confirm": "Delete this media file? If it is in the body or cover, remove the reference first.",
+        "delete_media_referenced": "This media is still referenced by the body or cover. Remove the reference before deleting.",
+        "convert_video": "Convert to compatible MP4",
+        "convert_video_confirm": "Convert this video to browser-compatible H.264 MP4? The original file will be kept and body references will move to the new file.",
+        "video_codec": "Codec",
+        "video_incompatible": "This video codec may not play in browsers. Convert it to H.264 MP4.",
+        "video_playback_failed": "The browser cannot play this video; the codec may be incompatible.",
         "candidate_empty": "Candidate is empty.",
         "cover_prompt": "Cover prompt",
         "candidate_warnings": "Candidate warnings",
@@ -356,6 +434,48 @@ def _ui() -> dict[str, str]:
         "markdown_downgrade": "Using the Markdown-compatible editor; block editing will be enabled by the future React / BlockNote component.",
         "candidate_saved": "Candidate was written into the body.",
         "compact_layout": "Compact layout",
+        "visual": "Visual",
+        "visual_prompt": "Visual prompt",
+        "visual_style": "Style",
+        "visual_size": "Size",
+        "visual_provider": "Visual generation",
+        "generate_visual": "Generate visual asset",
+        "generate_cover_image": "Generate cover candidate",
+        "recent_visuals": "Recent generations",
+        "save_to_media": "Save to media",
+        "visual_prompt_suggestions": "Prompt suggestions",
+        "visual_suggest_cover": "Use cover prompt",
+        "visual_suggest_cover_subject": "Subject cover",
+        "visual_suggest_cover_diagram": "Technical illustration",
+        "visual_suggest_flow": "Flowchart",
+        "visual_suggest_flow_compare": "Compare flow",
+        "visual_suggest_example": "Example scene",
+        "visual_suggest_example_system": "System sketch",
+        "visual_suggest_video": "Video cleanup",
+        "visual_size_default": "Default size",
+        "visual_style_default": "Default style",
+        "visual_custom": "Custom",
+        "visual_size_custom": "Custom size",
+        "visual_default": "Default",
+        "visual_size_help": "Leave empty for the default, or use width*height / widthxheight / 1K / 2K / 4K; minimum 768*768 and aspect ratio 1:8 to 8:1.",
+        "visual_style_help": "Choose a style preset, or customize material, camera, diagram, or rendering preferences.",
+        "visual_alt_help": "Used as Markdown image alt text when inserted into the body; covers use the post title instead.",
+        "visual_caption_help": "Shown as an image caption or video title when inserted into the body; not used for covers.",
+        "preview_unavailable": "No inline preview is available for this media; confirm it by filename and snippet.",
+        "update_preview": "Update preview",
+        "high_quality_preview": "High-quality preview",
+        "fast_preview": "Fast preview",
+        "view_full_preview": "Open large preview",
+        "load_full_preview": "Load full preview",
+        "close": "Close",
+        "flowchart": "Flowchart",
+        "example": "Example",
+        "video_edit": "Video edit",
+        "missing_visual_key": "Missing VISUAL_API_KEY / DASHSCOPE_API_KEY / LLM_API_KEY.",
+        "using_key_from": "Using key from",
+        "preview_empty": "No preview yet.",
+        "create_post": "New",
+        "filter_posts": "Filter",
     }
 
 
@@ -735,11 +855,12 @@ def _blog_status_index(status: str) -> int:
     return options.index(status) if status in options else 0
 
 
-_BLOG_RIGHT_TABS = ("Meta", "Media", "AI", "Check")
+_BLOG_RIGHT_TABS = ("Meta", "Media", "AI", "Visual", "Check")
 _BLOG_RIGHT_TAB_ICONS = {
     "Meta": "M",
     "Media": "▧",
     "AI": "AI",
+    "Visual": "V",
     "Check": "✓",
 }
 
@@ -839,9 +960,15 @@ def _set_right_blog_tab(
     slug: str,
     state: dict,
     tab: str,
+    *,
+    collapse_current: bool = False,
 ) -> None:
     next_state = dict(state)
-    if next_state.get("right_open") and next_state.get("active_right_tab") == tab:
+    if (
+        collapse_current
+        and next_state.get("right_open")
+        and next_state.get("active_right_tab") == tab
+    ):
         next_state["right_open"] = False
     else:
         next_state["right_open"] = True
@@ -875,6 +1002,27 @@ def _blog_check_state_key(selected: str, slug: str) -> str:
 
 def _blog_ai_candidate_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_candidate")
+
+
+def _blog_preview_html_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "preview_html")
+
+
+def _blog_preview_fingerprint_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "preview_fingerprint")
+
+
+def _blog_preview_quality_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "preview_quality")
+
+
+def _clear_blog_preview(selected: str, slug: str) -> None:
+    for key in (
+        _blog_preview_html_key(selected, slug),
+        _blog_preview_fingerprint_key(selected, slug),
+        _blog_preview_quality_key(selected, slug),
+    ):
+        st.session_state.pop(key, None)
 
 
 def _blog_shell_key(selected: str, slug: str, field: str) -> str:
@@ -984,41 +1132,575 @@ def _blog_shell_event_payload(
     return action, dict(meta), body, dirty
 
 
-def _blog_media_library(root: Path, slug: str, meta: dict, body: str) -> list[dict]:
-    """Return local media rows for one blog post."""
-    media_dir = root / MEDIA_DIRNAME / BLOG_DIRNAME / slug
-    if not media_dir.exists():
-        return []
-    cover = str(meta.get("cover", "") or "")
-    rows: list[dict] = []
-    for path in sorted(media_dir.iterdir()):
-        if not path.is_file():
-            continue
-        ext = path.suffix.lower().lstrip(".")
-        if ext in BLOG_IMAGE_EXTENSIONS:
-            kind = "image"
-        elif ext in BLOG_VIDEO_EXTENSIONS:
-            kind = "video"
-        else:
-            continue
-        rel = path.resolve().relative_to(root.resolve()).as_posix()
-        rows.append(
+_BLOG_EVENT_DEDUPE_ACTIONS = {
+    "markdown_changed",
+    "layout_state_changed",
+    "insert_media",
+    "delete_media",
+    "convert_media_video",
+    "insert_candidate",
+    "apply_candidate_meta",
+    "select_post",
+    "filter_posts",
+    "create_post",
+    "draft_from_evidence",
+    "draft_from_done",
+    "generate_ai_candidate",
+    "upload_media",
+    "generate_visual_asset",
+    "generate_cover_image",
+    "save_visual_candidate",
+    "discard_visual_candidate",
+    "load_media_preview_detail",
+    "preview_post",
+    "run_check",
+    "save_post",
+    "publish_request",
+}
+
+
+def _blog_shell_event_dedupe_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "processed_events")
+
+
+def _blog_shell_event_id(event: dict, action: str) -> str:
+    """Return a stable id for one React shell event."""
+    if not action:
+        return ""
+    payload = event.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
+    for source in (event, payload):
+        for field_name in ("event_id", "client_event_id"):
+            value = source.get(field_name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    if action not in _BLOG_EVENT_DEDUPE_ACTIONS:
+        return ""
+    try:
+        signature = json.dumps(
             {
-                "name": path.name,
-                "kind": kind,
-                "path": path,
-                "relative_path": rel,
-                "size_kb": round(path.stat().st_size / 1024, 1),
-                "referenced": rel in body or rel == cover,
-            }
+                "action": action,
+                "payload": payload,
+                "markdown": event.get("markdown", ""),
+                "dirty": event.get("dirty", False),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
         )
-    return rows
+    except Exception:
+        signature = repr((action, payload))
+    digest = hashlib.sha1(signature.encode("utf-8")).hexdigest()[:16]
+    return f"legacy:{digest}"
+
+
+def _blog_shell_event_already_processed(
+    selected: str,
+    slug: str,
+    event: dict,
+    action: str,
+) -> bool:
+    """Return True when Streamlit is replaying a component event after rerun."""
+    event_id = _blog_shell_event_id(event, action)
+    if not event_id:
+        return False
+    key = _blog_shell_event_dedupe_key(selected, slug)
+    seen = st.session_state.get(key)
+    if not isinstance(seen, list):
+        seen = []
+    if event_id in seen:
+        return True
+    seen.append(event_id)
+    st.session_state[key] = seen[-120:]
+    return False
+
+
+def _blog_media_preview_details_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "media_preview_details")
+
+
+def _blog_media_preview_details(selected: str, slug: str) -> dict[str, dict]:
+    details = st.session_state.get(_blog_media_preview_details_key(selected, slug), {})
+    return details if isinstance(details, dict) else {}
+
+
+def _merge_blog_media_preview_details(
+    selected: str,
+    slug: str,
+    rows: list[dict],
+) -> list[dict]:
+    if not selected:
+        return rows
+    details = _blog_media_preview_details(selected, slug)
+    if not details:
+        return rows
+    merged: list[dict] = []
+    for row in rows:
+        next_row = dict(row)
+        rel = str(next_row.get("relative_path", "") or "").strip()
+        detail = details.get(rel)
+        if isinstance(detail, dict):
+            next_row.update(detail)
+        merged.append(next_row)
+    return merged
+
+
+def _blog_media_library(
+    root: Path,
+    slug: str,
+    meta: dict,
+    body: str,
+    *,
+    selected: str = "",
+) -> list[dict]:
+    """Return local media rows for one blog post."""
+    rows = blog_media_library_rows(root, slug, meta, body)
+    return _merge_blog_media_preview_details(selected, slug, rows)
+
+
+def _blog_visual_results_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "visual_results")
+
+
+def _blog_visual_candidate_store_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "visual_candidate_store")
+
+
+def _blog_visual_candidate_payload(
+    slug: str,
+    assets: list[visual_generation.GeneratedVisualAsset],
+    *,
+    asset_type: str,
+    alt: str = "",
+    caption: str = "",
+) -> tuple[list[dict], dict[str, dict]]:
+    rows = blog_visual_candidate_rows(
+        slug,
+        assets,
+        asset_type=asset_type,
+        alt=alt,
+        caption=caption,
+    )
+    store: dict[str, dict] = {}
+    for row, asset in zip(rows, assets):
+        candidate_id = str(row.get("id", "") or "")
+        if not candidate_id:
+            continue
+        store[candidate_id] = {
+            "data": asset.data,
+            "filename": str(row.get("name", "") or "generated-visual.bin"),
+            "kind": str(row.get("kind", "") or "image"),
+            "mime_type": asset.mime_type,
+            "asset_type": str(row.get("asset_type", "") or asset_type),
+            "alt": str(row.get("alt", "") or ""),
+            "caption": str(row.get("caption", "") or ""),
+        }
+    return rows, store
+
+
+def _blog_visual_session_rows(selected: str, slug: str) -> list[dict]:
+    rows = st.session_state.get(_blog_visual_results_key(selected, slug), [])
+    return rows if isinstance(rows, list) else []
+
+
+def _blog_visual_session_store(selected: str, slug: str) -> dict[str, dict]:
+    store = st.session_state.get(_blog_visual_candidate_store_key(selected, slug), {})
+    return store if isinstance(store, dict) else {}
+
+
+def _discard_blog_visual_candidate(selected: str, slug: str, candidate_id: str) -> None:
+    rows = [
+        row
+        for row in _blog_visual_session_rows(selected, slug)
+        if str(row.get("id", "") if isinstance(row, dict) else "") != candidate_id
+    ]
+    store = dict(_blog_visual_session_store(selected, slug))
+    store.pop(candidate_id, None)
+    st.session_state[_blog_visual_results_key(selected, slug)] = rows
+    st.session_state[_blog_visual_candidate_store_key(selected, slug)] = store
+
+
+def _save_blog_visual_candidate(
+    *,
+    selected: str,
+    root: Path,
+    slug: str,
+    candidate_id: str,
+    meta: dict,
+    body: str,
+) -> list[dict]:
+    store = dict(_blog_visual_session_store(selected, slug))
+    entry = store.get(candidate_id)
+    if not isinstance(entry, dict):
+        raise PublicSiteError("Visual candidate is no longer available.")
+    data = entry.get("data")
+    if not isinstance(data, bytes):
+        raise PublicSiteError("Visual candidate data is no longer available.")
+    result = add_blog_media_bytes(
+        selected,
+        slug,
+        data=data,
+        filename=str(entry.get("filename", "") or "generated-visual.bin"),
+        kind=str(entry.get("kind", "") or "image"),
+        alt=str(entry.get("alt", "") or ""),
+        caption=str(entry.get("caption", "") or ""),
+    )
+    saved_rows = blog_visual_result_rows(
+        root,
+        slug,
+        [result],
+        asset_type=str(entry.get("asset_type", "") or "cover"),
+        alt=str(entry.get("alt", "") or ""),
+        caption=str(entry.get("caption", "") or ""),
+        meta=meta,
+        body=body,
+    )
+    for row in saved_rows:
+        row["saved"] = True
+        row["unsaved"] = False
+    rows: list[dict] = []
+    replaced = False
+    for row in _blog_visual_session_rows(selected, slug):
+        if isinstance(row, dict) and str(row.get("id", "") or "") == candidate_id:
+            rows.extend(saved_rows)
+            replaced = True
+        else:
+            rows.append(row)
+    if not replaced:
+        rows.extend(saved_rows)
+    store.pop(candidate_id, None)
+    st.session_state[_blog_visual_results_key(selected, slug)] = rows
+    st.session_state[_blog_visual_candidate_store_key(selected, slug)] = store
+    refresh_file_snapshots([result.path])
+    stash_git_backup_results()
+    clear_web_cache()
+    return saved_rows
+
+
+def _load_blog_visual_preview_detail(
+    *,
+    selected: str,
+    root: Path,
+    slug: str,
+    candidate_id: str = "",
+    relative_path: str = "",
+) -> None:
+    rows = _blog_visual_session_rows(selected, slug)
+    target_index = -1
+    target_row: dict | None = None
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        row_id = str(row.get("id", "") or "")
+        row_path = str(row.get("relative_path", "") or "")
+        if (candidate_id and row_id == candidate_id) or (
+            relative_path and row_path == relative_path
+        ):
+            target_index = index
+            target_row = dict(row)
+            break
+    if target_index < 0 or target_row is None:
+        raise PublicSiteError("Visual preview is no longer available.")
+    if target_row.get("unsaved"):
+        entry = _blog_visual_session_store(selected, slug).get(
+            str(target_row.get("id", "") or "")
+        )
+        if not isinstance(entry, dict) or not isinstance(entry.get("data"), bytes):
+            raise PublicSiteError("Visual candidate data is no longer available.")
+        detail = blog_media_full_preview_payload(
+            root,
+            str(target_row.get("relative_path", "") or ""),
+            data=entry["data"],
+            filename=str(entry.get("filename", "") or target_row.get("name", "")),
+            kind=str(entry.get("kind", "") or target_row.get("kind", "") or "image"),
+            mime=str(entry.get("mime_type", "") or target_row.get("preview_mime", "")),
+        )
+    else:
+        detail = blog_media_full_preview_payload(
+            root,
+            str(target_row.get("relative_path", "") or relative_path),
+            kind=str(target_row.get("kind", "") or "image"),
+        )
+    if not detail.get("full_preview_src"):
+        raise PublicSiteError("Full preview is not available for this media.")
+    target_row.update(detail)
+    rows[target_index] = target_row
+    st.session_state[_blog_visual_results_key(selected, slug)] = rows
+
+
+def _load_blog_media_preview_detail(
+    *,
+    selected: str,
+    root: Path,
+    slug: str,
+    relative_path: str,
+) -> None:
+    rel = str(relative_path or "").strip()
+    if not rel:
+        raise PublicSiteError("Media path is missing.")
+    target = _local_media_path(root, rel)
+    if target is None:
+        raise PublicSiteError(f"Media file does not exist: {rel}")
+    ext = target.suffix.lower().lstrip(".")
+    kind = "video" if ext in BLOG_VIDEO_EXTENSIONS else "image"
+    if ext not in BLOG_IMAGE_EXTENSIONS and ext not in BLOG_VIDEO_EXTENSIONS:
+        raise PublicSiteError(f"Unsupported media file: {rel}")
+    detail = blog_media_full_preview_payload(root, rel, kind=kind)
+    if not detail.get("full_preview_src"):
+        raise PublicSiteError("Full preview is not available for this media.")
+    details = dict(_blog_media_preview_details(selected, slug))
+    details[rel] = {
+        "relative_path": rel,
+        **detail,
+    }
+    st.session_state[_blog_media_preview_details_key(selected, slug)] = details
+
+
+def _trim_for_prompt(value: str, limit: int = 180) -> str:
+    clean = re.sub(r"\s+", " ", str(value or "")).strip()
+    return clean[:limit]
+
+
+def _candidate_cover_prompt(candidates: list[dict]) -> str:
+    for candidate in candidates:
+        meta = candidate.get("meta") if isinstance(candidate.get("meta"), dict) else candidate
+        prompt = str(meta.get("cover_prompt", "") or "").strip()
+        if prompt:
+            return prompt
+    return ""
+
+
+def _blog_visual_guidance(
+    *,
+    post,
+    meta: dict,
+    body: str,
+    candidates: list[dict],
+    ui: dict[str, str],
+) -> dict:
+    """Return visual prompt, size, style, and field guidance for the editor."""
+    cfg = visual_generation.current_config()
+    title = str(meta.get("title", "") or getattr(post, "title", "") or "").strip()
+    summary = str(meta.get("summary", "") or getattr(post, "summary", "") or "").strip()
+    tags = meta.get("tags") if isinstance(meta.get("tags"), list) else []
+    tags_text = ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+    gist = _trim_for_prompt(summary or body, 180)
+    cover_prompt = (
+        str(meta.get("cover_prompt", "") or "").strip()
+        or _candidate_cover_prompt(candidates)
+    )
+    cover_base = cover_prompt or (
+        "Editorial technical blog cover for "
+        f"{title or 'this article'}, no embedded text, inspectable main subject, "
+        "clear negative space for an HTML title overlay"
+    )
+    context_suffix = []
+    if gist:
+        context_suffix.append(f"context: {gist}")
+    if tags_text:
+        context_suffix.append(f"tags: {tags_text}")
+    context = "; ".join(context_suffix)
+    cover_suggestions = [
+        {
+            "label": ui["visual_suggest_cover"],
+            "prompt": cover_base + (f"; {context}" if context else ""),
+        },
+        {
+            "label": ui["visual_suggest_cover_subject"],
+            "prompt": (
+                f"One strong visual metaphor for {title or 'the article'}, "
+                "realistic lighting, public technical blog cover, no text, no logo"
+            ),
+        },
+        {
+            "label": ui["visual_suggest_cover_diagram"],
+            "prompt": (
+                f"Layered technical editorial illustration for {title or 'the article'}, "
+                "subtle system components, generous whitespace, no embedded words"
+            ),
+        },
+    ]
+    common = {
+        "alt_help": ui["visual_alt_help"],
+        "caption_help": ui["visual_caption_help"],
+        "size_help": ui["visual_size_help"],
+        "style_help": ui["visual_style_help"],
+    }
+    return {
+        "cover": {
+            **common,
+            "default_size": str(cfg.get("default_cover_size") or "1536*864"),
+            "size_options": [
+                {"label": ui["visual_size_default"], "value": ""},
+                {"label": "1536*864"},
+                {"label": "1024*1024"},
+                {"label": "2K"},
+                {"label": "4K"},
+            ],
+            "style_options": [
+                {"label": ui["visual_style_default"], "value": ""},
+                {"label": "Editorial technical cover"},
+                {"label": "Realistic product-style rendering"},
+                {"label": "Clean isometric illustration"},
+            ],
+            "prompt_suggestions": cover_suggestions,
+        },
+        "flowchart": {
+            **common,
+            "default_size": str(cfg.get("default_diagram_size") or "1440*1440"),
+            "size_options": [
+                {"label": ui["visual_size_default"], "value": ""},
+                {"label": "1440*1440"},
+                {"label": "1024*1024"},
+                {"label": "1536*864"},
+                {"label": "2K"},
+            ],
+            "style_options": [
+                {"label": ui["visual_style_default"], "value": ""},
+                {"label": "Clean vector diagram"},
+                {"label": "Whiteboard systems sketch"},
+                {"label": "Minimal publication figure"},
+            ],
+            "prompt_suggestions": [
+                {
+                    "label": ui["visual_suggest_flow"],
+                    "prompt": (
+                        f"Flowchart for {title or 'this article'}: show major steps as "
+                        "rectangular boxes with clear arrows, readable hierarchy, no tiny text"
+                    ),
+                },
+                {
+                    "label": ui["visual_suggest_flow_compare"],
+                    "prompt": (
+                        "Process comparison diagram with two lanes, labeled stages, clear "
+                        "handoffs, high contrast, sparse labels"
+                    ),
+                },
+            ],
+        },
+        "example": {
+            **common,
+            "default_size": str(cfg.get("default_example_size") or "1440*1440"),
+            "size_options": [
+                {"label": ui["visual_size_default"], "value": ""},
+                {"label": "1440*1440"},
+                {"label": "1024*1024"},
+                {"label": "1536*864"},
+                {"label": "2K"},
+            ],
+            "style_options": [
+                {"label": ui["visual_style_default"], "value": ""},
+                {"label": "Inspectable technical illustration"},
+                {"label": "Realistic lab/demo scene"},
+                {"label": "Annotated system mockup without tiny text"},
+            ],
+            "prompt_suggestions": [
+                {
+                    "label": ui["visual_suggest_example"],
+                    "prompt": (
+                        f"Concrete example scene for {title or 'this article'}, show the "
+                        "system or workflow clearly, public-safe, no private paths"
+                    ),
+                },
+                {
+                    "label": ui["visual_suggest_example_system"],
+                    "prompt": (
+                        "Inspectable system illustration with clear components, realistic "
+                        "workspace context, no watermark, no unreadable labels"
+                    ),
+                },
+            ],
+        },
+        "video_edit": {
+            **common,
+            "default_size": "source-video",
+            "size_options": [
+                {"label": ui["visual_size_default"], "value": ""},
+            ],
+            "style_options": [
+                {"label": ui["visual_style_default"], "value": ""},
+                {"label": "Clean presentation edit"},
+                {"label": "Subtle crop and color correction"},
+            ],
+            "prompt_suggestions": [
+                {
+                    "label": ui["visual_suggest_video"],
+                    "prompt": (
+                        "Clean presentation-ready edit: improve clarity, keep content factual, "
+                        "avoid watermarks and private identifiers"
+                    ),
+                },
+            ],
+        },
+    }
+
+
+def _visual_option_pairs(options: list[dict | str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for option in options:
+        if isinstance(option, dict):
+            label = str(option.get("label", "") or option.get("value", "") or "").strip()
+            value = str(option.get("value", "") if "value" in option else label).strip()
+        else:
+            label = str(option or "").strip()
+            value = label
+        if label:
+            pairs.append((label, value))
+    return pairs
 
 
 def _media_snippet(kind: str, rel: str, alt: str = "", caption: str = "") -> str:
     if kind == "image":
         return f"![{alt or caption}]({rel})"
     return f"::video[{caption or alt}]({rel})"
+
+
+def _decode_blog_upload_payload(payload: dict) -> bytes:
+    raw = (
+        payload.get("data_url")
+        or payload.get("data")
+        or payload.get("base64")
+        or payload.get("content")
+        or ""
+    )
+    if not isinstance(raw, str) or not raw.strip():
+        raise PublicSiteError("Upload payload is missing base64 data.")
+    encoded = raw.strip()
+    if encoded.startswith("data:") and "," in encoded:
+        encoded = encoded.split(",", 1)[1]
+    try:
+        return base64.b64decode(re.sub(r"\s+", "", encoded), validate=True)
+    except Exception as exc:
+        raise PublicSiteError("Upload payload is not valid base64 data.") from exc
+
+
+def _store_blog_preview_html(
+    selected: str,
+    slug: str,
+    meta: dict,
+    body: str,
+    *,
+    preview_quality: str = "fast",
+) -> str:
+    quality = "full" if str(preview_quality or "").strip().lower() == "full" else "fast"
+    html_text = render_blog_post_preview(
+        selected,
+        slug,
+        meta,
+        body,
+        preview_quality=quality,
+    )
+    st.session_state[_blog_preview_html_key(selected, slug)] = html_text
+    st.session_state[_blog_preview_quality_key(selected, slug)] = quality
+    st.session_state[_blog_preview_fingerprint_key(selected, slug)] = (
+        blog_preview_fingerprint(
+            profile_dir(selected),
+            meta,
+            body,
+            preview_quality=quality,
+        )
+    )
+    return html_text
 
 
 def _blog_quality_warnings(
@@ -1159,13 +1841,36 @@ def _render_body_editor(
     )
 
 
-def _blog_page_preview(selected: str, slug: str, ui: dict[str, str]) -> None:
+def _blog_page_preview(
+    selected: str,
+    slug: str,
+    ui: dict[str, str],
+    *,
+    meta: dict | None = None,
+    body: str | None = None,
+    preview_quality: str = "fast",
+) -> None:
     """Render the generated public blog detail page preview."""
     st.subheader(ui["site_post_preview"])
+    if meta is not None and body is not None:
+        try:
+            html_text = render_blog_post_preview(
+                selected,
+                slug,
+                meta,
+                body,
+                preview_quality=preview_quality,
+            )
+        except Exception as exc:
+            st.error(str(exc))
+            return
+        components.html(html_text, height=760, scrolling=True)
+        return
     try:
         preview = render_public_site_preview(
             selected,
             include_drafts=True,
+            preview_quality=preview_quality,
         )
     except Exception as exc:
         st.error(str(exc))
@@ -1249,11 +1954,45 @@ def _render_blog_react_shell(
         latest_post.slug,
         draft_meta,
         draft_body,
+        selected=selected,
     )
+    ai_candidates = _blog_shell_ai_candidates(selected, latest_post.slug)
+    visual_results = st.session_state.get(
+        _blog_visual_results_key(selected, latest_post.slug),
+        [],
+    )
+    if not isinstance(visual_results, list):
+        visual_results = []
     check_state = st.session_state.get(
         _blog_check_state_key(selected, latest_post.slug),
         {"errors": [], "warnings": [], "quality": []},
     )
+    preview_html = st.session_state.get(
+        _blog_preview_html_key(selected, latest_post.slug),
+        "",
+    )
+    if preview_html:
+        preview_quality = str(
+            st.session_state.get(
+                _blog_preview_quality_key(selected, latest_post.slug),
+                "fast",
+            )
+            or "fast"
+        )
+        expected_fingerprint = blog_preview_fingerprint(
+            root,
+            draft_meta,
+            draft_body,
+            preview_quality=preview_quality,
+        )
+        if (
+            st.session_state.get(
+                _blog_preview_fingerprint_key(selected, latest_post.slug)
+            )
+            != expected_fingerprint
+        ):
+            preview_html = ""
+            _clear_blog_preview(selected, latest_post.slug)
     math_safe = markdown_contains_math(draft_body)
     event = st_public_blog_editor(
         posts=_blog_shell_posts_payload(posts),
@@ -1261,8 +2000,24 @@ def _render_blog_react_shell(
         initial_markdown=draft_body,
         active_post_meta=draft_meta,
         media_items=media_rows,
-        ai_candidates=_blog_shell_ai_candidates(selected, latest_post.slug),
+        ai_candidates=ai_candidates,
         validation_state=check_state,
+        visual_config=visual_generation.current_config(),
+        visual_results=visual_results,
+        visual_guidance=_blog_visual_guidance(
+            post=latest_post,
+            meta=draft_meta,
+            body=draft_body,
+            candidates=ai_candidates,
+            ui=ui,
+        ),
+        preview_html=str(preview_html or ""),
+        status_filter=(
+            "all"
+            if st.session_state.get(f"blog_status_filter:{selected}", ui["all_statuses"])
+            == ui["all_statuses"]
+            else str(st.session_state.get(f"blog_status_filter:{selected}", "all"))
+        ),
         layout_state=layout_state,
         ui_labels=ui,
         document_id=f"{selected}:{latest_post.slug}",
@@ -1274,69 +2029,6 @@ def _render_blog_react_shell(
         source_mode=math_safe,
     )
 
-    with st.expander(ui["new_blog"], expanded=False):
-        new_title = st.text_input(
-            ui["title_label"],
-            key=f"react_new_blog_title:{selected}",
-        )
-        if st.button(ui["create"], key=f"react_create_blog:{selected}"):
-            if new_title.strip():
-                path = create_blog_draft(
-                    selected,
-                    title=new_title.strip(),
-                    body=f"{BLOG_INSERT_MARKER}\n\n",
-                    summary="",
-                )
-                st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
-                stash_git_backup_results()
-                clear_web_cache()
-                st.rerun()
-            st.warning(ui["title_label"])
-        evidence_id = st.text_input(
-            ui["evidence_id"],
-            key=f"react_blog_evidence_id:{selected}",
-        )
-        draft_cols = st.columns(2)
-        with draft_cols[0]:
-            if st.button(
-                ui["draft_from_evidence"],
-                key=f"react_blog_draft_from_evidence:{selected}",
-                use_container_width=True,
-            ):
-                try:
-                    path = draft_blog_from_evidence(selected, evidence_id.strip())
-                    st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
-                    stash_git_backup_results()
-                    clear_web_cache()
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-        with draft_cols[1]:
-            if st.button(
-                ui["draft_from_done"],
-                key=f"react_blog_draft_from_done:{selected}",
-                use_container_width=True,
-            ):
-                try:
-                    path = draft_blog_from_kanban_done(selected)
-                    st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
-                    stash_git_backup_results()
-                    clear_web_cache()
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-
-    with st.expander(ui["upload_media"], expanded=False):
-        _render_blog_media_panel(
-            selected=selected,
-            root=root,
-            latest_post=latest_post,
-            edited_meta=draft_meta,
-            edited_body=draft_body,
-            media_rows=media_rows,
-            ui=ui,
-        )
-
     if not isinstance(event, dict):
         return True
 
@@ -1345,9 +2037,18 @@ def _render_blog_react_shell(
         draft_meta,
         draft_body,
     )
+    if _blog_shell_event_already_processed(
+        selected,
+        latest_post.slug,
+        event,
+        action,
+    ):
+        return True
     event_layout = event.get("layout_state")
     if isinstance(event_layout, dict):
         _persist_blog_layout_state(selected, latest_post.slug, event_layout)
+    payload = event.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
 
     if action in {
         "markdown_changed",
@@ -1356,6 +2057,16 @@ def _render_blog_react_shell(
         "insert_candidate",
         "apply_candidate_meta",
     }:
+        if action == "insert_media":
+            media = payload.get("media")
+            media = media if isinstance(media, dict) else {}
+            rel = str(media.get("relative_path", "") or "").strip()
+            if media.get("unsaved"):
+                st.error("Visual candidate must be saved to media before insertion.")
+                return True
+            if rel and _local_media_path(root, rel) is None:
+                st.error(f"Media file does not exist: {rel}")
+                return True
         _blog_shell_store_draft(
             selected,
             latest_post.slug,
@@ -1363,6 +2074,102 @@ def _render_blog_react_shell(
             event_body,
             dirty=dirty,
         )
+        if action in {
+            "markdown_changed",
+            "insert_media",
+            "insert_candidate",
+            "apply_candidate_meta",
+        }:
+            _clear_blog_preview(selected, latest_post.slug)
+        return True
+
+    if action == "delete_media":
+        try:
+            media = payload.get("media")
+            media = media if isinstance(media, dict) else {}
+            rel = str(
+                payload.get("relative_path", "")
+                or media.get("relative_path", "")
+                or ""
+            ).strip()
+            if media.get("unsaved"):
+                st.error("Visual candidate must be saved to media before deletion.")
+                return True
+            cover = str(event_meta.get("cover", "") or "").strip()
+            if rel and (rel in event_body or rel == cover):
+                st.error(ui["delete_media_referenced"])
+                return True
+            deleted_path = delete_blog_media(
+                selected,
+                latest_post.slug,
+                rel,
+                meta=event_meta,
+                body=event_body,
+            )
+            details = dict(_blog_media_preview_details(selected, latest_post.slug))
+            details.pop(rel, None)
+            st.session_state[
+                _blog_media_preview_details_key(selected, latest_post.slug)
+            ] = details
+            st.session_state[
+                _blog_visual_results_key(selected, latest_post.slug)
+            ] = [
+                row
+                for row in _blog_visual_session_rows(selected, latest_post.slug)
+                if not isinstance(row, dict)
+                or str(row.get("relative_path", "") or "") != rel
+            ]
+            _blog_shell_store_draft(
+                selected,
+                latest_post.slug,
+                event_meta,
+                event_body,
+                dirty=dirty,
+            )
+            _clear_blog_preview(selected, latest_post.slug)
+            refresh_file_snapshots([deleted_path])
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "convert_media_video":
+        try:
+            media = payload.get("media")
+            media = media if isinstance(media, dict) else {}
+            rel = str(
+                payload.get("relative_path", "")
+                or media.get("relative_path", "")
+                or ""
+            ).strip()
+            if media.get("unsaved"):
+                st.error("Visual candidate must be saved to media before conversion.")
+                return True
+            result = convert_blog_media_video(selected, latest_post.slug, rel)
+            next_body = str(event_body or "")
+            if rel and rel in next_body:
+                next_body = next_body.replace(rel, result.relative_path)
+            _blog_shell_store_draft(
+                selected,
+                latest_post.slug,
+                event_meta,
+                next_body,
+                dirty=True,
+            )
+            details = dict(_blog_media_preview_details(selected, latest_post.slug))
+            details.pop(rel, None)
+            st.session_state[
+                _blog_media_preview_details_key(selected, latest_post.slug)
+            ] = details
+            _clear_blog_preview(selected, latest_post.slug)
+            refresh_file_snapshots([result.path])
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
         return True
 
     if action == "select_post":
@@ -1373,20 +2180,101 @@ def _render_blog_react_shell(
             event_body,
             dirty=dirty,
         )
-        payload = event.get("payload")
-        payload = payload if isinstance(payload, dict) else {}
         slug = str(payload.get("slug", "") or "")
         if slug and slug != latest_post.slug:
             st.session_state[f"blog_post_slug_select:{selected}"] = slug
             st.rerun()
         return True
 
+    if action == "filter_posts":
+        status = str(payload.get("status", "all") or "all")
+        st.session_state[f"blog_status_filter:{selected}"] = (
+            ui["all_statuses"]
+            if status == "all"
+            else status if status in {"draft", "published", "archived"} else ui["all_statuses"]
+        )
+        st.rerun()
+        return True
+
+    if action == "create_post":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        title = str(payload.get("title", "") or "").strip()
+        if not title:
+            st.warning(ui["title_label"])
+            return True
+        try:
+            path = create_blog_draft(
+                selected,
+                title=title,
+                body=f"{BLOG_INSERT_MARKER}\n\n",
+                summary="",
+            )
+            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "draft_from_evidence":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        evidence_id = str(payload.get("evidence_id", "") or "").strip()
+        try:
+            path = draft_blog_from_evidence(selected, evidence_id)
+            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "draft_from_done":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        try:
+            path = draft_blog_from_kanban_done(selected)
+            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
     if action == "generate_ai_candidate":
         try:
-            candidate = blog_candidate_from_title(
-                selected,
-                str(event_meta.get("title", "") or latest_post.title),
-            )
+            source = str(payload.get("source", "title") or "title")
+            if source == "evidence":
+                candidate = blog_candidate_from_evidence(
+                    selected,
+                    str(payload.get("evidence_id", "") or "").strip(),
+                )
+            elif source == "kanban_done":
+                candidate = blog_candidate_from_kanban_done(selected)
+            else:
+                candidate = blog_candidate_from_title(
+                    selected,
+                    str(payload.get("title", "") or event_meta.get("title", "") or latest_post.title),
+                )
             st.session_state[
                 _blog_ai_candidate_key(selected, latest_post.slug)
             ] = candidate.body
@@ -1394,6 +2282,183 @@ def _render_blog_react_shell(
                 _blog_editor_key(selected, latest_post.slug, "ai_candidate_meta")
             ] = candidate.to_dict()
             st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "upload_media":
+        try:
+            data = _decode_blog_upload_payload(payload)
+            filename = str(payload.get("filename", "") or "upload.bin")
+            kind = str(payload.get("kind", "") or "image").strip().lower()
+            alt = str(payload.get("alt", "") or "").strip()
+            caption = str(payload.get("caption", "") or "").strip()
+            insert = bool(payload.get("insert", False))
+            placement = str(payload.get("placement", "") or "marker").strip().lower()
+            cover = bool(payload.get("cover", False))
+            if cover and kind != "image":
+                raise PublicSiteError(ui["set_cover"])
+            result = add_blog_media_bytes(
+                selected,
+                latest_post.slug,
+                data=data,
+                filename=filename,
+                kind=kind,
+                alt=alt,
+                caption=caption,
+            )
+            next_meta = dict(event_meta)
+            next_body = event_body
+            if insert:
+                next_body = (
+                    _append_candidate_to_body(next_body, result.snippet)
+                    if placement == "append"
+                    else insert_blog_snippet(next_body, result.snippet)
+                )
+            if cover:
+                next_meta["cover"] = result.relative_path
+            _blog_shell_store_draft(
+                selected,
+                latest_post.slug,
+                next_meta,
+                next_body,
+                dirty=dirty or insert or cover,
+            )
+            _clear_blog_preview(selected, latest_post.slug)
+            refresh_file_snapshots([result.path])
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action in {"generate_visual_asset", "generate_cover_image"}:
+        try:
+            asset_type = str(payload.get("asset_type", "") or "cover")
+            clean_type = "cover" if action == "generate_cover_image" else asset_type
+            prompt = str(payload.get("prompt", "") or "").strip()
+            style = str(payload.get("style", "") or "").strip()
+            size = str(payload.get("size", "") or "").strip()
+            alt = str(payload.get("alt", "") or "").strip()
+            caption = str(payload.get("caption", "") or "").strip()
+            generated = visual_generation.generate_visual_asset(
+                clean_type,
+                prompt,
+                style=style,
+                size=size,
+                title=str(event_meta.get("title", "") or latest_post.title),
+                summary=str(event_meta.get("summary", "") or latest_post.summary),
+                tags=[
+                    str(tag).strip()
+                    for tag in event_meta.get("tags", [])
+                    if str(tag).strip()
+                ]
+                if isinstance(event_meta.get("tags"), list)
+                else [],
+                body=event_body,
+                source_video=str(payload.get("source_video", "") or "").strip(),
+                reference_image=str(payload.get("reference_image", "") or "").strip(),
+            )
+            rows, store = _blog_visual_candidate_payload(
+                latest_post.slug,
+                generated,
+                asset_type=clean_type,
+                alt=alt,
+                caption=caption,
+            )
+            st.session_state[
+                _blog_visual_results_key(selected, latest_post.slug)
+            ] = rows
+            st.session_state[
+                _blog_visual_candidate_store_key(selected, latest_post.slug)
+            ] = store
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "save_visual_candidate":
+        candidate_id = str(payload.get("candidate_id", "") or "").strip()
+        try:
+            if not candidate_id:
+                raise PublicSiteError("Visual candidate id is missing.")
+            _save_blog_visual_candidate(
+                selected=selected,
+                root=root,
+                slug=latest_post.slug,
+                candidate_id=candidate_id,
+                meta=event_meta,
+                body=event_body,
+            )
+            _clear_blog_preview(selected, latest_post.slug)
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "discard_visual_candidate":
+        candidate_id = str(payload.get("candidate_id", "") or "").strip()
+        if candidate_id:
+            _discard_blog_visual_candidate(selected, latest_post.slug, candidate_id)
+            _clear_blog_preview(selected, latest_post.slug)
+            st.rerun()
+        return True
+
+    if action == "load_media_preview_detail":
+        try:
+            media = payload.get("media")
+            media = media if isinstance(media, dict) else {}
+            candidate_id = str(
+                payload.get("candidate_id", "") or media.get("id", "") or ""
+            ).strip()
+            relative_path = str(
+                payload.get("relative_path", "")
+                or media.get("relative_path", "")
+                or ""
+            ).strip()
+            source = str(payload.get("source", "") or "").strip().lower()
+            if source == "visual" or candidate_id or media.get("unsaved"):
+                _load_blog_visual_preview_detail(
+                    selected=selected,
+                    root=root,
+                    slug=latest_post.slug,
+                    candidate_id=candidate_id,
+                    relative_path=relative_path,
+                )
+            else:
+                _load_blog_media_preview_detail(
+                    selected=selected,
+                    root=root,
+                    slug=latest_post.slug,
+                    relative_path=relative_path,
+                )
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "preview_post":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        try:
+            preview_quality = str(payload.get("preview_quality", "") or "fast")
+            _store_blog_preview_html(
+                selected,
+                latest_post.slug,
+                event_meta,
+                event_body,
+                preview_quality=preview_quality,
+            )
+            next_state = dict(layout_state)
+            next_state["preview_open"] = True
+            next_state["focus_mode"] = False
+            _rerun_with_blog_layout(selected, latest_post.slug, next_state)
         except Exception as exc:
             st.error(str(exc))
         return True
@@ -1459,6 +2524,7 @@ def _render_blog_react_shell(
             latest_post.slug,
             publish_meta,
             event_body,
+            selected=selected,
         )
         check = _run_blog_publish_check(
             selected=selected,
@@ -1478,13 +2544,17 @@ def _render_blog_react_shell(
             next_state["focus_mode"] = False
             _rerun_with_blog_layout(selected, latest_post.slug, next_state)
         try:
-            _persist_blog_editor(
-                selected=selected,
-                post_path=latest_post.path,
-                meta=publish_meta,
-                body=event_body,
-                ui=ui,
+            assert_files_current([latest_post.path])
+            published = publish_blog_text(
+                selected,
+                latest_post.slug,
+                publish_meta,
+                event_body,
             )
+            refresh_file_snapshots([published])
+            stash_git_backup_results()
+            clear_web_cache()
+            st.success(ui["saved"])
             _blog_shell_clear_draft(selected, latest_post.slug)
             st.rerun()
         except Exception as exc:
@@ -1829,6 +2899,14 @@ def _render_blog_media_panel(
         selected_row = next(
             row for row in media_rows if row["relative_path"] == selected_rel
         )
+        selected_path = _local_media_path(root, selected_rel)
+        if selected_path is not None:
+            if selected_row["kind"] == "image":
+                st.image(str(selected_path), use_container_width=True)
+            elif selected_row["kind"] == "video":
+                st.video(str(selected_path))
+                if selected_row.get("video_browser_compatible") is False:
+                    st.warning(ui["video_incompatible"])
         alt = st.text_input(
             ui["alt_text"],
             key=_blog_editor_key(selected, latest_post.slug, "library_alt"),
@@ -1837,7 +2915,12 @@ def _render_blog_media_panel(
             ui["caption"],
             key=_blog_editor_key(selected, latest_post.slug, "library_caption"),
         )
-        insert_col, cover_col = st.columns(2)
+        placement = st.selectbox(
+            ui["insert_placement"],
+            [ui["insert_at_marker"], ui["insert_at_end"]],
+            key=_blog_editor_key(selected, latest_post.slug, "library_insert_placement"),
+        )
+        insert_col, cover_col, convert_col, delete_col = st.columns(4)
         with insert_col:
             if st.button(
                 ui["use_selected_media"],
@@ -1855,7 +2938,11 @@ def _render_blog_media_panel(
                         selected=selected,
                         post_path=latest_post.path,
                         meta=edited_meta,
-                        body=insert_blog_snippet(edited_body, snippet),
+                        body=(
+                            _append_candidate_to_body(edited_body, snippet)
+                            if placement == ui["insert_at_end"]
+                            else insert_blog_snippet(edited_body, snippet)
+                        ),
                         ui=ui,
                     )
                 except Exception as exc:
@@ -1877,6 +2964,58 @@ def _render_blog_media_panel(
                         body=edited_body,
                         ui=ui,
                     )
+                except Exception as exc:
+                    st.error(str(exc))
+        with convert_col:
+            if st.button(
+                ui["convert_video"],
+                key=_blog_editor_key(selected, latest_post.slug, "convert_library"),
+                use_container_width=True,
+                disabled=selected_row["kind"] != "video",
+            ):
+                try:
+                    result = convert_blog_media_video(
+                        selected,
+                        latest_post.slug,
+                        selected_rel,
+                    )
+                    next_body = edited_body.replace(selected_rel, result.relative_path)
+                    _save_blog_editor(
+                        selected=selected,
+                        post_path=latest_post.path,
+                        meta=edited_meta,
+                        body=next_body,
+                        ui=ui,
+                    )
+                    refresh_file_snapshots([result.path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with delete_col:
+            if st.button(
+                ui["delete_media"],
+                key=_blog_editor_key(selected, latest_post.slug, "delete_library"),
+                use_container_width=True,
+                disabled=bool(selected_row.get("referenced")),
+                help=ui["delete_media_referenced"]
+                if selected_row.get("referenced")
+                else ui["delete_media_confirm"],
+            ):
+                try:
+                    deleted_path = delete_blog_media(
+                        selected,
+                        latest_post.slug,
+                        selected_rel,
+                        meta=edited_meta,
+                        body=edited_body,
+                    )
+                    _clear_blog_preview(selected, latest_post.slug)
+                    refresh_file_snapshots([deleted_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
     else:
@@ -2218,6 +3357,272 @@ def _render_blog_ai_panel(
             st.rerun()
 
 
+def _render_blog_visual_results_panel(
+    *,
+    selected: str,
+    latest_post,
+    edited_meta: dict,
+    edited_body: str,
+    ui: dict[str, str],
+) -> None:
+    """Render recent visual candidates in the Streamlit fallback UI."""
+    rows = st.session_state.get(_blog_visual_results_key(selected, latest_post.slug), [])
+    if not isinstance(rows, list) or not rows:
+        return
+    st.markdown(f"**{ui['recent_visuals']}**")
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name", "") or row.get("relative_path", "") or ui["media"])
+        kind = str(row.get("kind", "") or "image")
+        preview_src = str(row.get("preview_src", "") or "")
+        snippet = str(row.get("snippet", "") or _media_snippet(
+            kind,
+            str(row.get("relative_path", "") or ""),
+            alt=str(row.get("alt", "") or ""),
+            caption=str(row.get("caption", "") or ""),
+        ))
+        st.caption(f"{name} · {kind} · {row.get('size_kb', '-')} KB")
+        if preview_src and kind == "image":
+            st.image(preview_src, use_container_width=True)
+        elif not preview_src:
+            st.caption(ui["preview_unavailable"])
+        if snippet:
+            st.code(snippet, language="markdown")
+        if bool(row.get("unsaved", False)):
+            save_col, discard_col = st.columns(2)
+            with save_col:
+                if st.button(
+                    ui["save_to_media"],
+                    key=_blog_editor_key(
+                        selected,
+                        latest_post.slug,
+                        f"visual_result_save_{index}",
+                    ),
+                    use_container_width=True,
+                ):
+                    try:
+                        _save_blog_visual_candidate(
+                            selected=selected,
+                            root=latest_post.path.parents[1],
+                            slug=latest_post.slug,
+                            candidate_id=str(row.get("id", "") or ""),
+                            meta=edited_meta,
+                            body=edited_body,
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            with discard_col:
+                if st.button(
+                    ui["discard_candidate"],
+                    key=_blog_editor_key(
+                        selected,
+                        latest_post.slug,
+                        f"visual_result_discard_{index}",
+                    ),
+                    use_container_width=True,
+                ):
+                    _discard_blog_visual_candidate(
+                        selected,
+                        latest_post.slug,
+                        str(row.get("id", "") or ""),
+                    )
+                    st.rerun()
+            continue
+        insert_col, cover_col = st.columns(2)
+        with insert_col:
+            if st.button(
+                ui["insert_into_post"],
+                key=_blog_editor_key(
+                    selected,
+                    latest_post.slug,
+                    f"visual_result_insert_{index}",
+                ),
+                use_container_width=True,
+            ):
+                try:
+                    _save_blog_editor(
+                        selected=selected,
+                        post_path=latest_post.path,
+                        meta=edited_meta,
+                        body=insert_blog_snippet(edited_body, snippet),
+                        ui=ui,
+                    )
+                except Exception as exc:
+                    st.error(str(exc))
+        with cover_col:
+            if st.button(
+                ui["set_cover"],
+                key=_blog_editor_key(
+                    selected,
+                    latest_post.slug,
+                    f"visual_result_cover_{index}",
+                ),
+                use_container_width=True,
+                disabled=kind != "image",
+            ):
+                next_meta = dict(edited_meta)
+                next_meta["cover"] = str(row.get("relative_path", "") or "")
+                try:
+                    _save_blog_editor(
+                        selected=selected,
+                        post_path=latest_post.path,
+                        meta=next_meta,
+                        body=edited_body,
+                        ui=ui,
+                    )
+                except Exception as exc:
+                    st.error(str(exc))
+
+
+def _render_blog_visual_panel(
+    *,
+    selected: str,
+    root: Path,
+    latest_post,
+    edited_meta: dict,
+    edited_body: str,
+    ui: dict[str, str],
+) -> None:
+    """Render visual-generation status for the Streamlit fallback drawer."""
+    cfg = visual_generation.current_config()
+    st.caption(
+        f"{ui['visual_provider']}: {cfg.get('provider')} · "
+        f"{cfg.get('image_model')} · {ui['using_key_from']} "
+        f"{cfg.get('api_key_source') or '-'}"
+    )
+    for warning in cfg.get("warnings", []):
+        st.warning(str(warning))
+    candidates = _blog_shell_ai_candidates(selected, latest_post.slug)
+    guidance = _blog_visual_guidance(
+        post=latest_post,
+        meta=edited_meta,
+        body=edited_body,
+        candidates=candidates,
+        ui=ui,
+    )
+    asset_type = st.selectbox(
+        ui["visual"],
+        ["cover", "flowchart", "example", "video_edit"],
+        format_func=lambda value: ui.get(value, value),
+        key=_blog_editor_key(selected, latest_post.slug, "visual_asset_type"),
+    )
+    guide = guidance.get(str(asset_type), {})
+    prompt_key = _blog_editor_key(selected, latest_post.slug, "visual_prompt")
+    suggestions = guide.get("prompt_suggestions") if isinstance(guide, dict) else []
+    if suggestions:
+        st.caption(ui["visual_prompt_suggestions"])
+        suggestion_cols = st.columns(min(3, len(suggestions)))
+        for index, suggestion in enumerate(suggestions):
+            if not isinstance(suggestion, dict):
+                continue
+            with suggestion_cols[index % len(suggestion_cols)]:
+                if st.button(
+                    str(suggestion.get("label", "") or ui["visual_prompt"]),
+                    key=_blog_editor_key(
+                        selected,
+                        latest_post.slug,
+                        f"visual_suggestion_{asset_type}_{index}",
+                    ),
+                    use_container_width=True,
+                ):
+                    st.session_state[prompt_key] = str(suggestion.get("prompt", "") or "")
+                    st.rerun()
+    prompt = st.text_area(
+        ui["visual_prompt"],
+        key=prompt_key,
+        height=120,
+    )
+    style_pairs = _visual_option_pairs(list(guide.get("style_options") or []))
+    style_pairs.append((ui["visual_custom"], "__custom__"))
+    style_labels = [label for label, _value in style_pairs]
+    style_label = st.selectbox(
+        ui["visual_style"],
+        style_labels,
+        key=_blog_editor_key(selected, latest_post.slug, "visual_style_choice"),
+    )
+    style_value = dict(style_pairs).get(style_label, "")
+    if style_value == "__custom__":
+        style_value = st.text_input(
+            ui["visual_custom"],
+            key=_blog_editor_key(selected, latest_post.slug, "visual_style_custom"),
+        )
+    st.caption(str(guide.get("style_help", "") or ""))
+    size_pairs = _visual_option_pairs(list(guide.get("size_options") or []))
+    size_pairs.append((ui["visual_custom"], "__custom__"))
+    size_labels = [label for label, _value in size_pairs]
+    size_label = st.selectbox(
+        ui["visual_size"],
+        size_labels,
+        key=_blog_editor_key(selected, latest_post.slug, "visual_size_choice"),
+    )
+    size_value = dict(size_pairs).get(size_label, "")
+    if size_value == "__custom__":
+        size_value = st.text_input(
+            ui["visual_size_custom"],
+            key=_blog_editor_key(selected, latest_post.slug, "visual_size_custom"),
+        )
+    default_size = str(guide.get("default_size", "") or "")
+    st.caption(f"{guide.get('size_help', '')} {ui['visual_default']}: {default_size}")
+    alt = st.text_input(
+        ui["alt_text"],
+        key=_blog_editor_key(selected, latest_post.slug, "visual_alt"),
+    )
+    st.caption(str(guide.get("alt_help", "") or ""))
+    caption = st.text_input(
+        ui["caption"],
+        key=_blog_editor_key(selected, latest_post.slug, "visual_caption"),
+    )
+    st.caption(str(guide.get("caption_help", "") or ""))
+    if st.button(
+        ui["generate_visual"],
+        key=_blog_editor_key(selected, latest_post.slug, "visual_generate"),
+        use_container_width=True,
+        disabled=not bool(cfg.get("configured")) or not str(prompt or "").strip(),
+    ):
+        try:
+            generated = visual_generation.generate_visual_asset(
+                str(asset_type),
+                prompt,
+                style=style_value,
+                size=size_value,
+                title=str(edited_meta.get("title", "") or latest_post.title),
+                summary=str(edited_meta.get("summary", "") or latest_post.summary),
+                tags=[
+                    str(tag).strip()
+                    for tag in edited_meta.get("tags", [])
+                    if str(tag).strip()
+                ]
+                if isinstance(edited_meta.get("tags"), list)
+                else [],
+                body=edited_body,
+            )
+            rows, store = _blog_visual_candidate_payload(
+                latest_post.slug,
+                generated,
+                asset_type=str(asset_type),
+                alt=alt.strip(),
+                caption=caption.strip(),
+            )
+            st.session_state[
+                _blog_visual_results_key(selected, latest_post.slug)
+            ] = rows
+            st.session_state[
+                _blog_visual_candidate_store_key(selected, latest_post.slug)
+            ] = store
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+    _render_blog_visual_results_panel(
+        selected=selected,
+        latest_post=latest_post,
+        edited_meta=edited_meta,
+        edited_body=edited_body,
+        ui=ui,
+    )
+
+
 def _render_blog_check_messages(title: str, messages: list[str]) -> None:
     if not messages:
         return
@@ -2270,7 +3675,13 @@ def _render_blog_check_panel(
     _render_blog_check_messages(ui["quality_warnings"], quality)
     if not errors and not warnings and not quality:
         st.write(ui["no_issues"])
-    _blog_page_preview(selected, latest_post.slug, ui)
+    _blog_page_preview(
+        selected,
+        latest_post.slug,
+        ui,
+        meta=edited_meta,
+        body=edited_body,
+    )
 
 
 def _render_blog_right_panel(
@@ -2317,6 +3728,15 @@ def _render_blog_right_panel(
     elif active_tab == "AI":
         _render_blog_ai_panel(
             selected=selected,
+            latest_post=latest_post,
+            edited_meta=edited_meta,
+            edited_body=edited_body,
+            ui=ui,
+        )
+    elif active_tab == "Visual":
+        _render_blog_visual_panel(
+            selected=selected,
+            root=root,
             latest_post=latest_post,
             edited_meta=edited_meta,
             edited_body=edited_body,
@@ -2456,7 +3876,13 @@ def _render_blog_tab(
                 language="markdown",
             )
         if layout_state.get("preview_open"):
-            _blog_page_preview(selected, latest_post.slug, ui)
+            _blog_page_preview(
+                selected,
+                latest_post.slug,
+                ui,
+                meta=edited_meta,
+                body=edited_body,
+            )
 
     edited_meta = _blog_meta_from_state(
         selected,
@@ -2469,6 +3895,7 @@ def _render_blog_tab(
         latest_post.slug,
         edited_meta,
         edited_body,
+        selected=selected,
     )
 
     if not layout_state.get("focus_mode"):
@@ -2501,6 +3928,7 @@ def _render_blog_tab(
                             latest_post.slug,
                             layout_state,
                             tab,
+                            collapse_current=True,
                         )
 
     final_meta = _blog_meta_from_state(
@@ -2514,6 +3942,7 @@ def _render_blog_tab(
         latest_post.slug,
         final_meta,
         edited_body,
+        selected=selected,
     )
 
     if save_clicked:
@@ -2565,13 +3994,17 @@ def _render_blog_tab(
             next_state["focus_mode"] = False
             _rerun_with_blog_layout(selected, latest_post.slug, next_state)
         try:
-            _save_blog_editor(
-                selected=selected,
-                post_path=latest_post.path,
-                meta=publish_meta,
-                body=edited_body,
-                ui=ui,
+            assert_files_current([latest_post.path])
+            published = publish_blog_text(
+                selected,
+                latest_post.slug,
+                publish_meta,
+                edited_body,
             )
+            refresh_file_snapshots([published])
+            stash_git_backup_results()
+            clear_web_cache()
+            st.success(ui["saved"])
         except Exception as exc:
             st.error(str(exc))
 

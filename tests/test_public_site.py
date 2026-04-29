@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -35,6 +36,7 @@ def _write_blog(
     status: str,
     evidence: list[str] | None = None,
     summary: str = "Short summary",
+    cover: str = "",
     body: str = "Public body.",
 ) -> None:
     meta = {
@@ -43,7 +45,7 @@ def _write_blog(
         "status": status,
         "tags": ["demo"],
         "summary": summary,
-        "cover": "",
+        "cover": cover,
         "related_evidence": evidence or [],
         "related_kanban": [],
     }
@@ -843,6 +845,563 @@ class TestPublicSite(unittest.TestCase):
             self.assertIn("![Cover](", result.snippet)
             self.assertEqual(post.meta["cover"], result.relative_path)
             self.assertIn(result.snippet, post.body)
+
+    def test_delete_blog_media_removes_only_unreferenced_local_file(self) -> None:
+        """Blog media deletion refuses referenced media and removes unused files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            unused = media_dir / "unused.png"
+            used = media_dir / "used.png"
+            cover = media_dir / "cover.png"
+            unused.write_bytes(b"unused image")
+            used.write_bytes(b"used image")
+            cover.write_bytes(b"cover image")
+            _write_blog(
+                profile / "blog" / "draft-post.md",
+                title="Draft Post",
+                status="draft",
+                cover="media/blog/draft-post/cover.png",
+                body="![Used](media/blog/draft-post/used.png)",
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                deleted = public_site.delete_blog_media(
+                    "alice",
+                    "draft-post",
+                    "media/blog/draft-post/unused.png",
+                )
+                with self.assertRaises(public_site.PublicSiteError):
+                    public_site.delete_blog_media(
+                        "alice",
+                        "draft-post",
+                        "media/blog/draft-post/used.png",
+                    )
+                with self.assertRaises(public_site.PublicSiteError):
+                    public_site.delete_blog_media(
+                        "alice",
+                        "draft-post",
+                        "media/blog/draft-post/cover.png",
+                    )
+                with self.assertRaises(public_site.PublicSiteError):
+                    public_site.delete_blog_media(
+                        "alice",
+                        "draft-post",
+                        "media/avatar.png",
+                    )
+
+            self.assertEqual(deleted.name, "unused.png")
+            self.assertFalse(unused.exists())
+            self.assertTrue(used.exists())
+            self.assertTrue(cover.exists())
+
+    def test_convert_blog_media_video_creates_h264_copy(self) -> None:
+        """Video conversion creates a sibling MP4 and keeps the original."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            video = media_dir / "clip.mp4"
+            video.write_bytes(b"original video")
+
+            def fake_run(cmd, **_kwargs):
+                Path(cmd[-1]).write_bytes(b"converted video")
+                return type(
+                    "Completed",
+                    (),
+                    {"returncode": 0, "stderr": "", "stdout": ""},
+                )()
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.shutil.which", return_value="/usr/bin/ffmpeg"),
+                patch("nblane.core.public_site.subprocess.run", side_effect=fake_run),
+            ):
+                result = public_site.convert_blog_media_video(
+                    "alice",
+                    "draft-post",
+                    "media/blog/draft-post/clip.mp4",
+                )
+
+            self.assertTrue(video.exists())
+            self.assertTrue(result.path.exists())
+            self.assertEqual(result.path.read_bytes(), b"converted video")
+            self.assertTrue(result.relative_path.endswith("-h264.mp4"))
+            self.assertIn("::video[](", result.snippet)
+
+    def test_blog_media_library_rows_include_inline_image_preview(self) -> None:
+        """Editor media rows include image previews and skip large video inlining."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            image = media_dir / "cover.png"
+            image.write_bytes(b"\x89PNG\r\n\x1a\npreview")
+            video = media_dir / "clip.mp4"
+            video.write_bytes(
+                b"0" * (public_site.BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES + 1)
+            )
+            with patch(
+                "nblane.core.public_site._ffprobe_video_stream",
+                return_value={
+                    "codec_name": "mpeg4",
+                    "codec_tag_string": "mp4v",
+                    "profile": "Simple Profile",
+                },
+            ):
+                rows = public_site.blog_media_library_rows(
+                    profile,
+                    "draft-post",
+                    {"cover": "media/blog/draft-post/cover.png"},
+                    "![Cover](media/blog/draft-post/cover.png)",
+                )
+
+            by_name = {row["name"]: row for row in rows}
+            self.assertTrue(
+                by_name["cover.png"]["preview_src"].startswith(
+                    "data:image/png;base64,"
+                )
+            )
+            self.assertEqual(by_name["cover.png"]["preview_mime"], "image/png")
+            self.assertIn("preview_width", by_name["cover.png"])
+            self.assertIn("preview_height", by_name["cover.png"])
+            self.assertIn("original_size_kb", by_name["cover.png"])
+            self.assertTrue(by_name["cover.png"]["full_preview_available"])
+            self.assertTrue(by_name["cover.png"]["referenced"])
+            self.assertEqual(by_name["clip.mp4"]["preview_src"], "")
+            self.assertEqual(by_name["clip.mp4"]["preview_mime"], "video/mp4")
+            self.assertTrue(by_name["clip.mp4"]["full_preview_available"])
+            self.assertFalse(by_name["clip.mp4"]["video_browser_compatible"])
+            self.assertTrue(by_name["clip.mp4"]["needs_video_conversion"])
+            self.assertEqual(by_name["clip.mp4"]["video_codec"], "mpeg4")
+
+    def test_blog_media_library_marks_h264_video_compatible(self) -> None:
+        """H.264 MP4 rows are marked browser-compatible."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            video = media_dir / "clip.mp4"
+            video.write_bytes(b"0" * 64)
+            with patch(
+                "nblane.core.public_site._ffprobe_video_stream",
+                return_value={
+                    "codec_name": "h264",
+                    "codec_tag_string": "avc1",
+                    "profile": "High",
+                },
+            ):
+                rows = public_site.blog_media_library_rows(
+                    profile,
+                    "draft-post",
+                    {},
+                    "::video[](media/blog/draft-post/clip.mp4)",
+                )
+
+            self.assertTrue(rows[0]["video_browser_compatible"])
+            self.assertFalse(rows[0]["needs_video_conversion"])
+
+    def test_blog_visual_candidate_rows_are_unsaved_previews(self) -> None:
+        """Visual candidates can preview before they are persisted to media."""
+        from nblane.core import visual_generation
+
+        prompt = visual_generation.VisualPrompt(
+            positive_prompt="positive",
+            negative_prompt="negative",
+            asset_type="cover",
+            recommended_size="1536*864",
+            rationale="test",
+        )
+        asset = visual_generation.GeneratedVisualAsset(
+            data=b"\x89PNG\r\n\x1a\ncandidate",
+            mime_type="image/png",
+            extension="png",
+            prompt=prompt,
+            provider="dashscope_wan",
+            model="wan2.7-image-pro",
+        )
+
+        rows = public_site.blog_visual_candidate_rows(
+            "draft-post",
+            [asset],
+            asset_type="cover",
+            alt="Candidate cover",
+            caption="Candidate caption",
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["unsaved"])
+        self.assertTrue(rows[0]["preview_src"].startswith("data:image/png;base64,"))
+        self.assertIn("preview_width", rows[0])
+        self.assertIn("preview_height", rows[0])
+        self.assertTrue(rows[0]["full_preview_available"])
+        self.assertIn("media/blog/draft-post/generated-cover-", rows[0]["relative_path"])
+        self.assertIn("![Candidate cover](", rows[0]["snippet"])
+
+    def test_render_blog_post_preview_uses_unsaved_text_and_cover(self) -> None:
+        """Single-post preview renders in-memory meta/body and does not write."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            (media_dir / "cover.png").write_bytes(b"\x89PNG\r\n\x1a\npreview")
+            post_path = profile / "blog" / "draft-post.md"
+            before = post_path.read_text(encoding="utf-8")
+            meta = {
+                "title": "Unsaved Title",
+                "date": "2026-04-29",
+                "status": "draft",
+                "tags": ["preview"],
+                "summary": "Unsaved summary",
+                "cover": "media/blog/draft-post/cover.png",
+                "related_evidence": [],
+                "related_kanban": [],
+            }
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                html = public_site.render_blog_post_preview(
+                    "alice",
+                    "draft-post",
+                    meta,
+                    "Unsaved **body**.",
+                )
+
+            self.assertIn("Unsaved Title", html)
+            self.assertIn("Unsaved summary", html)
+            self.assertIn("Unsaved", html)
+            self.assertIn("data:image/png;base64", html)
+            self.assertEqual(post_path.read_text(encoding="utf-8"), before)
+
+    def test_render_blog_post_preview_fast_uses_smaller_image_payload(self) -> None:
+        """Fast previews thumbnail images while full previews keep original bytes."""
+        try:
+            from PIL import Image
+        except Exception:
+            self.skipTest("Pillow is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            image_path = media_dir / "cover.jpg"
+            image = Image.effect_noise((1600, 900), 96).convert("RGB")
+            image.save(image_path, format="JPEG", quality=95)
+            meta = {
+                "title": "Preview Size",
+                "date": "2026-04-29",
+                "status": "draft",
+                "tags": ["preview"],
+                "summary": "Preview summary",
+                "cover": "media/blog/draft-post/cover.jpg",
+                "related_evidence": [],
+                "related_kanban": [],
+            }
+            body = "![Cover](media/blog/draft-post/cover.jpg)"
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                fast_html = public_site.render_blog_post_preview(
+                    "alice",
+                    "draft-post",
+                    meta,
+                    body,
+                    preview_quality="fast",
+                )
+                full_html = public_site.render_blog_post_preview(
+                    "alice",
+                    "draft-post",
+                    meta,
+                    body,
+                    preview_quality="full",
+                )
+
+            self.assertIn("data:image/", fast_html)
+            self.assertNotIn('src=""', fast_html)
+            self.assertLess(len(fast_html), len(full_html))
+
+    def test_blog_media_full_preview_payload_returns_one_full_item(self) -> None:
+        """Full preview payloads are loaded on demand for a single media item."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            image = media_dir / "cover.png"
+            image.write_bytes(b"\x89PNG\r\n\x1a\nfull")
+
+            payload = public_site.blog_media_full_preview_payload(
+                profile,
+                "media/blog/draft-post/cover.png",
+                kind="image",
+            )
+
+            self.assertTrue(payload["full_preview_src"].startswith("data:image/png;base64,"))
+            self.assertEqual(payload["full_preview_mime"], "image/png")
+            self.assertTrue(payload["full_preview_available"])
+
+    def test_render_blog_post_preview_full_inlines_large_video(self) -> None:
+        """Full blog preview can play local videos that fast preview skips."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "draft-post"
+            media_dir.mkdir(parents=True)
+            video = media_dir / "clip.mp4"
+            video.write_bytes(
+                b"0" * (public_site.BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES + 1)
+            )
+            meta = {
+                "title": "Video Preview",
+                "date": "2026-04-29",
+                "status": "draft",
+                "tags": ["preview"],
+                "summary": "Preview summary",
+                "cover": "",
+                "related_evidence": [],
+                "related_kanban": [],
+            }
+            body = "::video[Clip](media/blog/draft-post/clip.mp4)"
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                fast_html = public_site.render_blog_post_preview(
+                    "alice",
+                    "draft-post",
+                    meta,
+                    body,
+                    preview_quality="fast",
+                )
+                full_html = public_site.render_blog_post_preview(
+                    "alice",
+                    "draft-post",
+                    meta,
+                    body,
+                    preview_quality="full",
+                )
+                detail = public_site.blog_media_full_preview_payload(
+                    profile,
+                    "media/blog/draft-post/clip.mp4",
+                    kind="video",
+                )
+
+            self.assertIn('<video class="media-video"', fast_html)
+            self.assertNotIn("data:video/mp4;base64", fast_html)
+            self.assertIn("data:video/mp4;base64", full_html)
+            self.assertTrue(detail["full_preview_src"].startswith("data:video/mp4;base64,"))
+            self.assertEqual(detail["full_preview_mime"], "video/mp4")
+            self.assertTrue(detail["full_preview_available"])
+
+    def test_publish_blog_text_validates_before_writing(self) -> None:
+        """Unsaved publish writes only after validation succeeds."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            post_path = profile / "blog" / "draft-post.md"
+            before = post_path.read_text(encoding="utf-8")
+            bad_meta = {
+                "title": "Bad Publish",
+                "date": "2026-04-29",
+                "status": "draft",
+                "tags": ["demo"],
+                "summary": "",
+                "cover": "",
+                "related_evidence": ["missing_ref"],
+                "related_kanban": [],
+            }
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                with self.assertRaises(public_site.PublicSiteError):
+                    public_site.publish_blog_text(
+                        "alice",
+                        "draft-post",
+                        bad_meta,
+                        "Ready body.",
+                    )
+            self.assertEqual(post_path.read_text(encoding="utf-8"), before)
+
+            good_meta = dict(bad_meta)
+            good_meta["summary"] = "Ready summary"
+            good_meta["related_evidence"] = []
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                path = public_site.publish_blog_text(
+                    "alice",
+                    "draft-post",
+                    good_meta,
+                    "Ready body.",
+                )
+                post = public_site.parse_blog_post(path)
+
+            self.assertEqual(post.status, "published")
+            self.assertEqual(post.title, "Bad Publish")
+            self.assertIn("Ready body.", post.body)
+
+    def test_generate_blog_visual_asset_unconfigured_is_clear(self) -> None:
+        """Visual generation never creates fake media when no key is configured."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            before = sorted((profile / "media" / "blog").glob("**/*"))
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch.dict("os.environ", {}, clear=True),
+                patch("nblane.core.llm._API_KEY", ""),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "VISUAL_API_KEY / DASHSCOPE_API_KEY / LLM_API_KEY",
+                ):
+                    public_site.generate_blog_visual_asset(
+                        "alice",
+                        "draft-post",
+                        "cover",
+                        "Cover prompt",
+                    )
+
+            after = sorted((profile / "media" / "blog").glob("**/*"))
+            self.assertEqual(after, before)
+
+    def test_generate_blog_visual_asset_saves_generated_media_candidate(self) -> None:
+        """Generated assets enter media/blog/<slug>/ without changing the post."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            post_path = profile / "blog" / "draft-post.md"
+            before = post_path.read_text(encoding="utf-8")
+            from nblane.core import visual_generation
+
+            prompt = visual_generation.VisualPrompt(
+                positive_prompt="positive",
+                negative_prompt="negative",
+                asset_type="cover",
+                recommended_size="1536*864",
+                rationale="test",
+            )
+            generated = visual_generation.GeneratedVisualAsset(
+                data=b"\x89PNG\r\n\x1a\ngenerated",
+                mime_type="image/png",
+                extension="png",
+                prompt=prompt,
+                provider="dashscope_wan",
+                model="wan2.7-image-pro",
+            )
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch(
+                    "nblane.core.public_site.visual_generation.generate_visual_asset",
+                    return_value=[generated],
+                ),
+            ):
+                results = public_site.generate_blog_visual_asset(
+                    "alice",
+                    "draft-post",
+                    "cover",
+                    "Cover prompt",
+                    alt="Generated cover",
+                )
+
+            self.assertEqual(len(results), 1)
+            result = results[0]
+            self.assertTrue(result.path.exists())
+            self.assertIn("media/blog/draft-post/generated-cover-", result.relative_path)
+            self.assertTrue(result.relative_path.endswith(".png"))
+            self.assertIn("![Generated cover](", result.snippet)
+            visual_rows = public_site.blog_visual_result_rows(
+                profile,
+                "draft-post",
+                results,
+                asset_type="cover",
+                alt="Generated cover",
+                caption="Candidate caption",
+                meta={},
+                body="",
+            )
+            self.assertEqual(len(visual_rows), 1)
+            self.assertEqual(visual_rows[0]["asset_type"], "cover")
+            self.assertEqual(visual_rows[0]["alt"], "Generated cover")
+            self.assertEqual(visual_rows[0]["caption"], "Candidate caption")
+            self.assertIn("![Generated cover](", visual_rows[0]["snippet"])
+            self.assertTrue(
+                visual_rows[0]["preview_src"].startswith("data:image/png;base64,")
+            )
+            self.assertEqual(post_path.read_text(encoding="utf-8"), before)
+
+    def test_blog_cover_renders_on_list_detail_and_social_tags(self) -> None:
+        """Cover images are visible in blog cards, detail headers, and SEO tags."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            media_dir = profile / "media" / "blog" / "published-post"
+            media_dir.mkdir(parents=True)
+            (media_dir / "cover.png").write_bytes(b"\x89PNG\r\n\x1a\ncover")
+            _write_blog(
+                profile / "blog" / "published-post.md",
+                title="Published Post",
+                status="published",
+                evidence=["ev_public"],
+                cover="media/blog/published-post/cover.png",
+                body="Published body.",
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                public_site.build_public_site(
+                    "alice",
+                    out_dir=root / "dist",
+                    base_url="https://alice.example/site",
+                )
+
+            blog_index = (root / "dist" / "blog" / "index.html").read_text(
+                encoding="utf-8"
+            )
+            detail = (
+                root / "dist" / "blog" / "published-post" / "index.html"
+            ).read_text(encoding="utf-8")
+
+            self.assertIn('class="item-cover"', blog_index)
+            self.assertIn("media/blog/published-post/cover.png", blog_index)
+            self.assertIn('class="blog-cover"', detail)
+            self.assertIn(
+                '<meta property="og:image" content="https://alice.example/site/media/blog/published-post/cover.png">',
+                detail,
+            )
+            self.assertIn(
+                '<meta name="twitter:image" content="https://alice.example/site/media/blog/published-post/cover.png">',
+                detail,
+            )
+            self.assertTrue(
+                (
+                    root
+                    / "dist"
+                    / "media"
+                    / "blog"
+                    / "published-post"
+                    / "cover.png"
+                ).exists()
+            )
+
+    def test_blog_media_result_dict_is_json_safe(self) -> None:
+        """Media API serialization exposes strings instead of Path objects."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            source = root / "photo.png"
+            source.write_bytes(b"image bytes")
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                result = public_site.add_blog_media(
+                    "alice",
+                    "draft-post",
+                    source=source,
+                    kind="image",
+                )
+
+            json.dumps(result.to_dict())
+            self.assertIsInstance(result.to_dict()["path"], str)
 
     def test_blog_candidate_from_evidence_does_not_write_post(self) -> None:
         """AI-style candidates stay in memory until the user confirms them."""

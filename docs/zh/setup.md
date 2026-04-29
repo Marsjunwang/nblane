@@ -22,6 +22,7 @@ pip install -e .
 | `pyyaml` | Profile / Schema / Team YAML 解析 |
 | `streamlit` | Web UI |
 | `openai` | LLM 客户端（兼容 OpenAI 接口） |
+| `Pillow` | 博客 / 视觉预览的图片缩略图生成 |
 | `python-dotenv` | `.env` 文件加载 |
 | `pandas` | Web UI 数据处理 |
 
@@ -59,6 +60,12 @@ nblane 读取以下环境变量：
 | `LLM_API_KEY` | *(空)* | API Key — **开启 AI 功能的必要条件** |
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API 基础地址 |
 | `LLM_MODEL` | `qwen3.6-plus` | 模型名称 |
+| `VISUAL_PROVIDER` | `dashscope_wan` | Blog 视觉生成 provider。其他 provider 预留给后续 adapter。 |
+| `VISUAL_API_KEY` | *(空)* | 可选的图像 / 视频 Key。为空时依次尝试 `DASHSCOPE_API_KEY`、`LLM_API_KEY`。 |
+| `DASHSCOPE_API_KEY` | *(空)* | 可选 DashScope Key；视觉生成会优先于 `LLM_API_KEY` 使用它。 |
+| `VISUAL_BASE_URL` | *(空)* | 可选视觉任务 endpoint 覆盖。通常留空，使用 DashScope 视觉任务 API。 |
+| `VISUAL_IMAGE_MODEL` | `wan2.7-image-pro` | Blog 图片 / 封面默认模型。 |
+| `VISUAL_VIDEO_MODEL` | `wan2.7-videoedit` | Blog 视频编辑默认模型。 |
 | `UI_LANG` | `en` | Streamlit 界面语言：`en` 或 `zh`。未设置时为兼容旧部署，会回退到 `LLM_REPLY_LANG`。 |
 | `LLM_REPLY_LANG` | `en` | 模型回复语言：`en` 或 `zh`。仅控制 AI prompt / 输出语言。 |
 | `NBLANE_AUTH_FILE` | *(空)* | Streamlit Web 登录用户配置。为空时保持本地开发模式；公网部署时应指向私有数据仓库中的 `auth/users.yaml`。 |
@@ -77,6 +84,11 @@ LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL=qwen3.6-plus
 UI_LANG=zh
 LLM_REPLY_LANG=en
+
+# 可选视觉生成覆盖项
+VISUAL_IMAGE_MODEL=wan2.7-image-pro
+VISUAL_VIDEO_MODEL=wan2.7-videoedit
+VISUAL_API_KEY=
 ```
 
 nblane 启动时会通过 `python-dotenv` 自动加载该文件。
@@ -101,6 +113,12 @@ streamlit run app.py
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_API_KEY=sk-xxx        # 阿里云百炼 API Key（即 DASHSCOPE_API_KEY）
 LLM_MODEL=qwen3.6-plus    # 模型列表: https://help.aliyun.com/model-studio/getting-started/models
+
+# Blog 封面、图片、视频生成默认复用同一个 LLM_API_KEY。
+# 只有图像 / 视频任务使用不同凭据时才需要填写 VISUAL_API_KEY。
+VISUAL_IMAGE_MODEL=wan2.7-image-pro
+VISUAL_VIDEO_MODEL=wan2.7-videoedit
+VISUAL_API_KEY=
 
 # DeepSeek
 LLM_BASE_URL=https://api.deepseek.com/v1

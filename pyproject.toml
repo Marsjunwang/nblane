@@ -15,6 +15,7 @@ dependencies = [
     "streamlit>=1.35",
     "streamlit-crepe>=0.1.5",
     "openai>=1.30",
+    "Pillow>=10",
     "python-dotenv>=1.0",
     "pandas>=2.0",
     "mcp>=1.0",

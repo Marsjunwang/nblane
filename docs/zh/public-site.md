@@ -134,6 +134,33 @@ nblane public blog publish <profile> <slug>
 博客本地媒体放在 `profiles/<name>/media/blog/<slug>/`。图片支持
 `png`、`jpg`、`jpeg`、`webp`、`gif`，单文件上限 10 MB；本地短视频支持
 `mp4`、`webm`，单文件上限 25 MB。更大的视频建议使用外链或对象存储。
+如果 front matter 中设置了 `cover: media/blog/<slug>/cover.png`，Blog 列表卡片、
+文章详情 header、`og:image` 和 `twitter:image` 都会使用该封面；草稿预览遇到
+缺失或不合法封面时会降级为纯文本布局，发布校验会继续报告该 cover 错误。
+
+Blog 编辑器的 Public Preview 使用当前会话中的 meta/body 做 in-memory 渲染，
+不需要先保存到磁盘。发布则走 `publish_blog_text()`：先校验未保存的 meta/body，
+通过后才写回 `blog/<slug>.md` 并记录 `publish ...` Git backup action。
+
+视觉生成配置使用 `VISUAL_*` 命名，并兼容旧式 `IMAGE_*` alias。默认 provider 是
+DashScope / 通义万相：
+
+```env
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.6-plus
+
+# Optional visual overrides
+VISUAL_PROVIDER=dashscope_wan
+VISUAL_IMAGE_MODEL=wan2.7-image-pro
+VISUAL_VIDEO_MODEL=wan2.7-videoedit
+VISUAL_API_KEY=
+```
+
+千问 / DashScope 视觉生成默认复用现有 `LLM_API_KEY`；只有图像 / 视频任务与文本
+LLM 使用不同账号或不同凭据时才需要 `VISUAL_API_KEY`。视觉模块只复用 key 和
+DashScope 域名信息，不会把 chat completions 的 `/compatible-mode/v1` 当成图像
+或视频任务 endpoint。
 
 把已知信息整理成公开草稿：
 
@@ -166,9 +193,11 @@ Web UI 新增 **Public Site** 页面：
   右侧提供实时整站预览，未保存的文字和新上传头像也会进入预览；原始 YAML 仍
   在折叠区内可直接编辑。
 - **Blog** 通过 React / BlockNote 编辑器 shell 创建、编辑、检查并发布博客。
-  shell 包含文章列表、正文编辑区、Meta / Media / AI / Check 右侧抽屉、
-  专注模式和 browser `localStorage` 布局记忆。Streamlit 继续负责文件 I/O、
-  上传、AI 调用、发布校验、Git backup，以及辅助的新建/上传工具。
+  shell 包含文章筛选、新建草稿、从 evidence / Done 生成、正文编辑区、
+  Meta / Media / AI / Visual / Check 右侧抽屉、Public Preview、移动端
+  Editor / Articles / Tools / Preview tab、专注模式和 browser `localStorage`
+  布局记忆。Streamlit 继续负责文件 I/O、session state、上传落盘、AI / 视觉调用、
+  发布校验、静态预览与 Git backup。
 - **Resume** 编辑 `resume-source.yaml`，预览生成简历，并生成定制简历草稿。
 - **Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
   生成 draft 项目。
@@ -188,12 +217,13 @@ Web UI 新增 **Public Site** 页面：
 - **Web UI：** **Public Site** 页面，含 Profile、Blog、Resume、Known Info、
   Build 五个 tab。
 - **静态输出：** 首页、Blog、Projects、Outputs、可选 Resume、复制后的媒体、
-  `robots.txt`、`sitemap.xml` 与页面 meta description。
+  Blog cover 展示、Open Graph / Twitter 图片、`robots.txt`、`sitemap.xml` 与页面
+  meta description。
 
 下一轮优化方向：
 
 - **React Blog Shell 打磨：** Markdown / front matter 仍是事实源，继续补齐
-  shell 内新建/上传流程、选中块媒体插入和更完整的 AI 候选生成。
+  更细的块级光标插入、更多 visual provider adapter 和前端 smoke 测试。
 - **SEO 质量：** 继续优化 canonical、Open Graph、社交分享 metadata、按 profile
   优化 title，并在部署时校验 `base-url` / base path。
 - **部署质量：** 补静态托管、缓存刷新、草稿预览 vs 公开构建、小团队受保护
