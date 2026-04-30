@@ -916,15 +916,6 @@ function ShellEditor(props) {
     [activeSlug, computeDirty, documentId, editable, getCurrentMarkdown, nextEventId],
   );
 
-  const updateLayout = useCallback(
-    (updater, action = "layout_state_changed") => {
-      const next = applyLayoutLocal(updater);
-      emitAction(action, { layout_state: next });
-      return next;
-    },
-    [applyLayoutLocal, emitAction],
-  );
-
   const syncMarkdown = useCallback(
     async () => {
       if (!ready || !editable) {
@@ -1034,7 +1025,7 @@ function ShellEditor(props) {
 
   function toggleFocusMode() {
     setMobileView("Editor");
-    updateLayout((current) => {
+    applyLayoutLocal((current) => {
       if (current.focus_mode) {
         return {
           ...current,
@@ -1064,7 +1055,7 @@ function ShellEditor(props) {
 
   function openRightTab(tab, collapseCurrent = false) {
     let nextRightOpen = true;
-    updateLayout((current) => {
+    applyLayoutLocal((current) => {
       if (collapseCurrent && current.right_open && current.active_right_tab === tab) {
         nextRightOpen = false;
         return { ...current, right_open: false, focus_mode: false };
@@ -1081,7 +1072,7 @@ function ShellEditor(props) {
   }
 
   function closeRightPanel() {
-    updateLayout((current) => ({ ...current, right_open: false, focus_mode: false }));
+    applyLayoutLocal((current) => ({ ...current, right_open: false, focus_mode: false }));
     setMobileView("Editor");
   }
 
@@ -1383,12 +1374,12 @@ function ShellEditor(props) {
             title={label(labels, "left_panel")}
             onClick={() => {
               const nextOpen = !layoutRef.current.left_open;
-              updateLayout({
+              applyLayoutLocal({
                 ...layoutRef.current,
                 left_open: nextOpen,
                 focus_mode: false,
               });
-              setMobileView(nextOpen ? "Articles" : "Editor");
+              setMobileView("Editor");
             }}
           >
             A
@@ -1399,12 +1390,12 @@ function ShellEditor(props) {
             title={label(labels, "right_panel")}
             onClick={() => {
               const nextOpen = !layoutRef.current.right_open;
-              updateLayout({
+              applyLayoutLocal({
                 ...layoutRef.current,
                 right_open: nextOpen,
                 focus_mode: false,
               });
-              setMobileView(nextOpen ? "Tools" : "Editor");
+              setMobileView("Editor");
             }}
           >
             T
@@ -1443,7 +1434,7 @@ function ShellEditor(props) {
               className="nb-icon-button"
               title={label(labels, "close_left_panel")}
               onClick={() => {
-                updateLayout((current) => ({
+                applyLayoutLocal((current) => ({
                   ...current,
                   left_open: false,
                   focus_mode: false,
@@ -1625,7 +1616,7 @@ function ShellEditor(props) {
                     className="nb-icon-button"
                     title={label(labels, "preview")}
                     onClick={() => {
-                      updateLayout((current) => ({
+                      applyLayoutLocal((current) => ({
                         ...current,
                         preview_open: false,
                         focus_mode: false,

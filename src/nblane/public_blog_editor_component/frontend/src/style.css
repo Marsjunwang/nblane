@@ -304,6 +304,22 @@ textarea:read-only {
   background: var(--nb-paper);
 }
 
+.nb-left-panel {
+  grid-column: 1;
+}
+
+.nb-center-panel {
+  grid-column: 2;
+}
+
+.nb-right-rail {
+  grid-column: 3;
+}
+
+.nb-right-panel {
+  grid-column: 4;
+}
+
 .nb-left-panel,
 .nb-right-panel {
   max-height: calc(100vh - 96px);
