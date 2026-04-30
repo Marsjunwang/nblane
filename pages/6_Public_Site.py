@@ -15,11 +15,6 @@ import yaml
 from nblane.core import llm as llm_client
 
 try:
-    from streamlit_crepe import st_milkdown
-except Exception:  # pragma: no cover - optional Streamlit component
-    st_milkdown = None
-
-try:
     from nblane.public_blog_editor_component import (
         st_blocknote_markdown,
         st_public_blog_editor,
@@ -131,8 +126,7 @@ def _ui() -> dict[str, str]:
             "summary": "摘要",
             "cover": "封面",
             "body": "正文",
-            "blocknote_unavailable": "BlockNote 组件不可用，已降级为 Markdown 富文本编辑器。",
-            "rich_editor_unavailable": "未安装 streamlit-crepe，已降级为 Markdown 文本编辑。",
+            "blocknote_unavailable": "BlockNote 组件不可用，已降级为 Markdown 文本编辑器。",
             "math_safe_mode": "公式安全模式",
             "math_safe_help": "使用 Markdown 源码编辑器，避免公式在 BlockNote 转换中被改写。",
             "math_safe_notice": "检测到公式，已使用 Markdown 源码编辑器。",
@@ -246,7 +240,7 @@ def _ui() -> dict[str, str]:
             "leftover_insert_marker": "正文仍包含插入位置标记。",
             "privacy_hint": "正文疑似引用了内部原始文件或私密路径。",
             "privacy_publish_blocked": "发布已暂停：正文疑似包含内部路径或私密引用，请先清理后重新检查。",
-            "markdown_downgrade": "当前使用 Markdown 兼容编辑器；块级编辑会在 React / BlockNote 组件落地后启用。",
+            "markdown_downgrade": "当前使用 Markdown 文本编辑器，因为 BlockNote 组件不可用。",
             "candidate_saved": "候选已写入正文。",
             "compact_layout": "窄屏模式",
             "visual": "Visual",
@@ -322,8 +316,7 @@ def _ui() -> dict[str, str]:
         "summary": "Summary",
         "cover": "Cover",
         "body": "Body",
-        "blocknote_unavailable": "BlockNote component is unavailable; using the rich Markdown editor.",
-        "rich_editor_unavailable": "streamlit-crepe is not installed; using the Markdown text editor.",
+        "blocknote_unavailable": "BlockNote component is unavailable; using the Markdown text editor.",
         "math_safe_mode": "Math-safe mode",
         "math_safe_help": "Use the Markdown source editor so formulas are not rewritten by BlockNote conversion.",
         "math_safe_notice": "Formulas detected; using the Markdown source editor.",
@@ -437,7 +430,7 @@ def _ui() -> dict[str, str]:
         "leftover_insert_marker": "Body still contains the insert marker.",
         "privacy_hint": "Body may reference internal raw files or private paths.",
         "privacy_publish_blocked": "Publish paused: the body appears to reference internal paths or private material. Clean it up and run the check again.",
-        "markdown_downgrade": "Using the Markdown-compatible editor; block editing will be enabled by the future React / BlockNote component.",
+        "markdown_downgrade": "Using the Markdown text editor because the BlockNote component is unavailable.",
         "candidate_saved": "Candidate was written into the body.",
         "compact_layout": "Compact layout",
         "visual": "Visual",
@@ -1740,7 +1733,7 @@ def _blog_quality_warnings(
     for row in media_rows:
         if not row["referenced"]:
             warnings.append(f"{ui['unreferenced_media']}: {row['name']}")
-    if st_blocknote_markdown is None and st_milkdown is None:
+    if st_blocknote_markdown is None:
         warnings.append(ui["markdown_downgrade"])
     return warnings
 
@@ -1820,25 +1813,6 @@ def _render_body_editor(
             return edited
     else:
         st.info(ui["blocknote_unavailable"])
-    if st_milkdown is not None:
-        try:
-            edited = st_milkdown(
-                default_value=body,
-                min_height=520,
-                features={
-                    "image": True,
-                    "link": True,
-                    "table": True,
-                    "codeblock": True,
-                    "math": False,
-                },
-                key=key,
-            )
-            return edited if isinstance(edited, str) else body
-        except Exception as exc:
-            st.warning(f"{ui['rich_editor_unavailable']} {exc}")
-    else:
-        st.info(ui["rich_editor_unavailable"])
     return st.text_area(
         ui["body"],
         value=body,

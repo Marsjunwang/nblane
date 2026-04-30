@@ -301,9 +301,27 @@ function mediaKind(item) {
   return /\.(mp4|mov|webm|m4v)$/i.test(path) ? "video" : "image";
 }
 
+const RAW_MARKDOWN_DIRECTIVE_LINE_RE =
+  /^::[A-Za-z][\w-]*\[[^\r\n\]]*\]\([^\r\n]+\)$/u;
+
+function rawDirectiveLines(value) {
+  return cleanText(value)
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function containsRawMarkdownDirective(markdown) {
+  return rawDirectiveLines(markdown).some((line) =>
+    RAW_MARKDOWN_DIRECTIVE_LINE_RE.test(line),
+  );
+}
+
 function isRawMarkdownDirective(snippet) {
-  return /^::[A-Za-z][\w-]*\[[^\]]*\]\([^)]+\)\s*$/m.test(
-    cleanText(snippet).trim(),
+  const lines = rawDirectiveLines(snippet);
+  return (
+    lines.length > 0 &&
+    lines.every((line) => RAW_MARKDOWN_DIRECTIVE_LINE_RE.test(line))
   );
 }
 
@@ -492,6 +510,8 @@ function LegacyMarkdownEditor(props) {
   const height = Number(args.height || 560);
   const editable = args.editable !== false;
   const sourceMode = args.source_mode === true || args.math_safe === true;
+  const editorSourceMode =
+    sourceMode || containsRawMarkdownDirective(initialMarkdown);
   const editor = useCreateBlockNote({});
   const [sourceMarkdown, setSourceMarkdown] = useState(initialMarkdown);
   const [error, setError] = useState("");
@@ -512,18 +532,18 @@ function LegacyMarkdownEditor(props) {
       if (
         loadedDocumentRef.current === documentId &&
         loadedInitialMarkdownRef.current === initialMarkdown &&
-        loadedSourceModeRef.current === sourceMode
+        loadedSourceModeRef.current === editorSourceMode
       ) {
         return;
       }
       setReady(false);
       setError("");
-      if (sourceMode) {
+      if (editorSourceMode) {
         setSourceMarkdown(initialMarkdown || "");
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
-        loadedSourceModeRef.current = sourceMode;
+        loadedSourceModeRef.current = editorSourceMode;
         Streamlit.setComponentValue({
           markdown: latestMarkdownRef.current,
           dirty: false,
@@ -543,7 +563,7 @@ function LegacyMarkdownEditor(props) {
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
-        loadedSourceModeRef.current = sourceMode;
+        loadedSourceModeRef.current = editorSourceMode;
         Streamlit.setComponentValue({
           markdown: latestMarkdownRef.current,
           dirty: false,
@@ -565,7 +585,7 @@ function LegacyMarkdownEditor(props) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, editor, height, initialMarkdown, sourceMode]);
+  }, [documentId, editor, height, initialMarkdown, editorSourceMode]);
 
   useEffect(() => {
     return () => {
@@ -599,7 +619,7 @@ function LegacyMarkdownEditor(props) {
     if (!ready) {
       return;
     }
-    if (sourceMode) {
+    if (editorSourceMode) {
       sendLegacyValue(latestMarkdownRef.current, immediate);
       return;
     }
@@ -614,7 +634,7 @@ function LegacyMarkdownEditor(props) {
   return (
     <main className="nb-editor-shell nb-legacy-shell" style={{ minHeight: `${height}px` }}>
       {error ? <div className="nb-editor-error">{error}</div> : null}
-      {sourceMode ? (
+      {editorSourceMode ? (
         <textarea
           className="nb-source-editor"
           value={sourceMarkdown}
@@ -658,6 +678,7 @@ function ShellEditor(props) {
   const height = Number(args.height || 720);
   const editable = args.editable !== false;
   const sourceMode = args.source_mode === true || args.math_safe === true;
+  const initialHasRawDirectives = containsRawMarkdownDirective(initialMarkdown);
   const layoutStorageKey = cleanText(
     args.layout_storage_key ||
       args.storage_key ||
@@ -667,6 +688,8 @@ function ShellEditor(props) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [sourceMarkdown, setSourceMarkdown] = useState(initialMarkdown);
+  const [rawDirectiveSourceDocumentId, setRawDirectiveSourceDocumentIdState] =
+    useState(() => (initialHasRawDirectives ? documentId : ""));
   const [dirty, setDirty] = useState(false);
   const [mobileView, setMobileView] = useState("Editor");
   const [newPostTitle, setNewPostTitle] = useState("");
@@ -689,14 +712,26 @@ function ShellEditor(props) {
   const initialMarkdownRef = useRef(initialMarkdown);
   const eventCounterRef = useRef(0);
   const lastCursorBlockIdRef = useRef("");
+  const rawDirectiveSourceDocumentIdRef = useRef(
+    initialHasRawDirectives ? documentId : "",
+  );
   const sourceTextareaRef = useRef(null);
   const sourceSelectionRef = useRef({ start: 0, end: 0 });
+  const editorSourceMode =
+    sourceMode ||
+    initialHasRawDirectives ||
+    rawDirectiveSourceDocumentId === documentId;
 
   const layoutSeed = deepStableStringify(args.layout_state || {});
   const metaSeed = deepStableStringify(args.active_post_meta || {});
   const visualSeed = deepStableStringify(args.visual_config || {});
   const visualResultsSeed = deepStableStringify(args.visual_results || []);
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
+
+  const setRawDirectiveSourceDocumentId = useCallback((nextDocumentId) => {
+    rawDirectiveSourceDocumentIdRef.current = nextDocumentId;
+    setRawDirectiveSourceDocumentIdState(nextDocumentId);
+  }, []);
 
   useFrameHeight(
     [
@@ -711,7 +746,7 @@ function ShellEditor(props) {
       mediaItems.length,
       aiCandidates.length,
       error,
-      sourceMode,
+      editorSourceMode,
       previewHtml.length,
       visualSeed,
       visualResultsSeed,
@@ -739,6 +774,10 @@ function ShellEditor(props) {
   }, [activeSlug, documentId, initialMarkdown, metaSeed]);
 
   useEffect(() => {
+    setRawDirectiveSourceDocumentId(initialHasRawDirectives ? documentId : "");
+  }, [documentId, initialHasRawDirectives, setRawDirectiveSourceDocumentId]);
+
+  useEffect(() => {
     setStatusFilter(initialStatusFilter);
   }, [initialStatusFilter]);
 
@@ -754,7 +793,7 @@ function ShellEditor(props) {
       if (
         loadedDocumentRef.current === documentId &&
         loadedInitialMarkdownRef.current === initialMarkdown &&
-        loadedSourceModeRef.current === sourceMode
+        loadedSourceModeRef.current === editorSourceMode
       ) {
         return;
       }
@@ -765,12 +804,12 @@ function ShellEditor(props) {
         start: (initialMarkdown || "").length,
         end: (initialMarkdown || "").length,
       };
-      if (sourceMode) {
+      if (editorSourceMode) {
         setSourceMarkdown(initialMarkdown || "");
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
-        loadedSourceModeRef.current = sourceMode;
+        loadedSourceModeRef.current = editorSourceMode;
         setReady(true);
         return;
       }
@@ -783,7 +822,7 @@ function ShellEditor(props) {
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
-        loadedSourceModeRef.current = sourceMode;
+        loadedSourceModeRef.current = editorSourceMode;
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -798,7 +837,7 @@ function ShellEditor(props) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, editor, initialMarkdown, sourceMode]);
+  }, [documentId, editor, initialMarkdown, editorSourceMode]);
 
   const computeDirty = useCallback((markdown, meta = draftMetaRef.current) => {
     return (
@@ -823,7 +862,10 @@ function ShellEditor(props) {
   );
 
   const getCurrentMarkdown = useCallback(async () => {
-    if (sourceMode) {
+    const preserveRawDirectives =
+      rawDirectiveSourceDocumentIdRef.current === documentId ||
+      initialHasRawDirectives;
+    if (sourceMode || preserveRawDirectives) {
       return latestMarkdownRef.current;
     }
     try {
@@ -834,10 +876,10 @@ function ShellEditor(props) {
       setError(err instanceof Error ? err.message : String(err));
       return latestMarkdownRef.current;
     }
-  }, [editor, sourceMode]);
+  }, [documentId, editor, initialHasRawDirectives, sourceMode]);
 
   const rememberCursorBlock = useCallback(() => {
-    if (sourceMode) {
+    if (editorSourceMode) {
       return;
     }
     try {
@@ -848,7 +890,7 @@ function ShellEditor(props) {
     } catch (_err) {
       // BlockNote can throw after focus leaves the editor; keep the previous block id.
     }
-  }, [editor, sourceMode]);
+  }, [editor, editorSourceMode]);
 
   const rememberSourceSelection = useCallback(() => {
     const textarea = sourceTextareaRef.current;
@@ -922,7 +964,7 @@ function ShellEditor(props) {
         return;
       }
       rememberCursorBlock();
-      const markdown = sourceMode
+      const markdown = editorSourceMode
         ? latestMarkdownRef.current
         : await getCurrentMarkdown();
       const nextDirty = computeDirty(markdown, draftMetaRef.current);
@@ -931,18 +973,24 @@ function ShellEditor(props) {
     [
       computeDirty,
       editable,
+      editorSourceMode,
       getCurrentMarkdown,
       rememberCursorBlock,
       ready,
-      sourceMode,
     ],
   );
 
   const replaceEditorMarkdown = useCallback(
-    async (markdown) => {
+    async (markdown, options = {}) => {
       latestMarkdownRef.current = markdown;
       setDirty(computeDirty(markdown, draftMetaRef.current));
-      if (sourceMode) {
+      const preserveRawDirectives =
+        options.preserveRawDirectives === true ||
+        containsRawMarkdownDirective(markdown);
+      if (preserveRawDirectives) {
+        setRawDirectiveSourceDocumentId(documentId);
+      }
+      if (editorSourceMode || preserveRawDirectives) {
         setSourceMarkdown(markdown);
         return markdown;
       }
@@ -950,7 +998,7 @@ function ShellEditor(props) {
       editor.replaceBlocks(editor.document, blocks);
       return markdown;
     },
-    [computeDirty, editor, sourceMode],
+    [computeDirty, documentId, editor, editorSourceMode, setRawDirectiveSourceDocumentId],
   );
 
   const insertMarkdown = useCallback(
@@ -962,7 +1010,7 @@ function ShellEditor(props) {
       }
       const current = await getCurrentMarkdown();
       const rawDirective = isRawMarkdownDirective(cleanSnippet);
-      if (sourceMode) {
+      if (editorSourceMode) {
         const next =
           insertPlacement === "cursor" || insertPlacement === "replace"
             ? insertMarkdownAtTextSelection(
@@ -980,7 +1028,7 @@ function ShellEditor(props) {
           cleanSnippet,
           rawDirective && insertPlacement !== "marker" ? "append" : insertPlacement,
         );
-        await replaceEditorMarkdown(next);
+        await replaceEditorMarkdown(next, { preserveRawDirectives: rawDirective });
         return next;
       }
       try {
@@ -1020,7 +1068,7 @@ function ShellEditor(props) {
         return next;
       }
     },
-    [editor, getCurrentMarkdown, replaceEditorMarkdown, sourceMode],
+    [editor, editorSourceMode, getCurrentMarkdown, replaceEditorMarkdown],
   );
 
   function toggleFocusMode() {
@@ -1543,7 +1591,7 @@ function ShellEditor(props) {
                 onChange={(event) => updateMetaText("title", event.target.value)}
               />
             </div>
-            {sourceMode ? (
+            {editorSourceMode ? (
               <textarea
                 ref={sourceTextareaRef}
                 className="nb-source-editor"
