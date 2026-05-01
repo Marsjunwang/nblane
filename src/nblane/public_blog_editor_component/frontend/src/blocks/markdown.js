@@ -16,6 +16,19 @@ const MARKDOWN_IMAGE_LINE_RE =
 const ITALIC_CAPTION_LINE_RE =
   /^[_*](?<caption>[^_*].*?)[_*]$/u;
 
+const DISPLAY_MATH_START_RE =
+  /^\s*(?:\$\$|\\\[)\s*(?:$|[^\s])/u;
+
+const COMPLEX_MATH_RE =
+  /\\begin\{(?:align\*?|equation\*?|gather\*?|multline\*?|split|aligned|matrix|pmatrix|bmatrix|cases)\}/u;
+
+const VISUAL_KIND_TO_ASSET_TYPE = {
+  cover: "image",
+  flowchart: "diagram",
+  example: "image",
+  video_edit: "video",
+};
+
 function cleanText(value) {
   return value === null || value === undefined ? "" : String(value);
 }
@@ -34,6 +47,30 @@ export function containsRawMarkdownDirective(markdown) {
 export function isRawMarkdownDirective(snippet) {
   const lines = trimmedLines(snippet);
   return lines.length > 0 && lines.every((line) => DIRECTIVE_LINE_RE.test(line));
+}
+
+export function containsDisplayMathBlock(markdown) {
+  const source = cleanText(markdown);
+  if (COMPLEX_MATH_RE.test(source)) {
+    return true;
+  }
+  return source.split(/\r?\n/u).some((line) => DISPLAY_MATH_START_RE.test(line));
+}
+
+function normalizeVisualKind(value) {
+  const clean = cleanText(value).trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(VISUAL_KIND_TO_ASSET_TYPE, clean)
+    ? clean
+    : "";
+}
+
+function normalizeVisualAssetType(value, visualKind = "") {
+  const clean = cleanText(value).trim().toLowerCase();
+  const kind = normalizeVisualKind(visualKind || clean);
+  if (kind) {
+    return VISUAL_KIND_TO_ASSET_TYPE[kind];
+  }
+  return ["image", "video", "diagram"].includes(clean) ? clean : "image";
 }
 
 function safeDirectiveLabel(value) {
@@ -143,10 +180,12 @@ function aiLoadingBlock(props) {
 }
 
 function visualBlock(props) {
+  const visualKind = normalizeVisualKind(props.visual_kind || props.visualKind || props.asset_type);
   return {
     type: "visual_block",
     props: {
-      asset_type: cleanText(props.asset_type || props.kind || "image"),
+      asset_type: normalizeVisualAssetType(props.asset_type || props.kind, visualKind),
+      visual_kind: visualKind,
       src: cleanText(props.src || props.url),
       prompt: cleanText(props.prompt),
       caption: cleanText(props.caption),
@@ -379,8 +418,26 @@ function visualBlockToMarkdown(block) {
   const src = safeDirectiveTarget(props.src);
   const caption = safeDirectiveLabel(props.caption);
   const alt = safeDirectiveLabel(props.alt || props.caption || "Visual");
-  const assetType = cleanText(props.asset_type || "image").toLowerCase();
+  const visualKind = normalizeVisualKind(props.visual_kind);
+  const assetType = normalizeVisualAssetType(props.asset_type, visualKind);
   const looksVideo = assetType.includes("video") || /\.(mp4|webm|ogg|mov|m4v)$/iu.test(src);
+
+  if (visualKind || assetType === "diagram" || props.ai_generated === true) {
+    return `<!-- nblane:visual_block ${JSON.stringify({
+      asset_type: assetType,
+      visual_kind: visualKind,
+      src,
+      prompt: cleanText(props.prompt),
+      status: cleanText(props.status || "draft"),
+      caption: cleanText(props.caption),
+      alt: cleanText(props.alt),
+      ai_generated: props.ai_generated === true,
+      ai_source_id: cleanText(props.ai_source_id),
+      ai_model: cleanText(props.ai_model),
+      accepted: props.accepted === true,
+      evidence_id: cleanText(props.evidence_id),
+    })} -->`;
+  }
 
   if (src && looksVideo) {
     return `::video[${caption || alt}](${src})`;
@@ -391,11 +448,18 @@ function visualBlockToMarkdown(block) {
   }
 
   return `<!-- nblane:visual_block ${JSON.stringify({
-    asset_type: cleanText(props.asset_type || "image"),
+    asset_type: assetType,
+    visual_kind: visualKind,
     prompt: cleanText(props.prompt),
     status: cleanText(props.status || "draft"),
     caption: cleanText(props.caption),
     alt: cleanText(props.alt),
+    candidates: cleanText(props.candidates),
+    ai_generated: props.ai_generated === true,
+    ai_source_id: cleanText(props.ai_source_id),
+    ai_model: cleanText(props.ai_model),
+    accepted: props.accepted === true,
+    evidence_id: cleanText(props.evidence_id),
   })} -->`;
 }
 

@@ -18,8 +18,31 @@ const AI_PROPS = {
   evidence_id: { default: "" },
 };
 
+const VISUAL_KIND_TO_ASSET_TYPE = {
+  cover: "image",
+  flowchart: "diagram",
+  example: "image",
+  video_edit: "video",
+};
+
 function cleanText(value) {
   return value === null || value === undefined ? "" : String(value);
+}
+
+function normalizeVisualKind(value) {
+  const clean = cleanText(value).trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(VISUAL_KIND_TO_ASSET_TYPE, clean)
+    ? clean
+    : "";
+}
+
+function normalizeVisualAssetType(value, visualKind = "") {
+  const clean = cleanText(value).trim().toLowerCase();
+  const kind = normalizeVisualKind(visualKind || clean);
+  if (kind) {
+    return VISUAL_KIND_TO_ASSET_TYPE[kind];
+  }
+  return ["image", "video", "diagram"].includes(clean) ? clean : "image";
 }
 
 function updateBlockProps(editor, block, props) {
@@ -245,6 +268,8 @@ function VisualBlock({ block, editor }) {
   const caption = cleanText(props.caption);
   const alt = cleanText(props.alt || caption || "Visual");
   const status = cleanText(props.status || "draft");
+  const assetType = normalizeVisualAssetType(props.asset_type, props.visual_kind);
+  const visualKind = normalizeVisualKind(props.visual_kind);
   return (
     <div
       className="nb-custom-block nb-visual-block"
@@ -253,16 +278,17 @@ function VisualBlock({ block, editor }) {
     >
       <div className="nb-block-header">
         <strong>Visual</strong>
+        {visualKind ? <span>{visualKind}</span> : null}
         <span>{status || "draft"}</span>
       </div>
-      <VisualMedia src={src} assetType={props.asset_type} alt={alt} editor={editor} />
+      <VisualMedia src={src} assetType={assetType} alt={alt} editor={editor} />
       {caption ? <div className="nb-block-caption">{caption}</div> : null}
       <BlockDetails label="Edit metadata" defaultOpen={!src}>
         <div className="nb-block-grid">
           <label className="nb-block-field">
             <span>Type</span>
             <select
-              value={cleanText(props.asset_type || "image")}
+              value={assetType}
               disabled={readOnly}
               onChange={(event) =>
                 updateBlockProps(editor, block, { asset_type: event.target.value })
@@ -272,6 +298,29 @@ function VisualBlock({ block, editor }) {
             >
               <option value="image">image</option>
               <option value="video">video</option>
+              <option value="diagram">diagram</option>
+            </select>
+          </label>
+          <label className="nb-block-field">
+            <span>Visual kind</span>
+            <select
+              value={visualKind}
+              disabled={readOnly}
+              onChange={(event) => {
+                const nextKind = normalizeVisualKind(event.target.value);
+                updateBlockProps(editor, block, {
+                  visual_kind: nextKind,
+                  asset_type: normalizeVisualAssetType(props.asset_type, nextKind),
+                });
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <option value="">none</option>
+              <option value="cover">cover</option>
+              <option value="flowchart">flowchart</option>
+              <option value="example">example</option>
+              <option value="video_edit">video_edit</option>
             </select>
           </label>
           <FieldText
@@ -354,6 +403,7 @@ function ExternalVisual({ block }) {
     <figure
       data-nblane-block="visual_block"
       data-asset-type={cleanText(props.asset_type)}
+      data-visual-kind={cleanText(props.visual_kind)}
       data-src={cleanText(props.src)}
       data-prompt={cleanText(props.prompt)}
       data-caption={cleanText(props.caption)}
@@ -396,8 +446,10 @@ function parseDataBlock(element, type) {
     };
   }
   if (type === "visual_block") {
+    const visualKind = normalizeVisualKind(dataset.visualKind || dataset.assetType);
     return {
-      asset_type: cleanText(dataset.assetType || "image"),
+      asset_type: normalizeVisualAssetType(dataset.assetType || "image", visualKind),
+      visual_kind: visualKind,
       src: cleanText(dataset.src),
       prompt: cleanText(dataset.prompt),
       caption: cleanText(dataset.caption),
@@ -452,7 +504,11 @@ const VisualBlockSpec = createReactBlockSpec(
   {
     type: "visual_block",
     propSchema: {
-      asset_type: { default: "image", values: ["image", "video"] },
+      asset_type: { default: "image", values: ["image", "video", "diagram"] },
+      visual_kind: {
+        default: "",
+        values: ["", "cover", "flowchart", "example", "video_edit"],
+      },
       src: { default: "" },
       prompt: { default: "" },
       caption: { default: "" },

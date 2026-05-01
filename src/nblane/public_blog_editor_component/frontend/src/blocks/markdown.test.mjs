@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   blockToSpecialMarkdown,
   blocksToNblaneMarkdown,
+  containsDisplayMathBlock,
   containsRawMarkdownDirective,
   parseVideoDirectiveLine,
   splitMarkdownSpecialBlocks,
@@ -44,6 +45,13 @@ test("parses display math as math blocks", () => {
   assert.equal(segments.length, 3);
   assert.equal(segments[1].block.type, "math_block");
   assert.equal(segments[1].block.props.latex, "J(\\theta)=\\sum_t r_t");
+});
+
+test("detects display math for math-safe mode", () => {
+  assert.equal(containsDisplayMathBlock("Before\n\n$$\nx^2\n$$"), true);
+  assert.equal(containsDisplayMathBlock("\\[x^2\\]"), true);
+  assert.equal(containsDisplayMathBlock("\\begin{align}x&=1\\end{align}"), true);
+  assert.equal(containsDisplayMathBlock("Inline $x$ only"), false);
 });
 
 test("parses standalone markdown images as visual blocks", () => {
@@ -100,6 +108,34 @@ test("serializes custom blocks to public-site markdown", () => {
     }),
     "![Chart](media/blog/post/chart.png)\n\n_Flow_",
   );
+
+  assert.equal(
+    blockToSpecialMarkdown({
+      type: "visual_block",
+      props: {
+        asset_type: "diagram",
+        visual_kind: "flowchart",
+        src: "media/blog/post/chart.png",
+        alt: "Chart",
+        caption: "Flow",
+        ai_generated: true,
+        accepted: true,
+      },
+    }),
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","prompt":"","status":"draft","caption":"Flow","alt":"Chart","ai_generated":true,"ai_source_id":"","ai_model":"","accepted":true,"evidence_id":""} -->',
+  );
+});
+
+test("parses visual block comments with visual kind", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","caption":"Flow"} -->',
+  );
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].block.type, "visual_block");
+  assert.equal(segments[0].block.props.asset_type, "diagram");
+  assert.equal(segments[0].block.props.visual_kind, "flowchart");
+  assert.equal(segments[0].block.props.src, "media/blog/post/chart.png");
 });
 
 test("interleaves native BlockNote markdown with custom block markdown", () => {

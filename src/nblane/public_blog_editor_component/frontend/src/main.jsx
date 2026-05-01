@@ -20,6 +20,7 @@ import "./style.css";
 import { blogSchema, getBlogSlashMenuItems } from "./blocks/blogBlocks.jsx";
 import {
   blocksToNblaneMarkdown,
+  containsDisplayMathBlock,
   isRawMarkdownDirective,
   parseMarkdownToEditorBlocks,
 } from "./blocks/markdown.js";
@@ -101,6 +102,7 @@ const DEFAULT_LABELS = {
   insert_at_cursor: "Recent cursor",
   insert_at_end: "End",
   insert_at_marker: "Marker",
+  insert_replace: "Replace selection",
   insert_into_post: "Insert",
   insert_placement: "Insert position",
   layout: "Layout",
@@ -115,6 +117,8 @@ const DEFAULT_LABELS = {
   new_blog: "New blog draft",
   no_issues: "No issues.",
   no_media: "No media.",
+  no_reference_images: "No images in the media library.",
+  no_source_videos: "No videos in the media library.",
   preview: "Preview",
   preview_empty: "No preview yet.",
   preview_unavailable: "No inline preview available.",
@@ -131,7 +135,14 @@ const DEFAULT_LABELS = {
   save: "Save",
   save_to_media: "Save to media",
   selected_media: "Selected media",
+  selection_context: "Selection context",
+  selection_context_empty: "No text selection; using the current block.",
   source_mode: "Source",
+  source_video: "Source video",
+  source_video_manual: "Manual source video URL/path",
+  source_video_select: "Select source video",
+  video_edit_source_help:
+    "DashScope video edit requires MP4/MOV, 2-10 seconds, up to 100MB. Local media is uploaded to temporary DashScope OSS before generation.",
   status: "Status",
   summary: "Summary",
   tags: "Tags",
@@ -150,7 +161,7 @@ const DEFAULT_LABELS = {
   video_edit: "Video edit",
   visual: "Visual",
   visual_block: "Visual",
-  visual_block_help: "Image or video candidate",
+  visual_block_help: "Image, video, or diagram candidate",
   visual_alt_help: "Used as Markdown image alt text when inserted; covers use the post title.",
   visual_caption_help: "Shown as a body caption or video title; not used for covers.",
   visual_custom: "Custom",
@@ -158,6 +169,9 @@ const DEFAULT_LABELS = {
   visual_prompt: "Visual prompt",
   visual_prompt_suggestions: "Prompt suggestions",
   visual_provider: "Visual generation",
+  reference_image: "Reference image",
+  reference_image_manual: "Manual reference image URL/path",
+  reference_image_select: "Select reference image",
   view_full_preview: "Open large preview",
   visual_size: "Size",
   visual_size_custom: "Custom size",
@@ -293,6 +307,10 @@ function mediaPath(item) {
 }
 
 function mediaSnippet(item) {
+  const visualSnippet = generatedVisualSnippet(item);
+  if (visualSnippet) {
+    return visualSnippet;
+  }
   const provided = cleanText(item.snippet || "");
   if (provided.trim()) {
     return provided;
@@ -318,6 +336,102 @@ function mediaKind(item) {
     return kind;
   }
   return /\.(mp4|mov|webm|m4v)$/i.test(path) ? "video" : "image";
+}
+
+function basename(value) {
+  const clean = cleanText(value).replace(/\\/gu, "/").replace(/\/+$/u, "");
+  return clean.split("/").filter(Boolean).pop() || clean;
+}
+
+function mediaOptionLabel(item, labels) {
+  const path = mediaPath(item);
+  const name = cleanText(item.name || item.title || basename(path) || label(labels, "media"));
+  const details = [
+    mediaKind(item),
+    item.size_kb !== undefined ? `${item.size_kb} KB` : "",
+  ].filter(Boolean);
+  return details.length ? `${name} (${details.join(" / ")})` : name;
+}
+
+function selectableMediaOptions(items, kind, labels) {
+  const byPath = new Map();
+  for (const item of asArray(items).map(asObject)) {
+    if (item.unsaved === true) {
+      continue;
+    }
+    const path = mediaPath(item);
+    if (!path || mediaKind(item) !== kind) {
+      continue;
+    }
+    const key = mediaLookupKey(path);
+    if (!key || byPath.has(key)) {
+      continue;
+    }
+    byPath.set(key, {
+      path,
+      label: mediaOptionLabel(item, labels),
+    });
+  }
+  return Array.from(byPath.values());
+}
+
+const VISUAL_KIND_TO_ASSET_TYPE = {
+  cover: "image",
+  flowchart: "diagram",
+  example: "image",
+  video_edit: "video",
+};
+
+function normalizeVisualKind(value) {
+  const clean = cleanText(value).trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(VISUAL_KIND_TO_ASSET_TYPE, clean)
+    ? clean
+    : "";
+}
+
+function normalizeVisualAssetType(value, visualKind = "") {
+  const clean = cleanText(value).trim().toLowerCase();
+  const kind = normalizeVisualKind(visualKind || clean);
+  if (kind) {
+    return VISUAL_KIND_TO_ASSET_TYPE[kind];
+  }
+  return ["image", "video", "diagram"].includes(clean) ? clean : "image";
+}
+
+function visualBlockMarkdownComment(props) {
+  const json = JSON.stringify(props).replace(/--/gu, "- -");
+  return `<!-- nblane:visual_block ${json} -->`;
+}
+
+function generatedVisualSnippet(item) {
+  const path = mediaPath(item);
+  if (!path) {
+    return "";
+  }
+  const rawVisualKind = item.visual_kind || item.visualKind || item.asset_type;
+  const visualKind = normalizeVisualKind(rawVisualKind);
+  const itemKind = mediaKind(item);
+  const assetType = normalizeVisualAssetType(
+    item.asset_type || itemKind,
+    visualKind,
+  );
+  if (!visualKind && assetType !== "diagram" && item.ai_generated !== true) {
+    return "";
+  }
+  return visualBlockMarkdownComment({
+    asset_type: assetType,
+    visual_kind: visualKind,
+    src: path,
+    prompt: cleanText(item.prompt),
+    caption: cleanText(item.caption),
+    alt: cleanText(item.alt || item.alt_text || item.title || ""),
+    status: cleanText(item.status || "accepted"),
+    ai_generated: item.ai_generated === true || item.generated === true,
+    ai_source_id: cleanText(item.ai_source_id),
+    ai_model: cleanText(item.ai_model || item.model),
+    accepted: item.accepted !== false,
+    evidence_id: cleanText(item.evidence_id),
+  });
 }
 
 function mediaVideoCodecLabel(item, labels) {
@@ -509,6 +623,162 @@ function findBlockById(blocks, blockId) {
     }
   }
   return null;
+}
+
+function truncateContextText(value, limit = 900) {
+  const clean = cleanText(value).replace(/\s+/gu, " ").trim();
+  return clean.length > limit ? `${clean.slice(0, limit)}...` : clean;
+}
+
+function inlineContentText(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content.map((item) => inlineContentText(item)).filter(Boolean).join("");
+  }
+  if (!content || typeof content !== "object") {
+    return "";
+  }
+  if (typeof content.text === "string") {
+    return content.text;
+  }
+  if (content.content !== undefined) {
+    return inlineContentText(content.content);
+  }
+  if (content.children !== undefined) {
+    return inlineContentText(content.children);
+  }
+  return "";
+}
+
+function blockContextText(block) {
+  if (!block) {
+    return "";
+  }
+  const parts = [
+    inlineContentText(block.content),
+    ...asArray(block.children).map((child) => blockContextText(child)),
+  ].filter(Boolean);
+  return parts.join("\n").trim();
+}
+
+function flattenBlocks(blocks, output = []) {
+  for (const block of asArray(blocks)) {
+    output.push(block);
+    flattenBlocks(block?.children, output);
+  }
+  return output;
+}
+
+function blockContextSummary(block) {
+  return {
+    block_id: cleanText(block?.id),
+    type: cleanText(block?.type),
+    text: truncateContextText(blockContextText(block), 420),
+  };
+}
+
+function browserSelectionText() {
+  try {
+    const selection = window.getSelection?.();
+    return selection && !selection.isCollapsed ? cleanText(selection.toString()).trim() : "";
+  } catch (_err) {
+    return "";
+  }
+}
+
+function buildSourceSelectionContext(markdown, selection) {
+  const source = cleanText(markdown);
+  const length = source.length;
+  const rawStart = Number(selection?.start);
+  const rawEnd = Number(selection?.end);
+  const start = Number.isFinite(rawStart)
+    ? Math.max(0, Math.min(length, rawStart))
+    : length;
+  const end = Number.isFinite(rawEnd)
+    ? Math.max(start, Math.min(length, rawEnd))
+    : start;
+  const contextStart = Math.max(0, start - 420);
+  const contextEnd = Math.min(length, end + 420);
+  return {
+    block_id: "source",
+    selection_text: source.slice(start, end),
+    range: { start, end },
+    cursor_block_id: "source",
+    surrounding_blocks: [
+      {
+        block_id: "source",
+        type: "markdown",
+        text: truncateContextText(source.slice(contextStart, contextEnd), 900),
+      },
+    ],
+  };
+}
+
+function buildEditorSelectionContext(editor, rememberedBlockId = "") {
+  let cursorBlock = null;
+  try {
+    cursorBlock = editor.getTextCursorPosition()?.block || null;
+  } catch (_err) {
+    cursorBlock = null;
+  }
+
+  let selection = null;
+  try {
+    selection = editor.getSelection?.() || null;
+  } catch (_err) {
+    selection = null;
+  }
+
+  let cutSelection = null;
+  if (selection) {
+    try {
+      cutSelection = editor.getSelectionCutBlocks?.() || null;
+    } catch (_err) {
+      cutSelection = null;
+    }
+  }
+
+  const selectedBlocks = asArray(selection?.blocks);
+  const cutBlocks = asArray(cutSelection?.blocks);
+  const flatBlocks = flattenBlocks(editor.document);
+  const rememberedBlock = findBlockById(editor.document, rememberedBlockId);
+  const activeBlock = selectedBlocks[0] || cursorBlock || rememberedBlock || null;
+  const activeBlockId = cleanText(activeBlock?.id || cursorBlock?.id || rememberedBlockId);
+  const activeIndex = flatBlocks.findIndex((block) => cleanText(block?.id) === activeBlockId);
+  const contextBlocks =
+    activeIndex >= 0
+      ? flatBlocks.slice(Math.max(0, activeIndex - 2), activeIndex + 3)
+      : activeBlock
+        ? [activeBlock]
+        : [];
+  const selectionText =
+    browserSelectionText() ||
+    (cutBlocks.length ? cutBlocks : selectedBlocks).map(blockContextText).join("\n\n").trim();
+  const blockIds = (selectedBlocks.length ? selectedBlocks : activeBlock ? [activeBlock] : [])
+    .map((block) => cleanText(block?.id))
+    .filter(Boolean);
+
+  if (!activeBlockId && !blockIds.length && !selectionText) {
+    return null;
+  }
+
+  return {
+    block_id: blockIds[0] || activeBlockId,
+    selection_text: selectionText,
+    range: selection
+      ? {
+          block_ids: blockIds,
+          start_pos: cutSelection?._meta?.startPos ?? null,
+          end_pos: cutSelection?._meta?.endPos ?? null,
+          block_cut_at_start: cutSelection?.blockCutAtStart || null,
+          block_cut_at_end: cutSelection?.blockCutAtEnd || null,
+        }
+      : null,
+    cursor_block_id: cleanText(cursorBlock?.id || rememberedBlockId),
+    surrounding_blocks: contextBlocks.map(blockContextSummary),
+  };
 }
 
 function statusClass(status) {
@@ -770,7 +1040,8 @@ function LegacyMarkdownEditor(props) {
   const initialMarkdown = markdownFromValue(args.initial_markdown);
   const height = Number(args.height || 560);
   const editable = args.editable !== false;
-  const sourceMode = args.source_mode === true;
+  const mathSafe = args.math_safe === true;
+  const sourceMode = args.source_mode === true || (mathSafe && containsDisplayMathBlock(initialMarkdown));
   const editorSourceMode = sourceMode;
   const editor = useCreateBlockNote({ schema: blogSchema });
   const [sourceMarkdown, setSourceMarkdown] = useState(initialMarkdown);
@@ -781,6 +1052,12 @@ function LegacyMarkdownEditor(props) {
   const loadedInitialMarkdownRef = useRef(null);
   const loadedSourceModeRef = useRef(null);
   const sendTimerRef = useRef(null);
+  const sourceTextareaRef = useRef(null);
+  const sourceSelectionRef = useRef({
+    start: (initialMarkdown || "").length,
+    end: (initialMarkdown || "").length,
+  });
+  const lastCursorBlockIdRef = useRef("");
 
   useFrameHeight([height, error, ready, editorSourceMode], height + 34);
 
@@ -796,6 +1073,11 @@ function LegacyMarkdownEditor(props) {
       }
       setReady(false);
       setError("");
+      lastCursorBlockIdRef.current = "";
+      sourceSelectionRef.current = {
+        start: (initialMarkdown || "").length,
+        end: (initialMarkdown || "").length,
+      };
       if (editorSourceMode) {
         setSourceMarkdown(initialMarkdown || "");
         latestMarkdownRef.current = initialMarkdown || "";
@@ -805,7 +1087,10 @@ function LegacyMarkdownEditor(props) {
         Streamlit.setComponentValue({
           markdown: latestMarkdownRef.current,
           dirty: false,
-          selected_block: null,
+          selected_block: buildSourceSelectionContext(
+            latestMarkdownRef.current,
+            sourceSelectionRef.current,
+          ),
           insert_event: null,
         });
         setReady(true);
@@ -825,7 +1110,10 @@ function LegacyMarkdownEditor(props) {
         Streamlit.setComponentValue({
           markdown: latestMarkdownRef.current,
           dirty: false,
-          selected_block: null,
+          selected_block: buildEditorSelectionContext(
+            editor,
+            lastCursorBlockIdRef.current,
+          ),
           insert_event: null,
         });
       } catch (err) {
@@ -853,13 +1141,47 @@ function LegacyMarkdownEditor(props) {
     };
   }, []);
 
+  function rememberLegacySourceSelection() {
+    const textarea = sourceTextareaRef.current;
+    if (!textarea) {
+      return sourceSelectionRef.current;
+    }
+    const next = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    };
+    sourceSelectionRef.current = next;
+    return next;
+  }
+
+  function rememberLegacyCursorBlock() {
+    if (editorSourceMode) {
+      return null;
+    }
+    try {
+      const block = editor.getTextCursorPosition()?.block || null;
+      if (block?.id) {
+        lastCursorBlockIdRef.current = block.id;
+      }
+      return block;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function legacySelectionContext() {
+    return editorSourceMode
+      ? buildSourceSelectionContext(latestMarkdownRef.current, sourceSelectionRef.current)
+      : buildEditorSelectionContext(editor, lastCursorBlockIdRef.current);
+  }
+
   function sendLegacyValue(markdown, immediate = false) {
     latestMarkdownRef.current = markdown;
     const send = () => {
       Streamlit.setComponentValue({
         markdown,
         dirty: markdown !== (initialMarkdown || ""),
-        selected_block: null,
+        selected_block: legacySelectionContext(),
         insert_event: null,
       });
     };
@@ -894,6 +1216,7 @@ function LegacyMarkdownEditor(props) {
       {error ? <div className="nb-editor-error">{error}</div> : null}
       {editorSourceMode ? (
         <textarea
+          ref={sourceTextareaRef}
           className="nb-source-editor"
           value={sourceMarkdown}
           readOnly={!editable}
@@ -902,7 +1225,13 @@ function LegacyMarkdownEditor(props) {
             setSourceMarkdown(next);
             sendLegacyValue(next, false);
           }}
-          onBlur={() => sendLegacyValue(latestMarkdownRef.current, true)}
+          onSelect={rememberLegacySourceSelection}
+          onKeyUp={rememberLegacySourceSelection}
+          onMouseUp={rememberLegacySourceSelection}
+          onBlur={() => {
+            rememberLegacySourceSelection();
+            sendLegacyValue(latestMarkdownRef.current, true);
+          }}
           style={{ minHeight: `${height}px` }}
         />
       ) : (
@@ -911,8 +1240,18 @@ function LegacyMarkdownEditor(props) {
           editable={editable}
           theme="light"
           slashMenu={false}
-          onChange={() => syncMarkdown(false)}
-          onBlur={() => syncMarkdown(true)}
+          onSelectionChange={rememberLegacyCursorBlock}
+          onKeyUp={rememberLegacyCursorBlock}
+          onMouseUp={rememberLegacyCursorBlock}
+          onFocus={rememberLegacyCursorBlock}
+          onChange={() => {
+            rememberLegacyCursorBlock();
+            syncMarkdown(false);
+          }}
+          onBlur={() => {
+            rememberLegacyCursorBlock();
+            syncMarkdown(true);
+          }}
         >
           <BlogSlashMenu editor={editor} labels={labels} />
         </BlockNoteView>
@@ -931,6 +1270,7 @@ function ShellEditor(props) {
   const visualConfig = asObject(args.visual_config);
   const visualResults = asArray(args.visual_results).map(asObject);
   const visualGuidance = asObject(args.visual_guidance);
+  const operationNotice = asObject(args.operation_notice);
   const previewHtml = cleanText(args.preview_html);
   const initialStatusFilter = cleanText(args.status_filter || "all") || "all";
   const activeSlug = cleanText(args.active_slug || args.slug || args.document_id || "");
@@ -938,7 +1278,8 @@ function ShellEditor(props) {
   const initialMarkdown = markdownFromValue(args.initial_markdown);
   const height = Number(args.height || 720);
   const editable = args.editable !== false;
-  const sourceMode = args.source_mode === true;
+  const mathSafe = args.math_safe === true;
+  const sourceMode = args.source_mode === true || (mathSafe && containsDisplayMathBlock(initialMarkdown));
   const layoutStorageKey = cleanText(
     args.layout_storage_key ||
       args.storage_key ||
@@ -969,6 +1310,7 @@ function ShellEditor(props) {
   const [draftMeta, setDraftMetaState] = useState(() =>
     normalizeMeta(args.active_post_meta),
   );
+  const [selectedBlock, setSelectedBlockState] = useState(null);
 
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
@@ -980,6 +1322,7 @@ function ShellEditor(props) {
   const initialMarkdownRef = useRef(initialMarkdown);
   const eventCounterRef = useRef(0);
   const lastCursorBlockIdRef = useRef("");
+  const selectedBlockRef = useRef(null);
   const sourceTextareaRef = useRef(null);
   const sourceSelectionRef = useRef({ start: 0, end: 0 });
   const editorSourceMode = sourceMode;
@@ -989,6 +1332,7 @@ function ShellEditor(props) {
   const visualSeed = deepStableStringify(args.visual_config || {});
   const visualResultsSeed = deepStableStringify(args.visual_results || []);
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
+  const operationNoticeSeed = deepStableStringify(args.operation_notice || {});
   const mediaPreviewRows = useMemo(
     () =>
       mediaItems.map((item, index) => ({
@@ -1028,6 +1372,7 @@ function ShellEditor(props) {
       visualSeed,
       visualResultsSeed,
       visualGuidanceSeed,
+      operationNoticeSeed,
     ],
     height + 72,
   );
@@ -1079,6 +1424,8 @@ function ShellEditor(props) {
       setReady(false);
       setError("");
       lastCursorBlockIdRef.current = "";
+      selectedBlockRef.current = null;
+      setSelectedBlockState(null);
       sourceSelectionRef.current = {
         start: (initialMarkdown || "").length,
         end: (initialMarkdown || "").length,
@@ -1156,28 +1503,50 @@ function ShellEditor(props) {
 
   const rememberCursorBlock = useCallback(() => {
     if (editorSourceMode) {
-      return;
+      return null;
     }
     try {
       const block = editor.getTextCursorPosition()?.block || null;
       if (block?.id) {
         lastCursorBlockIdRef.current = block.id;
       }
+      return block;
     } catch (_err) {
       // BlockNote can throw after focus leaves the editor; keep the previous block id.
+      return null;
     }
   }, [editor, editorSourceMode]);
 
   const rememberSourceSelection = useCallback(() => {
     const textarea = sourceTextareaRef.current;
     if (!textarea) {
-      return;
+      return sourceSelectionRef.current;
     }
-    sourceSelectionRef.current = {
+    const next = {
       start: textarea.selectionStart,
       end: textarea.selectionEnd,
     };
+    sourceSelectionRef.current = next;
+    return next;
   }, []);
+
+  const refreshSelectedBlock = useCallback(() => {
+    const next = editorSourceMode
+      ? buildSourceSelectionContext(latestMarkdownRef.current, sourceSelectionRef.current)
+      : buildEditorSelectionContext(editor, lastCursorBlockIdRef.current);
+    if (deepStableStringify(next) !== deepStableStringify(selectedBlockRef.current)) {
+      selectedBlockRef.current = next;
+      setSelectedBlockState(next);
+    } else {
+      selectedBlockRef.current = next;
+    }
+    return next;
+  }, [editor, editorSourceMode]);
+
+  const handleEditorSelectionUpdate = useCallback(() => {
+    rememberCursorBlock();
+    refreshSelectedBlock();
+  }, [refreshSelectedBlock, rememberCursorBlock]);
 
   const nextEventId = useCallback(
     (action) => {
@@ -1205,6 +1574,7 @@ function ShellEditor(props) {
       if (!editable && WRITE_ACTIONS.has(action)) {
         return;
       }
+      const selectionContext = selectedBlockRef.current || refreshSelectedBlock();
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
         await waitForInputFlush();
@@ -1218,6 +1588,7 @@ function ShellEditor(props) {
         meta: draftMetaRef.current,
         layout_state: layoutRef.current,
         dirty: computeDirty(markdown, draftMetaRef.current),
+        selected_block: selectionContext,
         ...extraPayload,
         event_id: eventId,
       };
@@ -1228,14 +1599,22 @@ function ShellEditor(props) {
         markdown,
         dirty: payload.dirty,
         layout_state: layoutRef.current,
-        selected_block: null,
+        selected_block: selectionContext,
         insert_event:
           action === "insert_candidate" || action === "insert_media"
             ? extraPayload
             : null,
       });
     },
-    [activeSlug, computeDirty, documentId, editable, getCurrentMarkdown, nextEventId],
+    [
+      activeSlug,
+      computeDirty,
+      documentId,
+      editable,
+      getCurrentMarkdown,
+      nextEventId,
+      refreshSelectedBlock,
+    ],
   );
 
   const syncMarkdown = useCallback(
@@ -1244,6 +1623,7 @@ function ShellEditor(props) {
         return;
       }
       rememberCursorBlock();
+      refreshSelectedBlock();
       const markdown = editorSourceMode
         ? latestMarkdownRef.current
         : await getCurrentMarkdown();
@@ -1255,6 +1635,7 @@ function ShellEditor(props) {
       editable,
       editorSourceMode,
       getCurrentMarkdown,
+      refreshSelectedBlock,
       rememberCursorBlock,
       ready,
     ],
@@ -1306,13 +1687,64 @@ function ShellEditor(props) {
         return next;
       }
       try {
-        if (insertPlacement === "replace" && editor.getSelection()) {
-          editor.removeBlocks(editor.getSelectionCutBlocks());
-        }
         const blocks = parseMarkdownToEditorBlocks(editor, cleanSnippet);
+        let insertionReference = null;
+        let insertionPlacement = "after";
+        if (insertPlacement === "replace") {
+          let replacementBlocks = [];
+          try {
+            replacementBlocks = asArray(editor.getSelection()?.blocks);
+          } catch (_err) {
+            replacementBlocks = [];
+          }
+          if (!replacementBlocks.length) {
+            const rememberedTarget = cleanText(
+              selectedBlockRef.current?.block_id || lastCursorBlockIdRef.current,
+            );
+            const targetBlock = findBlockById(editor.document, rememberedTarget);
+            if (targetBlock) {
+              replacementBlocks = [targetBlock];
+            }
+          }
+          if (replacementBlocks.length) {
+            const flatBlocks = flattenBlocks(editor.document);
+            const replacementIds = new Set(
+              replacementBlocks.map((block) => cleanText(block?.id)).filter(Boolean),
+            );
+            const firstIndex = flatBlocks.findIndex((block) =>
+              replacementIds.has(cleanText(block?.id)),
+            );
+            let lastIndex = -1;
+            if (firstIndex >= 0) {
+              for (let index = flatBlocks.length - 1; index >= firstIndex; index -= 1) {
+                if (replacementIds.has(cleanText(flatBlocks[index]?.id))) {
+                  lastIndex = index;
+                  break;
+                }
+              }
+            }
+            const previousBlock = firstIndex > 0 ? flatBlocks[firstIndex - 1] : null;
+            const nextBlock =
+              lastIndex >= 0 && lastIndex + 1 < flatBlocks.length
+                ? flatBlocks[lastIndex + 1]
+                : null;
+            insertionReference = previousBlock || nextBlock;
+            insertionPlacement = previousBlock ? "after" : "before";
+            editor.removeBlocks(replacementBlocks);
+            if (!insertionReference) {
+              editor.replaceBlocks(editor.document, blocks);
+              return await getCurrentMarkdown();
+            }
+          }
+        }
+        const referenceBlockId = cleanText(
+          selectedBlockRef.current?.cursor_block_id ||
+            selectedBlockRef.current?.block_id ||
+            lastCursorBlockIdRef.current,
+        );
         let referenceBlock = findBlockById(
           editor.document,
-          lastCursorBlockIdRef.current,
+          referenceBlockId,
         );
         try {
           const cursorBlock = editor.getTextCursorPosition()?.block || null;
@@ -1326,7 +1758,11 @@ function ShellEditor(props) {
         if (!referenceBlock) {
           referenceBlock = editor.document[editor.document.length - 1];
         }
-        editor.insertBlocks(blocks, referenceBlock, "after");
+        editor.insertBlocks(
+          blocks,
+          insertionReference || referenceBlock,
+          insertionReference ? insertionPlacement : "after",
+        );
         const next = await getCurrentMarkdown();
         if (next === current) {
           const fallback = insertMarkdownText(current, cleanSnippet, "append");
@@ -1900,32 +2336,43 @@ function ShellEditor(props) {
                   setDirty(computeDirty(next, draftMetaRef.current));
                   syncMarkdown();
                 }}
-                onSelect={rememberSourceSelection}
-                onKeyUp={rememberSourceSelection}
-                onMouseUp={rememberSourceSelection}
+                onSelect={() => {
+                  rememberSourceSelection();
+                  refreshSelectedBlock();
+                }}
+                onKeyUp={() => {
+                  rememberSourceSelection();
+                  refreshSelectedBlock();
+                }}
+                onMouseUp={() => {
+                  rememberSourceSelection();
+                  refreshSelectedBlock();
+                }}
                 onBlur={() => {
                   rememberSourceSelection();
+                  refreshSelectedBlock();
                   syncMarkdown();
                 }}
               />
             ) : (
               <div
                 className="nb-blocknote-frame"
-                onKeyUp={rememberCursorBlock}
-                onMouseUp={rememberCursorBlock}
-                onFocus={rememberCursorBlock}
+                onKeyUp={handleEditorSelectionUpdate}
+                onMouseUp={handleEditorSelectionUpdate}
+                onFocus={handleEditorSelectionUpdate}
               >
                 <BlockNoteView
                   editor={editor}
                   editable={editable}
                   theme="light"
                   slashMenu={false}
+                  onSelectionChange={handleEditorSelectionUpdate}
                   onChange={() => {
-                    rememberCursorBlock();
+                    handleEditorSelectionUpdate();
                     syncMarkdown();
                   }}
                   onBlur={() => {
-                    rememberCursorBlock();
+                    handleEditorSelectionUpdate();
                     syncMarkdown();
                   }}
                 >
@@ -2065,6 +2512,7 @@ function ShellEditor(props) {
               editable={editable}
               labels={labels}
               candidates={aiCandidates}
+              selectedBlock={selectedBlock}
               onInsert={handleInsertCandidate}
               onApplyMeta={handleApplyCandidateMeta}
               onRun={(payload) => emitAction("generate_ai_candidate", payload)}
@@ -2076,8 +2524,10 @@ function ShellEditor(props) {
               editable={editable}
               labels={labels}
               visualConfig={visualConfig}
+              mediaItems={mediaItems}
               visualResults={visualResults}
               visualGuidance={visualGuidance}
+              operationNotice={operationNotice}
               onGenerate={handleGenerateVisual}
               onInsert={handleInsertMedia}
               onSetCover={handleSetCover}
@@ -2212,6 +2662,7 @@ function InsertPlacementSelect({
   onChange,
   disabled = false,
   includeCursor = true,
+  includeReplace = true,
 }) {
   return (
     <label className="nb-field compact nb-placement-field">
@@ -2226,6 +2677,9 @@ function InsertPlacementSelect({
         ) : null}
         <option value="marker">{label(labels, "insert_at_marker")}</option>
         <option value="append">{label(labels, "insert_at_end")}</option>
+        {includeReplace ? (
+          <option value="replace">{label(labels, "insert_replace")}</option>
+        ) : null}
       </select>
     </label>
   );
@@ -2355,6 +2809,7 @@ function MediaDrawer({
             onChange={setUploadPlacement}
             disabled={!editable}
             includeCursor={false}
+            includeReplace={false}
           />
         ) : null}
         <button
@@ -2472,18 +2927,46 @@ function MediaDrawer({
   );
 }
 
+function SelectionContextPanel({ labels, selectedBlock }) {
+  const context = asObject(selectedBlock);
+  const blockId = cleanText(context.block_id || context.cursor_block_id);
+  const selectionText = cleanText(context.selection_text).trim();
+  const surrounding = asArray(context.surrounding_blocks)
+    .map((block) => asObject(block))
+    .map((block) => cleanText(block.text).trim())
+    .filter(Boolean);
+  if (!blockId && !selectionText && !surrounding.length) {
+    return null;
+  }
+  return (
+    <section className="nb-selection-context">
+      <strong>{label(labels, "selection_context")}</strong>
+      {blockId ? <span className="nb-muted-line">{blockId}</span> : null}
+      {selectionText ? (
+        <pre>{selectionText.slice(0, 520)}</pre>
+      ) : (
+        <p>{label(labels, "selection_context_empty")}</p>
+      )}
+      {!selectionText && surrounding.length ? <pre>{surrounding[0].slice(0, 520)}</pre> : null}
+    </section>
+  );
+}
+
 function AiDrawer({
   editable,
   labels,
   candidates,
+  selectedBlock,
   onInsert,
   onApplyMeta,
   onRun,
   currentTitle,
 }) {
   const [evidenceId, setEvidenceId] = useState("");
+  const [candidatePlacement, setCandidatePlacement] = useState("cursor");
   return (
     <div className="nb-drawer-body">
+      <SelectionContextPanel labels={labels} selectedBlock={selectedBlock} />
       <button
         type="button"
         className="nb-button wide"
@@ -2553,11 +3036,17 @@ function AiDrawer({
                 ) : null}
                 {body ? <pre>{body.slice(0, 420)}</pre> : null}
                 <div className="nb-row-actions">
+                  <InsertPlacementSelect
+                    labels={labels}
+                    value={candidatePlacement}
+                    onChange={setCandidatePlacement}
+                    disabled={!editable}
+                  />
                   <button
                     type="button"
                     className="nb-button"
                     disabled={!editable}
-                    onClick={() => onInsert(candidate, index, "marker")}
+                    onClick={() => onInsert(candidate, index, candidatePlacement)}
                   >
                     {label(labels, "insert_candidate")}
                   </button>
@@ -2867,12 +3356,29 @@ function VisualResultsList({
   );
 }
 
+function OperationNotice({ notice, source = "" }) {
+  const data = asObject(notice);
+  const message = cleanText(data.message).trim();
+  if (!message) {
+    return null;
+  }
+  const noticeSource = cleanText(data.source).trim();
+  if (source && noticeSource && noticeSource !== source) {
+    return null;
+  }
+  const tone = cleanText(data.tone || "info").toLowerCase();
+  const className = tone === "error" ? "nb-editor-error" : "nb-editor-notice";
+  return <div className={className}>{message}</div>;
+}
+
 function VisualDrawer({
   editable,
   labels,
   visualConfig,
+  mediaItems = [],
   visualResults,
   visualGuidance,
+  operationNotice = {},
   onGenerate,
   onInsert,
   onSetCover,
@@ -2888,6 +3394,8 @@ function VisualDrawer({
   const [customSize, setCustomSize] = useState("");
   const [alt, setAlt] = useState("");
   const [caption, setCaption] = useState("");
+  const [sourceVideo, setSourceVideo] = useState("");
+  const [referenceImage, setReferenceImage] = useState("");
   const configured = visualConfig.configured === true;
   const model =
     assetType === "video_edit"
@@ -2901,6 +3409,18 @@ function VisualDrawer({
   const sizeOptions = optionPairs(guidance.size_options);
   const selectedStyle = styleChoice === "__custom__" ? customStyle : styleChoice;
   const selectedSize = sizeChoice === "__custom__" ? customSize : sizeChoice;
+  const selectableMedia = useMemo(
+    () => [...asArray(mediaItems), ...asArray(visualResults)],
+    [mediaItems, visualResults],
+  );
+  const sourceVideoOptions = useMemo(
+    () => selectableMediaOptions(selectableMedia, "video", labels),
+    [labels, selectableMedia],
+  );
+  const referenceImageOptions = useMemo(
+    () => selectableMediaOptions(selectableMedia, "image", labels),
+    [labels, selectableMedia],
+  );
 
   useEffect(() => {
     setStyleChoice("");
@@ -2944,6 +3464,7 @@ function VisualDrawer({
       {!configured ? (
         <p className="nb-editor-error">{label(labels, "missing_visual_key")}</p>
       ) : null}
+      <OperationNotice notice={operationNotice} source="visual" />
       {warnings.length ? (
         <ul className="nb-compact-list">
           {warnings.map((warning) => (
@@ -2991,6 +3512,75 @@ function VisualDrawer({
           rows={5}
         />
       </label>
+      {assetType === "video_edit" ? (
+        <>
+          <label className="nb-field">
+            <span>{label(labels, "source_video_select")}</span>
+            <select
+              value={
+                sourceVideoOptions.some((option) => option.path === sourceVideo)
+                  ? sourceVideo
+                  : ""
+              }
+              disabled={!editable || !sourceVideoOptions.length}
+              onChange={(event) => setSourceVideo(event.target.value)}
+            >
+              <option value="">
+                {sourceVideoOptions.length
+                  ? label(labels, "visual_custom")
+                  : label(labels, "no_source_videos")}
+              </option>
+              {sourceVideoOptions.map((option) => (
+                <option value={option.path} key={`source-video-${option.path}`}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="nb-field">
+            <span>{label(labels, "source_video_manual")}</span>
+            <input
+              value={sourceVideo}
+              disabled={!editable}
+              placeholder="media/blog/post/source.mp4 or https://example.com/source.mp4"
+              onChange={(event) => setSourceVideo(event.target.value)}
+            />
+            <small>{label(labels, "video_edit_source_help")}</small>
+          </label>
+          <label className="nb-field">
+            <span>{label(labels, "reference_image_select")}</span>
+            <select
+              value={
+                referenceImageOptions.some((option) => option.path === referenceImage)
+                  ? referenceImage
+                  : ""
+              }
+              disabled={!editable || !referenceImageOptions.length}
+              onChange={(event) => setReferenceImage(event.target.value)}
+            >
+              <option value="">
+                {referenceImageOptions.length
+                  ? label(labels, "visual_custom")
+                  : label(labels, "no_reference_images")}
+              </option>
+              {referenceImageOptions.map((option) => (
+                <option value={option.path} key={`reference-image-${option.path}`}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="nb-field">
+            <span>{label(labels, "reference_image_manual")}</span>
+            <input
+              value={referenceImage}
+              disabled={!editable}
+              placeholder="media/blog/post/reference.png"
+              onChange={(event) => setReferenceImage(event.target.value)}
+            />
+          </label>
+        </>
+      ) : null}
       <label className="nb-field">
         <span>{label(labels, "visual_style")}</span>
         {renderOptionSelect({
@@ -3050,7 +3640,12 @@ function VisualDrawer({
       <button
         type="button"
         className="nb-button wide"
-        disabled={!editable || !configured || !prompt.trim()}
+        disabled={
+          !editable ||
+          !configured ||
+          !prompt.trim() ||
+          (assetType === "video_edit" && !sourceVideo.trim())
+        }
         onClick={() =>
           onGenerate({
             asset_type: assetType,
@@ -3059,6 +3654,8 @@ function VisualDrawer({
             size: selectedSize,
             alt,
             caption,
+            source_video: sourceVideo.trim(),
+            reference_image: referenceImage.trim(),
           })
         }
       >

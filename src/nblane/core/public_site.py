@@ -60,6 +60,10 @@ _URL_ATTR_RE = re.compile(
     r"(?P<bare>[^\s>]+))",
     re.IGNORECASE | re.DOTALL,
 )
+_VISUAL_BLOCK_COMMENT_RE = re.compile(
+    r"<!--\s*nblane:visual_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
+    re.IGNORECASE,
+)
 _MARKDOWN_LINK_RE = re.compile(
     r"(?<!!)\[[^\]]+\]\(\s*(?P<href><[^>]+>|[^)\s]+)"
     r"(?:\s+[\"'][^\"']*[\"'])?\s*\)"
@@ -937,6 +941,22 @@ def _video_directives(text: str) -> list[tuple[str, str]]:
     ]
 
 
+def _visual_block_comment_payloads(text: str) -> list[dict]:
+    payloads: list[dict] = []
+    for match in _VISUAL_BLOCK_COMMENT_RE.finditer(text):
+        raw = str(match.group("payload") or "").strip()
+        if not raw:
+            payloads.append({})
+            continue
+        try:
+            loaded = json.loads(raw)
+        except Exception:
+            payloads.append({})
+            continue
+        payloads.append(loaded if isinstance(loaded, dict) else {})
+    return payloads
+
+
 def _blog_body_media_refs(body: str) -> list[str]:
     refs: list[str] = []
     refs.extend(
@@ -948,6 +968,11 @@ def _blog_body_media_refs(body: str) -> list[str]:
         _strip_markdown_url(src).lstrip("/")
         for _caption, src in _video_directives(body)
         if _is_local_media_ref(src)
+    )
+    refs.extend(
+        _strip_markdown_url(str(payload.get("src", "") or "")).lstrip("/")
+        for payload in _visual_block_comment_payloads(body)
+        if _is_local_media_ref(str(payload.get("src", "") or ""))
     )
     return refs
 
@@ -1210,6 +1235,55 @@ def _replace_video_directives(text: str) -> str:
         )
 
     return pattern.sub(repl, text)
+
+
+def _render_visual_block_comment(payload: dict) -> str:
+    src = _strip_markdown_url(str(payload.get("src", "") or "")).strip()
+    if not src:
+        return ""
+    asset_type = str(payload.get("asset_type", "") or "").strip().lower()
+    visual_kind = str(payload.get("visual_kind", "") or "").strip().lower()
+    caption = str(payload.get("caption", "") or "").strip()
+    alt = str(payload.get("alt", "") or caption or "Visual").strip()
+    display_src = _media_src(src)
+    if (
+        asset_type == "video"
+        or visual_kind == "video_edit"
+        or _media_extension(src) in BLOG_VIDEO_EXTENSIONS
+    ):
+        return _render_video_block(caption or alt, display_src)
+    attrs = ""
+    if visual_kind:
+        attrs += f' data-visual-kind="{html.escape(visual_kind, quote=True)}"'
+    if asset_type:
+        attrs += f' data-asset-type="{html.escape(asset_type, quote=True)}"'
+    caption_html = (
+        f'<figcaption class="media-caption">{html.escape(caption)}</figcaption>'
+        if caption
+        else ""
+    )
+    return (
+        f'<figure class="media-block visual-block"{attrs}>'
+        f'<img src="{html.escape(display_src, quote=True)}" '
+        f'alt="{html.escape(alt, quote=True)}" loading="lazy" />'
+        f"{caption_html}</figure>"
+    )
+
+
+def _replace_visual_block_comments(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        raw = str(match.group("payload") or "").strip()
+        if not raw:
+            return ""
+        try:
+            loaded = json.loads(raw)
+        except Exception:
+            return ""
+        if not isinstance(loaded, dict):
+            return ""
+        return _render_visual_block_comment(loaded)
+
+    return _VISUAL_BLOCK_COMMENT_RE.sub(repl, text)
 
 
 def _validate_blog_body_media(
@@ -1547,6 +1621,7 @@ def validate_public_layer(
 
 
 def _markdown_to_html(text: str) -> str:
+    text = _replace_visual_block_comments(text)
     text = _replace_video_directives(text)
     prepared, math_blocks, inline_math = _extract_markdown_math(text)
     try:
@@ -1571,7 +1646,7 @@ def _markdown_to_html(text: str) -> str:
             if not line:
                 continue
             image_match = image_pattern.fullmatch(line)
-            if line.startswith('<figure class="media-block">') or line.startswith(
+            if line.startswith('<figure class="media-block') or line.startswith(
                 '<p class="media-caption">'
             ):
                 lines.append(line)
@@ -3891,6 +3966,7 @@ def blog_visual_result_rows(
     body: str = "",
 ) -> list[dict]:
     """Return editor payload rows for newly generated visual candidates."""
+    clean_visual_kind = str(asset_type or "").strip().lower()
     media_rows = blog_media_library_rows(
         profile_root,
         slug,
@@ -3903,7 +3979,11 @@ def blog_visual_result_rows(
         row = dict(rows_by_rel.get(result.relative_path, {}))
         if not row:
             path = result.path
-            kind = "video" if path.suffix.lower().lstrip(".") in BLOG_VIDEO_EXTENSIONS else "image"
+            kind = (
+                "video"
+                if path.suffix.lower().lstrip(".") in BLOG_VIDEO_EXTENSIONS
+                else "image"
+            )
             preview_payload = _blog_media_preview_payload(path, kind)
             row = {
                 "name": path.name,
@@ -3916,7 +3996,13 @@ def blog_visual_result_rows(
             }
         row.update(
             {
-                "asset_type": str(asset_type or "").strip().lower() or "cover",
+                "asset_type": clean_visual_kind or "cover",
+                "visual_kind": (
+                    clean_visual_kind
+                    if clean_visual_kind
+                    in {"cover", "flowchart", "example", "video_edit"}
+                    else ""
+                ),
                 "alt": str(alt or ""),
                 "caption": str(caption or ""),
                 "snippet": result.snippet,
@@ -3971,6 +4057,11 @@ def blog_visual_candidate_rows(
                 "referenced": False,
                 **preview_payload,
                 "asset_type": clean_type,
+                "visual_kind": (
+                    clean_type
+                    if clean_type in {"cover", "flowchart", "example", "video_edit"}
+                    else ""
+                ),
                 "alt": str(alt or ""),
                 "caption": str(caption or ""),
                 "snippet": _blog_media_snippet(

@@ -8,12 +8,16 @@ import json
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import time
+import uuid
 from dataclasses import dataclass, field
+from email.utils import formatdate
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from nblane.core import llm
@@ -35,6 +39,12 @@ DASHSCOPE_IMAGE_MIN_PIXELS = 768 * 768
 DASHSCOPE_IMAGE_MAX_PIXELS = 4096 * 4096
 DASHSCOPE_IMAGE_EDIT_MAX_PIXELS = 2048 * 2048
 DASHSCOPE_IMAGE_MAX_ASPECT_RATIO = 8
+DASHSCOPE_VIDEO_MIN_SECONDS = 2.0
+DASHSCOPE_VIDEO_MAX_SECONDS = 10.0
+DASHSCOPE_VIDEO_MAX_BYTES = 100 * 1024 * 1024
+DASHSCOPE_VIDEO_MIN_DIMENSION = 240
+DASHSCOPE_VIDEO_MAX_DIMENSION = 4096
+DASHSCOPE_VIDEO_MAX_ASPECT_RATIO = 8
 
 IMAGE_EXTENSIONS_BY_MIME = {
     "image/png": "png",
@@ -44,8 +54,11 @@ IMAGE_EXTENSIONS_BY_MIME = {
 }
 VIDEO_EXTENSIONS_BY_MIME = {
     "video/mp4": "mp4",
+    "video/quicktime": "mov",
     "video/webm": "webm",
 }
+VIDEO_EDIT_EXTENSIONS = {".mp4", ".mov"}
+VIDEO_EDIT_MIME_TYPES = {"video/mp4", "video/quicktime", "application/octet-stream"}
 PRIVATE_MARKERS = (
     "profiles/",
     "kanban.md",
@@ -160,6 +173,21 @@ def _endpoint_for(base_url: str, asset_type: str) -> str:
         return clean[: -len(video_suffix)].rstrip("/") + DASHSCOPE_IMAGE_PATH
     path = DASHSCOPE_VIDEO_PATH if asset_type == "video_edit" else DASHSCOPE_IMAGE_PATH
     return clean + path
+
+
+def _dashscope_http_base_for_upload(base_url: str) -> str:
+    """Return the DashScope API root used by temporary OSS upload certificates."""
+    clean = str(base_url or "").strip().rstrip("/")
+    if not clean:
+        return "https://dashscope.aliyuncs.com/api/v1"
+    for suffix in (
+        "/services/aigc/video-generation/video-synthesis",
+        "/services/aigc/image-generation/generation",
+        "/services/aigc",
+    ):
+        if clean.endswith(suffix):
+            return clean[: -len(suffix)].rstrip("/")
+    return clean
 
 
 def current_config(*, mask_key: bool = True) -> dict[str, Any]:
@@ -319,17 +347,36 @@ def build_blog_visual_prompt(
     )
 
 
-def _request_json(url: str, payload: dict[str, Any], api_key: str) -> dict[str, Any]:
+def _contains_oss_url(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().startswith("oss://")
+    if isinstance(value, dict):
+        return any(_contains_oss_url(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_oss_url(item) for item in value)
+    return False
+
+
+def _request_json(
+    url: str,
+    payload: dict[str, Any],
+    api_key: str,
+    *,
+    resolve_oss: bool = False,
+) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable",
+    }
+    if resolve_oss:
+        headers["X-DashScope-OssResourceResolve"] = "enable"
     request = Request(
         url,
         data=data,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "X-DashScope-Async": "enable",
-        },
+        headers=headers,
     )
     try:
         with urlopen(request, timeout=60) as response:
@@ -420,6 +467,395 @@ def _download(url: str) -> tuple[bytes, str]:
     if not mime or mime == "application/octet-stream":
         mime = mimetypes.guess_type(urlparse(url).path)[0] or ""
     return data, mime
+
+
+def _head_video_source(url: str) -> dict[str, Any]:
+    """Return cheap metadata for a remote video URL when the server allows it."""
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme not in {"http", "https"}:
+        return {}
+    request = Request(
+        url,
+        method="HEAD",
+        headers={"User-Agent": "nblane/visual-generation"},
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            length = response.headers.get("Content-Length", "")
+            return {
+                "mime_type": response.headers.get_content_type() or "",
+                "size": int(length) if str(length).isdigit() else None,
+            }
+    except HTTPError as exc:
+        if exc.code not in {403, 405}:
+            raise VisualGenerationError(
+                f"Source video URL is not reachable: HTTP {exc.code}."
+            ) from exc
+    except URLError as exc:
+        raise VisualGenerationError(f"Source video URL is not reachable: {exc}") from exc
+    return {}
+
+
+def _ffprobe_video_source(url: str) -> dict[str, Any]:
+    """Probe video duration and dimensions if ffprobe is available."""
+    executable = shutil.which("ffprobe")
+    if not executable:
+        return {}
+    command = [
+        executable,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration,size",
+        "-show_entries",
+        "stream=codec_type,width,height",
+        "-of",
+        "json",
+        url,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if completed.returncode != 0:
+        return {}
+    try:
+        loaded = json.loads(completed.stdout or "{}")
+    except Exception:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    info: dict[str, Any] = {}
+    fmt = loaded.get("format")
+    if isinstance(fmt, dict):
+        info["duration"] = fmt.get("duration")
+        info["size"] = fmt.get("size")
+    for stream in loaded.get("streams", []):
+        if isinstance(stream, dict) and stream.get("codec_type") == "video":
+            info["width"] = stream.get("width")
+            info["height"] = stream.get("height")
+            break
+    return info
+
+
+def _probe_video_source(url: str) -> dict[str, Any]:
+    """Collect best-effort source-video metadata without starting a provider task."""
+    info = _head_video_source(url)
+    for key, value in _ffprobe_video_source(url).items():
+        if value not in {None, ""}:
+            info[key] = value
+    return info
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_file_path(value: str) -> Path | None:
+    clean = str(value or "").strip()
+    if not clean:
+        return None
+    parsed = urlparse(clean)
+    if parsed.scheme in {"http", "https", "oss"}:
+        return None
+    if parsed.scheme == "file":
+        path_text = unquote(parsed.path or "")
+        if parsed.netloc:
+            path_text = f"//{parsed.netloc}{path_text}"
+        path = Path(path_text).expanduser()
+    else:
+        path = Path(clean).expanduser()
+    return path if path.exists() and path.is_file() else None
+
+
+def _validate_video_dimensions(info: dict[str, Any]) -> None:
+    width = _optional_int(info.get("width"))
+    height = _optional_int(info.get("height"))
+    if width and height:
+        min_dim = min(width, height)
+        max_dim = max(width, height)
+        if (
+            min_dim < DASHSCOPE_VIDEO_MIN_DIMENSION
+            or max_dim > DASHSCOPE_VIDEO_MAX_DIMENSION
+        ):
+            raise VisualGenerationError(
+                "DashScope video edit source_video dimensions must be between "
+                f"{DASHSCOPE_VIDEO_MIN_DIMENSION}px and "
+                f"{DASHSCOPE_VIDEO_MAX_DIMENSION}px; got {width}x{height}."
+            )
+        ratio = max_dim / min_dim
+        if ratio > DASHSCOPE_VIDEO_MAX_ASPECT_RATIO:
+            raise VisualGenerationError(
+                "DashScope video edit source_video aspect ratio must stay between "
+                "1:8 and 8:1."
+            )
+
+
+def _validate_video_edit_source(source_video: str) -> None:
+    """Fail early for source videos DashScope video edit cannot ingest."""
+    clean = str(source_video or "").strip()
+    if not clean:
+        raise VisualGenerationError("Video edit generation requires a source_video URL.")
+    parsed = urlparse(clean)
+    local_path = _local_file_path(clean)
+    if parsed.scheme == "oss":
+        return
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if not local_path:
+            raise VisualGenerationError(
+                "DashScope video edit requires a public HTTP(S), oss://, or existing "
+                "local source_video file."
+            )
+        suffix = local_path.suffix.lower()
+    else:
+        suffix = Path(parsed.path).suffix.lower()
+    if suffix and suffix not in VIDEO_EDIT_EXTENSIONS:
+        allowed = ", ".join(sorted(VIDEO_EDIT_EXTENSIONS))
+        raise VisualGenerationError(
+            f"DashScope video edit source_video must be MP4 or MOV ({allowed})."
+        )
+    if local_path:
+        stat_size = local_path.stat().st_size
+        if stat_size > DASHSCOPE_VIDEO_MAX_BYTES:
+            limit_mb = DASHSCOPE_VIDEO_MAX_BYTES // (1024 * 1024)
+            actual_mb = stat_size / (1024 * 1024)
+            raise VisualGenerationError(
+                f"DashScope video edit source_video must be at most {limit_mb}MB; "
+                f"this local file is about {actual_mb:.1f}MB."
+            )
+        info = _probe_video_source(str(local_path))
+    else:
+        info = _probe_video_source(clean)
+    mime = str(info.get("mime_type", "") or "").lower()
+    if mime and mime not in VIDEO_EDIT_MIME_TYPES:
+        raise VisualGenerationError(
+            f"DashScope video edit source_video must be MP4 or MOV, got {mime}."
+        )
+    size = _optional_int(info.get("size"))
+    if size is not None and size > DASHSCOPE_VIDEO_MAX_BYTES:
+        limit_mb = DASHSCOPE_VIDEO_MAX_BYTES // (1024 * 1024)
+        actual_mb = size / (1024 * 1024)
+        raise VisualGenerationError(
+            f"DashScope video edit source_video must be at most {limit_mb}MB; "
+            f"this URL is about {actual_mb:.1f}MB."
+        )
+    duration = _optional_float(info.get("duration"))
+    if duration is not None and not (
+        DASHSCOPE_VIDEO_MIN_SECONDS <= duration <= DASHSCOPE_VIDEO_MAX_SECONDS
+    ):
+        source_label = "local file" if local_path else "URL"
+        raise VisualGenerationError(
+            "DashScope video edit source_video must be 2-10 seconds. "
+            f"This {source_label} is about {duration:.1f}s; trim/export a 2-10s clip "
+            "and try again."
+        )
+    _validate_video_dimensions(info)
+
+
+def _upload_dashscope_local_file(
+    path: Path,
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+) -> str:
+    """Upload a local file to DashScope temporary OSS and return an oss:// URL."""
+    upload_base = _dashscope_http_base_for_upload(base_url)
+    upload_info = _dashscope_upload_certificate(
+        model=model,
+        api_key=api_key,
+        upload_base=upload_base,
+    )
+    return _post_dashscope_oss_file(path, upload_info)
+
+
+def _dashscope_upload_certificate(
+    *,
+    model: str,
+    api_key: str,
+    upload_base: str,
+) -> dict[str, Any]:
+    url = (
+        upload_base.rstrip("/")
+        + "/uploads?action=getPolicy&model="
+        + quote(str(model or ""), safe="")
+    )
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "nblane/visual-generation",
+        },
+    )
+    try:
+        with urlopen(request, timeout=60) as response:
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise VisualGenerationError(
+            f"DashScope upload certificate request failed: HTTP {exc.code} {detail}"
+        ) from exc
+    except URLError as exc:
+        raise VisualGenerationError(
+            f"DashScope upload certificate request failed: {exc}"
+        ) from exc
+    try:
+        loaded = json.loads(raw)
+    except Exception as exc:
+        raise VisualGenerationError(
+            "DashScope upload certificate response was not valid JSON"
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise VisualGenerationError("DashScope upload certificate response was invalid")
+    if isinstance(loaded.get("output"), dict):
+        output = loaded["output"]
+    elif isinstance(loaded.get("data"), dict):
+        output = loaded["data"]
+    else:
+        output = loaded
+    required = {
+        "oss_access_key_id",
+        "signature",
+        "policy",
+        "upload_dir",
+        "x_oss_object_acl",
+        "x_oss_forbid_overwrite",
+        "upload_host",
+    }
+    missing = sorted(key for key in required if not output.get(key))
+    if missing:
+        raise VisualGenerationError(
+            f"DashScope upload certificate is missing fields: {', '.join(missing)}"
+        )
+    return dict(output)
+
+
+def _multipart_form_body(
+    fields: dict[str, str],
+    *,
+    file_field: str,
+    filename: str,
+    mime_type: str,
+    data: bytes,
+) -> tuple[bytes, str]:
+    boundary = f"----nblane-dashscope-{uuid.uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    chunks.extend(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{file_field}"; '
+                f'filename="{filename}"\r\n'
+            ).encode("utf-8"),
+            f"Content-Type: {mime_type or 'application/octet-stream'}\r\n\r\n".encode(
+                "utf-8"
+            ),
+            data,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    return b"".join(chunks), boundary
+
+
+def _post_dashscope_oss_file(path: Path, upload_info: dict[str, Any]) -> str:
+    filename = path.name
+    upload_key = f"{upload_info['upload_dir']}/{filename}"
+    mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    fields = {
+        "OSSAccessKeyId": str(upload_info["oss_access_key_id"]),
+        "Signature": str(upload_info["signature"]),
+        "policy": str(upload_info["policy"]),
+        "key": upload_key,
+        "x-oss-object-acl": str(upload_info["x_oss_object_acl"]),
+        "x-oss-forbid-overwrite": str(upload_info["x_oss_forbid_overwrite"]),
+        "success_action_status": "200",
+        "x-oss-content-type": mime_type,
+    }
+    body, boundary = _multipart_form_body(
+        fields,
+        file_field="file",
+        filename=filename,
+        mime_type=mime_type,
+        data=path.read_bytes(),
+    )
+    request = Request(
+        str(upload_info["upload_host"]),
+        data=body,
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(body)),
+            "Date": formatdate(usegmt=True),
+            "User-Agent": "nblane/visual-generation",
+        },
+    )
+    try:
+        with urlopen(request, timeout=3600) as response:
+            response.read()
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise VisualGenerationError(
+            f"Uploading local media to DashScope temporary OSS failed: "
+            f"HTTP {exc.code} {detail}"
+        ) from exc
+    except URLError as exc:
+        raise VisualGenerationError(
+            f"Uploading local media to DashScope temporary OSS failed: {exc}"
+        ) from exc
+    return f"oss://{upload_key}"
+
+
+def _prepare_dashscope_media_url(
+    value: str,
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        return ""
+    parsed = urlparse(clean)
+    if parsed.scheme in {"http", "https", "oss"}:
+        return clean
+    local_path = _local_file_path(clean)
+    if not local_path:
+        return clean
+    return _upload_dashscope_local_file(
+        local_path,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+    )
 
 
 def _decode_data_url(value: str) -> tuple[bytes, str]:
@@ -558,7 +994,10 @@ def _dashscope_payload(
         return {
             "model": model,
             "input": input_data,
-            "parameters": {},
+            "parameters": {
+                "resolution": "720P",
+                "watermark": False,
+            },
         }
 
     normalized_size = _normalize_image_size(
@@ -625,7 +1064,9 @@ def generate_visual_asset(
         raise VisualGenerationError(f"Visual provider is not supported yet: {provider}")
     clean_type = str(asset_type or "").strip().lower()
     if clean_type == "video_edit" and not source_video:
-        raise VisualGenerationError("Video edit generation requires a source_video URL or path.")
+        raise VisualGenerationError("Video edit generation requires a source_video URL.")
+    if clean_type == "video_edit":
+        _validate_video_edit_source(source_video)
     structured = build_blog_visual_prompt(
         clean_type,
         prompt,
@@ -638,15 +1079,40 @@ def generate_visual_asset(
     )
     model = str(config["video_model"] if clean_type == "video_edit" else config["image_model"])
     endpoint = _endpoint_for(str(config["base_url"]), clean_type)
+    prepared_source_video = (
+        _prepare_dashscope_media_url(
+            source_video,
+            model=model,
+            api_key=str(config["api_key"]),
+            base_url=str(config["base_url"]),
+        )
+        if clean_type == "video_edit"
+        else source_video
+    )
+    prepared_reference_image = (
+        _prepare_dashscope_media_url(
+            reference_image,
+            model=model,
+            api_key=str(config["api_key"]),
+            base_url=str(config["base_url"]),
+        )
+        if reference_image
+        else ""
+    )
     payload = _dashscope_payload(
         structured,
         asset_type=clean_type,
         model=model,
         size=size or structured.recommended_size,
-        source_video=source_video,
-        reference_image=reference_image,
+        source_video=prepared_source_video,
+        reference_image=prepared_reference_image,
     )
-    response = _request_json(endpoint, payload, str(config["api_key"]))
+    response = _request_json(
+        endpoint,
+        payload,
+        str(config["api_key"]),
+        resolve_oss=_contains_oss_url(payload),
+    )
     task_id = str(response.get("output", {}).get("task_id", "") or "")
     if task_id and not (_extract_urls(response) or _extract_base64(response)):
         response = _poll_task(task_id, str(config["api_key"]))

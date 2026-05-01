@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,10 @@ except Exception:  # pragma: no cover - optional web dependency
     components = None
 
 _FRONTEND_DIR = Path(__file__).parent / "frontend" / "static"
+_DISPLAY_MATH_RE = re.compile(
+    r"(?m)^\s*(?:\$\$|\\\[)\s*(?:$|[^\s])|"
+    r"\\begin\{(?:align\*?|equation\*?|gather\*?|multline\*?|split|aligned|matrix|pmatrix|bmatrix|cases)\}"
+)
 
 
 def blocknote_component_available() -> bool:
@@ -34,6 +39,11 @@ def _get_component_func():
     return _component_func
 
 
+def _markdown_needs_math_safe(markdown: str) -> bool:
+    """Return True when Markdown contains display/complex LaTeX blocks."""
+    return bool(_DISPLAY_MATH_RE.search(str(markdown or "")))
+
+
 def st_blocknote_markdown(
     *,
     initial_markdown: str,
@@ -52,6 +62,9 @@ def st_blocknote_markdown(
     component_func = _get_component_func()
     if component_func is None:
         return None
+    effective_source_mode = source_mode or (
+        math_safe and _markdown_needs_math_safe(initial_markdown)
+    )
     result: Any = component_func(
         mode="markdown",
         initial_markdown=initial_markdown,
@@ -59,7 +72,7 @@ def st_blocknote_markdown(
         height=height,
         editable=editable,
         math_safe=math_safe,
-        source_mode=source_mode,
+        source_mode=effective_source_mode,
         key=key,
         default={"markdown": initial_markdown, "dirty": False},
     )
@@ -81,6 +94,7 @@ def st_public_blog_editor(
     visual_config: dict[str, Any] | None = None,
     visual_results: list[dict[str, Any]] | None = None,
     visual_guidance: dict[str, Any] | None = None,
+    operation_notice: dict[str, Any] | None = None,
     preview_html: str = "",
     status_filter: str = "all",
     layout_state: dict[str, Any] | None = None,
@@ -102,6 +116,9 @@ def st_public_blog_editor(
     component_func = _get_component_func()
     if component_func is None:
         return None
+    effective_source_mode = source_mode or (
+        math_safe and _markdown_needs_math_safe(initial_markdown)
+    )
 
     clean_layout_state = dict(layout_state or {})
     default = {
@@ -126,6 +143,7 @@ def st_public_blog_editor(
         visual_config=dict(visual_config or {}),
         visual_results=list(visual_results or []),
         visual_guidance=dict(visual_guidance or {}),
+        operation_notice=dict(operation_notice or {}),
         preview_html=preview_html,
         status_filter=status_filter,
         layout_state=clean_layout_state,
@@ -135,7 +153,7 @@ def st_public_blog_editor(
         height=height,
         editable=editable,
         math_safe=math_safe,
-        source_mode=source_mode,
+        source_mode=effective_source_mode,
         key=key,
         default=default,
     )

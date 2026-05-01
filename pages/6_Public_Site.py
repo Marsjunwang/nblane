@@ -6,6 +6,7 @@ import hashlib
 import base64
 import json
 import re
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -140,7 +141,7 @@ def _ui() -> dict[str, str]:
             "video_block": "视频",
             "video_block_help": "公开站视频块",
             "visual_block": "视觉块",
-            "visual_block_help": "图片或视频候选",
+            "visual_block_help": "图片、视频或图表候选",
             "ai_loading_block": "AI 占位",
             "ai_loading_block_help": "生成中内容",
             "upload_media": "上传图片或短视频",
@@ -212,17 +213,22 @@ def _ui() -> dict[str, str]:
             "public_preview": "公开预览",
             "media_library": "媒体库",
             "selected_media": "所选媒体",
+            "selection_context": "选区上下文",
+            "selection_context_empty": "未选中文本，使用当前块。",
             "use_selected_media": "插入所选媒体",
             "no_media": "暂无媒体",
+            "no_reference_images": "媒体库里暂无图片。",
+            "no_source_videos": "媒体库里暂无视频。",
             "unreferenced_media": "未引用媒体",
             "ai_candidate": "候选内容",
             "draft_from_title": "根据当前标题生成完整候选",
             "generate_candidate": "生成候选",
-            "insert_candidate": "插入标记处",
+            "insert_candidate": "插入",
             "insert_placement": "插入位置",
             "insert_at_cursor": "最近光标处",
             "insert_at_marker": "插入标记处",
             "insert_at_end": "文末",
+            "insert_replace": "替换选区",
             "append_candidate": "追加到文末",
             "apply_candidate_meta": "应用摘要和标签",
             "use_full_candidate": "使用完整候选",
@@ -256,6 +262,16 @@ def _ui() -> dict[str, str]:
             "visual_style": "风格",
             "visual_size": "尺寸",
             "visual_provider": "视觉生成",
+            "source_video": "源视频",
+            "source_video_manual": "手动输入源视频 URL/path",
+            "source_video_select": "选择源视频",
+            "video_edit_source_help": (
+                "DashScope 视频编辑要求 MP4/MOV，时长 2-10 秒，大小不超过 100MB。"
+                "本地媒体会先上传到 DashScope 临时 OSS 再生成。"
+            ),
+            "reference_image": "参考图",
+            "reference_image_manual": "手动输入参考图 URL/path",
+            "reference_image_select": "选择参考图",
             "generate_visual": "生成视觉素材",
             "generate_cover_image": "生成封面候选",
             "recent_visuals": "最近生成",
@@ -338,7 +354,7 @@ def _ui() -> dict[str, str]:
         "video_block": "Video",
         "video_block_help": "Public-site video block",
         "visual_block": "Visual block",
-        "visual_block_help": "Image or video candidate",
+        "visual_block_help": "Image, video, or diagram candidate",
         "ai_loading_block": "AI placeholder",
         "ai_loading_block_help": "Generated content",
         "upload_media": "Upload image or short video",
@@ -410,17 +426,22 @@ def _ui() -> dict[str, str]:
         "public_preview": "Public preview",
         "media_library": "Media library",
         "selected_media": "Selected media",
+        "selection_context": "Selection context",
+        "selection_context_empty": "No text selection; using the current block.",
         "use_selected_media": "Insert selected media",
         "no_media": "No media yet",
+        "no_reference_images": "No images in the media library.",
+        "no_source_videos": "No videos in the media library.",
         "unreferenced_media": "Unreferenced media",
         "ai_candidate": "Candidate",
         "draft_from_title": "Generate full candidate from current title",
         "generate_candidate": "Generate candidate",
-        "insert_candidate": "Insert at marker",
+        "insert_candidate": "Insert",
         "insert_placement": "Insert position",
         "insert_at_cursor": "Recent cursor",
         "insert_at_marker": "Insert marker",
         "insert_at_end": "End",
+        "insert_replace": "Replace selection",
         "append_candidate": "Append to end",
         "apply_candidate_meta": "Apply summary and tags",
         "use_full_candidate": "Use full candidate",
@@ -454,6 +475,16 @@ def _ui() -> dict[str, str]:
         "visual_style": "Style",
         "visual_size": "Size",
         "visual_provider": "Visual generation",
+        "source_video": "Source video",
+        "source_video_manual": "Manual source video URL/path",
+        "source_video_select": "Select source video",
+        "video_edit_source_help": (
+            "DashScope video edit requires MP4/MOV, 2-10 seconds, up to 100MB. "
+            "Local media is uploaded to temporary DashScope OSS before generation."
+        ),
+        "reference_image": "Reference image",
+        "reference_image_manual": "Manual reference image URL/path",
+        "reference_image_select": "Select reference image",
         "generate_visual": "Generate visual asset",
         "generate_cover_image": "Generate cover candidate",
         "recent_visuals": "Recent generations",
@@ -552,8 +583,8 @@ def _first_existing_avatar(root: Path) -> str:
 
 def _local_media_path(root: Path, rel: str) -> Path | None:
     """Resolve a profile media path for preview if it is local and safe."""
-    clean = rel.strip()
-    if not clean or clean.startswith(("http://", "https://")):
+    clean = rel.strip().lstrip("/")
+    if not clean or clean.startswith(("http://", "https://", "oss://", "file://")):
         return None
     media_root = (root / MEDIA_DIRNAME).resolve()
     target = (root / clean).resolve()
@@ -564,6 +595,15 @@ def _local_media_path(root: Path, rel: str) -> Path | None:
     if target.exists() and target.is_file():
         return target
     return None
+
+
+def _visual_media_input_for_generation(root: Path, value: str) -> str:
+    """Turn profile-relative media refs into local file paths for provider upload."""
+    clean = str(value or "").strip()
+    if not clean:
+        return ""
+    local_path = _local_media_path(root, clean)
+    return str(local_path) if local_path is not None else clean
 
 
 def _profile_contacts(profile_data: dict) -> dict:
@@ -1178,6 +1218,30 @@ def _blog_shell_event_dedupe_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "processed_events")
 
 
+def _blog_shell_notice_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "operation_notice")
+
+
+def _set_blog_shell_notice(
+    selected: str,
+    slug: str,
+    *,
+    tone: str,
+    message: str,
+    source: str = "",
+) -> None:
+    st.session_state[_blog_shell_notice_key(selected, slug)] = {
+        "tone": tone,
+        "message": message,
+        "source": source,
+        "created_at": time.time(),
+    }
+
+
+def _clear_blog_shell_notice(selected: str, slug: str) -> None:
+    st.session_state.pop(_blog_shell_notice_key(selected, slug), None)
+
+
 def _blog_shell_event_id(event: dict, action: str) -> str:
     """Return a stable id for one React shell event."""
     if not action:
@@ -1307,6 +1371,7 @@ def _blog_visual_candidate_payload(
             "kind": str(row.get("kind", "") or "image"),
             "mime_type": asset.mime_type,
             "asset_type": str(row.get("asset_type", "") or asset_type),
+            "visual_kind": str(row.get("visual_kind", "") or ""),
             "alt": str(row.get("alt", "") or ""),
             "caption": str(row.get("caption", "") or ""),
         }
@@ -1371,6 +1436,7 @@ def _save_blog_visual_candidate(
         body=body,
     )
     for row in saved_rows:
+        row["visual_kind"] = str(entry.get("visual_kind", "") or row.get("visual_kind", ""))
         row["saved"] = True
         row["unsaved"] = False
     rows: list[dict] = []
@@ -1629,6 +1695,7 @@ def _blog_visual_guidance(
         "video_edit": {
             **common,
             "default_size": "source-video",
+            "size_help": ui["video_edit_source_help"],
             "size_options": [
                 {"label": ui["visual_size_default"], "value": ""},
             ],
@@ -1803,6 +1870,7 @@ def _render_body_editor(
             initial_markdown=body,
             document_id=f"{selected}:{slug}",
             height=560,
+            math_safe=True,
             key=f"{key}:blocknote",
         )
         if isinstance(edited, str):
@@ -1986,6 +2054,10 @@ def _render_blog_react_shell(
             candidates=ai_candidates,
             ui=ui,
         ),
+        operation_notice=st.session_state.get(
+            _blog_shell_notice_key(selected, latest_post.slug),
+            {},
+        ),
         preview_html=str(preview_html or ""),
         status_filter=(
             "all"
@@ -2000,6 +2072,7 @@ def _render_blog_react_shell(
         key=_blog_editor_key(selected, latest_post.slug, "react_shell"),
         height=960,
         editable=True,
+        math_safe=True,
     )
 
     if not isinstance(event, dict):
@@ -2308,6 +2381,7 @@ def _render_blog_react_shell(
 
     if action in {"generate_visual_asset", "generate_cover_image"}:
         try:
+            _clear_blog_shell_notice(selected, latest_post.slug)
             asset_type = str(payload.get("asset_type", "") or "cover")
             clean_type = "cover" if action == "generate_cover_image" else asset_type
             prompt = str(payload.get("prompt", "") or "").strip()
@@ -2330,8 +2404,14 @@ def _render_blog_react_shell(
                 if isinstance(event_meta.get("tags"), list)
                 else [],
                 body=event_body,
-                source_video=str(payload.get("source_video", "") or "").strip(),
-                reference_image=str(payload.get("reference_image", "") or "").strip(),
+                source_video=_visual_media_input_for_generation(
+                    root,
+                    str(payload.get("source_video", "") or ""),
+                ),
+                reference_image=_visual_media_input_for_generation(
+                    root,
+                    str(payload.get("reference_image", "") or ""),
+                ),
             )
             rows, store = _blog_visual_candidate_payload(
                 latest_post.slug,
@@ -2346,9 +2426,25 @@ def _render_blog_react_shell(
             st.session_state[
                 _blog_visual_candidate_store_key(selected, latest_post.slug)
             ] = store
+            _set_blog_shell_notice(
+                selected,
+                latest_post.slug,
+                tone="success",
+                message=f"Generated {len(rows)} visual candidate(s).",
+                source="visual",
+            )
             st.rerun()
         except Exception as exc:
-            st.error(str(exc))
+            message = str(exc)
+            _set_blog_shell_notice(
+                selected,
+                latest_post.slug,
+                tone="error",
+                message=message,
+                source="visual",
+            )
+            st.error(message)
+            st.rerun()
         return True
 
     if action == "save_visual_candidate":
@@ -3507,6 +3603,18 @@ def _render_blog_visual_panel(
         key=prompt_key,
         height=120,
     )
+    source_video = ""
+    reference_image = ""
+    if str(asset_type) == "video_edit":
+        source_video = st.text_input(
+            ui["source_video_manual"],
+            key=_blog_editor_key(selected, latest_post.slug, "visual_source_video"),
+        )
+        st.caption(ui["video_edit_source_help"])
+        reference_image = st.text_input(
+            ui["reference_image_manual"],
+            key=_blog_editor_key(selected, latest_post.slug, "visual_reference_image"),
+        )
     style_pairs = _visual_option_pairs(list(guide.get("style_options") or []))
     style_pairs.append((ui["visual_custom"], "__custom__"))
     style_labels = [label for label, _value in style_pairs]
@@ -3552,7 +3660,11 @@ def _render_blog_visual_panel(
         ui["generate_visual"],
         key=_blog_editor_key(selected, latest_post.slug, "visual_generate"),
         use_container_width=True,
-        disabled=not bool(cfg.get("configured")) or not str(prompt or "").strip(),
+        disabled=(
+            not bool(cfg.get("configured"))
+            or not str(prompt or "").strip()
+            or (str(asset_type) == "video_edit" and not source_video.strip())
+        ),
     ):
         try:
             generated = visual_generation.generate_visual_asset(
@@ -3570,6 +3682,8 @@ def _render_blog_visual_panel(
                 if isinstance(edited_meta.get("tags"), list)
                 else [],
                 body=edited_body,
+                source_video=_visual_media_input_for_generation(root, source_video),
+                reference_image=_visual_media_input_for_generation(root, reference_image),
             )
             rows, store = _blog_visual_candidate_payload(
                 latest_post.slug,

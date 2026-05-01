@@ -1038,10 +1038,26 @@ class TestPublicSite(unittest.TestCase):
         self.assertTrue(rows[0]["unsaved"])
         self.assertTrue(rows[0]["preview_src"].startswith("data:image/png;base64,"))
         self.assertIn("preview_width", rows[0])
+        self.assertEqual(rows[0]["visual_kind"], "cover")
         self.assertIn("preview_height", rows[0])
         self.assertTrue(rows[0]["full_preview_available"])
         self.assertIn("media/blog/draft-post/generated-cover-", rows[0]["relative_path"])
         self.assertIn("![Candidate cover](", rows[0]["snippet"])
+
+    def test_visual_block_comment_counts_as_blog_media_ref(self) -> None:
+        """Visual block comments preserve generated visual semantics and media refs."""
+        body = (
+            '<!-- nblane:visual_block {"asset_type":"diagram",'
+            '"visual_kind":"flowchart","src":"media/blog/draft-post/chart.png",'
+            '"caption":"Flow"} -->'
+        )
+
+        refs = public_site._blog_body_media_refs(body)
+        html = public_site._markdown_to_html(body)
+
+        self.assertEqual(refs, ["media/blog/draft-post/chart.png"])
+        self.assertIn('data-visual-kind="flowchart"', html)
+        self.assertIn('src="/media/blog/draft-post/chart.png"', html)
 
     def test_render_blog_post_preview_uses_unsaved_text_and_cover(self) -> None:
         """Single-post preview renders in-memory meta/body and does not write."""

@@ -85,6 +85,16 @@ textarea:read-only {
   font-size: 0.92rem;
 }
 
+.nb-editor-notice {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(28, 99, 60, 0.22);
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 0.92rem;
+}
+
 .nb-shell {
   --nb-editor-pane-height: 770px;
   --nb-preview-pane-height: 770px;
@@ -656,6 +666,7 @@ textarea:read-only {
 .nb-media-row,
 .nb-candidate,
 .nb-check-list,
+.nb-selection-context,
 .nb-visual-card {
   display: grid;
   gap: 9px;
@@ -696,7 +707,8 @@ textarea:read-only {
   line-height: 1.45;
 }
 
-.nb-candidate pre {
+.nb-candidate pre,
+.nb-selection-context pre {
   max-height: 180px;
   margin: 0;
   overflow: auto;
@@ -710,6 +722,17 @@ textarea:read-only {
     monospace;
   font-size: 0.78rem;
   line-height: 1.45;
+}
+
+.nb-selection-context {
+  background: var(--nb-paper);
+}
+
+.nb-selection-context p {
+  margin: 0;
+  color: var(--nb-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .nb-check-list {

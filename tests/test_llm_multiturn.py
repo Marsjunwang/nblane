@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -222,6 +224,89 @@ class TestChatMessages(unittest.TestCase):
         self.assertIn("prompt", payload["input"])
         self.assertNotIn("messages", payload["input"])
         self.assertIn("legacy cover", payload["input"]["prompt"])
+
+    def test_dashscope_video_edit_payload_and_preflight(self) -> None:
+        """Video edit sends source media and validates provider limits locally."""
+        from nblane.core import visual_generation
+
+        prompt = visual_generation.VisualPrompt(
+            positive_prompt="clean video edit",
+            negative_prompt="watermark",
+            asset_type="video_edit",
+            recommended_size="source-video",
+            rationale="test",
+        )
+
+        payload = visual_generation._dashscope_payload(
+            prompt,
+            asset_type="video_edit",
+            model="wan2.7-videoedit",
+            size="",
+            source_video="https://example.com/clip.mp4",
+            reference_image="https://example.com/ref.png",
+        )
+
+        self.assertEqual(payload["input"]["media"][0]["type"], "video")
+        self.assertEqual(payload["input"]["media"][0]["url"], "https://example.com/clip.mp4")
+        self.assertEqual(payload["input"]["media"][1]["type"], "reference_image")
+        self.assertEqual(payload["parameters"]["resolution"], "720P")
+        self.assertFalse(payload["parameters"]["watermark"])
+
+        with patch(
+            "nblane.core.visual_generation._probe_video_source",
+            return_value={
+                "mime_type": "video/mp4",
+                "size": 4_372_373,
+                "duration": "52.208333",
+                "width": 854,
+                "height": 480,
+            },
+        ):
+            with self.assertRaisesRegex(RuntimeError, "2-10 seconds"):
+                visual_generation._validate_video_edit_source(
+                    "https://media.w3.org/2010/05/sintel/trailer.mp4"
+                )
+
+        with patch(
+            "nblane.core.visual_generation._probe_video_source",
+            return_value={
+                "mime_type": "video/mp4",
+                "size": 1_000_000,
+                "duration": "6.0",
+                "width": 854,
+                "height": 480,
+            },
+        ):
+            visual_generation._validate_video_edit_source("https://example.com/clip.mp4")
+
+        with self.assertRaisesRegex(RuntimeError, "existing local"):
+            visual_generation._validate_video_edit_source("media/blog/post/clip.mp4")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            local_video = Path(tmp) / "clip.mp4"
+            local_video.write_bytes(b"video")
+            with patch(
+                "nblane.core.visual_generation._probe_video_source",
+                return_value={
+                    "size": 1_000_000,
+                    "duration": "6.0",
+                    "width": 854,
+                    "height": 480,
+                },
+            ):
+                visual_generation._validate_video_edit_source(str(local_video))
+            with patch(
+                "nblane.core.visual_generation._upload_dashscope_local_file",
+                return_value="oss://dashscope-temp/clip.mp4",
+            ) as upload:
+                prepared = visual_generation._prepare_dashscope_media_url(
+                    str(local_video),
+                    model="wan2.7-videoedit",
+                    api_key="test-key",
+                    base_url="https://dashscope.aliyuncs.com/api/v1/services/aigc",
+                )
+            self.assertEqual(prepared, "oss://dashscope-temp/clip.mp4")
+            upload.assert_called_once()
 
     def test_dashscope_image_size_validation_is_local(self) -> None:
         """Invalid DashScope sizes fail before an API task is started."""
