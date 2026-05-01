@@ -20,6 +20,7 @@ import "./style.css";
 import { CandidatePatchPanel } from "./ai/CandidatePatchPanel.jsx";
 import { SelectionAIToolbar } from "./ai/SelectionAIToolbar.jsx";
 import { getAISlashMenuItems } from "./ai/slashItems.js";
+import { normalizeAIStream, useAIStream } from "./ai/useAIStream.js";
 import { blogSchema, getBlogSlashMenuItems } from "./blocks/blogBlocks.jsx";
 import {
   blocksToNblaneMarkdown,
@@ -43,6 +44,7 @@ const WRITE_ACTIONS = new Set([
   "apply_candidate_meta",
   "generate_ai_candidate",
   "ai_inline_action",
+  "cancel_ai_stream",
   "apply_ai_patch",
   "reject_ai_patch",
   "upload_media",
@@ -80,6 +82,9 @@ const DEFAULT_LABELS = {
   ai_patch_regenerate: "Regenerate",
   ai_patch_reject: "Reject",
   ai_patch_target: "Target",
+  ai_stream_cancel: "Cancel",
+  ai_stream_cancelled: "Cancelled",
+  ai_stream_failed: "AI generation failed",
   ai_slash_diagram: "Diagram",
   ai_slash_formula: "Formula",
   ai_slash_group: "AI actions",
@@ -624,6 +629,25 @@ function normalizeAIPatch(value) {
     citations: asArray(patch.citations).map(asObject),
     provenance: asObject(patch.provenance),
   };
+}
+
+function makeAIStreamId(documentId, operation) {
+  const random =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${cleanText(documentId || "doc")}:ai:${cleanText(operation || "write")}:${random}`;
+}
+
+function aiLoadingMode(operation) {
+  const clean = cleanText(operation).toLowerCase();
+  if (clean === "formula") {
+    return "formula";
+  }
+  if (clean === "visual") {
+    return "visual";
+  }
+  return clean === "continue" ? "write" : "rewrite";
 }
 
 function patchDefaultPlacement(patch) {
@@ -1351,6 +1375,10 @@ function ShellEditor(props) {
   const visualGuidance = asObject(args.visual_guidance);
   const operationNotice = asObject(args.operation_notice);
   const incomingAIPatch = useMemo(() => normalizeAIPatch(args.ai_patch), [args.ai_patch]);
+  const incomingAIStream = useMemo(
+    () => normalizeAIStream(args.ai_stream),
+    [args.ai_stream],
+  );
   const previewHtml = cleanText(args.preview_html);
   const initialStatusFilter = cleanText(args.status_filter || "all") || "all";
   const activeSlug = cleanText(args.active_slug || args.slug || args.document_id || "");
@@ -1416,6 +1444,7 @@ function ShellEditor(props) {
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
   const operationNoticeSeed = deepStableStringify(args.operation_notice || {});
   const aiPatchSeed = deepStableStringify(args.ai_patch || {});
+  const aiStreamSeed = deepStableStringify(args.ai_stream || {});
   const mediaPreviewRows = useMemo(
     () =>
       mediaItems.map((item, index) => ({
@@ -1457,8 +1486,10 @@ function ShellEditor(props) {
       visualGuidanceSeed,
       operationNoticeSeed,
       aiPatchSeed,
+      aiStreamSeed,
       patchCandidates.length,
       pendingAIAction?.operation,
+      pendingAIAction?.text,
     ],
     height + 72,
   );
@@ -1915,6 +1946,164 @@ function ShellEditor(props) {
     [editor, editorSourceMode, getCurrentMarkdown, replaceEditorMarkdown],
   );
 
+  const findAILoadingBlock = useCallback(
+    (streamId) => {
+      if (editorSourceMode) {
+        return null;
+      }
+      const targetId = cleanText(streamId).trim();
+      if (!targetId) {
+        return null;
+      }
+      return (
+        flattenBlocks(editor.document).find(
+          (block) =>
+            cleanText(block?.type) === "ai_loading_block" &&
+            cleanText(block?.props?.ai_source_id).trim() === targetId,
+        ) || null
+      );
+    },
+    [editor, editorSourceMode],
+  );
+
+  const insertAILoadingBlock = useCallback(
+    (streamId, operation, selectionContext = {}) => {
+      if (editorSourceMode || !editable || findAILoadingBlock(streamId)) {
+        return;
+      }
+      const targetContext = asObject(selectionContext);
+      const referenceId = cleanText(
+        targetContext.cursor_block_id ||
+          targetContext.block_id ||
+          lastCursorBlockIdRef.current,
+      ).trim();
+      let referenceBlock = findBlockById(editor.document, referenceId);
+      try {
+        const cursorBlock = editor.getTextCursorPosition()?.block || null;
+        if (cursorBlock?.id) {
+          lastCursorBlockIdRef.current = cursorBlock.id;
+        }
+        referenceBlock = referenceBlock || cursorBlock;
+      } catch (_err) {
+        // Use the remembered reference or fall back to the last document block.
+      }
+      referenceBlock = referenceBlock || editor.document[editor.document.length - 1];
+      if (!referenceBlock) {
+        return;
+      }
+      editor.insertBlocks(
+        [
+          {
+            type: "ai_loading_block",
+            props: {
+              prompt: "",
+              mode: aiLoadingMode(operation),
+              status: "loading",
+              ai_source_id: streamId,
+            },
+          },
+        ],
+        referenceBlock,
+        "after",
+      );
+    },
+    [editable, editor, editorSourceMode, findAILoadingBlock],
+  );
+
+  const updateAILoadingBlock = useCallback(
+    (stream) => {
+      const block = findAILoadingBlock(stream?.task_id);
+      if (!block) {
+        return;
+      }
+      const status =
+        stream.status === "running" ? "loading" : stream.status === "done" ? "done" : "failed";
+      const prompt = stream.status === "failed" ? stream.error : stream.text;
+      editor.updateBlock(block, {
+        props: {
+          ...block.props,
+          prompt: cleanText(prompt),
+          status,
+        },
+      });
+    },
+    [editor, findAILoadingBlock],
+  );
+
+  const removeAILoadingBlock = useCallback(
+    (streamId) => {
+      const block = findAILoadingBlock(streamId);
+      if (block) {
+        editor.removeBlocks([block]);
+      }
+    },
+    [editor, findAILoadingBlock],
+  );
+
+  const emitAIStreamControl = useCallback(
+    (action, streamId) => {
+      const cleanStreamId = cleanText(streamId).trim();
+      if (!cleanStreamId) {
+        return;
+      }
+      const selectionContext = selectedBlockRef.current || refreshSelectedBlock();
+      const eventId = nextEventId(action);
+      Streamlit.setComponentValue({
+        action,
+        event_id: eventId,
+        payload: {
+          slug: activeSlug,
+          document_id: documentId,
+          stream_id: cleanStreamId,
+          layout_state: layoutRef.current,
+          selected_block: selectionContext,
+          event_id: eventId,
+        },
+        markdown: latestMarkdownRef.current,
+        dirty,
+        layout_state: layoutRef.current,
+        selected_block: selectionContext,
+        insert_event: null,
+      });
+    },
+    [activeSlug, dirty, documentId, nextEventId, refreshSelectedBlock],
+  );
+
+  useAIStream({
+    stream: incomingAIStream,
+    poll: (streamId) => emitAIStreamControl("ai_stream_poll", streamId),
+    onFlush: (stream) => {
+      setPendingAIAction((current) => {
+        const streamId = cleanText(stream.task_id).trim();
+        if (!streamId) {
+          return current;
+        }
+        if (stream.status !== "running" && cleanText(current?.stream_id) !== streamId) {
+          return current;
+        }
+        return {
+          ...(current || {}),
+          operation: cleanText(stream.operation || current?.operation || "AI"),
+          trigger: cleanText(current?.trigger || "stream"),
+          started_at: current?.started_at || Date.now(),
+          stream_id: streamId,
+          status: stream.status,
+          text: stream.text,
+          error: stream.error,
+        };
+      });
+      updateAILoadingBlock(stream);
+    },
+    onComplete: (stream) => {
+      if (stream.status !== "running") {
+        removeAILoadingBlock(stream.task_id);
+        setPendingAIAction((current) =>
+          cleanText(current?.stream_id).trim() === stream.task_id ? null : current,
+        );
+      }
+    },
+  });
+
   function toggleFocusMode() {
     setMobileView("Editor");
     applyLayoutLocal((current) => {
@@ -2093,10 +2282,17 @@ function ShellEditor(props) {
       asArray(requestedSelection.block_ids).length
         ? requestedSelection
         : refreshSelectedBlock();
+    const markdownBeforeAI = await getCurrentMarkdown();
+    const streamId = cleanText(request.stream_id).trim() || makeAIStreamId(documentId, operation);
+    insertAILoadingBlock(streamId, operation, selectionContext);
     setPendingAIAction({
       operation,
       trigger: cleanText(request.trigger || "inline"),
       started_at: Date.now(),
+      stream_id: streamId,
+      status: "running",
+      text: "",
+      error: "",
     });
     applyLayoutLocal((current) => ({
       ...current,
@@ -2112,7 +2308,23 @@ function ShellEditor(props) {
       context_window: cleanText(request.context_window || "selection"),
       visual_kind: cleanText(request.visual_kind),
       selected_block: selectionContext,
+      stream_id: streamId,
+      markdown: markdownBeforeAI,
+      dirty: computeDirty(markdownBeforeAI, draftMetaRef.current),
     });
+  }
+
+  async function handleCancelAIStream() {
+    const streamId = cleanText(
+      pendingAIAction?.stream_id || incomingAIStream?.task_id || "",
+    ).trim();
+    if (!streamId) {
+      setPendingAIAction(null);
+      return;
+    }
+    removeAILoadingBlock(streamId);
+    setPendingAIAction(null);
+    emitAIStreamControl("cancel_ai_stream", streamId);
   }
 
   async function handleAcceptAIPatch(patch, options = {}) {
@@ -2349,7 +2561,7 @@ function ShellEditor(props) {
           <button
             type="button"
             className="nb-button primary"
-            disabled={!editable}
+            disabled={!editable || Boolean(pendingAIAction)}
             onClick={() => emitAction("save_post")}
           >
             {label(labels, "save")}
@@ -2371,7 +2583,7 @@ function ShellEditor(props) {
           <button
             type="button"
             className="nb-button"
-            disabled={!editable}
+            disabled={!editable || Boolean(pendingAIAction)}
             onClick={() => emitAction("publish_request")}
           >
             {label(labels, "publish")}
@@ -2767,6 +2979,7 @@ function ShellEditor(props) {
               onAcceptPatch={handleAcceptAIPatch}
               onRejectPatch={handleRejectAIPatch}
               onRegeneratePatch={handleRegenerateAIPatch}
+              onCancelPending={handleCancelAIStream}
               currentTitle={currentTitle}
             />
           ) : null}
@@ -3217,6 +3430,7 @@ function AiDrawer({
   onAcceptPatch,
   onRejectPatch,
   onRegeneratePatch,
+  onCancelPending,
   currentTitle,
 }) {
   const [evidenceId, setEvidenceId] = useState("");
@@ -3255,6 +3469,7 @@ function AiDrawer({
         onAccept={onAcceptPatch}
         onReject={onRejectPatch}
         onRegenerate={onRegeneratePatch}
+        onCancelPending={onCancelPending}
       />
       <button
         type="button"

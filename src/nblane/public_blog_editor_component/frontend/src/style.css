@@ -1286,6 +1286,22 @@ textarea:read-only {
   font-weight: 750;
 }
 
+.nb-ai-loading-preview {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #243431;
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .nb-loading-dot {
   width: 10px;
   height: 10px;

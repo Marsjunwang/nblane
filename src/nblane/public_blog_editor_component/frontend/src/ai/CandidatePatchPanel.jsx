@@ -83,6 +83,7 @@ export function CandidatePatchPanel({
   onAccept,
   onReject,
   onRegenerate,
+  onCancelPending,
 }) {
   const rows = useMemo(() => asArray(patches).map(asObject), [patches]);
   const hasPending = Boolean(pendingAction);
@@ -105,6 +106,28 @@ export function CandidatePatchPanel({
             <span className="nb-loading-dot" />
             <span>{cleanText(pendingAction.operation || "AI")}</span>
           </div>
+          {cleanText(pendingAction.text).trim() ? (
+            <pre className="nb-ai-stream-preview">
+              {cleanText(pendingAction.text).slice(0, 1200)}
+            </pre>
+          ) : null}
+          {cleanText(pendingAction.error).trim() ? (
+            <p className="nb-editor-error">
+              {cleanText(pendingAction.error)}
+            </p>
+          ) : null}
+          {onCancelPending ? (
+            <div className="nb-row-actions">
+              <button
+                type="button"
+                className="nb-button danger"
+                disabled={!editable}
+                onClick={() => onCancelPending(pendingAction)}
+              >
+                {label(labels, "ai_stream_cancel", "Cancel")}
+              </button>
+            </div>
+          ) : null}
         </article>
       ) : null}
       {rows.map((patch, index) => {
@@ -213,4 +236,3 @@ export function CandidatePatchPanel({
     </section>
   );
 }
-

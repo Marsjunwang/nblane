@@ -34,6 +34,10 @@ where = ["src"]
     "frontend/static/index.html",
     "frontend/static/assets/*",
 ]
+"nblane.core.ai_blog_prompts" = [
+    "en/*.md",
+    "zh/*.md",
+]
 "nblane.kanban_drag_component" = [
     "frontend/static/index.html",
 ]

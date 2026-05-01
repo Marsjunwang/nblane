@@ -367,6 +367,7 @@ function AiLoadingBlock({ block, editor }) {
         <span className="nb-loading-dot" />
         <span>{mode}</span>
       </div>
+      {prompt ? <pre className="nb-ai-loading-preview">{prompt}</pre> : null}
       <FieldText
         label="Prompt"
         value={prompt}

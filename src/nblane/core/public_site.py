@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import yaml
 
 from nblane.core import git_backup, llm, visual_generation
+from nblane.core.ai_blog_prompts import get_prompt
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_io import profile_dir
@@ -4690,18 +4691,7 @@ def blog_candidate_from_title(name: str, title: str) -> BlogDraftCandidate:
             "body": fallback_body,
         }
     )
-    system = (
-        "You draft public blog candidates for nblane. Return a YAML mapping "
-        "with exactly these keys: title, summary, tags, cover_prompt, "
-        "warnings, body. The body must be Markdown. Because the user only "
-        "provided a title, do not invent specific projects, metrics, dates, "
-        "paper claims, employers, links, or private facts. Write useful "
-        "structure, cautious prose, and explicit placeholders where facts "
-        "must be verified. If mathematical notation is useful, use "
-        "\\(...\\) for inline math and \\[...\\] for display math; never "
-        "leave formula placeholders empty. Keep the result suitable as a "
-        "human-reviewed candidate, not a final publication."
-    )
+    system = get_prompt("scaffold_title", llm.reply_language())
     user = _dump_yaml(
         {
             "profile": name,
@@ -4750,12 +4740,7 @@ def blog_candidate_from_evidence(
         "## Notes\n\n"
         "Confirm links, metrics, and claims before publishing.\n"
     )
-    system = (
-        "You draft public blog posts from verified nblane evidence. "
-        "Use only the provided evidence. Do not invent metrics, dates, "
-        "links, publications, or claims. Return Markdown body only. "
-        "The post will remain draft until a human publishes it."
-    )
+    system = get_prompt("scaffold_evidence", llm.reply_language())
     user = _dump_yaml({"evidence": evidence})
     body = _chat_or_fallback(system, user, fallback)
     return BlogDraftCandidate(
@@ -4810,12 +4795,7 @@ def blog_candidate_from_kanban_done(name: str) -> BlogDraftCandidate:
         "",
         "Add the reviewed public narrative here before publishing.",
     ]
-    system = (
-        "You draft public-facing work notes from kanban Done tasks. "
-        "Use only the provided task titles, outcomes, and details. "
-        "Do not expose private planning context or invent facts. "
-        "Return Markdown body only; the file must remain draft."
-    )
+    system = get_prompt("scaffold_kanban_done", llm.reply_language())
     body = _chat_or_fallback(
         system,
         _dump_yaml({"done_tasks": rows}),

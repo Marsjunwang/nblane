@@ -386,6 +386,50 @@ class TestChatMessages(unittest.TestCase):
         self.assertEqual(msgs[-1]["role"], "user")
         self.assertEqual(msgs[-1]["content"], "follow up")
 
+    def test_chat_stream_callback_collects_deltas(self) -> None:
+        """Streaming chat returns final text and emits plain text deltas."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [
+            types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        delta=types.SimpleNamespace(content="stream ")
+                    )
+                ]
+            ),
+            types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        delta=types.SimpleNamespace(content="reply")
+                    )
+                ]
+            ),
+        ]
+        fake_openai = types.SimpleNamespace(OpenAI=MagicMock(return_value=mock_client))
+        deltas: list[str] = []
+        with patch("nblane.core.llm._API_KEY", "test-key"):
+            with patch.dict(sys.modules, {"openai": fake_openai}):
+                from nblane.core import llm
+
+                out = llm.chat(
+                    "system",
+                    "user",
+                    stream=True,
+                    stream_callback=deltas.append,
+                )
+
+        self.assertEqual(out, "stream reply")
+        self.assertEqual(deltas, ["stream ", "reply"])
+        self.assertTrue(mock_client.chat.completions.create.call_args.kwargs["stream"])
+
+    def test_blog_prompt_sets_are_bilingual(self) -> None:
+        """Blog AI prompt registry keeps zh/en prompt keys aligned."""
+        from nblane.core.ai_blog_prompts import get_prompt, validate_prompt_sets
+
+        self.assertEqual(validate_prompt_sets(), {})
+        self.assertIn("YAML", get_prompt("scaffold_title", "en"))
+        self.assertIn("YAML", get_prompt("scaffold_title", "zh"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from nblane.core import llm as llm_client
+from nblane.core.ai_blog_prompts import get_prompt
 from schemas.ai_patch import (
     AIAsset,
     AIBlockPatch,
@@ -118,57 +120,11 @@ def _context_text(target: AIPatchTarget, markdown: str) -> str:
 
 
 def _prompt_for_operation(operation: str, lang: str, visual_kind: str = "") -> tuple[str, str]:
-    zh = lang == "zh"
-    if zh:
-        system = (
-            "你是 nblane 博客编辑器里的内联写作助手。"
-            "你只返回可以直接插入文章的 Markdown 或纯文本，不要解释过程。"
-        )
-        instructions = {
-            "polish": "润色目标文本，保持事实和结构，提升清晰度。只返回润色后的 Markdown。",
-            "rewrite": "改写目标文本，保持核心含义。只返回改写后的 Markdown。",
-            "shorten": "压缩目标文本，删除冗余，保留关键信息。只返回压缩后的 Markdown。",
-            "expand": "扩写目标文本，补充有用细节，但不要编造事实。只返回扩写后的 Markdown。",
-            "continue": "基于光标附近上下文续写下一段。只返回新增 Markdown，不要重复原文。",
-            "translate": "把目标文本翻译成自然、准确的中文或英文，按用户配置语言输出。只返回译文。",
-            "tone": "把目标文本改成更专业、克制、适合公开博客的语气。只返回修改后的 Markdown。",
-            "outline": "基于标题和上下文生成文章大纲。只返回 Markdown 标题和 bullet。",
-            "formula": "把目标描述转换为 LaTeX 展示公式。只返回 LaTeX，不要包裹 $$。",
-            "visual": (
-                "为目标段落生成视觉素材 prompt。"
-                "只返回一段可交给文生图或 diagram 生成器的 prompt。"
-            ),
-            "meta": "生成更好的标题、摘要或标签建议。只返回 Markdown。",
-            "check": "指出文本的事实、隐私或表达风险。只返回简明 Markdown。",
-        }
-    else:
-        system = (
-            "You are an inline writing assistant inside the nblane blog editor. "
-            "Return only Markdown or plain text that can be inserted directly. "
-            "Do not explain your process."
-        )
-        instructions = {
-            "polish": "Polish the target text for clarity while preserving facts and structure. Return only the polished Markdown.",
-            "rewrite": "Rewrite the target text while preserving its core meaning. Return only rewritten Markdown.",
-            "shorten": "Shorten the target text, remove redundancy, and keep the key information. Return only Markdown.",
-            "expand": "Expand the target text with useful detail without inventing facts. Return only Markdown.",
-            "continue": "Continue from the nearby cursor context. Return only new Markdown and do not repeat the original text.",
-            "translate": "Translate the target text into the configured reply language. Return only the translation.",
-            "tone": "Adjust the target text to a professional, restrained public-blog tone. Return only Markdown.",
-            "outline": "Generate an article outline from the title and context. Return only Markdown headings and bullets.",
-            "formula": "Convert the target description into a LaTeX display formula. Return only LaTeX, without $$ wrappers.",
-            "visual": "Create a visual-generation prompt from the target paragraph. Return only one prompt.",
-            "meta": "Suggest better title, summary, or tags. Return only Markdown.",
-            "check": "Flag factual, privacy, or wording risks. Return concise Markdown only.",
-        }
-    instruction = instructions.get(operation, instructions["polish"])
-    if operation == "visual" and visual_kind == "diagram":
-        instruction += (
-            " 输出应偏向清晰 diagram / mermaid / flowchart 描述。"
-            if zh
-            else " Prefer a clear diagram, Mermaid, or flowchart prompt."
-        )
-    return system, instruction
+    prompt_name = {
+        "formula": "nl_to_latex",
+        "visual": "diagram" if visual_kind == "diagram" else "visual",
+    }.get(operation, operation)
+    return get_prompt("inline_system", lang), get_prompt(prompt_name, lang)
 
 
 def _build_user_prompt(
@@ -257,6 +213,7 @@ def generate_ai_patch(
     prompt: str = "",
     visual_kind: str = "",
     source_event_id: str = "",
+    stream_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Generate an AI patch candidate without mutating the document."""
 
@@ -278,7 +235,13 @@ def generate_ai_patch(
         prompt=prompt,
         visual_kind=clean_visual_kind,
     )
-    raw = llm_client.chat(system, user, temperature=0.25)
+    raw = llm_client.chat(
+        system,
+        user,
+        temperature=0.25,
+        stream=stream_callback is not None,
+        stream_callback=stream_callback,
+    )
     if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
         raise RuntimeError(raw)
 
@@ -326,4 +289,3 @@ def generate_ai_patch(
         ),
     )
     return patch_to_dict(patch)
-

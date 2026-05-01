@@ -15,6 +15,7 @@ for the current Python process/session.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 from nblane.core.paths import REPO_ROOT
 
@@ -154,6 +155,8 @@ def chat(
     user: str,
     temperature: float = 0.3,
     stream: bool = False,
+    *,
+    stream_callback: Callable[[str], None] | None = None,
 ) -> str:
     """Send a single-turn chat and return the reply text.
 
@@ -172,14 +175,18 @@ def chat(
         client = OpenAI(
             base_url=_BASE_URL, api_key=_API_KEY
         )
+        use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(
             model=_MODEL,
             temperature=temperature,
+            stream=use_stream,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
         )
+        if use_stream:
+            return _collect_stream_text(response, stream_callback)
         content = response.choices[0].message.content
         return content if content is not None else ""
     except Exception as exc:
@@ -190,6 +197,9 @@ def chat_messages(
     system: str,
     messages: list[dict[str, str]],
     temperature: float = 0.3,
+    *,
+    stream: bool = False,
+    stream_callback: Callable[[str], None] | None = None,
 ) -> str:
     """Multi-turn chat: *system* plus *messages* (user/assistant only).
 
@@ -219,12 +229,39 @@ def chat_messages(
         client = OpenAI(
             base_url=_BASE_URL, api_key=_API_KEY
         )
+        use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(
             model=_MODEL,
             temperature=temperature,
+            stream=use_stream,
             messages=api_messages,
         )
+        if use_stream:
+            return _collect_stream_text(response, stream_callback)
         out = response.choices[0].message.content
         return out if out is not None else ""
     except Exception as exc:
         return f"LLM error: {exc}"
+
+
+def _collect_stream_text(
+    response: object,
+    stream_callback: Callable[[str], None] | None,
+) -> str:
+    """Collect OpenAI-compatible streaming chunks into final text."""
+    chunks: list[str] = []
+    for chunk in response:  # type: ignore[operator]
+        choices = getattr(chunk, "choices", None)
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        content = getattr(delta, "content", None)
+        if content is None and isinstance(delta, dict):
+            content = delta.get("content")
+        if not content:
+            continue
+        text = str(content)
+        chunks.append(text)
+        if stream_callback is not None:
+            stream_callback(text)
+    return "".join(chunks)

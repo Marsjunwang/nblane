@@ -7,6 +7,7 @@ import base64
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 
 import streamlit as st
@@ -25,7 +26,7 @@ except Exception:  # pragma: no cover - optional Streamlit component
     st_public_blog_editor = None
 
 from nblane.core import git_backup
-from nblane.core import ai_dispatcher
+from nblane.core import ai_stream_tasks
 from nblane.core import visual_generation
 from nblane.core.public_curation import (
     evidence_contexts,
@@ -242,6 +243,9 @@ def _ui() -> dict[str, str]:
             "ai_patch_accept_block_only": "仅接受正文",
             "ai_patch_regenerate": "重新生成",
             "ai_patch_reject": "拒绝",
+            "ai_stream_cancel": "取消生成",
+            "ai_stream_cancelled": "已取消",
+            "ai_stream_failed": "AI 生成失败",
             "ai_slash_group": "AI 操作",
             "ai_slash_write_next": "AI 写下一段",
             "ai_slash_outline": "大纲",
@@ -482,6 +486,9 @@ def _ui() -> dict[str, str]:
         "ai_patch_accept_block_only": "Accept block only",
         "ai_patch_regenerate": "Regenerate",
         "ai_patch_reject": "Reject",
+        "ai_stream_cancel": "Cancel",
+        "ai_stream_cancelled": "Cancelled",
+        "ai_stream_failed": "AI generation failed",
         "ai_slash_group": "AI actions",
         "ai_slash_write_next": "AI write next paragraph",
         "ai_slash_outline": "Outline",
@@ -1257,6 +1264,8 @@ _BLOG_EVENT_DEDUPE_ACTIONS = {
     "draft_from_done",
     "generate_ai_candidate",
     "ai_inline_action",
+    "ai_stream_poll",
+    "cancel_ai_stream",
     "apply_ai_patch",
     "reject_ai_patch",
     "upload_media",
@@ -1282,6 +1291,51 @@ def _blog_shell_notice_key(selected: str, slug: str) -> str:
 
 def _blog_ai_patch_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_patch")
+
+
+def _blog_ai_stream_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "ai_stream")
+
+
+def _ai_stream_snapshot(task_id: str) -> dict:
+    """Return a JSON-safe snapshot for a background AI stream task."""
+    return ai_stream_tasks.snapshot(task_id)
+
+
+def _cleanup_ai_stream_tasks(now: float | None = None) -> None:
+    """Drop old completed stream tasks from the in-memory store."""
+    ai_stream_tasks.cleanup(now)
+
+
+def _start_ai_stream_task(
+    *,
+    task_id: str,
+    profile: str,
+    slug: str,
+    meta: dict,
+    markdown: str,
+    selected_block: dict,
+    operation: str,
+    prompt: str,
+    visual_kind: str,
+) -> dict:
+    """Start background generation and return the initial stream snapshot."""
+    return ai_stream_tasks.start_ai_patch_stream(
+        task_id=task_id,
+        profile=profile,
+        slug=slug,
+        meta=meta,
+        markdown=markdown,
+        selected_block=selected_block,
+        operation=operation,
+        prompt=prompt,
+        visual_kind=visual_kind,
+    )
+
+
+def _cancel_ai_stream_task(task_id: str) -> dict:
+    """Request cancellation for a running AI stream task."""
+    return ai_stream_tasks.cancel(task_id)
 
 
 def _set_blog_shell_notice(
@@ -2120,6 +2174,15 @@ def _render_blog_react_shell(
             _blog_ai_patch_key(selected, latest_post.slug),
             {},
         ),
+        "ai_stream": _ai_stream_snapshot(
+            str(
+                st.session_state.get(
+                    _blog_ai_stream_key(selected, latest_post.slug),
+                    "",
+                )
+                or ""
+            )
+        ),
         "operation_notice": st.session_state.get(
             _blog_shell_notice_key(selected, latest_post.slug),
             {},
@@ -2143,9 +2206,12 @@ def _render_blog_react_shell(
     try:
         event = st_public_blog_editor(**editor_kwargs)
     except TypeError as exc:
-        if "unexpected keyword argument 'ai_patch'" not in str(exc):
+        if "unexpected keyword argument 'ai_patch'" in str(exc):
+            editor_kwargs.pop("ai_patch", None)
+        elif "unexpected keyword argument 'ai_stream'" in str(exc):
+            editor_kwargs.pop("ai_stream", None)
+        else:
             raise
-        editor_kwargs.pop("ai_patch", None)
         event = st_public_blog_editor(**editor_kwargs)
 
     if not isinstance(event, dict):
@@ -2204,6 +2270,7 @@ def _render_blog_react_shell(
             _clear_blog_preview(selected, latest_post.slug)
         if action == "apply_ai_patch":
             st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+            st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
         return True
 
     if action == "delete_media":
@@ -2398,7 +2465,14 @@ def _render_blog_react_shell(
                 selected_block = event.get("selected_block")
             if not isinstance(selected_block, dict):
                 selected_block = {}
-            patch = ai_dispatcher.generate_ai_patch(
+            stream_id = str(
+                payload.get("stream_id", "")
+                or payload.get("event_id", "")
+                or event.get("event_id", "")
+                or f"ai-stream-{uuid.uuid4().hex[:12]}"
+            )
+            _start_ai_stream_task(
+                task_id=stream_id,
                 profile=selected,
                 slug=latest_post.slug,
                 meta=event_meta,
@@ -2407,14 +2481,14 @@ def _render_blog_react_shell(
                 operation=str(payload.get("operation", "") or "polish"),
                 prompt=str(payload.get("prompt", "") or ""),
                 visual_kind=str(payload.get("visual_kind", "") or ""),
-                source_event_id=str(payload.get("event_id", "") or event.get("event_id", "")),
             )
-            st.session_state[_blog_ai_patch_key(selected, latest_post.slug)] = patch
+            st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
+            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
-                tone="success",
-                message="AI patch candidate is ready.",
+                tone="info",
+                message="AI generation started.",
                 source="ai",
             )
             next_state = dict(layout_state)
@@ -2425,6 +2499,7 @@ def _render_blog_react_shell(
         except Exception as exc:
             message = str(exc)
             st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+            st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -2436,8 +2511,69 @@ def _render_blog_react_shell(
             st.rerun()
         return True
 
+    if action == "ai_stream_poll":
+        stream_id = str(
+            payload.get("stream_id", "")
+            or st.session_state.get(_blog_ai_stream_key(selected, latest_post.slug), "")
+            or ""
+        )
+        snapshot = _ai_stream_snapshot(stream_id)
+        if snapshot.get("status") == "done":
+            patch = snapshot.get("patch")
+            if isinstance(patch, dict) and patch.get("operation"):
+                st.session_state[_blog_ai_patch_key(selected, latest_post.slug)] = patch
+                _set_blog_shell_notice(
+                    selected,
+                    latest_post.slug,
+                    tone="success",
+                    message="AI patch candidate is ready.",
+                    source="ai",
+                )
+                st.rerun()
+        elif snapshot.get("status") == "failed":
+            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+            _set_blog_shell_notice(
+                selected,
+                latest_post.slug,
+                tone="error",
+                message=str(snapshot.get("error", "") or "AI generation failed."),
+                source="ai",
+            )
+            st.rerun()
+        elif snapshot.get("status") == "cancelled":
+            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+            _set_blog_shell_notice(
+                selected,
+                latest_post.slug,
+                tone="info",
+                message="AI generation cancelled.",
+                source="ai",
+            )
+            st.rerun()
+        return True
+
+    if action == "cancel_ai_stream":
+        stream_id = str(
+            payload.get("stream_id", "")
+            or st.session_state.get(_blog_ai_stream_key(selected, latest_post.slug), "")
+            or ""
+        )
+        _cancel_ai_stream_task(stream_id)
+        st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
+        st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+        _set_blog_shell_notice(
+            selected,
+            latest_post.slug,
+            tone="info",
+            message="AI generation cancelled.",
+            source="ai",
+        )
+        st.rerun()
+        return True
+
     if action == "reject_ai_patch":
         st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+        st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
         _clear_blog_shell_notice(selected, latest_post.slug)
         st.rerun()
         return True

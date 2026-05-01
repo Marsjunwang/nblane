@@ -1,0 +1,1 @@
+Create a visual-generation prompt from the target paragraph. Describe the concrete subject, layout, style, and constraints. Avoid private paths, secrets, watermarks, and embedded title text. Return only one prompt.
