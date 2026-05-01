@@ -8,10 +8,21 @@ import React, {
 import { createRoot } from "react-dom/client";
 import { Streamlit } from "streamlit-component-lib";
 import { BlockNoteView } from "@blocknote/mantine";
-import { useCreateBlockNote } from "@blocknote/react";
+import { filterSuggestionItems } from "@blocknote/core";
+import {
+  getDefaultReactSlashMenuItems,
+  SuggestionMenuController,
+  useCreateBlockNote,
+} from "@blocknote/react";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "./style.css";
+import { blogSchema, getBlogSlashMenuItems } from "./blocks/blogBlocks.jsx";
+import {
+  blocksToNblaneMarkdown,
+  isRawMarkdownDirective,
+  parseMarkdownToEditorBlocks,
+} from "./blocks/markdown.js";
 
 const RIGHT_TABS = ["Meta", "Media", "AI", "Visual", "Check"];
 const MOBILE_VIEWS = ["Editor", "Articles", "Tools", "Preview"];
@@ -79,6 +90,8 @@ const DEFAULT_LABELS = {
   flowchart: "Flowchart",
   focus_mode: "Focus",
   fast_preview: "Fast preview",
+  formula_block: "Formula",
+  formula_block_help: "LaTeX display block",
   generate_candidate: "Generate candidate",
   generate_cover_image: "Generate cover candidate",
   generate_visual: "Generate visual asset",
@@ -130,8 +143,14 @@ const DEFAULT_LABELS = {
   validate: "Check",
   validation_errors: "Errors",
   validation_warnings: "Warnings",
+  ai_loading_block: "AI placeholder",
+  ai_loading_block_help: "Generated content",
+  video_block: "Video",
+  video_block_help: "Public-site video",
   video_edit: "Video edit",
   visual: "Visual",
+  visual_block: "Visual",
+  visual_block_help: "Image or video candidate",
   visual_alt_help: "Used as Markdown image alt text when inserted; covers use the post title.",
   visual_caption_help: "Shown as a body caption or video title; not used for covers.",
   visual_custom: "Custom",
@@ -301,30 +320,6 @@ function mediaKind(item) {
   return /\.(mp4|mov|webm|m4v)$/i.test(path) ? "video" : "image";
 }
 
-const RAW_MARKDOWN_DIRECTIVE_LINE_RE =
-  /^::[A-Za-z][\w-]*\[[^\r\n\]]*\]\([^\r\n]+\)$/u;
-
-function rawDirectiveLines(value) {
-  return cleanText(value)
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function containsRawMarkdownDirective(markdown) {
-  return rawDirectiveLines(markdown).some((line) =>
-    RAW_MARKDOWN_DIRECTIVE_LINE_RE.test(line),
-  );
-}
-
-function isRawMarkdownDirective(snippet) {
-  const lines = rawDirectiveLines(snippet);
-  return (
-    lines.length > 0 &&
-    lines.every((line) => RAW_MARKDOWN_DIRECTIVE_LINE_RE.test(line))
-  );
-}
-
 function mediaVideoCodecLabel(item, labels) {
   const codec = cleanText(item.video_codec || "");
   const tag = cleanText(item.video_codec_tag || "");
@@ -351,6 +346,40 @@ function mediaPreviewSrc(item) {
 
 function mediaFullPreviewSrc(item) {
   return cleanText(item.full_preview_src || item.full_preview || "");
+}
+
+function mediaDisplaySrc(item) {
+  return mediaFullPreviewSrc(item) || mediaPreviewSrc(item);
+}
+
+function mediaLookupKey(value) {
+  return cleanText(value).trim().replace(/^\/+/u, "");
+}
+
+function isAbsoluteAssetUrl(value) {
+  return /^([a-z][a-z0-9+.-]*:|\/\/)/iu.test(cleanText(value).trim());
+}
+
+function buildMediaPreviewMap(items) {
+  const map = new Map();
+  for (const item of asArray(items).map(asObject)) {
+    const path = mediaPath(item);
+    const displaySrc = mediaDisplaySrc(item);
+    if (!path || !displaySrc) {
+      continue;
+    }
+    map.set(path, displaySrc);
+    map.set(mediaLookupKey(path), displaySrc);
+  }
+  return map;
+}
+
+function resolveMediaPreviewUrl(value, mediaPreviewMap) {
+  const src = cleanText(value).trim();
+  if (!src || isAbsoluteAssetUrl(src)) {
+    return src;
+  }
+  return mediaPreviewMap.get(src) || mediaPreviewMap.get(mediaLookupKey(src)) || src;
 }
 
 function visualItemKey(item, index = 0) {
@@ -495,24 +524,255 @@ function statusClass(status) {
 
 function useFrameHeight(deps, minimumHeight) {
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      Streamlit.setFrameHeight(minimumHeight);
-      Streamlit.setFrameHeight();
-    }, 0);
-    return () => window.clearTimeout(timer);
+    let frame = null;
+    const root = document.getElementById("root");
+    const observed = new WeakSet();
+    const measuredSelectors = [
+      ".nb-shell",
+      ".nb-workspace",
+      ".nb-center-panel",
+      ".nb-editor-area",
+      ".nb-preview-panel",
+      ".nb-left-panel",
+      ".nb-right-panel",
+    ];
+    const measuredElements = () =>
+      [
+        root,
+        document.body,
+        document.documentElement,
+        ...document.querySelectorAll(measuredSelectors.join(",")),
+      ].filter(Boolean);
+    const elementExtent = (element) => {
+      if (element === document.body || element === document.documentElement) {
+        return Math.max(element.scrollHeight || 0, element.offsetHeight || 0);
+      }
+      const rect = element.getBoundingClientRect();
+      const top = rect.top + (window.scrollY || window.pageYOffset || 0);
+      return (
+        top +
+        Math.max(
+          element.scrollHeight || 0,
+          element.offsetHeight || 0,
+          rect.height || 0,
+        )
+      );
+    };
+    const measure = () => {
+      const nextHeight = Math.ceil(
+        Math.max(
+          minimumHeight,
+          ...measuredElements().map((element) => elementExtent(element)),
+        ) + 18,
+      );
+      Streamlit.setFrameHeight(nextHeight);
+    };
+    const schedule = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        measure();
+      });
+    };
+    const timers = [
+      window.setTimeout(schedule, 0),
+      window.setTimeout(schedule, 120),
+      window.setTimeout(schedule, 480),
+    ];
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(schedule);
+    const observeMeasuredElements = () => {
+      if (!observer) {
+        return;
+      }
+      for (const element of measuredElements()) {
+        if (!observed.has(element)) {
+          observer.observe(element);
+          observed.add(element);
+        }
+      }
+    };
+    observeMeasuredElements();
+    const mutationObserver =
+      root && typeof MutationObserver !== "undefined"
+        ? new MutationObserver(() => {
+            observeMeasuredElements();
+            schedule();
+          })
+        : null;
+    mutationObserver?.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+    window.addEventListener("resize", schedule);
+    document.addEventListener("load", schedule, true);
+    document.addEventListener("loadedmetadata", schedule, true);
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      for (const timer of timers) {
+        window.clearTimeout(timer);
+      }
+      observer?.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("load", schedule, true);
+      document.removeEventListener("loadedmetadata", schedule, true);
+    };
   }, deps);
+}
+
+function waitForInputFlush() {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
+
+function floatingPreviewMetrics() {
+  const fallbackWidth =
+    typeof window === "undefined" ? 960 : Math.max(320, window.innerWidth - 32);
+  const fallbackHeight =
+    typeof window === "undefined" ? 640 : Math.max(320, window.innerHeight - 32);
+  const fallback = {
+    left: "50%",
+    top: "50%",
+    maxWidth: `${Math.min(1180, fallbackWidth)}px`,
+    maxHeight: `${fallbackHeight}px`,
+  };
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const frame = window.frameElement;
+    const parentWindow =
+      window.parent && window.parent !== window ? window.parent : null;
+    if (!frame || !parentWindow) {
+      return fallback;
+    }
+    const rect = frame.getBoundingClientRect();
+    const parentWidth = parentWindow.innerWidth || window.innerWidth;
+    const parentHeight = parentWindow.innerHeight || window.innerHeight;
+    const visibleLeft = Math.max(0, rect.left);
+    const visibleRight = Math.min(parentWidth, rect.right);
+    const visibleTop = Math.max(0, rect.top);
+    const visibleBottom = Math.min(parentHeight, rect.bottom);
+    const visibleWidth = visibleRight - visibleLeft;
+    const visibleHeight = visibleBottom - visibleTop;
+    if (visibleWidth <= 0 || visibleHeight <= 0) {
+      return fallback;
+    }
+    return {
+      left: `${visibleLeft + visibleWidth / 2 - rect.left}px`,
+      top: `${visibleTop + visibleHeight / 2 - rect.top}px`,
+      maxWidth: `${Math.max(320, Math.min(1180, visibleWidth - 32))}px`,
+      maxHeight: `${Math.max(320, visibleHeight - 32)}px`,
+    };
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+function parentWindowForFloatingOverlay() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.parent && window.parent !== window ? window.parent : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function useFloatingPreviewStyle(active) {
+  const [metrics, setMetrics] = useState(() => floatingPreviewMetrics());
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+    let frame = null;
+    const update = () => setMetrics(floatingPreviewMetrics());
+    const schedule = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        update();
+      });
+    };
+    const parentWindow = parentWindowForFloatingOverlay();
+    const timers = [
+      window.setTimeout(schedule, 0),
+      window.setTimeout(schedule, 120),
+      window.setInterval(schedule, 300),
+    ];
+    window.addEventListener("resize", schedule);
+    let parentListening = false;
+    try {
+      parentWindow?.addEventListener("resize", schedule);
+      parentWindow?.addEventListener("scroll", schedule, true);
+      parentListening = Boolean(parentWindow);
+    } catch (_err) {
+      parentListening = false;
+    }
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      window.clearTimeout(timers[0]);
+      window.clearTimeout(timers[1]);
+      window.clearInterval(timers[2]);
+      window.removeEventListener("resize", schedule);
+      if (parentListening) {
+        try {
+          parentWindow?.removeEventListener("resize", schedule);
+          parentWindow?.removeEventListener("scroll", schedule, true);
+        } catch (_err) {
+          // The parent window may become unavailable while Streamlit reruns.
+        }
+      }
+    };
+  }, [active]);
+  return {
+    "--nb-floating-preview-left": metrics.left,
+    "--nb-floating-preview-top": metrics.top,
+    "--nb-floating-preview-max-width": metrics.maxWidth,
+    "--nb-floating-preview-max-height": metrics.maxHeight,
+  };
+}
+
+function BlogSlashMenu({ editor, labels }) {
+  const getItems = useCallback(
+    async (query) =>
+      filterSuggestionItems(
+        [
+          ...getDefaultReactSlashMenuItems(editor),
+          ...getBlogSlashMenuItems(editor, labels),
+        ],
+        query,
+      ),
+    [editor, labels],
+  );
+  return <SuggestionMenuController triggerCharacter="/" getItems={getItems} />;
 }
 
 function LegacyMarkdownEditor(props) {
   const args = props.args || {};
+  const labels = { ...DEFAULT_LABELS, ...asObject(args.ui_labels) };
   const documentId = String(args.document_id || "blog");
   const initialMarkdown = markdownFromValue(args.initial_markdown);
   const height = Number(args.height || 560);
   const editable = args.editable !== false;
-  const sourceMode = args.source_mode === true || args.math_safe === true;
-  const editorSourceMode =
-    sourceMode || containsRawMarkdownDirective(initialMarkdown);
-  const editor = useCreateBlockNote({});
+  const sourceMode = args.source_mode === true;
+  const editorSourceMode = sourceMode;
+  const editor = useCreateBlockNote({ schema: blogSchema });
   const [sourceMarkdown, setSourceMarkdown] = useState(initialMarkdown);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
@@ -522,9 +782,7 @@ function LegacyMarkdownEditor(props) {
   const loadedSourceModeRef = useRef(null);
   const sendTimerRef = useRef(null);
 
-  useEffect(() => {
-    Streamlit.setFrameHeight(height + 34);
-  }, [height]);
+  useFrameHeight([height, error, ready, editorSourceMode], height + 34);
 
   useEffect(() => {
     let cancelled = false;
@@ -555,7 +813,7 @@ function LegacyMarkdownEditor(props) {
         return;
       }
       try {
-        const blocks = await editor.tryParseMarkdownToBlocks(initialMarkdown || "");
+        const blocks = parseMarkdownToEditorBlocks(editor, initialMarkdown || "");
         if (cancelled) {
           return;
         }
@@ -624,7 +882,7 @@ function LegacyMarkdownEditor(props) {
       return;
     }
     try {
-      const markdown = await editor.blocksToMarkdownLossy(editor.document);
+      const markdown = blocksToNblaneMarkdown(editor, editor.document);
       sendLegacyValue(markdown, immediate);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -652,9 +910,12 @@ function LegacyMarkdownEditor(props) {
           editor={editor}
           editable={editable}
           theme="light"
+          slashMenu={false}
           onChange={() => syncMarkdown(false)}
           onBlur={() => syncMarkdown(true)}
-        />
+        >
+          <BlogSlashMenu editor={editor} labels={labels} />
+        </BlockNoteView>
       )}
     </main>
   );
@@ -677,24 +938,31 @@ function ShellEditor(props) {
   const initialMarkdown = markdownFromValue(args.initial_markdown);
   const height = Number(args.height || 720);
   const editable = args.editable !== false;
-  const sourceMode = args.source_mode === true || args.math_safe === true;
-  const initialHasRawDirectives = containsRawMarkdownDirective(initialMarkdown);
+  const sourceMode = args.source_mode === true;
   const layoutStorageKey = cleanText(
     args.layout_storage_key ||
       args.storage_key ||
       (documentId ? `public_blog_editor:${documentId}` : ""),
   );
-  const editor = useCreateBlockNote({});
+  const mediaPreviewMapRef = useRef(new Map());
+  mediaPreviewMapRef.current = buildMediaPreviewMap([
+    ...mediaItems,
+    ...visualResults,
+  ]);
+  const editor = useCreateBlockNote({
+    schema: blogSchema,
+    resolveFileUrl: (url) =>
+      resolveMediaPreviewUrl(url, mediaPreviewMapRef.current),
+  });
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [sourceMarkdown, setSourceMarkdown] = useState(initialMarkdown);
-  const [rawDirectiveSourceDocumentId, setRawDirectiveSourceDocumentIdState] =
-    useState(() => (initialHasRawDirectives ? documentId : ""));
   const [dirty, setDirty] = useState(false);
   const [mobileView, setMobileView] = useState("Editor");
   const [newPostTitle, setNewPostTitle] = useState("");
   const [evidenceId, setEvidenceId] = useState("");
   const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
+  const [largePreview, setLargePreview] = useState({ source: "", key: "" });
   const [layout, setLayoutState] = useState(() =>
     readStoredLayout(layoutStorageKey, normalizeLayout(args.layout_state)),
   );
@@ -712,26 +980,35 @@ function ShellEditor(props) {
   const initialMarkdownRef = useRef(initialMarkdown);
   const eventCounterRef = useRef(0);
   const lastCursorBlockIdRef = useRef("");
-  const rawDirectiveSourceDocumentIdRef = useRef(
-    initialHasRawDirectives ? documentId : "",
-  );
   const sourceTextareaRef = useRef(null);
   const sourceSelectionRef = useRef({ start: 0, end: 0 });
-  const editorSourceMode =
-    sourceMode ||
-    initialHasRawDirectives ||
-    rawDirectiveSourceDocumentId === documentId;
+  const editorSourceMode = sourceMode;
 
   const layoutSeed = deepStableStringify(args.layout_state || {});
   const metaSeed = deepStableStringify(args.active_post_meta || {});
   const visualSeed = deepStableStringify(args.visual_config || {});
   const visualResultsSeed = deepStableStringify(args.visual_results || []);
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
-
-  const setRawDirectiveSourceDocumentId = useCallback((nextDocumentId) => {
-    rawDirectiveSourceDocumentIdRef.current = nextDocumentId;
-    setRawDirectiveSourceDocumentIdState(nextDocumentId);
-  }, []);
+  const mediaPreviewRows = useMemo(
+    () =>
+      mediaItems.map((item, index) => ({
+        item,
+        key: visualItemKey(item, index),
+      })),
+    [mediaItems],
+  );
+  const visualPreviewRows = useMemo(
+    () =>
+      visualResults.map((item, index) => ({
+        item,
+        key: visualItemKey(item, index),
+      })),
+    [visualResults],
+  );
+  const largePreviewRow = useMemo(() => {
+    const rows = largePreview.source === "visual" ? visualPreviewRows : mediaPreviewRows;
+    return rows.find((row) => row.key === largePreview.key) || null;
+  }, [largePreview.key, largePreview.source, mediaPreviewRows, visualPreviewRows]);
 
   useFrameHeight(
     [
@@ -774,12 +1051,14 @@ function ShellEditor(props) {
   }, [activeSlug, documentId, initialMarkdown, metaSeed]);
 
   useEffect(() => {
-    setRawDirectiveSourceDocumentId(initialHasRawDirectives ? documentId : "");
-  }, [documentId, initialHasRawDirectives, setRawDirectiveSourceDocumentId]);
-
-  useEffect(() => {
     setStatusFilter(initialStatusFilter);
   }, [initialStatusFilter]);
+
+  useEffect(() => {
+    if (largePreview.key && !largePreviewRow) {
+      setLargePreview({ source: "", key: "" });
+    }
+  }, [largePreview.key, largePreviewRow]);
 
   useEffect(() => {
     if (layout.focus_mode) {
@@ -814,7 +1093,7 @@ function ShellEditor(props) {
         return;
       }
       try {
-        const blocks = await editor.tryParseMarkdownToBlocks(initialMarkdown || "");
+        const blocks = parseMarkdownToEditorBlocks(editor, initialMarkdown || "");
         if (cancelled) {
           return;
         }
@@ -862,21 +1141,18 @@ function ShellEditor(props) {
   );
 
   const getCurrentMarkdown = useCallback(async () => {
-    const preserveRawDirectives =
-      rawDirectiveSourceDocumentIdRef.current === documentId ||
-      initialHasRawDirectives;
-    if (sourceMode || preserveRawDirectives) {
+    if (sourceMode) {
       return latestMarkdownRef.current;
     }
     try {
-      const markdown = await editor.blocksToMarkdownLossy(editor.document);
+      const markdown = blocksToNblaneMarkdown(editor, editor.document);
       latestMarkdownRef.current = markdown;
       return markdown;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return latestMarkdownRef.current;
     }
-  }, [documentId, editor, initialHasRawDirectives, sourceMode]);
+  }, [editor, sourceMode]);
 
   const rememberCursorBlock = useCallback(() => {
     if (editorSourceMode) {
@@ -928,6 +1204,10 @@ function ShellEditor(props) {
     async (action, extraPayload = {}) => {
       if (!editable && WRITE_ACTIONS.has(action)) {
         return;
+      }
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+        await waitForInputFlush();
       }
       const markdown = await getCurrentMarkdown();
       const eventId = nextEventId(action);
@@ -981,24 +1261,18 @@ function ShellEditor(props) {
   );
 
   const replaceEditorMarkdown = useCallback(
-    async (markdown, options = {}) => {
+    async (markdown) => {
       latestMarkdownRef.current = markdown;
       setDirty(computeDirty(markdown, draftMetaRef.current));
-      const preserveRawDirectives =
-        options.preserveRawDirectives === true ||
-        containsRawMarkdownDirective(markdown);
-      if (preserveRawDirectives) {
-        setRawDirectiveSourceDocumentId(documentId);
-      }
-      if (editorSourceMode || preserveRawDirectives) {
+      if (editorSourceMode) {
         setSourceMarkdown(markdown);
         return markdown;
       }
-      const blocks = await editor.tryParseMarkdownToBlocks(markdown || "");
+      const blocks = parseMarkdownToEditorBlocks(editor, markdown || "");
       editor.replaceBlocks(editor.document, blocks);
       return markdown;
     },
-    [computeDirty, documentId, editor, editorSourceMode, setRawDirectiveSourceDocumentId],
+    [computeDirty, editor, editorSourceMode],
   );
 
   const insertMarkdown = useCallback(
@@ -1028,14 +1302,14 @@ function ShellEditor(props) {
           cleanSnippet,
           rawDirective && insertPlacement !== "marker" ? "append" : insertPlacement,
         );
-        await replaceEditorMarkdown(next, { preserveRawDirectives: rawDirective });
+        await replaceEditorMarkdown(next);
         return next;
       }
       try {
         if (insertPlacement === "replace" && editor.getSelection()) {
           editor.removeBlocks(editor.getSelectionCutBlocks());
         }
-        const blocks = await editor.tryParseMarkdownToBlocks(cleanSnippet);
+        const blocks = parseMarkdownToEditorBlocks(editor, cleanSnippet);
         let referenceBlock = findBlockById(
           editor.document,
           lastCursorBlockIdRef.current,
@@ -1298,6 +1572,15 @@ function ShellEditor(props) {
     });
   }
 
+  function handleOpenLargePreview(item, source = "media", key = "") {
+    const cleanSource = source === "visual" ? "visual" : "media";
+    setLargePreview({
+      source: cleanSource,
+      key: key || visualItemKey(item, 0),
+    });
+    setMobileView("Preview");
+  }
+
   async function handleDeleteMedia(item) {
     if (!editable) {
       return;
@@ -1369,9 +1652,19 @@ function ShellEditor(props) {
     cleanText(draftMeta.title) || cleanText(activePost?.title) || label(labels, "title_label");
   const currentStatus = cleanText(draftMeta.status || activePost?.status || "draft");
   const currentDate = cleanText(draftMeta.date || activePost?.date || "");
+  const basePaneHeight = Math.max(700, height - 190);
+  const editorPaneHeight = layout.focus_mode
+    ? Math.max(basePaneHeight, height - 120)
+    : basePaneHeight;
+  const shellStyle = {
+    minHeight: `${height}px`,
+    "--nb-editor-pane-height": `${editorPaneHeight}px`,
+    "--nb-preview-pane-height": `${basePaneHeight}px`,
+    "--nb-side-pane-height": `${Math.max(760, height - 80)}px`,
+  };
 
   return (
-    <main className={shellClasses} style={{ minHeight: `${height}px` }}>
+    <main className={shellClasses} style={shellStyle}>
       <header className="nb-topbar">
         <div className="nb-title-strip">
           <strong>{currentTitle}</strong>
@@ -1614,12 +1907,10 @@ function ShellEditor(props) {
                   rememberSourceSelection();
                   syncMarkdown();
                 }}
-                style={{ minHeight: `${Math.max(360, height - 190)}px` }}
               />
             ) : (
               <div
                 className="nb-blocknote-frame"
-                style={{ minHeight: `${Math.max(360, height - 190)}px` }}
                 onKeyUp={rememberCursorBlock}
                 onMouseUp={rememberCursorBlock}
                 onFocus={rememberCursorBlock}
@@ -1628,6 +1919,7 @@ function ShellEditor(props) {
                   editor={editor}
                   editable={editable}
                   theme="light"
+                  slashMenu={false}
                   onChange={() => {
                     rememberCursorBlock();
                     syncMarkdown();
@@ -1636,10 +1928,30 @@ function ShellEditor(props) {
                     rememberCursorBlock();
                     syncMarkdown();
                   }}
-                />
+                >
+                  <BlogSlashMenu editor={editor} labels={labels} />
+                </BlockNoteView>
               </div>
             )}
           </div>
+          {largePreviewRow ? (
+            <VisualPreviewDialog
+              item={largePreviewRow.item}
+              labels={labels}
+              editable={editable}
+              onClose={() => setLargePreview({ source: "", key: "" })}
+              onInsert={handleInsertMedia}
+              onSetCover={handleSetCover}
+              onSaveCandidate={handleSaveVisualCandidate}
+              onDiscardCandidate={handleDiscardVisualCandidate}
+              onLoadFullPreview={(item) =>
+                handleLoadMediaPreviewDetail(item, largePreview.source || "media")
+              }
+              onConvertVideo={
+                largePreview.source === "media" ? handleConvertMediaVideo : null
+              }
+            />
+          ) : null}
           {layout.preview_open ? (
             <div className="nb-preview-panel">
               <div className="nb-preview-toolbar">
@@ -1741,7 +2053,9 @@ function ShellEditor(props) {
               onInsert={handleInsertMedia}
               onSetCover={handleSetCover}
               onUpload={handleUploadMedia}
-              onLoadFullPreview={(item) => handleLoadMediaPreviewDetail(item, "media")}
+              onOpenLargePreview={(item, key) =>
+                handleOpenLargePreview(item, "media", key)
+              }
               onDelete={handleDeleteMedia}
               onConvertVideo={handleConvertMediaVideo}
             />
@@ -1769,7 +2083,9 @@ function ShellEditor(props) {
               onSetCover={handleSetCover}
               onSaveCandidate={handleSaveVisualCandidate}
               onDiscardCandidate={handleDiscardVisualCandidate}
-              onLoadFullPreview={(item) => handleLoadMediaPreviewDetail(item, "visual")}
+              onOpenLargePreview={(item, key) =>
+                handleOpenLargePreview(item, "visual", key)
+              }
             />
           ) : null}
           {activeRightTab === "Check" ? (
@@ -1922,7 +2238,7 @@ function MediaDrawer({
   onInsert,
   onSetCover,
   onUpload,
-  onLoadFullPreview,
+  onOpenLargePreview,
   onDelete,
   onConvertVideo,
 }) {
@@ -1934,12 +2250,10 @@ function MediaDrawer({
   const [cover, setCover] = useState(false);
   const [insertPlacement, setInsertPlacement] = useState("cursor");
   const [uploadPlacement, setUploadPlacement] = useState("marker");
-  const [selectedKey, setSelectedKey] = useState("");
   const keyedRows = mediaItems.map((item, index) => ({
     item,
     key: visualItemKey(item, index),
   }));
-  const selected = keyedRows.find((row) => row.key === selectedKey)?.item || null;
 
   function fileToDataUrl(targetFile) {
     return new Promise((resolve, reject) => {
@@ -2066,7 +2380,7 @@ function MediaDrawer({
                 <button
                   type="button"
                   className="nb-preview-button nb-media-thumb-button"
-                  onClick={() => setSelectedKey(key)}
+                  onClick={() => onOpenLargePreview(item, key)}
                   title={label(labels, "view_full_preview")}
                 >
                   <MediaPreview
@@ -2100,7 +2414,7 @@ function MediaDrawer({
                   <button
                     type="button"
                     className="nb-button"
-                    onClick={() => setSelectedKey(key)}
+                    onClick={() => onOpenLargePreview(item, key)}
                   >
                     {label(labels, "view_full_preview")}
                   </button>
@@ -2154,20 +2468,6 @@ function MediaDrawer({
       ) : (
         <p className="nb-empty">{label(labels, "no_media")}</p>
       )}
-      {selected ? (
-        <VisualPreviewDialog
-          item={selected}
-          labels={labels}
-          editable={editable}
-          onClose={() => setSelectedKey("")}
-          onInsert={onInsert}
-          onSetCover={onSetCover}
-          onSaveCandidate={() => {}}
-          onDiscardCandidate={() => {}}
-          onLoadFullPreview={onLoadFullPreview}
-          onConvertVideo={onConvertVideo}
-        />
-      ) : null}
     </div>
   );
 }
@@ -2297,7 +2597,6 @@ function VisualPreviewActions({
   onSetCover,
   onSaveCandidate,
   onDiscardCandidate,
-  onLoadFullPreview,
 }) {
   const [insertPlacement, setInsertPlacement] = useState("cursor");
   const kind = mediaKind(item);
@@ -2376,9 +2675,33 @@ function VisualPreviewDialog({
   const canLoadFull = item.full_preview_available !== false && !fullSrc;
   const codecLabel = mediaVideoCodecLabel(item, labels);
   const videoWarning = mediaVideoWarning(item, labels);
+  const overlayStyle = useFloatingPreviewStyle(true);
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
   return (
-    <div className="nb-preview-dialog" role="dialog" aria-modal="true">
-      <div className="nb-preview-dialog-panel">
+    <div
+      className="nb-preview-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label={label(labels, "view_full_preview")}
+      style={overlayStyle}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="nb-preview-dialog-panel"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="nb-preview-dialog-header">
           <div>
             <strong>{name}</strong>
@@ -2455,7 +2778,6 @@ function VisualResultCard({
   onSetCover,
   onSaveCandidate,
   onDiscardCandidate,
-  onLoadFullPreview,
 }) {
   const path = mediaPath(item);
   const kind = mediaKind(item);
@@ -2515,15 +2837,13 @@ function VisualResultsList({
   onSetCover,
   onSaveCandidate,
   onDiscardCandidate,
-  onLoadFullPreview,
+  onOpenLargePreview,
 }) {
   const rows = asArray(items).map(asObject);
-  const [selectedKey, setSelectedKey] = useState("");
   const keyedRows = rows.map((item, index) => ({
     item,
     key: visualItemKey(item, index),
   }));
-  const selected = keyedRows.find((row) => row.key === selectedKey)?.item || null;
   if (!rows.length) {
     return null;
   }
@@ -2536,26 +2856,13 @@ function VisualResultsList({
           item={item}
           labels={labels}
           editable={editable}
-          onOpenPreview={() => setSelectedKey(key)}
+          onOpenPreview={() => onOpenLargePreview(item, key)}
           onInsert={onInsert}
           onSetCover={onSetCover}
           onSaveCandidate={onSaveCandidate}
           onDiscardCandidate={onDiscardCandidate}
         />
       ))}
-      {selected ? (
-        <VisualPreviewDialog
-          item={selected}
-          labels={labels}
-          editable={editable}
-          onClose={() => setSelectedKey("")}
-          onInsert={onInsert}
-          onSetCover={onSetCover}
-          onSaveCandidate={onSaveCandidate}
-          onDiscardCandidate={onDiscardCandidate}
-          onLoadFullPreview={onLoadFullPreview}
-        />
-      ) : null}
     </section>
   );
 }
@@ -2571,7 +2878,7 @@ function VisualDrawer({
   onSetCover,
   onSaveCandidate,
   onDiscardCandidate,
-  onLoadFullPreview,
+  onOpenLargePreview,
 }) {
   const [assetType, setAssetType] = useState("cover");
   const [prompt, setPrompt] = useState("");
@@ -2767,7 +3074,7 @@ function VisualDrawer({
         onSetCover={onSetCover}
         onSaveCandidate={onSaveCandidate}
         onDiscardCandidate={onDiscardCandidate}
-        onLoadFullPreview={onLoadFullPreview}
+        onOpenLargePreview={onOpenLargePreview}
       />
     </div>
   );

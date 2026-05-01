@@ -135,6 +135,14 @@ def _ui() -> dict[str, str]:
             "related_kanban": "关联看板项",
             "insert_marker": "插入位置标记",
             "media": "媒体",
+            "formula_block": "公式",
+            "formula_block_help": "LaTeX 展示公式",
+            "video_block": "视频",
+            "video_block_help": "公开站视频块",
+            "visual_block": "视觉块",
+            "visual_block_help": "图片或视频候选",
+            "ai_loading_block": "AI 占位",
+            "ai_loading_block_help": "生成中内容",
             "upload_media": "上传图片或短视频",
             "media_kind": "媒体类型",
             "alt_text": "替代文本",
@@ -325,6 +333,14 @@ def _ui() -> dict[str, str]:
         "related_kanban": "Related kanban",
         "insert_marker": "Insert marker",
         "media": "Media",
+        "formula_block": "Formula",
+        "formula_block_help": "LaTeX display formula",
+        "video_block": "Video",
+        "video_block_help": "Public-site video block",
+        "visual_block": "Visual block",
+        "visual_block_help": "Image or video candidate",
+        "ai_loading_block": "AI placeholder",
+        "ai_loading_block_help": "Generated content",
         "upload_media": "Upload image or short video",
         "media_kind": "Media kind",
         "alt_text": "Alt text",
@@ -1782,26 +1798,6 @@ def _render_body_editor(
     """Render the preferred rich Markdown editor with text-area fallback."""
     key = _blog_editor_key(selected, slug, "body")
     body_token = hashlib.sha1(body.encode("utf-8")).hexdigest()[:12]
-    math_key = _blog_editor_key(selected, slug, "math_safe")
-    math_detected = markdown_contains_math(body)
-    if math_detected:
-        st.session_state[math_key] = True
-    math_safe = st.checkbox(
-        ui["math_safe_mode"],
-        value=bool(st.session_state.get(math_key, False)),
-        key=math_key,
-        help=ui["math_safe_help"],
-        disabled=math_detected,
-    )
-    if math_detected or math_safe:
-        if math_detected:
-            st.info(ui["math_safe_notice"])
-        return st.text_area(
-            ui["body"],
-            value=body,
-            height=520,
-            key=f"{key}:math_safe:{body_token}",
-        )
     if st_blocknote_markdown is not None:
         edited = st_blocknote_markdown(
             initial_markdown=body,
@@ -1844,7 +1840,7 @@ def _blog_page_preview(
         except Exception as exc:
             st.error(str(exc))
             return
-        components.html(html_text, height=760, scrolling=True)
+        components.html(html_text, height=960, scrolling=True)
         return
     try:
         preview = render_public_site_preview(
@@ -1861,7 +1857,7 @@ def _blog_page_preview(
         return
     components.html(
         preview.pages[page],
-        height=760,
+        height=960,
         scrolling=True,
     )
 
@@ -1973,7 +1969,6 @@ def _render_blog_react_shell(
         ):
             preview_html = ""
             _clear_blog_preview(selected, latest_post.slug)
-    math_safe = markdown_contains_math(draft_body)
     event = st_public_blog_editor(
         posts=_blog_shell_posts_payload(posts),
         active_slug=latest_post.slug,
@@ -2003,10 +1998,8 @@ def _render_blog_react_shell(
         document_id=f"{selected}:{latest_post.slug}",
         layout_storage_key=_blog_layout_storage_key(selected, latest_post.slug),
         key=_blog_editor_key(selected, latest_post.slug, "react_shell"),
-        height=760,
+        height=960,
         editable=True,
-        math_safe=math_safe,
-        source_mode=math_safe,
     )
 
     if not isinstance(event, dict):
