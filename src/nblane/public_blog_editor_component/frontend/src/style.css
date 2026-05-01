@@ -707,8 +707,61 @@ textarea:read-only {
   line-height: 1.45;
 }
 
+.nb-ai-inline-actions,
+.nb-ai-selection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nb-ai-inline-actions .nb-button,
+.nb-ai-tool-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.76rem;
+}
+
+.nb-ai-selection-toolbar {
+  z-index: 2147482500;
+  align-items: center;
+  padding: 7px;
+  border: 1px solid rgba(33, 104, 91, 0.34);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--nb-shadow);
+}
+
+.nb-ai-selection-toolbar.is-docked {
+  position: sticky;
+  bottom: 10px;
+  margin-top: 8px;
+}
+
+.nb-ai-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-paper);
+  color: var(--nb-ink);
+  font-weight: 780;
+  line-height: 1;
+}
+
+.nb-ai-tool-button:hover {
+  border-color: rgba(33, 104, 91, 0.55);
+  background: var(--nb-accent-soft);
+}
+
+.nb-ai-tool-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .nb-candidate pre,
-.nb-selection-context pre {
+.nb-selection-context pre,
+.nb-ai-patch-card pre {
   max-height: 180px;
   margin: 0;
   overflow: auto;
@@ -722,6 +775,78 @@ textarea:read-only {
     monospace;
   font-size: 0.78rem;
   line-height: 1.45;
+}
+
+.nb-ai-patch-panel,
+.nb-ai-patch-card {
+  display: grid;
+  gap: 8px;
+}
+
+.nb-ai-patch-card {
+  padding: 10px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-paper);
+}
+
+.nb-ai-patch-card.is-pending {
+  background: var(--nb-soft);
+}
+
+.nb-ai-patch-target {
+  color: var(--nb-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.nb-ai-patch-meta {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 8px 0 0;
+  color: var(--nb-muted);
+  font-size: 0.78rem;
+}
+
+.nb-ai-patch-meta dt {
+  font-weight: 800;
+}
+
+.nb-ai-patch-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.nb-ai-diff {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: #243431;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.nb-ai-diff .is-added {
+  background: #dff7ea;
+  color: #14532d;
+}
+
+.nb-ai-diff .is-removed {
+  background: #fde2e2;
+  color: #8f1d1d;
+  text-decoration: line-through;
+}
+
+.nb-ai-diff .is-equal {
+  color: #33413f;
 }
 
 .nb-selection-context {

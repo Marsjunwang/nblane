@@ -25,6 +25,7 @@ except Exception:  # pragma: no cover - optional Streamlit component
     st_public_blog_editor = None
 
 from nblane.core import git_backup
+from nblane.core import ai_dispatcher
 from nblane.core import visual_generation
 from nblane.core.public_curation import (
     evidence_contexts,
@@ -221,6 +222,33 @@ def _ui() -> dict[str, str]:
             "no_source_videos": "媒体库里暂无视频。",
             "unreferenced_media": "未引用媒体",
             "ai_candidate": "候选内容",
+            "ai_action_polish": "润色",
+            "ai_action_shorten": "缩短",
+            "ai_action_expand": "扩写",
+            "ai_action_continue": "续写",
+            "ai_action_translate": "翻译",
+            "ai_action_tone": "语气",
+            "ai_action_formula": "公式",
+            "ai_action_visual": "配图",
+            "ai_action_outline": "大纲",
+            "ai_patch_panel": "AI Patch 候选",
+            "ai_patch_candidate": "Patch 候选",
+            "ai_patch_generating": "正在生成 Patch",
+            "ai_patch_target": "目标",
+            "ai_patch_meta": "Meta 修改",
+            "ai_patch_assets": "资产",
+            "ai_patch_markdown": "Markdown",
+            "ai_patch_accept": "接受",
+            "ai_patch_accept_block_only": "仅接受正文",
+            "ai_patch_regenerate": "重新生成",
+            "ai_patch_reject": "拒绝",
+            "ai_slash_group": "AI 操作",
+            "ai_slash_write_next": "AI 写下一段",
+            "ai_slash_outline": "大纲",
+            "ai_slash_formula": "公式",
+            "ai_slash_visual": "图",
+            "ai_slash_diagram": "Diagram",
+            "ai_slash_polish": "润色当前块",
             "draft_from_title": "根据当前标题生成完整候选",
             "generate_candidate": "生成候选",
             "insert_candidate": "插入",
@@ -434,6 +462,33 @@ def _ui() -> dict[str, str]:
         "no_source_videos": "No videos in the media library.",
         "unreferenced_media": "Unreferenced media",
         "ai_candidate": "Candidate",
+        "ai_action_polish": "Polish",
+        "ai_action_shorten": "Shorten",
+        "ai_action_expand": "Expand",
+        "ai_action_continue": "Continue",
+        "ai_action_translate": "Translate",
+        "ai_action_tone": "Tone",
+        "ai_action_formula": "Formula",
+        "ai_action_visual": "Visual",
+        "ai_action_outline": "Outline",
+        "ai_patch_panel": "AI patch candidates",
+        "ai_patch_candidate": "Patch candidate",
+        "ai_patch_generating": "Generating patch",
+        "ai_patch_target": "Target",
+        "ai_patch_meta": "Meta changes",
+        "ai_patch_assets": "Assets",
+        "ai_patch_markdown": "Markdown",
+        "ai_patch_accept": "Accept",
+        "ai_patch_accept_block_only": "Accept block only",
+        "ai_patch_regenerate": "Regenerate",
+        "ai_patch_reject": "Reject",
+        "ai_slash_group": "AI actions",
+        "ai_slash_write_next": "AI write next paragraph",
+        "ai_slash_outline": "Outline",
+        "ai_slash_formula": "Formula",
+        "ai_slash_visual": "Visual",
+        "ai_slash_diagram": "Diagram",
+        "ai_slash_polish": "Polish current block",
         "draft_from_title": "Generate full candidate from current title",
         "generate_candidate": "Generate candidate",
         "insert_candidate": "Insert",
@@ -1201,6 +1256,9 @@ _BLOG_EVENT_DEDUPE_ACTIONS = {
     "draft_from_evidence",
     "draft_from_done",
     "generate_ai_candidate",
+    "ai_inline_action",
+    "apply_ai_patch",
+    "reject_ai_patch",
     "upload_media",
     "generate_visual_asset",
     "generate_cover_image",
@@ -1220,6 +1278,10 @@ def _blog_shell_event_dedupe_key(selected: str, slug: str) -> str:
 
 def _blog_shell_notice_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "operation_notice")
+
+
+def _blog_ai_patch_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "ai_patch")
 
 
 def _set_blog_shell_notice(
@@ -2037,43 +2099,54 @@ def _render_blog_react_shell(
         ):
             preview_html = ""
             _clear_blog_preview(selected, latest_post.slug)
-    event = st_public_blog_editor(
-        posts=_blog_shell_posts_payload(posts),
-        active_slug=latest_post.slug,
-        initial_markdown=draft_body,
-        active_post_meta=draft_meta,
-        media_items=media_rows,
-        ai_candidates=ai_candidates,
-        validation_state=check_state,
-        visual_config=visual_generation.current_config(),
-        visual_results=visual_results,
-        visual_guidance=_blog_visual_guidance(
+    editor_kwargs = {
+        "posts": _blog_shell_posts_payload(posts),
+        "active_slug": latest_post.slug,
+        "initial_markdown": draft_body,
+        "active_post_meta": draft_meta,
+        "media_items": media_rows,
+        "ai_candidates": ai_candidates,
+        "validation_state": check_state,
+        "visual_config": visual_generation.current_config(),
+        "visual_results": visual_results,
+        "visual_guidance": _blog_visual_guidance(
             post=latest_post,
             meta=draft_meta,
             body=draft_body,
             candidates=ai_candidates,
             ui=ui,
         ),
-        operation_notice=st.session_state.get(
+        "ai_patch": st.session_state.get(
+            _blog_ai_patch_key(selected, latest_post.slug),
+            {},
+        ),
+        "operation_notice": st.session_state.get(
             _blog_shell_notice_key(selected, latest_post.slug),
             {},
         ),
-        preview_html=str(preview_html or ""),
-        status_filter=(
+        "preview_html": str(preview_html or ""),
+        "status_filter": (
             "all"
             if st.session_state.get(f"blog_status_filter:{selected}", ui["all_statuses"])
             == ui["all_statuses"]
             else str(st.session_state.get(f"blog_status_filter:{selected}", "all"))
         ),
-        layout_state=layout_state,
-        ui_labels=ui,
-        document_id=f"{selected}:{latest_post.slug}",
-        layout_storage_key=_blog_layout_storage_key(selected, latest_post.slug),
-        key=_blog_editor_key(selected, latest_post.slug, "react_shell"),
-        height=960,
-        editable=True,
-        math_safe=True,
-    )
+        "layout_state": layout_state,
+        "ui_labels": ui,
+        "document_id": f"{selected}:{latest_post.slug}",
+        "layout_storage_key": _blog_layout_storage_key(selected, latest_post.slug),
+        "key": _blog_editor_key(selected, latest_post.slug, "react_shell"),
+        "height": 960,
+        "editable": True,
+        "math_safe": True,
+    }
+    try:
+        event = st_public_blog_editor(**editor_kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument 'ai_patch'" not in str(exc):
+            raise
+        editor_kwargs.pop("ai_patch", None)
+        event = st_public_blog_editor(**editor_kwargs)
 
     if not isinstance(event, dict):
         return True
@@ -2102,6 +2175,7 @@ def _render_blog_react_shell(
         "insert_media",
         "insert_candidate",
         "apply_candidate_meta",
+        "apply_ai_patch",
     }:
         if action == "insert_media":
             media = payload.get("media")
@@ -2125,8 +2199,11 @@ def _render_blog_react_shell(
             "insert_media",
             "insert_candidate",
             "apply_candidate_meta",
+            "apply_ai_patch",
         }:
             _clear_blog_preview(selected, latest_post.slug)
+        if action == "apply_ai_patch":
+            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
         return True
 
     if action == "delete_media":
@@ -2304,6 +2381,65 @@ def _render_blog_react_shell(
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
+        return True
+
+    if action == "ai_inline_action":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+        )
+        try:
+            _clear_blog_shell_notice(selected, latest_post.slug)
+            selected_block = payload.get("selected_block")
+            if not isinstance(selected_block, dict):
+                selected_block = event.get("selected_block")
+            if not isinstance(selected_block, dict):
+                selected_block = {}
+            patch = ai_dispatcher.generate_ai_patch(
+                profile=selected,
+                slug=latest_post.slug,
+                meta=event_meta,
+                markdown=event_body,
+                selected_block=selected_block,
+                operation=str(payload.get("operation", "") or "polish"),
+                prompt=str(payload.get("prompt", "") or ""),
+                visual_kind=str(payload.get("visual_kind", "") or ""),
+                source_event_id=str(payload.get("event_id", "") or event.get("event_id", "")),
+            )
+            st.session_state[_blog_ai_patch_key(selected, latest_post.slug)] = patch
+            _set_blog_shell_notice(
+                selected,
+                latest_post.slug,
+                tone="success",
+                message="AI patch candidate is ready.",
+                source="ai",
+            )
+            next_state = dict(layout_state)
+            next_state["right_open"] = True
+            next_state["active_right_tab"] = "AI"
+            next_state["focus_mode"] = False
+            _rerun_with_blog_layout(selected, latest_post.slug, next_state)
+        except Exception as exc:
+            message = str(exc)
+            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+            _set_blog_shell_notice(
+                selected,
+                latest_post.slug,
+                tone="error",
+                message=message,
+                source="ai",
+            )
+            st.error(message)
+            st.rerun()
+        return True
+
+    if action == "reject_ai_patch":
+        st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+        _clear_blog_shell_notice(selected, latest_post.slug)
+        st.rerun()
         return True
 
     if action == "generate_ai_candidate":

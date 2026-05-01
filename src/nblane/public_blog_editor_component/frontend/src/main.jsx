@@ -17,6 +17,9 @@ import {
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "./style.css";
+import { CandidatePatchPanel } from "./ai/CandidatePatchPanel.jsx";
+import { SelectionAIToolbar } from "./ai/SelectionAIToolbar.jsx";
+import { getAISlashMenuItems } from "./ai/slashItems.js";
 import { blogSchema, getBlogSlashMenuItems } from "./blocks/blogBlocks.jsx";
 import {
   blocksToNblaneMarkdown,
@@ -39,6 +42,9 @@ const WRITE_ACTIONS = new Set([
   "convert_media_video",
   "apply_candidate_meta",
   "generate_ai_candidate",
+  "ai_inline_action",
+  "apply_ai_patch",
+  "reject_ai_patch",
   "upload_media",
   "generate_visual_asset",
   "generate_cover_image",
@@ -53,7 +59,34 @@ const DEFAULT_LABELS = {
   add_media: "Add media",
   alt_text: "Alt text",
   ai: "AI",
+  ai_action_continue: "Continue",
+  ai_action_expand: "Expand",
+  ai_action_formula: "LaTeX",
+  ai_action_outline: "Outline",
+  ai_action_polish: "Polish",
+  ai_action_shorten: "Shorten",
+  ai_action_tone: "Tone",
+  ai_action_translate: "Translate",
+  ai_action_visual: "Visual",
   ai_candidate: "Candidate",
+  ai_patch_accept: "Accept",
+  ai_patch_accept_block_only: "Accept block only",
+  ai_patch_assets: "Assets",
+  ai_patch_candidate: "Patch candidate",
+  ai_patch_generating: "Generating patch",
+  ai_patch_markdown: "Markdown",
+  ai_patch_meta: "Meta changes",
+  ai_patch_panel: "AI patch candidates",
+  ai_patch_regenerate: "Regenerate",
+  ai_patch_reject: "Reject",
+  ai_patch_target: "Target",
+  ai_slash_diagram: "Diagram",
+  ai_slash_formula: "Formula",
+  ai_slash_group: "AI actions",
+  ai_slash_outline: "Outline",
+  ai_slash_polish: "Polish current block",
+  ai_slash_visual: "Visual",
+  ai_slash_write_next: "AI write next paragraph",
   all_statuses: "All statuses",
   append_candidate: "Append",
   apply_candidate_meta: "Apply meta",
@@ -563,6 +596,51 @@ function candidateMeta(candidate) {
   return meta;
 }
 
+function aiPatchId(patch, index = 0) {
+  const data = asObject(patch);
+  return cleanText(
+    data.patch_id ||
+      data.id ||
+      asObject(data.provenance).source_event_id ||
+      `ai-patch-${index}`,
+  );
+}
+
+function normalizeAIPatch(value) {
+  const patch = asObject(value);
+  const operation = cleanText(patch.operation).trim();
+  if (!operation) {
+    return null;
+  }
+  return {
+    patch_id: cleanText(patch.patch_id || patch.id || `ai-${Date.now()}`),
+    operation,
+    target: asObject(patch.target),
+    meta_patch: asObject(patch.meta_patch),
+    block_patches: asArray(patch.block_patches).map(asObject),
+    markdown_fallback: cleanText(patch.markdown_fallback),
+    assets: asArray(patch.assets).map(asObject),
+    warnings: asArray(patch.warnings).map(cleanText).filter(Boolean),
+    citations: asArray(patch.citations).map(asObject),
+    provenance: asObject(patch.provenance),
+  };
+}
+
+function patchDefaultPlacement(patch) {
+  const operation = cleanText(patch?.operation).toLowerCase();
+  const blockPatches = asArray(patch?.block_patches).map(asObject);
+  const firstOp = cleanText(blockPatches[0]?.op).toLowerCase();
+  if (
+    firstOp === "replace" ||
+    ["polish", "rewrite", "shorten", "expand", "translate", "tone", "formula"].includes(
+      operation,
+    )
+  ) {
+    return "replace";
+  }
+  return "cursor";
+}
+
 function normalizeInsertPlacement(value) {
   const placement = cleanText(value || "cursor");
   return ["cursor", "marker", "append", "replace"].includes(placement)
@@ -793,11 +871,12 @@ function statusClass(status) {
 }
 
 function useFrameHeight(deps, minimumHeight) {
+  const lastHeightRef = useRef(0);
   useEffect(() => {
     let frame = null;
-    const root = document.getElementById("root");
     const observed = new WeakSet();
     const measuredSelectors = [
+      ".nb-editor-shell",
       ".nb-shell",
       ".nb-workspace",
       ".nb-center-panel",
@@ -807,16 +886,8 @@ function useFrameHeight(deps, minimumHeight) {
       ".nb-right-panel",
     ];
     const measuredElements = () =>
-      [
-        root,
-        document.body,
-        document.documentElement,
-        ...document.querySelectorAll(measuredSelectors.join(",")),
-      ].filter(Boolean);
+      [...document.querySelectorAll(measuredSelectors.join(","))].filter(Boolean);
     const elementExtent = (element) => {
-      if (element === document.body || element === document.documentElement) {
-        return Math.max(element.scrollHeight || 0, element.offsetHeight || 0);
-      }
       const rect = element.getBoundingClientRect();
       const top = rect.top + (window.scrollY || window.pageYOffset || 0);
       return (
@@ -835,6 +906,10 @@ function useFrameHeight(deps, minimumHeight) {
           ...measuredElements().map((element) => elementExtent(element)),
         ) + 18,
       );
+      if (nextHeight === lastHeightRef.current) {
+        return;
+      }
+      lastHeightRef.current = nextHeight;
       Streamlit.setFrameHeight(nextHeight);
     };
     const schedule = () => {
@@ -868,18 +943,21 @@ function useFrameHeight(deps, minimumHeight) {
     };
     observeMeasuredElements();
     const mutationObserver =
-      root && typeof MutationObserver !== "undefined"
+      typeof MutationObserver !== "undefined"
         ? new MutationObserver(() => {
             observeMeasuredElements();
             schedule();
           })
         : null;
-    mutationObserver?.observe(root, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class", "style"],
-    });
+    const root = document.getElementById("root");
+    if (root) {
+      mutationObserver?.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+    }
     window.addEventListener("resize", schedule);
     document.addEventListener("load", schedule, true);
     document.addEventListener("loadedmetadata", schedule, true);
@@ -1018,17 +1096,18 @@ function useFloatingPreviewStyle(active) {
   };
 }
 
-function BlogSlashMenu({ editor, labels }) {
+function BlogSlashMenu({ editor, labels, onAIAction = null }) {
   const getItems = useCallback(
     async (query) =>
       filterSuggestionItems(
         [
+          ...(onAIAction ? getAISlashMenuItems({ labels, onAction: onAIAction }) : []),
           ...getDefaultReactSlashMenuItems(editor),
           ...getBlogSlashMenuItems(editor, labels),
         ],
         query,
       ),
-    [editor, labels],
+    [editor, labels, onAIAction],
   );
   return <SuggestionMenuController triggerCharacter="/" getItems={getItems} />;
 }
@@ -1271,6 +1350,7 @@ function ShellEditor(props) {
   const visualResults = asArray(args.visual_results).map(asObject);
   const visualGuidance = asObject(args.visual_guidance);
   const operationNotice = asObject(args.operation_notice);
+  const incomingAIPatch = useMemo(() => normalizeAIPatch(args.ai_patch), [args.ai_patch]);
   const previewHtml = cleanText(args.preview_html);
   const initialStatusFilter = cleanText(args.status_filter || "all") || "all";
   const activeSlug = cleanText(args.active_slug || args.slug || args.document_id || "");
@@ -1311,6 +1391,8 @@ function ShellEditor(props) {
     normalizeMeta(args.active_post_meta),
   );
   const [selectedBlock, setSelectedBlockState] = useState(null);
+  const [patchCandidates, setPatchCandidates] = useState([]);
+  const [pendingAIAction, setPendingAIAction] = useState(null);
 
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
@@ -1333,6 +1415,7 @@ function ShellEditor(props) {
   const visualResultsSeed = deepStableStringify(args.visual_results || []);
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
   const operationNoticeSeed = deepStableStringify(args.operation_notice || {});
+  const aiPatchSeed = deepStableStringify(args.ai_patch || {});
   const mediaPreviewRows = useMemo(
     () =>
       mediaItems.map((item, index) => ({
@@ -1373,6 +1456,9 @@ function ShellEditor(props) {
       visualResultsSeed,
       visualGuidanceSeed,
       operationNoticeSeed,
+      aiPatchSeed,
+      patchCandidates.length,
+      pendingAIAction?.operation,
     ],
     height + 72,
   );
@@ -1569,6 +1655,27 @@ function ShellEditor(props) {
     [layoutStorageKey],
   );
 
+  useEffect(() => {
+    if (!incomingAIPatch) {
+      return;
+    }
+    const incomingId = aiPatchId(incomingAIPatch);
+    setPatchCandidates((current) => {
+      const withoutDuplicate = current.filter(
+        (patch, index) => aiPatchId(patch, index) !== incomingId,
+      );
+      return [incomingAIPatch, ...withoutDuplicate].slice(0, 8);
+    });
+    setPendingAIAction(null);
+    applyLayoutLocal((current) => ({
+      ...current,
+      right_open: true,
+      active_right_tab: "AI",
+      focus_mode: false,
+    }));
+    setMobileView("Tools");
+  }, [applyLayoutLocal, incomingAIPatch]);
+
   const emitAction = useCallback(
     async (action, extraPayload = {}) => {
       if (!editable && WRITE_ACTIONS.has(action)) {
@@ -1657,21 +1764,28 @@ function ShellEditor(props) {
   );
 
   const insertMarkdown = useCallback(
-    async (snippet, placement = "cursor") => {
+    async (snippet, placement = "cursor", options = {}) => {
       const insertPlacement = normalizeInsertPlacement(placement);
       const cleanSnippet = cleanText(snippet).trim();
+      const targetContext = asObject(options.target || options.targetContext);
       if (!cleanSnippet) {
         return latestMarkdownRef.current;
       }
       const current = await getCurrentMarkdown();
       const rawDirective = isRawMarkdownDirective(cleanSnippet);
       if (editorSourceMode) {
+        const targetRange = asObject(targetContext.range);
+        const sourceSelection =
+          Number.isFinite(Number(targetRange.start)) ||
+          Number.isFinite(Number(targetRange.end))
+            ? targetRange
+            : sourceSelectionRef.current;
         const next =
           insertPlacement === "cursor" || insertPlacement === "replace"
             ? insertMarkdownAtTextSelection(
                 current,
                 cleanSnippet,
-                sourceSelectionRef.current,
+                sourceSelection,
               )
             : insertMarkdownText(current, cleanSnippet, insertPlacement);
         await replaceEditorMarkdown(next);
@@ -1686,16 +1800,36 @@ function ShellEditor(props) {
         await replaceEditorMarkdown(next);
         return next;
       }
+      if (insertPlacement === "replace") {
+        const targetText = cleanText(targetContext.selection_text).trim();
+        if (targetText && current.includes(targetText)) {
+          const next = current.replace(targetText, cleanSnippet);
+          await replaceEditorMarkdown(next);
+          return next;
+        }
+      }
       try {
         const blocks = parseMarkdownToEditorBlocks(editor, cleanSnippet);
         let insertionReference = null;
         let insertionPlacement = "after";
         if (insertPlacement === "replace") {
           let replacementBlocks = [];
-          try {
-            replacementBlocks = asArray(editor.getSelection()?.blocks);
-          } catch (_err) {
-            replacementBlocks = [];
+          const targetIds = asArray(targetContext.block_ids)
+            .map((id) => cleanText(id).trim())
+            .filter(Boolean);
+          const targetBlockId = cleanText(
+            targetContext.block_id || targetContext.cursor_block_id,
+          ).trim();
+          if (targetIds.length || targetBlockId) {
+            replacementBlocks = (targetIds.length ? targetIds : [targetBlockId])
+              .map((blockId) => findBlockById(editor.document, blockId))
+              .filter(Boolean);
+          } else {
+            try {
+              replacementBlocks = asArray(editor.getSelection()?.blocks);
+            } catch (_err) {
+              replacementBlocks = [];
+            }
           }
           if (!replacementBlocks.length) {
             const rememberedTarget = cleanText(
@@ -1944,6 +2078,105 @@ function ShellEditor(props) {
       candidate,
       meta_patch: metaPatch,
       meta: nextMeta,
+    });
+  }
+
+  async function handleAIInlineAction(request = {}) {
+    if (!editable) {
+      return;
+    }
+    const operation = cleanText(request.operation || "polish").trim() || "polish";
+    const requestedSelection = asObject(request.selected_block);
+    const selectionContext =
+      cleanText(requestedSelection.block_id).trim() ||
+      cleanText(requestedSelection.selection_text).trim() ||
+      asArray(requestedSelection.block_ids).length
+        ? requestedSelection
+        : refreshSelectedBlock();
+    setPendingAIAction({
+      operation,
+      trigger: cleanText(request.trigger || "inline"),
+      started_at: Date.now(),
+    });
+    applyLayoutLocal((current) => ({
+      ...current,
+      right_open: true,
+      active_right_tab: "AI",
+      focus_mode: false,
+    }));
+    setMobileView("Tools");
+    await emitAction("ai_inline_action", {
+      operation,
+      trigger: cleanText(request.trigger || "inline"),
+      prompt: cleanText(request.prompt),
+      context_window: cleanText(request.context_window || "selection"),
+      visual_kind: cleanText(request.visual_kind),
+      selected_block: selectionContext,
+    });
+  }
+
+  async function handleAcceptAIPatch(patch, options = {}) {
+    if (!editable) {
+      return;
+    }
+    const normalized = normalizeAIPatch(patch);
+    if (!normalized) {
+      return;
+    }
+    const id = aiPatchId(normalized);
+    const blockOnly = options.blockOnly === true;
+    const metaPatch = asObject(normalized.meta_patch);
+    let nextMeta = draftMetaRef.current;
+    if (!blockOnly && Object.keys(metaPatch).length) {
+      nextMeta = setDraftMeta((current) => ({ ...current, ...metaPatch }));
+    }
+    let markdown = latestMarkdownRef.current;
+    const fallback = cleanText(normalized.markdown_fallback).trim();
+    if (fallback) {
+      markdown = await insertMarkdown(
+        fallback,
+        patchDefaultPlacement(normalized),
+        { target: normalized.target },
+      );
+    }
+    setPatchCandidates((current) =>
+      current.filter((candidate, index) => aiPatchId(candidate, index) !== id),
+    );
+    await emitAction("apply_ai_patch", {
+      patch_id: id,
+      patch: normalized,
+      accepted: true,
+      block_only: blockOnly,
+      markdown,
+      meta: nextMeta,
+    });
+  }
+
+  async function handleRejectAIPatch(patch) {
+    const normalized = normalizeAIPatch(patch);
+    if (!normalized) {
+      return;
+    }
+    const id = aiPatchId(normalized);
+    setPatchCandidates((current) =>
+      current.filter((candidate, index) => aiPatchId(candidate, index) !== id),
+    );
+    await emitAction("reject_ai_patch", {
+      patch_id: id,
+      patch: normalized,
+      rejected: true,
+    });
+  }
+
+  async function handleRegenerateAIPatch(patch) {
+    const normalized = normalizeAIPatch(patch);
+    if (!normalized) {
+      return;
+    }
+    await handleAIInlineAction({
+      operation: normalized.operation,
+      trigger: "regenerate",
+      selected_block: normalized.target,
     });
   }
 
@@ -2366,6 +2599,7 @@ function ShellEditor(props) {
                   editable={editable}
                   theme="light"
                   slashMenu={false}
+                  formattingToolbar={false}
                   onSelectionChange={handleEditorSelectionUpdate}
                   onChange={() => {
                     handleEditorSelectionUpdate();
@@ -2376,10 +2610,21 @@ function ShellEditor(props) {
                     syncMarkdown();
                   }}
                 >
-                  <BlogSlashMenu editor={editor} labels={labels} />
+                  <BlogSlashMenu
+                    editor={editor}
+                    labels={labels}
+                    onAIAction={handleAIInlineAction}
+                  />
                 </BlockNoteView>
               </div>
             )}
+            <SelectionAIToolbar
+              editable={editable}
+              labels={labels}
+              selectedBlock={selectedBlock}
+              disabled={Boolean(pendingAIAction)}
+              onAction={handleAIInlineAction}
+            />
           </div>
           {largePreviewRow ? (
             <VisualPreviewDialog
@@ -2512,10 +2757,16 @@ function ShellEditor(props) {
               editable={editable}
               labels={labels}
               candidates={aiCandidates}
+              patchCandidates={patchCandidates}
+              pendingAIAction={pendingAIAction}
               selectedBlock={selectedBlock}
               onInsert={handleInsertCandidate}
               onApplyMeta={handleApplyCandidateMeta}
               onRun={(payload) => emitAction("generate_ai_candidate", payload)}
+              onInlineAction={handleAIInlineAction}
+              onAcceptPatch={handleAcceptAIPatch}
+              onRejectPatch={handleRejectAIPatch}
+              onRegeneratePatch={handleRegenerateAIPatch}
               currentTitle={currentTitle}
             />
           ) : null}
@@ -2956,10 +3207,16 @@ function AiDrawer({
   editable,
   labels,
   candidates,
+  patchCandidates = [],
+  pendingAIAction = null,
   selectedBlock,
   onInsert,
   onApplyMeta,
   onRun,
+  onInlineAction,
+  onAcceptPatch,
+  onRejectPatch,
+  onRegeneratePatch,
   currentTitle,
 }) {
   const [evidenceId, setEvidenceId] = useState("");
@@ -2967,6 +3224,38 @@ function AiDrawer({
   return (
     <div className="nb-drawer-body">
       <SelectionContextPanel labels={labels} selectedBlock={selectedBlock} />
+      <div className="nb-ai-inline-actions">
+        {[
+          ["polish", "ai_action_polish", "Polish"],
+          ["shorten", "ai_action_shorten", "Shorten"],
+          ["expand", "ai_action_expand", "Expand"],
+          ["continue", "ai_action_continue", "Continue"],
+          ["translate", "ai_action_translate", "Translate"],
+          ["tone", "ai_action_tone", "Tone"],
+          ["formula", "ai_action_formula", "LaTeX"],
+          ["visual", "ai_action_visual", "Visual"],
+          ["outline", "ai_action_outline", "Outline"],
+        ].map(([operation, key, fallback]) => (
+          <button
+            type="button"
+            className="nb-button"
+            disabled={!editable || Boolean(pendingAIAction)}
+            key={operation}
+            onClick={() => onInlineAction({ operation, trigger: "ai_drawer" })}
+          >
+            {label(labels, key, fallback)}
+          </button>
+        ))}
+      </div>
+      <CandidatePatchPanel
+        labels={labels}
+        patches={patchCandidates}
+        pendingAction={pendingAIAction}
+        editable={editable}
+        onAccept={onAcceptPatch}
+        onReject={onRejectPatch}
+        onRegenerate={onRegeneratePatch}
+      />
       <button
         type="button"
         className="nb-button wide"

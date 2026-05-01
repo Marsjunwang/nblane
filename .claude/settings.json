@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kill 3148465)",
+      "Bash(nohup .venv/bin/streamlit run app.py --server.address=127.0.0.1 --server.port=8510 --server.headless=true)",
+      "Bash(disown)",
+      "Bash(echo \"launched pid=$!\")",
+      "Read(//tmp/**)"
+    ]
+  }
+}
