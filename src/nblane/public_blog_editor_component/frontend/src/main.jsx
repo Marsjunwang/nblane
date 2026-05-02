@@ -34,6 +34,27 @@ const RIGHT_TABS = ["Meta", "Media", "AI", "Visual", "Check"];
 const MOBILE_VIEWS = ["Editor", "Articles", "Tools", "Preview"];
 const STATUS_OPTIONS = ["draft", "published", "archived"];
 const INSERT_MARKER = "<!-- nblane:insert -->";
+const SUPPORTED_PATCH_BLOCK_TYPES = new Set([
+  "audio",
+  "bulletListItem",
+  "checkListItem",
+  "codeBlock",
+  "divider",
+  "file",
+  "heading",
+  "image",
+  "numberedListItem",
+  "paragraph",
+  "quote",
+  "table",
+  "toggleListItem",
+  "video",
+  "math_block",
+  "video_block",
+  "visual_block",
+  "ai_loading_block",
+]);
+const AI_PROMPT_REQUIRED_OPERATIONS = new Set(["formula", "outline", "visual"]);
 const WRITE_ACTIONS = new Set([
   "markdown_changed",
   "save_post",
@@ -86,6 +107,9 @@ const DEFAULT_LABELS = {
   ai_stream_cancel: "Cancel",
   ai_stream_cancelled: "Cancelled",
   ai_stream_failed: "AI generation failed",
+  ai_prompt_required_title: "Describe the AI request",
+  ai_prompt_required_placeholder: "Enter what to generate",
+  ai_prompt_required_submit: "Generate",
   ai_slash_diagram: "Diagram",
   ai_slash_formula: "Formula",
   ai_slash_group: "AI actions",
@@ -106,6 +130,7 @@ const DEFAULT_LABELS = {
   create: "Create",
   create_post: "New",
   candidate_warnings: "Candidate warnings",
+  cancel: "Cancel",
   close_left_panel: "Collapse articles",
   close_right_panel: "Collapse tools",
   date: "Date",
@@ -419,14 +444,20 @@ function selectableMediaOptions(items, kind, labels) {
 
 const VISUAL_KIND_TO_ASSET_TYPE = {
   cover: "image",
-  diagram: "diagram",
   flowchart: "diagram",
+  sequence: "diagram",
+  state: "diagram",
+  class: "diagram",
+  mindmap: "diagram",
   example: "image",
   video_edit: "video",
 };
 
 function normalizeVisualKind(value) {
   const clean = cleanText(value).trim().toLowerCase();
+  if (clean === "diagram" || clean === "mermaid") {
+    return "flowchart";
+  }
   return Object.prototype.hasOwnProperty.call(VISUAL_KIND_TO_ASSET_TYPE, clean)
     ? clean
     : "";
@@ -645,12 +676,24 @@ function makeAIStreamId(documentId, operation) {
   return `${cleanText(documentId || "doc")}:ai:${cleanText(operation || "write")}:${random}`;
 }
 
-function aiLoadingMode(operation) {
+function aiLoadingMode(operation, visualKind = "") {
   const clean = cleanText(operation).toLowerCase();
   if (clean === "formula") {
     return "formula";
   }
   if (clean === "visual") {
+    const kind = cleanText(visualKind).toLowerCase();
+    if (
+      kind === "diagram" ||
+      kind === "flowchart" ||
+      kind === "mermaid" ||
+      kind === "sequence" ||
+      kind === "state" ||
+      kind === "class" ||
+      kind === "mindmap"
+    ) {
+      return "diagram";
+    }
     return "visual";
   }
   return clean === "continue" ? "write" : "rewrite";
@@ -676,6 +719,97 @@ function normalizeInsertPlacement(value) {
   return ["cursor", "marker", "append", "replace"].includes(placement)
     ? placement
     : "cursor";
+}
+
+function normalizePatchBlock(block) {
+  const data = asObject(block);
+  const type = cleanText(data.type).trim();
+  if (type && !SUPPORTED_PATCH_BLOCK_TYPES.has(type)) {
+    return null;
+  }
+  const next = { ...data };
+  if (type) {
+    next.type = type;
+  }
+  if (type === "visual_block") {
+    next.props = {
+      ...asObject(next.props),
+      accepted: true,
+      status: "accepted",
+    };
+  } else if (type === "math_block" || type === "video_block") {
+    next.props = {
+      ...asObject(next.props),
+      accepted: true,
+    };
+  }
+  return next;
+}
+
+function patchTargetIds(mutation, patchTarget) {
+  const ids = [];
+  const addId = (value) => {
+    const clean = cleanText(value).trim();
+    if (clean && !ids.includes(clean)) {
+      ids.push(clean);
+    }
+  };
+  const blockId = cleanText(mutation.block_id).trim();
+  if (blockId) {
+    addId(blockId);
+  }
+  for (const id of asArray(mutation.block_ids)) {
+    addId(id);
+  }
+  for (const id of asArray(asObject(mutation.target).block_ids)) {
+    addId(id);
+  }
+  const mutationTargetBlockId = cleanText(asObject(mutation.target).block_id).trim();
+  if (mutationTargetBlockId) {
+    addId(mutationTargetBlockId);
+  }
+  if (ids.length) {
+    return ids;
+  }
+  for (const id of asArray(asObject(patchTarget).block_ids)) {
+    addId(id);
+  }
+  const targetBlockId = cleanText(asObject(patchTarget).block_id).trim();
+  addId(targetBlockId);
+  return ids;
+}
+
+function firstExistingPatchTarget(editor, ids) {
+  for (const id of ids) {
+    const block = findBlockById(editor.document, id);
+    if (block) {
+      return block;
+    }
+  }
+  return null;
+}
+
+function blockPatchFallbackReason(editor, normalizedPatch) {
+  const mutations = asArray(normalizedPatch?.block_patches).map(asObject);
+  if (!mutations.length) {
+    return "empty";
+  }
+  for (const mutation of mutations) {
+    const op = cleanText(mutation.op).toLowerCase();
+    if (!["replace", "insert", "delete"].includes(op)) {
+      return `unsupported op: ${op || "unknown"}`;
+    }
+    if (op !== "delete" && !normalizePatchBlock(mutation.block)) {
+      return `unknown block type: ${cleanText(asObject(mutation.block).type) || "unknown"}`;
+    }
+    if (op === "replace" || op === "delete") {
+      const ids = patchTargetIds(mutation, normalizedPatch.target);
+      if (!ids.length || !firstExistingPatchTarget(editor, ids)) {
+        return "target block missing";
+      }
+    }
+  }
+  return "";
 }
 
 function insertMarkdownText(markdown, snippet, placement = "cursor") {
@@ -1428,6 +1562,8 @@ function ShellEditor(props) {
   const [selectedBlock, setSelectedBlockState] = useState(null);
   const [patchCandidates, setPatchCandidates] = useState([]);
   const [pendingAIAction, setPendingAIAction] = useState(null);
+  const [aiPromptRequest, setAIPromptRequest] = useState(null);
+  const [aiPromptDraft, setAIPromptDraft] = useState("");
   const [outlineVersion, setOutlineVersion] = useState(0);
 
   const latestMarkdownRef = useRef(initialMarkdown);
@@ -1498,6 +1634,7 @@ function ShellEditor(props) {
       patchCandidates.length,
       pendingAIAction?.operation,
       pendingAIAction?.text,
+      aiPromptRequest?.operation,
       outlineVersion,
     ],
     height + 72,
@@ -1956,6 +2093,91 @@ function ShellEditor(props) {
     [editor, editorSourceMode, getCurrentMarkdown, replaceEditorMarkdown],
   );
 
+  const applyBlockPatches = useCallback(
+    async (normalizedPatch) => {
+      if (editorSourceMode) {
+        return null;
+      }
+      const fallbackReason = blockPatchFallbackReason(editor, normalizedPatch);
+      if (fallbackReason) {
+        return null;
+      }
+      const beforeMarkdown = await getCurrentMarkdown();
+      const mutations = asArray(normalizedPatch?.block_patches).map(asObject);
+      const insertedByAnchor = new Map();
+      try {
+        for (const mutation of mutations) {
+          const op = cleanText(mutation.op).toLowerCase();
+          const ids = patchTargetIds(mutation, normalizedPatch.target);
+          const anchorKey = ids[0] || cleanText(normalizedPatch?.target?.cursor_block_id) || "__cursor";
+          if (op === "delete") {
+            const targets = ids
+              .map((id) => findBlockById(editor.document, id))
+              .filter(Boolean);
+            if (targets.length) {
+              editor.removeBlocks(targets);
+            }
+            continue;
+          }
+
+          const nextBlock = normalizePatchBlock(mutation.block);
+          if (!nextBlock) {
+            return null;
+          }
+
+          if (op === "replace") {
+            const targets = ids
+              .map((id) => findBlockById(editor.document, id))
+              .filter(Boolean);
+            if (!targets.length) {
+              return null;
+            }
+            const result = editor.replaceBlocks(targets, [nextBlock]);
+            const inserted = asArray(result?.insertedBlocks);
+            if (inserted.length) {
+              insertedByAnchor.set(anchorKey, inserted[inserted.length - 1]);
+            }
+            continue;
+          }
+
+          const remembered = insertedByAnchor.get(anchorKey);
+          const reference =
+            remembered ||
+            firstExistingPatchTarget(editor, ids) ||
+            findBlockById(editor.document, normalizedPatch?.target?.cursor_block_id) ||
+            editor.document[editor.document.length - 1];
+          if (!reference) {
+            return null;
+          }
+          const inserted = editor.insertBlocks([nextBlock], reference, "after");
+          if (inserted.length) {
+            insertedByAnchor.set(anchorKey, inserted[inserted.length - 1]);
+          }
+        }
+        setOutlineVersion((current) => current + 1);
+        const markdown = await getCurrentMarkdown();
+        setDirty(computeDirty(markdown, draftMetaRef.current));
+        return markdown;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        try {
+          await replaceEditorMarkdown(beforeMarkdown);
+          setDirty(computeDirty(beforeMarkdown, draftMetaRef.current));
+        } catch (restoreErr) {
+          setError(
+            restoreErr instanceof Error
+              ? `${message}; restore failed: ${restoreErr.message}`
+              : `${message}; restore failed: ${String(restoreErr)}`,
+          );
+          throw err;
+        }
+        return null;
+      }
+    },
+    [computeDirty, editor, editorSourceMode, getCurrentMarkdown, replaceEditorMarkdown],
+  );
+
   const findAILoadingBlock = useCallback(
     (streamId) => {
       if (editorSourceMode) {
@@ -1977,7 +2199,7 @@ function ShellEditor(props) {
   );
 
   const insertAILoadingBlock = useCallback(
-    (streamId, operation, selectionContext = {}) => {
+    (streamId, operation, selectionContext = {}, visualKind = "") => {
       if (editorSourceMode || !editable || findAILoadingBlock(streamId)) {
         return;
       }
@@ -2007,7 +2229,7 @@ function ShellEditor(props) {
             type: "ai_loading_block",
             props: {
               prompt: "",
-              mode: aiLoadingMode(operation),
+              mode: aiLoadingMode(operation, visualKind),
               status: "loading",
               ai_source_id: streamId,
             },
@@ -2292,9 +2514,20 @@ function ShellEditor(props) {
       asArray(requestedSelection.block_ids).length
         ? requestedSelection
         : refreshSelectedBlock();
+    const promptText = cleanText(request.prompt).trim();
+    if (
+      cleanText(request.trigger) === "slash" &&
+      AI_PROMPT_REQUIRED_OPERATIONS.has(operation) &&
+      !promptText &&
+      !cleanText(selectionContext.selection_text).trim()
+    ) {
+      setAIPromptRequest({ ...request, operation, requires_prompt: false });
+      setAIPromptDraft("");
+      return;
+    }
     const markdownBeforeAI = await getCurrentMarkdown();
     const streamId = cleanText(request.stream_id).trim() || makeAIStreamId(documentId, operation);
-    insertAILoadingBlock(streamId, operation, selectionContext);
+    insertAILoadingBlock(streamId, operation, selectionContext, request.visual_kind);
     setPendingAIAction({
       operation,
       trigger: cleanText(request.trigger || "inline"),
@@ -2314,13 +2547,38 @@ function ShellEditor(props) {
     await emitAction("ai_inline_action", {
       operation,
       trigger: cleanText(request.trigger || "inline"),
-      prompt: cleanText(request.prompt),
+      prompt: promptText,
       context_window: cleanText(request.context_window || "selection"),
       visual_kind: cleanText(request.visual_kind),
       selected_block: selectionContext,
       stream_id: streamId,
       markdown: markdownBeforeAI,
       dirty: computeDirty(markdownBeforeAI, draftMetaRef.current),
+    });
+  }
+
+  async function handleAISlashAction(request = {}) {
+    const prompt = cleanText(request.prompt).trim();
+    if (request.requires_prompt && !prompt) {
+      setAIPromptRequest({ ...request, requires_prompt: false });
+      setAIPromptDraft("");
+      return;
+    }
+    await handleAIInlineAction(request);
+  }
+
+  async function handleSubmitAIPromptRequest() {
+    const prompt = cleanText(aiPromptDraft).trim();
+    const request = aiPromptRequest;
+    if (!request || !prompt) {
+      return;
+    }
+    setAIPromptRequest(null);
+    setAIPromptDraft("");
+    await handleAIInlineAction({
+      ...request,
+      prompt,
+      requires_prompt: false,
     });
   }
 
@@ -2380,7 +2638,10 @@ function ShellEditor(props) {
     }
     let markdown = latestMarkdownRef.current;
     const fallback = cleanText(normalized.markdown_fallback).trim();
-    if (fallback) {
+    const blockPatchMarkdown = await applyBlockPatches(normalized);
+    if (blockPatchMarkdown !== null) {
+      markdown = blockPatchMarkdown;
+    } else if (fallback) {
       markdown = await insertMarkdown(
         fallback,
         patchDefaultPlacement(normalized),
@@ -2871,7 +3132,7 @@ function ShellEditor(props) {
                   <BlogSlashMenu
                     editor={editor}
                     labels={labels}
-                    onAIAction={handleAIInlineAction}
+                    onAIAction={handleAISlashAction}
                   />
                 </BlockNoteView>
               </div>
@@ -2884,6 +3145,19 @@ function ShellEditor(props) {
               onAction={handleAIInlineAction}
             />
           </div>
+          {aiPromptRequest ? (
+            <AIPromptDialog
+              labels={labels}
+              request={aiPromptRequest}
+              value={aiPromptDraft}
+              onChange={setAIPromptDraft}
+              onSubmit={handleSubmitAIPromptRequest}
+              onClose={() => {
+                setAIPromptRequest(null);
+                setAIPromptDraft("");
+              }}
+            />
+          ) : null}
           {largePreviewRow ? (
             <VisualPreviewDialog
               item={largePreviewRow.item}
@@ -3804,6 +4078,84 @@ function VisualPreviewDialog({
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AIPromptDialog({ labels, request, value, onChange, onSubmit, onClose }) {
+  const inputRef = useRef(null);
+  const operation = cleanText(request?.operation || "");
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+  return (
+    <div
+      className="nb-preview-dialog nb-ai-prompt-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label={label(labels, "ai_prompt_required_title")}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <form
+        className="nb-preview-dialog-panel nb-ai-prompt-panel"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="nb-preview-dialog-header">
+          <div>
+            <strong>{label(labels, "ai_prompt_required_title")}</strong>
+            {operation ? <span className="nb-muted-line">{operation}</span> : null}
+          </div>
+          <button
+            type="button"
+            className="nb-icon-button"
+            title={label(labels, "close")}
+            onClick={onClose}
+          >
+            x
+          </button>
+        </div>
+        <textarea
+          ref={inputRef}
+          className="nb-ai-prompt-input"
+          value={value}
+          rows={4}
+          placeholder={label(labels, "ai_prompt_required_placeholder")}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+        />
+        <div className="nb-row-actions">
+          <button type="button" className="nb-button" onClick={onClose}>
+            {label(labels, "cancel")}
+          </button>
+          <button
+            type="submit"
+            className="nb-button primary"
+            disabled={!cleanText(value).trim()}
+          >
+            {label(labels, "ai_prompt_required_submit")}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

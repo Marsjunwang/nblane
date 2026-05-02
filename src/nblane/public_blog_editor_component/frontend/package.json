@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 0.0.0.0",
-    "test": "node --test src/blocks/markdown.test.mjs"
+    "test": "node --test src/blocks/markdown.test.mjs src/ai/slashItems.test.mjs",
+    "e2e": "NODE_PATH=./node_modules playwright test -c ../../../../tests/e2e/playwright.config.ts"
   },
   "dependencies": {
     "@blocknote/core": "^0.41.1",
@@ -22,6 +23,7 @@
     "streamlit-component-lib": "^2.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "@vitejs/plugin-react": "^4.3.4",
     "vite": "^6.3.0"
   }

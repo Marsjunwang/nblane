@@ -246,6 +246,7 @@ export function CandidatePatchPanel({
                     <li key={`${id}-asset-${assetIndex}`}>
                       {cleanText(asset.kind || "asset")}
                       {asset.src ? ` / ${cleanText(asset.src)}` : ""}
+                      {asset.candidate_path ? ` / ${cleanText(asset.candidate_path)}` : ""}
                       {asset.prompt ? ` / ${cleanText(asset.prompt).slice(0, 120)}` : ""}
                     </li>
                   ))}

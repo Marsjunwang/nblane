@@ -11,6 +11,7 @@ from typing import Any
 from nblane.core import ai_blog_outline
 from nblane.core import llm as llm_client
 from nblane.core import visual_generation
+from nblane.core import visual_candidate_store
 from nblane.core.ai_blog_prompts import get_prompt
 from schemas.ai_patch import (
     AIAsset,
@@ -190,6 +191,13 @@ def _prompt_for_operation(operation: str, lang: str, visual_kind: str = "") -> t
     return get_prompt("inline_system", lang), get_prompt(prompt_name, lang)
 
 
+def _visual_kind_for_diagram(value: str) -> str:
+    clean = _clean_text(value).strip().lower()
+    if clean in {"diagram", "mermaid", "flowchart"}:
+        return "flowchart"
+    return clean or "flowchart"
+
+
 def _build_user_prompt(
     *,
     operation: str,
@@ -327,10 +335,17 @@ def generate_ai_patch(
 
     lang = llm_client.reply_language()
     clean_visual_kind = _clean_text(visual_kind).strip().lower()
-    if clean_visual_kind in {"flowchart", "mermaid"}:
+    requested_visual_kind = clean_visual_kind
+    if clean_visual_kind in {"diagram", "mermaid", "flowchart", "sequence", "state", "class", "mindmap"}:
         clean_visual_kind = "diagram"
     clean_operation = _operation(operation, clean_visual_kind)
     target = _target_from_selection(selected_block)
+    if (
+        clean_operation in {"formula", "visual", "outline"}
+        and not _clean_text(prompt).strip()
+        and not target.selection_text.strip()
+    ):
+        raise RuntimeError("请先选中文本或在 slash 后输入描述")
     system, instruction = _prompt_for_operation(
         clean_operation,
         lang,
@@ -405,7 +420,7 @@ def generate_ai_patch(
         mermaid = _extract_mermaid(raw)
         visual_payload = {
             "asset_type": "diagram",
-            "visual_kind": "flowchart",
+            "visual_kind": _visual_kind_for_diagram(requested_visual_kind),
             "src": "",
             "mermaid": mermaid,
             "prompt": raw_text,
@@ -448,40 +463,44 @@ def generate_ai_patch(
             if _clean_text(warning).strip()
         )
         generated_assets = _as_list(caption_intent.get("generated_assets"))
-        saved_src = ""
+        candidate_path = ""
         saved_model = _clean_text(caption_intent.get("model"))
         saved_provider = _clean_text(caption_intent.get("provider") or "dashscope_wan")
-        if generated_assets:
-            try:
-                from nblane.core import public_site
-
-                first = generated_assets[0]
-                extension = _clean_text(getattr(first, "extension", "png") or "png")
-                filename = visual_generation.generated_filename(
-                    "example",
-                    getattr(first, "data"),
-                    extension,
-                )
-                saved = public_site.add_blog_media_bytes(
-                    profile,
-                    slug,
-                    data=getattr(first, "data"),
-                    filename=filename,
-                    kind="image",
-                    alt=_clean_text(caption_intent.get("alt")),
-                    caption=_clean_text(caption_intent.get("caption")),
-                    append=False,
-                )
-                saved_src = saved.relative_path
-            except Exception as exc:
-                warnings.append(f"Generated visual could not be saved: {exc}")
+        if not generated_assets:
+            detail = "; ".join(warnings) or "Visual generation did not return an image candidate."
+            raise RuntimeError(detail)
+        try:
+            first = generated_assets[0]
+            extension = _clean_text(getattr(first, "extension", "png") or "png")
+            filename = visual_generation.generated_filename(
+                "example",
+                getattr(first, "data"),
+                extension,
+            )
+            candidate = visual_candidate_store.write_candidate(
+                profile,
+                slug,
+                data=getattr(first, "data"),
+                filename=filename,
+                kind="image",
+                alt=_clean_text(caption_intent.get("alt")),
+                caption=_clean_text(caption_intent.get("caption")),
+                patch_id=patch_id,
+                provider=saved_provider,
+                model=saved_model,
+                prompt=_clean_text(caption_intent.get("prompt") or raw_text),
+            )
+            candidate_path = candidate.relative_path
+        except Exception as exc:
+            raise RuntimeError(f"Generated visual could not be staged: {exc}") from exc
         visual_payload = {
             "asset_type": "image",
             "visual_kind": "example",
-            "src": saved_src,
+            "src": "",
+            "candidate_path": candidate_path,
             "mermaid": "",
             "prompt": _clean_text(caption_intent.get("prompt") or raw_text),
-            "status": "generated" if saved_src else "candidate",
+            "status": "candidate",
             "caption": _clean_text(caption_intent.get("caption")),
             "alt": _clean_text(caption_intent.get("alt")),
             "ai_generated": True,
@@ -499,7 +518,8 @@ def generate_ai_patch(
         assets.append(
             AIAsset(
                 kind="image",
-                src=saved_src,
+                src="",
+                candidate_path=candidate_path,
                 prompt=_clean_text(visual_payload.get("prompt")),
                 provider=saved_provider,
                 model=saved_model,

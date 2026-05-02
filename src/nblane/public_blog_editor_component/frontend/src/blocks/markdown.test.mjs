@@ -123,7 +123,7 @@ test("serializes custom blocks to public-site markdown", () => {
         accepted: true,
       },
     }),
-    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","mermaid":"flowchart TD\\\\nA\\u002d\\u002d>B","prompt":"","status":"draft","caption":"Flow","alt":"Chart","ai_generated":true,"ai_source_id":"","ai_model":"","accepted":true,"evidence_id":""} -->',
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","candidate_path":"","mermaid":"flowchart TD\\\\nA\\u002d\\u002d>B","prompt":"","status":"draft","caption":"Flow","alt":"Chart","ai_generated":true,"ai_source_id":"","ai_model":"","accepted":true,"evidence_id":""} -->',
   );
 });
 
@@ -138,6 +138,26 @@ test("parses visual block comments with visual kind", () => {
   assert.equal(segments[0].block.props.visual_kind, "flowchart");
   assert.equal(segments[0].block.props.src, "media/blog/post/chart.png");
   assert.equal(segments[0].block.props.mermaid, "flowchart TD\\nA-->B");
+});
+
+test("round-trips visual candidate paths through comments", () => {
+  const markdown = blockToSpecialMarkdown({
+    type: "visual_block",
+    props: {
+      asset_type: "image",
+      visual_kind: "example",
+      candidate_path: "blog/.candidates/ai-123/example.png",
+      caption: "Candidate",
+      ai_generated: true,
+    },
+  });
+
+  assert.match(markdown, /"candidate_path":"blog\/\.candidates\/ai-123\/example\.png"/);
+  const [segment] = splitMarkdownSpecialBlocks(markdown);
+  assert.equal(
+    segment.block.props.candidate_path,
+    "blog/.candidates/ai-123/example.png",
+  );
 });
 
 test("round-trips AI math block metadata through comments", () => {

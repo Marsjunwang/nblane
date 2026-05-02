@@ -12,6 +12,36 @@ function icon(text) {
   return React.createElement("span", { className: "nb-slash-icon" }, text);
 }
 
+export function stripAliasPrefix(query, item) {
+  let prompt = cleanText(query).trim();
+  const aliases = [
+    cleanText(item.title),
+    cleanText(item.operation),
+    cleanText(item.visual_kind),
+    ...(Array.isArray(item.aliases) ? item.aliases : []),
+  ]
+    .map((alias) => cleanText(alias).trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  let stripped = true;
+  while (prompt && stripped) {
+    stripped = false;
+    for (const alias of aliases) {
+      const lowerPrompt = prompt.toLowerCase();
+      const lowerAlias = alias.toLowerCase();
+      if (
+        lowerPrompt === lowerAlias ||
+        lowerPrompt.startsWith(`${lowerAlias} `)
+      ) {
+        prompt = prompt.slice(alias.length).trim();
+        stripped = true;
+        break;
+      }
+    }
+  }
+  return prompt;
+}
+
 const AI_SLASH_ITEMS = [
   {
     operation: "continue",
@@ -53,7 +83,7 @@ const AI_SLASH_ITEMS = [
   },
   {
     operation: "visual",
-    visual_kind: "diagram",
+    visual_kind: "flowchart",
     titleKey: "ai_slash_diagram",
     title: "Diagram",
     subtextKey: "ai_slash_diagram_help",
@@ -73,7 +103,6 @@ const AI_SLASH_ITEMS = [
 ];
 
 export function getAISlashMenuItems({ labels = {}, onAction, query = "" }) {
-  const prompt = cleanText(query).trim();
   return AI_SLASH_ITEMS.map((item) => ({
     title: slashLabel(labels, item.titleKey, item.title),
     subtext: slashLabel(labels, item.subtextKey, item.subtext),
@@ -81,10 +110,12 @@ export function getAISlashMenuItems({ labels = {}, onAction, query = "" }) {
     group: slashLabel(labels, "ai_slash_group", "AI actions"),
     icon: icon(item.icon),
     onItemClick: () => {
+      const prompt = stripAliasPrefix(query, item);
       onAction?.({
         operation: item.operation,
         trigger: "slash",
         prompt,
+        requires_prompt: !prompt,
         visual_kind: cleanText(item.visual_kind),
         context_window: cleanText(item.context_window),
       });

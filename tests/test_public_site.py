@@ -1060,7 +1060,7 @@ class TestPublicSite(unittest.TestCase):
         self.assertIn('src="/media/blog/draft-post/chart.png"', html)
 
     def test_visual_block_comment_renders_mermaid_without_src(self) -> None:
-        """Diagram visual blocks without image assets remain inspectable."""
+        """Diagram visual blocks without image assets render static SVG."""
         body = (
             '<!-- nblane:visual_block {"asset_type":"diagram",'
             '"visual_kind":"flowchart","mermaid":"flowchart TD\\\\nA\\\\u002d\\\\u002d>B",'
@@ -1069,9 +1069,28 @@ class TestPublicSite(unittest.TestCase):
 
         html = public_site._markdown_to_html(body)
 
-        self.assertIn('class="mermaid"', html)
-        self.assertIn("flowchart TD", html)
+        self.assertIn("<svg", html)
+        self.assertIn('class="mermaid-static"', html)
+        self.assertIn(">A<", html)
+        self.assertIn(">B<", html)
+        self.assertNotIn("<script", html)
         self.assertIn('data-asset-type="diagram"', html)
+
+    def test_visual_block_comment_renders_labeled_mermaid_edges(self) -> None:
+        """Common Mermaid edge labels still get a static SVG fallback."""
+        body = (
+            '<!-- nblane:visual_block {"asset_type":"diagram",'
+            '"visual_kind":"flowchart",'
+            '"mermaid":"flowchart TD\\\\nA[Login] \\\\u002d\\\\u002d>|Yes| B[Home]",'
+            '"caption":"Flow"} -->'
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn('class="mermaid-static"', html)
+        self.assertIn(">Login<", html)
+        self.assertIn(">Home<", html)
+        self.assertNotIn('<pre class="mermaid">', html)
 
     def test_math_block_comment_renders_with_mathjax_wrapper(self) -> None:
         """AI math-block comments render through the existing math pipeline."""

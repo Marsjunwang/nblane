@@ -1244,6 +1244,121 @@ def _replace_video_directives(text: str) -> str:
     return pattern.sub(repl, text)
 
 
+def _parse_mermaid_node(token: str) -> tuple[str, str]:
+    clean = token.strip().rstrip(";")
+    match = re.match(
+        r'^(?P<id>[A-Za-z][A-Za-z0-9_-]*)(?:\["(?P<quoted>[^"]+)"\]|\[(?P<bracket>[^\]]+)\]|\{(?P<brace>[^}]+)\}|\((?P<paren>[^)]+)\))?',
+        clean,
+    )
+    if not match:
+        return "", ""
+    node_id = match.group("id")
+    label = (
+        match.group("quoted")
+        or match.group("bracket")
+        or match.group("brace")
+        or match.group("paren")
+        or node_id
+    )
+    return node_id, re.sub(r"\s+", " ", label).strip()[:80] or node_id
+
+
+def _normalize_mermaid_edge_line(line: str) -> str:
+    """Remove common Mermaid edge labels before conservative node parsing."""
+
+    clean = line.strip().rstrip(";")
+    clean = re.sub(r"\s+--\s+[^-]+?\s+-->\s+", " --> ", clean)
+    clean = re.sub(r"\s+==\s+[^=]+?\s+==>\s+", " ==> ", clean)
+    clean = re.sub(r"\s+-\.\s+[^.]+?\s+\.->\s+", " -.-> ", clean)
+    return clean
+
+
+def _strip_mermaid_leading_edge_label(token: str) -> str:
+    return re.sub(r"^\|[^|]*\|\s*", "", token.strip())
+
+
+def _render_mermaid_static_svg(source: str) -> str:
+    """Render a conservative SVG fallback for simple flowchart Mermaid graphs."""
+
+    source = (
+        str(source or "")
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\u002d", "-")
+    )
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    if not lines or not re.match(r"^(flowchart|graph)\s+", lines[0], re.I):
+        return ""
+    nodes: dict[str, str] = {}
+    edges: list[tuple[str, str]] = []
+    for line in lines[1:]:
+        if line.startswith(("%%", "classDef ", "class ", "style ")):
+            continue
+        edge_line = _normalize_mermaid_edge_line(line)
+        edge_match = re.match(
+            r"^(?P<left>.+?)\s*(?:-->|---?>|==>|-\.\->)\s*(?P<right>.+?)$",
+            edge_line,
+        )
+        if not edge_match:
+            node_id, label = _parse_mermaid_node(line)
+            if node_id:
+                nodes.setdefault(node_id, label)
+            continue
+        left_id, left_label = _parse_mermaid_node(edge_match.group("left"))
+        right_id, right_label = _parse_mermaid_node(
+            _strip_mermaid_leading_edge_label(edge_match.group("right"))
+        )
+        if not left_id or not right_id:
+            continue
+        nodes.setdefault(left_id, left_label)
+        nodes.setdefault(right_id, right_label)
+        edges.append((left_id, right_id))
+    if not nodes:
+        return ""
+    node_ids = list(nodes)
+    positions = {
+        node_id: (40, 36 + index * 92)
+        for index, node_id in enumerate(node_ids)
+    }
+    width = 460
+    height = max(140, 76 + len(node_ids) * 92)
+    marker_id = f"arrow-{hashlib.sha1(str(source).encode('utf-8')).hexdigest()[:10]}"
+    edge_parts: list[str] = []
+    for left_id, right_id in edges:
+        if left_id not in positions or right_id not in positions:
+            continue
+        x1, y1 = positions[left_id]
+        x2, y2 = positions[right_id]
+        edge_parts.append(
+            '<path class="mermaid-static-edge" '
+            f'd="M {x1 + 180} {y1 + 54} C {x1 + 180} {y1 + 76}, '
+            f"{x2 + 180} {y2 - 22}, {x2 + 180} {y2} "
+            f'" marker-end="url(#{marker_id})" />'
+        )
+    node_parts: list[str] = []
+    for node_id in node_ids:
+        x, y = positions[node_id]
+        label = html.escape(nodes[node_id])
+        node_parts.append(
+            '<g class="mermaid-static-node">'
+            f'<rect x="{x}" y="{y}" width="360" height="54" rx="8" />'
+            f'<text x="{x + 180}" y="{y + 33}" text-anchor="middle">{label}</text>'
+            "</g>"
+        )
+    return (
+        '<svg class="mermaid-static" xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" role="img" aria-label="Mermaid diagram">'
+        "<defs>"
+        f'<marker id="{marker_id}" viewBox="0 0 10 10" refX="8" refY="5" '
+        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+        '<path d="M 0 0 L 10 5 L 0 10 z" />'
+        "</marker>"
+        "</defs>"
+        f'{"".join(edge_parts)}{"".join(node_parts)}'
+        "</svg>"
+    )
+
+
 def _render_visual_block_comment(payload: dict) -> str:
     src = _strip_markdown_url(str(payload.get("src", "") or "")).strip()
     asset_type = str(payload.get("asset_type", "") or "").strip().lower()
@@ -1252,6 +1367,10 @@ def _render_visual_block_comment(payload: dict) -> str:
     caption = str(payload.get("caption", "") or "").strip()
     alt = str(payload.get("alt", "") or caption or "Visual").strip()
     if not src and (asset_type == "diagram" or mermaid):
+        diagram_source = mermaid or str(payload.get("prompt", "") or "")
+        diagram_html = _render_mermaid_static_svg(diagram_source) or (
+            f'<pre class="mermaid">{html.escape(diagram_source)}</pre>'
+        )
         caption_html = (
             f'<figcaption class="media-caption">{html.escape(caption)}</figcaption>'
             if caption
@@ -1261,7 +1380,7 @@ def _render_visual_block_comment(payload: dict) -> str:
             '<figure class="media-block visual-block"'
             f' data-visual-kind="{html.escape(visual_kind or "flowchart", quote=True)}"'
             f' data-asset-type="{html.escape(asset_type or "diagram", quote=True)}">'
-            f'<pre class="mermaid">{html.escape(mermaid or str(payload.get("prompt", "") or ""))}</pre>'
+            f"{diagram_html}"
             f"{caption_html}</figure>"
         )
     if not src:
@@ -2176,6 +2295,32 @@ h3 { margin: 0 0 8px; letter-spacing: 0; }
   margin-top: 8px;
   color: var(--muted);
   font-size: 0.95rem;
+}
+.mermaid-static {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf8;
+}
+.mermaid-static-node rect {
+  fill: #ffffff;
+  stroke: #7aa79b;
+  stroke-width: 1.5;
+}
+.mermaid-static-node text {
+  fill: var(--ink);
+  font: 600 15px system-ui, sans-serif;
+}
+.mermaid-static-edge {
+  fill: none;
+  stroke: #426c62;
+  stroke-width: 2;
+}
+.mermaid-static marker path {
+  fill: #426c62;
 }
 .prose pre { overflow: auto; padding: 16px; background: #10201e; color: #eef5f1; }
 .prose code { font-size: 0.95em; }

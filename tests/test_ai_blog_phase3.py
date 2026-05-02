@@ -51,6 +51,7 @@ class AIBlogPhase3Tests(unittest.TestCase):
                 markdown="Context",
                 selected_block={"cursor_block_id": "b1"},
                 operation="outline",
+                prompt="Draft outline",
             )
 
         self.assertEqual(patch_payload["operation"], "outline")
@@ -69,6 +70,7 @@ class AIBlogPhase3Tests(unittest.TestCase):
                 selected_block={"cursor_block_id": "b1"},
                 operation="visual",
                 visual_kind="diagram",
+                prompt="User login flow",
             )
 
         self.assertEqual(patch_payload["operation"], "visual")
@@ -78,6 +80,17 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertEqual(props["visual_kind"], "flowchart")
         self.assertIn("flowchart TD", props["mermaid"])
         self.assertEqual(patch_payload["assets"][0]["kind"], "diagram")
+
+    def test_empty_formula_prompt_requires_selection_or_description(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "请先选中文本"):
+            ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={},
+                markdown="Existing body",
+                selected_block={"cursor_block_id": "b1"},
+                operation="formula",
+            )
 
     def test_caption_intent_parser_accepts_json_and_plain_text(self) -> None:
         parsed = visual_generation.parse_caption_intent_response(

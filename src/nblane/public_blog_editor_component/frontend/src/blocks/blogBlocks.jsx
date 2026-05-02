@@ -21,8 +21,11 @@ const AI_PROPS = {
 
 const VISUAL_KIND_TO_ASSET_TYPE = {
   cover: "image",
-  diagram: "diagram",
   flowchart: "diagram",
+  sequence: "diagram",
+  state: "diagram",
+  class: "diagram",
+  mindmap: "diagram",
   example: "image",
   video_edit: "video",
 };
@@ -33,6 +36,9 @@ function cleanText(value) {
 
 function normalizeVisualKind(value) {
   const clean = cleanText(value).trim().toLowerCase();
+  if (clean === "diagram" || clean === "mermaid") {
+    return "flowchart";
+  }
   return Object.prototype.hasOwnProperty.call(VISUAL_KIND_TO_ASSET_TYPE, clean)
     ? clean
     : "";
@@ -273,6 +279,7 @@ function VisualBlock({ block, editor }) {
   const assetType = normalizeVisualAssetType(props.asset_type, props.visual_kind);
   const visualKind = normalizeVisualKind(props.visual_kind);
   const mermaid = cleanText(props.mermaid);
+  const candidatePath = cleanText(props.candidate_path);
   const shouldRenderMermaid = Boolean(mermaid.trim()) || (assetType === "diagram" && !src);
   const mermaidSource =
     mermaid.trim() || (assetType === "diagram" ? cleanText(props.prompt).trim() : "");
@@ -328,8 +335,11 @@ function VisualBlock({ block, editor }) {
             >
               <option value="">none</option>
               <option value="cover">cover</option>
-              <option value="diagram">diagram</option>
               <option value="flowchart">flowchart</option>
+              <option value="sequence">sequence</option>
+              <option value="state">state</option>
+              <option value="class">class</option>
+              <option value="mindmap">mindmap</option>
               <option value="example">example</option>
               <option value="video_edit">video_edit</option>
             </select>
@@ -340,6 +350,14 @@ function VisualBlock({ block, editor }) {
             readOnly={readOnly}
             onChange={(next) => updateBlockProps(editor, block, { src: next })}
           />
+          {candidatePath ? (
+            <FieldText
+              label="Candidate"
+              value={candidatePath}
+              readOnly
+              onChange={() => {}}
+            />
+          ) : null}
           <FieldText
             label="Caption"
             value={caption}
@@ -373,9 +391,13 @@ function AiLoadingBlock({ block, editor }) {
   const prompt = cleanText(block.props.prompt);
   const status = cleanText(block.props.status || "loading");
   const mode = cleanText(block.props.mode || "write");
+  const isFormula = mode === "formula";
+  const isVisual = mode === "visual" || mode === "diagram" || mode === "video";
+  const visualLabel =
+    mode === "diagram" ? "Generating diagram..." : mode === "video" ? "Generating video..." : "Generating visual...";
   return (
     <div
-      className="nb-custom-block nb-ai-loading-block"
+      className={`nb-custom-block nb-ai-loading-block nb-ai-loading-${mode}`}
       contentEditable={false}
       data-nblane-block="ai_loading_block"
     >
@@ -387,14 +409,29 @@ function AiLoadingBlock({ block, editor }) {
         <span className="nb-loading-dot" />
         <span>{mode}</span>
       </div>
-      {prompt ? <pre className="nb-ai-loading-preview">{prompt}</pre> : null}
-      <FieldText
-        label="Prompt"
-        value={prompt}
-        readOnly={readOnly}
-        multiline
-        onChange={(next) => updateBlockProps(editor, block, { prompt: next })}
-      />
+      {isFormula ? (
+        <div className="nb-ai-loading-formula">
+          <KatexPreview latex={prompt} />
+        </div>
+      ) : isVisual ? (
+        <div className="nb-ai-loading-visual" aria-label={visualLabel}>
+          <div className="nb-ai-loading-progress">
+            <span />
+          </div>
+          <p>{visualLabel}</p>
+        </div>
+      ) : prompt ? (
+        <pre className="nb-ai-loading-preview">{prompt}</pre>
+      ) : null}
+      {!isFormula && !isVisual ? (
+        <FieldText
+          label="Prompt"
+          value={prompt}
+          readOnly={readOnly}
+          multiline
+          onChange={(next) => updateBlockProps(editor, block, { prompt: next })}
+        />
+      ) : null}
     </div>
   );
 }
@@ -430,6 +467,7 @@ function ExternalVisual({ block }) {
       data-asset-type={cleanText(assetType)}
       data-visual-kind={cleanText(props.visual_kind)}
       data-src={src}
+      data-candidate-path={cleanText(props.candidate_path)}
       data-mermaid={mermaid}
       data-prompt={cleanText(props.prompt)}
       data-caption={cleanText(props.caption)}
@@ -456,6 +494,9 @@ function ExternalAiLoading({ block }) {
       data-prompt={cleanText(block.props.prompt)}
       data-mode={cleanText(block.props.mode)}
       data-status={cleanText(block.props.status)}
+      data-ai-source-id={cleanText(block.props.ai_source_id)}
+      data-ai-model={cleanText(block.props.ai_model)}
+      data-evidence-id={cleanText(block.props.evidence_id)}
     />
   );
 }
@@ -481,6 +522,7 @@ function parseDataBlock(element, type) {
       asset_type: normalizeVisualAssetType(dataset.assetType || "image", visualKind),
       visual_kind: visualKind,
       src: cleanText(dataset.src),
+      candidate_path: cleanText(dataset.candidatePath),
       mermaid: cleanText(dataset.mermaid),
       prompt: cleanText(dataset.prompt),
       caption: cleanText(dataset.caption),
@@ -492,6 +534,9 @@ function parseDataBlock(element, type) {
       prompt: cleanText(dataset.prompt),
       mode: cleanText(dataset.mode || "write"),
       status: cleanText(dataset.status || "loading"),
+      ai_source_id: cleanText(dataset.aiSourceId),
+      ai_model: cleanText(dataset.aiModel),
+      evidence_id: cleanText(dataset.evidenceId),
     };
   }
   return undefined;
@@ -538,9 +583,20 @@ const VisualBlockSpec = createReactBlockSpec(
       asset_type: { default: "image", values: ["image", "video", "diagram"] },
       visual_kind: {
         default: "",
-        values: ["", "cover", "diagram", "flowchart", "example", "video_edit"],
+        values: [
+          "",
+          "cover",
+          "flowchart",
+          "sequence",
+          "state",
+          "class",
+          "mindmap",
+          "example",
+          "video_edit",
+        ],
       },
       src: { default: "" },
+      candidate_path: { default: "" },
       mermaid: { default: "" },
       prompt: { default: "" },
       caption: { default: "" },
@@ -568,7 +624,7 @@ const AiLoadingBlockSpec = createReactBlockSpec(
       prompt: { default: "" },
       mode: {
         default: "write",
-        values: ["write", "rewrite", "formula", "visual", "video"],
+        values: ["write", "rewrite", "formula", "visual", "diagram", "video"],
       },
       status: {
         default: "loading",

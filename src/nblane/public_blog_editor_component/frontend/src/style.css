@@ -1302,12 +1302,71 @@ textarea:read-only {
   line-height: 1.5;
 }
 
+.nb-ai-loading-formula,
+.nb-ai-loading-visual {
+  padding: 12px;
+  border: 1px dashed rgba(33, 104, 91, 0.28);
+  border-radius: 8px;
+  background: #f6faf8;
+}
+
+.nb-ai-loading-visual {
+  display: grid;
+  gap: 8px;
+}
+
+.nb-ai-loading-visual p {
+  margin: 0;
+  color: var(--nb-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.nb-ai-loading-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(33, 104, 91, 0.12);
+}
+
+.nb-ai-loading-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--nb-accent);
+  animation: nb-progress 1.25s ease-in-out infinite;
+}
+
 .nb-loading-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
   background: var(--nb-accent);
   animation: nb-pulse 1.2s ease-in-out infinite;
+}
+
+.nb-ai-prompt-panel {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.nb-ai-prompt-input {
+  width: 100%;
+  min-height: 108px;
+  padding: 10px 12px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  outline: 0;
+  resize: vertical;
+  background: var(--nb-paper);
+  color: var(--nb-ink);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.nb-ai-prompt-input:focus {
+  border-color: rgba(33, 104, 91, 0.65);
+  box-shadow: 0 0 0 3px rgba(33, 104, 91, 0.1);
 }
 
 .nb-slash-icon {
@@ -1418,6 +1477,20 @@ textarea:read-only {
   50% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes nb-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50% {
+    transform: translateX(70%);
+  }
+
+  100% {
+    transform: translateX(240%);
   }
 }
 

@@ -27,6 +27,7 @@ except Exception:  # pragma: no cover - optional Streamlit component
 
 from nblane.core import git_backup
 from nblane.core import ai_stream_tasks
+from nblane.core import visual_candidate_store
 from nblane.core import visual_generation
 from nblane.core.public_curation import (
     evidence_contexts,
@@ -249,6 +250,9 @@ def _ui() -> dict[str, str]:
             "ai_stream_cancel": "取消生成",
             "ai_stream_cancelled": "已取消",
             "ai_stream_failed": "AI 生成失败",
+            "ai_prompt_required_title": "补充 AI 描述",
+            "ai_prompt_required_placeholder": "输入要生成的内容，例如：二次方程",
+            "ai_prompt_required_submit": "生成",
             "ai_slash_group": "AI 操作",
             "ai_slash_write_next": "AI 写下一段",
             "ai_slash_outline": "大纲",
@@ -336,6 +340,7 @@ def _ui() -> dict[str, str]:
             "view_full_preview": "查看大图",
             "load_full_preview": "加载高清",
             "close": "关闭",
+            "cancel": "取消",
             "flowchart": "流程图",
             "example": "事例图",
             "video_edit": "视频编辑",
@@ -495,6 +500,9 @@ def _ui() -> dict[str, str]:
         "ai_stream_cancel": "Cancel",
         "ai_stream_cancelled": "Cancelled",
         "ai_stream_failed": "AI generation failed",
+        "ai_prompt_required_title": "Describe the AI request",
+        "ai_prompt_required_placeholder": "Enter what to generate, for example: quadratic equation",
+        "ai_prompt_required_submit": "Generate",
         "ai_slash_group": "AI actions",
         "ai_slash_write_next": "AI write next paragraph",
         "ai_slash_outline": "Outline",
@@ -582,6 +590,7 @@ def _ui() -> dict[str, str]:
         "view_full_preview": "Open large preview",
         "load_full_preview": "Load full preview",
         "close": "Close",
+        "cancel": "Cancel",
         "flowchart": "Flowchart",
         "example": "Example",
         "video_edit": "Video edit",
@@ -1301,6 +1310,195 @@ def _blog_ai_patch_key(selected: str, slug: str) -> str:
 
 def _blog_ai_stream_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_stream")
+
+
+_AI_VISUAL_BLOCK_COMMENT_RE = re.compile(
+    r"<!--\s*nblane:visual_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
+    re.IGNORECASE,
+)
+
+
+def _comment_json(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False).replace("--", "\\u002d\\u002d")
+
+
+def _ai_patch_candidate_entries(patch: dict) -> list[dict]:
+    """Return visual candidate references carried by an AI patch."""
+
+    entries: list[dict] = []
+    if not isinstance(patch, dict):
+        return entries
+    for asset in patch.get("assets", []):
+        if isinstance(asset, dict) and str(asset.get("candidate_path", "") or "").strip():
+            entries.append(dict(asset))
+    for mutation in patch.get("block_patches", []):
+        if not isinstance(mutation, dict):
+            continue
+        block = mutation.get("block")
+        if not isinstance(block, dict):
+            continue
+        props = block.get("props")
+        if isinstance(props, dict) and str(props.get("candidate_path", "") or "").strip():
+            entry = dict(props)
+            entry.setdefault("kind", props.get("asset_type") or "image")
+            entries.append(entry)
+    return entries
+
+
+def _visual_block_payloads(body: str) -> list[dict]:
+    """Return parsed visual block comment payloads from markdown body."""
+
+    payloads: list[dict] = []
+    for match in _AI_VISUAL_BLOCK_COMMENT_RE.finditer(str(body or "")):
+        raw = str(match.group("payload") or "").strip()
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
+def _ai_patch_visual_identity(patch: dict) -> dict[str, set[str]]:
+    """Collect identifiers that let accepted visual blocks match one patch."""
+
+    identity = {"ai_source_ids": set(), "mermaids": set(), "prompts": set()}
+    if not isinstance(patch, dict):
+        return identity
+    for mutation in patch.get("block_patches", []):
+        if not isinstance(mutation, dict):
+            continue
+        block = mutation.get("block")
+        if not isinstance(block, dict):
+            continue
+        props = block.get("props")
+        if not isinstance(props, dict):
+            continue
+        if block.get("type") != "visual_block" and not (
+            props.get("asset_type") or props.get("mermaid") or props.get("candidate_path")
+        ):
+            continue
+        ai_source_id = str(props.get("ai_source_id", "") or "").strip()
+        if ai_source_id:
+            identity["ai_source_ids"].add(ai_source_id)
+        mermaid = str(props.get("mermaid", "") or "").strip()
+        if mermaid:
+            identity["mermaids"].add(mermaid)
+        prompt = str(props.get("prompt", "") or "").strip()
+        if prompt:
+            identity["prompts"].add(prompt)
+    return identity
+
+
+def _visual_payload_belongs_to_patch(payload: dict, patch: dict) -> bool:
+    """Return whether a visual comment without a candidate belongs to this patch."""
+
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("candidate_path", "") or "").strip():
+        return False
+    identity = _ai_patch_visual_identity(patch)
+    ai_source_id = str(payload.get("ai_source_id", "") or "").strip()
+    if ai_source_id and ai_source_id in identity["ai_source_ids"]:
+        return True
+    mermaid = str(payload.get("mermaid", "") or "").strip()
+    if mermaid and mermaid in identity["mermaids"]:
+        return True
+    prompt = str(payload.get("prompt", "") or "").strip()
+    asset_type = str(payload.get("asset_type", "") or "").strip().lower()
+    if asset_type == "diagram" and prompt and prompt in identity["prompts"]:
+        return True
+    return False
+
+
+def _cleanup_ai_patch_candidates(selected: str, patch: dict) -> None:
+    """Remove temporary asset candidates for a rejected or superseded patch."""
+
+    if not selected or not isinstance(patch, dict):
+        return
+    seen: set[str] = set()
+    for entry in _ai_patch_candidate_entries(patch):
+        candidate_path = str(entry.get("candidate_path", "") or "").strip()
+        if candidate_path and candidate_path not in seen:
+            seen.add(candidate_path)
+            visual_candidate_store.discard_candidate(selected, candidate_path)
+    patch_id = str(patch.get("patch_id", "") or patch.get("id", "") or "").strip()
+    if patch_id:
+        visual_candidate_store.discard_patch(selected, patch_id)
+
+
+def _promote_ai_patch_candidates(
+    selected: str,
+    slug: str,
+    patch: dict,
+    body: str,
+) -> str:
+    """Promote accepted visual candidates and rewrite visual block comments."""
+
+    if not selected or not slug or not isinstance(patch, dict):
+        return body
+    referenced_candidate_paths = {
+        str(payload.get("candidate_path", "") or "").strip()
+        for payload in _visual_block_payloads(body)
+        if str(payload.get("candidate_path", "") or "").strip()
+    }
+    patch_entries = {
+        str(entry.get("candidate_path", "") or "").strip(): entry
+        for entry in _ai_patch_candidate_entries(patch)
+        if str(entry.get("candidate_path", "") or "").strip()
+    }
+    candidate_paths = [
+        candidate_path
+        for candidate_path in patch_entries
+        if candidate_path in referenced_candidate_paths
+    ]
+    for candidate_path in candidate_paths:
+        if not visual_candidate_store.candidate_exists(selected, candidate_path):
+            raise FileNotFoundError("Visual candidate is no longer available.")
+    promotions: dict[str, str] = {}
+    for candidate_path in candidate_paths:
+        entry = patch_entries[candidate_path]
+        asset_type = str(entry.get("asset_type", "") or entry.get("kind", "") or "image")
+        kind = "video" if asset_type.strip().lower() == "video" else "image"
+        result = visual_candidate_store.promote_candidate(
+            selected,
+            slug,
+            candidate_path,
+            kind=kind,
+            alt=str(entry.get("alt", "") or ""),
+            caption=str(entry.get("caption", "") or ""),
+        )
+        promotions[candidate_path] = result.relative_path
+    if not promotions and str(patch.get("operation", "") or "") != "visual":
+        return body
+
+    def repl(match: re.Match[str]) -> str:
+        raw = str(match.group("payload") or "").strip()
+        if not raw:
+            return match.group(0)
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return match.group(0)
+        if not isinstance(payload, dict):
+            return match.group(0)
+        candidate_path = str(payload.get("candidate_path", "") or "").strip()
+        if candidate_path in promotions:
+            payload["src"] = promotions[candidate_path]
+            payload.pop("candidate_path", None)
+            payload["status"] = "accepted"
+            payload["accepted"] = True
+            return f"<!-- nblane:visual_block {_comment_json(payload)} -->"
+        if _visual_payload_belongs_to_patch(payload, patch):
+            payload["status"] = "accepted"
+            payload["accepted"] = True
+            return f"<!-- nblane:visual_block {_comment_json(payload)} -->"
+        return match.group(0)
+
+    return _AI_VISUAL_BLOCK_COMMENT_RE.sub(repl, body)
 
 
 def _ai_stream_snapshot(task_id: str) -> dict:
@@ -2259,6 +2457,19 @@ def _render_blog_react_shell(
             if rel and _local_media_path(root, rel) is None:
                 st.error(f"Media file does not exist: {rel}")
                 return True
+        if action == "apply_ai_patch":
+            patch_payload = payload.get("patch")
+            patch_payload = patch_payload if isinstance(patch_payload, dict) else {}
+            try:
+                event_body = _promote_ai_patch_candidates(
+                    selected,
+                    latest_post.slug,
+                    patch_payload,
+                    event_body,
+                )
+            except Exception as exc:
+                st.error(str(exc))
+                return True
         _blog_shell_store_draft(
             selected,
             latest_post.slug,
@@ -2277,6 +2488,14 @@ def _render_blog_react_shell(
         if action == "apply_ai_patch":
             st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
+            patch_payload = payload.get("patch")
+            if isinstance(patch_payload, dict):
+                patch_id = str(
+                    patch_payload.get("patch_id", "") or patch_payload.get("id", "") or ""
+                ).strip()
+                if patch_id:
+                    visual_candidate_store.discard_patch(selected, patch_id)
+            st.rerun()
         return True
 
     if action == "delete_media":
@@ -2465,6 +2684,12 @@ def _render_blog_react_shell(
             dirty=dirty,
         )
         try:
+            visual_candidate_store.cleanup_expired(selected)
+            previous_patch = st.session_state.get(
+                _blog_ai_patch_key(selected, latest_post.slug)
+            )
+            if isinstance(previous_patch, dict):
+                _cleanup_ai_patch_candidates(selected, previous_patch)
             _clear_blog_shell_notice(selected, latest_post.slug)
             selected_block = payload.get("selected_block")
             if not isinstance(selected_block, dict):
@@ -2537,6 +2762,11 @@ def _render_blog_react_shell(
                 )
                 st.rerun()
         elif snapshot.get("status") == "failed":
+            existing_patch = st.session_state.get(
+                _blog_ai_patch_key(selected, latest_post.slug)
+            )
+            if isinstance(existing_patch, dict):
+                _cleanup_ai_patch_candidates(selected, existing_patch)
             st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
@@ -2547,6 +2777,11 @@ def _render_blog_react_shell(
             )
             st.rerun()
         elif snapshot.get("status") == "cancelled":
+            existing_patch = st.session_state.get(
+                _blog_ai_patch_key(selected, latest_post.slug)
+            )
+            if isinstance(existing_patch, dict):
+                _cleanup_ai_patch_candidates(selected, existing_patch)
             st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
@@ -2565,6 +2800,9 @@ def _render_blog_react_shell(
             or ""
         )
         _cancel_ai_stream_task(stream_id)
+        existing_patch = st.session_state.get(_blog_ai_patch_key(selected, latest_post.slug))
+        if isinstance(existing_patch, dict):
+            _cleanup_ai_patch_candidates(selected, existing_patch)
         st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
         st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
         _set_blog_shell_notice(
@@ -2578,6 +2816,13 @@ def _render_blog_react_shell(
         return True
 
     if action == "reject_ai_patch":
+        patch_payload = payload.get("patch")
+        patch_payload = patch_payload if isinstance(patch_payload, dict) else st.session_state.get(
+            _blog_ai_patch_key(selected, latest_post.slug),
+            {},
+        )
+        if isinstance(patch_payload, dict):
+            _cleanup_ai_patch_candidates(selected, patch_payload)
         st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
         st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
         _clear_blog_shell_notice(selected, latest_post.slug)

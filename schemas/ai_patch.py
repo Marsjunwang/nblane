@@ -57,6 +57,7 @@ class AIAsset(BaseModel):
     prompt: str = ""
     provider: str = ""
     model: str = ""
+    candidate_path: str = ""
 
 
 class AICitation(BaseModel):
@@ -100,4 +101,3 @@ def patch_to_dict(patch: AIPatch) -> dict[str, Any]:
     """Return JSON-safe patch payload for Streamlit component props."""
 
     return patch.model_dump(mode="json", exclude_none=True)
-

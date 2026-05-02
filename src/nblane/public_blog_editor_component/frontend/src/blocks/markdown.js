@@ -27,8 +27,11 @@ const COMPLEX_MATH_RE =
 
 const VISUAL_KIND_TO_ASSET_TYPE = {
   cover: "image",
-  diagram: "diagram",
   flowchart: "diagram",
+  sequence: "diagram",
+  state: "diagram",
+  class: "diagram",
+  mindmap: "diagram",
   example: "image",
   video_edit: "video",
 };
@@ -63,6 +66,9 @@ export function containsDisplayMathBlock(markdown) {
 
 function normalizeVisualKind(value) {
   const clean = cleanText(value).trim().toLowerCase();
+  if (clean === "diagram" || clean === "mermaid") {
+    return "flowchart";
+  }
   return Object.prototype.hasOwnProperty.call(VISUAL_KIND_TO_ASSET_TYPE, clean)
     ? clean
     : "";
@@ -199,6 +205,7 @@ function visualBlock(props) {
       asset_type: normalizeVisualAssetType(props.asset_type || props.kind, visualKind),
       visual_kind: visualKind,
       src: cleanText(props.src || props.url),
+      candidate_path: cleanText(props.candidate_path || props.candidatePath),
       mermaid: cleanText(props.mermaid),
       prompt: cleanText(props.prompt),
       caption: cleanText(props.caption),
@@ -459,6 +466,7 @@ function visualBlockToMarkdown(block) {
       asset_type: assetType,
       visual_kind: visualKind,
       src,
+      candidate_path: cleanText(props.candidate_path),
       mermaid,
       prompt: cleanText(props.prompt),
       status: cleanText(props.status || "draft"),
@@ -484,6 +492,7 @@ function visualBlockToMarkdown(block) {
     asset_type: assetType,
     visual_kind: visualKind,
     prompt: cleanText(props.prompt),
+    candidate_path: cleanText(props.candidate_path),
     mermaid,
     status: cleanText(props.status || "draft"),
     caption: cleanText(props.caption),
@@ -503,6 +512,10 @@ function aiLoadingBlockToMarkdown(block) {
     prompt: cleanText(props.prompt),
     mode: cleanText(props.mode || "write"),
     status: cleanText(props.status || "loading"),
+    ai_source_id: cleanText(props.ai_source_id),
+    ai_model: cleanText(props.ai_model),
+    accepted: props.accepted === true,
+    evidence_id: cleanText(props.evidence_id),
   })} -->`;
 }
 
