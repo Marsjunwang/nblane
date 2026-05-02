@@ -29,6 +29,8 @@ Commands:
     nblane health [name]            Profile health / growth review
     nblane public init <name>       Initialize public site layer
     nblane public build <name>      Build static public site
+    nblane public library tree <name>
+                                    Inspect Public Site file tree
     nblane auth hash-password       Generate a password hash for Web auth
 
 Examples:
@@ -89,6 +91,11 @@ from nblane.commands.public import (
     cmd_public_group,
     cmd_public_hydrate,
     cmd_public_init,
+    cmd_public_library_purge,
+    cmd_public_library_reconcile,
+    cmd_public_library_restore,
+    cmd_public_library_trash,
+    cmd_public_library_tree,
     cmd_public_resume,
     cmd_public_suggest_groups,
     cmd_public_validate,
@@ -482,7 +489,12 @@ def main() -> None:
     p_pub_blog_new.add_argument(
         "--slug",
         default=None,
-        help="Optional blog slug",
+        help="Optional blog slug or route",
+    )
+    p_pub_blog_new.add_argument(
+        "--category",
+        default=None,
+        help="Optional category route, for example robotics/software/vla",
     )
     p_pub_blog_new.add_argument(
         "--summary",
@@ -510,10 +522,10 @@ def main() -> None:
 
     p_pub_blog_media = pub_blog_sub.add_parser(
         "media",
-        help="Copy media into media/blog/<slug>/",
+        help="Copy media into media/blog/<slug-or-route>/",
     )
     p_pub_blog_media.add_argument("name", help="Profile name")
-    p_pub_blog_media.add_argument("slug", help="Blog slug")
+    p_pub_blog_media.add_argument("slug", help="Blog slug or route")
     p_pub_blog_media.add_argument(
         "--file",
         required=True,
@@ -552,7 +564,66 @@ def main() -> None:
         help="Publish a blog post after validation",
     )
     p_pub_blog_publish.add_argument("name", help="Profile name")
-    p_pub_blog_publish.add_argument("slug", help="Blog slug")
+    p_pub_blog_publish.add_argument("slug", help="Blog slug or route")
+
+    p_pub_library = public_sub.add_parser(
+        "library",
+        help="Manage the Public Site file tree",
+    )
+    pub_library_sub = p_pub_library.add_subparsers(
+        dest="public_library_command",
+        required=True,
+    )
+
+    p_pub_library_tree = pub_library_sub.add_parser(
+        "tree",
+        help="List the Public Site file tree",
+    )
+    p_pub_library_tree.add_argument("name", help="Profile name")
+    p_pub_library_tree.add_argument(
+        "--include-trash",
+        action="store_true",
+        help="Include trashed nodes",
+    )
+    p_pub_library_tree.add_argument(
+        "--format",
+        choices=["text", "yaml"],
+        default="text",
+        dest="library_format",
+        help="Output format",
+    )
+
+    p_pub_library_reconcile = pub_library_sub.add_parser(
+        "reconcile",
+        help="Attach existing blog posts and media to public-library.yaml",
+    )
+    p_pub_library_reconcile.add_argument("name", help="Profile name")
+
+    p_pub_library_trash = pub_library_sub.add_parser(
+        "trash",
+        help="Move a public-library node to trash",
+    )
+    p_pub_library_trash.add_argument("name", help="Profile name")
+    p_pub_library_trash.add_argument("node_id", help="Public library node id")
+
+    p_pub_library_restore = pub_library_sub.add_parser(
+        "restore",
+        help="Restore a public-library node from trash",
+    )
+    p_pub_library_restore.add_argument("name", help="Profile name")
+    p_pub_library_restore.add_argument("node_id", help="Public library node id")
+
+    p_pub_library_purge = pub_library_sub.add_parser(
+        "purge",
+        help="Permanently remove a trashed public-library node",
+    )
+    p_pub_library_purge.add_argument("name", help="Profile name")
+    p_pub_library_purge.add_argument("node_id", help="Public library node id")
+    p_pub_library_purge.add_argument(
+        "--delete-files",
+        action="store_true",
+        help="Also delete owned Markdown, sidecar, or media files when safe",
+    )
 
     p_pub_draft_resume = public_sub.add_parser(
         "draft-resume",
@@ -769,6 +840,7 @@ def main() -> None:
                     args.name,
                     title=args.title,
                     slug=args.slug,
+                    category=args.category,
                     summary=args.summary,
                     tags=args.tags,
                     body_file=args.body_file,
@@ -789,6 +861,31 @@ def main() -> None:
                 cmd_public_blog_publish(
                     args.name,
                     slug=args.slug,
+                )
+        elif args.public_command == "library":
+            if args.public_library_command == "tree":
+                cmd_public_library_tree(
+                    args.name,
+                    include_trash=args.include_trash,
+                    output_format=args.library_format,
+                )
+            elif args.public_library_command == "reconcile":
+                cmd_public_library_reconcile(args.name)
+            elif args.public_library_command == "trash":
+                cmd_public_library_trash(
+                    args.name,
+                    node_id=args.node_id,
+                )
+            elif args.public_library_command == "restore":
+                cmd_public_library_restore(
+                    args.name,
+                    node_id=args.node_id,
+                )
+            elif args.public_library_command == "purge":
+                cmd_public_library_purge(
+                    args.name,
+                    node_id=args.node_id,
+                    delete_files=args.delete_files,
                 )
         elif args.public_command == "draft-resume":
             cmd_public_draft_resume(

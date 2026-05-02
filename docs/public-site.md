@@ -29,6 +29,7 @@ profiles/<name>/
   resume-source.yaml
   projects.yaml
   outputs.yaml
+  public-library.yaml
   blog/
   media/
   resumes/generated/
@@ -40,7 +41,7 @@ Public files are private or draft by default. Publishing is explicit:
   build.
 - `resume-source.yaml`: set `visibility: public` to include the online
   resume in the site.
-- `blog/*.md`, `projects.yaml`, `outputs.yaml`: set `status: published` to
+- `blog/**/*.md`, `projects.yaml`, `outputs.yaml`: set `status: published` to
   include objects in the normal build.
 - Use `--include-drafts` only for local preview builds.
 
@@ -110,35 +111,158 @@ Write and publish blog posts:
 ```bash
 nblane public blog list <profile> --include-drafts
 nblane public blog new <profile> --title "My post" --tag robotics
+nblane public blog new <profile> --title "VLA notes" --category robotics/software/vla
 nblane public blog new <profile> --title "My post" --stdin
-nblane public blog media <profile> <slug> \
+nblane public blog media <profile> <slug-or-route> \
   --file ./cover.png \
   --kind image \
   --alt "Cover image" \
   --cover \
   --append
-nblane public blog media <profile> <slug> \
+nblane public blog media <profile> <slug-or-route> \
   --file ./demo.mp4 \
   --kind video \
   --caption "Short demo" \
   --append
-nblane public blog publish <profile> <slug>
+nblane public blog publish <profile> <slug-or-route>
 ```
+
+Manage the Public Site file tree:
+
+```bash
+nblane public library tree <profile>
+nblane public library tree <profile> --include-trash --format yaml
+nblane public library reconcile <profile>
+nblane public library trash <profile> <node-id>
+nblane public library restore <profile> <node-id>
+nblane public library purge <profile> <node-id>
+nblane public library purge <profile> <node-id> --delete-files
+```
+
+`public-library.yaml` is the flexible management tree used by the Public Site
+editor. It can contain folders, posts, and media nodes, and posts may have
+children. Folders are metadata only: creating or moving a folder does not create
+or move directories on disk.
+
+```yaml
+version: 1
+profile: alice
+nodes:
+  - id: root
+    type: root
+    title: Public Library
+    parent_id: ""
+    order: 0
+    visibility: private
+    status: active
+  - id: fld_robotics
+    type: folder
+    title: Robotics
+    parent_id: root
+    order: 10
+    visibility: private
+    status: active
+  - id: post_vla_notes
+    type: post
+    title: VLA notes
+    ref: blog/vla-notes.md
+    parent_id: fld_robotics
+    order: 20
+    visibility: public
+    status: active
+    owned: false
+  - id: media_demo
+    type: media
+    title: demo.mp4
+    ref: media/blog/vla-notes/demo.mp4
+    parent_id: post_vla_notes
+    order: 30
+    visibility: private
+    status: active
+    owned: true
+```
+
+The public URL is stable and comes from the Markdown route, not from the tree
+parent. Moving `post_vla_notes` under another folder changes only the backstage
+organization; `/blog/vla-notes/` stays the same. A post appears in normal public
+navigation only when its library node is `status: active`,
+`visibility: public`, and its Markdown front matter is `status: published`.
+
+Deletion is two-stage. `trash` marks a node or subtree as `status: trashed` in
+`public-library.yaml` and hides it from loading, saving, publishing, and normal
+builds without deleting files. `restore` moves it back to its previous parent
+when possible. `purge` removes the trashed node from the tree; physical files
+are kept unless `--delete-files` is passed. With `--delete-files`, post purging
+may remove the Markdown file, BlockNote sidecar, and `media/blog/<route>/`
+directory. Media purging refuses to delete a source file while any active post
+still references it from cover metadata, Markdown image links, video
+directives, or visual blocks.
+
+`reconcile` is the migration helper. It imports existing `blog/**/*.md` posts
+and `media/blog/<route>/` files into `public-library.yaml` without changing
+URLs or duplicating nodes.
+
+`blog-taxonomy.yaml` remains supported for route-based blog categories and for
+older profiles. When `public-library.yaml` has real nodes, the file tree becomes
+the backstage organization source; taxonomy no longer limits how folders,
+posts, and media are associated in the editor. Use taxonomy only when you want
+the URL itself to include category folders.
+
+To organize post URLs into category folders, add `blog-taxonomy.yaml` at the
+profile root. Category `slug` values are used for folders and URLs, while
+`title` values are shown in the public pages:
+
+```yaml
+profile: alice
+taxonomy:
+  - slug: robotics
+    title: Robotics
+    children:
+      - slug: hardware
+        title: Hardware
+      - slug: software
+        title: Software
+        children:
+          - slug: vla
+            title: VLA
+          - slug: motion-control
+            title: Motion control
+  - slug: uncategorized
+    title: Uncategorized
+```
+
+With taxonomy enabled, posts may live under nested folders:
+
+```text
+profiles/<name>/blog/robotics/software/vla/my-post.md
+```
+
+The public URL becomes `/blog/robotics/software/vla/my-post/`, and local media
+lives under `profiles/<name>/media/blog/robotics/software/vla/my-post/`.
+Front matter should record the category path:
+
+```yaml
+category_path: [robotics, software, vla]
+```
+
+CLI `<slug-or-route>` arguments remain compatible with legacy leaf slugs. If
+multiple categories contain the same leaf slug, pass the full route such as
+`robotics/software/vla/my-post`.
 
 Blog bodies remain Markdown. Images should use normal Markdown syntax:
 
 ```markdown
-![Alt text](media/blog/<slug>/image.png)
+![Alt text](media/blog/<slug-or-route>/image.png)
 ```
 
 Short videos use the nblane video directive:
 
 ```markdown
-::video[Short demo](media/blog/<slug>/demo.mp4)
+::video[Short demo](media/blog/<slug-or-route>/demo.mp4)
 ::video[External demo](https://example.com/demo.mp4)
 ```
 
-Local blog media lives under `profiles/<name>/media/blog/<slug>/`. Images may
+Local blog media lives under `profiles/<name>/media/blog/<slug-or-route>/`. Images may
 be `png`, `jpg`, `jpeg`, `webp`, or `gif` up to 10 MB. Local short videos may
 be `mp4` or `webm` up to 25 MB. Larger videos should use an external URL or
 object storage.
@@ -193,7 +317,7 @@ cache clearing, and optional Git backup.
 Shipped v1 covers the end-to-end public loop:
 
 - **Data:** `public-profile.yaml`, `resume-source.yaml`, `projects.yaml`,
-  `outputs.yaml`, `blog/*.md`, and profile media directories.
+  `outputs.yaml`, `blog/**/*.md`, and profile media directories.
 - **CLI:** initialization, validation, static build, resume generation, blog
   create/media/publish, draft generation, and evidence-to-project curation.
 - **Web UI:** the **Public Site** page with Profile, Blog, Resume, Known Info,
@@ -254,9 +378,10 @@ Current implementation intentionally does not include:
 - comments
 - full-text search
 - multi-theme marketplace
-- database-backed storage
+- database-backed storage; `public-library.yaml` is the current single-repo
+  index
 - object-storage media uploads
 
 Small images can live under `profiles/<name>/media/`. Videos should use
 external URLs or object storage by default; small `mp4` / `webm` clips can be
-kept under `media/blog/<slug>/` for v1 posts.
+kept under `media/blog/<slug-or-route>/` for v1 posts.

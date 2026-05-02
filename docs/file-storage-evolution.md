@@ -75,8 +75,8 @@ auth/users.yaml
 | Online resume preview | Missing | `resume-source.yaml` + generated HTML | Collaborative editing, many versions |
 | Resume download | Missing | Markdown / HTML first; PDF later | Batch generation, job queue |
 | Job-targeted resume | Missing | Generate from structured facts only | Many users, audit, async jobs |
-| Blog writing | v1 supported | `blog/*.md` + front matter | Search, comments, collaboration |
-| Blog images | v1 supported | `media/blog/<slug>/` | CDN, image processing |
+| Blog writing | v1 supported | `blog/**/*.md` + front matter | Search, comments, collaboration |
+| Blog images | v1 supported | `media/blog/<slug-or-route>/` | CDN, image processing |
 | Blog video | Partial | Prefer external URLs; small local `mp4` / `webm` allowed | Upload/transcode/analytics |
 | Project links | Partly in evidence | `projects.yaml` referencing evidence | Complex filters/search |
 | Papers / patents | Partly in evidence | `outputs.yaml`, type expansion | External sync, metrics |

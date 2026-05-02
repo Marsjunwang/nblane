@@ -95,7 +95,7 @@ prompt 解析规则：menu query 中**命中的 alias 前缀会被自动剥离**
 - `accept` / `reject` / `regenerate` 三按钮
 
 操作语义：
-- **accept**：优先按 `block_patches[].op` 调 `editor.replaceBlocks / insertBlocks / removeBlocks`；仅 source-mode、legacy textarea、未知 block 类型 三种情况才降级 `markdown_fallback`。资产从 `.candidates/<patch_id>/` 晋升到 `media/blog/<slug>/`。
+- **accept**：优先按 `block_patches[].op` 调 `editor.replaceBlocks / insertBlocks / removeBlocks`；仅 source-mode、legacy textarea、未知 block 类型 三种情况才降级 `markdown_fallback`。资产从 `.candidates/<patch_id>/` 晋升到 `media/blog/<slug-or-route>/`。
 - **reject**：移除正文 candidate 卡片 + 清理临时文件（24h TTL 兜底 GC）。
 - **regenerate**：用同一上下文重新触发，旧候选自动 reject。
 
@@ -160,7 +160,7 @@ Check Tab 顶部仍是规则校验（必填项、tag、front matter 等），下
 1. caption 由 `from_caption_intent` 推导；可在 prompt 中显式给出。
 2. visual 生成结果写入 `profiles/<name>/blog/.candidates/<patch_id>/<filename>`（**未** 写入 `media/blog/`，避免 reject 后污染媒体库）。
 3. `assets[].preview_src` 双轨：< 2MB 直接 `data:image/png;base64,...`；超阈值 / 视频走 `/blog_candidate_preview/<patch_id>/<filename>` 受控 endpoint（仅校验当前 active session 可读）。
-4. accept → 文件晋升到 `media/blog/<slug>/`；`visual_block.src` 填正式相对路径，`preview_src` 清空。
+4. accept → 文件晋升到 `media/blog/<slug-or-route>/`；`visual_block.src` 填正式相对路径，`preview_src` 清空。
 
 注意：reject 后立刻清理；24h 后未决候选由 TTL GC 兜底删。
 
@@ -190,11 +190,73 @@ Check Tab 顶部仍是规则校验（必填项、tag、front matter 等），下
 
 | 文件 | 角色 | 何时优先 |
 |---|---|---|
-| `profiles/<name>/blog/<slug>.md` | 公开发布事实源、git diff 友好 | 公开站点构建用此 |
-| `profiles/<name>/blog/<slug>.blocknote.json` | session canonical 编辑模型 | 加载时优先（带 `source_md_sha256` 校验） |
+| `profiles/<name>/blog/<slug-or-route>.md` | 公开发布事实源、git diff 友好 | 公开站点构建用此 |
+| `profiles/<name>/blog/<slug-or-route>.blocknote.json` | session canonical 编辑模型 | 加载时优先（带 `source_md_sha256` 校验） |
+
+### 6.1 Public Library 文件树
+
+Public Site Blog 左栏现在优先使用 `profiles/<name>/public-library.yaml`
+作为后台组织源。它不是数据库，而是一个 Git 友好的 YAML 索引，节点使用扁平表：
+
+```yaml
+version: 1
+profile: 王军
+nodes:
+  - id: root
+    type: root
+    title: Public Library
+    parent_id: ""
+    order: 0
+    visibility: private
+    status: active
+  - id: fld_robotics
+    type: folder
+    title: 机器人
+    parent_id: root
+    order: 10
+    visibility: private
+    status: active
+  - id: post_vla_notes
+    type: post
+    title: VLA 调研笔记
+    ref: blog/vla-notes.md
+    parent_id: fld_robotics
+    order: 20
+    visibility: public
+    status: active
+```
+
+核心规则：
+- folder 只是管理节点，不对应磁盘目录。
+- post 的公开 URL 来自 `ref: blog/<route>.md`，不随树移动改变。
+- post 可以挂子 folder、post、media；第一版“关联文件”就是一个节点一个父节点。
+- 普通公开导航只显示 active + public 的 library post，并且 Markdown front matter
+  仍必须是 `status: published`。
+- `blog-taxonomy.yaml` 继续兼容；但 `public-library.yaml` 有真实节点后，Blog
+  编辑器的后台组织以文件树为准，taxonomy 不再限制你怎么挂载文件。
+
+CLI 辅助命令：
+
+```bash
+nblane public library tree <profile>
+nblane public library tree <profile> --include-trash --format yaml
+nblane public library reconcile <profile>
+nblane public library trash <profile> <node-id>
+nblane public library restore <profile> <node-id>
+nblane public library purge <profile> <node-id>
+nblane public library purge <profile> <node-id> --delete-files
+```
+
+删除是两阶段：移入回收站只改 `public-library.yaml`，不会删 md、sidecar 或媒体。
+永久删除默认也只删 tree node；只有显式 `--delete-files` 才会尝试删除物理文件。
+媒体永久删除会先检查 active 文章中的 cover、正文图片、video directive 和 visual
+block 引用，仍被引用时会拒绝删除源文件。
 
 约束：
 - 写顺序 **先 sidecar 再 md**，并 `fsync` 保证 sidecar 不会比 md 旧。
+- `<slug-or-route>` 可以是单层 `my-post`，也可以是 taxonomy 分类下的
+  `robotics/software/vla/my-post`；同名叶子 slug 存在于多个分类时，编辑器和 CLI
+  使用完整 route。
 - 加载时若 sidecar 与 md 内容不一致（外部编辑器改了 md），以 **sidecar** 为准；md 会被 sidecar 还原后重写。
 - 删除 md 后只要 sidecar 还在，下次保存可整篇还原。
 - 外部编辑器（Typora / Obsidian / GitHub Web）请避免直接改正文 → 它们会吞掉 HTML 注释 round-trip 标记；如果非改不可，建议同步删除 sidecar 让其从 md 重建。
@@ -216,7 +278,7 @@ A: 确认 [pages/6_Public_Site.py:1495](../pages/6_Public_Site.py) `_candidate_p
 A: 公开站点用预渲染 SVG，不依赖外部 mermaid runtime。如果空白：① 看构建日志 `mermaid-cli` 是否安装；② 检查 `_render_visual_block_comment` 是否走到 SVG 分支；③ 兜底分支若启用 CDN，需要公开页 layout 注入了 mermaid runtime。
 
 **Q5: 删除 md 后 blog 列表还有？**
-A: 这是 sidecar 兜底机制 — 下次保存会从 sidecar 重建 md。要彻底删除 blog，需要同时删 `<slug>.md` 与 `<slug>.blocknote.json`。
+A: 如果启用了 Public Library，列表由 `public-library.yaml` 控制，应先移入回收站，再按需永久删除。仅手动删除 md 时，sidecar 仍可能兜底重建 md；要彻底删除物理文章，需要在回收站中执行永久删除并显式选择删除文件，或同时删除 `<slug-or-route>.md`、`<slug-or-route>.blocknote.json` 与对应媒体目录。
 
 **Q6: 想批量跑 AI 修复怎么办？**
 A: 当前 Reviewer 是逐条修复，每个修复都进 CandidatePatchPanel 等审核。Phase 5 之后会把 Reviewer 升级为可批选 + 一次性 patch bundle，但当前阶段刻意保留逐条审核以避免误修。
@@ -244,7 +306,7 @@ npm run build   # 主 chunk 应 < 1.0 MB
 
 1. 选段 → polish → CandidatePatchPanel → accept → React DevTools 确认仅替换该 block
 2. `/公式` 直接选 → 弹二级输入框 → 输入"二次方程" → 流式 KaTeX 容错预览 → accept → math_block 插入
-3. 选段 → Visual → 候选 → reject → `media/blog/<slug>/` 不变；`.candidates/` 已清
+3. 选段 → Visual → 候选 → reject → `media/blog/<slug-or-route>/` 不变；`.candidates/` 已清
 4. 选段 → Visual → 候选 → accept → 文件晋升 + `visual_block.src` 正确
 5. `/diagram 用户登录` → mermaid 流 → accept → 编辑器渲染 + public site SVG（不依赖外部 runtime）
 6. `/visual` 长任务期间，整页不白屏，其他段可继续编辑

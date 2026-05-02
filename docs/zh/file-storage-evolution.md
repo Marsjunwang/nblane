@@ -91,8 +91,8 @@ auth/users.yaml
 | 在线简历预览 | 不满足 | `resume-source.yaml` + generated HTML | 复杂版本、协作编辑、搜索 |
 | 简历下载 | 不满足 | Markdown / HTML 可先做，PDF 后续 | 批量生成、任务队列 |
 | 岗位定制简历 | 不满足 | 基于结构化事实库生成 | 多用户并发生成、审计 |
-| 博客写作 | v1 已支持 | `blog/*.md` + front matter | 评论、搜索、多人协作 |
-| 博客图片 | v1 已支持 | `media/blog/<slug>/` | 大量图片、CDN |
+| 博客写作 | v1 已支持 | `blog/**/*.md` + front matter | 评论、搜索、多人协作 |
+| 博客图片 | v1 已支持 | `media/blog/<slug-or-route>/` | 大量图片、CDN |
 | 博客视频 | 部分支持 | 优先外链；小型 `mp4` / `webm` 可本地 | 视频上传、转码、播放统计 |
 | 项目链接 | 部分在 evidence | `projects.yaml` 引用 evidence | 项目多、复杂筛选 |
 | 论文 / 专利 | 部分在 evidence | `outputs.yaml`，扩展 `patent` 等类型 | 引用统计、同步外部平台 |

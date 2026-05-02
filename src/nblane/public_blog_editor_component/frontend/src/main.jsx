@@ -78,6 +78,15 @@ const WRITE_ACTIONS = new Set([
   "create_post",
   "draft_from_evidence",
   "draft_from_done",
+  "library_create_folder",
+  "library_create_post",
+  "library_attach_existing",
+  "library_rename_node",
+  "library_move_node",
+  "library_reorder_node",
+  "library_trash_node",
+  "library_restore_node",
+  "library_permanent_delete_node",
 ]);
 
 const DEFAULT_LABELS = {
@@ -125,6 +134,7 @@ const DEFAULT_LABELS = {
   articles: "Articles",
   body: "Body",
   caption: "Caption",
+  category: "Category",
   check: "Check",
   cover: "Cover",
   cover_prompt: "Cover prompt",
@@ -172,6 +182,29 @@ const DEFAULT_LABELS = {
   insert_placement: "Insert position",
   layout: "Layout",
   left_panel: "Articles",
+  library_attach_existing: "Attach ref",
+  library_attach_ref_prompt: "Existing ref or route",
+  library_create_folder: "Folder",
+  library_create_post: "Post",
+  library_delete_forever: "Delete forever",
+  library_delete_forever_confirm: "Permanently delete this library item?",
+  library_empty: "No library items.",
+  library_move: "Move",
+  library_move_parent_prompt: "Move to parent node ID; leave blank for root",
+  library_new_folder_prompt: "Folder title",
+  library_new_post_prompt: "Post title",
+  library_node_actions: "File tree actions",
+  library_ref_type_prompt: "Type for existing ref",
+  library_rename: "Rename",
+  library_rename_prompt: "New title",
+  library_restore: "Restore",
+  library_select_parent_hint: "Folder selection controls where new items are created.",
+  library_trash: "Trash",
+  library_trash_confirm: "Move this library item to trash?",
+  library_trash_empty: "Trash is empty.",
+  library_trash_node: "Trash",
+  library_up: "Up",
+  library_down: "Down",
   media: "Media",
   media_library: "Media library",
   media_kind: "Media kind",
@@ -382,7 +415,77 @@ function postTitle(post) {
 }
 
 function postSlug(post) {
-  return cleanText(post.slug || post.id || "");
+  return cleanText(post.route || post.slug || post.id || "");
+}
+
+function libraryNodeTitle(node) {
+  return cleanText(node.title || node.name || node.slug || node.route || node.ref || node.id || "Untitled");
+}
+
+function libraryNodeId(node, fallback = "") {
+  return cleanText(node.id || node.node_id || node.route || node.slug || node.ref || fallback);
+}
+
+function libraryNodeType(node) {
+  const type = cleanText(node.type || "").toLowerCase();
+  if (type === "folder" || type === "directory") {
+    return "folder";
+  }
+  if (type === "media" || type === "asset" || type === "image" || type === "video") {
+    return "media";
+  }
+  return type || "post";
+}
+
+function normalizeLibraryTree(nodes, parentId = "") {
+  return asArray(nodes)
+    .map((raw, index) => {
+      const source = asObject(raw);
+      const id = libraryNodeId(source, `${parentId || "root"}:${index}`);
+      const normalized = {
+        ...source,
+        id,
+        type: libraryNodeType(source),
+        title: libraryNodeTitle(source),
+        parent_id: cleanText(source.parent_id || parentId),
+      };
+      normalized.children = normalizeLibraryTree(source.children, id);
+      return normalized;
+    })
+    .sort((left, right) => {
+      const leftOrder = Number.isFinite(Number(left.order)) ? Number(left.order) : 0;
+      const rightOrder = Number.isFinite(Number(right.order)) ? Number(right.order) : 0;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+      return libraryNodeTitle(left).localeCompare(libraryNodeTitle(right));
+    });
+}
+
+function libraryTreeFromPosts(posts) {
+  return posts.map((post, index) => ({
+    ...post,
+    id: cleanText(post.id || postSlug(post) || `post:${index}`),
+    type: "post",
+    title: postTitle(post),
+    ref: cleanText(post.ref || postSlug(post)),
+    route: cleanText(post.route || post.slug || ""),
+    slug: cleanText(post.slug || post.route || ""),
+    parent_id: "",
+    children: [],
+  }));
+}
+
+function flattenLibraryTree(nodes) {
+  const rows = [];
+  const visit = (items, depth = 0, parent = null) => {
+    for (const node of items) {
+      rows.push({ node, depth, parent });
+      visit(asArray(node.children), depth + 1, node);
+    }
+  };
+  visit(nodes);
+  return rows;
 }
 
 function mediaPath(item) {
@@ -1745,10 +1848,449 @@ function LegacyMarkdownEditor(props) {
   );
 }
 
+function PublicLibraryTreePanel({
+  activeNodeId,
+  activeSlug,
+  capabilities,
+  editable,
+  labels,
+  nodes,
+  onAction,
+  onInsertMedia,
+  onTreeStateChange,
+  posts,
+  trashNodes,
+}) {
+  const initialExpanded = useMemo(() => {
+    const expanded = new Set();
+    const visit = (items) => {
+      for (const node of items) {
+        if (asArray(node.children).length) {
+          expanded.add(node.id);
+          visit(node.children);
+        }
+      }
+    };
+    visit(nodes);
+    return expanded;
+  }, [nodes]);
+  const [expandedIds, setExpandedIds] = useState(initialExpanded);
+  const [selectedNodeId, setSelectedNodeId] = useState(cleanText(activeNodeId));
+  const [selectedTrashId, setSelectedTrashId] = useState("");
+
+  useEffect(() => {
+    setExpandedIds(initialExpanded);
+  }, [initialExpanded]);
+
+  useEffect(() => {
+    if (activeNodeId) {
+      setSelectedNodeId(cleanText(activeNodeId));
+    }
+  }, [activeNodeId]);
+
+  const visibleRows = useMemo(() => {
+    const rows = [];
+    const visit = (items, depth = 0) => {
+      for (const node of items) {
+        rows.push({ node, depth });
+        if (expandedIds.has(node.id)) {
+          visit(asArray(node.children), depth + 1);
+        }
+      }
+    };
+    visit(nodes);
+    return rows;
+  }, [expandedIds, nodes]);
+  const flatRows = useMemo(() => flattenLibraryTree(nodes), [nodes]);
+  const nodeById = useMemo(
+    () => new Map(flatRows.map((row) => [row.node.id, row])),
+    [flatRows],
+  );
+  const selectedRow = nodeById.get(selectedNodeId) || null;
+  const selectedNode = selectedRow?.node || null;
+  const selectedType = selectedNode ? libraryNodeType(selectedNode) : "";
+  const selectedCreateParentId =
+    selectedNode && (selectedType === "folder" || selectedType === "post")
+      ? selectedNode.id
+      : cleanText(selectedNode?.parent_id || "");
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadKind, setUploadKind] = useState("image");
+  const canMutate =
+    editable &&
+    asObject(capabilities).readonly !== true &&
+    asObject(capabilities).can_write !== false;
+
+  const notifyTreeState = useCallback(() => {
+    onTreeStateChange?.();
+  }, [onTreeStateChange]);
+
+  function updateExpanded(updater) {
+    setExpandedIds((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      notifyTreeState();
+      return next;
+    });
+  }
+
+  async function selectNode(node) {
+    setSelectedNodeId(node.id);
+    notifyTreeState();
+    const slug = cleanText(node.route || node.slug || "");
+    const post =
+      posts.find((item) => postSlug(item) === slug || cleanText(item.id) === cleanText(node.ref)) ||
+      null;
+    await onAction("library_select_node", {
+      node_id: node.id,
+      ref: cleanText(node.ref || ""),
+      route: cleanText(node.route || ""),
+      slug,
+      node,
+      type: libraryNodeType(node),
+      legacy_action: libraryNodeType(node) === "post" ? "select_post" : "",
+      select_post: libraryNodeType(node) === "post" ? { slug, post } : null,
+      post,
+    });
+  }
+
+  async function createFolder() {
+    const title = window.prompt(label(labels, "library_new_folder_prompt"));
+    if (!title?.trim()) {
+      return;
+    }
+    await onAction("library_create_folder", {
+      title: title.trim(),
+      parent_id: selectedCreateParentId,
+    });
+  }
+
+  async function createPost() {
+    const title = window.prompt(label(labels, "library_new_post_prompt"));
+    if (!title?.trim()) {
+      return;
+    }
+    await onAction("library_create_post", {
+      title: title.trim(),
+      parent_id: selectedCreateParentId,
+    });
+  }
+
+  async function attachExisting() {
+    const ref = window.prompt(label(labels, "library_attach_ref_prompt"));
+    if (!ref?.trim()) {
+      return;
+    }
+    const type =
+      window.prompt(label(labels, "library_ref_type_prompt"), "post") || "post";
+    await onAction("library_attach_existing", {
+      ref: ref.trim(),
+      type: type.trim() || "post",
+      parent_id: selectedCreateParentId,
+    });
+  }
+
+  function fileToDataUrl(targetFile) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(cleanText(reader.result));
+      reader.onerror = () => reject(reader.error || new Error("file read failed"));
+      reader.readAsDataURL(targetFile);
+    });
+  }
+
+  async function uploadMedia() {
+    if (!uploadFile) {
+      return;
+    }
+    const dataUrl = await fileToDataUrl(uploadFile);
+    await onAction("library_upload_media", {
+      filename: uploadFile.name,
+      kind: uploadKind,
+      data_url: dataUrl,
+      parent_id: selectedCreateParentId || "root",
+    });
+  }
+
+  function selectedMediaItem() {
+    if (!selectedNode || selectedType !== "media") {
+      return null;
+    }
+    const ref = cleanText(selectedNode.relative_path || selectedNode.ref || selectedNode.path || "");
+    if (!ref) {
+      return null;
+    }
+    return {
+      ...selectedNode,
+      relative_path: ref,
+      path: ref,
+      name: libraryNodeTitle(selectedNode),
+      title: libraryNodeTitle(selectedNode),
+      preview_src: cleanText(selectedNode.preview_src || selectedNode.preview || `/${ref}`),
+      kind: /\.(mp4|mov|webm|m4v)$/i.test(ref) ? "video" : "image",
+    };
+  }
+
+  async function insertSelectedMedia() {
+    const item = selectedMediaItem();
+    if (!item || typeof onInsertMedia !== "function") {
+      return;
+    }
+    await onInsertMedia(item, "marker");
+  }
+
+  async function renameSelected() {
+    if (!selectedNode) {
+      return;
+    }
+    const title = window.prompt(
+      label(labels, "library_rename_prompt"),
+      libraryNodeTitle(selectedNode),
+    );
+    if (!title?.trim()) {
+      return;
+    }
+    await onAction("library_rename_node", {
+      node_id: selectedNode.id,
+      title: title.trim(),
+    });
+  }
+
+  async function moveSelected() {
+    if (!selectedNode) {
+      return;
+    }
+    const parentId = window.prompt(
+      label(labels, "library_move_parent_prompt"),
+      cleanText(selectedNode.parent_id || ""),
+    );
+    if (parentId === null) {
+      return;
+    }
+    await onAction("library_move_node", {
+      node_id: selectedNode.id,
+      parent_id: parentId.trim(),
+    });
+  }
+
+  async function reorderSelected(direction) {
+    if (!selectedNode) {
+      return;
+    }
+    await onAction("library_reorder_node", {
+      node_id: selectedNode.id,
+      direction,
+      parent_id: cleanText(selectedNode.parent_id || ""),
+    });
+  }
+
+  async function trashSelected() {
+    if (!selectedNode) {
+      return;
+    }
+    if (!window.confirm(label(labels, "library_trash_confirm"))) {
+      return;
+    }
+    await onAction("library_trash_node", {
+      node_id: selectedNode.id,
+    });
+  }
+
+  async function restoreTrash() {
+    if (!selectedTrashId) {
+      return;
+    }
+    await onAction("library_restore_node", {
+      node_id: selectedTrashId,
+    });
+  }
+
+  async function purgeTrash() {
+    if (!selectedTrashId) {
+      return;
+    }
+    if (!window.confirm(label(labels, "library_delete_forever_confirm"))) {
+      return;
+    }
+    await onAction("library_permanent_delete_node", {
+      node_id: selectedTrashId,
+    });
+  }
+
+  return (
+    <section className="nb-library-panel" aria-label={label(labels, "articles")}>
+      <div className="nb-library-actions" aria-label={label(labels, "library_node_actions")}>
+        <span>{label(labels, "library_node_actions")}</span>
+        <div className="nb-library-action-grid">
+          <button type="button" className="nb-button" disabled={!canMutate} onClick={createFolder}>
+            {label(labels, "library_create_folder")}
+          </button>
+          <button type="button" className="nb-button" disabled={!canMutate} onClick={createPost}>
+            {label(labels, "library_create_post")}
+          </button>
+          <button type="button" className="nb-button" disabled={!canMutate} onClick={attachExisting}>
+            {label(labels, "library_attach_existing")}
+          </button>
+          <label className="nb-library-upload">
+            <span>{label(labels, "upload_media")}</span>
+            <input
+              type="file"
+              disabled={!canMutate}
+              accept="image/*,video/mp4,video/webm"
+              onChange={(event) => {
+                const nextFile = event.target.files?.[0] || null;
+                setUploadFile(nextFile);
+                if (nextFile?.type?.startsWith("video/")) {
+                  setUploadKind("video");
+                } else if (nextFile) {
+                  setUploadKind("image");
+                }
+              }}
+            />
+          </label>
+          <button type="button" className="nb-button" disabled={!canMutate || !uploadFile} onClick={uploadMedia}>
+            {label(labels, "upload_media")}
+          </button>
+          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={renameSelected}>
+            {label(labels, "library_rename")}
+          </button>
+          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={moveSelected}>
+            {label(labels, "library_move")}
+          </button>
+          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={() => reorderSelected("up")}>
+            {label(labels, "library_up")}
+          </button>
+          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={() => reorderSelected("down")}>
+            {label(labels, "library_down")}
+          </button>
+          <button type="button" className="nb-button danger" disabled={!canMutate || !selectedNode} onClick={trashSelected}>
+            {label(labels, "library_trash_node")}
+          </button>
+        </div>
+        <small>{label(labels, "library_select_parent_hint")}</small>
+      </div>
+      <div className="nb-library-tree" role="tree">
+        {visibleRows.length ? (
+          visibleRows.map(({ node, depth }) => {
+            const type = libraryNodeType(node);
+            const hasChildren = asArray(node.children).length > 0;
+            const expanded = expandedIds.has(node.id);
+            const slug = cleanText(node.route || node.slug || "");
+            const active =
+              cleanText(activeNodeId) === node.id ||
+              (type === "post" && slug && slug === activeSlug);
+            const selected = selectedNodeId === node.id;
+            return (
+              <div
+                key={node.id}
+                className={`nb-library-row ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
+                role="treeitem"
+                aria-expanded={hasChildren ? expanded : undefined}
+                aria-selected={selected}
+                style={{ "--nb-tree-depth": depth }}
+              >
+                <button
+                  type="button"
+                  className="nb-library-toggle"
+                  disabled={!hasChildren}
+                  aria-label={expanded ? "Collapse" : "Expand"}
+                  onClick={() =>
+                    updateExpanded((current) => {
+                      const next = new Set(current);
+                      if (next.has(node.id)) {
+                        next.delete(node.id);
+                      } else {
+                        next.add(node.id);
+                      }
+                      return next;
+                    })
+                  }
+                >
+                  {hasChildren ? (expanded ? "v" : ">") : ""}
+                </button>
+                <button type="button" className="nb-library-node" onClick={() => selectNode(node)}>
+                  <span className={`nb-library-type is-${type}`}>
+                    {type === "folder" ? "D" : type === "media" ? "M" : "P"}
+                  </span>
+                  <span className="nb-library-title">{libraryNodeTitle(node)}</span>
+                  <span className="nb-library-meta">
+                    {[type, cleanText(node.status || node.visibility || ""), slug || cleanText(node.ref || "")]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </span>
+                </button>
+              </div>
+            );
+          })
+        ) : (
+          <p className="nb-empty">{label(labels, "library_empty")}</p>
+        )}
+      </div>
+      {selectedType === "media" ? (
+        <div className="nb-library-selected-media">
+          <MediaPreview item={selectedMediaItem() || {}} labels={labels} />
+          <button
+            type="button"
+            className="nb-button wide"
+            disabled={!canMutate || !selectedMediaItem()}
+            onClick={insertSelectedMedia}
+          >
+            {label(labels, "insert_into_post")}
+          </button>
+        </div>
+      ) : null}
+      <div className="nb-library-trash">
+        <strong>{label(labels, "library_trash")}</strong>
+        {trashNodes.length ? (
+          <div className="nb-library-trash-controls">
+            <select
+              value={selectedTrashId}
+              onChange={(event) => {
+                setSelectedTrashId(event.target.value);
+                notifyTreeState();
+              }}
+            >
+              <option value="">{label(labels, "library_trash")}</option>
+              {trashNodes.map((node, index) => {
+                const id = libraryNodeId(node, `trash:${index}`);
+                return (
+                  <option key={id} value={id}>
+                    {libraryNodeTitle(node)}
+                  </option>
+                );
+              })}
+            </select>
+            <button type="button" className="nb-button" disabled={!canMutate || !selectedTrashId} onClick={restoreTrash}>
+              {label(labels, "library_restore")}
+            </button>
+            <button type="button" className="nb-button danger" disabled={!canMutate || !selectedTrashId} onClick={purgeTrash}>
+              {label(labels, "library_delete_forever")}
+            </button>
+          </div>
+        ) : (
+          <p className="nb-empty">{label(labels, "library_trash_empty")}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ShellEditor(props) {
   const args = props.args || {};
   const labels = { ...DEFAULT_LABELS, ...asObject(args.ui_labels) };
-  const posts = asArray(args.posts).map(asObject);
+  const posts = useMemo(() => asArray(args.posts).map(asObject), [args.posts]);
+  const hasLibraryTree = Array.isArray(args.library_tree);
+  const libraryTree = useMemo(
+    () =>
+      hasLibraryTree
+        ? normalizeLibraryTree(args.library_tree)
+        : normalizeLibraryTree(libraryTreeFromPosts(posts)),
+    [args.library_tree, hasLibraryTree, posts],
+  );
+  const trashNodes = useMemo(
+    () => normalizeLibraryTree(args.trash_nodes),
+    [args.trash_nodes],
+  );
+  const libraryCapabilities = asObject(args.library_capabilities);
+  const categoryOptions = asArray(args.category_options).map(asObject);
   const mediaItems = asArray(args.media_items).map(asObject);
   const aiCandidates = asArray(args.ai_candidates).map(asObject);
   const validationState = asObject(args.validation_state);
@@ -1767,7 +2309,18 @@ function ShellEditor(props) {
   );
   const previewHtml = cleanText(args.preview_html);
   const initialStatusFilter = cleanText(args.status_filter || "all") || "all";
-  const activeSlug = cleanText(args.active_slug || args.slug || args.document_id || "");
+  const activeSlug = cleanText(args.active_route || args.active_slug || args.slug || args.document_id || "");
+  const activeNodeId = cleanText(args.active_node_id || "");
+  const activeCategoryValue = asArray(args.active_category_path)
+    .map((item) => cleanText(item).trim())
+    .filter(Boolean)
+    .join("/");
+  const categoryValues = categoryOptions
+    .map((option) => cleanText(option.value || asArray(option.path).join("/")))
+    .filter(Boolean);
+  const initialNewPostCategory = categoryValues.includes(activeCategoryValue)
+    ? activeCategoryValue
+    : categoryValues[0] || "";
   const documentId = String(args.document_id || activeSlug || "blog");
   const initialMarkdown = markdownFromValue(args.initial_markdown);
   const initialBlocks = useMemo(
@@ -1799,6 +2352,7 @@ function ShellEditor(props) {
   const [dirty, setDirty] = useState(false);
   const [mobileView, setMobileView] = useState("Editor");
   const [newPostTitle, setNewPostTitle] = useState("");
+  const [newPostCategory, setNewPostCategory] = useState(initialNewPostCategory);
   const [evidenceId, setEvidenceId] = useState("");
   const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
   const [largePreview, setLargePreview] = useState({ source: "", key: "" });
@@ -1814,6 +2368,7 @@ function ShellEditor(props) {
   const [aiPromptRequest, setAIPromptRequest] = useState(null);
   const [aiPromptDraft, setAIPromptDraft] = useState("");
   const [outlineVersion, setOutlineVersion] = useState(0);
+  const [treeUiVersion, setTreeUiVersion] = useState(0);
 
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
@@ -1837,6 +2392,8 @@ function ShellEditor(props) {
   const visualResultsSeed = deepStableStringify(args.visual_results || []);
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
   const operationNoticeSeed = deepStableStringify(args.operation_notice || {});
+  const libraryTreeSeed = deepStableStringify(args.library_tree || []);
+  const trashNodesSeed = deepStableStringify(args.trash_nodes || []);
   const aiPatchSeed = deepStableStringify(args.ai_patch || {});
   const aiPatchesSeed = deepStableStringify(args.ai_patches || []);
   const aiStreamSeed = deepStableStringify(args.ai_stream || {});
@@ -1872,6 +2429,10 @@ function ShellEditor(props) {
       layout.preview_open,
       mobileView,
       posts.length,
+      activeNodeId,
+      libraryTreeSeed,
+      trashNodesSeed,
+      treeUiVersion,
       mediaItems.length,
       aiCandidates.length,
       error,
@@ -3485,11 +4046,34 @@ function ShellEditor(props) {
                 placeholder={label(labels, "title_label")}
                 onChange={(event) => setNewPostTitle(event.target.value)}
               />
+              {categoryOptions.length ? (
+                <select
+                  value={newPostCategory}
+                  disabled={!editable}
+                  title={label(labels, "category")}
+                  onChange={(event) => setNewPostCategory(event.target.value)}
+                >
+                  {categoryOptions.map((option) => {
+                    const value = cleanText(option.value || asArray(option.path).join("/"));
+                    return (
+                      <option key={value} value={value}>
+                        {cleanText(option.label || value)}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : null}
               <button
                 type="button"
                 className="nb-button"
                 disabled={!editable || !newPostTitle.trim()}
-                onClick={() => emitAction("create_post", { title: newPostTitle.trim() })}
+                onClick={() =>
+                  emitAction("create_post", {
+                    title: newPostTitle.trim(),
+                    category: newPostCategory,
+                    category_path: newPostCategory.split("/").filter(Boolean),
+                  })
+                }
               >
                 {label(labels, "create_post")}
               </button>
@@ -3530,28 +4114,19 @@ function ShellEditor(props) {
               onExpandSection={handleExpandOutlineSection}
             />
           ) : null}
-          <div className="nb-post-list">
-            {posts.length ? (
-              posts.map((post) => {
-                const slug = postSlug(post);
-                return (
-                  <button
-                    type="button"
-                    key={slug || postTitle(post)}
-                    className={`nb-post-row ${slug === activeSlug ? "is-active" : ""}`}
-                    onClick={() => emitAction("select_post", { slug, post })}
-                  >
-                    <span className="nb-post-title">{postTitle(post)}</span>
-                    <span className="nb-post-meta">
-                      {cleanText(post.date || "-")} / {cleanText(post.status || "draft")}
-                    </span>
-                  </button>
-                );
-              })
-            ) : (
-              <p className="nb-empty">{label(labels, "post")}</p>
-            )}
-          </div>
+          <PublicLibraryTreePanel
+            activeNodeId={activeNodeId}
+            activeSlug={activeSlug}
+            capabilities={libraryCapabilities}
+            editable={editable}
+            labels={labels}
+            nodes={libraryTree}
+            onAction={emitAction}
+            onInsertMedia={handleInsertMedia}
+            onTreeStateChange={() => setTreeUiVersion((value) => value + 1)}
+            posts={posts}
+            trashNodes={trashNodes}
+          />
         </aside>
 
         <section className="nb-center-panel" aria-label={label(labels, "editor")}>

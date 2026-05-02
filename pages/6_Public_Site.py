@@ -74,6 +74,7 @@ from nblane.core.public_site import (
     init_public_layer,
     insert_blog_snippet,
     load_blog_posts,
+    load_blog_taxonomy,
     load_public_profile,
     load_projects,
     load_resume_source,
@@ -87,6 +88,36 @@ from nblane.core.public_site import (
     validate_blog_text_for_publish,
     validate_public_layer,
 )
+try:
+    from nblane.core.public_site import (
+        add_public_library_media_bytes,
+        attach_existing_public_library_node,
+        create_blog_draft_in_library,
+        create_public_library_folder,
+        list_public_library_tree,
+        load_public_library,
+        move_public_library_node,
+        public_library_trash_nodes,
+        purge_public_library_node,
+        rename_public_library_node,
+        reorder_public_library_node,
+        restore_public_library_node,
+        trash_public_library_node,
+    )
+except ImportError:  # pragma: no cover - optional while core API lands in parallel
+    add_public_library_media_bytes = None
+    attach_existing_public_library_node = None
+    create_blog_draft_in_library = None
+    create_public_library_folder = None
+    list_public_library_tree = None
+    load_public_library = None
+    move_public_library_node = None
+    public_library_trash_nodes = None
+    purge_public_library_node = None
+    rename_public_library_node = None
+    reorder_public_library_node = None
+    restore_public_library_node = None
+    trash_public_library_node = None
 from nblane.core.io import profile_dir
 from nblane.core.paths import REPO_ROOT
 from nblane.web_auth import require_login
@@ -358,6 +389,7 @@ def _ui() -> dict[str, str]:
             "preview_empty": "暂无预览。",
             "create_post": "新建",
             "filter_posts": "筛选",
+            "category": "分类",
         }
     return {
         "page_title": "Public Site · nblane",
@@ -611,6 +643,7 @@ def _ui() -> dict[str, str]:
         "preview_empty": "No preview yet.",
         "create_post": "New",
         "filter_posts": "Filter",
+        "category": "Category",
     }
 
 
@@ -1242,12 +1275,239 @@ def _blog_shell_posts_payload(posts: list) -> list[dict]:
     return [
         {
             "slug": post.slug,
+            "route": getattr(post, "route", post.slug),
+            "leaf_slug": getattr(post, "leaf_slug", post.slug),
+            "category_path": list(getattr(post, "category_path", []) or []),
             "title": post.title,
             "date": post.date,
             "status": post.status,
             "summary": post.summary,
         }
         for post in posts
+    ]
+
+
+def _public_library_available() -> bool:
+    return callable(list_public_library_tree)
+
+
+def _public_library_payload(selected: str) -> tuple[list[dict], list[dict]]:
+    """Return current library tree/trash payloads for the React shell."""
+    if not _public_library_available():
+        return [], []
+    try:
+        if callable(load_public_library):
+            load_public_library(selected)
+        tree = list_public_library_tree(selected, include_trashed=False)
+        trash = (
+            public_library_trash_nodes(selected)
+            if callable(public_library_trash_nodes)
+            else []
+        )
+    except Exception as exc:
+        st.warning(str(exc))
+        return [], []
+    return (
+        list(tree or []) if isinstance(tree, list) else [],
+        list(trash or []) if isinstance(trash, list) else [],
+    )
+
+
+def _public_library_capabilities() -> dict[str, bool]:
+    return {
+        "select_node": _public_library_available(),
+        "create_folder": callable(create_public_library_folder),
+        "create_post": callable(create_blog_draft_in_library),
+        "upload_media": callable(add_public_library_media_bytes),
+        "attach_existing": callable(attach_existing_public_library_node),
+        "rename_node": callable(rename_public_library_node),
+        "move_node": callable(move_public_library_node),
+        "reorder_node": callable(reorder_public_library_node),
+        "trash_node": callable(trash_public_library_node),
+        "restore_node": callable(restore_public_library_node),
+        "permanent_delete_node": callable(purge_public_library_node),
+    }
+
+
+def _walk_public_library_nodes(nodes: list[dict]):
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        yield node
+        children = node.get("children")
+        if isinstance(children, list):
+            yield from _walk_public_library_nodes(children)
+
+
+def _public_library_result_dict(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "to_dict"):
+        try:
+            data = value.to_dict()
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _public_library_node_value(node: object, *keys: str) -> str:
+    data = _public_library_result_dict(node)
+    if not data and hasattr(node, "node"):
+        data = _public_library_result_dict(getattr(node, "node", None))
+    for key in keys:
+        value = data.get(key)
+        clean = str(value or "").strip()
+        if clean:
+            return clean
+    return ""
+
+
+def _public_library_ref_to_slug(ref: object) -> str:
+    clean = str(ref or "").strip()
+    if not clean:
+        return ""
+    clean = clean.removeprefix("blog/").removesuffix(".md").strip("/")
+    return clean
+
+
+def _public_library_slug_from_payload(
+    payload: dict,
+    tree: list[dict],
+    posts: list,
+) -> str:
+    """Resolve a library node/ref/route payload into an existing blog slug."""
+    candidates = [
+        payload.get("slug"),
+        payload.get("route"),
+        payload.get("ref"),
+        payload.get("node_id"),
+    ]
+    node_id = str(payload.get("node_id", "") or "").strip()
+    if node_id:
+        for node in _walk_public_library_nodes(tree):
+            if node_id in {
+                _public_library_node_value(node, "id", "node_id"),
+                _public_library_node_value(node, "ref"),
+                _public_library_node_value(node, "route"),
+                _public_library_node_value(node, "slug"),
+            }:
+                candidates.extend(
+                    [
+                        node.get("slug"),
+                        node.get("route"),
+                        node.get("ref"),
+                    ]
+                )
+                break
+    post_routes = {
+        str(getattr(post, "route", "") or ""): post.slug
+        for post in posts
+        if str(getattr(post, "route", "") or "").strip()
+    }
+    post_slugs = {post.slug for post in posts}
+    for candidate in candidates:
+        clean = _public_library_ref_to_slug(candidate)
+        if clean in post_slugs:
+            return clean
+        if clean in post_routes:
+            return post_routes[clean]
+    return ""
+
+
+def _created_blog_slug(result: object) -> str:
+    if isinstance(result, (str, Path)):
+        path = Path(result)
+        if path.exists():
+            return parse_blog_post(path).slug
+        return _public_library_ref_to_slug(path.as_posix())
+    data = _public_library_result_dict(result)
+    if data:
+        slug = _public_library_ref_to_slug(
+            data.get("slug") or data.get("route") or data.get("ref") or ""
+        )
+        if slug:
+            return slug
+    node = getattr(result, "node", None)
+    if node is not None:
+        slug = _public_library_ref_to_slug(getattr(node, "ref", "") or "")
+        if slug:
+            return slug
+    for path in getattr(result, "changed_paths", []) or []:
+        clean = _public_library_ref_to_slug(str(path))
+        if clean:
+            return clean
+    return ""
+
+
+def _active_public_library_node_id(
+    selected: str,
+    latest_post,
+    tree: list[dict],
+) -> str:
+    key = f"public_library_active_node:{selected}"
+    current = str(st.session_state.get(key, "") or "").strip()
+    post_values = {
+        str(latest_post.slug or "").strip(),
+        str(getattr(latest_post, "route", "") or "").strip(),
+        f"blog/{latest_post.slug}.md",
+        f"blog/{getattr(latest_post, 'route', latest_post.slug)}.md",
+    }
+    for node in _walk_public_library_nodes(tree):
+        node_id = _public_library_node_value(node, "id", "node_id")
+        node_values = {
+            node_id,
+            _public_library_node_value(node, "slug"),
+            _public_library_node_value(node, "route"),
+            _public_library_node_value(node, "ref"),
+        }
+        if current and current in node_values:
+            return current
+        if post_values & node_values:
+            return node_id or current
+    return current
+
+
+def _blog_category_options(selected: str) -> list[dict]:
+    """Return taxonomy category choices for blog creation controls."""
+    taxonomy = load_blog_taxonomy(selected)
+    nodes = taxonomy.get("taxonomy") if isinstance(taxonomy, dict) else []
+    if not isinstance(nodes, list):
+        return []
+    options: list[dict] = []
+
+    def walk(items: list, path: list[str], titles: list[str]) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            slug = str(item.get("slug", "") or "").strip()
+            if not slug:
+                continue
+            title = str(item.get("title", "") or slug).strip() or slug
+            next_path = [*path, slug]
+            next_titles = [*titles, title]
+            options.append(
+                {
+                    "path": next_path,
+                    "value": "/".join(next_path),
+                    "label": " / ".join(next_titles),
+                }
+            )
+            children = item.get("children")
+            if isinstance(children, list):
+                walk(children, next_path, next_titles)
+
+    walk(nodes, [], [])
+    return options
+
+
+def _category_path_from_payload(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [
+        part.strip()
+        for part in str(value or "").replace("\\", "/").split("/")
+        if part.strip()
     ]
 
 
@@ -1311,6 +1571,17 @@ _BLOG_EVENT_DEDUPE_ACTIONS = {
     "select_post",
     "filter_posts",
     "create_post",
+    "library_select_node",
+    "library_create_folder",
+    "library_create_post",
+    "library_upload_media",
+    "library_attach_existing",
+    "library_rename_node",
+    "library_move_node",
+    "library_reorder_node",
+    "library_trash_node",
+    "library_restore_node",
+    "library_permanent_delete_node",
     "draft_from_evidence",
     "draft_from_done",
     "generate_ai_candidate",
@@ -2624,20 +2895,21 @@ def _persist_blog_editor(
     ui: dict[str, str],
 ) -> None:
     """Save one structured blog editor state."""
-    sidecar_path = blog_sidecar_path_for_slug(selected, post_path.stem)
+    route = parse_blog_post(post_path).slug
+    sidecar_path = blog_sidecar_path_for_slug(selected, route)
     tracked_paths = [post_path]
     if sidecar_path.exists():
         tracked_paths.append(sidecar_path)
     assert_files_current(tracked_paths)
     saved, changed = save_blog_post(
         selected,
-        post_path.stem,
+        route,
         meta,
         body,
         blocks_json=blocks_json,
         action=f"update {selected}/blog/{post_path.name}",
     )
-    refresh_file_snapshots([saved, blog_sidecar_path_for_slug(selected, post_path.stem), *changed])
+    refresh_file_snapshots([saved, blog_sidecar_path_for_slug(selected, route), *changed])
     stash_git_backup_results()
     clear_web_cache()
     st.success(ui["saved"])
@@ -2661,7 +2933,7 @@ def _save_blog_editor(
         blocks_json=blocks_json,
         ui=ui,
     )
-    _blog_shell_clear_draft(selected, post_path.stem)
+    _blog_shell_clear_draft(selected, parse_blog_post(post_path).slug)
     st.rerun()
 
 
@@ -2772,9 +3044,22 @@ def _render_blog_react_shell_fragment(
             selected,
             ai_stream_payload.get("patch", {}),
         )
+    library_tree, trash_nodes = _public_library_payload(selected)
+    active_node_id = _active_public_library_node_id(
+        selected,
+        latest_post,
+        library_tree,
+    )
     editor_kwargs = {
         "posts": _blog_shell_posts_payload(posts),
         "active_slug": latest_post.slug,
+        "active_route": str(getattr(latest_post, "route", "") or latest_post.slug),
+        "library_tree": library_tree,
+        "active_node_id": active_node_id,
+        "trash_nodes": trash_nodes,
+        "library_capabilities": _public_library_capabilities(),
+        "category_options": _blog_category_options(selected),
+        "active_category_path": list(getattr(latest_post, "category_path", []) or []),
         "initial_markdown": draft_body,
         "initial_blocks": draft_blocks,
         "active_post_meta": draft_meta,
@@ -2813,18 +3098,29 @@ def _render_blog_react_shell_fragment(
         "editable": True,
         "math_safe": True,
     }
-    try:
-        event = st_public_blog_editor(**editor_kwargs)
-    except TypeError as exc:
-        if "unexpected keyword argument 'ai_patch'" in str(exc):
-            editor_kwargs.pop("ai_patch", None)
-        elif "unexpected keyword argument 'ai_patches'" in str(exc):
-            editor_kwargs.pop("ai_patches", None)
-        elif "unexpected keyword argument 'ai_stream'" in str(exc):
-            editor_kwargs.pop("ai_stream", None)
-        else:
-            raise
-        event = st_public_blog_editor(**editor_kwargs)
+    optional_component_args = {
+        "active_route",
+        "library_tree",
+        "active_node_id",
+        "trash_nodes",
+        "library_capabilities",
+        "category_options",
+        "active_category_path",
+        "ai_patch",
+        "ai_patches",
+        "ai_stream",
+    }
+    while True:
+        try:
+            event = st_public_blog_editor(**editor_kwargs)
+            break
+        except TypeError as exc:
+            match = re.search(r"unexpected keyword argument '([^']+)'", str(exc))
+            unknown_arg = match.group(1) if match else ""
+            if unknown_arg not in optional_component_args:
+                raise
+            optional_component_args.remove(unknown_arg)
+            editor_kwargs.pop(unknown_arg, None)
 
     if not isinstance(event, dict):
         return True
@@ -3010,6 +3306,212 @@ def _render_blog_react_shell_fragment(
             st.error(str(exc))
         return True
 
+    if action == "library_select_node":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        node_id = str(payload.get("node_id", "") or "").strip()
+        if node_id:
+            st.session_state[f"public_library_active_node:{selected}"] = node_id
+        slug = _public_library_slug_from_payload(payload, library_tree, posts)
+        if slug and slug != latest_post.slug:
+            st.session_state[f"blog_post_slug_select:{selected}"] = slug
+            st.rerun()
+        return True
+
+    if action == "library_create_folder":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        if not callable(create_public_library_folder):
+            st.warning("Public library folders are not available yet.")
+            return True
+        title = str(payload.get("title", "") or "").strip()
+        if not title:
+            st.warning(ui["title_label"])
+            return True
+        try:
+            result = create_public_library_folder(
+                selected,
+                str(payload.get("parent_id", "") or "").strip(),
+                title,
+            )
+            node_id = _public_library_node_value(result, "id", "node_id")
+            if node_id:
+                st.session_state[f"public_library_active_node:{selected}"] = node_id
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "library_create_post":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        if not callable(create_blog_draft_in_library):
+            st.warning("Public library post creation is not available yet.")
+            return True
+        title = str(payload.get("title", "") or "").strip()
+        if not title:
+            st.warning(ui["title_label"])
+            return True
+        try:
+            result = create_blog_draft_in_library(
+                selected,
+                str(payload.get("parent_id", "") or "").strip(),
+                title,
+                str(payload.get("body", "") or f"{BLOG_INSERT_MARKER}\n\n"),
+                str(payload.get("summary", "") or ""),
+            )
+            slug = _created_blog_slug(result)
+            if slug:
+                st.session_state[f"blog_post_slug_select:{selected}"] = slug
+            node_id = _public_library_node_value(result, "id", "node_id")
+            if node_id:
+                st.session_state[f"public_library_active_node:{selected}"] = node_id
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action == "library_attach_existing":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        if not callable(attach_existing_public_library_node):
+            st.warning("Attaching existing public items is not available yet.")
+            return True
+        ref = str(payload.get("ref", "") or "").strip()
+        if not ref:
+            st.warning("Missing public library ref.")
+            return True
+        try:
+            result = attach_existing_public_library_node(
+                selected,
+                str(payload.get("parent_id", "") or "").strip(),
+                ref,
+                str(payload.get("title", "") or "").strip(),
+            )
+            node_id = _public_library_node_value(result, "id", "node_id")
+            if node_id:
+                st.session_state[f"public_library_active_node:{selected}"] = node_id
+            slug = _public_library_ref_to_slug(ref)
+            if slug:
+                st.session_state[f"blog_post_slug_select:{selected}"] = slug
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
+    if action in {
+        "library_rename_node",
+        "library_move_node",
+        "library_reorder_node",
+        "library_trash_node",
+        "library_restore_node",
+        "library_permanent_delete_node",
+    }:
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        node_id = str(payload.get("node_id", "") or "").strip()
+        if not node_id:
+            st.warning("Missing public library node id.")
+            return True
+        try:
+            if action == "library_rename_node":
+                if not callable(rename_public_library_node):
+                    st.warning("Renaming public library nodes is not available yet.")
+                    return True
+                rename_public_library_node(
+                    selected,
+                    node_id,
+                    str(payload.get("title", "") or "").strip(),
+                )
+            elif action == "library_move_node":
+                if not callable(move_public_library_node):
+                    st.warning("Moving public library nodes is not available yet.")
+                    return True
+                move_public_library_node(
+                    selected,
+                    node_id,
+                    str(
+                        payload.get("target_parent_id", "")
+                        or payload.get("parent_id", "")
+                        or ""
+                    ).strip(),
+                )
+            elif action == "library_reorder_node":
+                if not callable(reorder_public_library_node):
+                    st.warning("Reordering public library nodes is not available yet.")
+                    return True
+                reorder_public_library_node(
+                    selected,
+                    node_id,
+                    str(payload.get("direction", "") or "").strip(),
+                )
+            elif action == "library_trash_node":
+                if not callable(trash_public_library_node):
+                    st.warning("Trashing public library nodes is not available yet.")
+                    return True
+                trash_public_library_node(
+                    selected,
+                    node_id,
+                    recursive=bool(payload.get("recursive", True)),
+                )
+            elif action == "library_restore_node":
+                if not callable(restore_public_library_node):
+                    st.warning("Restoring public library nodes is not available yet.")
+                    return True
+                restore_public_library_node(selected, node_id)
+            else:
+                if not callable(purge_public_library_node):
+                    st.warning("Permanent deletion is not available yet.")
+                    return True
+                purge_public_library_node(
+                    selected,
+                    node_id,
+                    delete_files=bool(payload.get("delete_files", False)),
+                )
+            st.session_state[f"public_library_active_node:{selected}"] = node_id
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
     if action == "select_post":
         _blog_shell_store_draft(
             selected,
@@ -3049,13 +3551,35 @@ def _render_blog_react_shell_fragment(
             st.warning(ui["title_label"])
             return True
         try:
-            path = create_blog_draft(
-                selected,
-                title=title,
-                body=f"{BLOG_INSERT_MARKER}\n\n",
-                summary="",
-            )
-            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            parent_id = str(payload.get("parent_id", "") or "").strip()
+            if parent_id and callable(create_blog_draft_in_library):
+                result = create_blog_draft_in_library(
+                    selected,
+                    parent_id,
+                    title,
+                    f"{BLOG_INSERT_MARKER}\n\n",
+                    "",
+                )
+                slug = _created_blog_slug(result)
+                node_id = _public_library_node_value(result, "id", "node_id")
+                if node_id:
+                    st.session_state[
+                        f"public_library_active_node:{selected}"
+                    ] = node_id
+            else:
+                category_path = _category_path_from_payload(
+                    payload.get("category_path", payload.get("category", ""))
+                )
+                path = create_blog_draft(
+                    selected,
+                    title=title,
+                    body=f"{BLOG_INSERT_MARKER}\n\n",
+                    summary="",
+                    category_path=category_path,
+                )
+                slug = parse_blog_post(path).slug
+            if slug:
+                st.session_state[f"blog_post_slug_select:{selected}"] = slug
             stash_git_backup_results()
             clear_web_cache()
             st.rerun()
@@ -3075,7 +3599,7 @@ def _render_blog_react_shell_fragment(
         evidence_id = str(payload.get("evidence_id", "") or "").strip()
         try:
             path = draft_blog_from_evidence(selected, evidence_id)
-            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
             stash_git_backup_results()
             clear_web_cache()
             st.rerun()
@@ -3094,7 +3618,7 @@ def _render_blog_react_shell_fragment(
         )
         try:
             path = draft_blog_from_kanban_done(selected)
-            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
             stash_git_backup_results()
             clear_web_cache()
             st.rerun()
@@ -3263,8 +3787,16 @@ def _render_blog_react_shell_fragment(
             st.error(str(exc))
         return True
 
-    if action == "upload_media":
+    if action in {"upload_media", "library_upload_media"}:
         try:
+            if action == "library_upload_media" and not any(
+                str(payload.get(key, "") or "").strip()
+                for key in ("data_url", "data", "base64", "content")
+            ):
+                st.warning(
+                    "Library media upload needs file bytes from the editor payload."
+                )
+                return True
             data = _decode_blog_upload_payload(payload)
             filename = str(payload.get("filename", "") or "upload.bin")
             kind = str(payload.get("kind", "") or "image").strip().lower()
@@ -3275,6 +3807,68 @@ def _render_blog_react_shell_fragment(
             cover = bool(payload.get("cover", False))
             if cover and kind != "image":
                 raise PublicSiteError(ui["set_cover"])
+            if action == "library_upload_media":
+                if not callable(add_public_library_media_bytes):
+                    st.warning("Public library media upload is not available yet.")
+                    return True
+                parent_id = str(
+                    payload.get("parent_id", "")
+                    or payload.get("node_id", "")
+                    or active_node_id
+                    or ""
+                ).strip()
+                result = add_public_library_media_bytes(
+                    selected,
+                    parent_id,
+                    data=data,
+                    filename=filename,
+                    kind=kind,
+                    title=caption or alt or filename,
+                )
+                node_id = _public_library_node_value(result, "id", "node_id")
+                if node_id:
+                    st.session_state[f"public_library_active_node:{selected}"] = node_id
+                media_ref = _public_library_node_value(
+                    result,
+                    "ref",
+                    "relative_path",
+                )
+                next_meta = dict(event_meta)
+                next_body = event_body
+                if media_ref:
+                    snippet = (
+                        f"![{alt or caption}]({media_ref})"
+                        if kind == "image"
+                        else f"::video[{caption or alt}]({media_ref})"
+                    )
+                    if insert:
+                        next_body = (
+                            _append_candidate_to_body(next_body, snippet)
+                            if placement == "append"
+                            else insert_blog_snippet(next_body, snippet)
+                        )
+                    if cover:
+                        next_meta["cover"] = media_ref
+                _blog_shell_store_draft(
+                    selected,
+                    latest_post.slug,
+                    next_meta,
+                    next_body,
+                    dirty=dirty or insert or cover,
+                    blocks_json=event_blocks,
+                )
+                _clear_blog_preview(selected, latest_post.slug)
+                refresh_paths = [
+                    Path(path)
+                    for path in getattr(result, "changed_paths", []) or []
+                    if str(path)
+                ]
+                if refresh_paths:
+                    refresh_file_snapshots(refresh_paths)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.rerun()
+                return True
             result = add_blog_media_bytes(
                 selected,
                 latest_post.slug,
@@ -3798,6 +4392,23 @@ def _render_blog_article_panel(
             ui["title_label"],
             key=f"new_blog_title:{selected}",
         )
+        category_options = _blog_category_options(selected)
+        selected_category = ""
+        if category_options:
+            category_values = [str(option.get("value", "") or "") for option in category_options]
+            selected_category = st.selectbox(
+                ui["category"],
+                category_values,
+                format_func=lambda value: next(
+                    (
+                        str(option.get("label", "") or value)
+                        for option in category_options
+                        if option.get("value") == value
+                    ),
+                    value,
+                ),
+                key=f"new_blog_category:{selected}",
+            )
         if st.button(ui["create"], key=f"create_blog:{selected}"):
             if new_title.strip():
                 path = create_blog_draft(
@@ -3805,8 +4416,9 @@ def _render_blog_article_panel(
                     title=new_title.strip(),
                     body=f"{BLOG_INSERT_MARKER}\n\n",
                     summary="",
+                    category_path=_category_path_from_payload(selected_category),
                 )
-                st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+                st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
                 stash_git_backup_results()
                 clear_web_cache()
                 st.rerun()
@@ -3823,7 +4435,7 @@ def _render_blog_article_panel(
         ):
             try:
                 path = draft_blog_from_evidence(selected, evidence_id.strip())
-                st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+                st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(str(path))
@@ -3834,7 +4446,7 @@ def _render_blog_article_panel(
     if st.button(ui["draft_from_done"], key=f"blog_left_draft_from_done:{selected}"):
         try:
             path = draft_blog_from_kanban_done(selected)
-            st.session_state[f"blog_post_slug_select:{selected}"] = path.stem
+            st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
             stash_git_backup_results()
             clear_web_cache()
             st.success(str(path))

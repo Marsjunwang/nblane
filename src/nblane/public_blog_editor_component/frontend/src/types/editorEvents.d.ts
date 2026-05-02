@@ -27,7 +27,18 @@ export type EditorAction =
   | "run_check"
   | "request_reviewer_repair"
   | "save_post"
-  | "publish_request";
+  | "publish_request"
+  | "library_select_node"
+  | "library_create_folder"
+  | "library_create_post"
+  | "library_upload_media"
+  | "library_attach_existing"
+  | "library_rename_node"
+  | "library_move_node"
+  | "library_reorder_node"
+  | "library_trash_node"
+  | "library_restore_node"
+  | "library_permanent_delete_node";
 
 export interface BlockNoteBlock {
   id?: string;

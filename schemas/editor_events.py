@@ -18,6 +18,17 @@ EditorAction = Literal[
     "select_post",
     "filter_posts",
     "create_post",
+    "library_select_node",
+    "library_create_folder",
+    "library_create_post",
+    "library_upload_media",
+    "library_attach_existing",
+    "library_rename_node",
+    "library_move_node",
+    "library_reorder_node",
+    "library_trash_node",
+    "library_restore_node",
+    "library_permanent_delete_node",
     "draft_from_evidence",
     "draft_from_done",
     "generate_ai_candidate",
@@ -58,6 +69,14 @@ class EditorEventPayload(BaseModel):
     finding_id: str = ""
     finding: dict[str, Any] = Field(default_factory=dict)
     event_id: str = ""
+    node_id: str = ""
+    parent_id: str = ""
+    target_parent_id: str = ""
+    title: str = ""
+    ref: str = ""
+    direction: str = ""
+    delete_files: bool = False
+    library_tree: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class EditorEvent(BaseModel):

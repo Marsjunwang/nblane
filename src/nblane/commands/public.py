@@ -24,8 +24,14 @@ from nblane.core.public_site import (
     draft_resume_for_target,
     generate_resume_files,
     init_public_layer,
+    list_public_library_tree,
     load_blog_posts,
     publish_blog_post,
+    public_library_trash_nodes,
+    purge_public_library_node,
+    reconcile_public_library,
+    restore_public_library_node,
+    trash_public_library_node,
     validate_public_layer,
 )
 
@@ -149,6 +155,9 @@ def cmd_public_blog_list(
             "posts": [
                 {
                     "slug": post.slug,
+                    "route": post.route,
+                    "leaf_slug": post.leaf_slug,
+                    "category_path": post.category_path,
                     "title": post.title,
                     "date": post.date,
                     "status": post.status,
@@ -166,6 +175,7 @@ def cmd_public_blog_new(
     *,
     title: str,
     slug: str | None,
+    category: str | None,
     summary: str,
     tags: list[str],
     body_file: str | None,
@@ -186,6 +196,11 @@ def cmd_public_blog_new(
         tags=tags,
         summary=summary,
         slug=slug,
+        category_path=[
+            part.strip()
+            for part in str(category or "").replace("\\", "/").split("/")
+            if part.strip()
+        ],
     )
     print(f"Created blog draft: {path}")
 
@@ -233,6 +248,147 @@ def cmd_public_blog_publish(
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
     print(f"Published blog post: {path}")
+
+
+def _public_library_node_lines(
+    node: dict,
+    *,
+    depth: int = 0,
+) -> list[str]:
+    """Return readable text rows for one public-library node."""
+    indent = "  " * depth
+    node_type = str(node.get("type", "node") or "node")
+    status = str(node.get("status", "active") or "active")
+    visibility = str(node.get("visibility", "private") or "private")
+    node_id = str(node.get("id", "") or "")
+    title = str(node.get("title", "") or node_id or "(untitled)")
+    ref = str(node.get("ref", "") or "")
+    route = str(node.get("route", "") or "")
+    meta = f"{node_type}, {status}, {visibility}"
+    line = f"{indent}- {title} [{node_id}] ({meta})"
+    if route:
+        line += f" /blog/{route}/"
+    elif ref:
+        line += f" -> {ref}"
+    lines = [line]
+    children = node.get("children") or []
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                lines.extend(
+                    _public_library_node_lines(child, depth=depth + 1)
+                )
+    return lines
+
+
+def _print_public_library_text(
+    tree: list[dict],
+    *,
+    trash_nodes: list[dict],
+) -> None:
+    """Print the public-library tree in a compact text format."""
+    lines: list[str] = []
+    for root in tree:
+        if isinstance(root, dict):
+            lines.extend(_public_library_node_lines(root))
+    if trash_nodes:
+        if lines:
+            lines.append("")
+        lines.append("Trash:")
+        for node in trash_nodes:
+            lines.extend(_public_library_node_lines(node, depth=1))
+    print("\n".join(lines) if lines else "(empty public library)")
+
+
+def cmd_public_library_tree(
+    name: str,
+    *,
+    include_trash: bool,
+    output_format: str,
+) -> None:
+    """List the Public Site file tree."""
+    _require_profile(name)
+    try:
+        tree = list_public_library_tree(
+            name,
+            include_trashed=include_trash,
+        )
+        trash_nodes = (
+            public_library_trash_nodes(name) if include_trash else []
+        )
+    except PublicSiteError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if output_format == "yaml":
+        _print_yaml(
+            {
+                "tree": tree,
+                "trash": trash_nodes,
+            }
+        )
+        return
+    _print_public_library_text(tree, trash_nodes=trash_nodes)
+
+
+def cmd_public_library_reconcile(name: str) -> None:
+    """Attach existing blog posts and media to public-library.yaml."""
+    _require_profile(name)
+    try:
+        result = reconcile_public_library(name)
+    except PublicSiteError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    _print_yaml(result.to_dict())
+
+
+def cmd_public_library_trash(
+    name: str,
+    *,
+    node_id: str,
+) -> None:
+    """Move a public-library node to trash."""
+    _require_profile(name)
+    try:
+        result = trash_public_library_node(name, node_id)
+    except PublicSiteError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    _print_yaml(result.to_dict())
+
+
+def cmd_public_library_restore(
+    name: str,
+    *,
+    node_id: str,
+) -> None:
+    """Restore a public-library node from trash."""
+    _require_profile(name)
+    try:
+        result = restore_public_library_node(name, node_id)
+    except PublicSiteError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    _print_yaml(result.to_dict())
+
+
+def cmd_public_library_purge(
+    name: str,
+    *,
+    node_id: str,
+    delete_files: bool,
+) -> None:
+    """Permanently remove a trashed public-library node."""
+    _require_profile(name)
+    try:
+        result = purge_public_library_node(
+            name,
+            node_id,
+            delete_files=delete_files,
+        )
+    except PublicSiteError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    _print_yaml(result.to_dict())
 
 
 def cmd_public_draft_resume(

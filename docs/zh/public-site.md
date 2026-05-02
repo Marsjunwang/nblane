@@ -26,6 +26,7 @@ profiles/<name>/
   resume-source.yaml
   projects.yaml
   outputs.yaml
+  public-library.yaml
   blog/
   media/
   resumes/generated/
@@ -35,7 +36,7 @@ profiles/<name>/
 
 - `public-profile.yaml`：普通公开构建前需要 `visibility: public`。
 - `resume-source.yaml`：需要 `visibility: public` 才会进入在线简历页。
-- `blog/*.md`、`projects.yaml`、`outputs.yaml`：需要 `status: published`
+- `blog/**/*.md`、`projects.yaml`、`outputs.yaml`：需要 `status: published`
   才会进入普通构建。
 - `--include-drafts` 只用于本地预览草稿 / 私有内容。
 
@@ -103,44 +104,160 @@ nblane public draft-project-update <profile> --project <project_id>
 ```bash
 nblane public blog list <profile> --include-drafts
 nblane public blog new <profile> --title "我的文章" --tag robotics
+nblane public blog new <profile> --title "VLA 笔记" --category robotics/software/vla
 nblane public blog new <profile> --title "我的文章" --stdin
-nblane public blog media <profile> <slug> \
+nblane public blog media <profile> <slug-or-route> \
   --file ./cover.png \
   --kind image \
   --alt "封面图" \
   --cover \
   --append
-nblane public blog media <profile> <slug> \
+nblane public blog media <profile> <slug-or-route> \
   --file ./demo.mp4 \
   --kind video \
   --caption "短视频演示" \
   --append
-nblane public blog publish <profile> <slug>
+nblane public blog publish <profile> <slug-or-route>
 ```
+
+管理 Public Site 文件树：
+
+```bash
+nblane public library tree <profile>
+nblane public library tree <profile> --include-trash --format yaml
+nblane public library reconcile <profile>
+nblane public library trash <profile> <node-id>
+nblane public library restore <profile> <node-id>
+nblane public library purge <profile> <node-id>
+nblane public library purge <profile> <node-id> --delete-files
+```
+
+`public-library.yaml` 是 Public Site 编辑器使用的自由文件树。它可以同时管理
+folder、post、media 节点，post 节点下面也可以继续挂 folder、post、media。
+folder 只是后台组织元数据：新建或移动 folder 不会在磁盘上创建或移动目录。
+
+```yaml
+version: 1
+profile: 王军
+nodes:
+  - id: root
+    type: root
+    title: Public Library
+    parent_id: ""
+    order: 0
+    visibility: private
+    status: active
+  - id: fld_robotics
+    type: folder
+    title: 机器人
+    parent_id: root
+    order: 10
+    visibility: private
+    status: active
+  - id: post_vla_notes
+    type: post
+    title: VLA 调研笔记
+    ref: blog/vla-notes.md
+    parent_id: fld_robotics
+    order: 20
+    visibility: public
+    status: active
+    owned: false
+  - id: media_demo
+    type: media
+    title: demo.mp4
+    ref: media/blog/vla-notes/demo.mp4
+    parent_id: post_vla_notes
+    order: 30
+    visibility: private
+    status: active
+    owned: true
+```
+
+公开 URL 由 Markdown route 决定，不由文件树父子关系决定。把
+`post_vla_notes` 移到另一个 folder，只改变后台组织方式；`/blog/vla-notes/`
+仍保持不变。普通公开导航只显示同时满足这些条件的文章：library node 是
+`status: active`、`visibility: public`，并且 Markdown front matter 是
+`status: published`。
+
+删除是两阶段：`trash` 只把节点或子树标记为 `status: trashed`，隐藏加载、保存、
+发布和普通构建，但不删除文件；`restore` 尽量恢复到原父节点；`purge` 才会从
+文件树中永久移除 trashed 节点。默认 purge 也不删物理文件；只有显式加
+`--delete-files` 时，post 才可能删除 Markdown、BlockNote sidecar 和
+`media/blog/<route>/` 目录。media 永久删除会检查 active 文章中的 cover、正文
+图片、video directive 和 visual block 引用；仍被引用时拒绝删除源文件。
+
+`reconcile` 是迁移命令：它会把现有 `blog/**/*.md` 与
+`media/blog/<route>/` 文件导入 `public-library.yaml`，不会改 URL，也不会重复
+创建已有节点。
+
+`blog-taxonomy.yaml` 继续兼容旧 profile 和“URL 分类目录”需求。当
+`public-library.yaml` 中已经有真实节点时，文件树成为后台组织源；taxonomy 不再
+限制编辑器里 folder、post、media 的自由挂载。只有在你希望 URL 本身带分类路径时，
+才需要继续使用 taxonomy。
+
+如果需要让博客 URL 带分类目录，在 profile 根目录新增 `blog-taxonomy.yaml`。
+`slug` 用于文件夹和 URL，`title` 用于页面显示：
+
+```yaml
+profile: 王军
+taxonomy:
+  - slug: robotics
+    title: 机器人
+    children:
+      - slug: hardware
+        title: 硬件
+      - slug: software
+        title: 软件
+        children:
+          - slug: vla
+            title: VLA
+          - slug: motion-control
+            title: 运控
+  - slug: uncategorized
+    title: 未分类
+```
+
+taxonomy 启用后，文章可以放在多层目录：
+
+```text
+profiles/<name>/blog/robotics/software/vla/my-post.md
+```
+
+对应公开 URL 是 `/blog/robotics/software/vla/my-post/`，本地媒体放在
+`profiles/<name>/media/blog/robotics/software/vla/my-post/`。front matter
+建议显式记录分类路径：
+
+```yaml
+category_path: [robotics, software, vla]
+```
+
+CLI 的 `<slug-or-route>` 兼容旧单段 slug；如果不同分类下有同名文章，需要传完整
+route，例如 `robotics/software/vla/my-post`。
 
 博客正文仍是 Markdown。图片使用标准 Markdown：
 
 ```markdown
-![Alt text](media/blog/<slug>/image.png)
+![Alt text](media/blog/<slug-or-route>/image.png)
 ```
 
 短视频使用 nblane 视频指令：
 
 ```markdown
-::video[短视频演示](media/blog/<slug>/demo.mp4)
+::video[短视频演示](media/blog/<slug-or-route>/demo.mp4)
 ::video[外部视频](https://example.com/demo.mp4)
 ```
 
-博客本地媒体放在 `profiles/<name>/media/blog/<slug>/`。图片支持
+博客本地媒体放在 `profiles/<name>/media/blog/<slug-or-route>/`。图片支持
 `png`、`jpg`、`jpeg`、`webp`、`gif`，单文件上限 10 MB；本地短视频支持
 `mp4`、`webm`，单文件上限 25 MB。更大的视频建议使用外链或对象存储。
-如果 front matter 中设置了 `cover: media/blog/<slug>/cover.png`，Blog 列表卡片、
+如果 front matter 中设置了 `cover: media/blog/<slug-or-route>/cover.png`，Blog 列表卡片、
 文章详情 header、`og:image` 和 `twitter:image` 都会使用该封面；草稿预览遇到
 缺失或不合法封面时会降级为纯文本布局，发布校验会继续报告该 cover 错误。
 
 Blog 编辑器的 Public Preview 使用当前会话中的 meta/body 做 in-memory 渲染，
 不需要先保存到磁盘。发布则走 `publish_blog_text()`：先校验未保存的 meta/body，
-通过后才写回 `blog/<slug>.md` 并记录 `publish ...` Git backup action。
+通过后才写回 `blog/<slug-or-route>.md` 并记录 `publish ...` Git backup action。
 
 视觉生成配置使用 `VISUAL_*` 命名，并兼容旧式 `IMAGE_*` alias。默认 provider 是
 DashScope / 通义万相：
@@ -211,7 +328,7 @@ Web UI 新增 **Public Site** 页面：
 已落地的 v1 覆盖完整公开闭环：
 
 - **数据层：** `public-profile.yaml`、`resume-source.yaml`、`projects.yaml`、
-  `outputs.yaml`、`blog/*.md` 与 profile 媒体目录。
+  `outputs.yaml`、`blog/**/*.md` 与 profile 媒体目录。
 - **CLI：** 初始化、校验、静态构建、简历生成、博客创建/媒体/发布、草稿生成、
   evidence 到公开项目的人工整理。
 - **Web UI：** **Public Site** 页面，含 Profile、Blog、Resume、Known Info、
@@ -263,11 +380,11 @@ app.example.com {
 - 评论系统
 - 全文搜索
 - 多主题市场
-- 数据库存储
+- 数据库存储；当前单仓库工作流使用 `public-library.yaml` 做索引
 - 对象存储媒体上传
 
 小图片可以放在 `profiles/<name>/media/`。视频默认使用外链或对象存储。
-v1 也允许把小型 `mp4` / `webm` 短视频放在 `media/blog/<slug>/`。
+v1 也允许把小型 `mp4` / `webm` 短视频放在 `media/blog/<slug-or-route>/`。
 
 Public 层会拒绝博客 Markdown 和公开字段中的危险 `href` / `src` scheme，
 例如 `javascript:` 与 `data:`。但 Markdown 原始 HTML 仍按“可信本地作者”

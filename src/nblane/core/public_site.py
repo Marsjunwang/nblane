@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -32,6 +33,8 @@ PUBLIC_PROFILE_FILENAME = "public-profile.yaml"
 RESUME_SOURCE_FILENAME = "resume-source.yaml"
 PROJECTS_FILENAME = "projects.yaml"
 OUTPUTS_FILENAME = "outputs.yaml"
+BLOG_TAXONOMY_FILENAME = "blog-taxonomy.yaml"
+PUBLIC_LIBRARY_FILENAME = "public-library.yaml"
 BLOG_DIRNAME = "blog"
 MEDIA_DIRNAME = "media"
 RESUMES_DIRNAME = "resumes"
@@ -39,6 +42,8 @@ GENERATED_RESUME_DIRNAME = "generated"
 
 PUBLIC_VISIBILITIES = {"private", "public"}
 PUBLISH_STATUSES = {"draft", "published", "archived"}
+PUBLIC_LIBRARY_TYPES = {"root", "folder", "post", "media"}
+PUBLIC_LIBRARY_STATUSES = {"active", "trashed"}
 LOCAL_MEDIA_FIELDS = ("avatar", "cover")
 BLOG_INSERT_MARKER = "<!-- nblane:insert -->"
 BLOG_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
@@ -155,6 +160,7 @@ class BlogPost:
     path: Path
     meta: dict
     body: str
+    category_path: list[str] = field(default_factory=list)
     blocks_json: list[dict] = field(default_factory=list)
     sidecar_path: Path | None = None
 
@@ -183,6 +189,112 @@ class BlogPost:
         """Return the relative output URL path."""
         return f"blog/{self.slug}/"
 
+    @property
+    def route(self) -> str:
+        """Return the unique route for this post.
+
+        For legacy flat posts this equals the leaf slug. For categorized posts
+        it includes slash-separated category segments.
+        """
+        return self.slug
+
+    @property
+    def leaf_slug(self) -> str:
+        """Return the final route segment / Markdown filename stem."""
+        return self.slug.rstrip("/").split("/")[-1] or self.slug
+
+
+@dataclass
+class PublicLibraryNode:
+    """One node in the public-site management tree."""
+
+    id: str
+    type: str
+    title: str
+    parent_id: str = ""
+    order: int = 0
+    visibility: str = "private"
+    status: str = "active"
+    ref: str = ""
+    owned: bool = False
+    trashed_at: str = ""
+    trashed_from_parent_id: str = ""
+    trashed_from_order: int | None = None
+    previous_post_status: str = ""
+
+    @property
+    def active(self) -> bool:
+        return self.status == "active"
+
+    @property
+    def trashed(self) -> bool:
+        return self.status == "trashed"
+
+    def to_dict(self) -> dict:
+        data: dict[str, object] = {
+            "id": self.id,
+            "type": self.type,
+            "title": self.title,
+            "parent_id": self.parent_id,
+            "order": self.order,
+            "visibility": self.visibility,
+            "status": self.status,
+        }
+        if self.ref:
+            data["ref"] = self.ref
+        if self.owned:
+            data["owned"] = True
+        if self.trashed_at:
+            data["trashed_at"] = self.trashed_at
+        if self.trashed_from_parent_id:
+            data["trashed_from_parent_id"] = self.trashed_from_parent_id
+        if self.trashed_from_order is not None:
+            data["trashed_from_order"] = self.trashed_from_order
+        if self.previous_post_status:
+            data["previous_post_status"] = self.previous_post_status
+        return data
+
+
+@dataclass
+class PublicLibrary:
+    """Public-site file tree stored in ``public-library.yaml``."""
+
+    profile: str
+    version: int = 1
+    nodes: list[PublicLibraryNode] = field(default_factory=list)
+
+
+@dataclass
+class PublicLibraryIndex:
+    """Lookup indexes for a public library."""
+
+    by_id: dict[str, PublicLibraryNode] = field(default_factory=dict)
+    by_ref: dict[str, PublicLibraryNode] = field(default_factory=dict)
+    children_by_parent: dict[str, list[PublicLibraryNode]] = field(default_factory=dict)
+
+
+@dataclass
+class PublicLibraryOperationResult:
+    """Result for public library mutations."""
+
+    node: PublicLibraryNode | None = None
+    changed_paths: list[Path] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Serialize mutation results for CLI/Streamlit event handlers."""
+        data: dict[str, object] = {}
+        if self.node is not None:
+            data.update(self.node.to_dict())
+            if self.node.type == "post" and self.node.ref:
+                route = _library_blog_route(self.node.ref)
+                data["route"] = route
+                data["slug"] = route
+        data["node"] = self.node.to_dict() if self.node is not None else {}
+        data["changed_paths"] = [str(path) for path in self.changed_paths]
+        data["warnings"] = list(self.warnings)
+        return data
+
 
 @dataclass
 class PublicBuildResult:
@@ -201,6 +313,7 @@ class PublicSiteRenderResult:
     css: str
     media_refs: list[str] = field(default_factory=list)
     resume_markdown: str = ""
+    sitemap_exclude: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -342,6 +455,24 @@ def _default_outputs() -> dict:
     return {"outputs": []}
 
 
+def _default_public_library(name: str) -> dict:
+    return {
+        "version": 1,
+        "profile": name,
+        "nodes": [
+            {
+                "id": "root",
+                "type": "root",
+                "title": "Public Library",
+                "parent_id": "",
+                "order": 0,
+                "visibility": "private",
+                "status": "active",
+            }
+        ],
+    }
+
+
 def init_public_layer(name: str) -> list[Path]:
     """Create missing public-layer files and directories.
 
@@ -356,6 +487,7 @@ def init_public_layer(name: str) -> list[Path]:
         RESUME_SOURCE_FILENAME: _default_resume_source(name),
         PROJECTS_FILENAME: _default_projects(),
         OUTPUTS_FILENAME: _default_outputs(),
+        PUBLIC_LIBRARY_FILENAME: _default_public_library(name),
     }
     for filename, data in defaults.items():
         path = root / filename
@@ -412,6 +544,1121 @@ def load_outputs(name: str) -> list[dict]:
     return [o for o in outputs if isinstance(o, dict)]
 
 
+def load_blog_taxonomy(name: str) -> dict:
+    """Load optional blog taxonomy configuration."""
+    return _read_yaml_mapping(_profile_path(name) / BLOG_TAXONOMY_FILENAME)
+
+
+def _public_library_path(name: str) -> Path:
+    return _profile_path(name) / PUBLIC_LIBRARY_FILENAME
+
+
+def _blog_markdown_path_for_route(name: str, route: str) -> Path:
+    return _profile_path(name) / BLOG_DIRNAME / f"{_slugify_route(route)}.md"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _clean_library_parent_id(value: object) -> str:
+    parent_id = str(value or "").strip()
+    return "" if parent_id in {"", "none", "None", "null"} else parent_id
+
+
+def _clean_library_ref(value: object) -> str:
+    return str(value or "").strip().replace("\\", "/").strip("/")
+
+
+def _library_blog_ref(route: str) -> str:
+    return f"{BLOG_DIRNAME}/{_slugify_route(route)}.md"
+
+
+def _library_blog_route(ref_or_route: str) -> str:
+    clean = _clean_library_ref(ref_or_route)
+    prefix = f"{BLOG_DIRNAME}/"
+    if clean.startswith(prefix):
+        clean = clean[len(prefix) :]
+    if clean.endswith(".md"):
+        clean = clean[:-3]
+    if clean.endswith(".blocknote.json"):
+        clean = clean[: -len(".blocknote.json")]
+    return _slugify_route(clean)
+
+
+def _normalize_library_node(raw: object, index: int) -> PublicLibraryNode | None:
+    if not isinstance(raw, dict):
+        return None
+    node_type = str(raw.get("type", raw.get("kind", "")) or "").strip().lower()
+    if not node_type:
+        node_type = "folder"
+    raw_id = str(raw.get("id", "") or "").strip()
+    ref = _clean_library_ref(raw.get("ref", raw.get("target", "")))
+    title = str(raw.get("title", "") or "").strip()
+    if node_type == "root":
+        node_id = raw_id or "root"
+        title = title or "Public Library"
+    else:
+        seed = ref or title or str(index)
+        node_id = raw_id or f"{node_type}_{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+        title = title or Path(ref).stem or node_id
+    try:
+        order = int(raw.get("order", index * 10) or 0)
+    except (TypeError, ValueError):
+        order = index * 10
+    visibility = str(raw.get("visibility", "private") or "private").strip().lower()
+    status = str(raw.get("status", "active") or "active").strip().lower()
+    trashed_order = raw.get("trashed_from_order")
+    try:
+        trashed_from_order = (
+            int(trashed_order) if trashed_order is not None and str(trashed_order) != "" else None
+        )
+    except (TypeError, ValueError):
+        trashed_from_order = None
+    return PublicLibraryNode(
+        id=node_id,
+        type=node_type,
+        title=title,
+        parent_id=_clean_library_parent_id(raw.get("parent_id")),
+        order=order,
+        visibility=visibility,
+        status=status,
+        ref=ref,
+        owned=bool(raw.get("owned", False)),
+        trashed_at=str(raw.get("trashed_at", "") or ""),
+        trashed_from_parent_id=_clean_library_parent_id(
+            raw.get("trashed_from_parent_id")
+        ),
+        trashed_from_order=trashed_from_order,
+        previous_post_status=str(raw.get("previous_post_status", "") or ""),
+    )
+
+
+def _normalize_public_library(raw: dict, name: str) -> PublicLibrary:
+    nodes_raw = raw.get("nodes") if isinstance(raw, dict) else []
+    nodes: list[PublicLibraryNode] = []
+    if isinstance(nodes_raw, list):
+        for index, item in enumerate(nodes_raw):
+            node = _normalize_library_node(item, index)
+            if node is not None:
+                nodes.append(node)
+    if not any(node.id == "root" for node in nodes):
+        nodes.insert(
+            0,
+            PublicLibraryNode(
+                id="root",
+                type="root",
+                title="Public Library",
+                parent_id="",
+                order=0,
+            ),
+        )
+    for node in nodes:
+        if node.type == "root":
+            node.id = "root"
+            node.parent_id = ""
+            node.status = "active"
+    version = raw.get("version", 1) if isinstance(raw, dict) else 1
+    try:
+        clean_version = int(version)
+    except (TypeError, ValueError):
+        clean_version = 1
+    profile = str(raw.get("profile", name) or name) if isinstance(raw, dict) else name
+    return PublicLibrary(profile=profile, version=clean_version, nodes=nodes)
+
+
+def _public_library_to_yaml(library: PublicLibrary) -> dict:
+    nodes = sorted(
+        library.nodes,
+        key=lambda node: (
+            0 if node.id == "root" else 1,
+            node.parent_id,
+            node.order,
+            node.id,
+        ),
+    )
+    return {
+        "version": int(library.version or 1),
+        "profile": library.profile,
+        "nodes": [node.to_dict() for node in nodes],
+    }
+
+
+def load_public_library(name: str) -> PublicLibrary:
+    """Load the optional public-site file tree."""
+    path = _public_library_path(name)
+    if not path.exists():
+        return _normalize_public_library({}, name)
+    return _normalize_public_library(_read_yaml_mapping(path), name)
+
+
+def save_public_library(
+    name: str,
+    library: PublicLibrary,
+    *,
+    action: str = "",
+) -> Path:
+    """Persist ``public-library.yaml`` and record a git backup event."""
+    path = _public_library_path(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    library.profile = name
+    atomic_write_text(path, _dump_yaml(_public_library_to_yaml(library)))
+    git_backup.record_change(
+        [path],
+        action=action or f"update {name}/{PUBLIC_LIBRARY_FILENAME}",
+    )
+    return path
+
+
+def index_public_library(library: PublicLibrary) -> PublicLibraryIndex:
+    """Build lookup indexes for public library nodes."""
+    by_id: dict[str, PublicLibraryNode] = {}
+    by_ref: dict[str, PublicLibraryNode] = {}
+    children_by_parent: dict[str, list[PublicLibraryNode]] = {}
+    for node in library.nodes:
+        by_id.setdefault(node.id, node)
+        if node.ref:
+            by_ref.setdefault(node.ref, node)
+        children_by_parent.setdefault(node.parent_id, []).append(node)
+    for children in children_by_parent.values():
+        children.sort(key=lambda node: (node.order, node.title, node.id))
+    return PublicLibraryIndex(
+        by_id=by_id,
+        by_ref=by_ref,
+        children_by_parent=children_by_parent,
+    )
+
+
+def load_public_library_index(name: str) -> PublicLibraryIndex:
+    """Load and index one profile public library."""
+    return index_public_library(load_public_library(name))
+
+
+def _public_library_has_real_nodes(library: PublicLibrary) -> bool:
+    return any(node.id != "root" for node in library.nodes)
+
+
+def _blog_route_for_library_node(node: PublicLibraryNode) -> str:
+    if node.type != "post" or not node.ref:
+        return ""
+    return _library_blog_route(node.ref)
+
+
+def public_library_node_for_blog(
+    name: str,
+    slug: str | Path,
+    *,
+    include_trashed: bool = False,
+) -> PublicLibraryNode | None:
+    """Return the library node for a blog route, if one exists."""
+    try:
+        route = _resolve_blog_route(name, slug)
+    except Exception:
+        route = _slugify_route(_blog_route_text(name, slug))
+    ref = _library_blog_ref(route)
+    for node in load_public_library(name).nodes:
+        if node.type != "post" or node.ref != ref:
+            continue
+        if include_trashed or node.status != "trashed":
+            return node
+    return None
+
+
+def is_blog_route_trashed(name: str, slug: str | Path) -> bool:
+    """Return True when the blog route is in the library trash."""
+    try:
+        route = _resolve_blog_route(name, slug)
+    except Exception:
+        route = _slugify_route(_blog_route_text(name, slug))
+    ref = _library_blog_ref(route)
+    trashed = False
+    for node in load_public_library(name).nodes:
+        if node.type != "post" or node.ref != ref:
+            continue
+        if node.status != "trashed":
+            return False
+        trashed = True
+    return trashed
+
+
+def active_blog_routes_from_library(name: str) -> set[str] | None:
+    """Return active blog routes from the library, or None when unused."""
+    library = load_public_library(name)
+    if not _public_library_has_real_nodes(library):
+        return None
+    routes = {
+        _blog_route_for_library_node(node)
+        for node in library.nodes
+        if node.type == "post" and node.status != "trashed" and node.ref
+    }
+    return {route for route in routes if route}
+
+
+def _library_node_path_titles(
+    library: PublicLibrary,
+    index: PublicLibraryIndex,
+    node: PublicLibraryNode,
+) -> list[str]:
+    titles: list[str] = []
+    seen: set[str] = set()
+    parent_id = node.parent_id
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent = index.by_id.get(parent_id)
+        if parent is None or parent.type == "root":
+            break
+        titles.append(parent.title)
+        parent_id = parent.parent_id
+    return list(reversed(titles))
+
+
+def _blog_post_for_library_ref(name: str, ref: str) -> BlogPost | None:
+    try:
+        return load_blog_post(name, _library_blog_route(ref), include_trashed=True)
+    except Exception:
+        return None
+
+
+def _public_library_node_payload(
+    name: str,
+    library: PublicLibrary,
+    index: PublicLibraryIndex,
+    node: PublicLibraryNode,
+    *,
+    include_trashed: bool,
+) -> dict | None:
+    if node.status == "trashed" and not include_trashed:
+        return None
+    payload = node.to_dict()
+    payload["children"] = []
+    if node.type == "post":
+        route = _blog_route_for_library_node(node)
+        payload["route"] = route
+        payload["slug"] = route
+        payload["leaf_slug"] = _blog_route_leaf(route)
+        post = _blog_post_for_library_ref(name, node.ref)
+        if post is not None:
+            payload["title"] = node.title or post.title
+            payload["date"] = post.date
+            payload["post_status"] = post.status
+            payload["summary"] = post.summary
+            payload["category_path"] = list(post.category_path)
+            payload["url_path"] = post.url_path
+    elif node.type == "media":
+        payload["relative_path"] = node.ref
+    elif node.type == "folder":
+        payload["path_titles"] = _library_node_path_titles(library, index, node)
+    for child in index.children_by_parent.get(node.id, []):
+        child_payload = _public_library_node_payload(
+            name,
+            library,
+            index,
+            child,
+            include_trashed=include_trashed,
+        )
+        if child_payload is not None:
+            payload["children"].append(child_payload)
+    return payload
+
+
+def _virtual_blog_node(post: BlogPost) -> dict:
+    return {
+        "id": "post:" + hashlib.sha1(post.route.encode("utf-8")).hexdigest()[:12],
+        "type": "post",
+        "title": post.title,
+        "ref": _library_blog_ref(post.route),
+        "parent_id": "root",
+        "order": 0,
+        "visibility": "public" if post.status == "published" else "private",
+        "status": "active",
+        "owned": False,
+        "virtual": True,
+        "route": post.route,
+        "slug": post.route,
+        "leaf_slug": post.leaf_slug,
+        "category_path": list(post.category_path),
+        "date": post.date,
+        "post_status": post.status,
+        "summary": post.summary,
+        "url_path": post.url_path,
+        "children": [],
+    }
+
+
+def list_public_library_tree(
+    name: str,
+    *,
+    include_trashed: bool = False,
+    include_posts: bool = True,
+) -> list[dict]:
+    """Return the public library tree payload for Streamlit/React."""
+    library = load_public_library(name)
+    index = index_public_library(library)
+    root = index.by_id.get("root")
+    if root is None:
+        root = PublicLibraryNode(id="root", type="root", title="Public Library")
+    root_payload = _public_library_node_payload(
+        name,
+        library,
+        index,
+        root,
+        include_trashed=include_trashed,
+    ) or {
+        "id": "root",
+        "type": "root",
+        "title": "Public Library",
+        "children": [],
+    }
+    if include_posts:
+        known_refs = {
+            node.ref
+            for node in library.nodes
+            if node.type == "post" and node.ref
+        }
+        for post in load_blog_posts(
+            name,
+            include_drafts=True,
+            include_archived=True,
+            include_trashed=include_trashed,
+        ):
+            ref = _library_blog_ref(post.route)
+            if ref in known_refs:
+                continue
+            root_payload.setdefault("children", []).append(_virtual_blog_node(post))
+    return [root_payload]
+
+
+def public_library_trash_nodes(name: str) -> list[dict]:
+    """Return trashed nodes as flat dictionaries for the editor UI."""
+    library = load_public_library(name)
+    index = index_public_library(library)
+    rows: list[dict] = []
+    trashed_ids = {node.id for node in library.nodes if node.status == "trashed"}
+    for node in sorted(library.nodes, key=lambda item: (item.trashed_at, item.order, item.id)):
+        if node.status != "trashed":
+            continue
+        if node.parent_id in trashed_ids:
+            continue
+        payload = _public_library_node_payload(
+            name,
+            library,
+            index,
+            node,
+            include_trashed=True,
+        )
+        if payload is not None:
+            rows.append(payload)
+    return rows
+
+
+def _library_next_order(library: PublicLibrary, parent_id: str) -> int:
+    orders = [
+        node.order
+        for node in library.nodes
+        if node.parent_id == parent_id and node.status != "trashed"
+    ]
+    return (max(orders) + 10) if orders else 10
+
+
+def _library_unique_id(prefix: str, seed: str = "") -> str:
+    clean = re.sub(r"[^a-z0-9_]+", "_", prefix.lower()).strip("_") or "node"
+    digest_seed = seed or uuid.uuid4().hex
+    digest = hashlib.sha1(digest_seed.encode("utf-8")).hexdigest()[:12]
+    return f"{clean}_{digest}"
+
+
+def _library_parent_or_root(library: PublicLibrary, parent_id: str | None) -> str:
+    clean = _clean_library_parent_id(parent_id)
+    if not clean:
+        return "root"
+    for node in library.nodes:
+        if node.id != clean or node.status == "trashed":
+            continue
+        if node.type not in {"root", "folder", "post"}:
+            raise PublicSiteError("Public library parent must be root, folder, or post.")
+        return clean
+    return "root"
+
+
+def _library_require_node(
+    library: PublicLibrary,
+    node_id: str,
+    *,
+    include_trashed: bool = False,
+) -> PublicLibraryNode:
+    clean = str(node_id or "").strip()
+    for node in library.nodes:
+        if node.id != clean:
+            continue
+        if node.status == "trashed" and not include_trashed:
+            raise PublicSiteError(f"Public library node is in trash: {clean}")
+        return node
+    raise PublicSiteError(f"Unknown public library node: {node_id}")
+
+
+def create_public_library_folder(
+    name: str,
+    parent_id: str | None,
+    title: str,
+    *,
+    visibility: str = "private",
+) -> PublicLibraryOperationResult:
+    """Create a folder node in the public library."""
+    clean_title = str(title or "").strip()
+    if not clean_title:
+        raise PublicSiteError("Folder title is required.")
+    library = load_public_library(name)
+    parent = _library_parent_or_root(library, parent_id)
+    node = PublicLibraryNode(
+        id=_library_unique_id("folder", f"{parent}:{clean_title}:{uuid.uuid4().hex}"),
+        type="folder",
+        title=clean_title,
+        parent_id=parent,
+        order=_library_next_order(library, parent),
+        visibility=visibility if visibility in PUBLIC_VISIBILITIES else "private",
+    )
+    library.nodes.append(node)
+    path = save_public_library(name, library, action=f"create {name} public folder")
+    return PublicLibraryOperationResult(node=node, changed_paths=[path])
+
+
+def _library_add_post_node(
+    name: str,
+    *,
+    library: PublicLibrary,
+    parent_id: str | None,
+    route: str,
+    title: str,
+    visibility: str = "public",
+    owned: bool = True,
+) -> PublicLibraryNode:
+    ref = _library_blog_ref(route)
+    for node in library.nodes:
+        if node.type == "post" and node.ref == ref and node.status != "trashed":
+            raise PublicSiteError(f"Blog post is already in the public library: {route}")
+    parent = _library_parent_or_root(library, parent_id)
+    node = PublicLibraryNode(
+        id=_library_unique_id("post", ref),
+        type="post",
+        title=title or _blog_route_leaf(route),
+        parent_id=parent,
+        order=_library_next_order(library, parent),
+        visibility=visibility if visibility in PUBLIC_VISIBILITIES else "private",
+        ref=ref,
+        owned=owned,
+    )
+    library.nodes.append(node)
+    return node
+
+
+def create_blog_draft_in_library(
+    name: str,
+    parent_id: str | None,
+    title: str = "",
+    body: str = "",
+    summary: str = "",
+    *,
+    tags: list[str] | None = None,
+    slug: str | None = None,
+    visibility: str = "public",
+) -> PublicLibraryOperationResult:
+    """Create a blog draft and attach it to the public library tree."""
+    clean_title = str(title or "").strip()
+    if not clean_title:
+        raise PublicSiteError("Blog title is required.")
+    path = create_blog_draft(
+        name,
+        title=clean_title,
+        body=body or BLOG_INSERT_MARKER + "\n\n",
+        tags=tags,
+        summary=summary,
+        slug=slug,
+        category_path=[],
+        respect_taxonomy=False,
+    )
+    route = _blog_route_from_document_path(path)
+    library = load_public_library(name)
+    node = _library_add_post_node(
+        name,
+        library=library,
+        parent_id=parent_id,
+        route=route,
+        title=clean_title,
+        visibility=visibility,
+        owned=True,
+    )
+    lib_path = save_public_library(
+        name,
+        library,
+        action=f"attach {name} blog draft to public library",
+    )
+    git_backup.record_change(
+        [path, _blog_sidecar_path_for_markdown(path), lib_path],
+        action=f"create {name} library blog draft",
+    )
+    return PublicLibraryOperationResult(
+        node=node,
+        changed_paths=[path, _blog_sidecar_path_for_markdown(path), lib_path],
+    )
+
+
+def attach_existing_public_library_node(
+    name: str,
+    parent_id: str | None,
+    ref: str,
+    title: str = "",
+    *,
+    visibility: str = "",
+) -> PublicLibraryOperationResult:
+    """Attach an existing blog or media file to the public library."""
+    clean_ref = _clean_library_ref(ref)
+    if not clean_ref:
+        raise PublicSiteError("Reference is required.")
+    library = load_public_library(name)
+    parent = _library_parent_or_root(library, parent_id)
+    node_type = "media"
+    normalized_ref = clean_ref
+    if clean_ref.startswith(f"{BLOG_DIRNAME}/") or clean_ref.endswith(".md"):
+        route = _resolve_blog_route(name, _library_blog_route(clean_ref))
+        normalized_ref = _library_blog_ref(route)
+        node_type = "post"
+        path = _blog_markdown_path_for_route(name, route)
+        if not path.exists() and not _blog_sidecar_path_for_markdown(path).exists():
+            raise PublicSiteError(f"Unknown blog post: {clean_ref}")
+    elif clean_ref.startswith(f"{MEDIA_DIRNAME}/"):
+        target = _local_media_target(_profile_path(name), clean_ref)
+        if target is None or not target.exists() or not target.is_file():
+            raise PublicSiteError(f"Unknown media file: {clean_ref}")
+    else:
+        route = _resolve_blog_route(name, clean_ref)
+        path = _blog_markdown_path_for_route(name, route)
+        if path.exists() or _blog_sidecar_path_for_markdown(path).exists():
+            normalized_ref = _library_blog_ref(route)
+            node_type = "post"
+        else:
+            raise PublicSiteError(f"Unknown public library reference: {clean_ref}")
+    for node in library.nodes:
+        if node.ref == normalized_ref and node.status != "trashed":
+            raise PublicSiteError(f"Reference is already attached: {normalized_ref}")
+    clean_title = str(title or "").strip()
+    if not clean_title and node_type == "post":
+        post = _blog_post_for_library_ref(name, normalized_ref)
+        clean_title = post.title if post is not None else _blog_route_leaf(normalized_ref)
+    if not clean_title:
+        clean_title = Path(normalized_ref).name
+    node = PublicLibraryNode(
+        id=_library_unique_id(node_type, normalized_ref),
+        type=node_type,
+        title=clean_title,
+        parent_id=parent,
+        order=_library_next_order(library, parent),
+        visibility=(
+            visibility
+            if visibility in PUBLIC_VISIBILITIES
+            else ("public" if node_type == "post" else "private")
+        ),
+        ref=normalized_ref,
+        owned=False,
+    )
+    library.nodes.append(node)
+    path = save_public_library(name, library, action=f"attach {name} public library node")
+    return PublicLibraryOperationResult(node=node, changed_paths=[path])
+
+
+def add_public_library_media_bytes(
+    name: str,
+    parent_id: str | None,
+    *,
+    data: bytes,
+    filename: str,
+    kind: str = "image",
+    title: str = "",
+) -> PublicLibraryOperationResult:
+    """Store uploaded media and attach it to the public library."""
+    if not data:
+        raise PublicSiteError("Media data is empty.")
+    library = load_public_library(name)
+    parent = _library_parent_or_root(library, parent_id)
+    parent_node = index_public_library(library).by_id.get(parent)
+    if parent_node is not None and parent_node.type == "post" and parent_node.ref:
+        route = _library_blog_route(parent_node.ref)
+        result = _add_blog_media_data(
+            name,
+            route,
+            data=data,
+            filename=filename,
+            kind=kind,
+            append=False,
+            cover=False,
+        )
+        rel = result.relative_path
+        changed = list(result.changed_paths)
+    else:
+        media_dir = _profile_path(name) / MEDIA_DIRNAME / "library" / parent
+        media_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = _safe_media_filename(filename, fallback="media")
+        target = _unique_media_path(media_dir, safe_name, data)
+        target.write_bytes(data)
+        rel = _media_relative_path(name, target)
+        changed = [target]
+        git_backup.record_change(changed, action=f"upload {name} public library media")
+    node = PublicLibraryNode(
+        id=_library_unique_id("media", rel),
+        type="media",
+        title=str(title or "").strip() or Path(rel).name,
+        parent_id=parent,
+        order=_library_next_order(library, parent),
+        visibility="private",
+        ref=rel,
+        owned=True,
+    )
+    library.nodes.append(node)
+    lib_path = save_public_library(
+        name,
+        library,
+        action=f"attach {name} media to public library",
+    )
+    return PublicLibraryOperationResult(node=node, changed_paths=[*changed, lib_path])
+
+
+def rename_public_library_node(
+    name: str,
+    node_id: str,
+    title: str,
+) -> PublicLibraryOperationResult:
+    """Rename one public library node title."""
+    clean_title = str(title or "").strip()
+    if not clean_title:
+        raise PublicSiteError("Title is required.")
+    library = load_public_library(name)
+    node = _library_require_node(library, node_id, include_trashed=True)
+    if node.type == "root":
+        raise PublicSiteError("The root node cannot be renamed.")
+    node.title = clean_title
+    path = save_public_library(name, library, action=f"rename {name} public library node")
+    return PublicLibraryOperationResult(node=node, changed_paths=[path])
+
+
+def move_public_library_node(
+    name: str,
+    node_id: str,
+    new_parent_id: str | None,
+) -> PublicLibraryOperationResult:
+    """Move a public library node without changing content URLs or files."""
+    library = load_public_library(name)
+    index = index_public_library(library)
+    node = _library_require_node(library, node_id)
+    if node.type == "root":
+        raise PublicSiteError("The root node cannot be moved.")
+    parent = _library_parent_or_root(library, new_parent_id)
+    if parent == node.id:
+        raise PublicSiteError("A node cannot be moved under itself.")
+    cursor = index.by_id.get(parent)
+    while cursor is not None and cursor.parent_id:
+        if cursor.parent_id == node.id:
+            raise PublicSiteError("A node cannot be moved under its descendant.")
+        cursor = index.by_id.get(cursor.parent_id)
+    node.parent_id = parent
+    node.order = _library_next_order(library, parent)
+    path = save_public_library(name, library, action=f"move {name} public library node")
+    return PublicLibraryOperationResult(node=node, changed_paths=[path])
+
+
+def reorder_public_library_node(
+    name: str,
+    node_id: str,
+    direction: str,
+) -> PublicLibraryOperationResult:
+    """Move a node up or down among siblings."""
+    library = load_public_library(name)
+    index = index_public_library(library)
+    node = _library_require_node(library, node_id)
+    siblings = [
+        item
+        for item in index.children_by_parent.get(node.parent_id, [])
+        if item.status != "trashed"
+    ]
+    pos = next((i for i, item in enumerate(siblings) if item.id == node.id), -1)
+    if pos < 0:
+        raise PublicSiteError(f"Unknown public library node: {node_id}")
+    target_pos = pos - 1 if str(direction).lower() == "up" else pos + 1
+    if target_pos < 0 or target_pos >= len(siblings):
+        return PublicLibraryOperationResult(node=node, changed_paths=[])
+    other = siblings[target_pos]
+    node.order, other.order = other.order, node.order
+    path = save_public_library(name, library, action=f"reorder {name} public library node")
+    return PublicLibraryOperationResult(node=node, changed_paths=[path])
+
+
+def _library_descendant_ids(
+    index: PublicLibraryIndex,
+    node_id: str,
+) -> list[str]:
+    ids: list[str] = []
+    for child in index.children_by_parent.get(node_id, []):
+        ids.append(child.id)
+        ids.extend(_library_descendant_ids(index, child.id))
+    return ids
+
+
+def trash_public_library_node(
+    name: str,
+    node_id: str,
+    *,
+    recursive: bool = True,
+) -> PublicLibraryOperationResult:
+    """Move one node, and optionally its descendants, to library trash."""
+    library = load_public_library(name)
+    index = index_public_library(library)
+    node = _library_require_node(library, node_id)
+    if node.type == "root":
+        raise PublicSiteError("The root node cannot be trashed.")
+    descendant_ids = _library_descendant_ids(index, node.id)
+    if descendant_ids and not recursive:
+        raise PublicSiteError("Folder is not empty. Use recursive trash.")
+    now = _utc_now()
+    ids = [node.id, *descendant_ids]
+    changed_nodes: list[PublicLibraryNode] = []
+    for item in library.nodes:
+        if item.id not in ids or item.status == "trashed":
+            continue
+        item.trashed_from_parent_id = item.parent_id
+        item.trashed_from_order = item.order
+        item.trashed_at = now
+        if item.type == "post" and item.ref and not item.previous_post_status:
+            post = _blog_post_for_library_ref(name, item.ref)
+            if post is not None:
+                item.previous_post_status = post.status
+        item.status = "trashed"
+        changed_nodes.append(item)
+    path = save_public_library(name, library, action=f"trash {name} public library node")
+    return PublicLibraryOperationResult(
+        node=node,
+        changed_paths=[path],
+        warnings=[f"trashed {len(changed_nodes)} node(s)"],
+    )
+
+
+def restore_public_library_node(
+    name: str,
+    node_id: str,
+) -> PublicLibraryOperationResult:
+    """Restore one trashed public library node and its trashed descendants."""
+    library = load_public_library(name)
+    index = index_public_library(library)
+    node = _library_require_node(library, node_id, include_trashed=True)
+    if node.status != "trashed":
+        return PublicLibraryOperationResult(node=node, changed_paths=[])
+    ids = [node.id, *_library_descendant_ids(index, node.id)]
+    warnings: list[str] = []
+    active_ids = {
+        item.id
+        for item in library.nodes
+        if item.status != "trashed"
+    }
+    used_orders = {
+        (item.parent_id, item.order)
+        for item in library.nodes
+        if item.status != "trashed" and item.id not in ids
+    }
+    max_order_by_parent: dict[str, int] = {}
+    for item in library.nodes:
+        if item.status != "trashed" and item.id not in ids:
+            max_order_by_parent[item.parent_id] = max(
+                max_order_by_parent.get(item.parent_id, 0),
+                item.order,
+            )
+    for item in library.nodes:
+        if item.id not in ids:
+            continue
+        parent = item.trashed_from_parent_id or item.parent_id or "root"
+        if parent not in active_ids and parent not in ids:
+            warnings.append(f"{item.title}: restored under root because parent is unavailable")
+            parent = "root"
+        item.parent_id = parent
+        if item.trashed_from_order is not None:
+            item.order = item.trashed_from_order
+        if (item.parent_id, item.order) in used_orders:
+            item.order = max_order_by_parent.get(item.parent_id, 0) + 10
+        used_orders.add((item.parent_id, item.order))
+        max_order_by_parent[item.parent_id] = max(
+            max_order_by_parent.get(item.parent_id, 0),
+            item.order,
+        )
+        item.status = "active"
+        item.trashed_at = ""
+        item.trashed_from_parent_id = ""
+        item.trashed_from_order = None
+        item.previous_post_status = ""
+    path = save_public_library(name, library, action=f"restore {name} public library node")
+    return PublicLibraryOperationResult(node=node, changed_paths=[path], warnings=warnings)
+
+
+def _active_library_refs(
+    library: PublicLibrary,
+    *,
+    exclude_node_id: str = "",
+) -> set[str]:
+    return {
+        node.ref
+        for node in library.nodes
+        if node.id != exclude_node_id and node.status != "trashed" and node.ref
+    }
+
+
+def _active_media_refs(name: str) -> set[str]:
+    refs: set[str] = set()
+    for post in load_blog_posts(
+        name,
+        include_drafts=True,
+        include_archived=True,
+        include_trashed=False,
+    ):
+        cover = _normalize_media_ref(
+            _strip_markdown_url(str(post.meta.get("cover", "") or ""))
+        ).lstrip("/")
+        if cover:
+            refs.add(cover)
+        refs.update(_blog_body_media_refs(post.body))
+    return refs
+
+
+def purge_public_library_node(
+    name: str,
+    node_id: str,
+    *,
+    delete_files: bool = False,
+) -> PublicLibraryOperationResult:
+    """Permanently remove a trashed node from the library.
+
+    Physical files are removed only when ``delete_files`` is True and no active
+    library node still references the same content.
+    """
+    library = load_public_library(name)
+    index = index_public_library(library)
+    node = _library_require_node(library, node_id, include_trashed=True)
+    if node.type == "root":
+        raise PublicSiteError("The root node cannot be purged.")
+    if node.status != "trashed":
+        raise PublicSiteError("Only trashed nodes can be permanently deleted.")
+    ids = [node.id, *_library_descendant_ids(index, node.id)]
+    active_refs = _active_library_refs(library, exclude_node_id="")
+    changed: list[Path] = []
+    warnings: list[str] = []
+    if delete_files:
+        profile_root = _profile_path(name)
+        media_refs = _active_media_refs(name)
+        for item in list(library.nodes):
+            if item.id not in ids or not item.ref:
+                continue
+            sibling_refs = active_refs - {item.ref}
+            if item.type == "post":
+                if item.ref in sibling_refs:
+                    warnings.append(f"kept files for shared post ref {item.ref}")
+                    continue
+                route = _library_blog_route(item.ref)
+                md_path = _blog_markdown_path_for_route(name, route)
+                sidecar = _blog_sidecar_path_for_markdown(md_path)
+                media_dir = profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify_route(route)
+                media_prefix = f"{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify_route(route)}/"
+                external_media_refs = sorted(
+                    ref for ref in media_refs if ref.startswith(media_prefix)
+                )
+                if external_media_refs:
+                    raise PublicSiteError(
+                        "Blog media directory is still referenced by an active post: "
+                        + ", ".join(external_media_refs)
+                    )
+                for path in (md_path, sidecar):
+                    if path.exists():
+                        path.unlink()
+                        changed.append(path)
+                if media_dir.exists() and media_dir.is_dir():
+                    shutil.rmtree(media_dir)
+                    changed.append(media_dir)
+            elif item.type == "media":
+                if item.ref in media_refs:
+                    raise PublicSiteError(
+                        f"Media is still referenced by an active post: {item.ref}"
+                    )
+                target = _local_media_target(profile_root, item.ref)
+                if target is not None and target.exists() and target.is_file():
+                    target.unlink()
+                    changed.append(target)
+                    try:
+                        target.parent.rmdir()
+                    except OSError:
+                        pass
+    library.nodes = [item for item in library.nodes if item.id not in ids]
+    lib_path = save_public_library(name, library, action=f"purge {name} public library node")
+    changed.append(lib_path)
+    if changed:
+        git_backup.record_change(changed, action=f"purge {name} public library files")
+    return PublicLibraryOperationResult(node=node, changed_paths=changed, warnings=warnings)
+
+
+def reconcile_public_library(
+    name: str,
+    *,
+    create_missing: bool = True,
+) -> PublicLibraryOperationResult:
+    """Attach existing blog posts and blog media to ``public-library.yaml``."""
+    library = load_public_library(name)
+    existing_refs = {node.ref for node in library.nodes if node.ref}
+    created: list[PublicLibraryNode] = []
+    if create_missing:
+        for post in load_blog_posts(
+            name,
+            include_drafts=True,
+            include_archived=True,
+            include_trashed=True,
+        ):
+            ref = _library_blog_ref(post.route)
+            if ref in existing_refs:
+                continue
+            node = _library_add_post_node(
+                name,
+                library=library,
+                parent_id="root",
+                route=post.route,
+                title=post.title,
+                visibility="public" if post.status == "published" else "private",
+                owned=False,
+            )
+            created.append(node)
+            existing_refs.add(ref)
+            media_dir = _profile_path(name) / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify_route(post.route)
+            if media_dir.exists():
+                for media_path in sorted(media_dir.iterdir()):
+                    if not media_path.is_file():
+                        continue
+                    ext = media_path.suffix.lower().lstrip(".")
+                    if ext not in BLOG_IMAGE_EXTENSIONS and ext not in BLOG_VIDEO_EXTENSIONS:
+                        continue
+                    rel = _media_relative_path(name, media_path)
+                    if rel in existing_refs:
+                        continue
+                    media_node = PublicLibraryNode(
+                        id=_library_unique_id("media", rel),
+                        type="media",
+                        title=media_path.name,
+                        parent_id=node.id,
+                        order=_library_next_order(library, node.id),
+                        visibility="private",
+                        ref=rel,
+                        owned=False,
+                    )
+                    library.nodes.append(media_node)
+                    created.append(media_node)
+                    existing_refs.add(rel)
+    path = save_public_library(name, library, action=f"reconcile {name} public library")
+    return PublicLibraryOperationResult(
+        node=None,
+        changed_paths=[path],
+        warnings=[f"created {len(created)} node(s)"],
+    )
+
+
+def _validate_public_library(
+    result: PublicValidationResult,
+    name: str,
+    library: PublicLibrary,
+) -> None:
+    """Validate ``public-library.yaml`` structural integrity."""
+    if not _public_library_path(name).exists():
+        return
+    label = PUBLIC_LIBRARY_FILENAME
+    ids: set[str] = set()
+    active_refs: set[str] = set()
+    for node in library.nodes:
+        if not node.id:
+            result.errors.append(f"{label}: node missing id")
+            continue
+        if node.id in ids:
+            result.errors.append(f"{label}: duplicate node id '{node.id}'")
+        ids.add(node.id)
+        if node.type == "root" and node.id != "root":
+            result.errors.append(f"{label}:{node.id}: root node id must be 'root'")
+        if node.type not in PUBLIC_LIBRARY_TYPES:
+            result.errors.append(f"{label}:{node.id}: invalid type '{node.type}'")
+        if node.status not in PUBLIC_LIBRARY_STATUSES:
+            result.errors.append(f"{label}:{node.id}: invalid status '{node.status}'")
+        if node.visibility not in PUBLIC_VISIBILITIES:
+            result.errors.append(f"{label}:{node.id}: invalid visibility '{node.visibility}'")
+        if node.id != "root" and node.parent_id and node.parent_id not in ids:
+            # A second pass below catches forward references; keep this as warning-free.
+            pass
+        if node.status != "trashed":
+            if node.ref:
+                if node.ref in active_refs:
+                    result.errors.append(
+                        f"{label}:{node.id}: duplicate active ref '{node.ref}'"
+                    )
+                active_refs.add(node.ref)
+    ids = {node.id for node in library.nodes}
+    by_id = {node.id: node for node in library.nodes}
+    for node in library.nodes:
+        if node.id == "root":
+            continue
+        if node.parent_id not in ids:
+            result.errors.append(
+                f"{label}:{node.id}: parent_id does not exist: {node.parent_id or '(empty)'}"
+            )
+        else:
+            parent = by_id.get(node.parent_id)
+            if parent is not None and parent.type not in {"root", "folder", "post"}:
+                result.errors.append(
+                    f"{label}:{node.id}: parent must be root, folder, or post"
+                )
+        seen: set[str] = set()
+        cursor = node
+        while cursor.parent_id:
+            if cursor.parent_id in seen:
+                result.errors.append(f"{label}:{node.id}: parent cycle detected")
+                break
+            seen.add(cursor.parent_id)
+            parent = next((item for item in library.nodes if item.id == cursor.parent_id), None)
+            if parent is None:
+                break
+            cursor = parent
+        if node.status == "trashed":
+            continue
+        if node.type == "post":
+            if not node.ref:
+                result.errors.append(f"{label}:{node.id}: post node missing ref")
+                continue
+            ref_parts = _clean_library_ref(node.ref).split("/")
+            if (
+                not node.ref.startswith(f"{BLOG_DIRNAME}/")
+                or not node.ref.endswith(".md")
+                or any(part in {"", ".", ".."} for part in ref_parts)
+            ):
+                result.errors.append(
+                    f"{label}:{node.id}: post ref must be a safe '{BLOG_DIRNAME}/<route>.md' path"
+                )
+                continue
+            route = _library_blog_route(node.ref)
+            path = _blog_markdown_path_for_route(name, route)
+            if not path.exists() and not _blog_sidecar_path_for_markdown(path).exists():
+                result.errors.append(
+                    f"{label}:{node.id}: blog ref does not exist: {node.ref}"
+                )
+        elif node.type == "media":
+            ref_parts = _clean_library_ref(node.ref).split("/")
+            if not node.ref.startswith(f"{MEDIA_DIRNAME}/") or any(
+                part in {"", ".", ".."} for part in ref_parts
+            ):
+                result.errors.append(
+                    f"{label}:{node.id}: media ref must be a safe '{MEDIA_DIRNAME}/...' path"
+                )
+                continue
+            target = _local_media_target(_profile_path(name), node.ref)
+            if not node.ref or target is None or not target.exists():
+                result.errors.append(
+                    f"{label}:{node.id}: media ref does not exist: {node.ref}"
+                )
+
+
 def _parse_front_matter(text: str) -> tuple[dict, str]:
     if not text.startswith("---\n"):
         return {}, text
@@ -456,6 +1703,133 @@ def _blog_slug_from_sidecar_path(path: Path) -> str:
     return name[: -len(suffix)] if name.endswith(suffix) else path.stem
 
 
+def _blog_root_for_path(path: Path) -> Path | None:
+    """Return the nearest ancestor named ``blog`` for a blog document path."""
+    for parent in path.resolve().parents:
+        if parent.name == BLOG_DIRNAME:
+            return parent
+    return None
+
+
+def _blog_route_from_document_path(path: Path, blog_dir: Path | None = None) -> str:
+    """Return the slash-separated blog route represented by a document path."""
+    root = blog_dir or _blog_root_for_path(path)
+    if root is None:
+        return _blog_slug_from_sidecar_path(path) if path.name.endswith(".blocknote.json") else path.stem
+    try:
+        rel = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return _blog_slug_from_sidecar_path(path) if path.name.endswith(".blocknote.json") else path.stem
+    parts = list(rel.parts)
+    if not parts:
+        return ""
+    if path.name.endswith(".blocknote.json"):
+        parts[-1] = _blog_slug_from_sidecar_path(path)
+    else:
+        parts[-1] = path.stem
+    return "/".join(part for part in parts if part)
+
+
+def _blog_category_path_from_route(route: str) -> list[str]:
+    parts = [part for part in str(route or "").split("/") if part]
+    return parts[:-1]
+
+
+def _blog_category_path_for_document(path: Path, meta: dict | None = None) -> list[str]:
+    route = _blog_route_from_document_path(path)
+    category_path = _blog_category_path_from_route(route)
+    if category_path:
+        return category_path
+    raw = (meta or {}).get("category_path")
+    return _coerce_string_list(raw)
+
+
+def _blog_route_leaf(route: str) -> str:
+    parts = [part for part in str(route or "").split("/") if part]
+    return parts[-1] if parts else ""
+
+
+def _hidden_blog_path(path: Path, blog_dir: Path) -> bool:
+    try:
+        rel = path.resolve().relative_to(blog_dir.resolve())
+    except ValueError:
+        return True
+    return any(part.startswith(".") for part in rel.parts)
+
+
+def _taxonomy_nodes(raw: dict | None = None) -> list[dict]:
+    data = raw or {}
+    nodes = data.get("taxonomy") if isinstance(data, dict) else []
+    return [node for node in nodes or [] if isinstance(node, dict)]
+
+
+def _taxonomy_path_titles(raw: dict | None) -> dict[tuple[str, ...], list[str]]:
+    """Return taxonomy category paths mapped to display title paths."""
+    titles: dict[tuple[str, ...], list[str]] = {}
+
+    def walk(nodes: list[dict], path: tuple[str, ...], title_path: list[str]) -> None:
+        for node in nodes:
+            slug = str(node.get("slug", "") or "").strip()
+            if not slug:
+                continue
+            title = str(node.get("title", "") or slug).strip() or slug
+            next_path = (*path, slug)
+            next_title_path = [*title_path, title]
+            titles[next_path] = next_title_path
+            children = node.get("children")
+            if isinstance(children, list):
+                walk([child for child in children if isinstance(child, dict)], next_path, next_title_path)
+
+    walk(_taxonomy_nodes(raw), (), [])
+    return titles
+
+
+def _taxonomy_enabled(raw: dict | None) -> bool:
+    return bool(_taxonomy_nodes(raw))
+
+
+def _taxonomy_child_nodes(raw: dict | None, category_path: list[str]) -> list[dict]:
+    nodes = _taxonomy_nodes(raw)
+    for segment in category_path:
+        match = next(
+            (
+                node
+                for node in nodes
+                if str(node.get("slug", "") or "").strip() == segment
+            ),
+            None,
+        )
+        if match is None:
+            return []
+        children = match.get("children")
+        nodes = [node for node in children or [] if isinstance(node, dict)]
+    return nodes
+
+
+def _taxonomy_category_title(raw: dict | None, category_path: list[str]) -> str:
+    if not category_path:
+        return "Blog"
+    titles = _taxonomy_path_titles(raw).get(tuple(category_path))
+    if titles:
+        return " / ".join(titles)
+    return " / ".join(category_path)
+
+
+def _taxonomy_category_url_path(category_path: list[str]) -> str:
+    if not category_path:
+        return "blog/"
+    return "blog/" + "/".join(category_path) + "/"
+
+
+def _blog_aliases(meta: dict) -> list[str]:
+    aliases = _coerce_string_list((meta or {}).get("aliases"))
+    return [
+        alias.strip().strip("/")
+        for alias in aliases
+        if alias.strip().strip("/")
+    ]
+
+
 def _read_blog_sidecar(path: Path) -> BlockNoteDocument | None:
     """Read a BlockNote sidecar, returning ``None`` on malformed files."""
 
@@ -474,15 +1848,21 @@ def _parse_blog_sidecar(path: Path, markdown_path: Path | None = None) -> BlogPo
     doc = _read_blog_sidecar(path)
     if doc is None:
         return None
-    slug = str(doc.slug or _blog_slug_from_sidecar_path(path)).strip()
+    route_from_path = _blog_route_from_document_path(markdown_path or path)
+    slug = str(route_from_path or doc.slug or _blog_slug_from_sidecar_path(path)).strip()
     if not slug:
-        slug = _blog_slug_from_sidecar_path(path)
-    md_path = markdown_path or path.with_name(f"{slug}.md")
+        slug = route_from_path or _blog_slug_from_sidecar_path(path)
+    md_path = markdown_path or path.with_name(f"{_blog_slug_from_sidecar_path(path)}.md")
+    meta = dict(doc.meta or {})
+    category_path = _blog_category_path_for_document(md_path, meta)
+    if category_path and not meta.get("category_path"):
+        meta["category_path"] = list(category_path)
     return BlogPost(
         slug=slug,
         path=md_path,
-        meta=dict(doc.meta or {}),
+        meta=meta,
         body=str(doc.markdown or ""),
+        category_path=category_path,
         blocks_json=[block.model_dump(mode="json", exclude_none=True) for block in doc.blocks],
         sidecar_path=path,
     )
@@ -494,12 +1874,16 @@ def _blog_post_candidate_paths(blog_dir: Path) -> list[Path]:
     candidate_paths: dict[str, Path] = {}
     if not blog_dir.exists():
         return []
-    for path in sorted(blog_dir.glob("*.md")):
-        candidate_paths[path.stem] = path
-    for path in sorted(blog_dir.glob("*.blocknote.json")):
-        slug = _blog_slug_from_sidecar_path(path)
-        candidate_paths.setdefault(slug, path)
-    return [candidate_paths[slug] for slug in sorted(candidate_paths)]
+    for path in sorted(blog_dir.rglob("*.md")):
+        if _hidden_blog_path(path, blog_dir):
+            continue
+        candidate_paths[_blog_route_from_document_path(path, blog_dir)] = path
+    for path in sorted(blog_dir.rglob("*.blocknote.json")):
+        if _hidden_blog_path(path, blog_dir):
+            continue
+        route = _blog_route_from_document_path(path, blog_dir)
+        candidate_paths.setdefault(route, path)
+    return [candidate_paths[route] for route in sorted(candidate_paths)]
 
 
 def parse_blog_post(path: Path) -> BlogPost:
@@ -515,11 +1899,16 @@ def parse_blog_post(path: Path) -> BlogPost:
         return sidecar_post
     text = path.read_text(encoding="utf-8")
     meta, body = _parse_front_matter(text)
+    route = _blog_route_from_document_path(path)
+    category_path = _blog_category_path_for_document(path, meta)
+    if category_path and not meta.get("category_path"):
+        meta["category_path"] = list(category_path)
     return BlogPost(
-        slug=path.stem,
+        slug=route or path.stem,
         path=path,
         meta=meta,
         body=body,
+        category_path=category_path,
         blocks_json=[],
         sidecar_path=sidecar_path if sidecar_path.exists() else None,
     )
@@ -530,19 +1919,43 @@ def load_blog_posts(
     *,
     include_drafts: bool = False,
     include_archived: bool = False,
+    include_trashed: bool = False,
 ) -> list[BlogPost]:
     """Load visible blog posts from profiles/<name>/blog."""
     blog_dir = _profile_path(name) / BLOG_DIRNAME
     if not blog_dir.exists():
         return []
+    library = load_public_library(name)
+    library_enabled = _public_library_has_real_nodes(library)
+    library_posts: dict[str, PublicLibraryNode] = {}
+    trashed_routes: set[str] = set()
+    if library_enabled:
+        for node in library.nodes:
+            if node.type != "post" or not node.ref:
+                continue
+            route = _library_blog_route(node.ref)
+            if not route:
+                continue
+            if node.status == "trashed":
+                trashed_routes.add(route)
+                continue
+            library_posts.setdefault(route, node)
+        trashed_routes -= set(library_posts)
+    public_library_only = library_enabled and not include_drafts and not include_archived
     posts: list[BlogPost] = []
     for path in _blog_post_candidate_paths(blog_dir):
         post = parse_blog_post(path)
+        if not include_trashed and post.route in trashed_routes:
+            continue
         if _status_visible(
             post.status,
             include_drafts=include_drafts,
             include_archived=include_archived,
         ):
+            if public_library_only:
+                node = library_posts.get(post.route)
+                if node is None or node.visibility != "public":
+                    continue
             posts.append(post)
     return sorted(
         posts,
@@ -708,7 +2121,13 @@ def _coerce_string_list(raw: object) -> list[str]:
 def _normalize_blog_meta(meta: dict) -> dict:
     """Normalize structured blog front matter fields before writing."""
     clean = dict(meta or {})
-    for field_name in ("tags", "related_evidence", "related_kanban"):
+    for field_name in (
+        "tags",
+        "related_evidence",
+        "related_kanban",
+        "category_path",
+        "aliases",
+    ):
         clean[field_name] = _coerce_string_list(clean.get(field_name))
     for field_name in ("title", "date", "status", "summary", "cover"):
         if clean.get(field_name) is None:
@@ -1733,6 +3152,68 @@ def _validate_status(
         )
 
 
+def _validate_blog_taxonomy(
+    result: PublicValidationResult,
+    raw: dict,
+) -> None:
+    """Validate the optional blog taxonomy tree."""
+    if not raw:
+        return
+    if str(raw.get("profile", "") or "").strip() and not isinstance(raw.get("profile"), str):
+        result.errors.append(f"{BLOG_TAXONOMY_FILENAME}: 'profile' must be a string")
+    nodes = raw.get("taxonomy")
+    if nodes is None:
+        return
+    if not isinstance(nodes, list):
+        result.errors.append(f"{BLOG_TAXONOMY_FILENAME}: 'taxonomy' must be a list")
+        return
+    seen: set[tuple[str, ...]] = set()
+
+    def walk(items: list, path: tuple[str, ...]) -> None:
+        sibling_slugs: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                result.errors.append(f"{BLOG_TAXONOMY_FILENAME}: category entries must be mappings")
+                continue
+            raw_slug = str(item.get("slug", "") or "").strip()
+            title = str(item.get("title", "") or "").strip()
+            if not raw_slug:
+                result.errors.append(f"{BLOG_TAXONOMY_FILENAME}: category missing slug")
+                continue
+            slug = _slugify(raw_slug)
+            if slug != raw_slug:
+                result.errors.append(
+                    f"{BLOG_TAXONOMY_FILENAME}: category slug must be URL-safe: {raw_slug}"
+                )
+            if raw_slug in sibling_slugs:
+                result.errors.append(
+                    f"{BLOG_TAXONOMY_FILENAME}: duplicate category slug '{raw_slug}'"
+                )
+            sibling_slugs.add(raw_slug)
+            if not title:
+                result.errors.append(
+                    f"{BLOG_TAXONOMY_FILENAME}: category '{raw_slug}' missing title"
+                )
+            next_path = (*path, raw_slug)
+            if next_path in seen:
+                result.errors.append(
+                    f"{BLOG_TAXONOMY_FILENAME}: duplicate category path "
+                    + "/".join(next_path)
+                )
+            seen.add(next_path)
+            children = item.get("children")
+            if children is None:
+                continue
+            if not isinstance(children, list):
+                result.errors.append(
+                    f"{BLOG_TAXONOMY_FILENAME}: children for '{raw_slug}' must be a list"
+                )
+                continue
+            walk(children, next_path)
+
+    walk(nodes, ())
+
+
 def validate_blog_text_for_publish(
     name: str,
     path: Path,
@@ -1741,13 +3222,35 @@ def validate_blog_text_for_publish(
     """Validate one blog document as if it will become public."""
     root = _profile_path(name)
     meta, body = _parse_front_matter(text)
+    route = _blog_route_from_document_path(path) or path.stem
     post = BlogPost(
-        slug=path.stem,
+        slug=route,
         path=path,
         meta=meta,
         body=body,
+        category_path=_blog_category_path_for_document(path, meta),
     )
     result = PublicValidationResult()
+    blog_taxonomy = load_blog_taxonomy(name)
+    public_library = load_public_library(name)
+    taxonomy_paths = set(_taxonomy_path_titles(blog_taxonomy))
+    if _taxonomy_enabled(blog_taxonomy) and not _public_library_has_real_nodes(public_library):
+        route_category = _blog_category_path_from_route(post.route)
+        meta_category = _coerce_string_list(post.meta.get("category_path"))
+        label = f"blog/{post.route}.md"
+        if not route_category:
+            result.errors.append(
+                f"{label}: taxonomy blogs must be stored under a category folder"
+            )
+        elif tuple(route_category) not in taxonomy_paths:
+            result.errors.append(
+                f"{label}: category_path is not defined in {BLOG_TAXONOMY_FILENAME}: "
+                + "/".join(route_category)
+            )
+        if meta_category and meta_category != route_category:
+            result.errors.append(
+                f"{label}: front matter category_path must match file path"
+            )
     _validate_blog_post(
         result,
         root,
@@ -1768,7 +3271,7 @@ def _validate_blog_post(
     include_refs: bool,
     require_publish_ready: bool,
 ) -> None:
-    label = f"blog/{post.path.name}"
+    label = f"blog/{post.route}.md"
     required_fields = (
         "title",
         "date",
@@ -1834,6 +3337,15 @@ def validate_public_layer(
     root = _profile_path(name)
     result = PublicValidationResult()
     known_ids = _evidence_ids(name)
+    blog_taxonomy = load_blog_taxonomy(name)
+    public_library = load_public_library(name)
+    _validate_blog_taxonomy(result, blog_taxonomy)
+    _validate_public_library(result, name, public_library)
+    taxonomy_paths = set(_taxonomy_path_titles(blog_taxonomy))
+    taxonomy_is_enabled = (
+        _taxonomy_enabled(blog_taxonomy)
+        and not _public_library_has_real_nodes(public_library)
+    )
 
     public_profile = load_public_profile(name)
     if not public_profile:
@@ -1937,6 +3449,23 @@ def validate_public_layer(
     if blog_dir.exists():
         for path in _blog_post_candidate_paths(blog_dir):
             post = parse_blog_post(path)
+            if taxonomy_is_enabled:
+                route_category = _blog_category_path_from_route(post.route)
+                meta_category = _coerce_string_list(post.meta.get("category_path"))
+                label = f"blog/{post.route}.md"
+                if not route_category:
+                    result.errors.append(
+                        f"{label}: taxonomy blogs must be stored under a category folder"
+                    )
+                elif tuple(route_category) not in taxonomy_paths:
+                    result.errors.append(
+                        f"{label}: category_path is not defined in {BLOG_TAXONOMY_FILENAME}: "
+                        + "/".join(route_category)
+                    )
+                if meta_category and meta_category != route_category:
+                    result.errors.append(
+                        f"{label}: front matter category_path must match file path"
+                    )
             include_refs = _status_visible(
                 post.status,
                 include_drafts=include_drafts,
@@ -2809,11 +4338,152 @@ def _render_post_item(post: BlogPost, profile_root: Path | None = None) -> str:
   <h3><a href="/{post.url_path}">{html.escape(post.title)}</a></h3>
   <p>{html.escape(post.summary)}</p>
   <div class="tag-row">{tag_html}</div>
-</article>
-"""
+	</article>
+	"""
 
 
-def _render_blog_article(profile_root: Path, post: BlogPost) -> str:
+def _category_post_count(posts: list[BlogPost], category_path: list[str]) -> int:
+    if not category_path:
+        return len(posts)
+    prefix = "/".join(category_path) + "/"
+    return sum(1 for post in posts if post.route.startswith(prefix))
+
+
+def _posts_for_category(posts: list[BlogPost], category_path: list[str]) -> list[BlogPost]:
+    if not category_path:
+        return posts
+    prefix = "/".join(category_path) + "/"
+    return [post for post in posts if post.route.startswith(prefix)]
+
+
+def _render_category_cards(
+    posts: list[BlogPost],
+    taxonomy: dict,
+    category_path: list[str],
+) -> str:
+    cards: list[str] = []
+    for node in _taxonomy_child_nodes(taxonomy, category_path):
+        slug = str(node.get("slug", "") or "").strip()
+        if not slug:
+            continue
+        title = str(node.get("title", "") or slug).strip() or slug
+        next_path = [*category_path, slug]
+        href = "/" + _taxonomy_category_url_path(next_path)
+        count = _category_post_count(posts, next_path)
+        detail = f"{count} post" if count == 1 else f"{count} posts"
+        cards.append(
+            "<article class=\"item\">"
+            f"<div class=\"meta\">{html.escape(detail)}</div>"
+            f"<h3><a href=\"{html.escape(href)}\">{html.escape(title)}</a></h3>"
+            "</article>"
+        )
+    return "".join(cards)
+
+
+def _render_blog_listing(
+    posts: list[BlogPost],
+    profile_root: Path,
+    *,
+    taxonomy: dict | None = None,
+    category_path: list[str] | None = None,
+) -> str:
+    category_path = category_path or []
+    title = _taxonomy_category_title(taxonomy, category_path) if taxonomy else "Blog"
+    visible_posts = _posts_for_category(posts, category_path)
+    category_cards = (
+        _render_category_cards(posts, taxonomy or {}, category_path)
+        if taxonomy
+        else ""
+    )
+    category_section = (
+        "<h2>Categories</h2><div class=\"grid\">" + category_cards + "</div>"
+        if category_cards
+        else ""
+    )
+    post_section = (
+        "<h2>Posts</h2>"
+        if category_cards and visible_posts
+        else ""
+    )
+    post_cards = "".join(_render_post_item(p, profile_root) for p in visible_posts)
+    empty = '<p class="meta">No posts in this category.</p>' if not post_cards else ""
+    return (
+        '<section class="section"><div class="section-inner">'
+        f"<h1>{html.escape(title)}</h1>"
+        f"{category_section}{post_section}<div class=\"grid\">{post_cards}</div>{empty}"
+        "</div></section>"
+    )
+
+
+def _taxonomy_category_paths(raw: dict) -> list[list[str]]:
+    return [list(path) for path in sorted(_taxonomy_path_titles(raw))]
+
+
+def _redirect_page(target_url_path: str) -> str:
+    target = "/" + target_url_path.strip("/") + "/"
+    escaped = html.escape(target, quote=True)
+    return (
+        "<!doctype html><html><head>"
+        '<meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0; url={escaped}">'
+        f'<link rel="canonical" href="{escaped}">'
+        "</head><body>"
+        f'<p><a href="{escaped}">Redirecting</a></p>'
+        "</body></html>"
+    )
+
+
+def _render_public_library_children(
+    name: str,
+    post: BlogPost,
+    posts_by_route: dict[str, BlogPost],
+) -> str:
+    """Render public child nodes attached below one blog post."""
+    library = load_public_library(name)
+    if not _public_library_has_real_nodes(library):
+        return ""
+    index = index_public_library(library)
+    parent = public_library_node_for_blog(name, post.route)
+    if parent is None:
+        return ""
+    cards: list[str] = []
+    for node in index.children_by_parent.get(parent.id, []):
+        if node.status == "trashed" or node.visibility != "public":
+            continue
+        if node.type == "post":
+            child = posts_by_route.get(_blog_route_for_library_node(node))
+            if child is None:
+                continue
+            cards.append(_render_post_item(child))
+        elif node.type == "media":
+            target = _local_media_target(_profile_path(name), node.ref)
+            if target is None or not target.exists():
+                continue
+            title = node.title or Path(node.ref).name
+            cards.append(
+                "<article class=\"item\">"
+                "<div class=\"meta\">Media</div>"
+                f"<h3><a href=\"/{html.escape(node.ref, quote=True)}\">"
+                f"{html.escape(title)}</a></h3>"
+                "</article>"
+            )
+    if not cards:
+        return ""
+    return (
+        '<section class="related-files">'
+        "<h2>Related Files</h2>"
+        '<div class="grid">'
+        + "".join(cards)
+        + "</div></section>"
+    )
+
+
+def _render_blog_article(
+    profile_root: Path,
+    post: BlogPost,
+    *,
+    related_files_html: str = "",
+) -> str:
     cover_html = _blog_cover_img(profile_root, post, css_class="blog-cover")
     summary_html = (
         f'<p class="lead">{html.escape(post.summary)}</p>'
@@ -2828,6 +4498,7 @@ def _render_blog_article(profile_root: Path, post: BlogPost) -> str:
         f"{summary_html}{cover_html}"
         "</header>"
         + _markdown_to_html(post.body)
+        + related_files_html
         + "</article>"
     )
 
@@ -3324,6 +4995,12 @@ def render_public_site_pages(
         load_public_profile(name),
         public_profile_override,
     )
+    blog_taxonomy = load_blog_taxonomy(name)
+    public_library = load_public_library(name)
+    taxonomy_is_enabled = (
+        _taxonomy_enabled(blog_taxonomy)
+        and not _public_library_has_real_nodes(public_library)
+    )
     projects = _visible_projects(name, include_drafts=include_drafts)
     outputs = _visible_outputs(name, include_drafts=include_drafts)
     posts = load_blog_posts(name, include_drafts=include_drafts)
@@ -3444,11 +5121,10 @@ def render_public_site_pages(
             ),
         )
 
-    blog_body = (
-        '<section class="section"><div class="section-inner">'
-        "<h1>Blog</h1><div class=\"grid\">"
-        + "".join(_render_post_item(p, profile_root) for p in posts)
-        + "</div></div></section>"
+    blog_body = _render_blog_listing(
+        posts,
+        profile_root,
+        taxonomy=blog_taxonomy if taxonomy_is_enabled else None,
     )
     _add_render_page(
         pages,
@@ -3464,16 +5140,50 @@ def render_public_site_pages(
             include_resume=resume_visible,
         ),
     )
+    if taxonomy_is_enabled:
+        for category_path in _taxonomy_category_paths(blog_taxonomy):
+            category_url_path = _taxonomy_category_url_path(category_path)
+            category_rel = f"{category_url_path}index.html"
+            category_title = _taxonomy_category_title(blog_taxonomy, category_path)
+            _add_render_page(
+                pages,
+                page_titles,
+                category_rel,
+                category_title,
+                _html_page(
+                    title=category_title,
+                    body=_render_blog_listing(
+                        posts,
+                        profile_root,
+                        taxonomy=blog_taxonomy,
+                        category_path=category_path,
+                    ),
+                    public_profile=public_profile,
+                    current="blog",
+                    canonical_url=page_url(category_rel),
+                    include_resume=resume_visible,
+                ),
+            )
+    posts_by_route = {post.route: post for post in posts}
     for post in posts:
         cover_ref = _valid_blog_cover_ref(
             profile_root,
             post.meta.get("cover"),
         )
-        article = _render_blog_article(profile_root, post)
+        article = _render_blog_article(
+            profile_root,
+            post,
+            related_files_html=_render_public_library_children(
+                name,
+                post,
+                posts_by_route,
+            ),
+        )
+        post_rel = f"{post.url_path}index.html"
         _add_render_page(
             pages,
             page_titles,
-            f"blog/{post.slug}/index.html",
+            post_rel,
             post.title,
             _html_page(
                 title=post.title,
@@ -3481,13 +5191,23 @@ def render_public_site_pages(
                 public_profile=public_profile,
                 current="blog",
                 description=post.summary,
-                canonical_url=page_url(f"blog/{post.slug}/index.html"),
+                canonical_url=page_url(post_rel),
                 og_type="article",
                 include_resume=resume_visible,
                 include_math=markdown_contains_math(post.body),
                 image_url=_seo_image_url(base_url, cover_ref),
             ),
         )
+        for alias in _blog_aliases(post.meta):
+            alias_rel = alias.strip("/") + "/index.html"
+            if alias_rel not in pages:
+                _add_render_page(
+                    pages,
+                    page_titles,
+                    alias_rel,
+                    post.title,
+                    _redirect_page(_site_path(base_path, "/" + post.url_path)),
+                )
 
     resume_md = ""
     if resume_visible:
@@ -3524,6 +5244,11 @@ def render_public_site_pages(
         css=css,
         media_refs=_collect_media_refs(public_profile, projects, posts),
         resume_markdown=resume_md,
+        sitemap_exclude={
+            alias.strip("/") + "/index.html"
+            for post in posts
+            for alias in _blog_aliases(post.meta)
+        },
     )
 
 
@@ -3601,6 +5326,7 @@ def build_public_site(
         pages,
         tmp_dir,
         base_url=normalized_base_url,
+        exclude=rendered.sitemap_exclude,
     )
     _write_text(tmp_dir / "sitemap.xml", sitemap, pages)
 
@@ -4028,12 +5754,17 @@ def render_blog_post_preview(
     """Render one blog post preview from unsaved meta/body without writing files."""
     profile_root = _profile_path(name)
     public_profile = load_public_profile(name)
-    clean_slug = _slugify(slug)
+    clean_slug = _slugify_route(slug)
+    category_path = _blog_category_path_from_route(clean_slug)
+    clean_meta = _normalize_blog_meta(meta)
+    if category_path and not clean_meta.get("category_path"):
+        clean_meta["category_path"] = category_path
     post = BlogPost(
         slug=clean_slug,
         path=profile_root / BLOG_DIRNAME / f"{clean_slug}.md",
-        meta=_normalize_blog_meta(meta),
+        meta=clean_meta,
         body=str(body or ""),
+        category_path=category_path,
     )
     cover_ref = _valid_blog_cover_ref(profile_root, post.meta.get("cover"))
     html_text = _html_page(
@@ -4062,14 +5793,18 @@ def _render_sitemap(
     root: Path,
     *,
     base_url: str,
+    exclude: set[str] | None = None,
 ) -> str:
     urls = []
+    excluded = {str(item).strip("/") for item in (exclude or set())}
     for path in pages:
         if path.suffix not in (".html", ".xml", ".txt"):
             continue
         if path.name not in ("index.html", "sitemap.xml"):
             continue
         rel = path.relative_to(root)
+        if rel.as_posix().strip("/") in excluded:
+            continue
         loc = _site_url(base_url, _url_path_for_page(rel))
         urls.append(f"  <url><loc>{html.escape(loc)}</loc></url>")
     body = "\n".join(urls)
@@ -4220,17 +5955,67 @@ def _slugify(text: str) -> str:
     return clean[:72]
 
 
-def _blog_slug_text(slug: str | Path) -> str:
-    """Normalize public blog slug inputs for API compatibility."""
+def _slugify_route(text: str) -> str:
+    """Return a slash-separated, filesystem-safe blog route."""
+    parts = []
+    for part in re.split(r"[\\/]+", str(text or "")):
+        clean = _slugify(part)
+        if clean:
+            parts.append(clean)
+    return "/".join(parts) or "draft"
+
+
+def _blog_route_text(name: str, slug: str | Path) -> str:
+    """Normalize public blog slug/route inputs for API compatibility."""
     if isinstance(slug, Path):
-        return slug.stem
+        path = slug
+        blog_dir = _profile_path(name) / BLOG_DIRNAME
+        try:
+            rel = path.resolve().relative_to(blog_dir.resolve())
+            parts = list(rel.parts)
+            if not parts:
+                return ""
+            if path.name.endswith(".blocknote.json"):
+                parts[-1] = _blog_slug_from_sidecar_path(path)
+            elif path.suffix:
+                parts[-1] = path.stem
+            return "/".join(parts)
+        except ValueError:
+            return _blog_slug_from_sidecar_path(path) if path.name.endswith(".blocknote.json") else path.stem
     if not isinstance(slug, str):
         raise PublicSiteError("Blog slug must be a string or Path.")
     return slug
 
 
+def _resolve_blog_route(name: str, slug: str | Path) -> str:
+    """Resolve a route, accepting legacy leaf slugs when unambiguous."""
+    route = _slugify_route(_blog_route_text(name, slug))
+    blog_dir = _profile_path(name) / BLOG_DIRNAME
+    direct = blog_dir / f"{route}.md"
+    if direct.exists() or _blog_sidecar_path_for_markdown(direct).exists():
+        return route
+    if "/" in route or not blog_dir.exists():
+        return route
+    matches = [
+        candidate_route
+        for candidate_route in (
+            _blog_route_from_document_path(path, blog_dir)
+            for path in _blog_post_candidate_paths(blog_dir)
+        )
+        if _blog_route_leaf(candidate_route) == route
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise PublicSiteError(
+            f"Ambiguous blog slug '{slug}'. Use the full route: "
+            + ", ".join(sorted(matches))
+        )
+    return route
+
+
 def _safe_blog_path(name: str, slug: str) -> Path:
-    clean = _slugify(slug)
+    clean = _slugify_route(slug)
     path = _profile_path(name) / BLOG_DIRNAME / f"{clean}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
@@ -4238,18 +6023,26 @@ def _safe_blog_path(name: str, slug: str) -> Path:
 
 def blog_path_for_slug(name: str, slug: str) -> Path:
     """Return the canonical Markdown path for a blog slug."""
-    return _safe_blog_path(name, slug)
+    return _safe_blog_path(name, _resolve_blog_route(name, slug))
 
 
 def blog_sidecar_path_for_slug(name: str, slug: str) -> Path:
     """Return the canonical BlockNote sidecar path for a blog slug."""
 
-    return _blog_sidecar_path_for_markdown(_safe_blog_path(name, slug))
+    return _blog_sidecar_path_for_markdown(blog_path_for_slug(name, slug))
 
 
-def load_blog_post(name: str, slug: str) -> BlogPost:
+def load_blog_post(
+    name: str,
+    slug: str | Path,
+    *,
+    include_trashed: bool = False,
+) -> BlogPost:
     """Load a blog post by slug."""
-    path = _safe_blog_path(name, slug)
+    route = _resolve_blog_route(name, slug)
+    if not include_trashed and is_blog_route_trashed(name, route):
+        raise PublicSiteError(f"Blog post is in public library trash: {route}")
+    path = _safe_blog_path(name, route)
     sidecar_path = _blog_sidecar_path_for_markdown(path)
     if not path.exists() and not sidecar_path.exists():
         raise PublicSiteError(f"Unknown blog post: {slug}")
@@ -4266,6 +6059,7 @@ def _write_blog_sidecar(
     """Write the canonical BlockNote sidecar for one blog post."""
 
     sidecar = _blog_sidecar_path_for_markdown(path)
+    route = _blog_route_from_document_path(path) or path.stem
     if blocks_json is None:
         existing = _read_blog_sidecar(sidecar)
         if existing is not None:
@@ -4274,9 +6068,9 @@ def _write_blog_sidecar(
                 for block in existing.blocks
             ]
     document = BlockNoteDocument(
-        document_id=path.stem,
+        document_id=route,
         profile=name,
-        slug=path.stem,
+        slug=route,
         meta=_normalize_blog_meta(meta),
         blocks=coerce_blocks(blocks_json),
         markdown=str(body or ""),
@@ -4315,7 +6109,7 @@ def _write_blog_post_file(
 
 
 def _blog_media_dir(name: str, slug: str) -> Path:
-    clean_slug = _slugify(slug)
+    clean_slug = _slugify_route(slug)
     path = _profile_path(name) / MEDIA_DIRNAME / BLOG_DIRNAME / clean_slug
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -4350,7 +6144,7 @@ def blog_media_library_rows(
     body: str,
 ) -> list[dict]:
     """Return local blog media rows with preview data for editor components."""
-    media_dir = profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify(slug)
+    media_dir = profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify_route(slug)
     if not media_dir.exists():
         return []
     cover = str((meta or {}).get("cover", "") or "")
@@ -4482,7 +6276,7 @@ def blog_visual_candidate_rows(
             asset.data,
             asset.extension,
         )
-        rel = f"{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify(slug)}/{filename}"
+        rel = f"{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify_route(slug)}/{filename}"
         preview_payload = _media_preview_payload_from_bytes(
             asset.data,
             source_name=filename,
@@ -4534,7 +6328,7 @@ def extract_blog_base64_images(
     slug: str,
     body: str,
 ) -> tuple[str, list[Path]]:
-    """Extract Markdown data-URI images into media/blog/<slug>/ files."""
+    """Extract Markdown data-URI images into media/blog/<slug-or-route>/ files."""
     media_dir = _blog_media_dir(name, slug)
     changed: list[Path] = []
     pattern = re.compile(
@@ -4575,14 +6369,24 @@ def save_blog_post(
     action: str | None = None,
 ) -> tuple[Path, list[Path]]:
     """Save a blog post from structured metadata and Markdown body."""
-    path = _safe_blog_path(name, slug)
+    route = _resolve_blog_route(name, slug)
+    if is_blog_route_trashed(name, route):
+        raise PublicSiteError(f"Blog post is in public library trash: {route}")
+    path = _safe_blog_path(name, route)
     sidecar_path = _blog_sidecar_path_for_markdown(path)
     if not path.exists() and not sidecar_path.exists():
         raise PublicSiteError(f"Unknown blog post: {slug}")
     changed: list[Path] = []
     meta = _normalize_blog_meta(meta)
+    category_path = _blog_category_path_from_route(route)
+    if category_path and not meta.get("category_path"):
+        meta["category_path"] = category_path
     if extract_inline_images:
-        body, changed = extract_blog_base64_images(name, path.stem, body)
+        body, changed = extract_blog_base64_images(
+            name,
+            route,
+            body,
+        )
     _write_blog_post_file(
         name,
         path,
@@ -4634,7 +6438,7 @@ def _add_blog_media_data(
     cover: bool = False,
     append: bool = False,
 ) -> BlogMediaResult:
-    """Copy a media file into media/blog/<slug>/ and optionally update a post."""
+    """Copy a media file into media/blog/<slug-or-route>/ and optionally update a post."""
     post = load_blog_post(name, slug)
     media_kind = kind.strip().lower()
     if media_kind not in {"image", "video"}:
@@ -4719,7 +6523,7 @@ def add_blog_media(
     cover: bool = False,
     append: bool = False,
 ) -> BlogMediaResult:
-    """Copy a media file into media/blog/<slug>/ and optionally update a post."""
+    """Copy a media file into media/blog/<slug-or-route>/ and optionally update a post."""
     source_path = Path(source)
     if not source_path.exists() or not source_path.is_file():
         raise PublicSiteError(f"Media file does not exist: {source_path}")
@@ -4781,13 +6585,13 @@ def delete_blog_media(
     if target is None:
         raise PublicSiteError(f"Media path must stay under '{MEDIA_DIRNAME}/': {clean}")
     media_dir = (
-        profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify(post.slug)
+        profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify_route(post.slug)
     ).resolve()
     try:
         target.resolve().relative_to(media_dir)
     except ValueError as exc:
         raise PublicSiteError(
-            f"Blog media must stay under '{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify(post.slug)}/': {clean}"
+            f"Blog media must stay under '{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify_route(post.slug)}/': {clean}"
         ) from exc
     if not target.exists() or not target.is_file():
         raise PublicSiteError(f"Media file does not exist: {clean}")
@@ -4839,13 +6643,13 @@ def convert_blog_media_video(name: str, slug: str, rel: str) -> BlogMediaResult:
     if target is None or not target.exists() or not target.is_file():
         raise PublicSiteError(f"Media file does not exist: {clean}")
     media_dir = (
-        profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify(post.slug)
+        profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify_route(post.slug)
     ).resolve()
     try:
         target.resolve().relative_to(media_dir)
     except ValueError as exc:
         raise PublicSiteError(
-            f"Blog media must stay under '{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify(post.slug)}/': {clean}"
+            f"Blog media must stay under '{MEDIA_DIRNAME}/{BLOG_DIRNAME}/{_slugify_route(post.slug)}/': {clean}"
         ) from exc
     if target.suffix.lower().lstrip(".") not in BLOG_VIDEO_EXTENSIONS:
         raise PublicSiteError(f"Media is not a supported blog video: {clean}")
@@ -4897,7 +6701,7 @@ def generate_blog_visual_asset(
     source_video: str = "",
     reference_image: str = "",
 ) -> list[BlogMediaResult]:
-    """Generate visual assets into media/blog/<slug>/ without editing the post."""
+    """Generate visual assets into media/blog/<slug-or-route>/ without editing the post."""
     post = load_blog_post(name, slug)
     clean_type = str(asset_type or "").strip().lower() or "cover"
     generated = visual_generation.generate_visual_asset(
@@ -4984,7 +6788,7 @@ def generate_blog_video_edit_candidate(
 
 def publish_blog_post(name: str, slug: str | Path) -> Path:
     """Set a blog post status to published after publish validation."""
-    slug_text = _blog_slug_text(slug)
+    slug_text = _resolve_blog_route(name, slug)
     post = load_blog_post(name, slug_text)
     meta = dict(post.meta)
     meta["status"] = "published"
@@ -5038,14 +6842,29 @@ def create_blog_draft(
     related_evidence: list[str] | None = None,
     related_kanban: list[str] | None = None,
     slug: str | None = None,
+    category_path: list[str] | None = None,
+    respect_taxonomy: bool = True,
 ) -> Path:
     """Write a draft blog post and return its path."""
     today = date.today().isoformat()
     slug_text = slug or f"{today}-{title}"
+    clean_category = [
+        _slugify(part)
+        for part in (category_path or [])
+        if _slugify(part)
+    ]
+    taxonomy = load_blog_taxonomy(name) if respect_taxonomy else {}
+    if clean_category and "/" not in slug_text:
+        slug_text = "/".join([*clean_category, slug_text])
+    elif _taxonomy_enabled(taxonomy) and "/" not in slug_text:
+        taxonomy_paths = _taxonomy_path_titles(taxonomy)
+        if ("uncategorized",) in taxonomy_paths:
+            slug_text = f"uncategorized/{slug_text}"
     path = _safe_blog_path(name, slug_text)
     if path.exists() or _blog_sidecar_path_for_markdown(path).exists():
-        stem = path.stem
-        path = _safe_blog_path(name, f"{stem}-{today}")
+        route = _blog_route_from_document_path(path) or path.stem
+        path = _safe_blog_path(name, f"{route}-{today}")
+    post_category = _blog_category_path_from_route(_blog_route_from_document_path(path))
     meta = {
         "title": title,
         "date": today,
@@ -5053,6 +6872,7 @@ def create_blog_draft(
         "tags": tags or [],
         "summary": summary,
         "cover": "",
+        "category_path": post_category,
         "related_evidence": related_evidence or [],
         "related_kanban": related_kanban or [],
     }
@@ -5369,4 +7189,4 @@ def draft_project_update(name: str, project_id: str) -> Path:
 
 def blog_slug_from_path(path: Path) -> str:
     """Return a URL-safe slug for display or output paths."""
-    return quote(path.stem)
+    return quote(_blog_route_from_document_path(path) or path.stem)

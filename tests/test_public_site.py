@@ -38,6 +38,7 @@ def _write_blog(
     summary: str = "Short summary",
     cover: str = "",
     body: str = "Public body.",
+    extra_meta: dict | None = None,
 ) -> None:
     meta = {
         "title": title,
@@ -49,6 +50,8 @@ def _write_blog(
         "related_evidence": evidence or [],
         "related_kanban": [],
     }
+    if extra_meta:
+        meta.update(extra_meta)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "---\n"
@@ -367,6 +370,96 @@ class TestPublicSite(unittest.TestCase):
                     / "index.html"
                 ).exists()
             )
+
+    def test_taxonomy_blog_builds_nested_routes_and_redirect_aliases(self) -> None:
+        """Blog taxonomy enables nested file routes and category index pages."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            for path in (profile / "blog").glob("*"):
+                if path.is_file():
+                    path.unlink()
+            _write_yaml(
+                profile / "blog-taxonomy.yaml",
+                {
+                    "profile": "alice",
+                    "taxonomy": [
+                        {
+                            "slug": "robotics",
+                            "title": "机器人",
+                            "children": [
+                                {
+                                    "slug": "software",
+                                    "title": "软件",
+                                    "children": [
+                                        {"slug": "vla", "title": "VLA"},
+                                        {"slug": "motion-control", "title": "运控"},
+                                    ],
+                                },
+                                {"slug": "hardware", "title": "硬件"},
+                            ],
+                        },
+                        {"slug": "uncategorized", "title": "未分类"},
+                    ],
+                },
+            )
+            _write_blog(
+                profile
+                / "blog"
+                / "robotics"
+                / "software"
+                / "vla"
+                / "deep-vla.md",
+                title="Deep VLA",
+                status="published",
+                evidence=["ev_public"],
+                body="Nested body.",
+                extra_meta={
+                    "category_path": ["robotics", "software", "vla"],
+                    "aliases": ["blog/deep-vla/"],
+                },
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                posts = public_site.load_blog_posts("alice")
+                loaded = public_site.load_blog_post("alice", "deep-vla")
+                public_site.build_public_site("alice", out_dir=root / "dist")
+
+            self.assertEqual([post.slug for post in posts], ["robotics/software/vla/deep-vla"])
+            self.assertEqual(loaded.slug, "robotics/software/vla/deep-vla")
+            self.assertTrue(
+                (
+                    root
+                    / "dist"
+                    / "blog"
+                    / "robotics"
+                    / "software"
+                    / "vla"
+                    / "deep-vla"
+                    / "index.html"
+                ).exists()
+            )
+            self.assertTrue(
+                (
+                    root
+                    / "dist"
+                    / "blog"
+                    / "robotics"
+                    / "software"
+                    / "vla"
+                    / "index.html"
+                ).exists()
+            )
+            redirect = (
+                root / "dist" / "blog" / "deep-vla" / "index.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("/blog/robotics/software/vla/deep-vla/", redirect)
+            sitemap = (root / "dist" / "sitemap.xml").read_text(encoding="utf-8")
+            self.assertIn(
+                "/blog/robotics/software/vla/deep-vla/",
+                sitemap,
+            )
+            self.assertNotIn("/blog/deep-vla/", sitemap)
 
     def test_home_renders_and_copies_avatar_media(self) -> None:
         """A configured public avatar appears in the generated homepage."""

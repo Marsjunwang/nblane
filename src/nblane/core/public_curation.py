@@ -227,11 +227,17 @@ def _blog_evidence_usage(name: str) -> dict[str, list[str]]:
     usage: dict[str, list[str]] = {}
     if not blog_dir.exists():
         return usage
-    for path in sorted(blog_dir.glob("*.md")):
+    for path in sorted(blog_dir.rglob("*.md")):
+        try:
+            rel = path.relative_to(blog_dir)
+        except ValueError:
+            continue
+        if any(part.startswith(".") for part in rel.parts):
+            continue
         text = path.read_text(encoding="utf-8")
         meta = _parse_front_matter(text)
         for ref in _as_string_list(meta.get("related_evidence")):
-            usage.setdefault(ref, []).append(path.stem)
+            usage.setdefault(ref, []).append(rel.with_suffix("").as_posix())
     return usage
 
 
