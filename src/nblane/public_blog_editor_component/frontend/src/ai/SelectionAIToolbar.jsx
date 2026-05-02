@@ -60,6 +60,8 @@ const TOOLBAR_ACTIONS = [
   },
   {
     operation: "visual",
+    visual_kind: "example",
+    context_window: "current_block",
     labelKey: "ai_action_visual",
     fallback: "Visual",
     titleKey: "ai_action_visual_help",
@@ -155,6 +157,8 @@ export function SelectionAIToolbar({
             onAction({
               operation: action.operation,
               trigger: "selection_toolbar",
+              visual_kind: cleanText(action.visual_kind),
+              context_window: cleanText(action.context_window || "selection"),
             })
           }
         >

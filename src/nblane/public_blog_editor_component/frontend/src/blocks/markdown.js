@@ -7,6 +7,9 @@ const DIRECTIVE_LINE_RE =
 const AI_LOADING_COMMENT_RE =
   /^<!--\s*nblane:ai_loading(?:\s+(?<json>\{.*\}))?\s*-->$/u;
 
+const MATH_BLOCK_COMMENT_RE =
+  /^<!--\s*nblane:math_block(?:\s+(?<json>\{.*\}))?\s*-->$/u;
+
 const VISUAL_BLOCK_COMMENT_RE =
   /^<!--\s*nblane:visual_block(?:\s+(?<json>\{.*\}))?\s*-->$/u;
 
@@ -24,6 +27,7 @@ const COMPLEX_MATH_RE =
 
 const VISUAL_KIND_TO_ASSET_TYPE = {
   cover: "image",
+  diagram: "diagram",
   flowchart: "diagram",
   example: "image",
   video_edit: "video",
@@ -79,6 +83,10 @@ function safeDirectiveLabel(value) {
 
 function safeDirectiveTarget(value) {
   return cleanText(value).replace(/[)\r\n]+/gu, "").trim();
+}
+
+function safeCommentJson(value) {
+  return JSON.stringify(value).replace(/--/gu, "\\u002d\\u002d");
 }
 
 function jsonPropsFromComment(line, regex) {
@@ -150,16 +158,20 @@ function videoDirectiveBlock(line) {
   };
 }
 
-function mathBlock(latex) {
+function mathBlock(input) {
+  const props =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? input
+      : { latex: input };
   return {
     type: "math_block",
     props: {
-      latex: cleanText(latex).trim(),
-      ai_generated: false,
-      ai_source_id: "",
-      ai_model: "",
-      accepted: true,
-      evidence_id: "",
+      latex: cleanText(props.latex).trim(),
+      ai_generated: props.ai_generated === true,
+      ai_source_id: cleanText(props.ai_source_id),
+      ai_model: cleanText(props.ai_model),
+      accepted: props.accepted === undefined ? true : props.accepted === true,
+      evidence_id: cleanText(props.evidence_id),
     },
   };
 }
@@ -187,6 +199,7 @@ function visualBlock(props) {
       asset_type: normalizeVisualAssetType(props.asset_type || props.kind, visualKind),
       visual_kind: visualKind,
       src: cleanText(props.src || props.url),
+      mermaid: cleanText(props.mermaid),
       prompt: cleanText(props.prompt),
       caption: cleanText(props.caption),
       alt: cleanText(props.alt),
@@ -239,6 +252,10 @@ function parseCommentBlock(line) {
   const loadingProps = jsonPropsFromComment(line, AI_LOADING_COMMENT_RE);
   if (loadingProps) {
     return aiLoadingBlock(loadingProps);
+  }
+  const mathProps = jsonPropsFromComment(line, MATH_BLOCK_COMMENT_RE);
+  if (mathProps) {
+    return mathBlock(mathProps);
   }
   const visualProps = jsonPropsFromComment(line, VISUAL_BLOCK_COMMENT_RE);
   if (visualProps) {
@@ -397,9 +414,23 @@ export function parseMarkdownToEditorBlocks(editor, markdown) {
 }
 
 function mathBlockToMarkdown(block) {
-  const latex = cleanText(block.props?.latex).trim();
-  if (!latex) {
-    return "<!-- nblane:math_block -->";
+  const props = block.props || {};
+  const latex = cleanText(props.latex).trim();
+  const hasRoundTripMetadata =
+    props.ai_generated === true ||
+    cleanText(props.ai_source_id).trim() ||
+    cleanText(props.ai_model).trim() ||
+    props.accepted === false ||
+    cleanText(props.evidence_id).trim();
+  if (!latex || hasRoundTripMetadata) {
+    return `<!-- nblane:math_block ${safeCommentJson({
+      latex,
+      ai_generated: props.ai_generated === true,
+      ai_source_id: cleanText(props.ai_source_id),
+      ai_model: cleanText(props.ai_model),
+      accepted: props.accepted === undefined ? false : props.accepted === true,
+      evidence_id: cleanText(props.evidence_id),
+    })} -->`;
   }
   return `$$\n${latex}\n$$`;
 }
@@ -420,13 +451,15 @@ function visualBlockToMarkdown(block) {
   const alt = safeDirectiveLabel(props.alt || props.caption || "Visual");
   const visualKind = normalizeVisualKind(props.visual_kind);
   const assetType = normalizeVisualAssetType(props.asset_type, visualKind);
+  const mermaid = cleanText(props.mermaid);
   const looksVideo = assetType.includes("video") || /\.(mp4|webm|ogg|mov|m4v)$/iu.test(src);
 
-  if (visualKind || assetType === "diagram" || props.ai_generated === true) {
-    return `<!-- nblane:visual_block ${JSON.stringify({
+  if (visualKind || assetType === "diagram" || mermaid.trim() || props.ai_generated === true) {
+    return `<!-- nblane:visual_block ${safeCommentJson({
       asset_type: assetType,
       visual_kind: visualKind,
       src,
+      mermaid,
       prompt: cleanText(props.prompt),
       status: cleanText(props.status || "draft"),
       caption: cleanText(props.caption),
@@ -447,10 +480,11 @@ function visualBlockToMarkdown(block) {
     return caption ? `${image}\n\n_${caption}_` : image;
   }
 
-  return `<!-- nblane:visual_block ${JSON.stringify({
+  return `<!-- nblane:visual_block ${safeCommentJson({
     asset_type: assetType,
     visual_kind: visualKind,
     prompt: cleanText(props.prompt),
+    mermaid,
     status: cleanText(props.status || "draft"),
     caption: cleanText(props.caption),
     alt: cleanText(props.alt),
@@ -465,7 +499,7 @@ function visualBlockToMarkdown(block) {
 
 function aiLoadingBlockToMarkdown(block) {
   const props = block.props || {};
-  return `<!-- nblane:ai_loading ${JSON.stringify({
+  return `<!-- nblane:ai_loading ${safeCommentJson({
     prompt: cleanText(props.prompt),
     mode: cleanText(props.mode || "write"),
     status: cleanText(props.status || "loading"),

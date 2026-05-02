@@ -18,6 +18,7 @@ import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "./style.css";
 import { CandidatePatchPanel } from "./ai/CandidatePatchPanel.jsx";
+import { OutlinePanel } from "./ai/OutlinePanel.jsx";
 import { SelectionAIToolbar } from "./ai/SelectionAIToolbar.jsx";
 import { getAISlashMenuItems } from "./ai/slashItems.js";
 import { normalizeAIStream, useAIStream } from "./ai/useAIStream.js";
@@ -157,6 +158,9 @@ const DEFAULT_LABELS = {
   no_media: "No media.",
   no_reference_images: "No images in the media library.",
   no_source_videos: "No videos in the media library.",
+  outline_empty: "No headings yet.",
+  outline_expand_section: "Expand",
+  outline_panel: "Outline",
   preview: "Preview",
   preview_empty: "No preview yet.",
   preview_unavailable: "No inline preview available.",
@@ -415,6 +419,7 @@ function selectableMediaOptions(items, kind, labels) {
 
 const VISUAL_KIND_TO_ASSET_TYPE = {
   cover: "image",
+  diagram: "diagram",
   flowchart: "diagram",
   example: "image",
   video_edit: "video",
@@ -460,6 +465,7 @@ function generatedVisualSnippet(item) {
     asset_type: assetType,
     visual_kind: visualKind,
     src: path,
+    mermaid: cleanText(item.mermaid),
     prompt: cleanText(item.prompt),
     caption: cleanText(item.caption),
     alt: cleanText(item.alt || item.alt_text || item.title || ""),
@@ -1125,7 +1131,7 @@ function BlogSlashMenu({ editor, labels, onAIAction = null }) {
     async (query) =>
       filterSuggestionItems(
         [
-          ...(onAIAction ? getAISlashMenuItems({ labels, onAction: onAIAction }) : []),
+          ...(onAIAction ? getAISlashMenuItems({ labels, onAction: onAIAction, query }) : []),
           ...getDefaultReactSlashMenuItems(editor),
           ...getBlogSlashMenuItems(editor, labels),
         ],
@@ -1206,6 +1212,7 @@ function LegacyMarkdownEditor(props) {
           return;
         }
         editor.replaceBlocks(editor.document, blocks);
+        setOutlineVersion((current) => current + 1);
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
@@ -1421,6 +1428,7 @@ function ShellEditor(props) {
   const [selectedBlock, setSelectedBlockState] = useState(null);
   const [patchCandidates, setPatchCandidates] = useState([]);
   const [pendingAIAction, setPendingAIAction] = useState(null);
+  const [outlineVersion, setOutlineVersion] = useState(0);
 
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
@@ -1490,6 +1498,7 @@ function ShellEditor(props) {
       patchCandidates.length,
       pendingAIAction?.operation,
       pendingAIAction?.text,
+      outlineVersion,
     ],
     height + 72,
   );
@@ -1789,6 +1798,7 @@ function ShellEditor(props) {
       }
       const blocks = parseMarkdownToEditorBlocks(editor, markdown || "");
       editor.replaceBlocks(editor.document, blocks);
+      setOutlineVersion((current) => current + 1);
       return markdown;
     },
     [computeDirty, editor, editorSourceMode],
@@ -2314,6 +2324,32 @@ function ShellEditor(props) {
     });
   }
 
+  async function handleExpandOutlineSection(row) {
+    const data = asObject(row);
+    const blockId = cleanText(data.id || data.block?.id).trim();
+    const childBlockIds = asArray(data.childBlockIds).map(cleanText).filter(Boolean);
+    const sectionText = cleanText(data.sectionText || data.title).trim();
+    await handleAIInlineAction({
+      operation: "expand_section",
+      trigger: "outline_panel",
+      prompt: cleanText(data.title),
+      context_window: "section",
+      selected_block: {
+        block_id: blockId,
+        selection_text: sectionText,
+        range: { block_ids: [blockId, ...childBlockIds].filter(Boolean) },
+        cursor_block_id: blockId,
+        surrounding_blocks: [
+          {
+            block_id: blockId,
+            type: "heading",
+            text: sectionText,
+          },
+        ],
+      },
+    });
+  }
+
   async function handleCancelAIStream() {
     const streamId = cleanText(
       pendingAIAction?.stream_id || incomingAIStream?.task_id || "",
@@ -2729,6 +2765,15 @@ function ShellEditor(props) {
               {label(labels, "draft_from_done")}
             </button>
           </div>
+          {!editorSourceMode ? (
+            <OutlinePanel
+              blocks={editor.document}
+              editable={editable}
+              labels={labels}
+              pending={Boolean(pendingAIAction)}
+              onExpandSection={handleExpandOutlineSection}
+            />
+          ) : null}
           <div className="nb-post-list">
             {posts.length ? (
               posts.map((post) => {
@@ -2815,6 +2860,7 @@ function ShellEditor(props) {
                   onSelectionChange={handleEditorSelectionUpdate}
                   onChange={() => {
                     handleEditorSelectionUpdate();
+                    setOutlineVersion((current) => current + 1);
                     syncMarkdown();
                   }}
                   onBlur={() => {

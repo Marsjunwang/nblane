@@ -1059,6 +1059,32 @@ class TestPublicSite(unittest.TestCase):
         self.assertIn('data-visual-kind="flowchart"', html)
         self.assertIn('src="/media/blog/draft-post/chart.png"', html)
 
+    def test_visual_block_comment_renders_mermaid_without_src(self) -> None:
+        """Diagram visual blocks without image assets remain inspectable."""
+        body = (
+            '<!-- nblane:visual_block {"asset_type":"diagram",'
+            '"visual_kind":"flowchart","mermaid":"flowchart TD\\\\nA\\\\u002d\\\\u002d>B",'
+            '"caption":"Flow"} -->'
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn('class="mermaid"', html)
+        self.assertIn("flowchart TD", html)
+        self.assertIn('data-asset-type="diagram"', html)
+
+    def test_math_block_comment_renders_with_mathjax_wrapper(self) -> None:
+        """AI math-block comments render through the existing math pipeline."""
+        body = (
+            '<!-- nblane:math_block {"latex":"x^2+y^2=z^2",'
+            '"ai_generated":true,"accepted":false} -->'
+        )
+        html = public_site._markdown_to_html(body)
+
+        self.assertTrue(public_site.markdown_contains_math(body))
+        self.assertIn('class="math-display"', html)
+        self.assertIn("x^2+y^2=z^2", html)
+
     def test_render_blog_post_preview_uses_unsaved_text_and_cover(self) -> None:
         """Single-post preview renders in-memory meta/body and does not write."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -5,7 +5,15 @@
       "Bash(nohup .venv/bin/streamlit run app.py --server.address=127.0.0.1 --server.port=8510 --server.headless=true)",
       "Bash(disown)",
       "Bash(echo \"launched pid=$!\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(sed -n '270,320p' src/nblane/public_blog_editor_component/frontend/src/blocks/blogBlocks.jsx)",
+      "Bash(sed -n '170,210p' src/nblane/public_blog_editor_component/frontend/src/blocks/blogBlocks.jsx)",
+      "Bash(sed -n '70,95p' src/nblane/public_blog_editor_component/frontend/src/ai/slashItems.js)",
+      "Bash(sed -n '1095,1115p' src/nblane/public_blog_editor_component/frontend/src/main.jsx)",
+      "Bash(sed -n '2370,2420p' pages/6_Public_Site.py)",
+      "Bash(sed -n '2600,2640p' pages/6_Public_Site.py)",
+      "Bash(sed -n '1255,1300p' src/nblane/public_blog_editor_component/frontend/src/main.jsx)",
+      "Bash(sed -n '2099,2125p' src/nblane/public_blog_editor_component/frontend/src/main.jsx)"
     ]
   }
 }

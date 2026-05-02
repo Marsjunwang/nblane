@@ -1,4 +1,6 @@
 import React, { useMemo } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { AIBlockDiff } from "./AIBlockDiff.jsx";
 
 function cleanText(value) {
@@ -75,6 +77,61 @@ function patchPreviewBefore(patch) {
   return surrounding[0] || "";
 }
 
+function firstBlockOfType(patch, blockType) {
+  return (
+    asArray(patch?.block_patches)
+      .map(asObject)
+      .map((item) => asObject(item.block))
+      .find((block) => cleanText(block.type) === blockType) || null
+  );
+}
+
+function FormulaPreview({ latex }) {
+  const source = cleanText(latex).trim();
+  const rendered = useMemo(() => {
+    if (!source) {
+      return { html: "", error: "" };
+    }
+    try {
+      return {
+        html: katex.renderToString(source, {
+          displayMode: true,
+          throwOnError: false,
+          strict: false,
+          trust: false,
+        }),
+        error: "",
+      };
+    } catch (err) {
+      return {
+        html: "",
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }, [source]);
+  if (!source) {
+    return null;
+  }
+  if (!rendered.html || rendered.error) {
+    return <pre className="nb-math-fallback">{source}</pre>;
+  }
+  return (
+    <div
+      className="nb-ai-formula-preview"
+      dangerouslySetInnerHTML={{ __html: rendered.html }}
+    />
+  );
+}
+
+function DiagramPreview({ block }) {
+  const props = asObject(block?.props);
+  const mermaid = cleanText(props.mermaid || props.prompt).trim();
+  if (!mermaid) {
+    return null;
+  }
+  return <pre className="nb-mermaid-fallback">{mermaid.slice(0, 1600)}</pre>;
+}
+
 export function CandidatePatchPanel({
   labels,
   patches,
@@ -135,6 +192,8 @@ export function CandidatePatchPanel({
         const warnings = asArray(patch.warnings).map(cleanText).filter(Boolean);
         const assets = asArray(patch.assets).map(asObject);
         const blockPatches = asArray(patch.block_patches).map(asObject);
+        const mathBlock = firstBlockOfType(patch, "math_block");
+        const visualBlock = firstBlockOfType(patch, "visual_block");
         const metaRows = metaPatchRows(patch.meta_patch);
         const markdown = cleanText(patch.markdown_fallback).trim();
         const before = patchPreviewBefore(patch);
@@ -172,6 +231,12 @@ export function CandidatePatchPanel({
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>
+            ) : null}
+            {mathBlock ? (
+              <FormulaPreview latex={asObject(mathBlock.props).latex} />
+            ) : null}
+            {cleanText(asObject(visualBlock?.props).asset_type) === "diagram" ? (
+              <DiagramPreview block={visualBlock} />
             ) : null}
             {assets.length ? (
               <details>

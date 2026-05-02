@@ -65,6 +65,10 @@ _VISUAL_BLOCK_COMMENT_RE = re.compile(
     r"<!--\s*nblane:visual_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
     re.IGNORECASE,
 )
+_MATH_BLOCK_COMMENT_RE = re.compile(
+    r"<!--\s*nblane:math_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
+    re.IGNORECASE,
+)
 _MARKDOWN_LINK_RE = re.compile(
     r"(?<!!)\[[^\]]+\]\(\s*(?P<href><[^>]+>|[^)\s]+)"
     r"(?:\s+[\"'][^\"']*[\"'])?\s*\)"
@@ -621,6 +625,8 @@ def _normalize_blog_meta(meta: dict) -> dict:
 def markdown_contains_math(text: str) -> bool:
     """Return True when Markdown appears to contain LaTeX math delimiters."""
     clean = _FENCED_CODE_RE.sub("", text)
+    if _MATH_BLOCK_COMMENT_RE.search(clean):
+        return True
     if _DISPLAY_DOLLAR_MATH_RE.search(clean):
         return True
     if _DISPLAY_BRACKET_MATH_RE.search(clean):
@@ -1240,12 +1246,26 @@ def _replace_video_directives(text: str) -> str:
 
 def _render_visual_block_comment(payload: dict) -> str:
     src = _strip_markdown_url(str(payload.get("src", "") or "")).strip()
-    if not src:
-        return ""
     asset_type = str(payload.get("asset_type", "") or "").strip().lower()
     visual_kind = str(payload.get("visual_kind", "") or "").strip().lower()
+    mermaid = str(payload.get("mermaid", "") or "").strip()
     caption = str(payload.get("caption", "") or "").strip()
     alt = str(payload.get("alt", "") or caption or "Visual").strip()
+    if not src and (asset_type == "diagram" or mermaid):
+        caption_html = (
+            f'<figcaption class="media-caption">{html.escape(caption)}</figcaption>'
+            if caption
+            else ""
+        )
+        return (
+            '<figure class="media-block visual-block"'
+            f' data-visual-kind="{html.escape(visual_kind or "flowchart", quote=True)}"'
+            f' data-asset-type="{html.escape(asset_type or "diagram", quote=True)}">'
+            f'<pre class="mermaid">{html.escape(mermaid or str(payload.get("prompt", "") or ""))}</pre>'
+            f"{caption_html}</figure>"
+        )
+    if not src:
+        return ""
     display_src = _media_src(src)
     if (
         asset_type == "video"
@@ -1285,6 +1305,25 @@ def _replace_visual_block_comments(text: str) -> str:
         return _render_visual_block_comment(loaded)
 
     return _VISUAL_BLOCK_COMMENT_RE.sub(repl, text)
+
+
+def _replace_math_block_comments(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        raw = str(match.group("payload") or "").strip()
+        if not raw:
+            return ""
+        try:
+            loaded = json.loads(raw)
+        except Exception:
+            return ""
+        if not isinstance(loaded, dict):
+            return ""
+        latex = str(loaded.get("latex", "") or "").strip()
+        if not latex:
+            return ""
+        return f"\n\n$$\n{latex}\n$$\n\n"
+
+    return _MATH_BLOCK_COMMENT_RE.sub(repl, text)
 
 
 def _validate_blog_body_media(
@@ -1622,6 +1661,7 @@ def validate_public_layer(
 
 
 def _markdown_to_html(text: str) -> str:
+    text = _replace_math_block_comments(text)
     text = _replace_visual_block_comments(text)
     text = _replace_video_directives(text)
     prepared, math_blocks, inline_math = _extract_markdown_math(text)

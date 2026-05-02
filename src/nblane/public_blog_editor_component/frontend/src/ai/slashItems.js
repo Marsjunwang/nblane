@@ -42,6 +42,8 @@ const AI_SLASH_ITEMS = [
   },
   {
     operation: "visual",
+    visual_kind: "example",
+    context_window: "current_block",
     titleKey: "ai_slash_visual",
     title: "Visual",
     subtextKey: "ai_slash_visual_help",
@@ -70,7 +72,8 @@ const AI_SLASH_ITEMS = [
   },
 ];
 
-export function getAISlashMenuItems({ labels = {}, onAction }) {
+export function getAISlashMenuItems({ labels = {}, onAction, query = "" }) {
+  const prompt = cleanText(query).trim();
   return AI_SLASH_ITEMS.map((item) => ({
     title: slashLabel(labels, item.titleKey, item.title),
     subtext: slashLabel(labels, item.subtextKey, item.subtext),
@@ -81,7 +84,9 @@ export function getAISlashMenuItems({ labels = {}, onAction }) {
       onAction?.({
         operation: item.operation,
         trigger: "slash",
+        prompt,
         visual_kind: cleanText(item.visual_kind),
+        context_window: cleanText(item.context_window),
       });
     },
   }));

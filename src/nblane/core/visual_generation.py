@@ -21,6 +21,7 @@ from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from nblane.core import llm
+from nblane.core.ai_blog_prompts import get_prompt
 
 DEFAULT_PROVIDER = "dashscope_wan"
 DEFAULT_IMAGE_MODEL = "wan2.7-image-pro"
@@ -345,6 +346,223 @@ def build_blog_visual_prompt(
         rationale=rationale,
         safety_notes=notes,
     )
+
+
+def _clean_caption_text(value: Any, *, limit: int = 1200) -> str:
+    clean = re.sub(r"\s+", " ", str(value or "")).strip()
+    return clean[:limit]
+
+
+def _strip_response_fence(value: str) -> str:
+    text = str(value or "").strip()
+    fence = re.fullmatch(r"```(?:json|JSON|[a-zA-Z0-9_-]+)?\s*(.*?)\s*```", text, re.S)
+    if fence:
+        return fence.group(1).strip()
+    return text
+
+
+def _caption_fallback(value: str, source_text: str = "") -> str:
+    clean = _clean_caption_text(value or source_text, limit=220)
+    if not clean:
+        return "Illustration for the article context."
+    sentence = re.split(r"(?<=[.!?。！？])\s+", clean, maxsplit=1)[0].strip()
+    return sentence[:220] or clean[:220]
+
+
+def parse_caption_intent_response(response: str, *, source_text: str = "") -> dict[str, Any]:
+    """Parse an LLM caption-intent response into prompt/caption/alt fields.
+
+    The preferred response is JSON, but the parser also accepts plain text or
+    labeled lines so tests and fallbacks do not need a configured model.
+    """
+    text = _strip_response_fence(response)
+    loaded: Any = None
+    warnings: list[str] = []
+    if text:
+        try:
+            loaded = json.loads(text)
+        except Exception:
+            loaded = None
+    if isinstance(loaded, dict):
+        prompt = _clean_caption_text(
+            loaded.get("prompt")
+            or loaded.get("visual_prompt")
+            or loaded.get("image_prompt")
+            or loaded.get("positive_prompt"),
+            limit=1600,
+        )
+        caption = _clean_caption_text(loaded.get("caption"), limit=220)
+        alt = _clean_caption_text(loaded.get("alt") or loaded.get("alt_text"), limit=220)
+        raw_warnings = loaded.get("warnings") or loaded.get("safety_notes") or []
+        if isinstance(raw_warnings, list):
+            warnings.extend(_clean_caption_text(item, limit=220) for item in raw_warnings)
+        elif raw_warnings:
+            warnings.append(_clean_caption_text(raw_warnings, limit=220))
+    else:
+        labeled: dict[str, str] = {}
+        for raw_line in text.splitlines():
+            match = re.match(r"^\s*(prompt|visual_prompt|image_prompt|caption|alt|alt_text)\s*:\s*(.+?)\s*$", raw_line, re.I)
+            if match:
+                labeled[match.group(1).lower()] = match.group(2).strip()
+        prompt = _clean_caption_text(
+            labeled.get("prompt")
+            or labeled.get("visual_prompt")
+            or labeled.get("image_prompt")
+            or text
+            or source_text,
+            limit=1600,
+        )
+        caption = _clean_caption_text(labeled.get("caption"), limit=220)
+        alt = _clean_caption_text(labeled.get("alt") or labeled.get("alt_text"), limit=220)
+    if not prompt:
+        prompt = (
+            "Clear example illustration for a public technical article. "
+            f"Concrete subject from context: {_caption_fallback(source_text)}."
+        )
+    if not caption:
+        caption = _caption_fallback(source_text or prompt)
+    if not alt:
+        alt = caption or _caption_fallback(prompt)
+    return {
+        "prompt": prompt,
+        "caption": caption,
+        "alt": alt,
+        "warnings": [warning for warning in warnings if warning],
+    }
+
+
+def _caption_user_payload(
+    *,
+    text: str,
+    lang: str,
+    title: str = "",
+    summary: str = "",
+    tags: list[str] | None = None,
+    body: str = "",
+) -> str:
+    payload = {
+        "operation": "visual_caption",
+        "instruction": get_prompt("caption", lang),
+        "target_text": _clean_caption_text(text, limit=1800),
+        "title": _clean_caption_text(title, limit=240),
+        "summary": _clean_caption_text(summary, limit=600),
+        "tags": [str(tag).strip() for tag in (tags or []) if str(tag).strip()],
+        "article_excerpt": _clean_caption_text(body, limit=1800),
+        "response_format": {
+            "prompt": "visual generation prompt",
+            "caption": "short display caption",
+            "alt": "accessible alt text",
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def from_caption_intent(text: str, lang: str = "en", **context: Any) -> dict[str, Any]:
+    """Create an example visual candidate from prose or a caption-intent reply.
+
+    Returns a structured dict even when LLM or visual generation is not
+    configured.  Provider/network errors are converted to warnings so callers
+    can still persist a visual-block prompt candidate.
+    """
+    prompt_lang = "zh" if str(lang or "").strip().lower() == "zh" else "en"
+    warnings: list[str] = []
+    raw_response = str(
+        context.pop("llm_response", "") or context.pop("raw_response", "") or ""
+    ).strip()
+    chat_func = context.pop("chat_func", None)
+    title = str(context.get("title") or "").strip()
+    summary = str(context.get("summary") or "").strip()
+    body = str(context.get("body") or context.get("markdown") or "").strip()
+    style = str(context.get("style") or "").strip()
+    size = str(context.get("size") or "").strip()
+    tags_value = context.get("tags")
+    tags = [str(tag).strip() for tag in tags_value if str(tag).strip()] if isinstance(tags_value, list) else []
+
+    if not raw_response:
+        if chat_func is not None or llm.is_configured():
+            try:
+                chat = chat_func or llm.chat
+                raw_response = chat(
+                    get_prompt("inline_system", prompt_lang),
+                    _caption_user_payload(
+                        text=text,
+                        lang=prompt_lang,
+                        title=title,
+                        summary=summary,
+                        tags=tags,
+                        body=body,
+                    ),
+                    temperature=0.25,
+                )
+            except Exception as exc:
+                warnings.append(f"Caption intent LLM failed: {exc}")
+                raw_response = ""
+            if raw_response.startswith("LLM error:") or raw_response.startswith(
+                "AI features not configured."
+            ):
+                warnings.append(raw_response)
+                raw_response = ""
+        else:
+            warnings.append("AI features not configured; using text fallback for visual prompt.")
+
+    intent = parse_caption_intent_response(raw_response, source_text=text)
+    warnings.extend(str(warning) for warning in intent.get("warnings", []) if warning)
+    result: dict[str, Any] = {
+        "asset_type": "image",
+        "visual_kind": "example",
+        "prompt": str(intent.get("prompt") or "").strip(),
+        "caption": str(intent.get("caption") or "").strip(),
+        "alt": str(intent.get("alt") or "").strip(),
+        "status": "candidate",
+        "src": "",
+        "provider": DEFAULT_PROVIDER,
+        "model": "",
+        "warnings": [],
+        "assets": [],
+        "generated_assets": [],
+    }
+    try:
+        generated_assets = generate_visual_asset(
+            "example",
+            result["prompt"],
+            style=style,
+            size=size,
+            title=title,
+            summary=summary,
+            tags=tags,
+            body=body or text,
+        )
+    except VisualGenerationError as exc:
+        warnings.append(str(exc))
+        generated_assets = []
+    except Exception as exc:
+        warnings.append(f"Visual generation failed: {exc}")
+        generated_assets = []
+
+    if generated_assets:
+        first = generated_assets[0]
+        result.update(
+            {
+                "status": "generated",
+                "src": first.source if first.source.startswith(("http://", "https://")) else "",
+                "provider": first.provider,
+                "model": first.model,
+                "mime_type": first.mime_type,
+                "extension": first.extension,
+                "generated_assets": generated_assets,
+            }
+        )
+    result["assets"] = [
+        {
+            "kind": "image",
+            "src": result["src"],
+            "prompt": result["prompt"],
+            "provider": result["provider"],
+            "model": result["model"],
+        }
+    ]
+    result["warnings"] = [warning for warning in warnings if warning]
+    return result
 
 
 def _contains_oss_url(value: Any) -> bool:

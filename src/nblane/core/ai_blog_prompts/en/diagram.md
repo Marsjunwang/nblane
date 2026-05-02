@@ -1,1 +1,1 @@
-Create a clear diagram or Mermaid-style flowchart prompt from the target paragraph. Prefer explicit nodes, edges, states, and labels. Return only one concise prompt.
+Generate directly renderable Mermaid diagram code from the target paragraph. Prefer `flowchart TD` with explicit nodes, edges, states, and labels. Return only Mermaid code, with no explanation and no Markdown code fence.

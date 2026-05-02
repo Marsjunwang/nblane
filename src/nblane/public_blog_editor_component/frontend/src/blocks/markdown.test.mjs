@@ -115,6 +115,7 @@ test("serializes custom blocks to public-site markdown", () => {
       props: {
         asset_type: "diagram",
         visual_kind: "flowchart",
+        mermaid: "flowchart TD\\nA-->B",
         src: "media/blog/post/chart.png",
         alt: "Chart",
         caption: "Flow",
@@ -122,13 +123,13 @@ test("serializes custom blocks to public-site markdown", () => {
         accepted: true,
       },
     }),
-    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","prompt":"","status":"draft","caption":"Flow","alt":"Chart","ai_generated":true,"ai_source_id":"","ai_model":"","accepted":true,"evidence_id":""} -->',
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","mermaid":"flowchart TD\\\\nA\\u002d\\u002d>B","prompt":"","status":"draft","caption":"Flow","alt":"Chart","ai_generated":true,"ai_source_id":"","ai_model":"","accepted":true,"evidence_id":""} -->',
   );
 });
 
 test("parses visual block comments with visual kind", () => {
   const segments = splitMarkdownSpecialBlocks(
-    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","caption":"Flow"} -->',
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","caption":"Flow","mermaid":"flowchart TD\\\\nA\\u002d\\u002d>B"} -->',
   );
 
   assert.equal(segments.length, 1);
@@ -136,6 +137,36 @@ test("parses visual block comments with visual kind", () => {
   assert.equal(segments[0].block.props.asset_type, "diagram");
   assert.equal(segments[0].block.props.visual_kind, "flowchart");
   assert.equal(segments[0].block.props.src, "media/blog/post/chart.png");
+  assert.equal(segments[0].block.props.mermaid, "flowchart TD\\nA-->B");
+});
+
+test("round-trips AI math block metadata through comments", () => {
+  const markdown = blockToSpecialMarkdown({
+    type: "math_block",
+    props: {
+      latex: "x^2+y^2=z^2",
+      ai_generated: true,
+      ai_source_id: "ai-123",
+      ai_model: "qwen-test",
+      accepted: false,
+      evidence_id: "ev-1",
+    },
+  });
+
+  assert.equal(
+    markdown,
+    '<!-- nblane:math_block {"latex":"x^2+y^2=z^2","ai_generated":true,"ai_source_id":"ai-123","ai_model":"qwen-test","accepted":false,"evidence_id":"ev-1"} -->',
+  );
+
+  const segments = splitMarkdownSpecialBlocks(markdown);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].block.type, "math_block");
+  assert.equal(segments[0].block.props.latex, "x^2+y^2=z^2");
+  assert.equal(segments[0].block.props.ai_generated, true);
+  assert.equal(segments[0].block.props.ai_source_id, "ai-123");
+  assert.equal(segments[0].block.props.ai_model, "qwen-test");
+  assert.equal(segments[0].block.props.accepted, false);
+  assert.equal(segments[0].block.props.evidence_id, "ev-1");
 });
 
 test("interleaves native BlockNote markdown with custom block markdown", () => {

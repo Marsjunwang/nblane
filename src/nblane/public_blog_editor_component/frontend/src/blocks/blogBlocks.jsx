@@ -9,6 +9,7 @@ import {
 import { createReactBlockSpec } from "@blocknote/react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+import { MermaidRenderer } from "./MermaidRenderer.jsx";
 
 const AI_PROPS = {
   ai_generated: { default: false },
@@ -20,6 +21,7 @@ const AI_PROPS = {
 
 const VISUAL_KIND_TO_ASSET_TYPE = {
   cover: "image",
+  diagram: "diagram",
   flowchart: "diagram",
   example: "image",
   video_edit: "video",
@@ -179,7 +181,7 @@ function MathBlock({ block, editor }) {
     >
       <div className="nb-block-header">
         <strong>Formula</strong>
-        {block.props.ai_generated ? <span>AI</span> : null}
+        {block.props.ai_generated ? <span>ai_generated</span> : null}
       </div>
       <KatexPreview latex={latex} />
       <BlockDetails label="Edit LaTeX" defaultOpen={!latex}>
@@ -270,6 +272,10 @@ function VisualBlock({ block, editor }) {
   const status = cleanText(props.status || "draft");
   const assetType = normalizeVisualAssetType(props.asset_type, props.visual_kind);
   const visualKind = normalizeVisualKind(props.visual_kind);
+  const mermaid = cleanText(props.mermaid);
+  const shouldRenderMermaid = Boolean(mermaid.trim()) || (assetType === "diagram" && !src);
+  const mermaidSource =
+    mermaid.trim() || (assetType === "diagram" ? cleanText(props.prompt).trim() : "");
   return (
     <div
       className="nb-custom-block nb-visual-block"
@@ -281,9 +287,13 @@ function VisualBlock({ block, editor }) {
         {visualKind ? <span>{visualKind}</span> : null}
         <span>{status || "draft"}</span>
       </div>
-      <VisualMedia src={src} assetType={assetType} alt={alt} editor={editor} />
+      {shouldRenderMermaid ? (
+        <MermaidRenderer source={mermaidSource} />
+      ) : (
+        <VisualMedia src={src} assetType={assetType} alt={alt} editor={editor} />
+      )}
       {caption ? <div className="nb-block-caption">{caption}</div> : null}
-      <BlockDetails label="Edit metadata" defaultOpen={!src}>
+      <BlockDetails label="Edit metadata" defaultOpen={!src && !mermaidSource}>
         <div className="nb-block-grid">
           <label className="nb-block-field">
             <span>Type</span>
@@ -318,6 +328,7 @@ function VisualBlock({ block, editor }) {
             >
               <option value="">none</option>
               <option value="cover">cover</option>
+              <option value="diagram">diagram</option>
               <option value="flowchart">flowchart</option>
               <option value="example">example</option>
               <option value="video_edit">video_edit</option>
@@ -342,6 +353,15 @@ function VisualBlock({ block, editor }) {
             multiline
             onChange={(next) => updateBlockProps(editor, block, { prompt: next })}
           />
+          {shouldRenderMermaid ? (
+            <FieldText
+              label="Mermaid"
+              value={mermaid}
+              readOnly={readOnly}
+              multiline
+              onChange={(next) => updateBlockProps(editor, block, { mermaid: next })}
+            />
+          ) : null}
         </div>
       </BlockDetails>
     </div>
@@ -400,21 +420,30 @@ function ExternalVideo({ block }) {
 
 function ExternalVisual({ block }) {
   const props = block.props || {};
+  const assetType = normalizeVisualAssetType(props.asset_type, props.visual_kind);
+  const src = cleanText(props.src);
+  const mermaid = cleanText(props.mermaid);
+  const shouldRenderMermaid = Boolean(mermaid.trim()) || (assetType === "diagram" && !src);
   return (
     <figure
       data-nblane-block="visual_block"
-      data-asset-type={cleanText(props.asset_type)}
+      data-asset-type={cleanText(assetType)}
       data-visual-kind={cleanText(props.visual_kind)}
-      data-src={cleanText(props.src)}
+      data-src={src}
+      data-mermaid={mermaid}
       data-prompt={cleanText(props.prompt)}
       data-caption={cleanText(props.caption)}
       data-alt={cleanText(props.alt)}
     >
-      <VisualMedia
-        src={props.src}
-        assetType={props.asset_type}
-        alt={cleanText(props.alt || props.caption)}
-      />
+      {shouldRenderMermaid ? (
+        <pre>{mermaid || cleanText(props.prompt)}</pre>
+      ) : (
+        <VisualMedia
+          src={props.src}
+          assetType={props.asset_type}
+          alt={cleanText(props.alt || props.caption)}
+        />
+      )}
       {props.caption ? <figcaption>{cleanText(props.caption)}</figcaption> : null}
     </figure>
   );
@@ -452,6 +481,7 @@ function parseDataBlock(element, type) {
       asset_type: normalizeVisualAssetType(dataset.assetType || "image", visualKind),
       visual_kind: visualKind,
       src: cleanText(dataset.src),
+      mermaid: cleanText(dataset.mermaid),
       prompt: cleanText(dataset.prompt),
       caption: cleanText(dataset.caption),
       alt: cleanText(dataset.alt),
@@ -508,9 +538,10 @@ const VisualBlockSpec = createReactBlockSpec(
       asset_type: { default: "image", values: ["image", "video", "diagram"] },
       visual_kind: {
         default: "",
-        values: ["", "cover", "flowchart", "example", "video_edit"],
+        values: ["", "cover", "diagram", "flowchart", "example", "video_edit"],
       },
       src: { default: "" },
+      mermaid: { default: "" },
       prompt: { default: "" },
       caption: { default: "" },
       alt: { default: "" },
