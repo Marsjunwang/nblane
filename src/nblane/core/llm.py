@@ -32,6 +32,7 @@ _DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _DEFAULT_MODEL = "qwen3.6-plus"
 _DEFAULT_UI_LANG = "en"
 _DEFAULT_REPLY_LANG = "en"
+_DEFAULT_TIMEOUT_SECONDS = 90.0
 
 _BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
 _API_KEY: str = os.getenv("LLM_API_KEY", "")
@@ -131,6 +132,16 @@ def model_label() -> str:
     return f"{_MODEL} @ {_BASE_URL}"
 
 
+def timeout_seconds() -> float:
+    """Return the OpenAI-compatible client timeout in seconds."""
+
+    try:
+        value = float(os.getenv("LLM_TIMEOUT_SECONDS", str(_DEFAULT_TIMEOUT_SECONDS)))
+    except ValueError:
+        value = _DEFAULT_TIMEOUT_SECONDS
+    return max(5.0, value)
+
+
 def reply_language() -> str:
     """Return the configured reply language code ('en' or 'zh').
 
@@ -173,7 +184,9 @@ def chat(
         from openai import OpenAI
 
         client = OpenAI(
-            base_url=_BASE_URL, api_key=_API_KEY
+            base_url=_BASE_URL,
+            api_key=_API_KEY,
+            timeout=timeout_seconds(),
         )
         use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(
@@ -227,7 +240,9 @@ def chat_messages(
         from openai import OpenAI
 
         client = OpenAI(
-            base_url=_BASE_URL, api_key=_API_KEY
+            base_url=_BASE_URL,
+            api_key=_API_KEY,
+            timeout=timeout_seconds(),
         )
         use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(

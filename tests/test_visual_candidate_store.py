@@ -103,6 +103,44 @@ class VisualCandidateStoreTests(unittest.TestCase):
                 )
                 self.assertFalse((profile / "media" / "blog" / "post").exists())
 
+    def test_candidate_preview_src_inlines_only_small_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            (profile / "blog").mkdir(parents=True)
+            with patch("nblane.core.visual_candidate_store.profile_dir", lambda _n: profile):
+                small = visual_candidate_store.write_candidate(
+                    "alice",
+                    "post",
+                    "patch-preview",
+                    data=b"\x89PNG\r\n\x1a\nsmall",
+                    filename="small.png",
+                    kind="image",
+                )
+                large = visual_candidate_store.write_candidate(
+                    "alice",
+                    "post",
+                    "patch-preview",
+                    data=b"\x89PNG\r\n\x1a\n" + b"0" * (2 * 1024 * 1024 + 1),
+                    filename="large.png",
+                    kind="image",
+                )
+
+                self.assertTrue(
+                    visual_candidate_store.candidate_preview_src(
+                        "alice",
+                        small.relative_path,
+                        kind="image",
+                    ).startswith("data:image/png;base64,")
+                )
+                self.assertEqual(
+                    visual_candidate_store.candidate_preview_src(
+                        "alice",
+                        large.relative_path,
+                        kind="image",
+                    ),
+                    "",
+                )
+
     def test_inline_visual_patch_stages_candidate_path_not_media_src(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = Path(tmp) / "alice"
@@ -152,7 +190,9 @@ class VisualCandidateStoreTests(unittest.TestCase):
             props = patch_payload["block_patches"][0]["block"]["props"]
             self.assertEqual(props["src"], "")
             self.assertIn("blog/.candidates/", props["candidate_path"])
+            self.assertTrue(props["preview_src"].startswith("data:image/png;base64,"))
             self.assertEqual(patch_payload["assets"][0]["candidate_path"], props["candidate_path"])
+            self.assertEqual(patch_payload["assets"][0]["preview_src"], props["preview_src"])
             self.assertFalse((profile / "media" / "blog" / "post").exists())
 
     def test_inline_visual_patch_fails_when_generated_asset_cannot_be_staged(self) -> None:

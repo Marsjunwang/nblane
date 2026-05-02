@@ -56,9 +56,35 @@ function normalizeVisualAssetType(value, visualKind = "") {
 function updateBlockProps(editor, block, props) {
   editor.updateBlock(block, {
     props: {
+      ...block.props,
       ...props,
     },
   });
+}
+
+function emitInlineCandidateAction(action, block) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const props = block?.props || {};
+  window.dispatchEvent(
+    new CustomEvent("nblane:ai-candidate-action", {
+      detail: {
+        action,
+        block_id: cleanText(block?.id),
+        mode: cleanText(props.mode),
+        status: cleanText(props.status),
+        patch_id: cleanText(props.patch_id),
+        ai_source_id: cleanText(props.ai_source_id),
+        ai_model: cleanText(props.ai_model),
+        prompt: cleanText(props.prompt),
+        summary: cleanText(props.summary),
+        preview_src: cleanText(props.preview_src),
+        candidate_path: cleanText(props.candidate_path),
+        evidence_id: cleanText(props.evidence_id),
+      },
+    }),
+  );
 }
 
 function FieldText({ label, value, onChange, readOnly = false, multiline = false }) {
@@ -273,6 +299,7 @@ function VisualBlock({ block, editor }) {
   const readOnly = editor.isEditable === false;
   const props = block.props;
   const src = cleanText(props.src);
+  const previewSrc = cleanText(props.preview_src);
   const caption = cleanText(props.caption);
   const alt = cleanText(props.alt || caption || "Visual");
   const status = cleanText(props.status || "draft");
@@ -297,7 +324,7 @@ function VisualBlock({ block, editor }) {
       {shouldRenderMermaid ? (
         <MermaidRenderer source={mermaidSource} />
       ) : (
-        <VisualMedia src={src} assetType={assetType} alt={alt} editor={editor} />
+        <VisualMedia src={src || previewSrc} assetType={assetType} alt={alt} editor={editor} />
       )}
       {caption ? <div className="nb-block-caption">{caption}</div> : null}
       <BlockDetails label="Edit metadata" defaultOpen={!src && !mermaidSource}>
@@ -391,13 +418,19 @@ function AiLoadingBlock({ block, editor }) {
   const prompt = cleanText(block.props.prompt);
   const status = cleanText(block.props.status || "loading");
   const mode = cleanText(block.props.mode || "write");
+  const previewSrc = cleanText(block.props.preview_src);
+  const summary = cleanText(block.props.summary || prompt);
   const isFormula = mode === "formula";
   const isVisual = mode === "visual" || mode === "diagram" || mode === "video";
+  const isDiagram = mode === "diagram";
   const visualLabel =
     mode === "diagram" ? "Generating diagram..." : mode === "video" ? "Generating video..." : "Generating visual...";
+  const isCandidate = status === "candidate";
   return (
     <div
-      className={`nb-custom-block nb-ai-loading-block nb-ai-loading-${mode}`}
+      className={`nb-custom-block nb-ai-loading-block nb-ai-loading-${mode} ${
+        isCandidate ? "is-candidate" : ""
+      }`}
       contentEditable={false}
       data-nblane-block="ai_loading_block"
     >
@@ -405,25 +438,81 @@ function AiLoadingBlock({ block, editor }) {
         <strong>AI</strong>
         <span>{status}</span>
       </div>
-      <div className="nb-loading-row">
-        <span className="nb-loading-dot" />
-        <span>{mode}</span>
-      </div>
-      {isFormula ? (
+      {isCandidate ? (
+        <div
+          className={`nb-ai-candidate-placeholder ${
+            previewSrc ? "" : "is-no-preview"
+          }`}
+        >
+          {previewSrc ? (
+            <img className="nb-ai-candidate-image" src={previewSrc} alt="AI candidate" />
+          ) : null}
+          <div>
+            <strong>Candidate ready</strong>
+            {summary && !isDiagram ? <p>{summary.slice(0, 240)}</p> : null}
+          </div>
+          {isDiagram && summary ? (
+            <div className="nb-ai-candidate-diagram">
+              <MermaidRenderer source={summary} />
+            </div>
+          ) : null}
+          <div className="nb-ai-candidate-actions">
+            <button
+              type="button"
+              className="nb-button primary"
+              disabled={readOnly}
+              onClick={(event) => {
+                event.stopPropagation();
+                emitInlineCandidateAction("accept", block);
+              }}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className="nb-button"
+              disabled={readOnly}
+              onClick={(event) => {
+                event.stopPropagation();
+                emitInlineCandidateAction("review", block);
+              }}
+            >
+              Review
+            </button>
+            <button
+              type="button"
+              className="nb-button danger"
+              disabled={readOnly}
+              onClick={(event) => {
+                event.stopPropagation();
+                emitInlineCandidateAction("reject", block);
+              }}
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="nb-loading-row">
+          <span className="nb-loading-dot" />
+          <span>{mode}</span>
+        </div>
+      )}
+      {!isCandidate && isFormula ? (
         <div className="nb-ai-loading-formula">
           <KatexPreview latex={prompt} />
         </div>
-      ) : isVisual ? (
+      ) : !isCandidate && isVisual ? (
         <div className="nb-ai-loading-visual" aria-label={visualLabel}>
           <div className="nb-ai-loading-progress">
             <span />
           </div>
           <p>{visualLabel}</p>
         </div>
-      ) : prompt ? (
+      ) : !isCandidate && prompt ? (
         <pre className="nb-ai-loading-preview">{prompt}</pre>
       ) : null}
-      {!isFormula && !isVisual ? (
+      {!isCandidate && !isFormula && !isVisual ? (
         <FieldText
           label="Prompt"
           value={prompt}
@@ -468,6 +557,7 @@ function ExternalVisual({ block }) {
       data-visual-kind={cleanText(props.visual_kind)}
       data-src={src}
       data-candidate-path={cleanText(props.candidate_path)}
+      data-preview-src={cleanText(props.preview_src)}
       data-mermaid={mermaid}
       data-prompt={cleanText(props.prompt)}
       data-caption={cleanText(props.caption)}
@@ -496,6 +586,10 @@ function ExternalAiLoading({ block }) {
       data-status={cleanText(block.props.status)}
       data-ai-source-id={cleanText(block.props.ai_source_id)}
       data-ai-model={cleanText(block.props.ai_model)}
+      data-patch-id={cleanText(block.props.patch_id)}
+      data-preview-src={cleanText(block.props.preview_src)}
+      data-summary={cleanText(block.props.summary)}
+      data-candidate-path={cleanText(block.props.candidate_path)}
       data-evidence-id={cleanText(block.props.evidence_id)}
     />
   );
@@ -523,6 +617,7 @@ function parseDataBlock(element, type) {
       visual_kind: visualKind,
       src: cleanText(dataset.src),
       candidate_path: cleanText(dataset.candidatePath),
+      preview_src: cleanText(dataset.previewSrc),
       mermaid: cleanText(dataset.mermaid),
       prompt: cleanText(dataset.prompt),
       caption: cleanText(dataset.caption),
@@ -536,6 +631,10 @@ function parseDataBlock(element, type) {
       status: cleanText(dataset.status || "loading"),
       ai_source_id: cleanText(dataset.aiSourceId),
       ai_model: cleanText(dataset.aiModel),
+      patch_id: cleanText(dataset.patchId),
+      preview_src: cleanText(dataset.previewSrc),
+      summary: cleanText(dataset.summary),
+      candidate_path: cleanText(dataset.candidatePath),
       evidence_id: cleanText(dataset.evidenceId),
     };
   }
@@ -597,6 +696,7 @@ const VisualBlockSpec = createReactBlockSpec(
       },
       src: { default: "" },
       candidate_path: { default: "" },
+      preview_src: { default: "" },
       mermaid: { default: "" },
       prompt: { default: "" },
       caption: { default: "" },
@@ -628,10 +728,14 @@ const AiLoadingBlockSpec = createReactBlockSpec(
       },
       status: {
         default: "loading",
-        values: ["loading", "failed", "done"],
+        values: ["loading", "failed", "done", "candidate"],
       },
       ai_source_id: { default: "" },
       ai_model: { default: "" },
+      patch_id: { default: "" },
+      preview_src: { default: "" },
+      summary: { default: "" },
+      candidate_path: { default: "" },
       accepted: { default: false },
       evidence_id: { default: "" },
     },

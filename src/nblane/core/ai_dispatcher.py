@@ -114,10 +114,86 @@ def _extract_mermaid(value: str) -> str:
         "timeline",
     )
     if clean.startswith(mermaid_starts):
-        return clean
+        return _normalize_mermaid_source(clean)
     label = re.sub(r"[\[\]{}<>|`\"']", " ", clean)
     label = re.sub(r"\s+", " ", label).strip()[:120] or "Diagram draft"
     return f'flowchart TD\n  A["{label}"]'
+
+
+def _normalize_mermaid_source(value: str) -> str:
+    """Normalize common LLM Mermaid output without changing graph semantics."""
+
+    source = (
+        _clean_text(value)
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\u002d", "-")
+        .strip()
+        .rstrip("，。")
+    )
+    if "\n" in source:
+        return source
+    match = re.match(r"^(?P<header>(?:flowchart|graph)\s+(?:TB|TD|BT|LR|RL))\s+(?P<body>.+)$", source, re.I)
+    if not match:
+        return source
+    body = match.group("body").strip()
+    statements = _split_one_line_mermaid_flowchart(body)
+    if not statements:
+        return source
+    return "\n".join([match.group("header"), *(f"  {statement}" for statement in statements)])
+
+
+def _split_one_line_mermaid_flowchart(body: str) -> list[str]:
+    statements: list[str] = []
+    start = 0
+    quote = ""
+    square = curly = paren = 0
+    for index, char in enumerate(body):
+        if quote:
+            if char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            continue
+        if char == "[":
+            square += 1
+            continue
+        if char == "]" and square:
+            square -= 1
+            continue
+        if char == "{":
+            curly += 1
+            continue
+        if char == "}" and curly:
+            curly -= 1
+            continue
+        if char == "(":
+            paren += 1
+            continue
+        if char == ")" and paren:
+            paren -= 1
+            continue
+        if not char.isspace() or square or curly or paren:
+            continue
+        previous = body[index - 1] if index > 0 else ""
+        if not re.match(r"[\w\]\}\)]", previous, re.I):
+            continue
+        rest = body[index:].lstrip()
+        if re.match(
+            r"^[A-Za-z_][\w-]*(?:\s*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\)))?\s*(?:-->|---|--|==>|-\.\->|-\.)",
+            rest,
+        ):
+            statement = body[start:index].strip().rstrip(";")
+            if statement:
+                statements.append(statement)
+            start = len(body) - len(rest)
+    tail = body[start:].strip().rstrip(";")
+    if tail:
+        statements.append(tail)
+    if len(statements) == 1 and ";" in statements[0]:
+        statements = [part.strip() for part in statements[0].split(";") if part.strip()]
+    return statements
 
 
 def _operation(value: object, visual_kind: str = "") -> str:
@@ -379,6 +455,10 @@ def generate_ai_patch(
     block_patches: list[AIBlockPatch] = []
     visual_payload: dict[str, Any] | None = None
 
+    def _emit_progress(message: str) -> None:
+        if stream_callback is not None:
+            stream_callback(f"\n\n{message}\n")
+
     if clean_operation == "formula":
         latex = _strip_wrapping_math_delimiters(raw)
         block_patches = [
@@ -448,6 +528,7 @@ def generate_ai_patch(
             )
         )
     elif clean_operation == "visual":
+        _emit_progress("Generating visual asset candidate...")
         caption_intent = visual_generation.from_caption_intent(
             _context_text(target, markdown),
             lang,
@@ -464,12 +545,14 @@ def generate_ai_patch(
         )
         generated_assets = _as_list(caption_intent.get("generated_assets"))
         candidate_path = ""
+        preview_src = ""
         saved_model = _clean_text(caption_intent.get("model"))
         saved_provider = _clean_text(caption_intent.get("provider") or "dashscope_wan")
         if not generated_assets:
             detail = "; ".join(warnings) or "Visual generation did not return an image candidate."
             raise RuntimeError(detail)
         try:
+            _emit_progress("Staging visual asset preview...")
             first = generated_assets[0]
             extension = _clean_text(getattr(first, "extension", "png") or "png")
             filename = visual_generation.generated_filename(
@@ -491,6 +574,11 @@ def generate_ai_patch(
                 prompt=_clean_text(caption_intent.get("prompt") or raw_text),
             )
             candidate_path = candidate.relative_path
+            preview_src = visual_candidate_store.candidate_preview_src(
+                profile,
+                candidate_path,
+                kind="image",
+            )
         except Exception as exc:
             raise RuntimeError(f"Generated visual could not be staged: {exc}") from exc
         visual_payload = {
@@ -498,6 +586,7 @@ def generate_ai_patch(
             "visual_kind": "example",
             "src": "",
             "candidate_path": candidate_path,
+            "preview_src": preview_src,
             "mermaid": "",
             "prompt": _clean_text(caption_intent.get("prompt") or raw_text),
             "status": "candidate",
@@ -520,6 +609,7 @@ def generate_ai_patch(
                 kind="image",
                 src="",
                 candidate_path=candidate_path,
+                preview_src=preview_src,
                 prompt=_clean_text(visual_payload.get("prompt")),
                 provider=saved_provider,
                 model=saved_model,

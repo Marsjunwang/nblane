@@ -160,6 +160,21 @@ test("round-trips visual candidate paths through comments", () => {
   );
 });
 
+test("parses AI loading diagram candidates from comments", () => {
+  const markdown =
+    '<!-- nblane:ai_loading {"prompt":"flowchart TD\\n  A[Login] \\u002d\\u002d> B{Valid?}\\n  B \\u002d\\u002d>|Yes| C[Home]","mode":"diagram","status":"candidate","ai_source_id":"ai-stream-1","patch_id":"ai-patch-1","summary":"flowchart TD\\n  A[Login] \\u002d\\u002d> B{Valid?}\\n  B \\u002d\\u002d>|Yes| C[Home]","candidate_path":"","accepted":false,"evidence_id":""} -->';
+
+  const segments = splitMarkdownSpecialBlocks(markdown);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].block.type, "ai_loading_block");
+  assert.equal(segments[0].block.props.mode, "diagram");
+  assert.equal(segments[0].block.props.status, "candidate");
+  assert.equal(
+    segments[0].block.props.summary,
+    "flowchart TD\n  A[Login] --> B{Valid?}\n  B -->|Yes| C[Home]",
+  );
+});
+
 test("round-trips AI math block metadata through comments", () => {
   const markdown = blockToSpecialMarkdown({
     type: "math_block",

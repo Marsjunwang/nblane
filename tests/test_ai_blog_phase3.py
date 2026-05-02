@@ -81,6 +81,36 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertIn("flowchart TD", props["mermaid"])
         self.assertEqual(patch_payload["assets"][0]["kind"], "diagram")
 
+    def test_diagram_patch_normalizes_single_line_flowchart(self) -> None:
+        raw = (
+            "flowchart TD A[用户输入账号密码] --> B{系统校验} "
+            "B -->|校验成功| C[成功进入首页] B -->|校验失败| D[失败提示错误]"
+        )
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", return_value=raw):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={},
+                markdown="",
+                selected_block={"cursor_block_id": "b1"},
+                operation="visual",
+                visual_kind="diagram",
+                prompt="User login flow",
+            )
+
+        mermaid = patch_payload["block_patches"][0]["block"]["props"]["mermaid"]
+        self.assertEqual(
+            mermaid,
+            "\n".join(
+                [
+                    "flowchart TD",
+                    "  A[用户输入账号密码] --> B{系统校验}",
+                    "  B -->|校验成功| C[成功进入首页]",
+                    "  B -->|校验失败| D[失败提示错误]",
+                ]
+            ),
+        )
+
     def test_empty_formula_prompt_requires_selection_or_description(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "请先选中文本"):
             ai_dispatcher.generate_ai_patch(

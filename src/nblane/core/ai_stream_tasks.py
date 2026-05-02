@@ -146,6 +146,13 @@ def start_ai_patch_stream(
         daemon=True,
     )
     thread.start()
+    watchdog = threading.Thread(
+        target=_watchdog_timeout,
+        args=(clean_task_id,),
+        name=f"nblane-ai-stream-timeout-{clean_task_id}",
+        daemon=True,
+    )
+    watchdog.start()
     cleanup(started_at)
     return snapshot(clean_task_id)
 
@@ -183,3 +190,16 @@ def _mark_timeout_locked(task_id: str, task: dict[str, Any], now: float) -> None
         "Regenerate or check the LLM provider connection."
     )
     task["updated_at"] = now
+
+
+def _watchdog_timeout(task_id: str) -> None:
+    """Mark a running task as failed even if no client poll arrives."""
+
+    time.sleep(_TIMEOUT_SECONDS)
+    clean_id = str(task_id or "").strip()
+    if not clean_id:
+        return
+    with _LOCK:
+        task = _TASKS.get(clean_id)
+        if isinstance(task, dict):
+            _mark_timeout_locked(clean_id, task, time.time())

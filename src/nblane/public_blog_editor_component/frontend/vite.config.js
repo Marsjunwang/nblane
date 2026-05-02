@@ -11,78 +11,95 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) {
+          const normalizedId = id.replace(/\\/g, "/");
+          if (!normalizedId.includes("node_modules")) {
             return undefined;
           }
-          if (id.includes("mermaid") || id.includes("d3") || id.includes("dagre") || id.includes("graphlib")) {
-            return "vendor-mermaid";
+          if (normalizedId.includes("/node_modules/mermaid/")) {
+            return undefined;
           }
-          if (id.includes("elkjs") || id.includes("cytoscape")) {
-            return "vendor-diagram-layout";
+          if (normalizedId.includes("/node_modules/d3") || normalizedId.includes("/node_modules/internmap/")) {
+            return "vendor-d3";
           }
-          if (id.includes("katex")) {
+          if (
+            normalizedId.includes("/node_modules/dagre-d3-es/") ||
+            normalizedId.includes("/node_modules/graphlib/")
+          ) {
+            return "vendor-dagre";
+          }
+          if (normalizedId.includes("/node_modules/elkjs/")) {
+            return "vendor-elk";
+          }
+          if (
+            normalizedId.includes("/node_modules/cytoscape/") ||
+            normalizedId.includes("/node_modules/cytoscape-cose-bilkent/") ||
+            normalizedId.includes("/node_modules/cose-base/")
+          ) {
+            return "vendor-cytoscape";
+          }
+          if (normalizedId.includes("katex")) {
             return "vendor-katex";
           }
-          if (id.includes("diff-match-patch")) {
+          if (normalizedId.includes("diff-match-patch")) {
             return "vendor-diff";
           }
-          if (id.includes("@blocknote") || id.includes("@tiptap")) {
+          if (normalizedId.includes("@blocknote") || normalizedId.includes("@tiptap")) {
             return "vendor-blocknote";
           }
           if (
-            id.includes("react") ||
-            id.includes("react-dom") ||
-            id.includes("scheduler") ||
-            id.includes("use-sync-external-store") ||
-            id.includes("@mantine") ||
-            id.includes("@floating-ui") ||
-            id.includes("tabbable")
+            normalizedId.includes("react") ||
+            normalizedId.includes("react-dom") ||
+            normalizedId.includes("scheduler") ||
+            normalizedId.includes("use-sync-external-store") ||
+            normalizedId.includes("@mantine") ||
+            normalizedId.includes("@floating-ui") ||
+            normalizedId.includes("tabbable")
           ) {
             return "vendor-react-ui";
           }
-          if (id.includes("streamlit-component-lib")) {
+          if (normalizedId.includes("streamlit-component-lib")) {
             return "vendor-streamlit";
           }
-          if (id.includes("emoji-mart") || id.includes("@emoji-mart")) {
+          if (normalizedId.includes("emoji-mart") || normalizedId.includes("@emoji-mart")) {
             return "vendor-emoji";
           }
           if (
-            id.includes("prosemirror") ||
-            id.includes("yjs") ||
-            id.includes("lib0") ||
-            id.includes("orderedmap") ||
-            id.includes("rope-sequence") ||
-            id.includes("w3c-keyname")
+            normalizedId.includes("prosemirror") ||
+            normalizedId.includes("yjs") ||
+            normalizedId.includes("lib0") ||
+            normalizedId.includes("orderedmap") ||
+            normalizedId.includes("rope-sequence") ||
+            normalizedId.includes("w3c-keyname")
           ) {
             return "vendor-editor-core";
           }
           if (
-            id.includes("unified") ||
-            id.includes("remark") ||
-            id.includes("rehype") ||
-            id.includes("micromark") ||
-            id.includes("mdast") ||
-            id.includes("hast") ||
-            id.includes("unist") ||
-            id.includes("vfile") ||
-            id.includes("parse5") ||
-            id.includes("property-information") ||
-            id.includes("character-entities") ||
-            id.includes("decode-named-character-reference") ||
-            id.includes("comma-separated-tokens") ||
-            id.includes("space-separated-tokens") ||
-            id.includes("html-void-elements") ||
-            id.includes("web-namespaces") ||
-            id.includes("zwitch") ||
-            id.includes("bail") ||
-            id.includes("ccount") ||
-            id.includes("devlop") ||
-            id.includes("trough") ||
-            id.includes("trim-lines") ||
-            id.includes("trim-trailing-lines") ||
-            id.includes("longest-streak") ||
-            id.includes("markdown-table") ||
-            id.includes("stringify-entities")
+            normalizedId.includes("unified") ||
+            normalizedId.includes("remark") ||
+            normalizedId.includes("rehype") ||
+            normalizedId.includes("micromark") ||
+            normalizedId.includes("mdast") ||
+            normalizedId.includes("hast") ||
+            normalizedId.includes("unist") ||
+            normalizedId.includes("vfile") ||
+            normalizedId.includes("parse5") ||
+            normalizedId.includes("property-information") ||
+            normalizedId.includes("character-entities") ||
+            normalizedId.includes("decode-named-character-reference") ||
+            normalizedId.includes("comma-separated-tokens") ||
+            normalizedId.includes("space-separated-tokens") ||
+            normalizedId.includes("html-void-elements") ||
+            normalizedId.includes("web-namespaces") ||
+            normalizedId.includes("zwitch") ||
+            normalizedId.includes("bail") ||
+            normalizedId.includes("ccount") ||
+            normalizedId.includes("devlop") ||
+            normalizedId.includes("trough") ||
+            normalizedId.includes("trim-lines") ||
+            normalizedId.includes("trim-trailing-lines") ||
+            normalizedId.includes("longest-streak") ||
+            normalizedId.includes("markdown-table") ||
+            normalizedId.includes("stringify-entities")
           ) {
             return "vendor-markdown";
           }

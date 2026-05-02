@@ -65,6 +65,10 @@ _VISUAL_BLOCK_COMMENT_RE = re.compile(
     r"<!--\s*nblane:visual_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
     re.IGNORECASE,
 )
+_AI_LOADING_COMMENT_RE = re.compile(
+    r"<!--\s*nblane:ai_loading(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
+    re.IGNORECASE,
+)
 _MATH_BLOCK_COMMENT_RE = re.compile(
     r"<!--\s*nblane:math_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
     re.IGNORECASE,
@@ -100,6 +104,21 @@ _MATHJAX_HEAD = r"""
   };
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+"""
+_MERMAID_HEAD = r"""
+  <script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "default"
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    mermaid.run({ querySelector: ".mermaid" }).catch((error) => {
+      console.error("Mermaid render failed", error);
+    });
+  });
+  </script>
 """
 
 
@@ -1280,12 +1299,7 @@ def _strip_mermaid_leading_edge_label(token: str) -> str:
 def _render_mermaid_static_svg(source: str) -> str:
     """Render a conservative SVG fallback for simple flowchart Mermaid graphs."""
 
-    source = (
-        str(source or "")
-        .replace("\\r\\n", "\n")
-        .replace("\\n", "\n")
-        .replace("\\u002d", "-")
-    )
+    source = _normalize_mermaid_source(source)
     lines = [line.strip() for line in source.splitlines() if line.strip()]
     if not lines or not re.match(r"^(flowchart|graph)\s+", lines[0], re.I):
         return ""
@@ -1359,6 +1373,81 @@ def _render_mermaid_static_svg(source: str) -> str:
     )
 
 
+def _normalize_mermaid_source(source: str) -> str:
+    """Normalize common one-line Mermaid flowcharts produced by LLMs."""
+
+    text = (
+        str(source or "")
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\u002d", "-")
+        .strip()
+        .rstrip("，。")
+    )
+    if "\n" in text:
+        return text
+    match = re.match(r"^(?P<header>(?:flowchart|graph)\s+(?:TB|TD|BT|LR|RL))\s+(?P<body>.+)$", text, re.I)
+    if not match:
+        return text
+    statements = _split_one_line_mermaid_flowchart(match.group("body").strip())
+    if not statements:
+        return text
+    return "\n".join([match.group("header"), *(f"  {statement}" for statement in statements)])
+
+
+def _split_one_line_mermaid_flowchart(body: str) -> list[str]:
+    statements: list[str] = []
+    start = 0
+    quote = ""
+    square = curly = paren = 0
+    for index, char in enumerate(body):
+        if quote:
+            if char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            continue
+        if char == "[":
+            square += 1
+            continue
+        if char == "]" and square:
+            square -= 1
+            continue
+        if char == "{":
+            curly += 1
+            continue
+        if char == "}" and curly:
+            curly -= 1
+            continue
+        if char == "(":
+            paren += 1
+            continue
+        if char == ")" and paren:
+            paren -= 1
+            continue
+        if not char.isspace() or square or curly or paren:
+            continue
+        previous = body[index - 1] if index > 0 else ""
+        if not re.match(r"[\w\]\}\)]", previous, re.I):
+            continue
+        rest = body[index:].lstrip()
+        if re.match(
+            r"^[A-Za-z_][\w-]*(?:\s*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\)))?\s*(?:-->|---|--|==>|-\.\->|-\.)",
+            rest,
+        ):
+            statement = body[start:index].strip().rstrip(";")
+            if statement:
+                statements.append(statement)
+            start = len(body) - len(rest)
+    tail = body[start:].strip().rstrip(";")
+    if tail:
+        statements.append(tail)
+    if len(statements) == 1 and ";" in statements[0]:
+        statements = [part.strip() for part in statements[0].split(";") if part.strip()]
+    return statements
+
+
 def _render_visual_block_comment(payload: dict) -> str:
     src = _strip_markdown_url(str(payload.get("src", "") or "")).strip()
     asset_type = str(payload.get("asset_type", "") or "").strip().lower()
@@ -1367,10 +1456,13 @@ def _render_visual_block_comment(payload: dict) -> str:
     caption = str(payload.get("caption", "") or "").strip()
     alt = str(payload.get("alt", "") or caption or "Visual").strip()
     if not src and (asset_type == "diagram" or mermaid):
-        diagram_source = mermaid or str(payload.get("prompt", "") or "")
-        diagram_html = _render_mermaid_static_svg(diagram_source) or (
-            f'<pre class="mermaid">{html.escape(diagram_source)}</pre>'
+        diagram_source = _normalize_mermaid_source(
+            mermaid or str(payload.get("prompt", "") or "")
         )
+        static_fallback = _render_mermaid_static_svg(diagram_source)
+        diagram_html = f'<pre class="mermaid">{html.escape(diagram_source)}</pre>'
+        if static_fallback:
+            diagram_html += f"<noscript>{static_fallback}</noscript>"
         caption_html = (
             f'<figcaption class="media-caption">{html.escape(caption)}</figcaption>'
             if caption
@@ -1424,6 +1516,12 @@ def _replace_visual_block_comments(text: str) -> str:
         return _render_visual_block_comment(loaded)
 
     return _VISUAL_BLOCK_COMMENT_RE.sub(repl, text)
+
+
+def _replace_ai_loading_comments(text: str) -> str:
+    """Drop unaccepted inline AI candidates from public-site rendering."""
+
+    return _AI_LOADING_COMMENT_RE.sub("", text)
 
 
 def _replace_math_block_comments(text: str) -> str:
@@ -1780,6 +1878,7 @@ def validate_public_layer(
 
 
 def _markdown_to_html(text: str) -> str:
+    text = _replace_ai_loading_comments(text)
     text = _replace_math_block_comments(text)
     text = _replace_visual_block_comments(text)
     text = _replace_video_directives(text)
@@ -2003,6 +2102,7 @@ def _html_page(
         + f'  <meta name="twitter:description" content="{html.escape(meta_description, quote=True)}">\n'
     )
     math_head = _MATHJAX_HEAD if include_math else ""
+    mermaid_head = _MERMAID_HEAD if 'class="mermaid"' in body else ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2013,6 +2113,7 @@ def _html_page(
 {seo_html.rstrip()}
   <link rel="stylesheet" href="{html.escape(asset_href)}">
 {math_head}
+{mermaid_head}
 </head>
 <body>
   <header class="site-header">
@@ -2323,6 +2424,21 @@ h3 { margin: 0 0 8px; letter-spacing: 0; }
   fill: #426c62;
 }
 .prose pre { overflow: auto; padding: 16px; background: #10201e; color: #eef5f1; }
+.prose pre.mermaid,
+.prose .mermaid {
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f6f8f7;
+  color: var(--ink);
+}
+.prose .mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
 .prose code { font-size: 0.95em; }
 .prose mjx-container[display="true"] {
   max-width: 100%;
@@ -4140,6 +4256,33 @@ def blog_media_library_rows(
     return rows
 
 
+_VISUAL_KIND_TO_ASSET_TYPE = {
+    "cover": "image",
+    "flowchart": "diagram",
+    "sequence": "diagram",
+    "state": "diagram",
+    "class": "diagram",
+    "mindmap": "diagram",
+    "example": "image",
+    "video_edit": "video",
+}
+
+
+def _normalize_visual_kind(value: str) -> str:
+    clean = str(value or "").strip().lower()
+    if clean in {"diagram", "mermaid"}:
+        return "flowchart"
+    return clean if clean in _VISUAL_KIND_TO_ASSET_TYPE else ""
+
+
+def _visual_asset_type(asset_type: str, visual_kind: str = "") -> str:
+    clean_type = str(asset_type or "").strip().lower()
+    clean_kind = _normalize_visual_kind(visual_kind or clean_type)
+    if clean_kind:
+        return _VISUAL_KIND_TO_ASSET_TYPE[clean_kind]
+    return clean_type if clean_type in {"image", "video", "diagram"} else "image"
+
+
 def blog_visual_result_rows(
     profile_root: Path,
     slug: str,
@@ -4152,7 +4295,8 @@ def blog_visual_result_rows(
     body: str = "",
 ) -> list[dict]:
     """Return editor payload rows for newly generated visual candidates."""
-    clean_visual_kind = str(asset_type or "").strip().lower()
+    clean_visual_kind = _normalize_visual_kind(asset_type)
+    clean_asset_type = _visual_asset_type(asset_type, clean_visual_kind)
     media_rows = blog_media_library_rows(
         profile_root,
         slug,
@@ -4182,13 +4326,8 @@ def blog_visual_result_rows(
             }
         row.update(
             {
-                "asset_type": clean_visual_kind or "cover",
-                "visual_kind": (
-                    clean_visual_kind
-                    if clean_visual_kind
-                    in {"cover", "flowchart", "example", "video_edit"}
-                    else ""
-                ),
+                "asset_type": clean_asset_type,
+                "visual_kind": clean_visual_kind,
                 "alt": str(alt or ""),
                 "caption": str(caption or ""),
                 "snippet": result.snippet,
@@ -4209,6 +4348,8 @@ def blog_visual_candidate_rows(
 ) -> list[dict]:
     """Return editor rows for unsaved visual candidates."""
     clean_type = str(asset_type or "").strip().lower() or "cover"
+    clean_visual_kind = _normalize_visual_kind(clean_type)
+    clean_asset_type = _visual_asset_type(clean_type, clean_visual_kind)
     kind = _generated_media_kind(clean_type)
     rows: list[dict] = []
     for index, asset in enumerate(assets):
@@ -4242,12 +4383,8 @@ def blog_visual_candidate_rows(
                 "size_kb": round(len(asset.data) / 1024, 1),
                 "referenced": False,
                 **preview_payload,
-                "asset_type": clean_type,
-                "visual_kind": (
-                    clean_type
-                    if clean_type in {"cover", "flowchart", "example", "video_edit"}
-                    else ""
-                ),
+                "asset_type": clean_asset_type,
+                "visual_kind": clean_visual_kind,
                 "alt": str(alt or ""),
                 "caption": str(caption or ""),
                 "snippet": _blog_media_snippet(

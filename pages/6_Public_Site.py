@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import base64
+import copy
 import json
+import mimetypes
 import re
 import time
 import uuid
@@ -1345,6 +1347,108 @@ def _ai_patch_candidate_entries(patch: dict) -> list[dict]:
     return entries
 
 
+def _candidate_preview_src_for_patch(
+    selected: str,
+    patch_id: str,
+    candidate_path: str,
+    *,
+    kind: str = "image",
+) -> str:
+    """Return a browser-safe preview URL for one active AI candidate asset."""
+
+    if not selected or not candidate_path:
+        return ""
+    try:
+        inline_src = visual_candidate_store.candidate_preview_src(
+            selected,
+            candidate_path,
+            kind=kind,
+        )
+        if inline_src:
+            return inline_src
+        path = visual_candidate_store.candidate_file_path(selected, candidate_path)
+        if not path.exists() or not path.is_file():
+            return ""
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        from streamlit.runtime import get_instance
+
+        media_mgr = get_instance().media_file_mgr
+        coordinates = ":".join(
+            [
+                "blog_candidate_preview",
+                selected,
+                str(patch_id or "patch"),
+                path.name,
+            ]
+        )
+        return media_mgr.add(
+            str(path),
+            mime,
+            coordinates=coordinates,
+            file_name=path.name,
+        )
+    except Exception:
+        return ""
+
+
+def _attach_ai_patch_preview_sources(selected: str, patch: dict) -> dict:
+    """Attach preview_src to candidate assets while preserving the patch shape."""
+
+    if not isinstance(patch, dict):
+        return {}
+    enriched = copy.deepcopy(patch)
+    patch_id = str(enriched.get("patch_id", "") or enriched.get("id", "") or "").strip()
+    previews_by_path: dict[str, str] = {}
+    assets = enriched.get("assets")
+    if isinstance(assets, list):
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            candidate_path = str(asset.get("candidate_path", "") or "").strip()
+            if not candidate_path:
+                continue
+            preview_src = str(asset.get("preview_src", "") or "").strip()
+            if not preview_src:
+                preview_src = _candidate_preview_src_for_patch(
+                    selected,
+                    patch_id,
+                    candidate_path,
+                    kind=str(asset.get("kind", "") or "image"),
+                )
+                if preview_src:
+                    asset["preview_src"] = preview_src
+            if preview_src:
+                previews_by_path[candidate_path] = preview_src
+    mutations = enriched.get("block_patches")
+    if isinstance(mutations, list):
+        for mutation in mutations:
+            if not isinstance(mutation, dict):
+                continue
+            block = mutation.get("block")
+            if not isinstance(block, dict):
+                continue
+            props = block.get("props")
+            if not isinstance(props, dict):
+                continue
+            candidate_path = str(props.get("candidate_path", "") or "").strip()
+            if not candidate_path:
+                continue
+            preview_src = str(props.get("preview_src", "") or "").strip()
+            if not preview_src:
+                preview_src = previews_by_path.get(candidate_path, "")
+            if not preview_src:
+                preview_src = _candidate_preview_src_for_patch(
+                    selected,
+                    patch_id,
+                    candidate_path,
+                    kind=str(props.get("asset_type", "") or "image"),
+                )
+            if preview_src:
+                props["preview_src"] = preview_src
+                previews_by_path[candidate_path] = preview_src
+    return enriched
+
+
 def _visual_block_payloads(body: str) -> list[dict]:
     """Return parsed visual block comment payloads from markdown body."""
 
@@ -1489,10 +1593,12 @@ def _promote_ai_patch_candidates(
         if candidate_path in promotions:
             payload["src"] = promotions[candidate_path]
             payload.pop("candidate_path", None)
+            payload.pop("preview_src", None)
             payload["status"] = "accepted"
             payload["accepted"] = True
             return f"<!-- nblane:visual_block {_comment_json(payload)} -->"
         if _visual_payload_belongs_to_patch(payload, patch):
+            payload.pop("preview_src", None)
             payload["status"] = "accepted"
             payload["accepted"] = True
             return f"<!-- nblane:visual_block {_comment_json(payload)} -->"
@@ -2303,9 +2409,35 @@ def _render_blog_react_shell(
     layout_state: dict,
     ui: dict[str, str],
 ) -> bool:
-    """Render the React Blog Editor shell and dispatch returned actions."""
+    """Render the React Blog Editor shell inside a Streamlit fragment."""
     if st_public_blog_editor is None:
         return False
+    _render_blog_react_shell_fragment(
+        selected=selected,
+        root=root,
+        posts=posts,
+        latest_post=latest_post,
+        original_meta=original_meta,
+        layout_state=layout_state,
+        ui=ui,
+    )
+    return True
+
+
+@st.fragment
+def _render_blog_react_shell_fragment(
+    *,
+    selected: str,
+    root: Path,
+    posts: list,
+    latest_post,
+    original_meta: dict,
+    layout_state: dict,
+    ui: dict[str, str],
+) -> None:
+    """Render the React Blog Editor shell and dispatch returned actions."""
+    if st_public_blog_editor is None:
+        return
 
     draft_meta, draft_body = _blog_shell_prepare_state(
         selected,
@@ -2357,6 +2489,24 @@ def _render_blog_react_shell(
         ):
             preview_html = ""
             _clear_blog_preview(selected, latest_post.slug)
+    ai_patch_payload = _attach_ai_patch_preview_sources(
+        selected,
+        st.session_state.get(_blog_ai_patch_key(selected, latest_post.slug), {}),
+    )
+    ai_stream_payload = _ai_stream_snapshot(
+        str(
+            st.session_state.get(
+                _blog_ai_stream_key(selected, latest_post.slug),
+                "",
+            )
+            or ""
+        )
+    )
+    if isinstance(ai_stream_payload.get("patch"), dict):
+        ai_stream_payload["patch"] = _attach_ai_patch_preview_sources(
+            selected,
+            ai_stream_payload.get("patch", {}),
+        )
     editor_kwargs = {
         "posts": _blog_shell_posts_payload(posts),
         "active_slug": latest_post.slug,
@@ -2374,19 +2524,8 @@ def _render_blog_react_shell(
             candidates=ai_candidates,
             ui=ui,
         ),
-        "ai_patch": st.session_state.get(
-            _blog_ai_patch_key(selected, latest_post.slug),
-            {},
-        ),
-        "ai_stream": _ai_stream_snapshot(
-            str(
-                st.session_state.get(
-                    _blog_ai_stream_key(selected, latest_post.slug),
-                    "",
-                )
-                or ""
-            )
-        ),
+        "ai_patch": ai_patch_payload,
+        "ai_stream": ai_stream_payload,
         "operation_notice": st.session_state.get(
             _blog_shell_notice_key(selected, latest_post.slug),
             {},
@@ -2752,6 +2891,7 @@ def _render_blog_react_shell(
         if snapshot.get("status") == "done":
             patch = snapshot.get("patch")
             if isinstance(patch, dict) and patch.get("operation"):
+                patch = _attach_ai_patch_preview_sources(selected, patch)
                 st.session_state[_blog_ai_patch_key(selected, latest_post.slug)] = patch
                 _set_blog_shell_notice(
                     selected,

@@ -699,6 +699,226 @@ function aiLoadingMode(operation, visualKind = "") {
   return clean === "continue" ? "write" : "rewrite";
 }
 
+function firstPatchBlockProps(patch, blockType = "") {
+  const targetType = cleanText(blockType).trim();
+  for (const mutation of asArray(patch?.block_patches).map(asObject)) {
+    const block = asObject(mutation.block);
+    if (targetType && cleanText(block.type) !== targetType) {
+      continue;
+    }
+    return asObject(block.props);
+  }
+  return {};
+}
+
+function aiPatchSourceIds(patch) {
+  const ids = [];
+  const addId = (value) => {
+    const clean = cleanText(value).trim();
+    if (clean && !ids.includes(clean)) {
+      ids.push(clean);
+    }
+  };
+  addId(patch?.patch_id || patch?.id);
+  for (const mutation of asArray(patch?.block_patches).map(asObject)) {
+    addId(asObject(asObject(mutation.block).props).ai_source_id);
+  }
+  for (const ref of asArray(asObject(patch?.provenance).source_refs)) {
+    addId(ref);
+  }
+  return ids;
+}
+
+function aiPatchCandidatePreview(patch) {
+  for (const asset of asArray(patch?.assets).map(asObject)) {
+    const preview = cleanText(asset.preview_src || asset.preview || asset.thumbnail).trim();
+    if (preview) {
+      return preview;
+    }
+  }
+  for (const mutation of asArray(patch?.block_patches).map(asObject)) {
+    const props = asObject(asObject(mutation.block).props);
+    const preview = cleanText(props.preview_src || props.preview || props.thumbnail).trim();
+    if (preview) {
+      return preview;
+    }
+  }
+  return "";
+}
+
+function aiPatchCandidatePath(patch) {
+  for (const asset of asArray(patch?.assets).map(asObject)) {
+    const candidatePath = cleanText(asset.candidate_path).trim();
+    if (candidatePath) {
+      return candidatePath;
+    }
+  }
+  for (const mutation of asArray(patch?.block_patches).map(asObject)) {
+    const candidatePath = cleanText(
+      asObject(asObject(mutation.block).props).candidate_path,
+    ).trim();
+    if (candidatePath) {
+      return candidatePath;
+    }
+  }
+  return "";
+}
+
+function aiPatchCandidateSummary(patch) {
+  const visualProps = firstPatchBlockProps(patch, "visual_block");
+  const mathProps = firstPatchBlockProps(patch, "math_block");
+  const asset = asObject(asArray(patch?.assets).map(asObject)[0]);
+  return cleanText(
+    visualProps.caption ||
+      visualProps.prompt ||
+      mathProps.latex ||
+      asset.prompt ||
+      patch?.markdown_fallback ||
+      patch?.operation ||
+    "",
+  ).trim();
+}
+
+function inlineCandidatePatchFromBlock(block, detail = {}) {
+  const blockProps = asObject(block?.props);
+  const eventProps = asObject(detail);
+  const props = { ...eventProps, ...blockProps };
+  const mode = cleanText(props.mode).toLowerCase();
+  const status = cleanText(props.status || "candidate").toLowerCase();
+  const blockId = cleanText(block?.id || props.block_id).trim();
+  if (status !== "candidate" || !blockId) {
+    return null;
+  }
+
+  const patchId = cleanText(
+    props.patch_id || props.ai_source_id || `ai-${Date.now()}`,
+  ).trim();
+  const sourceId = cleanText(props.ai_source_id || patchId).trim();
+  const summary = cleanText(props.summary || props.prompt).trim();
+  const prompt = cleanText(props.prompt || summary).trim();
+  const previewSrc = cleanText(props.preview_src).trim();
+  const candidatePath = cleanText(props.candidate_path).trim();
+  const aiModel = cleanText(props.ai_model);
+  const evidenceId = cleanText(props.evidence_id);
+
+  if (mode === "diagram") {
+    const mermaid = summary || prompt;
+    if (!mermaid) {
+      return null;
+    }
+    return {
+      patch_id: patchId,
+      operation: "visual",
+      target: {
+        block_id: blockId,
+        block_ids: [blockId],
+        cursor_block_id: blockId,
+        selection_text: "",
+      },
+      meta_patch: {},
+      block_patches: [
+        {
+          op: "replace",
+          block_id: blockId,
+          block: {
+            type: "visual_block",
+            props: {
+              asset_type: "diagram",
+              visual_kind: "flowchart",
+              src: "",
+              candidate_path: "",
+              preview_src: "",
+              mermaid,
+              prompt,
+              caption: "",
+              alt: "Diagram",
+              status: "candidate",
+              ai_generated: true,
+              ai_source_id: sourceId,
+              ai_model: aiModel,
+              accepted: false,
+              evidence_id: evidenceId,
+            },
+          },
+        },
+      ],
+      markdown_fallback: "",
+      assets: [],
+      warnings: [],
+      citations: [],
+      provenance: {
+        source_event_id: sourceId,
+        source_refs: [sourceId, patchId].filter(Boolean),
+      },
+    };
+  }
+
+  if (!["visual", "video"].includes(mode)) {
+    return null;
+  }
+  if (!candidatePath && !previewSrc) {
+    return null;
+  }
+
+  const assetType = mode === "video" ? "video" : "image";
+  const visualKind = mode === "video" ? "video_edit" : "example";
+  return {
+    patch_id: patchId,
+    operation: "visual",
+    target: {
+      block_id: blockId,
+      block_ids: [blockId],
+      cursor_block_id: blockId,
+      selection_text: "",
+    },
+    meta_patch: {},
+    block_patches: [
+      {
+        op: "replace",
+        block_id: blockId,
+        block: {
+          type: "visual_block",
+          props: {
+            asset_type: assetType,
+            visual_kind: visualKind,
+            src: "",
+            candidate_path: candidatePath,
+            preview_src: previewSrc,
+            mermaid: "",
+            prompt,
+            caption: summary || prompt,
+            alt: summary || prompt || "Visual candidate",
+            status: "candidate",
+            ai_generated: true,
+            ai_source_id: sourceId,
+            ai_model: aiModel,
+            accepted: false,
+            evidence_id: evidenceId,
+          },
+        },
+      },
+    ],
+    markdown_fallback: "",
+    assets: [
+      {
+        kind: assetType,
+        src: "",
+        candidate_path: candidatePath,
+        preview_src: previewSrc,
+        prompt,
+        provider: "",
+        model: aiModel,
+      },
+    ],
+    warnings: [],
+    citations: [],
+    provenance: {
+      source_event_id: sourceId,
+      source_refs: [sourceId, patchId].filter(Boolean),
+    },
+  };
+}
+
 function patchDefaultPlacement(patch) {
   const operation = cleanText(patch?.operation).toLowerCase();
   const blockPatches = asArray(patch?.block_patches).map(asObject);
@@ -1346,7 +1566,6 @@ function LegacyMarkdownEditor(props) {
           return;
         }
         editor.replaceBlocks(editor.document, blocks);
-        setOutlineVersion((current) => current + 1);
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
@@ -2149,7 +2368,7 @@ function ShellEditor(props) {
           if (!reference) {
             return null;
           }
-          const inserted = editor.insertBlocks([nextBlock], reference, "after");
+          const inserted = asArray(editor.insertBlocks([nextBlock], reference, "after"));
           if (inserted.length) {
             insertedByAnchor.set(anchorKey, inserted[inserted.length - 1]);
           }
@@ -2248,14 +2467,35 @@ function ShellEditor(props) {
       if (!block) {
         return;
       }
+      const patch = asObject(stream?.patch);
+      const hasPatch = Boolean(cleanText(patch.operation).trim());
+      const previewSrc = hasPatch ? aiPatchCandidatePreview(patch) : "";
+      const summary = hasPatch ? aiPatchCandidateSummary(patch) : "";
+      const patchId = hasPatch ? cleanText(patch.patch_id || patch.id).trim() : "";
+      const candidatePath = hasPatch ? aiPatchCandidatePath(patch) : "";
       const status =
-        stream.status === "running" ? "loading" : stream.status === "done" ? "done" : "failed";
-      const prompt = stream.status === "failed" ? stream.error : stream.text;
+        stream.status === "running"
+          ? "loading"
+          : stream.status === "done" && hasPatch
+            ? "candidate"
+            : stream.status === "done"
+              ? "done"
+              : "failed";
+      const prompt =
+        status === "candidate"
+          ? summary || stream.text
+          : stream.status === "failed"
+            ? stream.error
+            : stream.text;
       editor.updateBlock(block, {
         props: {
           ...block.props,
           prompt: cleanText(prompt),
           status,
+          patch_id: patchId,
+          preview_src: previewSrc,
+          summary,
+          candidate_path: candidatePath,
         },
       });
     },
@@ -2270,6 +2510,44 @@ function ShellEditor(props) {
       }
     },
     [editor, findAILoadingBlock],
+  );
+
+  const findAILoadingBlockForPatch = useCallback(
+    (patch) => {
+      if (editorSourceMode) {
+        return null;
+      }
+      const ids = aiPatchSourceIds(patch);
+      if (!ids.length) {
+        return null;
+      }
+      return (
+        flattenBlocks(editor.document).find((block) => {
+          if (cleanText(block?.type) !== "ai_loading_block") {
+            return false;
+          }
+          const props = asObject(block.props);
+          return ids.some(
+            (id) =>
+              cleanText(props.ai_source_id).trim() === id ||
+              cleanText(props.patch_id).trim() === id,
+          );
+        }) || null
+      );
+    },
+    [editor, editorSourceMode],
+  );
+
+  const removeAILoadingBlockForPatch = useCallback(
+    (patch) => {
+      const block = findAILoadingBlockForPatch(patch);
+      if (!block) {
+        return false;
+      }
+      editor.removeBlocks([block]);
+      return true;
+    },
+    [editor, findAILoadingBlockForPatch],
   );
 
   const emitAIStreamControl = useCallback(
@@ -2328,13 +2606,53 @@ function ShellEditor(props) {
     },
     onComplete: (stream) => {
       if (stream.status !== "running") {
-        removeAILoadingBlock(stream.task_id);
+        const patch = asObject(stream.patch);
+        if (stream.status === "done" && cleanText(patch.operation).trim()) {
+          updateAILoadingBlock(stream);
+        } else {
+          removeAILoadingBlock(stream.task_id);
+        }
         setPendingAIAction((current) =>
           cleanText(current?.stream_id).trim() === stream.task_id ? null : current,
         );
       }
     },
   });
+
+  useEffect(() => {
+    const streamId = cleanText(pendingAIAction?.stream_id).trim();
+    if (!streamId || cleanText(pendingAIAction?.status) !== "running") {
+      return undefined;
+    }
+    const incomingId = cleanText(incomingAIStream?.task_id).trim();
+    const incomingStatus = cleanText(incomingAIStream?.status || "running").trim();
+    if (incomingId === streamId && incomingStatus === "running") {
+      return undefined;
+    }
+
+    const operation = cleanText(pendingAIAction?.operation).toLowerCase();
+    const intervalMs = ["visual", "diagram", "video"].includes(operation) ? 1500 : 800;
+    let timer = null;
+    const firstPoll = window.setTimeout(() => {
+      emitAIStreamControl("ai_stream_poll", streamId);
+      timer = window.setInterval(() => {
+        emitAIStreamControl("ai_stream_poll", streamId);
+      }, intervalMs);
+    }, 8000);
+    return () => {
+      window.clearTimeout(firstPoll);
+      if (timer !== null) {
+        window.clearInterval(timer);
+      }
+    };
+  }, [
+    emitAIStreamControl,
+    incomingAIStream?.status,
+    incomingAIStream?.task_id,
+    pendingAIAction?.operation,
+    pendingAIAction?.status,
+    pendingAIAction?.stream_id,
+  ]);
 
   function toggleFocusMode() {
     setMobileView("Editor");
@@ -2641,12 +2959,19 @@ function ShellEditor(props) {
     const blockPatchMarkdown = await applyBlockPatches(normalized);
     if (blockPatchMarkdown !== null) {
       markdown = blockPatchMarkdown;
+    } else if (blockOnly) {
+      setError("Block patch could not be applied in the editor.");
+      return;
     } else if (fallback) {
       markdown = await insertMarkdown(
         fallback,
         patchDefaultPlacement(normalized),
         { target: normalized.target },
       );
+    }
+    if (removeAILoadingBlockForPatch(normalized)) {
+      markdown = await getCurrentMarkdown();
+      setDirty(computeDirty(markdown, nextMeta));
     }
     setPatchCandidates((current) =>
       current.filter((candidate, index) => aiPatchId(candidate, index) !== id),
@@ -2667,6 +2992,7 @@ function ShellEditor(props) {
       return;
     }
     const id = aiPatchId(normalized);
+    removeAILoadingBlockForPatch(normalized);
     setPatchCandidates((current) =>
       current.filter((candidate, index) => aiPatchId(candidate, index) !== id),
     );
@@ -2688,6 +3014,112 @@ function ShellEditor(props) {
       selected_block: normalized.target,
     });
   }
+
+  function findInlineCandidateBlock(detail) {
+    if (editorSourceMode) {
+      return null;
+    }
+    const data = asObject(detail);
+    const blockId = cleanText(data.block_id).trim();
+    if (blockId) {
+      const byId = findBlockById(editor.document, blockId);
+      if (byId) {
+        return byId;
+      }
+    }
+    const ids = [
+      data.patch_id,
+      data.ai_source_id,
+      data.stream_id,
+    ]
+      .map(cleanText)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!ids.length) {
+      return null;
+    }
+    return (
+      flattenBlocks(editor.document).find((block) => {
+        if (cleanText(block?.type) !== "ai_loading_block") {
+          return false;
+        }
+        const props = asObject(block.props);
+        return ids.some(
+          (id) =>
+            cleanText(props.patch_id).trim() === id ||
+            cleanText(props.ai_source_id).trim() === id,
+        );
+      }) || null
+    );
+  }
+
+  function patchCandidateForInlineCandidate(block, detail) {
+    const data = asObject(detail);
+    const ids = [
+      data.patch_id,
+      data.ai_source_id,
+      block?.props?.patch_id,
+      block?.props?.ai_source_id,
+    ]
+      .map(cleanText)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const existing = patchCandidates.find((patch, index) => {
+      const patchIds = [aiPatchId(patch, index), ...aiPatchSourceIds(patch)];
+      return ids.some((id) => patchIds.includes(id));
+    });
+    return existing || inlineCandidatePatchFromBlock(block, data);
+  }
+
+  useEffect(() => {
+    const handleInlineCandidateAction = (event) => {
+      void (async () => {
+        if (!editable) {
+          return;
+        }
+        const detail = asObject(event.detail);
+        const action = cleanText(detail.action).toLowerCase();
+        if (!["accept", "reject", "review"].includes(action)) {
+          return;
+        }
+        const block = findInlineCandidateBlock(detail);
+        const patch = patchCandidateForInlineCandidate(block, detail);
+        if (!patch) {
+          setError("AI candidate data is incomplete. Please regenerate this candidate.");
+          return;
+        }
+        if (action === "review") {
+          const id = aiPatchId(patch);
+          setPatchCandidates((current) => {
+            const withoutDuplicate = current.filter(
+              (candidate, index) => aiPatchId(candidate, index) !== id,
+            );
+            return [patch, ...withoutDuplicate].slice(0, 8);
+          });
+          applyLayoutLocal((current) => ({
+            ...current,
+            right_open: true,
+            active_right_tab: "AI",
+            focus_mode: false,
+          }));
+          setMobileView("Tools");
+          return;
+        }
+        if (action === "accept") {
+          await handleAcceptAIPatch(patch, { blockOnly: false });
+          return;
+        }
+        await handleRejectAIPatch(patch);
+      })();
+    };
+    window.addEventListener("nblane:ai-candidate-action", handleInlineCandidateAction);
+    return () => {
+      window.removeEventListener(
+        "nblane:ai-candidate-action",
+        handleInlineCandidateAction,
+      );
+    };
+  });
 
   async function handleSetCover(item) {
     if (!editable) {

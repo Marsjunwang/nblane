@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import hashlib
+import mimetypes
 import re
 import shutil
 import time
@@ -16,6 +18,7 @@ from nblane.core.profile_io import profile_dir
 
 CANDIDATE_DIRNAME = ".candidates"
 DEFAULT_TTL_SECONDS = 24 * 60 * 60
+DEFAULT_INLINE_PREVIEW_BYTES = 2 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,35 @@ def _resolve_candidate_path(profile: str, candidate_path: str | Path) -> Path:
 
 def _profile_relative(profile: str, path: Path) -> str:
     return path.resolve().relative_to(profile_dir(profile).resolve()).as_posix()
+
+
+def candidate_file_path(profile: str, candidate_path: str | Path) -> Path:
+    """Resolve a candidate path after verifying it stays inside the store."""
+
+    return _resolve_candidate_path(profile, candidate_path)
+
+
+def candidate_preview_src(
+    profile: str,
+    candidate_path: str | Path,
+    *,
+    kind: str = "",
+    max_inline_bytes: int = DEFAULT_INLINE_PREVIEW_BYTES,
+) -> str:
+    """Return an inline browser preview for small staged image candidates."""
+
+    path = _resolve_candidate_path(profile, candidate_path)
+    if not path.exists() or not path.is_file():
+        return ""
+    clean_kind = str(kind or "").strip().lower()
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if clean_kind and clean_kind != "image":
+        return ""
+    if not mime.startswith("image/"):
+        return ""
+    if path.stat().st_size > max_inline_bytes:
+        return ""
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 
 def write_candidate(

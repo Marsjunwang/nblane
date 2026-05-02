@@ -33,6 +33,7 @@ export function useAIStream({
   onComplete,
   intervalMs = 120,
   pollIntervalMs = 800,
+  longTaskPollIntervalMs = 1500,
 }) {
   const latestStreamRef = useRef(null);
   const flushTimerRef = useRef(null);
@@ -60,11 +61,22 @@ export function useAIStream({
     if (!stream || stream.status !== "running") {
       return undefined;
     }
+    const operation = cleanText(stream.operation).toLowerCase();
+    const effectivePollIntervalMs = ["visual", "diagram", "video"].includes(operation)
+      ? longTaskPollIntervalMs
+      : pollIntervalMs;
     const timer = window.setInterval(() => {
       poll?.(stream.task_id);
-    }, pollIntervalMs);
+    }, effectivePollIntervalMs);
     return () => window.clearInterval(timer);
-  }, [poll, pollIntervalMs, stream?.status, stream?.task_id]);
+  }, [
+    longTaskPollIntervalMs,
+    poll,
+    pollIntervalMs,
+    stream?.operation,
+    stream?.status,
+    stream?.task_id,
+  ]);
 
   useEffect(() => {
     if (!stream || stream.status === "running") {

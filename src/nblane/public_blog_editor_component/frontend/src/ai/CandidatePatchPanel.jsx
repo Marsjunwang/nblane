@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { AIBlockDiff } from "./AIBlockDiff.jsx";
+import { MermaidRenderer } from "../blocks/MermaidRenderer.jsx";
 
 function cleanText(value) {
   return value === null || value === undefined ? "" : String(value);
@@ -129,7 +130,26 @@ function DiagramPreview({ block }) {
   if (!mermaid) {
     return null;
   }
-  return <pre className="nb-mermaid-fallback">{mermaid.slice(0, 1600)}</pre>;
+  return <MermaidRenderer source={mermaid} />;
+}
+
+function AssetPreview({ asset }) {
+  const previewSrc = cleanText(asset.preview_src || asset.preview || asset.thumbnail).trim();
+  if (!previewSrc) {
+    return null;
+  }
+  const kind = cleanText(asset.kind || "image").toLowerCase();
+  if (kind === "video" || /^data:video\//iu.test(previewSrc)) {
+    return (
+      <video
+        className="nb-ai-asset-preview"
+        src={previewSrc}
+        controls
+        preload="metadata"
+      />
+    );
+  }
+  return <img className="nb-ai-asset-preview" src={previewSrc} alt="AI asset preview" />;
 }
 
 export function CandidatePatchPanel({
@@ -191,6 +211,9 @@ export function CandidatePatchPanel({
         const id = patchId(patch, index);
         const warnings = asArray(patch.warnings).map(cleanText).filter(Boolean);
         const assets = asArray(patch.assets).map(asObject);
+        const previewAssets = assets.filter((asset) =>
+          cleanText(asset.preview_src || asset.preview || asset.thumbnail).trim(),
+        );
         const blockPatches = asArray(patch.block_patches).map(asObject);
         const mathBlock = firstBlockOfType(patch, "math_block");
         const visualBlock = firstBlockOfType(patch, "visual_block");
@@ -237,6 +260,13 @@ export function CandidatePatchPanel({
             ) : null}
             {cleanText(asObject(visualBlock?.props).asset_type) === "diagram" ? (
               <DiagramPreview block={visualBlock} />
+            ) : null}
+            {previewAssets.length ? (
+              <div className="nb-ai-asset-grid">
+                {previewAssets.map((asset, assetIndex) => (
+                  <AssetPreview asset={asset} key={`${id}-asset-preview-${assetIndex}`} />
+                ))}
+              </div>
             ) : null}
             {assets.length ? (
               <details>

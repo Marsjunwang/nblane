@@ -58,6 +58,7 @@ class AIAsset(BaseModel):
     provider: str = ""
     model: str = ""
     candidate_path: str = ""
+    preview_src: str = ""
 
 
 class AICitation(BaseModel):

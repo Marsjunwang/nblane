@@ -1060,7 +1060,7 @@ class TestPublicSite(unittest.TestCase):
         self.assertIn('src="/media/blog/draft-post/chart.png"', html)
 
     def test_visual_block_comment_renders_mermaid_without_src(self) -> None:
-        """Diagram visual blocks without image assets render static SVG."""
+        """Diagram visual blocks without image assets render Mermaid runtime source."""
         body = (
             '<!-- nblane:visual_block {"asset_type":"diagram",'
             '"visual_kind":"flowchart","mermaid":"flowchart TD\\\\nA\\\\u002d\\\\u002d>B",'
@@ -1069,15 +1069,15 @@ class TestPublicSite(unittest.TestCase):
 
         html = public_site._markdown_to_html(body)
 
-        self.assertIn("<svg", html)
-        self.assertIn('class="mermaid-static"', html)
-        self.assertIn(">A<", html)
-        self.assertIn(">B<", html)
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertIn("flowchart TD", html)
+        self.assertIn("A--&gt;B", html)
+        self.assertIn("<noscript><svg", html)
         self.assertNotIn("<script", html)
         self.assertIn('data-asset-type="diagram"', html)
 
     def test_visual_block_comment_renders_labeled_mermaid_edges(self) -> None:
-        """Common Mermaid edge labels still get a static SVG fallback."""
+        """Common Mermaid edge labels are preserved for the Mermaid runtime."""
         body = (
             '<!-- nblane:visual_block {"asset_type":"diagram",'
             '"visual_kind":"flowchart",'
@@ -1087,10 +1087,82 @@ class TestPublicSite(unittest.TestCase):
 
         html = public_site._markdown_to_html(body)
 
-        self.assertIn('class="mermaid-static"', html)
-        self.assertIn(">Login<", html)
-        self.assertIn(">Home<", html)
-        self.assertNotIn('<pre class="mermaid">', html)
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertIn("A[Login] --&gt;|Yes| B[Home]", html)
+        self.assertIn("<noscript><svg", html)
+
+    def test_visual_block_comment_normalizes_single_line_mermaid_flowchart(self) -> None:
+        """One-line LLM Mermaid output is normalized before runtime rendering."""
+        body = (
+            '<!-- nblane:visual_block {"asset_type":"diagram",'
+            '"visual_kind":"flowchart",'
+            '"mermaid":"flowchart TD A[用户输入账号密码] --> B{系统校验} '
+            'B -->|校验成功| C[成功进入首页] B -->|校验失败| D[失败提示错误]",'
+            '"caption":"Flow"} -->'
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertIn("flowchart TD\n  A[用户输入账号密码] --&gt; B{系统校验}", html)
+        self.assertIn("B --&gt;|校验成功| C[成功进入首页]", html)
+        self.assertIn("B --&gt;|校验失败| D[失败提示错误]", html)
+
+    def test_blog_preview_page_includes_mermaid_runtime_when_needed(self) -> None:
+        """Full public pages load Mermaid only when diagram blocks are present."""
+        body = public_site._markdown_to_html(
+            '<!-- nblane:visual_block {"asset_type":"diagram",'
+            '"visual_kind":"flowchart","mermaid":"flowchart TD\\\\nA\\\\u002d\\\\u002d>B"} -->'
+        )
+
+        html = public_site._html_page(
+            title="Diagram",
+            body=body,
+            public_profile={"name": "Test"},
+            current="blog",
+        )
+
+        self.assertIn("mermaid@10.9.5", html)
+        self.assertIn("mermaid.run", html)
+
+    def test_public_mermaid_background_matches_editor_shell(self) -> None:
+        """Public Mermaid containers use the same light surface as the editor."""
+        css = public_site._site_css()
+
+        self.assertIn(".prose pre.mermaid", css)
+        self.assertIn("background: #f6f8f7", css)
+        self.assertIn("border: 1px solid var(--line)", css)
+
+    def test_video_directive_render_order_matches_markdown_order(self) -> None:
+        """Public Markdown rendering keeps video directives in document order."""
+        body = (
+            "::video[first](https://example.com/a.mp4)\n\n"
+            "Between\n\n"
+            "::video[second](media/blog/post/b.mp4)\n\n"
+            "::video[third](media/blog/post/c.mp4)"
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertLess(html.index("a.mp4"), html.index("Between"))
+        self.assertLess(html.index("Between"), html.index("b.mp4"))
+        self.assertLess(html.index("b.mp4"), html.index("c.mp4"))
+
+    def test_ai_loading_comments_are_not_public_rendered(self) -> None:
+        """Unaccepted inline AI candidates stay out of public previews."""
+        body = (
+            "Before\n\n"
+            '<!-- nblane:ai_loading {"mode":"diagram","status":"candidate",'
+            '"summary":"flowchart TD\\\\nA\\\\u002d\\\\u002d>B"} -->\n\n'
+            "After"
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn("Before", html)
+        self.assertIn("After", html)
+        self.assertNotIn("ai_loading", html)
+        self.assertNotIn("flowchart TD", html)
 
     def test_math_block_comment_renders_with_mathjax_wrapper(self) -> None:
         """AI math-block comments render through the existing math pipeline."""
@@ -1383,7 +1455,8 @@ class TestPublicSite(unittest.TestCase):
                 body="",
             )
             self.assertEqual(len(visual_rows), 1)
-            self.assertEqual(visual_rows[0]["asset_type"], "cover")
+            self.assertEqual(visual_rows[0]["asset_type"], "image")
+            self.assertEqual(visual_rows[0]["visual_kind"], "cover")
             self.assertEqual(visual_rows[0]["alt"], "Generated cover")
             self.assertEqual(visual_rows[0]["caption"], "Candidate caption")
             self.assertIn("![Generated cover](", visual_rows[0]["snippet"])
