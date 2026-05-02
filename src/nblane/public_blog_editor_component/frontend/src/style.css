@@ -1121,6 +1121,17 @@ textarea:read-only {
   border-color: rgba(41, 91, 130, 0.28);
 }
 
+.nb-reviewer-finding {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nb-reviewer-finding .nb-button.small {
+  flex: 0 0 auto;
+}
+
 .nb-empty {
   margin: 0;
   padding: 10px;

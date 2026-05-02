@@ -141,6 +141,36 @@ class VisualCandidateStoreTests(unittest.TestCase):
                     "",
                 )
 
+    def test_list_candidates_filters_by_slug(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            (profile / "blog").mkdir(parents=True)
+            with patch("nblane.core.visual_candidate_store.profile_dir", lambda _n: profile):
+                first = visual_candidate_store.write_candidate(
+                    "alice",
+                    "post-a",
+                    "patch-a",
+                    data=b"candidate-a",
+                    filename="a.png",
+                    kind="image",
+                )
+                visual_candidate_store.write_candidate(
+                    "alice",
+                    "post-b",
+                    "patch-b",
+                    data=b"candidate-b",
+                    filename="b.png",
+                    kind="image",
+                )
+
+                records = visual_candidate_store.list_candidates("alice", slug="post-a")
+
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["candidate_path"], first.relative_path)
+                self.assertEqual(records[0]["patch_id"], "patch-a")
+                self.assertEqual(records[0]["slug"], "post-a")
+                self.assertEqual(records[0]["size_bytes"], len(b"candidate-a"))
+
     def test_inline_visual_patch_stages_candidate_path_not_media_src(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = Path(tmp) / "alice"

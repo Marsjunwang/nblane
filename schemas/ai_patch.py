@@ -87,6 +87,7 @@ class AIPatch(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     patch_id: str = ""
+    ai_source_id: str = ""
     operation: AIOperation
     target: AIPatchTarget = Field(default_factory=AIPatchTarget)
     meta_patch: dict[str, Any] = Field(default_factory=dict)

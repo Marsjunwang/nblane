@@ -156,7 +156,7 @@ export function CandidatePatchPanel({
   labels,
   patches,
   pendingAction = null,
-  editable,
+  editable = true,
   onAccept,
   onReject,
   onRegenerate,

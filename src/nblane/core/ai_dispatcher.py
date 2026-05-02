@@ -642,6 +642,7 @@ def generate_ai_patch(
     ]
     patch = AIPatch(
         patch_id=patch_id,
+        ai_source_id=ai_source_id,
         operation=clean_operation,  # type: ignore[arg-type]
         target=target,
         block_patches=block_patches,

@@ -16,6 +16,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yaml
 
+from schemas.blocknote_doc import coerce_blocks
+from schemas.editor_events import validate_editor_event
 from nblane.core import llm as llm_client
 
 try:
@@ -29,6 +31,7 @@ except Exception:  # pragma: no cover - optional Streamlit component
 
 from nblane.core import git_backup
 from nblane.core import ai_stream_tasks
+from nblane.core import ai_blog_reviewer
 from nblane.core import visual_candidate_store
 from nblane.core import visual_generation
 from nblane.core.public_curation import (
@@ -57,6 +60,7 @@ from nblane.core.public_site import (
     blog_visual_candidate_rows,
     blog_media_library_rows,
     blog_preview_fingerprint,
+    blog_sidecar_path_for_slug,
     blog_visual_result_rows,
     build_public_site,
     convert_blog_media_video,
@@ -289,6 +293,9 @@ def _ui() -> dict[str, str]:
             "validation_warnings": "校验警告",
             "quality_warnings": "内容质量提醒",
             "no_issues": "暂无问题。",
+            "reviewer": "AI 编辑审阅",
+            "reviewer_repair": "生成修复",
+            "reviewer_no_findings": "AI 审阅暂无问题。",
             "missing_summary": "缺少摘要。",
             "missing_cover": "缺少封面。",
             "missing_tags": "缺少标签。",
@@ -539,6 +546,9 @@ def _ui() -> dict[str, str]:
         "validation_warnings": "Validation warnings",
         "quality_warnings": "Quality warnings",
         "no_issues": "No issues.",
+        "reviewer": "AI Editor Reviewer",
+        "reviewer_repair": "Repair",
+        "reviewer_no_findings": "No reviewer findings.",
         "missing_summary": "Summary is missing.",
         "missing_cover": "Cover is missing.",
         "missing_tags": "Tags are missing.",
@@ -1173,13 +1183,16 @@ def _blog_shell_prepare_state(
     slug: str,
     meta: dict,
     body: str,
-) -> tuple[dict, str]:
+    blocks_json: list[dict] | None = None,
+) -> tuple[dict, str, list[dict]]:
     """Return the current shell draft meta/body, initializing from disk."""
     token = _blog_shell_source_token(meta, body)
     source_key = _blog_shell_key(selected, slug, "source")
     dirty_key = _blog_shell_key(selected, slug, "dirty")
     meta_key = _blog_shell_key(selected, slug, "meta")
     body_key = _blog_shell_key(selected, slug, "body")
+    blocks_key = _blog_shell_key(selected, slug, "blocks_json")
+    clean_blocks = coerce_blocks(blocks_json or [])
     if (
         st.session_state.get(source_key) != token
         and not st.session_state.get(dirty_key, False)
@@ -1187,10 +1200,14 @@ def _blog_shell_prepare_state(
         st.session_state[source_key] = token
         st.session_state[meta_key] = dict(meta)
         st.session_state[body_key] = body
+        st.session_state[blocks_key] = clean_blocks
     st.session_state.setdefault(meta_key, dict(meta))
     st.session_state.setdefault(body_key, body)
-    return dict(st.session_state.get(meta_key) or {}), str(
-        st.session_state.get(body_key) or ""
+    st.session_state.setdefault(blocks_key, clean_blocks)
+    return (
+        dict(st.session_state.get(meta_key) or {}),
+        str(st.session_state.get(body_key) or ""),
+        coerce_blocks(st.session_state.get(blocks_key) or []),
     )
 
 
@@ -1201,15 +1218,20 @@ def _blog_shell_store_draft(
     body: str,
     *,
     dirty: bool,
+    blocks_json: list[dict] | None = None,
 ) -> None:
     """Persist an in-browser React shell draft into session state."""
     st.session_state[_blog_shell_key(selected, slug, "meta")] = dict(meta)
     st.session_state[_blog_shell_key(selected, slug, "body")] = body
     st.session_state[_blog_shell_key(selected, slug, "dirty")] = dirty
+    if blocks_json is not None:
+        st.session_state[_blog_shell_key(selected, slug, "blocks_json")] = coerce_blocks(
+            blocks_json
+        )
 
 
 def _blog_shell_clear_draft(selected: str, slug: str) -> None:
-    for field in ("source", "meta", "body", "dirty"):
+    for field in ("source", "meta", "body", "dirty", "blocks_json"):
         key = _blog_shell_key(selected, slug, field)
         if key in st.session_state:
             del st.session_state[key]
@@ -1249,8 +1271,14 @@ def _blog_shell_event_payload(
     event: dict,
     fallback_meta: dict,
     fallback_body: str,
-) -> tuple[str, dict, str, bool]:
+    fallback_blocks: list[dict] | None = None,
+) -> tuple[str, dict, str, list[dict], bool]:
     """Extract action/meta/body/dirty from a React shell event."""
+    try:
+        event = validate_editor_event(event)
+    except ValueError as exc:
+        st.error(str(exc))
+        event = {}
     action = str(event.get("action") or "")
     payload = event.get("payload")
     payload = payload if isinstance(payload, dict) else {}
@@ -1262,8 +1290,14 @@ def _blog_shell_event_payload(
         body = event.get("markdown")
     if not isinstance(body, str):
         body = fallback_body
+    blocks_json = payload.get("blocks_json")
+    if not isinstance(blocks_json, list):
+        blocks_json = event.get("blocks_json")
+    if not isinstance(blocks_json, list):
+        blocks_json = fallback_blocks or []
+    blocks_json = coerce_blocks(blocks_json)
     dirty = bool(payload.get("dirty", event.get("dirty", False)))
-    return action, dict(meta), body, dirty
+    return action, dict(meta), body, blocks_json, dirty
 
 
 _BLOG_EVENT_DEDUPE_ACTIONS = {
@@ -1293,6 +1327,7 @@ _BLOG_EVENT_DEDUPE_ACTIONS = {
     "load_media_preview_detail",
     "preview_post",
     "run_check",
+    "request_reviewer_repair",
     "save_post",
     "publish_request",
 }
@@ -1310,18 +1345,182 @@ def _blog_ai_patch_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_patch")
 
 
+def _blog_ai_patch_store_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "ai_patches")
+
+
 def _blog_ai_stream_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_stream")
+
+
+def _ai_patch_primary_id(patch: dict) -> str:
+    if not isinstance(patch, dict):
+        return ""
+    for value in (
+        patch.get("patch_id"),
+        patch.get("id"),
+        patch.get("ai_source_id"),
+    ):
+        clean = str(value or "").strip()
+        if clean:
+            return clean
+    provenance = patch.get("provenance")
+    if isinstance(provenance, dict):
+        for value in provenance.get("source_refs", []) or []:
+            clean = str(value or "").strip()
+            if clean:
+                return clean
+    return f"patch-{hashlib.sha1(json.dumps(patch, sort_keys=True, default=str).encode('utf-8')).hexdigest()[:12]}"
+
+
+def _ai_patch_alias_ids(patch: dict) -> set[str]:
+    aliases: set[str] = set()
+    if not isinstance(patch, dict):
+        return aliases
+
+    def add(value: object) -> None:
+        clean = str(value or "").strip()
+        if clean:
+            aliases.add(clean)
+
+    add(patch.get("patch_id"))
+    add(patch.get("id"))
+    add(patch.get("ai_source_id"))
+    provenance = patch.get("provenance")
+    if isinstance(provenance, dict):
+        for value in provenance.get("source_refs", []) or []:
+            add(value)
+    for mutation in patch.get("block_patches", []) or []:
+        if not isinstance(mutation, dict):
+            continue
+        block = mutation.get("block")
+        props = block.get("props") if isinstance(block, dict) else None
+        if isinstance(props, dict):
+            add(props.get("ai_source_id"))
+            add(props.get("patch_id"))
+    return aliases
+
+
+def _blog_ai_patch_store(selected: str, slug: str) -> dict[str, dict]:
+    key = _blog_ai_patch_store_key(selected, slug)
+    store = st.session_state.get(key)
+    if not isinstance(store, dict):
+        legacy = st.session_state.get(_blog_ai_patch_key(selected, slug))
+        store = {}
+        if isinstance(legacy, dict) and legacy.get("operation"):
+            store[_ai_patch_primary_id(legacy)] = legacy
+        st.session_state[key] = store
+    return store
+
+
+def _store_blog_ai_patch(selected: str, slug: str, patch: dict) -> None:
+    if not isinstance(patch, dict) or not patch.get("operation"):
+        return
+    key = _blog_ai_patch_store_key(selected, slug)
+    store = dict(_blog_ai_patch_store(selected, slug))
+    primary_id = _ai_patch_primary_id(patch)
+    for existing_id, existing_patch in list(store.items()):
+        if _ai_patch_alias_ids(existing_patch) & _ai_patch_alias_ids(patch):
+            store.pop(existing_id, None)
+    store[primary_id] = patch
+    st.session_state[key] = dict(list(store.items())[-8:])
+    st.session_state[_blog_ai_patch_key(selected, slug)] = patch
+
+
+def _remove_blog_ai_patch(selected: str, slug: str, patch: dict | None = None, patch_id: str = "") -> None:
+    key = _blog_ai_patch_store_key(selected, slug)
+    store = dict(_blog_ai_patch_store(selected, slug))
+    aliases = set()
+    if isinstance(patch, dict):
+        aliases |= _ai_patch_alias_ids(patch)
+        aliases.add(_ai_patch_primary_id(patch))
+    if patch_id:
+        aliases.add(str(patch_id).strip())
+    for existing_id, existing_patch in list(store.items()):
+        if existing_id in aliases or (_ai_patch_alias_ids(existing_patch) & aliases):
+            store.pop(existing_id, None)
+    st.session_state[key] = store
+    if store:
+        st.session_state[_blog_ai_patch_key(selected, slug)] = list(store.values())[-1]
+    else:
+        st.session_state.pop(_blog_ai_patch_key(selected, slug), None)
+
+
+def _clear_blog_ai_patches(selected: str, slug: str) -> None:
+    st.session_state.pop(_blog_ai_patch_store_key(selected, slug), None)
+    st.session_state.pop(_blog_ai_patch_key(selected, slug), None)
+
+
+def _blog_ai_patch_payloads(selected: str, slug: str) -> list[dict]:
+    return [
+        _attach_ai_patch_preview_sources(selected, patch)
+        for patch in _blog_ai_patch_store(selected, slug).values()
+        if isinstance(patch, dict) and patch.get("operation")
+    ]
 
 
 _AI_VISUAL_BLOCK_COMMENT_RE = re.compile(
     r"<!--\s*nblane:visual_block(?:\s+(?P<payload>\{[^\r\n]*\}))?\s*-->",
     re.IGNORECASE,
 )
+_BLOG_CANDIDATE_PATH_RE = re.compile(r"blog/\.candidates/[^\"'\s<>)\\,}]+")
 
 
 def _comment_json(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False).replace("--", "\\u002d\\u002d")
+
+
+def _candidate_paths_from_value(value) -> set[str]:
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "candidate_path":
+                clean = str(item or "").strip()
+                if clean:
+                    paths.add(clean)
+            paths.update(_candidate_paths_from_value(item))
+    elif isinstance(value, list):
+        for item in value:
+            paths.update(_candidate_paths_from_value(item))
+    elif isinstance(value, str):
+        paths.update(match.group(0).strip() for match in _BLOG_CANDIDATE_PATH_RE.finditer(value))
+    return paths
+
+
+def _active_blog_candidate_paths(
+    selected: str,
+    slug: str,
+    body: str,
+    blocks_json: list[dict] | None = None,
+) -> set[str]:
+    paths = _candidate_paths_from_value(body)
+    paths.update(_candidate_paths_from_value(blocks_json or []))
+    for patch in _blog_ai_patch_store(selected, slug).values():
+        paths.update(_candidate_paths_from_value(patch))
+    stream_id = str(st.session_state.get(_blog_ai_stream_key(selected, slug), "") or "").strip()
+    if stream_id:
+        snapshot = _ai_stream_snapshot(stream_id)
+        if isinstance(snapshot.get("patch"), dict):
+            paths.update(_candidate_paths_from_value(snapshot["patch"]))
+    return paths
+
+
+def _blog_orphan_visual_candidates(
+    selected: str,
+    slug: str,
+    body: str,
+    blocks_json: list[dict] | None = None,
+) -> list[dict]:
+    try:
+        candidates = visual_candidate_store.list_candidates(selected, slug=slug)
+    except Exception:
+        return []
+    active_paths = _active_blog_candidate_paths(selected, slug, body, blocks_json)
+    return [
+        candidate
+        for candidate in candidates
+        if str(candidate.get("candidate_path", "") or "").strip() not in active_paths
+    ]
 
 
 def _ai_patch_candidate_entries(patch: dict) -> list[dict]:
@@ -1539,11 +1738,11 @@ def _promote_ai_patch_candidates(
     slug: str,
     patch: dict,
     body: str,
-) -> str:
+) -> tuple[str, dict[str, str]]:
     """Promote accepted visual candidates and rewrite visual block comments."""
 
     if not selected or not slug or not isinstance(patch, dict):
-        return body
+        return body, {}
     referenced_candidate_paths = {
         str(payload.get("candidate_path", "") or "").strip()
         for payload in _visual_block_payloads(body)
@@ -1577,7 +1776,7 @@ def _promote_ai_patch_candidates(
         )
         promotions[candidate_path] = result.relative_path
     if not promotions and str(patch.get("operation", "") or "") != "visual":
-        return body
+        return body, promotions
 
     def repl(match: re.Match[str]) -> str:
         raw = str(match.group("payload") or "").strip()
@@ -1604,7 +1803,50 @@ def _promote_ai_patch_candidates(
             return f"<!-- nblane:visual_block {_comment_json(payload)} -->"
         return match.group(0)
 
-    return _AI_VISUAL_BLOCK_COMMENT_RE.sub(repl, body)
+    return _AI_VISUAL_BLOCK_COMMENT_RE.sub(repl, body), promotions
+
+
+def _promote_ai_patch_candidate_blocks(
+    blocks_json: list[dict],
+    promotions: dict[str, str],
+    patch: dict,
+) -> list[dict]:
+    """Rewrite accepted visual candidate block props for sidecar storage."""
+
+    if not promotions and not isinstance(patch, dict):
+        return coerce_blocks(blocks_json)
+    identity = _ai_patch_visual_identity(patch if isinstance(patch, dict) else {})
+
+    def rewrite(block: dict) -> dict:
+        next_block = copy.deepcopy(block)
+        props = next_block.get("props")
+        if isinstance(props, dict) and next_block.get("type") == "visual_block":
+            candidate_path = str(props.get("candidate_path", "") or "").strip()
+            if candidate_path in promotions:
+                props["src"] = promotions[candidate_path]
+                props.pop("candidate_path", None)
+                props.pop("preview_src", None)
+                props["status"] = "accepted"
+                props["accepted"] = True
+            else:
+                ai_source_id = str(props.get("ai_source_id", "") or "").strip()
+                mermaid = str(props.get("mermaid", "") or "").strip()
+                prompt = str(props.get("prompt", "") or "").strip()
+                asset_type = str(props.get("asset_type", "") or "").strip().lower()
+                if (
+                    (ai_source_id and ai_source_id in identity["ai_source_ids"])
+                    or (mermaid and mermaid in identity["mermaids"])
+                    or (asset_type == "diagram" and prompt and prompt in identity["prompts"])
+                ):
+                    props.pop("preview_src", None)
+                    props["status"] = "accepted"
+                    props["accepted"] = True
+        children = next_block.get("children")
+        if isinstance(children, list):
+            next_block["children"] = [rewrite(child) for child in children if isinstance(child, dict)]
+        return next_block
+
+    return coerce_blocks([rewrite(block) for block in blocks_json if isinstance(block, dict)])
 
 
 def _ai_stream_snapshot(task_id: str) -> dict:
@@ -2256,9 +2498,16 @@ def _run_blog_publish_check(
     body: str,
     media_rows: list[dict],
     ui: dict[str, str],
+    blocks_json: list[dict] | None = None,
 ) -> dict:
     candidate = format_blog_document(meta, body)
     result = validate_blog_text_for_publish(selected, post_path, candidate)
+    orphan_candidates = _blog_orphan_visual_candidates(
+        selected,
+        slug,
+        body,
+        blocks_json,
+    )
     check_state = {
         "errors": list(result.errors),
         "warnings": list(result.warnings),
@@ -2268,6 +2517,15 @@ def _run_blog_publish_check(
             media_rows=media_rows,
             ui=ui,
         ),
+        "reviewer_findings": ai_blog_reviewer.review_blog(
+            slug=slug,
+            meta=meta,
+            body=body,
+            media_rows=media_rows,
+            orphan_candidates=orphan_candidates,
+        ),
+        "reviewer_status": "done",
+        "reviewer_error": "",
     }
     st.session_state[_blog_check_state_key(selected, slug)] = check_state
     return check_state
@@ -2362,18 +2620,24 @@ def _persist_blog_editor(
     post_path: Path,
     meta: dict,
     body: str,
+    blocks_json: list[dict] | None = None,
     ui: dict[str, str],
 ) -> None:
     """Save one structured blog editor state."""
-    assert_files_current([post_path])
+    sidecar_path = blog_sidecar_path_for_slug(selected, post_path.stem)
+    tracked_paths = [post_path]
+    if sidecar_path.exists():
+        tracked_paths.append(sidecar_path)
+    assert_files_current(tracked_paths)
     saved, changed = save_blog_post(
         selected,
         post_path.stem,
         meta,
         body,
+        blocks_json=blocks_json,
         action=f"update {selected}/blog/{post_path.name}",
     )
-    refresh_file_snapshots([saved, *changed])
+    refresh_file_snapshots([saved, blog_sidecar_path_for_slug(selected, post_path.stem), *changed])
     stash_git_backup_results()
     clear_web_cache()
     st.success(ui["saved"])
@@ -2385,6 +2649,7 @@ def _save_blog_editor(
     post_path: Path,
     meta: dict,
     body: str,
+    blocks_json: list[dict] | None = None,
     ui: dict[str, str],
 ) -> None:
     """Save one structured blog editor state and rerun."""
@@ -2393,6 +2658,7 @@ def _save_blog_editor(
         post_path=post_path,
         meta=meta,
         body=body,
+        blocks_json=blocks_json,
         ui=ui,
     )
     _blog_shell_clear_draft(selected, post_path.stem)
@@ -2439,11 +2705,12 @@ def _render_blog_react_shell_fragment(
     if st_public_blog_editor is None:
         return
 
-    draft_meta, draft_body = _blog_shell_prepare_state(
+    draft_meta, draft_body, draft_blocks = _blog_shell_prepare_state(
         selected,
         latest_post.slug,
         original_meta,
         latest_post.body,
+        latest_post.blocks_json,
     )
     media_rows = _blog_media_library(
         root,
@@ -2489,10 +2756,8 @@ def _render_blog_react_shell_fragment(
         ):
             preview_html = ""
             _clear_blog_preview(selected, latest_post.slug)
-    ai_patch_payload = _attach_ai_patch_preview_sources(
-        selected,
-        st.session_state.get(_blog_ai_patch_key(selected, latest_post.slug), {}),
-    )
+    ai_patch_payloads = _blog_ai_patch_payloads(selected, latest_post.slug)
+    ai_patch_payload = ai_patch_payloads[-1] if ai_patch_payloads else {}
     ai_stream_payload = _ai_stream_snapshot(
         str(
             st.session_state.get(
@@ -2511,6 +2776,7 @@ def _render_blog_react_shell_fragment(
         "posts": _blog_shell_posts_payload(posts),
         "active_slug": latest_post.slug,
         "initial_markdown": draft_body,
+        "initial_blocks": draft_blocks,
         "active_post_meta": draft_meta,
         "media_items": media_rows,
         "ai_candidates": ai_candidates,
@@ -2525,6 +2791,7 @@ def _render_blog_react_shell_fragment(
             ui=ui,
         ),
         "ai_patch": ai_patch_payload,
+        "ai_patches": ai_patch_payloads,
         "ai_stream": ai_stream_payload,
         "operation_notice": st.session_state.get(
             _blog_shell_notice_key(selected, latest_post.slug),
@@ -2551,6 +2818,8 @@ def _render_blog_react_shell_fragment(
     except TypeError as exc:
         if "unexpected keyword argument 'ai_patch'" in str(exc):
             editor_kwargs.pop("ai_patch", None)
+        elif "unexpected keyword argument 'ai_patches'" in str(exc):
+            editor_kwargs.pop("ai_patches", None)
         elif "unexpected keyword argument 'ai_stream'" in str(exc):
             editor_kwargs.pop("ai_stream", None)
         else:
@@ -2560,10 +2829,11 @@ def _render_blog_react_shell_fragment(
     if not isinstance(event, dict):
         return True
 
-    action, event_meta, event_body, dirty = _blog_shell_event_payload(
+    action, event_meta, event_body, event_blocks, dirty = _blog_shell_event_payload(
         event,
         draft_meta,
         draft_body,
+        draft_blocks,
     )
     if _blog_shell_event_already_processed(
         selected,
@@ -2600,11 +2870,16 @@ def _render_blog_react_shell_fragment(
             patch_payload = payload.get("patch")
             patch_payload = patch_payload if isinstance(patch_payload, dict) else {}
             try:
-                event_body = _promote_ai_patch_candidates(
+                event_body, promotions = _promote_ai_patch_candidates(
                     selected,
                     latest_post.slug,
                     patch_payload,
                     event_body,
+                )
+                event_blocks = _promote_ai_patch_candidate_blocks(
+                    event_blocks,
+                    promotions,
+                    patch_payload,
                 )
             except Exception as exc:
                 st.error(str(exc))
@@ -2615,6 +2890,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         if action in {
             "markdown_changed",
@@ -2625,9 +2901,15 @@ def _render_blog_react_shell_fragment(
         }:
             _clear_blog_preview(selected, latest_post.slug)
         if action == "apply_ai_patch":
-            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
-            st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
             patch_payload = payload.get("patch")
+            patch_payload = patch_payload if isinstance(patch_payload, dict) else {}
+            _remove_blog_ai_patch(
+                selected,
+                latest_post.slug,
+                patch_payload,
+                patch_id=str(payload.get("patch_id", "") or ""),
+            )
+            st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
             if isinstance(patch_payload, dict):
                 patch_id = str(
                     patch_payload.get("patch_id", "") or patch_payload.get("id", "") or ""
@@ -2679,6 +2961,7 @@ def _render_blog_react_shell_fragment(
                 event_meta,
                 event_body,
                 dirty=dirty,
+                blocks_json=event_blocks,
             )
             _clear_blog_preview(selected, latest_post.slug)
             refresh_file_snapshots([deleted_path])
@@ -2711,6 +2994,7 @@ def _render_blog_react_shell_fragment(
                 event_meta,
                 next_body,
                 dirty=True,
+                blocks_json=event_blocks,
             )
             details = dict(_blog_media_preview_details(selected, latest_post.slug))
             details.pop(rel, None)
@@ -2733,6 +3017,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         slug = str(payload.get("slug", "") or "")
         if slug and slug != latest_post.slug:
@@ -2757,6 +3042,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         title = str(payload.get("title", "") or "").strip()
         if not title:
@@ -2784,6 +3070,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         evidence_id = str(payload.get("evidence_id", "") or "").strip()
         try:
@@ -2803,6 +3090,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         try:
             path = draft_blog_from_kanban_done(selected)
@@ -2821,14 +3109,10 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         try:
             visual_candidate_store.cleanup_expired(selected)
-            previous_patch = st.session_state.get(
-                _blog_ai_patch_key(selected, latest_post.slug)
-            )
-            if isinstance(previous_patch, dict):
-                _cleanup_ai_patch_candidates(selected, previous_patch)
             _clear_blog_shell_notice(selected, latest_post.slug)
             selected_block = payload.get("selected_block")
             if not isinstance(selected_block, dict):
@@ -2853,7 +3137,6 @@ def _render_blog_react_shell_fragment(
                 visual_kind=str(payload.get("visual_kind", "") or ""),
             )
             st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
-            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -2868,7 +3151,6 @@ def _render_blog_react_shell_fragment(
             _rerun_with_blog_layout(selected, latest_post.slug, next_state)
         except Exception as exc:
             message = str(exc)
-            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
@@ -2892,7 +3174,7 @@ def _render_blog_react_shell_fragment(
             patch = snapshot.get("patch")
             if isinstance(patch, dict) and patch.get("operation"):
                 patch = _attach_ai_patch_preview_sources(selected, patch)
-                st.session_state[_blog_ai_patch_key(selected, latest_post.slug)] = patch
+                _store_blog_ai_patch(selected, latest_post.slug, patch)
                 _set_blog_shell_notice(
                     selected,
                     latest_post.slug,
@@ -2902,12 +3184,6 @@ def _render_blog_react_shell_fragment(
                 )
                 st.rerun()
         elif snapshot.get("status") == "failed":
-            existing_patch = st.session_state.get(
-                _blog_ai_patch_key(selected, latest_post.slug)
-            )
-            if isinstance(existing_patch, dict):
-                _cleanup_ai_patch_candidates(selected, existing_patch)
-            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -2917,12 +3193,6 @@ def _render_blog_react_shell_fragment(
             )
             st.rerun()
         elif snapshot.get("status") == "cancelled":
-            existing_patch = st.session_state.get(
-                _blog_ai_patch_key(selected, latest_post.slug)
-            )
-            if isinstance(existing_patch, dict):
-                _cleanup_ai_patch_candidates(selected, existing_patch)
-            st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -2940,11 +3210,7 @@ def _render_blog_react_shell_fragment(
             or ""
         )
         _cancel_ai_stream_task(stream_id)
-        existing_patch = st.session_state.get(_blog_ai_patch_key(selected, latest_post.slug))
-        if isinstance(existing_patch, dict):
-            _cleanup_ai_patch_candidates(selected, existing_patch)
         st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
-        st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
         _set_blog_shell_notice(
             selected,
             latest_post.slug,
@@ -2957,13 +3223,15 @@ def _render_blog_react_shell_fragment(
 
     if action == "reject_ai_patch":
         patch_payload = payload.get("patch")
-        patch_payload = patch_payload if isinstance(patch_payload, dict) else st.session_state.get(
-            _blog_ai_patch_key(selected, latest_post.slug),
-            {},
-        )
+        patch_payload = patch_payload if isinstance(patch_payload, dict) else {}
         if isinstance(patch_payload, dict):
             _cleanup_ai_patch_candidates(selected, patch_payload)
-        st.session_state.pop(_blog_ai_patch_key(selected, latest_post.slug), None)
+        _remove_blog_ai_patch(
+            selected,
+            latest_post.slug,
+            patch_payload,
+            patch_id=str(payload.get("patch_id", "") or ""),
+        )
         st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
         _clear_blog_shell_notice(selected, latest_post.slug)
         st.rerun()
@@ -3032,6 +3300,7 @@ def _render_blog_react_shell_fragment(
                 next_meta,
                 next_body,
                 dirty=dirty or insert or cover,
+                blocks_json=event_blocks,
             )
             _clear_blog_preview(selected, latest_post.slug)
             refresh_file_snapshots([result.path])
@@ -3177,6 +3446,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         try:
             preview_quality = str(payload.get("preview_quality", "") or "fast")
@@ -3202,6 +3472,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         _run_blog_publish_check(
             selected=selected,
@@ -3211,7 +3482,57 @@ def _render_blog_react_shell_fragment(
             body=event_body,
             media_rows=media_rows,
             ui=ui,
+            blocks_json=event_blocks,
         )
+        next_state = dict(layout_state)
+        next_state["right_open"] = True
+        next_state["active_right_tab"] = "Check"
+        next_state["focus_mode"] = False
+        _rerun_with_blog_layout(selected, latest_post.slug, next_state)
+        return True
+
+    if action == "request_reviewer_repair":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        check_state = st.session_state.get(
+            _blog_check_state_key(selected, latest_post.slug),
+            {},
+        )
+        findings = check_state.get("reviewer_findings") if isinstance(check_state, dict) else []
+        if not isinstance(findings, list):
+            findings = []
+        finding_id = str(payload.get("finding_id", "") or "").strip()
+        finding = next(
+            (
+                item
+                for item in findings
+                if isinstance(item, dict)
+                and str(item.get("id", "") or "").strip() == finding_id
+            ),
+            None,
+        )
+        if finding is None:
+            finding = payload.get("finding")
+            finding = finding if isinstance(finding, dict) else None
+        if finding is None:
+            st.error("Reviewer finding is no longer available.")
+            return True
+        patch = ai_blog_reviewer.repair_patch_for_finding(
+            slug=latest_post.slug,
+            meta=event_meta,
+            body=event_body,
+            media_rows=media_rows,
+            finding=finding,
+            source_event_id=str(payload.get("event_id", "") or ""),
+            lang=llm_client.ui_language(),
+        )
+        _store_blog_ai_patch(selected, latest_post.slug, patch)
         next_state = dict(layout_state)
         next_state["right_open"] = True
         next_state["active_right_tab"] = "Check"
@@ -3226,6 +3547,7 @@ def _render_blog_react_shell_fragment(
             event_meta,
             event_body,
             dirty=dirty,
+            blocks_json=event_blocks,
         )
         try:
             _persist_blog_editor(
@@ -3233,6 +3555,7 @@ def _render_blog_react_shell_fragment(
                 post_path=latest_post.path,
                 meta=event_meta,
                 body=event_body,
+                blocks_json=event_blocks,
                 ui=ui,
             )
             _blog_shell_clear_draft(selected, latest_post.slug)
@@ -3250,6 +3573,7 @@ def _render_blog_react_shell_fragment(
             publish_meta,
             event_body,
             dirty=True,
+            blocks_json=event_blocks,
         )
         final_media_rows = _blog_media_library(
             root,
@@ -3266,6 +3590,7 @@ def _render_blog_react_shell_fragment(
             body=event_body,
             media_rows=final_media_rows,
             ui=ui,
+            blocks_json=event_blocks,
         )
         if _blog_publish_blocked(check, ui):
             if ui["privacy_hint"] in check.get("quality", []):
@@ -3282,8 +3607,11 @@ def _render_blog_react_shell_fragment(
                 latest_post.slug,
                 publish_meta,
                 event_body,
+                blocks_json=event_blocks,
             )
-            refresh_file_snapshots([published])
+            refresh_file_snapshots(
+                [published, blog_sidecar_path_for_slug(selected, latest_post.slug)]
+            )
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["saved"])
@@ -4404,6 +4732,7 @@ def _render_blog_check_panel(
             body=edited_body,
             media_rows=media_rows,
             ui=ui,
+            blocks_json=latest_post.blocks_json,
         )
     check_state = st.session_state.get(
         _blog_check_state_key(selected, latest_post.slug),
@@ -4412,6 +4741,11 @@ def _render_blog_check_panel(
     errors = list(check_state.get("errors") or [])
     warnings = list(check_state.get("warnings") or [])
     quality = list(check_state.get("quality") or [])
+    reviewer_findings = [
+        item
+        for item in list(check_state.get("reviewer_findings") or [])
+        if isinstance(item, dict)
+    ]
     if errors:
         st.error(ui["public_errors"])
     elif warnings:
@@ -4423,7 +4757,36 @@ def _render_blog_check_panel(
     _render_blog_check_messages(ui["validation_errors"], errors)
     _render_blog_check_messages(ui["validation_warnings"], warnings)
     _render_blog_check_messages(ui["quality_warnings"], quality)
-    if not errors and not warnings and not quality:
+    if reviewer_findings:
+        st.markdown(f"**{ui['reviewer']}**")
+        for finding in reviewer_findings:
+            st.write(
+                f"- {finding.get('title', finding.get('category', 'review'))}: "
+                f"{finding.get('detail', '')}"
+            )
+            repairable = finding.get("repairable") is True or str(
+                finding.get("repair_action", "")
+            ) == "request_reviewer_repair"
+            if repairable and st.button(
+                ui["reviewer_repair"],
+                key=_blog_editor_key(
+                    selected,
+                    latest_post.slug,
+                    f"check_repair_{finding.get('id', '')}",
+                ),
+            ):
+                patch = ai_blog_reviewer.repair_patch_for_finding(
+                    slug=latest_post.slug,
+                    meta=edited_meta,
+                    body=edited_body,
+                    media_rows=media_rows,
+                    finding=finding,
+                    source_event_id=f"check:{finding.get('id', '')}",
+                    lang=llm_client.ui_language(),
+                )
+                _store_blog_ai_patch(selected, latest_post.slug, patch)
+                st.rerun()
+    if not errors and not warnings and not quality and not reviewer_findings:
         st.write(ui["no_issues"])
     _blog_page_preview(
         selected,
@@ -4702,6 +5065,7 @@ def _render_blog_tab(
                 post_path=latest_post.path,
                 meta=final_meta,
                 body=edited_body,
+                blocks_json=latest_post.blocks_json,
                 ui=ui,
             )
         except Exception as exc:
@@ -4716,6 +5080,7 @@ def _render_blog_tab(
             body=edited_body,
             media_rows=final_media_rows,
             ui=ui,
+            blocks_json=latest_post.blocks_json,
         )
         next_state = dict(layout_state)
         next_state["right_open"] = True
@@ -4734,6 +5099,7 @@ def _render_blog_tab(
             body=edited_body,
             media_rows=final_media_rows,
             ui=ui,
+            blocks_json=latest_post.blocks_json,
         )
         if _blog_publish_blocked(check_state, ui):
             if ui["privacy_hint"] in check_state.get("quality", []):
@@ -4744,14 +5110,19 @@ def _render_blog_tab(
             next_state["focus_mode"] = False
             _rerun_with_blog_layout(selected, latest_post.slug, next_state)
         try:
-            assert_files_current([latest_post.path])
+            sidecar_path = blog_sidecar_path_for_slug(selected, latest_post.slug)
+            tracked_paths = [latest_post.path]
+            if sidecar_path.exists():
+                tracked_paths.append(sidecar_path)
+            assert_files_current(tracked_paths)
             published = publish_blog_text(
                 selected,
                 latest_post.slug,
                 publish_meta,
                 edited_body,
+                blocks_json=latest_post.blocks_json,
             )
-            refresh_file_snapshots([published])
+            refresh_file_snapshots([published, sidecar_path])
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["saved"])

@@ -207,6 +207,50 @@ def candidate_exists(profile: str, candidate_path: str | Path) -> bool:
     return path.exists() and path.is_file()
 
 
+def list_candidates(profile: str, *, slug: str = "") -> list[dict[str, Any]]:
+    """Return staged visual candidate records for one profile.
+
+    The returned paths are profile-relative and stay inside
+    ``blog/.candidates``. Missing or malformed metadata does not hide a file;
+    the filesystem entry is still returned with conservative defaults.
+    """
+
+    root = _candidate_root(profile)
+    requested_slug = str(slug or "").strip()
+    records: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*/*")):
+        if not path.is_file() or path.name.endswith(".json"):
+            continue
+        meta_path = path.with_suffix(f"{path.suffix}.json")
+        metadata: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                metadata = loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                metadata = {}
+        candidate_slug = str(metadata.get("slug", "") or "").strip()
+        if requested_slug and candidate_slug and candidate_slug != requested_slug:
+            continue
+        created_at = metadata.get("created_at")
+        try:
+            created_at_float = float(created_at)
+        except (TypeError, ValueError):
+            created_at_float = path.stat().st_mtime
+        records.append(
+            {
+                "candidate_path": _profile_relative(profile, path),
+                "patch_id": str(metadata.get("patch_id", "") or path.parent.name),
+                "slug": candidate_slug,
+                "filename": str(metadata.get("filename", "") or path.name),
+                "kind": str(metadata.get("kind", "") or "image"),
+                "size_bytes": path.stat().st_size,
+                "created_at": created_at_float,
+            }
+        )
+    return sorted(records, key=lambda item: (item.get("created_at", 0), item.get("candidate_path", "")))
+
+
 def discard_candidate(profile: str, candidate_path: str | Path) -> bool:
     """Delete a temporary candidate if it still exists."""
 

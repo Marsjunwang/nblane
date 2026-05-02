@@ -18,6 +18,7 @@ import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "./style.css";
 import { CandidatePatchPanel } from "./ai/CandidatePatchPanel.jsx";
+import { validateEditorEvent } from "./ai/eventSchema.js";
 import { OutlinePanel } from "./ai/OutlinePanel.jsx";
 import { SelectionAIToolbar } from "./ai/SelectionAIToolbar.jsx";
 import { getAISlashMenuItems } from "./ai/slashItems.js";
@@ -189,6 +190,9 @@ const DEFAULT_LABELS = {
   preview: "Preview",
   preview_empty: "No preview yet.",
   preview_unavailable: "No inline preview available.",
+  reviewer: "AI Editor Reviewer",
+  reviewer_repair: "Repair",
+  reviewer_no_findings: "No reviewer findings.",
   post: "Post",
   public_preview: "Public preview",
   publish: "Publish",
@@ -264,6 +268,20 @@ function asArray(value) {
 
 function cleanText(value) {
   return value === null || value === undefined ? "" : String(value);
+}
+
+function normalizeEditorBlocks(value) {
+  return asArray(value)
+    .map(asObject)
+    .filter((block) => cleanText(block.type).trim());
+}
+
+function cloneEditorBlocks(value) {
+  try {
+    return normalizeEditorBlocks(JSON.parse(JSON.stringify(value || [])));
+  } catch (_err) {
+    return [];
+  }
 }
 
 function deepStableStringify(value) {
@@ -643,6 +661,7 @@ function aiPatchId(patch, index = 0) {
   return cleanText(
     data.patch_id ||
       data.id ||
+      data.ai_source_id ||
       asObject(data.provenance).source_event_id ||
       `ai-patch-${index}`,
   );
@@ -656,6 +675,7 @@ function normalizeAIPatch(value) {
   }
   return {
     patch_id: cleanText(patch.patch_id || patch.id || `ai-${Date.now()}`),
+    ai_source_id: cleanText(patch.ai_source_id || ""),
     operation,
     target: asObject(patch.target),
     meta_patch: asObject(patch.meta_patch),
@@ -720,6 +740,7 @@ function aiPatchSourceIds(patch) {
     }
   };
   addId(patch?.patch_id || patch?.id);
+  addId(patch?.ai_source_id);
   for (const mutation of asArray(patch?.block_patches).map(asObject)) {
     addId(asObject(asObject(mutation.block).props).ai_source_id);
   }
@@ -1530,6 +1551,7 @@ function LegacyMarkdownEditor(props) {
       if (
         loadedDocumentRef.current === documentId &&
         loadedInitialMarkdownRef.current === initialMarkdown &&
+        loadedInitialBlocksRef.current === initialBlocksSeed &&
         loadedSourceModeRef.current === editorSourceMode
       ) {
         return;
@@ -1735,6 +1757,10 @@ function ShellEditor(props) {
   const visualGuidance = asObject(args.visual_guidance);
   const operationNotice = asObject(args.operation_notice);
   const incomingAIPatch = useMemo(() => normalizeAIPatch(args.ai_patch), [args.ai_patch]);
+  const incomingAIPatches = useMemo(
+    () => asArray(args.ai_patches).map(normalizeAIPatch).filter(Boolean),
+    [args.ai_patches],
+  );
   const incomingAIStream = useMemo(
     () => normalizeAIStream(args.ai_stream),
     [args.ai_stream],
@@ -1744,6 +1770,10 @@ function ShellEditor(props) {
   const activeSlug = cleanText(args.active_slug || args.slug || args.document_id || "");
   const documentId = String(args.document_id || activeSlug || "blog");
   const initialMarkdown = markdownFromValue(args.initial_markdown);
+  const initialBlocks = useMemo(
+    () => normalizeEditorBlocks(args.initial_blocks),
+    [args.initial_blocks],
+  );
   const height = Number(args.height || 720);
   const editable = args.editable !== false;
   const mathSafe = args.math_safe === true;
@@ -1788,6 +1818,7 @@ function ShellEditor(props) {
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
   const loadedInitialMarkdownRef = useRef(null);
+  const loadedInitialBlocksRef = useRef(null);
   const loadedSourceModeRef = useRef(null);
   const layoutRef = useRef(layout);
   const draftMetaRef = useRef(draftMeta);
@@ -1807,7 +1838,9 @@ function ShellEditor(props) {
   const visualGuidanceSeed = deepStableStringify(args.visual_guidance || {});
   const operationNoticeSeed = deepStableStringify(args.operation_notice || {});
   const aiPatchSeed = deepStableStringify(args.ai_patch || {});
+  const aiPatchesSeed = deepStableStringify(args.ai_patches || []);
   const aiStreamSeed = deepStableStringify(args.ai_stream || {});
+  const initialBlocksSeed = deepStableStringify(args.initial_blocks || []);
   const mediaPreviewRows = useMemo(
     () =>
       mediaItems.map((item, index) => ({
@@ -1849,7 +1882,9 @@ function ShellEditor(props) {
       visualGuidanceSeed,
       operationNoticeSeed,
       aiPatchSeed,
+      aiPatchesSeed,
       aiStreamSeed,
+      initialBlocksSeed,
       patchCandidates.length,
       pendingAIAction?.operation,
       pendingAIAction?.text,
@@ -1917,12 +1952,15 @@ function ShellEditor(props) {
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
+        loadedInitialBlocksRef.current = initialBlocksSeed;
         loadedSourceModeRef.current = editorSourceMode;
         setReady(true);
         return;
       }
       try {
-        const blocks = parseMarkdownToEditorBlocks(editor, initialMarkdown || "");
+        const blocks = initialBlocks.length
+          ? initialBlocks
+          : parseMarkdownToEditorBlocks(editor, initialMarkdown || "");
         if (cancelled) {
           return;
         }
@@ -1930,6 +1968,7 @@ function ShellEditor(props) {
         latestMarkdownRef.current = initialMarkdown || "";
         loadedDocumentRef.current = documentId;
         loadedInitialMarkdownRef.current = initialMarkdown;
+        loadedInitialBlocksRef.current = initialBlocksSeed;
         loadedSourceModeRef.current = editorSourceMode;
       } catch (err) {
         if (!cancelled) {
@@ -1945,7 +1984,7 @@ function ShellEditor(props) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, editor, initialMarkdown, editorSourceMode]);
+  }, [documentId, editor, initialBlocks, initialBlocksSeed, initialMarkdown, editorSourceMode]);
 
   const computeDirty = useCallback((markdown, meta = draftMetaRef.current) => {
     return (
@@ -1981,6 +2020,13 @@ function ShellEditor(props) {
       setError(err instanceof Error ? err.message : String(err));
       return latestMarkdownRef.current;
     }
+  }, [editor, sourceMode]);
+
+  const getCurrentBlocks = useCallback(() => {
+    if (sourceMode) {
+      return [];
+    }
+    return cloneEditorBlocks(editor.document);
   }, [editor, sourceMode]);
 
   const rememberCursorBlock = useCallback(() => {
@@ -2052,25 +2098,34 @@ function ShellEditor(props) {
   );
 
   useEffect(() => {
-    if (!incomingAIPatch) {
+    const incoming = [
+      ...incomingAIPatches,
+      ...(incomingAIPatch ? [incomingAIPatch] : []),
+    ];
+    if (!incoming.length) {
       return;
     }
-    const incomingId = aiPatchId(incomingAIPatch);
     setPatchCandidates((current) => {
+      const incomingIds = new Set(incoming.map((patch, index) => aiPatchId(patch, index)));
       const withoutDuplicate = current.filter(
-        (patch, index) => aiPatchId(patch, index) !== incomingId,
+        (patch, index) => !incomingIds.has(aiPatchId(patch, index)),
       );
-      return [incomingAIPatch, ...withoutDuplicate].slice(0, 8);
+      return [...incoming, ...withoutDuplicate].slice(0, 8);
     });
     setPendingAIAction(null);
+    const routeToCheck = incoming.some(
+      (patch) =>
+        cleanText(patch.operation).toLowerCase() === "check" ||
+        cleanText(asObject(patch.provenance).prompt_id).startsWith("check"),
+    );
     applyLayoutLocal((current) => ({
       ...current,
       right_open: true,
-      active_right_tab: "AI",
+      active_right_tab: routeToCheck ? "Check" : "AI",
       focus_mode: false,
     }));
     setMobileView("Tools");
-  }, [applyLayoutLocal, incomingAIPatch]);
+  }, [applyLayoutLocal, incomingAIPatch, incomingAIPatches]);
 
   const emitAction = useCallback(
     async (action, extraPayload = {}) => {
@@ -2083,11 +2138,13 @@ function ShellEditor(props) {
         await waitForInputFlush();
       }
       const markdown = await getCurrentMarkdown();
+      const blocksJson = getCurrentBlocks();
       const eventId = nextEventId(action);
       const payload = {
         slug: activeSlug,
         document_id: documentId,
         markdown,
+        blocks_json: blocksJson,
         meta: draftMetaRef.current,
         layout_state: layoutRef.current,
         dirty: computeDirty(markdown, draftMetaRef.current),
@@ -2095,11 +2152,12 @@ function ShellEditor(props) {
         ...extraPayload,
         event_id: eventId,
       };
-      Streamlit.setComponentValue({
+      Streamlit.setComponentValue(validateEditorEvent({
         action,
         event_id: eventId,
         payload,
         markdown,
+        blocks_json: blocksJson,
         dirty: payload.dirty,
         layout_state: layoutRef.current,
         selected_block: selectionContext,
@@ -2107,13 +2165,14 @@ function ShellEditor(props) {
           action === "insert_candidate" || action === "insert_media"
             ? extraPayload
             : null,
-      });
+      }));
     },
     [
       activeSlug,
       computeDirty,
       documentId,
       editable,
+      getCurrentBlocks,
       getCurrentMarkdown,
       nextEventId,
       refreshSelectedBlock,
@@ -2558,25 +2617,29 @@ function ShellEditor(props) {
       }
       const selectionContext = selectedBlockRef.current || refreshSelectedBlock();
       const eventId = nextEventId(action);
-      Streamlit.setComponentValue({
+      const blocksJson = getCurrentBlocks();
+      Streamlit.setComponentValue(validateEditorEvent({
         action,
         event_id: eventId,
         payload: {
           slug: activeSlug,
           document_id: documentId,
           stream_id: cleanStreamId,
+          markdown: latestMarkdownRef.current,
+          blocks_json: blocksJson,
           layout_state: layoutRef.current,
           selected_block: selectionContext,
           event_id: eventId,
         },
         markdown: latestMarkdownRef.current,
+        blocks_json: blocksJson,
         dirty,
         layout_state: layoutRef.current,
         selected_block: selectionContext,
         insert_event: null,
-      });
+      }));
     },
-    [activeSlug, dirty, documentId, nextEventId, refreshSelectedBlock],
+    [activeSlug, dirty, documentId, getCurrentBlocks, nextEventId, refreshSelectedBlock],
   );
 
   useAIStream({
@@ -3756,9 +3819,20 @@ function ShellEditor(props) {
           ) : null}
           {activeRightTab === "Check" ? (
             <CheckDrawer
+              editable={editable}
               labels={labels}
               state={validationState}
               onRun={() => emitAction("run_check")}
+              patchCandidates={patchCandidates}
+              onRepairFinding={(finding) =>
+                emitAction("request_reviewer_repair", {
+                  finding_id: cleanText(finding?.id),
+                  finding,
+                })
+              }
+              onAcceptPatch={handleAcceptAIPatch}
+              onRejectPatch={handleRejectAIPatch}
+              onRegeneratePatch={handleRegenerateAIPatch}
             />
           ) : null}
         </aside>
@@ -5011,10 +5085,29 @@ function VisualDrawer({
   );
 }
 
-function CheckDrawer({ labels, state, onRun }) {
+function isReviewerPatch(patch) {
+  return (
+    cleanText(patch?.operation).toLowerCase() === "check" ||
+    cleanText(asObject(patch?.provenance).prompt_id).startsWith("check")
+  );
+}
+
+function CheckDrawer({
+  editable = true,
+  labels,
+  state,
+  onRun,
+  patchCandidates = [],
+  onRepairFinding,
+  onAcceptPatch,
+  onRejectPatch,
+  onRegeneratePatch,
+}) {
   const errors = asArray(state.errors).map(cleanText).filter(Boolean);
   const warnings = asArray(state.warnings).map(cleanText).filter(Boolean);
   const quality = asArray(state.quality).map(cleanText).filter(Boolean);
+  const findings = asArray(state.reviewer_findings).map(asObject).filter((item) => item.id);
+  const reviewerPatches = asArray(patchCandidates).filter(isReviewerPatch);
   return (
     <div className="nb-drawer-body">
       <button type="button" className="nb-button wide" onClick={onRun}>
@@ -5023,10 +5116,68 @@ function CheckDrawer({ labels, state, onRun }) {
       <CheckList title={label(labels, "validation_errors")} items={errors} tone="danger" />
       <CheckList title={label(labels, "validation_warnings")} items={warnings} tone="warn" />
       <CheckList title={label(labels, "quality_warnings")} items={quality} tone="info" />
-      {!errors.length && !warnings.length && !quality.length ? (
+      <ReviewerFindings
+        labels={labels}
+        findings={findings}
+        onRepair={onRepairFinding}
+      />
+      {reviewerPatches.length ? (
+        <CandidatePatchPanel
+          patches={reviewerPatches}
+          labels={labels}
+          editable={editable}
+          onAccept={onAcceptPatch}
+          onReject={onRejectPatch}
+          onRegenerate={onRegeneratePatch}
+        />
+      ) : null}
+      {!errors.length && !warnings.length && !quality.length && !findings.length ? (
         <p className="nb-empty">{label(labels, "no_issues")}</p>
       ) : null}
     </div>
+  );
+}
+
+function ReviewerFindings({ labels, findings, onRepair }) {
+  if (!findings.length) {
+    return (
+      <section className="nb-check-list info">
+        <strong>{label(labels, "reviewer", "AI Editor Reviewer")}</strong>
+        <p className="nb-empty">{label(labels, "reviewer_no_findings", "No reviewer findings.")}</p>
+      </section>
+    );
+  }
+  return (
+    <section className="nb-check-list info">
+      <strong>{label(labels, "reviewer", "AI Editor Reviewer")}</strong>
+      <ul>
+        {findings.map((finding) => {
+          const repairable =
+            finding.repairable === true ||
+            cleanText(finding.repairable).toLowerCase() === "true" ||
+            cleanText(finding.repair_action) === "request_reviewer_repair";
+          return (
+            <li key={cleanText(finding.id)}>
+              <div className="nb-reviewer-finding">
+                <span>
+                  <strong>{cleanText(finding.title || finding.category)}</strong>
+                  {finding.detail ? ` - ${cleanText(finding.detail)}` : ""}
+                </span>
+                {repairable ? (
+                  <button
+                    type="button"
+                    className="nb-button small"
+                    onClick={() => onRepair?.(finding)}
+                  >
+                    {label(labels, "reviewer_repair", "Repair")}
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

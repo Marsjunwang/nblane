@@ -13,14 +13,17 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 import yaml
 
+from schemas.blocknote_doc import Document as BlockNoteDocument
+from schemas.blocknote_doc import coerce_blocks, document_to_dict
 from nblane.core import git_backup, llm, visual_generation
 from nblane.core.ai_blog_prompts import get_prompt
+from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_io import profile_dir
@@ -152,6 +155,8 @@ class BlogPost:
     path: Path
     meta: dict
     body: str
+    blocks_json: list[dict] = field(default_factory=list)
+    sidecar_path: Path | None = None
 
     @property
     def status(self) -> str:
@@ -437,8 +442,77 @@ def blog_post_text(meta: dict, body: str) -> str:
     return format_blog_document(meta, body)
 
 
+def _blog_sidecar_path_for_markdown(path: Path) -> Path:
+    """Return the BlockNote sidecar path for a Markdown blog path."""
+
+    return path.with_suffix(".blocknote.json")
+
+
+def _blog_slug_from_sidecar_path(path: Path) -> str:
+    """Return a blog slug from ``<slug>.blocknote.json``."""
+
+    name = path.name
+    suffix = ".blocknote.json"
+    return name[: -len(suffix)] if name.endswith(suffix) else path.stem
+
+
+def _read_blog_sidecar(path: Path) -> BlockNoteDocument | None:
+    """Read a BlockNote sidecar, returning ``None`` on malformed files."""
+
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return BlockNoteDocument.model_validate(raw)
+    except Exception:
+        return None
+
+
+def _parse_blog_sidecar(path: Path, markdown_path: Path | None = None) -> BlogPost | None:
+    """Parse one ``*.blocknote.json`` sidecar as a BlogPost."""
+
+    doc = _read_blog_sidecar(path)
+    if doc is None:
+        return None
+    slug = str(doc.slug or _blog_slug_from_sidecar_path(path)).strip()
+    if not slug:
+        slug = _blog_slug_from_sidecar_path(path)
+    md_path = markdown_path or path.with_name(f"{slug}.md")
+    return BlogPost(
+        slug=slug,
+        path=md_path,
+        meta=dict(doc.meta or {}),
+        body=str(doc.markdown or ""),
+        blocks_json=[block.model_dump(mode="json", exclude_none=True) for block in doc.blocks],
+        sidecar_path=path,
+    )
+
+
+def _blog_post_candidate_paths(blog_dir: Path) -> list[Path]:
+    """Return de-duplicated blog document paths, preferring Markdown when present."""
+
+    candidate_paths: dict[str, Path] = {}
+    if not blog_dir.exists():
+        return []
+    for path in sorted(blog_dir.glob("*.md")):
+        candidate_paths[path.stem] = path
+    for path in sorted(blog_dir.glob("*.blocknote.json")):
+        slug = _blog_slug_from_sidecar_path(path)
+        candidate_paths.setdefault(slug, path)
+    return [candidate_paths[slug] for slug in sorted(candidate_paths)]
+
+
 def parse_blog_post(path: Path) -> BlogPost:
-    """Parse a blog Markdown file."""
+    """Parse a blog post, preferring BlockNote sidecar state when present."""
+    if path.name.endswith(".blocknote.json"):
+        sidecar_post = _parse_blog_sidecar(path)
+        if sidecar_post is not None:
+            return sidecar_post
+        raise PublicSiteError(f"Invalid blog sidecar: {path}")
+    sidecar_path = _blog_sidecar_path_for_markdown(path)
+    sidecar_post = _parse_blog_sidecar(sidecar_path, markdown_path=path)
+    if sidecar_post is not None:
+        return sidecar_post
     text = path.read_text(encoding="utf-8")
     meta, body = _parse_front_matter(text)
     return BlogPost(
@@ -446,6 +520,8 @@ def parse_blog_post(path: Path) -> BlogPost:
         path=path,
         meta=meta,
         body=body,
+        blocks_json=[],
+        sidecar_path=sidecar_path if sidecar_path.exists() else None,
     )
 
 
@@ -460,7 +536,7 @@ def load_blog_posts(
     if not blog_dir.exists():
         return []
     posts: list[BlogPost] = []
-    for path in sorted(blog_dir.glob("*.md")):
+    for path in _blog_post_candidate_paths(blog_dir):
         post = parse_blog_post(path)
         if _status_visible(
             post.status,
@@ -1859,7 +1935,7 @@ def validate_public_layer(
 
     blog_dir = root / BLOG_DIRNAME
     if blog_dir.exists():
-        for path in sorted(blog_dir.glob("*.md")):
+        for path in _blog_post_candidate_paths(blog_dir):
             post = parse_blog_post(path)
             include_refs = _status_visible(
                 post.status,
@@ -1868,11 +1944,11 @@ def validate_public_layer(
             _validate_blog_post(
                 result,
                 root,
-            post,
-            known_evidence_ids=known_ids,
-            include_refs=include_refs,
-            require_publish_ready=(post.status == "published"),
-        )
+                post,
+                known_evidence_ids=known_ids,
+                include_refs=include_refs,
+                require_publish_ready=(post.status == "published"),
+            )
 
     return result
 
@@ -4165,12 +4241,58 @@ def blog_path_for_slug(name: str, slug: str) -> Path:
     return _safe_blog_path(name, slug)
 
 
+def blog_sidecar_path_for_slug(name: str, slug: str) -> Path:
+    """Return the canonical BlockNote sidecar path for a blog slug."""
+
+    return _blog_sidecar_path_for_markdown(_safe_blog_path(name, slug))
+
+
 def load_blog_post(name: str, slug: str) -> BlogPost:
     """Load a blog post by slug."""
     path = _safe_blog_path(name, slug)
-    if not path.exists():
+    sidecar_path = _blog_sidecar_path_for_markdown(path)
+    if not path.exists() and not sidecar_path.exists():
         raise PublicSiteError(f"Unknown blog post: {slug}")
     return parse_blog_post(path)
+
+
+def _write_blog_sidecar(
+    name: str,
+    path: Path,
+    meta: dict,
+    body: str,
+    blocks_json: list[dict] | None,
+) -> Path:
+    """Write the canonical BlockNote sidecar for one blog post."""
+
+    sidecar = _blog_sidecar_path_for_markdown(path)
+    if blocks_json is None:
+        existing = _read_blog_sidecar(sidecar)
+        if existing is not None:
+            blocks_json = [
+                block.model_dump(mode="json", exclude_none=True)
+                for block in existing.blocks
+            ]
+    document = BlockNoteDocument(
+        document_id=path.stem,
+        profile=name,
+        slug=path.stem,
+        meta=_normalize_blog_meta(meta),
+        blocks=coerce_blocks(blocks_json),
+        markdown=str(body or ""),
+        source_md_sha256=hashlib.sha256(
+            _format_front_matter(meta, body).encode("utf-8")
+        ).hexdigest(),
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    payload = json.dumps(
+        document_to_dict(document),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=False,
+    )
+    atomic_write_text(sidecar, payload + "\n")
+    return sidecar
 
 
 def _write_blog_post_file(
@@ -4181,11 +4303,13 @@ def _write_blog_post_file(
     *,
     action: str,
     changed_paths: list[Path] | None = None,
+    blocks_json: list[dict] | None = None,
 ) -> Path:
-    paths = [path]
+    sidecar = _write_blog_sidecar(name, path, meta, body, blocks_json)
+    paths = [sidecar, path]
     if changed_paths:
         paths.extend(changed_paths)
-    path.write_text(_format_front_matter(meta, body), encoding="utf-8")
+    atomic_write_text(path, _format_front_matter(meta, body))
     git_backup.record_change(paths, action=action)
     return path
 
@@ -4447,11 +4571,13 @@ def save_blog_post(
     body: str,
     *,
     extract_inline_images: bool = True,
+    blocks_json: list[dict] | None = None,
     action: str | None = None,
 ) -> tuple[Path, list[Path]]:
     """Save a blog post from structured metadata and Markdown body."""
     path = _safe_blog_path(name, slug)
-    if not path.exists():
+    sidecar_path = _blog_sidecar_path_for_markdown(path)
+    if not path.exists() and not sidecar_path.exists():
         raise PublicSiteError(f"Unknown blog post: {slug}")
     changed: list[Path] = []
     meta = _normalize_blog_meta(meta)
@@ -4464,6 +4590,7 @@ def save_blog_post(
         body,
         action=action or f"update {name}/blog/{path.name}",
         changed_paths=changed,
+        blocks_json=blocks_json,
     )
     return path, changed
 
@@ -4864,15 +4991,25 @@ def publish_blog_post(name: str, slug: str | Path) -> Path:
     candidate = _format_front_matter(meta, post.body)
     result = validate_blog_text_for_publish(name, post.path, candidate)
     result.raise_for_errors()
-    post.path.write_text(candidate, encoding="utf-8")
-    git_backup.record_change(
-        [post.path],
+    _write_blog_post_file(
+        name,
+        post.path,
+        meta,
+        post.body,
         action=f"publish {name}/blog/{post.path.name}",
+        blocks_json=post.blocks_json,
     )
     return post.path
 
 
-def publish_blog_text(name: str, slug: str, meta: dict, body: str) -> Path:
+def publish_blog_text(
+    name: str,
+    slug: str,
+    meta: dict,
+    body: str,
+    *,
+    blocks_json: list[dict] | None = None,
+) -> Path:
     """Publish unsaved structured blog text after full validation."""
     post = load_blog_post(name, slug)
     publish_meta = _normalize_blog_meta(meta)
@@ -4886,6 +5023,7 @@ def publish_blog_text(name: str, slug: str, meta: dict, body: str) -> Path:
         publish_meta,
         body,
         action=f"publish {name}/blog/{post.path.name}",
+        blocks_json=blocks_json if blocks_json is not None else post.blocks_json,
     )
     return post.path
 
@@ -4905,7 +5043,7 @@ def create_blog_draft(
     today = date.today().isoformat()
     slug_text = slug or f"{today}-{title}"
     path = _safe_blog_path(name, slug_text)
-    if path.exists():
+    if path.exists() or _blog_sidecar_path_for_markdown(path).exists():
         stem = path.stem
         path = _safe_blog_path(name, f"{stem}-{today}")
     meta = {
@@ -4918,13 +5056,13 @@ def create_blog_draft(
         "related_evidence": related_evidence or [],
         "related_kanban": related_kanban or [],
     }
-    path.write_text(
-        _format_front_matter(meta, body),
-        encoding="utf-8",
-    )
-    git_backup.record_change(
-        [path],
+    _write_blog_post_file(
+        name,
+        path,
+        meta,
+        body,
         action=f"create {name} blog draft",
+        blocks_json=[],
     )
     return path
 

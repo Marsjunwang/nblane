@@ -27,7 +27,8 @@ nblane = "nblane.cli:main"
 nblane-mcp = "nblane.mcp_server:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["nblane*", "schemas*"]
 
 [tool.setuptools.package-data]
 "nblane.public_blog_editor_component" = [
