@@ -972,12 +972,14 @@ def _library_parent_or_root(library: PublicLibrary, parent_id: str | None) -> st
     if not clean:
         return "root"
     for node in library.nodes:
-        if node.id != clean or node.status == "trashed":
+        if node.id != clean:
             continue
+        if node.status == "trashed":
+            raise PublicSiteError(f"Public library parent is in trash: {clean}")
         if node.type not in {"root", "folder", "post"}:
             raise PublicSiteError("Public library parent must be root, folder, or post.")
         return clean
-    return "root"
+    raise PublicSiteError(f"Unknown public library parent: {clean}")
 
 
 def _library_require_node(
@@ -1066,6 +1068,8 @@ def create_blog_draft_in_library(
     clean_title = str(title or "").strip()
     if not clean_title:
         raise PublicSiteError("Blog title is required.")
+    library = load_public_library(name)
+    parent = _library_parent_or_root(library, parent_id)
     path = create_blog_draft(
         name,
         title=clean_title,
@@ -1077,11 +1081,10 @@ def create_blog_draft_in_library(
         respect_taxonomy=False,
     )
     route = _blog_route_from_document_path(path)
-    library = load_public_library(name)
     node = _library_add_post_node(
         name,
         library=library,
-        parent_id=parent_id,
+        parent_id=parent,
         route=route,
         title=clean_title,
         visibility=visibility,

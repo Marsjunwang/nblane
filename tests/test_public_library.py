@@ -456,12 +456,107 @@ class TestPublicLibrary(unittest.TestCase):
                         "post_a",
                         before_node_id="trashed_post",
                     )
+                with self.assertRaisesRegex(public_site.PublicSiteError, "Unknown.*missing_parent"):
+                    public_site.position_public_library_node(
+                        "alice",
+                        "post_a",
+                        parent_id="missing_parent",
+                    )
+                with self.assertRaisesRegex(public_site.PublicSiteError, "trash"):
+                    public_site.position_public_library_node(
+                        "alice",
+                        "post_a",
+                        parent_id="trashed_post",
+                    )
                 with self.assertRaisesRegex(public_site.PublicSiteError, "itself"):
                     public_site.position_public_library_node(
                         "alice",
                         "post_a",
                         before_node_id="post_a",
                     )
+
+    def test_public_library_mutations_reject_invalid_move_parents(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = _make_profile(Path(tmp))
+            _write_yaml(
+                profile / "public-library.yaml",
+                _library_yaml(
+                    [
+                        {
+                            "id": "folder_a",
+                            "type": "folder",
+                            "title": "Folder A",
+                            "parent_id": "root",
+                            "order": 10,
+                        },
+                        {
+                            "id": "post_a",
+                            "type": "post",
+                            "title": "Post A",
+                            "ref": "blog/post-a.md",
+                            "parent_id": "root",
+                            "order": 20,
+                        },
+                        {
+                            "id": "media_one",
+                            "type": "media",
+                            "title": "Media One",
+                            "ref": "media/library/media-one.png",
+                            "parent_id": "root",
+                            "order": 30,
+                        },
+                        {
+                            "id": "trashed_folder",
+                            "type": "folder",
+                            "title": "Trashed Folder",
+                            "parent_id": "root",
+                            "order": 40,
+                            "status": "trashed",
+                        },
+                    ]
+                ),
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                with self.assertRaisesRegex(public_site.PublicSiteError, "root"):
+                    public_site.move_public_library_node("alice", "root", "folder_a")
+
+                for parent_id, pattern in (
+                    ("missing_parent", "Unknown.*missing_parent"),
+                    ("media_one", "parent must be root, folder, or post"),
+                    ("trashed_folder", "trash"),
+                ):
+                    with self.assertRaisesRegex(public_site.PublicSiteError, pattern):
+                        public_site.create_public_library_folder(
+                            "alice",
+                            parent_id,
+                            "Nested Folder",
+                        )
+                    with self.assertRaisesRegex(public_site.PublicSiteError, pattern):
+                        public_site.create_blog_draft_in_library(
+                            "alice",
+                            parent_id,
+                            "Nested Draft",
+                        )
+                    with self.assertRaisesRegex(public_site.PublicSiteError, pattern):
+                        public_site.attach_existing_public_library_node(
+                            "alice",
+                            parent_id,
+                            "published-post",
+                        )
+                    with self.assertRaisesRegex(public_site.PublicSiteError, pattern):
+                        public_site.add_public_library_media_bytes(
+                            "alice",
+                            parent_id,
+                            data=b"png",
+                            filename="photo.png",
+                        )
+                    with self.assertRaisesRegex(public_site.PublicSiteError, pattern):
+                        public_site.move_public_library_node(
+                            "alice",
+                            "post_a",
+                            parent_id,
+                        )
 
     def test_media_purge_with_delete_files_rejects_active_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

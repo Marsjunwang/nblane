@@ -582,7 +582,7 @@ textarea:read-only {
 .nb-library-row {
   position: relative;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 30px;
+  grid-template-columns: 24px 22px minmax(0, 1fr) 30px;
   align-items: stretch;
   padding-left: calc(var(--nb-tree-depth, 0) * 14px);
   border: 1px solid transparent;
@@ -617,7 +617,7 @@ textarea:read-only {
 
 .nb-library-node {
   display: grid;
-  grid-template-columns: 16px auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 2px 7px;
   width: 100%;
   min-width: 0;
@@ -630,13 +630,34 @@ textarea:read-only {
 }
 
 .nb-library-drag-handle {
-  grid-row: 1 / 3;
   align-self: center;
+  justify-self: center;
+  min-width: 20px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--nb-muted);
   cursor: grab;
   font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0;
+  touch-action: none;
+}
+
+.nb-library-drag-handle:hover:not(:disabled),
+.nb-library-drag-handle:focus-visible {
+  background: var(--nb-soft);
+  color: var(--nb-ink);
+}
+
+.nb-library-drag-handle:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+.nb-library-drag-handle:disabled {
+  cursor: default;
+  opacity: 0.32;
 }
 
 .nb-library-type {
@@ -718,14 +739,25 @@ textarea:read-only {
   pointer-events: none;
 }
 
-.nb-library-drop-zone.is-upper {
+.nb-library-drop-zone.is-before {
   top: 0;
-  height: 50%;
+  height: 30%;
 }
 
-.nb-library-drop-zone.is-lower {
+.nb-library-drop-zone.is-into {
+  top: 30%;
+  height: 40%;
+}
+
+.nb-library-drop-zone.is-after {
   bottom: 0;
-  height: 50%;
+  height: 30%;
+}
+
+.nb-library-drop-zone.is-only {
+  top: 0;
+  bottom: auto;
+  height: 100%;
 }
 
 .nb-library-drop-indicator {
@@ -749,6 +781,30 @@ textarea:read-only {
 
 .nb-library-row.is-dragging {
   opacity: 0.58;
+}
+
+.nb-library-drag-overlay {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  max-width: min(320px, 72vw);
+  padding: 7px 10px;
+  border: 1px solid rgba(33, 104, 91, 0.34);
+  border-radius: 8px;
+  background: var(--nb-paper);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
+  color: var(--nb-ink);
+  pointer-events: none;
+}
+
+.nb-library-drag-overlay-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nb-library-row.is-subdoc {

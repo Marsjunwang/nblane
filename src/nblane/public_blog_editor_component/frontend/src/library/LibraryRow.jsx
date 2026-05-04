@@ -1,22 +1,22 @@
 import React from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
 import {
+  isVirtualNode,
   libraryNodeId,
   libraryNodeTitle,
   libraryNodeType,
 } from "./treeUtils.js";
 
-function DropZone({ node, depth, half }) {
-  const id = `${libraryNodeId(node)}:${half}`;
+function DropZone({ node, depth, position, only = false }) {
+  const id = `${libraryNodeId(node)}:${position}`;
   const { setNodeRef, isOver } = useDroppable({
     id,
-    data: { node, half, depth },
+    data: { node, position, depth },
   });
   return (
     <span
       ref={setNodeRef}
-      className={`nb-library-drop-zone is-${half} ${isOver ? "is-over" : ""}`}
+      className={`nb-library-drop-zone is-${position} ${only ? "is-only" : ""} ${isOver ? "is-over" : ""}`}
       aria-hidden="true"
     />
   );
@@ -33,28 +33,34 @@ export function LibraryRow({
   hasChildren = false,
   activeIntent = null,
   labels = {},
+  toggleDisabled = false,
   onToggle,
   onSelect,
   onMenu,
 }) {
   const type = libraryNodeType(node);
   const id = libraryNodeId(node);
+  const virtual = isVirtualNode(node);
+  const dropPositions = virtual
+    ? []
+    : type === "root" || id === "root"
+      ? ["into"]
+      : ["before", "into", "after"];
+  const dragDisabled = id === "root" || node.status === "trashed";
   const {
     attributes,
     listeners,
     setNodeRef,
-    transform,
     isDragging,
   } = useDraggable({
     id: `drag:${id}`,
     data: { node },
-    disabled: id === "root" || node.status === "trashed",
+    disabled: dragDisabled,
   });
   const isDropTarget =
     activeIntent?.overId === id && activeIntent?.position === "into";
   const style = {
     "--nb-tree-depth": depth,
-    transform: CSS.Transform.toString(transform),
   };
   const subdoc = parentType === "post";
   const tooltip = subdoc
@@ -81,26 +87,36 @@ export function LibraryRow({
         }
       }}
     >
-      <DropZone node={node} depth={depth} half="upper" />
-      <DropZone node={node} depth={depth} half="lower" />
+      {dropPositions.map((position) => (
+        <DropZone
+          key={position}
+          node={node}
+          depth={depth}
+          position={position}
+          only={dropPositions.length === 1}
+        />
+      ))}
       <button
         type="button"
         className="nb-library-toggle"
-        disabled={!hasChildren}
+        disabled={!hasChildren || toggleDisabled}
         aria-label={expanded ? labels.library_collapse || "Collapse" : labels.library_expand || "Expand"}
         onClick={onToggle}
       >
         {hasChildren ? (expanded ? "v" : ">") : ""}
       </button>
+      <button
+        type="button"
+        className="nb-library-drag-handle"
+        disabled={dragDisabled}
+        aria-label={labels.library_drag_handle || "Drag"}
+        title={labels.library_drag_handle || "Drag"}
+        {...listeners}
+        {...attributes}
+      >
+        ::
+      </button>
       <button type="button" className="nb-library-node" onClick={onSelect}>
-        <span
-          className="nb-library-drag-handle"
-          {...listeners}
-          {...attributes}
-          title={labels.library_drag_handle || "Drag"}
-        >
-          ::
-        </span>
         <span className={`nb-library-type is-${type}`}>
           {type === "root" ? "R" : type === "folder" ? "D" : type === "media" ? "M" : "P"}
         </span>

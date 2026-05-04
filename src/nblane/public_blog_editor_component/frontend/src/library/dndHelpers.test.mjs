@@ -47,23 +47,27 @@ const media = {
 folder.children = [child];
 root.children = [folder, post, media];
 
-test("drop halves map media rows to sibling targets and parentable rows to children", () => {
-  assert.equal(canDropOn(media, folder, "lower"), true);
-  assert.equal(canDropOn(media, post, "lower"), true);
-  assert.equal(canDropOn(post, root, "lower"), true);
-  assert.equal(canDropOn(post, media, "upper"), true);
-  assert.equal(canDropOn(post, media, "lower"), true);
+test("explicit drop positions map parentable and leaf rows consistently", () => {
+  assert.equal(canDropOn(media, folder, "before"), true);
+  assert.equal(canDropOn(media, folder, "into"), true);
+  assert.equal(canDropOn(media, folder, "after"), true);
+  assert.equal(canDropOn(media, post, "into"), true);
+  assert.equal(canDropOn(post, root, "into"), true);
+  assert.equal(canDropOn(post, root, "before"), false);
+  assert.equal(canDropOn(post, root, "after"), false);
+  assert.equal(canDropOn(post, media, "before"), true);
+  assert.equal(canDropOn(post, media, "after"), true);
   assert.equal(canDropOn(post, media, "into"), false);
 });
 
 test("drop intent rejects self and descendant cycles", () => {
-  assert.equal(canDropOn(folder, folder, "lower"), false);
-  assert.equal(canDropOn(folder, child, "lower"), false);
-  assert.equal(canDropOn(folder, child, "upper"), false);
+  assert.equal(canDropOn(folder, folder, "into"), false);
+  assert.equal(canDropOn(folder, child, "into"), false);
+  assert.equal(canDropOn(folder, child, "before"), false);
 });
 
-test("upper half produces before reorder payloads and same-depth indicators", () => {
-  const before = resolveDropIntent(post, folder, "upper", { overDepth: 1 });
+test("before position produces reorder payloads and same-depth indicators", () => {
+  const before = resolveDropIntent(post, folder, "before", { overDepth: 1 });
   assert.equal(before.kind, "reorder");
   assert.equal(before.position, "before");
   assert.equal(before.indentDepth, 1);
@@ -83,8 +87,8 @@ test("upper half produces before reorder payloads and same-depth indicators", ()
   });
 });
 
-test("lower half on folder and post produces move-into payloads", () => {
-  const intoFolder = resolveDropIntent(media, folder, "lower", { overDepth: 1 });
+test("into position on folder, post, and root produces move-into payloads", () => {
+  const intoFolder = resolveDropIntent(media, folder, "into", { overDepth: 1 });
   assert.equal(intoFolder.kind, "move-into");
   assert.equal(intoFolder.position, "into");
   assert.equal(intoFolder.parentId, "folder");
@@ -100,13 +104,19 @@ test("lower half on folder and post produces move-into payloads", () => {
     },
   });
 
-  const intoPost = resolveDropIntent(media, post, "lower", { overDepth: 1 });
+  const intoPost = resolveDropIntent(media, post, "into", { overDepth: 1 });
   assert.equal(intoPost.kind, "move-into");
   assert.equal(intoPost.parentId, "post");
+
+  const intoRoot = resolveDropIntent(child, root, "into", { overDepth: 0 });
+  assert.equal(intoRoot.kind, "move-into");
+  assert.equal(intoRoot.position, "into");
+  assert.equal(intoRoot.parentId, "root");
+  assert.equal(intoRoot.indentDepth, 1);
 });
 
-test("lower half on media produces after reorder payloads", () => {
-  const after = resolveDropIntent(post, media, "lower", { overDepth: 1 });
+test("after position produces reorder payloads on media and parentable rows", () => {
+  const after = resolveDropIntent(post, media, "after", { overDepth: 1 });
   assert.equal(after.kind, "reorder");
   assert.equal(after.position, "after");
   assert.equal(after.afterNodeId, "media");
@@ -123,14 +133,11 @@ test("lower half on media produces after reorder payloads", () => {
       drop_intent: "after",
     },
   });
-});
 
-test("lower half on root moves nodes back to the library root", () => {
-  const intent = resolveDropIntent(child, root, "lower", { overDepth: 0 });
-  assert.equal(intent.kind, "move-into");
-  assert.equal(intent.position, "into");
-  assert.equal(intent.parentId, "root");
-  assert.equal(intent.indentDepth, 1);
+  const afterFolder = resolveDropIntent(post, folder, "after", { overDepth: 1 });
+  assert.equal(afterFolder.kind, "reorder");
+  assert.equal(afterFolder.afterNodeId, "folder");
+  assert.equal(afterFolder.parentId, "root");
 });
 
 test("virtual posts attach existing refs instead of moving node ids", () => {
@@ -142,9 +149,9 @@ test("virtual posts attach existing refs instead of moving node ids", () => {
     virtual: true,
     parent_id: "root",
   };
-  const intent = resolveDropIntent(virtual, folder, "lower");
-  assert.equal(intent.kind, "attach-existing");
-  assert.deepEqual(actionForDropIntent(intent, virtual), {
+  const intoIntent = resolveDropIntent(virtual, folder, "into");
+  assert.equal(intoIntent.kind, "attach-existing");
+  assert.deepEqual(actionForDropIntent(intoIntent, virtual), {
     action: "library_attach_existing",
     payload: {
       ref: "virtual",
@@ -154,6 +161,36 @@ test("virtual posts attach existing refs instead of moving node ids", () => {
       before_node_id: "",
       after_node_id: "",
       drop_intent: "into",
+    },
+  });
+
+  const beforeIntent = resolveDropIntent(virtual, post, "before");
+  assert.equal(beforeIntent.kind, "attach-existing");
+  assert.deepEqual(actionForDropIntent(beforeIntent, virtual), {
+    action: "library_attach_existing",
+    payload: {
+      ref: "virtual",
+      title: "Virtual",
+      parent_id: "root",
+      target_parent_id: "root",
+      before_node_id: "post",
+      after_node_id: "",
+      drop_intent: "before",
+    },
+  });
+
+  const afterIntent = resolveDropIntent(virtual, media, "after");
+  assert.equal(afterIntent.kind, "attach-existing");
+  assert.deepEqual(actionForDropIntent(afterIntent, virtual), {
+    action: "library_attach_existing",
+    payload: {
+      ref: "virtual",
+      title: "Virtual",
+      parent_id: "root",
+      target_parent_id: "root",
+      before_node_id: "",
+      after_node_id: "media",
+      drop_intent: "after",
     },
   });
 });
@@ -166,19 +203,20 @@ test("virtual targets are rejected", () => {
     virtual: true,
     parent_id: "root",
   };
-  assert.equal(resolveDropIntent(post, virtualTarget, "upper"), null);
-  assert.equal(resolveDropIntent(post, virtualTarget, "lower"), null);
+  assert.equal(resolveDropIntent(post, virtualTarget, "before"), null);
+  assert.equal(resolveDropIntent(post, virtualTarget, "into"), null);
+  assert.equal(resolveDropIntent(post, virtualTarget, "after"), null);
 });
 
 test("drop labels distinguish folder, post subdoc, and sibling positions", () => {
   assert.equal(
-    dropIntentLabel(resolveDropIntent(post, folder, "lower"), {
+    dropIntentLabel(resolveDropIntent(post, folder, "into"), {
       library_drop_into_folder: "放入「{title}」",
     }),
     "放入「Folder」",
   );
   assert.equal(
-    dropIntentLabel(resolveDropIntent(folder, post, "lower"), {
+    dropIntentLabel(resolveDropIntent(folder, post, "into"), {
       library_drop_as_subdoc: "作为「{title}」的子文档",
     }),
     "作为「Post」的子文档",

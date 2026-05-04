@@ -14,52 +14,45 @@ function isNodeParentableForDrop(node) {
   return type === "root" || type === "folder" || type === "post";
 }
 
-function positionForDropHalf(overNode, half = "lower") {
-  const targetType = libraryNodeType(overNode);
-  if (half === "upper" || half === "before") {
+function normalizeDropPosition(position = "after") {
+  const clean = cleanText(position).toLowerCase();
+  if (clean === "before" || clean === "upper") {
     return "before";
   }
-  if (half === "lower") {
-    return targetType === "media" ? "after" : "into";
+  if (clean === "into") {
+    return "into";
   }
-  if (half === "into" || half === "after") {
-    return half;
+  if (clean === "after" || clean === "lower") {
+    return "after";
   }
   return "";
 }
 
-function indicatorEdgeFor(half, position) {
-  return half === "upper" || position === "before" ? "top" : "bottom";
+function indicatorEdgeFor(position) {
+  return position === "before" ? "top" : "bottom";
 }
 
-function normalizedHalfFor(half, position) {
-  if (half === "upper" || half === "lower") {
-    return half;
-  }
-  return position === "before" ? "upper" : "lower";
-}
-
-export function canDropOn(activeNode, overNode, half = "lower") {
+export function canDropOn(activeNode, overNode, position = "after") {
   const activeId = libraryNodeId(activeNode);
   const overId = libraryNodeId(overNode);
-  const position = positionForDropHalf(overNode, half);
+  const dropPosition = normalizeDropPosition(position);
   if (
     !activeId ||
     !overId ||
-    !position ||
+    !dropPosition ||
     activeId === overId ||
     isRootNode(activeNode) ||
     isVirtualNode(overNode)
   ) {
     return false;
   }
-  if (position === "into") {
+  if (dropPosition === "into") {
     if (!isNodeParentableForDrop(overNode)) {
       return false;
     }
     return !isDescendantId(activeNode, overId);
   }
-  if (position === "before" || position === "after") {
+  if (dropPosition === "before" || dropPosition === "after") {
     if (isRootNode(overNode)) {
       return false;
     }
@@ -72,9 +65,9 @@ export function canDropOn(activeNode, overNode, half = "lower") {
   return false;
 }
 
-export function resolveDropIntent(activeNode, overNode, half = "lower", options = {}) {
-  const position = positionForDropHalf(overNode, half);
-  if (!canDropOn(activeNode, overNode, half)) {
+export function resolveDropIntent(activeNode, overNode, position = "after", options = {}) {
+  const dropPosition = normalizeDropPosition(position);
+  if (!canDropOn(activeNode, overNode, dropPosition)) {
     return null;
   }
   const activeId = libraryNodeId(activeNode);
@@ -83,21 +76,20 @@ export function resolveDropIntent(activeNode, overNode, half = "lower", options 
     ? Number(options.overDepth)
     : 0;
   const baseIntent = {
-    half: normalizedHalfFor(half, position),
-    indentDepth: position === "into" ? overDepth + 1 : overDepth,
-    indicatorEdge: indicatorEdgeFor(half, position),
+    position: dropPosition,
+    indentDepth: dropPosition === "into" ? overDepth + 1 : overDepth,
+    indicatorEdge: indicatorEdgeFor(dropPosition),
   };
-  if (position === "before" || position === "after") {
+  if (dropPosition === "before" || dropPosition === "after") {
     const parentId = parentIdFor(overNode);
     return {
       ...baseIntent,
       kind: isVirtualNode(activeNode) ? "attach-existing" : "reorder",
-      position,
       activeId,
       overId,
       parentId,
-      beforeNodeId: position === "before" ? overId : "",
-      afterNodeId: position === "after" ? overId : "",
+      beforeNodeId: dropPosition === "before" ? overId : "",
+      afterNodeId: dropPosition === "after" ? overId : "",
       targetTitle: libraryNodeTitle(overNode),
       targetType: libraryNodeType(overNode),
     };
@@ -105,7 +97,6 @@ export function resolveDropIntent(activeNode, overNode, half = "lower", options 
   return {
     ...baseIntent,
     kind: isVirtualNode(activeNode) ? "attach-existing" : "move-into",
-    position: "into",
     activeId,
     overId,
     parentId: overId,

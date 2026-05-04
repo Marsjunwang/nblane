@@ -1717,6 +1717,59 @@ def _blog_ai_stream_key(selected: str, slug: str) -> str:
     return _blog_editor_key(selected, slug, "ai_stream")
 
 
+def _blog_ai_stream_snapshot_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "ai_stream_snapshot")
+
+
+def _blog_ai_stream_seen_key(selected: str, slug: str) -> str:
+    return _blog_editor_key(selected, slug, "ai_stream_seen")
+
+
+def _clear_blog_ai_stream_state(selected: str, slug: str) -> None:
+    """Clear all Streamlit-side state for the current AI stream."""
+    st.session_state.pop(_blog_ai_stream_key(selected, slug), None)
+    st.session_state.pop(_blog_ai_stream_snapshot_key(selected, slug), None)
+    st.session_state.pop(_blog_ai_stream_seen_key(selected, slug), None)
+
+
+def _remember_blog_ai_stream_snapshot(selected: str, slug: str, snapshot: dict) -> None:
+    """Keep the latest stream snapshot available for the next React render."""
+    if not isinstance(snapshot, dict):
+        return
+    task_id = str(snapshot.get("task_id", "") or "").strip()
+    if not task_id:
+        return
+    st.session_state[_blog_ai_stream_key(selected, slug)] = task_id
+    st.session_state[_blog_ai_stream_snapshot_key(selected, slug)] = dict(snapshot)
+
+
+def _blog_ai_stream_payload(selected: str, slug: str) -> dict:
+    """Return the stream snapshot that should be sent to the editor component."""
+    stream_id = str(st.session_state.get(_blog_ai_stream_key(selected, slug), "") or "").strip()
+    if not stream_id:
+        return {}
+    snapshot = _ai_stream_snapshot(stream_id)
+    if snapshot:
+        _remember_blog_ai_stream_snapshot(selected, slug, snapshot)
+        return snapshot
+    stored = st.session_state.get(_blog_ai_stream_snapshot_key(selected, slug))
+    if isinstance(stored, dict) and str(stored.get("task_id", "") or "").strip() == stream_id:
+        return dict(stored)
+    return {}
+
+
+def _blog_ai_stream_seen_signature(snapshot: dict) -> tuple[str, str, float, int]:
+    """Return a compact signature for deciding whether a running stream changed."""
+    if not isinstance(snapshot, dict):
+        return ("", "", 0.0, 0)
+    return (
+        str(snapshot.get("task_id", "") or ""),
+        str(snapshot.get("status", "") or ""),
+        float(snapshot.get("updated_at", 0.0) or 0.0),
+        len(str(snapshot.get("text", "") or "")),
+    )
+
+
 def _ai_patch_primary_id(patch: dict) -> str:
     if not isinstance(patch, dict):
         return ""
@@ -3123,15 +3176,7 @@ def _render_blog_react_shell_fragment(
             _clear_blog_preview(selected, latest_post.slug)
     ai_patch_payloads = _blog_ai_patch_payloads(selected, latest_post.slug)
     ai_patch_payload = ai_patch_payloads[-1] if ai_patch_payloads else {}
-    ai_stream_payload = _ai_stream_snapshot(
-        str(
-            st.session_state.get(
-                _blog_ai_stream_key(selected, latest_post.slug),
-                "",
-            )
-            or ""
-        )
-    )
+    ai_stream_payload = _blog_ai_stream_payload(selected, latest_post.slug)
     if isinstance(ai_stream_payload.get("patch"), dict):
         ai_stream_payload["patch"] = _attach_ai_patch_preview_sources(
             selected,
@@ -3298,7 +3343,7 @@ def _render_blog_react_shell_fragment(
                 patch_payload,
                 patch_id=str(payload.get("patch_id", "") or ""),
             )
-            st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
+            _clear_blog_ai_stream_state(selected, latest_post.slug)
             if isinstance(patch_payload, dict):
                 patch_id = str(
                     patch_payload.get("patch_id", "") or patch_payload.get("id", "") or ""
@@ -3790,7 +3835,7 @@ def _render_blog_react_shell_fragment(
                 or event.get("event_id", "")
                 or f"ai-stream-{uuid.uuid4().hex[:12]}"
             )
-            _start_ai_stream_task(
+            snapshot = _start_ai_stream_task(
                 task_id=stream_id,
                 profile=selected,
                 slug=latest_post.slug,
@@ -3801,7 +3846,10 @@ def _render_blog_react_shell_fragment(
                 prompt=str(payload.get("prompt", "") or ""),
                 visual_kind=str(payload.get("visual_kind", "") or ""),
             )
-            st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
+            _remember_blog_ai_stream_snapshot(selected, latest_post.slug, snapshot)
+            st.session_state[
+                _blog_ai_stream_seen_key(selected, latest_post.slug)
+            ] = _blog_ai_stream_seen_signature(snapshot)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -3816,7 +3864,7 @@ def _render_blog_react_shell_fragment(
             _rerun_with_blog_layout(selected, latest_post.slug, next_state)
         except Exception as exc:
             message = str(exc)
-            st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
+            _clear_blog_ai_stream_state(selected, latest_post.slug)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -3835,11 +3883,15 @@ def _render_blog_react_shell_fragment(
             or ""
         )
         snapshot = _ai_stream_snapshot(stream_id)
+        if snapshot:
+            _remember_blog_ai_stream_snapshot(selected, latest_post.slug, snapshot)
         if snapshot.get("status") == "done":
             patch = snapshot.get("patch")
             if isinstance(patch, dict) and patch.get("operation"):
                 patch = _attach_ai_patch_preview_sources(selected, patch)
                 _store_blog_ai_patch(selected, latest_post.slug, patch)
+                snapshot["patch"] = patch
+                _remember_blog_ai_stream_snapshot(selected, latest_post.slug, snapshot)
                 _set_blog_shell_notice(
                     selected,
                     latest_post.slug,
@@ -3848,7 +3900,17 @@ def _render_blog_react_shell_fragment(
                     source="ai",
                 )
                 st.rerun()
+            else:
+                _set_blog_shell_notice(
+                    selected,
+                    latest_post.slug,
+                    tone="error",
+                    message="AI generation finished without a patch candidate.",
+                    source="ai",
+                )
+                st.rerun()
         elif snapshot.get("status") == "failed":
+            _remember_blog_ai_stream_snapshot(selected, latest_post.slug, snapshot)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -3858,6 +3920,7 @@ def _render_blog_react_shell_fragment(
             )
             st.rerun()
         elif snapshot.get("status") == "cancelled":
+            _remember_blog_ai_stream_snapshot(selected, latest_post.slug, snapshot)
             _set_blog_shell_notice(
                 selected,
                 latest_post.slug,
@@ -3866,6 +3929,12 @@ def _render_blog_react_shell_fragment(
                 source="ai",
             )
             st.rerun()
+        elif snapshot.get("status") == "running":
+            seen_key = _blog_ai_stream_seen_key(selected, latest_post.slug)
+            signature = _blog_ai_stream_seen_signature(snapshot)
+            if st.session_state.get(seen_key) != signature:
+                st.session_state[seen_key] = signature
+                st.rerun()
         return True
 
     if action == "cancel_ai_stream":
@@ -3874,8 +3943,13 @@ def _render_blog_react_shell_fragment(
             or st.session_state.get(_blog_ai_stream_key(selected, latest_post.slug), "")
             or ""
         )
-        _cancel_ai_stream_task(stream_id)
-        st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
+        snapshot = _cancel_ai_stream_task(stream_id)
+        if not snapshot and stream_id:
+            snapshot = _ai_stream_snapshot(stream_id)
+        if snapshot:
+            _remember_blog_ai_stream_snapshot(selected, latest_post.slug, snapshot)
+        elif stream_id:
+            st.session_state[_blog_ai_stream_key(selected, latest_post.slug)] = stream_id
         _set_blog_shell_notice(
             selected,
             latest_post.slug,
@@ -3897,7 +3971,7 @@ def _render_blog_react_shell_fragment(
             patch_payload,
             patch_id=str(payload.get("patch_id", "") or ""),
         )
-        st.session_state.pop(_blog_ai_stream_key(selected, latest_post.slug), None)
+        _clear_blog_ai_stream_state(selected, latest_post.slug)
         _clear_blog_shell_notice(selected, latest_post.slug)
         st.rerun()
         return True

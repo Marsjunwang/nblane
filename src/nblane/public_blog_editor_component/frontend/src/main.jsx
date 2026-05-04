@@ -11,9 +11,12 @@ import { BlockNoteView } from "@blocknote/mantine";
 import { filterSuggestionItems } from "@blocknote/core";
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  pointerWithin,
+  rectIntersection,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -57,7 +60,6 @@ import {
   filterTreeWithAncestors,
   flattenLibraryTree as flattenLibraryRows,
   isParentableNode,
-  isRootNode,
   isVirtualNode,
   libraryNodeId as treeNodeId,
   libraryNodeTitle as treeNodeTitle,
@@ -564,6 +566,88 @@ function libraryTreeHasVisibleContent(nodes) {
     const id = libraryNodeId(node);
     return id && id !== "root";
   });
+}
+
+function libraryProfileKey(storageKey, activeSlug) {
+  const source = cleanText(storageKey || activeSlug || "default");
+  if (!source) {
+    return "default";
+  }
+  if (source.startsWith("public_blog_editor:")) {
+    const parts = source.split(":");
+    return cleanText(parts[1]) || "default";
+  }
+  const parts = source.split(":");
+  if (parts.length > 1) {
+    return cleanText(parts[0]) || "default";
+  }
+  return source;
+}
+
+function readExpandedIds(storageKey) {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) {
+      return null;
+    }
+    const ids = JSON.parse(stored);
+    if (Array.isArray(ids)) {
+      return new Set(ids.map(cleanText).filter(Boolean));
+    }
+  } catch (_err) {
+    // localStorage can be unavailable in private browsing or embedded contexts.
+  }
+  return null;
+}
+
+function sameStringSet(left, right) {
+  return left.size === right.size && [...left].every((id) => right.has(id));
+}
+
+function libraryCollisionDetection(args) {
+  const activeId = libraryNodeId(args.active?.data?.current?.node);
+  const droppableContainers = activeId
+    ? args.droppableContainers.filter((container) => {
+        const nodeId = libraryNodeId(container.data?.current?.node);
+        if (nodeId) {
+          return nodeId !== activeId;
+        }
+        return !cleanText(container.id).startsWith(`${activeId}:`);
+      })
+    : args.droppableContainers;
+  const filteredArgs = { ...args, droppableContainers };
+  const pointerCollisions = pointerWithin(filteredArgs);
+  if (pointerCollisions.length) {
+    return pointerCollisions;
+  }
+  const intersections = rectIntersection(filteredArgs);
+  return intersections.length ? intersections : closestCenter(filteredArgs);
+}
+
+function libraryTypeGlyph(type) {
+  if (type === "root") {
+    return "R";
+  }
+  if (type === "folder") {
+    return "D";
+  }
+  if (type === "media") {
+    return "M";
+  }
+  return "P";
+}
+
+function LibraryDragOverlay({ node }) {
+  if (!node) {
+    return null;
+  }
+  const type = treeNodeType(node);
+  return (
+    <div className="nb-library-drag-overlay">
+      <span className={`nb-library-type is-${type}`}>{libraryTypeGlyph(type)}</span>
+      <span className="nb-library-drag-overlay-title">{treeNodeTitle(node)}</span>
+    </div>
+  );
 }
 
 function mediaPath(item) {
@@ -2224,33 +2308,25 @@ function PublicLibraryTreePanel({
   trashNodes,
 }) {
   const profileKey = useMemo(() => {
-    const source = cleanText(storageKey || activeSlug || "default");
-    return source.split(":")[0] || "default";
+    return libraryProfileKey(storageKey, activeSlug);
   }, [activeSlug, storageKey]);
   const expandedStorageKey = `nb-library-expanded-${profileKey}`;
-  const flatRows = useMemo(() => flattenLibraryRows(nodes), [nodes]);
   const nodeById = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const validIds = useMemo(() => validTreeIds(nodes), [nodes]);
+  const defaultExpanded = useMemo(() => directExpandableRootChildren(nodes), [nodes]);
+  const activeAncestorIds = useMemo(
+    () => ancestorIdsForNodeId(nodeById, activeNodeId),
+    [activeNodeId, nodeById],
+  );
   const initialExpanded = useMemo(() => {
-    const next = directExpandableRootChildren(nodes);
+    const next = new Set(defaultExpanded);
     for (const id of ancestorIdsForNodeId(nodeById, activeNodeId)) {
       next.add(id);
     }
     return next;
-  }, [activeNodeId, nodeById, nodes]);
+  }, [activeNodeId, defaultExpanded, nodeById]);
   const [expandedIds, setExpandedIds] = useState(() => {
-    try {
-      const stored = window.localStorage.getItem(expandedStorageKey);
-      if (stored) {
-        const ids = JSON.parse(stored);
-        if (Array.isArray(ids)) {
-          return new Set(ids.map(cleanText).filter(Boolean));
-        }
-      }
-    } catch (_err) {
-      // localStorage can be unavailable in private browsing or embedded contexts.
-    }
-    return initialExpanded;
+    return readExpandedIds(expandedStorageKey) || initialExpanded;
   });
   const [selectedNodeId, setSelectedNodeId] = useState(cleanText(activeNodeId));
   const [uploadFile, setUploadFile] = useState(null);
@@ -2260,7 +2336,11 @@ function PublicLibraryTreePanel({
   const [menu, setMenu] = useState(null);
   const [dragIntent, setDragIntent] = useState(null);
   const [dropIndicator, setDropIndicator] = useState(null);
+  const [draggingNode, setDraggingNode] = useState(null);
   const libraryTreeRef = useRef(null);
+  const previousActiveNodeIdRef = useRef("");
+  const previousExpandedStorageKeyRef = useRef(expandedStorageKey);
+  const skipExpandedPersistRef = useRef(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor),
@@ -2273,24 +2353,51 @@ function PublicLibraryTreePanel({
   }, [activeNodeId]);
 
   useEffect(() => {
+    if (previousExpandedStorageKeyRef.current === expandedStorageKey) {
+      return;
+    }
+    const stored = readExpandedIds(expandedStorageKey);
+    const next = new Set(
+      [...(stored || initialExpanded)].filter((id) => validIds.has(id)),
+    );
+    if (!next.size) {
+      for (const id of initialExpanded) {
+        next.add(id);
+      }
+    }
+    skipExpandedPersistRef.current = true;
+    previousExpandedStorageKeyRef.current = expandedStorageKey;
+    setExpandedIds(next);
+  }, [expandedStorageKey, initialExpanded, validIds]);
+
+  useEffect(() => {
+    const cleanActiveId = cleanText(activeNodeId);
+    const activeChanged = previousActiveNodeIdRef.current !== cleanActiveId;
     setExpandedIds((current) => {
       const next = new Set([...current].filter((id) => validIds.has(id)));
       if (!next.size) {
-        for (const id of initialExpanded) {
+        for (const id of defaultExpanded) {
           next.add(id);
         }
       }
-      for (const id of ancestorIdsForNodeId(nodeById, activeNodeId)) {
-        next.add(id);
+      if (activeChanged) {
+        for (const id of activeAncestorIds) {
+          next.add(id);
+        }
       }
-      if (next.size === current.size && [...next].every((id) => current.has(id))) {
+      if (sameStringSet(next, current)) {
         return current;
       }
       return next;
     });
-  }, [activeNodeId, initialExpanded, nodeById, validIds]);
+    previousActiveNodeIdRef.current = cleanActiveId;
+  }, [activeAncestorIds, activeNodeId, defaultExpanded, validIds]);
 
   useEffect(() => {
+    if (skipExpandedPersistRef.current) {
+      skipExpandedPersistRef.current = false;
+      return;
+    }
     try {
       window.localStorage.setItem(
         expandedStorageKey,
@@ -2352,6 +2459,21 @@ function PublicLibraryTreePanel({
     setExpandedIds((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
       notifyTreeState();
+      return next;
+    });
+  }
+
+  function revealParent(parentId) {
+    const cleanParentId = cleanText(parentId);
+    if (!cleanParentId) {
+      return;
+    }
+    setExpandedIds((current) => {
+      if (current.has(cleanParentId)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(cleanParentId);
       return next;
     });
   }
@@ -2464,11 +2586,13 @@ function PublicLibraryTreePanel({
       if (!ref) {
         return;
       }
+      const parentId = cleanText(node?.parent_id || "root") || "root";
+      revealParent(parentId);
       await onAction("library_attach_existing", {
         ref,
         title: treeNodeTitle(node),
-        parent_id: cleanText(node?.parent_id || "root") || "root",
-        target_parent_id: cleanText(node?.parent_id || "root") || "root",
+        parent_id: parentId,
+        target_parent_id: parentId,
       });
       return;
     }
@@ -2499,12 +2623,19 @@ function PublicLibraryTreePanel({
     }
   }
 
+  function handleDragStart(event) {
+    setDraggingNode(event.active?.data?.current?.node || null);
+    setDragIntent(null);
+    setDropIndicator(null);
+  }
+
   function handleDragOver(event) {
     const activeNode = event.active?.data?.current?.node;
     const overNode = event.over?.data?.current?.node;
-    const half = event.over?.data?.current?.half;
+    const position =
+      event.over?.data?.current?.position || event.over?.data?.current?.half;
     const overDepth = event.over?.data?.current?.depth ?? 0;
-    const intent = resolveDropIntent(activeNode, overNode, half, { overDepth });
+    const intent = resolveDropIntent(activeNode, overNode, position, { overDepth });
     setDragIntent(intent);
     setDropIndicator(resolveDropIndicator(event, intent));
   }
@@ -2512,13 +2643,16 @@ function PublicLibraryTreePanel({
   async function handleDragEnd(event) {
     const activeNode = event.active?.data?.current?.node;
     const overNode = event.over?.data?.current?.node;
-    const half = event.over?.data?.current?.half;
+    const position =
+      event.over?.data?.current?.position || event.over?.data?.current?.half;
     const overDepth = event.over?.data?.current?.depth ?? 0;
-    const intent = resolveDropIntent(activeNode, overNode, half, { overDepth });
+    const intent = resolveDropIntent(activeNode, overNode, position, { overDepth });
     setDragIntent(null);
     setDropIndicator(null);
+    setDraggingNode(null);
     const next = actionForDropIntent(intent, activeNode);
     if (next) {
+      revealParent(intent.parentId);
       await onAction(next.action, next.payload);
     }
   }
@@ -2540,6 +2674,7 @@ function PublicLibraryTreePanel({
   function clearDragState() {
     setDragIntent(null);
     setDropIndicator(null);
+    setDraggingNode(null);
   }
 
   function renderDialog() {
@@ -2561,6 +2696,7 @@ function PublicLibraryTreePanel({
           onCancel={close}
           onConfirm={async (title) => {
             close();
+            revealParent(parentId);
             await onAction("library_create_folder", { title, parent_id: parentId });
           }}
         />
@@ -2577,6 +2713,7 @@ function PublicLibraryTreePanel({
           onCancel={close}
           onConfirm={async (title) => {
             close();
+            revealParent(parentId);
             await onAction("library_create_post", { title, parent_id: parentId });
           }}
         />
@@ -2590,6 +2727,7 @@ function PublicLibraryTreePanel({
           onCancel={close}
           onConfirm={async ({ ref, title }) => {
             close();
+            revealParent(parentId);
             await onAction("library_attach_existing", {
               ref,
               title,
@@ -2628,6 +2766,7 @@ function PublicLibraryTreePanel({
           onCancel={close}
           onConfirm={async (targetParentId) => {
             close();
+            revealParent(targetParentId);
             await onAction("library_move_node", {
               node_id: treeNodeId(node),
               parent_id: targetParentId,
@@ -2734,7 +2873,8 @@ function PublicLibraryTreePanel({
       </div>
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={libraryCollisionDetection}
+        onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragCancel={clearDragState}
         onDragEnd={handleDragEnd}
@@ -2763,6 +2903,7 @@ function PublicLibraryTreePanel({
                   hasChildren={hasChildren}
                   activeIntent={dragIntent}
                   labels={labels}
+                  toggleDisabled={Boolean(searchQuery.trim())}
                   onToggle={() =>
                     updateExpanded((current) => {
                       const next = new Set(current);
@@ -2793,6 +2934,9 @@ function PublicLibraryTreePanel({
             />
           ) : null}
         </div>
+        <DragOverlay dropAnimation={null}>
+          <LibraryDragOverlay node={draggingNode} />
+        </DragOverlay>
       </DndContext>
       {dragIntent ? (
         <div className="nb-library-drag-hint">
