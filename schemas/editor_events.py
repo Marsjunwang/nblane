@@ -75,6 +75,10 @@ class EditorEventPayload(BaseModel):
     title: str = ""
     ref: str = ""
     direction: str = ""
+    drop_intent: str = ""
+    before_node_id: str = ""
+    after_node_id: str = ""
+    trash_first: bool = False
     delete_files: bool = False
     library_tree: list[dict[str, Any]] = Field(default_factory=list)
 

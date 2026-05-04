@@ -6,13 +6,16 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 0.0.0.0",
-    "test": "node --test src/blocks/markdown.test.mjs src/ai/slashItems.test.mjs",
+    "test": "node --test src/blocks/markdown.test.mjs src/ai/slashItems.test.mjs src/library/dndHelpers.test.mjs",
     "e2e": "NODE_PATH=./node_modules playwright test -c ../../../../tests/e2e/playwright.config.ts"
   },
   "dependencies": {
     "@blocknote/core": "^0.41.1",
     "@blocknote/mantine": "^0.41.1",
     "@blocknote/react": "^0.41.1",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@mantine/core": "^8.3.2",
     "@mantine/hooks": "^8.3.2",
     "diff-match-patch": "^1.0.5",

@@ -1264,6 +1264,114 @@ def move_public_library_node(
     return PublicLibraryOperationResult(node=node, changed_paths=[path])
 
 
+def _library_assert_not_descendant_parent(
+    index: PublicLibraryIndex,
+    *,
+    node: PublicLibraryNode,
+    parent_id: str,
+) -> None:
+    """Reject moving ``node`` under itself or under one of its descendants."""
+    if parent_id == node.id:
+        raise PublicSiteError("A node cannot be moved under itself.")
+    cursor = index.by_id.get(parent_id)
+    while cursor is not None and cursor.parent_id:
+        if cursor.parent_id == node.id:
+            raise PublicSiteError("A node cannot be moved under its descendant.")
+        cursor = index.by_id.get(cursor.parent_id)
+
+
+def position_public_library_node(
+    name: str,
+    node_id: str,
+    *,
+    parent_id: str | None = None,
+    before_node_id: str = "",
+    after_node_id: str = "",
+) -> PublicLibraryOperationResult:
+    """Move a node to a concrete parent/sibling position in one save.
+
+    ``before_node_id`` and ``after_node_id`` are mutually exclusive. When one is
+    supplied, the target node's parent decides the destination parent. Without a
+    relative target, the node is appended under ``parent_id``.
+    """
+    before_id = str(before_node_id or "").strip()
+    after_id = str(after_node_id or "").strip()
+    if before_id and after_id:
+        raise PublicSiteError("Use either before_node_id or after_node_id, not both.")
+
+    library = load_public_library(name)
+    index = index_public_library(library)
+    node = _library_require_node(library, node_id)
+    if node.type == "root":
+        raise PublicSiteError("The root node cannot be moved.")
+
+    target: PublicLibraryNode | None = None
+    insert_after = False
+    if before_id or after_id:
+        target_id = before_id or after_id
+        if target_id == node.id:
+            raise PublicSiteError("A node cannot be positioned relative to itself.")
+        target = _library_require_node(library, target_id)
+        if target.type == "root":
+            raise PublicSiteError("The root node cannot be used as a position target.")
+        parent = target.parent_id or "root"
+        insert_after = bool(after_id)
+    else:
+        parent = _library_parent_or_root(library, parent_id)
+
+    _library_assert_not_descendant_parent(index, node=node, parent_id=parent)
+
+    before_state = {
+        item.id: (item.parent_id, item.order)
+        for item in library.nodes
+    }
+    old_parent = node.parent_id
+    siblings = [
+        item
+        for item in index.children_by_parent.get(parent, [])
+        if item.status != "trashed" and item.id != node.id
+    ]
+    if target is not None:
+        target_pos = next(
+            (i for i, item in enumerate(siblings) if item.id == target.id),
+            -1,
+        )
+        if target_pos < 0:
+            raise PublicSiteError(f"Unknown public library position target: {target.id}")
+        insert_pos = target_pos + 1 if insert_after else target_pos
+    else:
+        insert_pos = len(siblings)
+
+    next_siblings = list(siblings)
+    next_siblings.insert(insert_pos, node)
+    node.parent_id = parent
+    for index_pos, item in enumerate(next_siblings, start=1):
+        item.order = index_pos * 10
+
+    if old_parent != parent:
+        old_siblings = [
+            item
+            for item in index.children_by_parent.get(old_parent, [])
+            if item.status != "trashed" and item.id != node.id
+        ]
+        for index_pos, item in enumerate(old_siblings, start=1):
+            item.order = index_pos * 10
+
+    after_state = {
+        item.id: (item.parent_id, item.order)
+        for item in library.nodes
+    }
+    if before_state == after_state:
+        return PublicLibraryOperationResult(node=node, changed_paths=[])
+
+    path = save_public_library(
+        name,
+        library,
+        action=f"position {name} public library node",
+    )
+    return PublicLibraryOperationResult(node=node, changed_paths=[path])
+
+
 def reorder_public_library_node(
     name: str,
     node_id: str,

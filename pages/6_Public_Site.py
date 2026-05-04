@@ -97,6 +97,7 @@ try:
         list_public_library_tree,
         load_public_library,
         move_public_library_node,
+        position_public_library_node,
         public_library_trash_nodes,
         purge_public_library_node,
         rename_public_library_node,
@@ -112,6 +113,7 @@ except ImportError:  # pragma: no cover - optional while core API lands in paral
     list_public_library_tree = None
     load_public_library = None
     move_public_library_node = None
+    position_public_library_node = None
     public_library_trash_nodes = None
     purge_public_library_node = None
     rename_public_library_node = None
@@ -390,6 +392,51 @@ def _ui() -> dict[str, str]:
             "create_post": "新建",
             "filter_posts": "筛选",
             "category": "分类",
+            "library_attach_existing": "附加引用",
+            "library_attach_virtual": "加入文件库",
+            "library_attach_ref_prompt": "已有 ref 或 route",
+            "library_attach_title": "显示标题",
+            "library_attach_title_optional": "可选",
+            "library_collapse": "折叠",
+            "library_collapse_all": "全部折叠",
+            "library_create_folder": "文件夹",
+            "library_create_folder_here": "在此处新建文件夹",
+            "library_create_post": "文章",
+            "library_create_post_here": "在此处新建草稿",
+            "library_delete_forever": "永久删除",
+            "library_delete_forever_confirm": "永久删除这个库项目？",
+            "library_delete_forever_match": "输入项目标题以确认。",
+            "library_down": "下移",
+            "library_drag_handle": "拖拽",
+            "library_drop_after": "放在「{title}」之后",
+            "library_drop_as_subdoc": "作为「{title}」的子文档",
+            "library_drop_before": "放在「{title}」之前",
+            "library_drop_into_folder": "放入「{title}」",
+            "library_drop_into_root": "放到根目录",
+            "library_empty": "暂无文件库项目。",
+            "library_expand": "展开",
+            "library_expand_all": "全部展开",
+            "library_move": "移动",
+            "library_move_target_unavailable": "此项目不能作为父级。",
+            "library_move_to": "移动到…",
+            "library_new_folder_prompt": "文件夹标题",
+            "library_new_post_prompt": "文章标题",
+            "library_node_actions": "文件树操作",
+            "library_parent": "父级",
+            "library_rename": "重命名",
+            "library_rename_prompt": "新标题",
+            "library_restore": "恢复",
+            "library_search": "搜索文件库",
+            "library_select_parent_hint": "右键节点或点 ⋯ 进行新建、移动、重命名和删除。",
+            "library_subdoc_chip": "子文档",
+            "library_subdoc_count": "子文档",
+            "library_subdoc_tooltip": "作为 {title} 的子文档",
+            "library_trash": "回收站",
+            "library_trash_confirm": "移到回收站？",
+            "library_trash_empty": "回收站为空。",
+            "library_trash_node": "移到回收站",
+            "library_up": "上移",
+            "library_virtual": "虚拟",
         }
     return {
         "page_title": "Public Site · nblane",
@@ -644,6 +691,51 @@ def _ui() -> dict[str, str]:
         "create_post": "New",
         "filter_posts": "Filter",
         "category": "Category",
+        "library_attach_existing": "Attach ref",
+        "library_attach_virtual": "Add to library",
+        "library_attach_ref_prompt": "Existing ref or route",
+        "library_attach_title": "Display title",
+        "library_attach_title_optional": "Optional",
+        "library_collapse": "Collapse",
+        "library_collapse_all": "Collapse all",
+        "library_create_folder": "Folder",
+        "library_create_folder_here": "New folder here",
+        "library_create_post": "Post",
+        "library_create_post_here": "New post here",
+        "library_delete_forever": "Delete forever",
+        "library_delete_forever_confirm": "Permanently delete this library item?",
+        "library_delete_forever_match": "Type the item title to confirm.",
+        "library_down": "Down",
+        "library_drag_handle": "Drag",
+        "library_drop_after": "Place after \"{title}\"",
+        "library_drop_as_subdoc": "Attach as a subdoc of \"{title}\"",
+        "library_drop_before": "Place before \"{title}\"",
+        "library_drop_into_folder": "Move into \"{title}\"",
+        "library_drop_into_root": "Place at library root",
+        "library_empty": "No library items.",
+        "library_expand": "Expand",
+        "library_expand_all": "Expand all",
+        "library_move": "Move",
+        "library_move_target_unavailable": "This item cannot be used as a parent.",
+        "library_move_to": "Move to...",
+        "library_new_folder_prompt": "Folder title",
+        "library_new_post_prompt": "Post title",
+        "library_node_actions": "File tree actions",
+        "library_parent": "Parent",
+        "library_rename": "Rename",
+        "library_rename_prompt": "New title",
+        "library_restore": "Restore",
+        "library_search": "Search library",
+        "library_select_parent_hint": "Right-click a node or use ⋯ to create, move, rename, and delete.",
+        "library_subdoc_chip": "Subdoc",
+        "library_subdoc_count": "Subdocs",
+        "library_subdoc_tooltip": "As a subdoc of {title}",
+        "library_trash": "Trash",
+        "library_trash_confirm": "Move this library item to trash?",
+        "library_trash_empty": "Trash is empty.",
+        "library_trash_node": "Trash",
+        "library_up": "Up",
+        "library_virtual": "virtual",
     }
 
 
@@ -1322,7 +1414,8 @@ def _public_library_capabilities() -> dict[str, bool]:
         "attach_existing": callable(attach_existing_public_library_node),
         "rename_node": callable(rename_public_library_node),
         "move_node": callable(move_public_library_node),
-        "reorder_node": callable(reorder_public_library_node),
+        "reorder_node": callable(reorder_public_library_node)
+        or callable(position_public_library_node),
         "trash_node": callable(trash_public_library_node),
         "restore_node": callable(restore_public_library_node),
         "permanent_delete_node": callable(purge_public_library_node),
@@ -3417,6 +3510,23 @@ def _render_blog_react_shell_fragment(
                 str(payload.get("title", "") or "").strip(),
             )
             node_id = _public_library_node_value(result, "id", "node_id")
+            before_node_id = str(payload.get("before_node_id", "") or "").strip()
+            after_node_id = str(payload.get("after_node_id", "") or "").strip()
+            if node_id and (before_node_id or after_node_id):
+                if callable(position_public_library_node):
+                    result = position_public_library_node(
+                        selected,
+                        node_id,
+                        parent_id=str(
+                            payload.get("target_parent_id", "")
+                            or payload.get("parent_id", "")
+                            or ""
+                        ).strip(),
+                        before_node_id=before_node_id,
+                        after_node_id=after_node_id,
+                    )
+                else:
+                    st.warning("Positioning public library nodes is not available yet.")
             if node_id:
                 st.session_state[f"public_library_active_node:{selected}"] = node_id
             slug = _public_library_ref_to_slug(ref)
@@ -3473,14 +3583,32 @@ def _render_blog_react_shell_fragment(
                     ).strip(),
                 )
             elif action == "library_reorder_node":
-                if not callable(reorder_public_library_node):
-                    st.warning("Reordering public library nodes is not available yet.")
-                    return True
-                reorder_public_library_node(
-                    selected,
-                    node_id,
-                    str(payload.get("direction", "") or "").strip(),
-                )
+                before_node_id = str(payload.get("before_node_id", "") or "").strip()
+                after_node_id = str(payload.get("after_node_id", "") or "").strip()
+                if before_node_id or after_node_id:
+                    if not callable(position_public_library_node):
+                        st.warning("Positioning public library nodes is not available yet.")
+                        return True
+                    position_public_library_node(
+                        selected,
+                        node_id,
+                        parent_id=str(
+                            payload.get("target_parent_id", "")
+                            or payload.get("parent_id", "")
+                            or ""
+                        ).strip(),
+                        before_node_id=before_node_id,
+                        after_node_id=after_node_id,
+                    )
+                else:
+                    if not callable(reorder_public_library_node):
+                        st.warning("Reordering public library nodes is not available yet.")
+                        return True
+                    reorder_public_library_node(
+                        selected,
+                        node_id,
+                        str(payload.get("direction", "") or "").strip(),
+                    )
             elif action == "library_trash_node":
                 if not callable(trash_public_library_node):
                     st.warning("Trashing public library nodes is not available yet.")
@@ -3499,6 +3627,19 @@ def _render_blog_react_shell_fragment(
                 if not callable(purge_public_library_node):
                     st.warning("Permanent deletion is not available yet.")
                     return True
+                if bool(payload.get("trash_first", False)):
+                    if not callable(trash_public_library_node):
+                        st.warning("Trashing public library nodes is not available yet.")
+                        return True
+                    try:
+                        trash_public_library_node(
+                            selected,
+                            node_id,
+                            recursive=bool(payload.get("recursive", True)),
+                        )
+                    except Exception as exc:
+                        if "trash" not in str(exc).lower():
+                            raise
                 purge_public_library_node(
                     selected,
                     node_id,

@@ -10,6 +10,14 @@ import { Streamlit } from "streamlit-component-lib";
 import { BlockNoteView } from "@blocknote/mantine";
 import { filterSuggestionItems } from "@blocknote/core";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
   useCreateBlockNote,
@@ -30,6 +38,32 @@ import {
   isRawMarkdownDirective,
   parseMarkdownToEditorBlocks,
 } from "./blocks/markdown.js";
+import { AttachExistingDialog } from "./library/AttachExistingDialog.jsx";
+import { LibraryContextMenu } from "./library/LibraryContextMenu.jsx";
+import { LibraryDialog } from "./library/LibraryDialog.jsx";
+import { LibraryRow } from "./library/LibraryRow.jsx";
+import { LibraryTextPromptDialog } from "./library/LibraryTextPromptDialog.jsx";
+import { MoveTargetPicker } from "./library/MoveTargetPicker.jsx";
+import {
+  actionForDropIntent,
+  dropIntentLabel,
+  resolveDropIntent,
+} from "./library/dndHelpers.js";
+import {
+  ancestorIdsForNodeId,
+  buildNodeIndex,
+  childCounts,
+  directExpandableRootChildren,
+  filterTreeWithAncestors,
+  flattenLibraryTree as flattenLibraryRows,
+  isParentableNode,
+  isRootNode,
+  isVirtualNode,
+  libraryNodeId as treeNodeId,
+  libraryNodeTitle as treeNodeTitle,
+  libraryNodeType as treeNodeType,
+  validTreeIds,
+} from "./library/treeUtils.js";
 
 const RIGHT_TABS = ["Meta", "Media", "AI", "Visual", "Check"];
 const MOBILE_VIEWS = ["Editor", "Articles", "Tools", "Preview"];
@@ -183,28 +217,52 @@ const DEFAULT_LABELS = {
   layout: "Layout",
   left_panel: "Articles",
   library_attach_existing: "Attach ref",
+  library_attach_virtual: "Add to library",
   library_attach_ref_prompt: "Existing ref or route",
+  library_attach_title: "Display title",
+  library_attach_title_optional: "Optional",
+  library_collapse: "Collapse",
+  library_create_folder_here: "New folder here",
+  library_create_post_here: "New post here",
   library_create_folder: "Folder",
   library_create_post: "Post",
   library_delete_forever: "Delete forever",
   library_delete_forever_confirm: "Permanently delete this library item?",
+  library_delete_forever_match: "Type the item title to confirm.",
+  library_drag_handle: "Drag",
+  library_drop_after: "Place after \"{title}\"",
+  library_drop_as_subdoc: "Attach as a subdoc of \"{title}\"",
+  library_drop_before: "Place before \"{title}\"",
+  library_drop_into_folder: "Move into \"{title}\"",
+  library_drop_into_root: "Place at library root",
   library_empty: "No library items.",
+  library_expand: "Expand",
+  library_expand_all: "Expand all",
+  library_collapse_all: "Collapse all",
   library_move: "Move",
   library_move_parent_prompt: "Move to parent node ID; leave blank for root",
+  library_move_target_unavailable: "This item cannot be used as a parent.",
+  library_move_to: "Move to...",
   library_new_folder_prompt: "Folder title",
   library_new_post_prompt: "Post title",
   library_node_actions: "File tree actions",
+  library_parent: "Parent",
   library_ref_type_prompt: "Type for existing ref",
   library_rename: "Rename",
   library_rename_prompt: "New title",
   library_restore: "Restore",
+  library_search: "Search library",
   library_select_parent_hint: "Folder selection controls where new items are created.",
+  library_subdoc_chip: "Subdoc",
+  library_subdoc_count: "Subdocs",
+  library_subdoc_tooltip: "As a subdoc of {title}",
   library_trash: "Trash",
   library_trash_confirm: "Move this library item to trash?",
   library_trash_empty: "Trash is empty.",
   library_trash_node: "Trash",
   library_up: "Up",
   library_down: "Down",
+  library_virtual: "virtual",
   media: "Media",
   media_library: "Media library",
   media_kind: "Media kind",
@@ -463,17 +521,30 @@ function normalizeLibraryTree(nodes, parentId = "") {
 }
 
 function libraryTreeFromPosts(posts) {
-  return posts.map((post, index) => ({
-    ...post,
-    id: cleanText(post.id || postSlug(post) || `post:${index}`),
-    type: "post",
-    title: postTitle(post),
-    ref: cleanText(post.ref || postSlug(post)),
-    route: cleanText(post.route || post.slug || ""),
-    slug: cleanText(post.slug || post.route || ""),
-    parent_id: "",
-    children: [],
-  }));
+  return [
+    {
+      id: "root",
+      type: "root",
+      title: "Public Library",
+      parent_id: "",
+      children: posts.map((post, index) => {
+        const route = cleanText(post.route || post.slug || "");
+        const slug = cleanText(post.slug || post.route || "");
+        return {
+          ...post,
+          id: `post:${route || slug || index}`,
+          type: "post",
+          title: postTitle(post),
+          ref: cleanText(post.ref || route || slug),
+          route,
+          slug,
+          parent_id: "root",
+          children: [],
+          virtual: true,
+        };
+      }),
+    },
+  ];
 }
 
 function flattenLibraryTree(nodes) {
@@ -486,6 +557,13 @@ function flattenLibraryTree(nodes) {
   };
   visit(nodes);
   return rows;
+}
+
+function libraryTreeHasVisibleContent(nodes) {
+  return flattenLibraryTree(nodes).some(({ node }) => {
+    const id = libraryNodeId(node);
+    return id && id !== "root";
+  });
 }
 
 function mediaPath(item) {
@@ -1485,6 +1563,135 @@ function useFrameHeight(deps, minimumHeight) {
   }, deps);
 }
 
+function boundedWidth(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, Math.round(number)));
+}
+
+function readStoredWidth(storageKey, min, max, defaultValue) {
+  if (typeof window === "undefined") {
+    return defaultValue;
+  }
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored) {
+      return boundedWidth(stored, min, max);
+    }
+  } catch (_err) {
+    // localStorage can be unavailable in private browsing or embedded contexts.
+  }
+  return defaultValue;
+}
+
+function useResizableWidth(varName, storageKey, options = {}) {
+  const min = Number(options.min) || 200;
+  const max = Number(options.max) || 560;
+  const defaultValue = boundedWidth(
+    options.defaultValue || options.default || 300,
+    min,
+    max,
+  );
+  const [width, setWidth] = useState(() =>
+    readStoredWidth(storageKey, min, max, defaultValue),
+  );
+  const [isResizing, setIsResizing] = useState(false);
+  const widthRef = useRef(width);
+
+  useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
+
+  const persistWidth = useCallback(
+    (nextWidth) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+      try {
+        window.localStorage.setItem(storageKey, String(nextWidth));
+      } catch (_err) {
+        // localStorage can be unavailable in private browsing or embedded contexts.
+      }
+    },
+    [storageKey],
+  );
+
+  const updateWidth = useCallback(
+    (nextValue, persist = false) => {
+      const nextWidth = boundedWidth(nextValue, min, max);
+      widthRef.current = nextWidth;
+      setWidth(nextWidth);
+      if (persist) {
+        persistWidth(nextWidth);
+      }
+      return nextWidth;
+    },
+    [max, min, persistWidth],
+  );
+
+  const onPointerDown = useCallback(
+    (event) => {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      event.currentTarget?.setPointerCapture?.(event.pointerId);
+      const startX = event.clientX;
+      const startWidth = widthRef.current;
+      setIsResizing(true);
+
+      const handlePointerMove = (moveEvent) => {
+        updateWidth(startWidth + moveEvent.clientX - startX);
+      };
+      const finishResize = () => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", finishResize);
+        window.removeEventListener("pointercancel", finishResize);
+        setIsResizing(false);
+        persistWidth(widthRef.current);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", finishResize);
+      window.addEventListener("pointercancel", finishResize);
+    },
+    [persistWidth, updateWidth],
+  );
+
+  const onKeyDown = useCallback(
+    (event) => {
+      let nextWidth = null;
+      if (event.key === "ArrowLeft") {
+        nextWidth = widthRef.current - 16;
+      } else if (event.key === "ArrowRight") {
+        nextWidth = widthRef.current + 16;
+      } else if (event.key === "Home") {
+        nextWidth = min;
+      } else if (event.key === "End") {
+        nextWidth = max;
+      }
+      if (nextWidth === null) {
+        return;
+      }
+      event.preventDefault();
+      updateWidth(nextWidth, true);
+    },
+    [max, min, updateWidth],
+  );
+
+  return {
+    cssVariable: { [varName]: `${width}px` },
+    isResizing,
+    max,
+    min,
+    onKeyDown,
+    onPointerDown,
+    width,
+  };
+}
+
 function waitForInputFlush() {
   return new Promise((resolve) => {
     window.setTimeout(resolve, 0);
@@ -1859,28 +2066,51 @@ function PublicLibraryTreePanel({
   onInsertMedia,
   onTreeStateChange,
   posts,
+  storageKey = "",
   trashNodes,
 }) {
+  const profileKey = useMemo(() => {
+    const source = cleanText(storageKey || activeSlug || "default");
+    return source.split(":")[0] || "default";
+  }, [activeSlug, storageKey]);
+  const expandedStorageKey = `nb-library-expanded-${profileKey}`;
+  const flatRows = useMemo(() => flattenLibraryRows(nodes), [nodes]);
+  const nodeById = useMemo(() => buildNodeIndex(nodes), [nodes]);
+  const validIds = useMemo(() => validTreeIds(nodes), [nodes]);
   const initialExpanded = useMemo(() => {
-    const expanded = new Set();
-    const visit = (items) => {
-      for (const node of items) {
-        if (asArray(node.children).length) {
-          expanded.add(node.id);
-          visit(node.children);
+    const next = directExpandableRootChildren(nodes);
+    for (const id of ancestorIdsForNodeId(nodeById, activeNodeId)) {
+      next.add(id);
+    }
+    return next;
+  }, [activeNodeId, nodeById, nodes]);
+  const [expandedIds, setExpandedIds] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(expandedStorageKey);
+      if (stored) {
+        const ids = JSON.parse(stored);
+        if (Array.isArray(ids)) {
+          return new Set(ids.map(cleanText).filter(Boolean));
         }
       }
-    };
-    visit(nodes);
-    return expanded;
-  }, [nodes]);
-  const [expandedIds, setExpandedIds] = useState(initialExpanded);
+    } catch (_err) {
+      // localStorage can be unavailable in private browsing or embedded contexts.
+    }
+    return initialExpanded;
+  });
   const [selectedNodeId, setSelectedNodeId] = useState(cleanText(activeNodeId));
-  const [selectedTrashId, setSelectedTrashId] = useState("");
-
-  useEffect(() => {
-    setExpandedIds(initialExpanded);
-  }, [initialExpanded]);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadKind, setUploadKind] = useState("image");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dialogState, setDialogState] = useState(null);
+  const [menu, setMenu] = useState(null);
+  const [dragIntent, setDragIntent] = useState(null);
+  const [dropIndicator, setDropIndicator] = useState(null);
+  const libraryTreeRef = useRef(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor),
+  );
 
   useEffect(() => {
     if (activeNodeId) {
@@ -1888,33 +2118,73 @@ function PublicLibraryTreePanel({
     }
   }, [activeNodeId]);
 
+  useEffect(() => {
+    setExpandedIds((current) => {
+      const next = new Set([...current].filter((id) => validIds.has(id)));
+      if (!next.size) {
+        for (const id of initialExpanded) {
+          next.add(id);
+        }
+      }
+      for (const id of ancestorIdsForNodeId(nodeById, activeNodeId)) {
+        next.add(id);
+      }
+      if (next.size === current.size && [...next].every((id) => current.has(id))) {
+        return current;
+      }
+      return next;
+    });
+  }, [activeNodeId, initialExpanded, nodeById, validIds]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        expandedStorageKey,
+        JSON.stringify([...expandedIds]),
+      );
+    } catch (_err) {
+      // localStorage can be unavailable in private browsing or embedded contexts.
+    }
+  }, [expandedIds, expandedStorageKey]);
+
+  useEffect(() => {
+    if (selectedNodeId && !nodeById.has(selectedNodeId)) {
+      setSelectedNodeId(cleanText(activeNodeId || ""));
+    }
+  }, [activeNodeId, nodeById, selectedNodeId]);
+
+  const filteredNodes = useMemo(
+    () => filterTreeWithAncestors(nodes, searchQuery),
+    [nodes, searchQuery],
+  );
   const visibleRows = useMemo(() => {
     const rows = [];
     const visit = (items, depth = 0) => {
       for (const node of items) {
-        rows.push({ node, depth });
-        if (expandedIds.has(node.id)) {
+        const row = nodeById.get(treeNodeId(node)) || {
+          node,
+          depth,
+          parent: null,
+          parentType: "",
+          parentTitle: "",
+        };
+        rows.push({ ...row, node, depth });
+        if (searchQuery.trim() || expandedIds.has(treeNodeId(node))) {
           visit(asArray(node.children), depth + 1);
         }
       }
     };
-    visit(nodes);
+    visit(filteredNodes);
     return rows;
-  }, [expandedIds, nodes]);
-  const flatRows = useMemo(() => flattenLibraryTree(nodes), [nodes]);
-  const nodeById = useMemo(
-    () => new Map(flatRows.map((row) => [row.node.id, row])),
-    [flatRows],
-  );
+  }, [expandedIds, filteredNodes, nodeById, searchQuery]);
+  const trashRows = useMemo(() => flattenLibraryRows(trashNodes), [trashNodes]);
   const selectedRow = nodeById.get(selectedNodeId) || null;
   const selectedNode = selectedRow?.node || null;
-  const selectedType = selectedNode ? libraryNodeType(selectedNode) : "";
+  const selectedType = selectedNode ? treeNodeType(selectedNode) : "";
   const selectedCreateParentId =
-    selectedNode && (selectedType === "folder" || selectedType === "post")
-      ? selectedNode.id
-      : cleanText(selectedNode?.parent_id || "");
-  const [uploadFile, setUploadFile] = useState(null);
-  const [uploadKind, setUploadKind] = useState("image");
+    selectedNode && isParentableNode(selectedNode)
+      ? treeNodeId(selectedNode)
+      : cleanText(selectedNode?.parent_id || "root") || "root";
   const canMutate =
     editable &&
     asObject(capabilities).readonly !== true &&
@@ -1933,59 +2203,30 @@ function PublicLibraryTreePanel({
   }
 
   async function selectNode(node) {
-    setSelectedNodeId(node.id);
+    setSelectedNodeId(treeNodeId(node));
     notifyTreeState();
     const slug = cleanText(node.route || node.slug || "");
     const post =
       posts.find((item) => postSlug(item) === slug || cleanText(item.id) === cleanText(node.ref)) ||
       null;
     await onAction("library_select_node", {
-      node_id: node.id,
+      node_id: treeNodeId(node),
       ref: cleanText(node.ref || ""),
       route: cleanText(node.route || ""),
       slug,
       node,
-      type: libraryNodeType(node),
-      legacy_action: libraryNodeType(node) === "post" ? "select_post" : "",
-      select_post: libraryNodeType(node) === "post" ? { slug, post } : null,
+      type: treeNodeType(node),
+      legacy_action: treeNodeType(node) === "post" ? "select_post" : "",
+      select_post: treeNodeType(node) === "post" ? { slug, post } : null,
       post,
     });
   }
 
-  async function createFolder() {
-    const title = window.prompt(label(labels, "library_new_folder_prompt"));
-    if (!title?.trim()) {
-      return;
+  function parentIdForDialog(node) {
+    if (node && isParentableNode(node) && !isVirtualNode(node)) {
+      return treeNodeId(node);
     }
-    await onAction("library_create_folder", {
-      title: title.trim(),
-      parent_id: selectedCreateParentId,
-    });
-  }
-
-  async function createPost() {
-    const title = window.prompt(label(labels, "library_new_post_prompt"));
-    if (!title?.trim()) {
-      return;
-    }
-    await onAction("library_create_post", {
-      title: title.trim(),
-      parent_id: selectedCreateParentId,
-    });
-  }
-
-  async function attachExisting() {
-    const ref = window.prompt(label(labels, "library_attach_ref_prompt"));
-    if (!ref?.trim()) {
-      return;
-    }
-    const type =
-      window.prompt(label(labels, "library_ref_type_prompt"), "post") || "post";
-    await onAction("library_attach_existing", {
-      ref: ref.trim(),
-      type: type.trim() || "post",
-      parent_id: selectedCreateParentId,
-    });
+    return cleanText(node?.parent_id || selectedCreateParentId || "root") || "root";
   }
 
   function fileToDataUrl(targetFile) {
@@ -2010,125 +2251,310 @@ function PublicLibraryTreePanel({
     });
   }
 
-  function selectedMediaItem() {
-    if (!selectedNode || selectedType !== "media") {
+  function mediaItemFor(node) {
+    if (!node || treeNodeType(node) !== "media") {
       return null;
     }
-    const ref = cleanText(selectedNode.relative_path || selectedNode.ref || selectedNode.path || "");
+    const ref = cleanText(node.relative_path || node.ref || node.path || "");
     if (!ref) {
       return null;
     }
     return {
-      ...selectedNode,
+      ...node,
       relative_path: ref,
       path: ref,
-      name: libraryNodeTitle(selectedNode),
-      title: libraryNodeTitle(selectedNode),
-      preview_src: cleanText(selectedNode.preview_src || selectedNode.preview || `/${ref}`),
+      name: treeNodeTitle(node),
+      title: treeNodeTitle(node),
+      preview_src: cleanText(node.preview_src || node.preview || `/${ref}`),
       kind: /\.(mp4|mov|webm|m4v)$/i.test(ref) ? "video" : "image",
     };
   }
 
-  async function insertSelectedMedia() {
-    const item = selectedMediaItem();
+  async function insertMediaNode(node) {
+    const item = mediaItemFor(node);
     if (!item || typeof onInsertMedia !== "function") {
       return;
     }
     await onInsertMedia(item, "marker");
   }
 
-  async function renameSelected() {
-    if (!selectedNode) {
-      return;
-    }
-    const title = window.prompt(
-      label(labels, "library_rename_prompt"),
-      libraryNodeTitle(selectedNode),
-    );
-    if (!title?.trim()) {
-      return;
-    }
-    await onAction("library_rename_node", {
-      node_id: selectedNode.id,
-      title: title.trim(),
-    });
-  }
-
-  async function moveSelected() {
-    if (!selectedNode) {
-      return;
-    }
-    const parentId = window.prompt(
-      label(labels, "library_move_parent_prompt"),
-      cleanText(selectedNode.parent_id || ""),
-    );
-    if (parentId === null) {
-      return;
-    }
-    await onAction("library_move_node", {
-      node_id: selectedNode.id,
-      parent_id: parentId.trim(),
-    });
-  }
-
-  async function reorderSelected(direction) {
-    if (!selectedNode) {
+  async function reorderNode(node, direction) {
+    if (!node) {
       return;
     }
     await onAction("library_reorder_node", {
-      node_id: selectedNode.id,
+      node_id: treeNodeId(node),
       direction,
-      parent_id: cleanText(selectedNode.parent_id || ""),
+      parent_id: cleanText(node.parent_id || "root") || "root",
     });
   }
 
-  async function trashSelected() {
-    if (!selectedNode) {
-      return;
-    }
-    if (!window.confirm(label(labels, "library_trash_confirm"))) {
-      return;
-    }
-    await onAction("library_trash_node", {
-      node_id: selectedNode.id,
-    });
+  function openMenu(event, node) {
+    event.preventDefault?.();
+    setSelectedNodeId(treeNodeId(node));
+    setMenu({ x: event.clientX, y: event.clientY, node });
   }
 
-  async function restoreTrash() {
-    if (!selectedTrashId) {
-      return;
-    }
-    await onAction("library_restore_node", {
-      node_id: selectedTrashId,
-    });
+  function openDialog(kind, node = selectedNode, extra = {}) {
+    setMenu(null);
+    setDialogState({ kind, node, ...extra });
   }
 
-  async function purgeTrash() {
-    if (!selectedTrashId) {
+  async function handleMenuAction(kind, node) {
+    if (kind === "insert-media") {
+      await insertMediaNode(node);
       return;
     }
-    if (!window.confirm(label(labels, "library_delete_forever_confirm"))) {
+    if (kind === "attach-virtual") {
+      const ref = cleanText(node?.ref || node?.route || node?.slug || "");
+      if (!ref) {
+        return;
+      }
+      await onAction("library_attach_existing", {
+        ref,
+        title: treeNodeTitle(node),
+        parent_id: cleanText(node?.parent_id || "root") || "root",
+        target_parent_id: cleanText(node?.parent_id || "root") || "root",
+      });
       return;
     }
-    await onAction("library_permanent_delete_node", {
-      node_id: selectedTrashId,
-    });
+    if (kind === "restore") {
+      await onAction("library_restore_node", { node_id: treeNodeId(node) });
+      return;
+    }
+    if (kind === "reorder-up") {
+      await reorderNode(node, "up");
+      return;
+    }
+    if (kind === "reorder-down") {
+      await reorderNode(node, "down");
+      return;
+    }
+    const dialogKinds = {
+      "create-folder": "create-folder",
+      "create-post": "create-post",
+      "attach-existing": "attach-existing",
+      rename: "rename",
+      move: "move",
+      trash: "trash",
+      "purge-active": "purge-active",
+      "purge-trash": "purge-trash",
+    };
+    if (dialogKinds[kind]) {
+      openDialog(dialogKinds[kind], node);
+    }
   }
+
+  function handleDragOver(event) {
+    const activeNode = event.active?.data?.current?.node;
+    const overNode = event.over?.data?.current?.node;
+    const half = event.over?.data?.current?.half;
+    const overDepth = event.over?.data?.current?.depth ?? 0;
+    const intent = resolveDropIntent(activeNode, overNode, half, { overDepth });
+    setDragIntent(intent);
+    setDropIndicator(resolveDropIndicator(event, intent));
+  }
+
+  async function handleDragEnd(event) {
+    const activeNode = event.active?.data?.current?.node;
+    const overNode = event.over?.data?.current?.node;
+    const half = event.over?.data?.current?.half;
+    const overDepth = event.over?.data?.current?.depth ?? 0;
+    const intent = resolveDropIntent(activeNode, overNode, half, { overDepth });
+    setDragIntent(null);
+    setDropIndicator(null);
+    const next = actionForDropIntent(intent, activeNode);
+    if (next) {
+      await onAction(next.action, next.payload);
+    }
+  }
+
+  function resolveDropIndicator(event, intent) {
+    const tree = libraryTreeRef.current;
+    const overRect = event.over?.rect;
+    if (!tree || !overRect || !intent) {
+      return null;
+    }
+    const treeRect = tree.getBoundingClientRect();
+    const edgeTop = intent.indicatorEdge === "top" ? overRect.top : overRect.bottom;
+    return {
+      top: Math.max(0, edgeTop - treeRect.top + tree.scrollTop),
+      indentDepth: Math.max(0, Number(intent.indentDepth) || 0),
+    };
+  }
+
+  function clearDragState() {
+    setDragIntent(null);
+    setDropIndicator(null);
+  }
+
+  function renderDialog() {
+    if (!dialogState) {
+      return null;
+    }
+    const node = dialogState.node;
+    const parentId = parentIdForDialog(node);
+    const parentTitle = node ? treeNodeTitle(node) : "";
+    const close = () => setDialogState(null);
+    if (dialogState.kind === "create-folder") {
+      return (
+        <LibraryTextPromptDialog
+          labels={labels}
+          title={label(labels, "library_new_folder_prompt")}
+          subtitle={parentTitle}
+          placeholder={label(labels, "library_new_folder_prompt")}
+          confirmLabel={label(labels, "create")}
+          onCancel={close}
+          onConfirm={async (title) => {
+            close();
+            await onAction("library_create_folder", { title, parent_id: parentId });
+          }}
+        />
+      );
+    }
+    if (dialogState.kind === "create-post") {
+      return (
+        <LibraryTextPromptDialog
+          labels={labels}
+          title={label(labels, "library_new_post_prompt")}
+          subtitle={parentTitle}
+          placeholder={label(labels, "library_new_post_prompt")}
+          confirmLabel={label(labels, "create")}
+          onCancel={close}
+          onConfirm={async (title) => {
+            close();
+            await onAction("library_create_post", { title, parent_id: parentId });
+          }}
+        />
+      );
+    }
+    if (dialogState.kind === "attach-existing") {
+      return (
+        <AttachExistingDialog
+          labels={labels}
+          parentTitle={parentTitle}
+          onCancel={close}
+          onConfirm={async ({ ref, title }) => {
+            close();
+            await onAction("library_attach_existing", {
+              ref,
+              title,
+              parent_id: parentId,
+            });
+          }}
+        />
+      );
+    }
+    if (dialogState.kind === "rename") {
+      return (
+        <LibraryTextPromptDialog
+          labels={labels}
+          title={label(labels, "library_rename")}
+          initialValue={treeNodeTitle(node)}
+          placeholder={label(labels, "library_rename_prompt")}
+          confirmLabel={label(labels, "library_rename")}
+          onCancel={close}
+          onConfirm={async (title) => {
+            close();
+            await onAction("library_rename_node", {
+              node_id: treeNodeId(node),
+              title,
+            });
+          }}
+        />
+      );
+    }
+    if (dialogState.kind === "move") {
+      return (
+        <MoveTargetPicker
+          labels={labels}
+          nodes={nodes}
+          activeNode={node}
+          initialParentId={cleanText(node?.parent_id || "root") || "root"}
+          onCancel={close}
+          onConfirm={async (targetParentId) => {
+            close();
+            await onAction("library_move_node", {
+              node_id: treeNodeId(node),
+              parent_id: targetParentId,
+              target_parent_id: targetParentId,
+            });
+          }}
+        />
+      );
+    }
+    if (dialogState.kind === "trash") {
+      return (
+        <LibraryDialog
+          labels={labels}
+          title={label(labels, "library_trash_node")}
+          subtitle={treeNodeTitle(node)}
+          confirmLabel={label(labels, "library_trash_node")}
+          danger
+          onCancel={close}
+          onConfirm={async () => {
+            close();
+            await onAction("library_trash_node", { node_id: treeNodeId(node) });
+          }}
+        >
+          <p className="nb-empty">{label(labels, "library_trash_confirm")}</p>
+        </LibraryDialog>
+      );
+    }
+    if (dialogState.kind === "purge-active" || dialogState.kind === "purge-trash") {
+      const title = treeNodeTitle(node);
+      return (
+        <LibraryTextPromptDialog
+          labels={labels}
+          title={label(labels, "library_delete_forever")}
+          subtitle={title}
+          placeholder={label(labels, "library_delete_forever_match")}
+          confirmLabel={label(labels, "library_delete_forever")}
+          danger
+          validateValue={(value) => value === title}
+          onCancel={close}
+          onConfirm={async () => {
+            close();
+            await onAction("library_permanent_delete_node", {
+              node_id: treeNodeId(node),
+              delete_files: false,
+              trash_first: dialogState.kind === "purge-active",
+            });
+          }}
+        />
+      );
+    }
+    return null;
+  }
+
+  const selectedCounts = selectedNode ? childCounts(selectedNode) : { children: 0, subdocs: 0 };
 
   return (
     <section className="nb-library-panel" aria-label={label(labels, "articles")}>
       <div className="nb-library-actions" aria-label={label(labels, "library_node_actions")}>
-        <span>{label(labels, "library_node_actions")}</span>
-        <div className="nb-library-action-grid">
-          <button type="button" className="nb-button" disabled={!canMutate} onClick={createFolder}>
-            {label(labels, "library_create_folder")}
+        <div className="nb-library-toolbar">
+          <input
+            className="nb-library-search"
+            value={searchQuery}
+            placeholder={label(labels, "library_search")}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+          <button
+            type="button"
+            className="nb-button"
+            onClick={() => updateExpanded(validIds)}
+          >
+            {label(labels, "library_expand_all")}
           </button>
-          <button type="button" className="nb-button" disabled={!canMutate} onClick={createPost}>
-            {label(labels, "library_create_post")}
+          <button
+            type="button"
+            className="nb-button"
+            onClick={() => updateExpanded(new Set(["root"]))}
+          >
+            {label(labels, "library_collapse_all")}
           </button>
-          <button type="button" className="nb-button" disabled={!canMutate} onClick={attachExisting}>
-            {label(labels, "library_attach_existing")}
-          </button>
+        </div>
+        <div className="nb-library-action-grid nb-library-upload-grid">
           <label className="nb-library-upload">
             <span>{label(labels, "upload_media")}</span>
             <input
@@ -2149,89 +2575,100 @@ function PublicLibraryTreePanel({
           <button type="button" className="nb-button" disabled={!canMutate || !uploadFile} onClick={uploadMedia}>
             {label(labels, "upload_media")}
           </button>
-          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={renameSelected}>
-            {label(labels, "library_rename")}
-          </button>
-          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={moveSelected}>
-            {label(labels, "library_move")}
-          </button>
-          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={() => reorderSelected("up")}>
-            {label(labels, "library_up")}
-          </button>
-          <button type="button" className="nb-button" disabled={!canMutate || !selectedNode} onClick={() => reorderSelected("down")}>
-            {label(labels, "library_down")}
-          </button>
-          <button type="button" className="nb-button danger" disabled={!canMutate || !selectedNode} onClick={trashSelected}>
-            {label(labels, "library_trash_node")}
-          </button>
         </div>
         <small>{label(labels, "library_select_parent_hint")}</small>
       </div>
-      <div className="nb-library-tree" role="tree">
-        {visibleRows.length ? (
-          visibleRows.map(({ node, depth }) => {
-            const type = libraryNodeType(node);
-            const hasChildren = asArray(node.children).length > 0;
-            const expanded = expandedIds.has(node.id);
-            const slug = cleanText(node.route || node.slug || "");
-            const active =
-              cleanText(activeNodeId) === node.id ||
-              (type === "post" && slug && slug === activeSlug);
-            const selected = selectedNodeId === node.id;
-            return (
-              <div
-                key={node.id}
-                className={`nb-library-row ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
-                role="treeitem"
-                aria-expanded={hasChildren ? expanded : undefined}
-                aria-selected={selected}
-                style={{ "--nb-tree-depth": depth }}
-              >
-                <button
-                  type="button"
-                  className="nb-library-toggle"
-                  disabled={!hasChildren}
-                  aria-label={expanded ? "Collapse" : "Expand"}
-                  onClick={() =>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragOver={handleDragOver}
+        onDragCancel={clearDragState}
+        onDragEnd={handleDragEnd}
+      >
+        <div ref={libraryTreeRef} className="nb-library-tree" role="tree">
+          {visibleRows.length ? (
+            visibleRows.map(({ node, depth, parentType, parentTitle }) => {
+              const type = treeNodeType(node);
+              const hasChildren = asArray(node.children).length > 0;
+              const expanded = searchQuery.trim() || expandedIds.has(treeNodeId(node));
+              const slug = cleanText(node.route || node.slug || "");
+              const active =
+                cleanText(activeNodeId) === treeNodeId(node) ||
+                (type === "post" && slug && slug === activeSlug);
+              const selected = selectedNodeId === treeNodeId(node);
+              return (
+                <LibraryRow
+                  key={treeNodeId(node)}
+                  node={node}
+                  depth={depth}
+                  parentType={parentType}
+                  parentTitle={parentTitle}
+                  active={active}
+                  selected={selected}
+                  expanded={Boolean(expanded)}
+                  hasChildren={hasChildren}
+                  activeIntent={dragIntent}
+                  labels={labels}
+                  onToggle={() =>
                     updateExpanded((current) => {
                       const next = new Set(current);
-                      if (next.has(node.id)) {
-                        next.delete(node.id);
+                      const id = treeNodeId(node);
+                      if (next.has(id)) {
+                        next.delete(id);
                       } else {
-                        next.add(node.id);
+                        next.add(id);
                       }
                       return next;
                     })
                   }
-                >
-                  {hasChildren ? (expanded ? "v" : ">") : ""}
-                </button>
-                <button type="button" className="nb-library-node" onClick={() => selectNode(node)}>
-                  <span className={`nb-library-type is-${type}`}>
-                    {type === "folder" ? "D" : type === "media" ? "M" : "P"}
-                  </span>
-                  <span className="nb-library-title">{libraryNodeTitle(node)}</span>
-                  <span className="nb-library-meta">
-                    {[type, cleanText(node.status || node.visibility || ""), slug || cleanText(node.ref || "")]
-                      .filter(Boolean)
-                      .join(" / ")}
-                  </span>
-                </button>
-              </div>
-            );
-          })
-        ) : (
-          <p className="nb-empty">{label(labels, "library_empty")}</p>
-        )}
-      </div>
+                  onSelect={() => selectNode(node)}
+                  onMenu={openMenu}
+                />
+              );
+            })
+          ) : (
+            <p className="nb-empty">{label(labels, "library_empty")}</p>
+          )}
+          {dropIndicator ? (
+            <div
+              className="nb-library-drop-indicator"
+              style={{
+                "--nb-drop-top": `${dropIndicator.top}px`,
+                "--nb-drop-indent": dropIndicator.indentDepth,
+              }}
+            />
+          ) : null}
+        </div>
+      </DndContext>
+      {dragIntent ? (
+        <div className="nb-library-drag-hint">
+          {dropIntentLabel(dragIntent, labels)}
+        </div>
+      ) : null}
+      {selectedNode ? (
+        <div className="nb-library-node-details">
+          <strong>{treeNodeTitle(selectedNode)}</strong>
+          <span>
+            {label(labels, "library_parent")}:{" "}
+            {selectedRow?.parent ? treeNodeTitle(selectedRow.parent) : "root"}
+          </span>
+          <span>
+            {label(labels, "library_subdoc_count")}: {selectedCounts.subdocs} /{" "}
+            {selectedCounts.children}
+          </span>
+          {cleanText(selectedNode.ref || selectedNode.route || selectedNode.slug) ? (
+            <span>{cleanText(selectedNode.ref || selectedNode.route || selectedNode.slug)}</span>
+          ) : null}
+        </div>
+      ) : null}
       {selectedType === "media" ? (
         <div className="nb-library-selected-media">
-          <MediaPreview item={selectedMediaItem() || {}} labels={labels} />
+          <MediaPreview item={mediaItemFor(selectedNode) || {}} labels={labels} />
           <button
             type="button"
             className="nb-button wide"
-            disabled={!canMutate || !selectedMediaItem()}
-            onClick={insertSelectedMedia}
+            disabled={!canMutate || !mediaItemFor(selectedNode)}
+            onClick={() => insertMediaNode(selectedNode)}
           >
             {label(labels, "insert_into_post")}
           </button>
@@ -2239,36 +2676,50 @@ function PublicLibraryTreePanel({
       ) : null}
       <div className="nb-library-trash">
         <strong>{label(labels, "library_trash")}</strong>
-        {trashNodes.length ? (
+        {trashRows.length ? (
           <div className="nb-library-trash-controls">
-            <select
-              value={selectedTrashId}
-              onChange={(event) => {
-                setSelectedTrashId(event.target.value);
-                notifyTreeState();
-              }}
-            >
-              <option value="">{label(labels, "library_trash")}</option>
-              {trashNodes.map((node, index) => {
-                const id = libraryNodeId(node, `trash:${index}`);
-                return (
-                  <option key={id} value={id}>
-                    {libraryNodeTitle(node)}
-                  </option>
-                );
-              })}
-            </select>
-            <button type="button" className="nb-button" disabled={!canMutate || !selectedTrashId} onClick={restoreTrash}>
-              {label(labels, "library_restore")}
-            </button>
-            <button type="button" className="nb-button danger" disabled={!canMutate || !selectedTrashId} onClick={purgeTrash}>
-              {label(labels, "library_delete_forever")}
-            </button>
+            {trashRows.map(({ node, depth }) => (
+              <div
+                key={treeNodeId(node)}
+                className="nb-library-trash-row"
+                style={{ "--nb-tree-depth": depth }}
+                onContextMenu={(event) => openMenu(event, { ...node, status: "trashed" })}
+              >
+                <button type="button" onClick={() => setSelectedNodeId(treeNodeId(node))}>
+                  {treeNodeTitle(node)}
+                </button>
+                <button
+                  type="button"
+                  className="nb-button"
+                  disabled={!canMutate}
+                  onClick={() => onAction("library_restore_node", { node_id: treeNodeId(node) })}
+                >
+                  {label(labels, "library_restore")}
+                </button>
+                <button
+                  type="button"
+                  className="nb-button danger"
+                  disabled={!canMutate}
+                  onClick={() => openDialog("purge-trash", { ...node, status: "trashed" })}
+                >
+                  {label(labels, "library_delete_forever")}
+                </button>
+              </div>
+            ))}
           </div>
         ) : (
           <p className="nb-empty">{label(labels, "library_trash_empty")}</p>
         )}
       </div>
+      <LibraryContextMenu
+        labels={labels}
+        menu={menu}
+        capabilities={asObject(capabilities)}
+        canMutate={canMutate}
+        onClose={() => setMenu(null)}
+        onAction={handleMenuAction}
+      />
+      {renderDialog()}
     </section>
   );
 }
@@ -2278,13 +2729,13 @@ function ShellEditor(props) {
   const labels = { ...DEFAULT_LABELS, ...asObject(args.ui_labels) };
   const posts = useMemo(() => asArray(args.posts).map(asObject), [args.posts]);
   const hasLibraryTree = Array.isArray(args.library_tree);
-  const libraryTree = useMemo(
-    () =>
-      hasLibraryTree
-        ? normalizeLibraryTree(args.library_tree)
-        : normalizeLibraryTree(libraryTreeFromPosts(posts)),
-    [args.library_tree, hasLibraryTree, posts],
-  );
+  const libraryTree = useMemo(() => {
+    const normalized = hasLibraryTree ? normalizeLibraryTree(args.library_tree) : [];
+    if (libraryTreeHasVisibleContent(normalized) || !posts.length) {
+      return normalized;
+    }
+    return normalizeLibraryTree(libraryTreeFromPosts(posts));
+  }, [args.library_tree, hasLibraryTree, posts]);
   const trashNodes = useMemo(
     () => normalizeLibraryTree(args.trash_nodes),
     [args.trash_nodes],
@@ -3868,10 +4319,16 @@ function ShellEditor(props) {
     () => posts.find((post) => postSlug(post) === activeSlug) || null,
     [activeSlug, posts],
   );
+  const leftPanelWidth = useResizableWidth("--nb-left-width", "nb.leftPanelWidth", {
+    min: 200,
+    max: 1120,
+    defaultValue: 300,
+  });
 
   const shellClasses = [
     "nb-shell",
     layout.focus_mode ? "is-focus" : "",
+    leftPanelWidth.isResizing ? "is-resizing-left" : "",
     layout.left_open ? "has-left" : "left-collapsed",
     layout.right_open ? "has-right" : "right-collapsed",
     `mobile-${mobileView.toLowerCase()}`,
@@ -3895,6 +4352,7 @@ function ShellEditor(props) {
     "--nb-editor-pane-height": `${editorPaneHeight}px`,
     "--nb-preview-pane-height": `${basePaneHeight}px`,
     "--nb-side-pane-height": `${Math.max(760, height - 80)}px`,
+    ...leftPanelWidth.cssVariable,
   };
 
   return (
@@ -4125,9 +4583,25 @@ function ShellEditor(props) {
             onInsertMedia={handleInsertMedia}
             onTreeStateChange={() => setTreeUiVersion((value) => value + 1)}
             posts={posts}
+            storageKey={documentId}
             trashNodes={trashNodes}
           />
         </aside>
+
+        {layout.left_open && !layout.focus_mode ? (
+          <div
+            className="nb-resize-handle nb-resize-left"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={label(labels, "resize_left_panel", "Resize left panel")}
+            aria-valuemin={leftPanelWidth.min}
+            aria-valuemax={leftPanelWidth.max}
+            aria-valuenow={leftPanelWidth.width}
+            tabIndex={0}
+            onKeyDown={leftPanelWidth.onKeyDown}
+            onPointerDown={leftPanelWidth.onPointerDown}
+          />
+        ) : null}
 
         <section className="nb-center-panel" aria-label={label(labels, "editor")}>
           {error ? <div className="nb-editor-error">{error}</div> : null}
