@@ -1935,6 +1935,15 @@ textarea:read-only {
   width: min(520px, calc(100vw - 32px));
 }
 
+.nb-ai-prompt-dialog.is-anchored {
+  background: transparent;
+}
+
+.nb-ai-prompt-dialog.is-anchored .nb-ai-prompt-panel {
+  transform: none;
+  box-shadow: 0 18px 42px rgba(23, 33, 31, 0.22);
+}
+
 .nb-ai-prompt-input {
   width: 100%;
   min-height: 108px;

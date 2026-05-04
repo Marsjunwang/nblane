@@ -89,7 +89,7 @@ const SUPPORTED_PATCH_BLOCK_TYPES = new Set([
   "visual_block",
   "ai_loading_block",
 ]);
-const AI_PROMPT_REQUIRED_OPERATIONS = new Set(["formula", "outline", "visual"]);
+const AI_PROMPT_REQUIRED_OPERATIONS = new Set(["formula", "visual"]);
 const WRITE_ACTIONS = new Set([
   "markdown_changed",
   "save_post",
@@ -1698,6 +1698,160 @@ function waitForInputFlush() {
   });
 }
 
+function rectIsUsable(rect) {
+  return Boolean(rect && (rect.width || rect.height));
+}
+
+function firstUsableClientRect(rects) {
+  for (const rect of Array.from(rects || [])) {
+    if (rectIsUsable(rect)) {
+      return rect;
+    }
+  }
+  return null;
+}
+
+function currentSelectionRect() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount < 1) {
+    return null;
+  }
+  const range = selection.getRangeAt(0);
+  return (
+    firstUsableClientRect(range.getClientRects()) ||
+    (rectIsUsable(range.getBoundingClientRect())
+      ? range.getBoundingClientRect()
+      : null)
+  );
+}
+
+function cssSelectorEscape(value) {
+  const clean = cleanText(value);
+  if (!clean) {
+    return "";
+  }
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(clean);
+  }
+  return clean.replace(/["\\]/gu, "\\$&");
+}
+
+function blockAnchorRect(context) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const data = asObject(context);
+  const blockId = cleanText(
+    data.block_id || data.cursor_block_id || asArray(data.block_ids)[0],
+  ).trim();
+  if (blockId) {
+    const escaped = cssSelectorEscape(blockId);
+    const element = document.querySelector(
+      [
+        `[data-id="${escaped}"]`,
+        `[data-block-id="${escaped}"]`,
+        `[data-node-id="${escaped}"]`,
+        `#${escaped}`,
+      ].join(","),
+    );
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      if (rectIsUsable(rect)) {
+        return rect;
+      }
+    }
+  }
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement) {
+    const activeRect = activeElement.getBoundingClientRect();
+    if (rectIsUsable(activeRect)) {
+      return activeRect;
+    }
+  }
+  const editorFrame = document.querySelector(".nb-source-editor, .nb-blocknote-frame");
+  if (editorFrame) {
+    const rect = editorFrame.getBoundingClientRect();
+    if (rectIsUsable(rect)) {
+      return rect;
+    }
+  }
+  return null;
+}
+
+function sourceTextareaCaretRect(textarea) {
+  if (!textarea) {
+    return null;
+  }
+  const rect = textarea.getBoundingClientRect();
+  if (!rectIsUsable(rect)) {
+    return null;
+  }
+  const computed = window.getComputedStyle(textarea);
+  const paddingLeft = Number.parseFloat(computed.paddingLeft || "0") || 0;
+  const paddingTop = Number.parseFloat(computed.paddingTop || "0") || 0;
+  const fontSize = Number.parseFloat(computed.fontSize || "16") || 16;
+  const lineHeight =
+    Number.parseFloat(computed.lineHeight || "") || Math.round(fontSize * 1.45);
+  const selectionStart = Number.isFinite(textarea.selectionStart)
+    ? textarea.selectionStart
+    : textarea.value.length;
+  const before = textarea.value.slice(0, selectionStart);
+  const lines = before.split("\n");
+  const currentLine = lines[lines.length - 1] || "";
+  const approxCharWidth = Math.max(6, fontSize * 0.56);
+  const left = Math.min(
+    rect.right - 16,
+    rect.left + paddingLeft + currentLine.length * approxCharWidth - textarea.scrollLeft,
+  );
+  const top =
+    rect.top + paddingTop + (lines.length - 1) * lineHeight - textarea.scrollTop;
+  return {
+    left: Math.max(rect.left + paddingLeft, left),
+    right: Math.max(rect.left + paddingLeft, left),
+    top: Math.max(rect.top + paddingTop, top),
+    bottom: Math.max(rect.top + paddingTop, top) + lineHeight,
+    width: 0,
+    height: lineHeight,
+  };
+}
+
+function aiPromptAnchorStyle(context, sourceTextarea = null) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const rect =
+    sourceTextareaCaretRect(sourceTextarea) ||
+    currentSelectionRect() ||
+    blockAnchorRect(context);
+  if (!rect) {
+    return null;
+  }
+  const gap = 8;
+  const viewportWidth = window.innerWidth || 800;
+  const viewportHeight = window.innerHeight || 600;
+  const panelWidth = Math.min(520, Math.max(320, viewportWidth - 24));
+  const estimatedHeight = 238;
+  const left = Math.max(
+    12,
+    Math.min(viewportWidth - panelWidth - 12, rect.left),
+  );
+  let top = rect.bottom + gap;
+  if (top + estimatedHeight > viewportHeight - 12) {
+    top = rect.top - estimatedHeight - gap;
+  }
+  top = Math.max(12, Math.min(viewportHeight - 180, top));
+  return {
+    position: "fixed",
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${panelWidth}px`,
+    maxHeight: `${Math.max(180, viewportHeight - top - 12)}px`,
+  };
+}
+
 function floatingPreviewMetrics() {
   const fallbackWidth =
     typeof window === "undefined" ? 960 : Math.max(320, window.innerWidth - 32);
@@ -2818,6 +2972,7 @@ function ShellEditor(props) {
   const [pendingAIAction, setPendingAIAction] = useState(null);
   const [aiPromptRequest, setAIPromptRequest] = useState(null);
   const [aiPromptDraft, setAIPromptDraft] = useState("");
+  const [aiPromptStyle, setAIPromptStyle] = useState(null);
   const [outlineVersion, setOutlineVersion] = useState(0);
   const [treeUiVersion, setTreeUiVersion] = useState(0);
 
@@ -2901,6 +3056,8 @@ function ShellEditor(props) {
       pendingAIAction?.operation,
       pendingAIAction?.text,
       aiPromptRequest?.operation,
+      aiPromptStyle?.top,
+      aiPromptStyle?.left,
       outlineVersion,
     ],
     height + 72,
@@ -3909,13 +4066,18 @@ function ShellEditor(props) {
         : refreshSelectedBlock();
     const promptText = cleanText(request.prompt).trim();
     if (
-      cleanText(request.trigger) === "slash" &&
       AI_PROMPT_REQUIRED_OPERATIONS.has(operation) &&
       !promptText &&
       !cleanText(selectionContext.selection_text).trim()
     ) {
       setAIPromptRequest({ ...request, operation, requires_prompt: false });
       setAIPromptDraft("");
+      setAIPromptStyle(
+        aiPromptAnchorStyle(
+          selectionContext,
+          editorSourceMode ? sourceTextareaRef.current : null,
+        ),
+      );
       return;
     }
     const markdownBeforeAI = await getCurrentMarkdown();
@@ -3953,8 +4115,15 @@ function ShellEditor(props) {
   async function handleAISlashAction(request = {}) {
     const prompt = cleanText(request.prompt).trim();
     if (request.requires_prompt && !prompt) {
+      const selectionContext = selectedBlockRef.current || refreshSelectedBlock();
       setAIPromptRequest({ ...request, requires_prompt: false });
       setAIPromptDraft("");
+      setAIPromptStyle(
+        aiPromptAnchorStyle(
+          selectionContext,
+          editorSourceMode ? sourceTextareaRef.current : null,
+        ),
+      );
       return;
     }
     await handleAIInlineAction(request);
@@ -3968,6 +4137,7 @@ function ShellEditor(props) {
     }
     setAIPromptRequest(null);
     setAIPromptDraft("");
+    setAIPromptStyle(null);
     await handleAIInlineAction({
       ...request,
       prompt,
@@ -4691,6 +4861,7 @@ function ShellEditor(props) {
           </div>
           {aiPromptRequest ? (
             <AIPromptDialog
+              anchorStyle={aiPromptStyle}
               labels={labels}
               request={aiPromptRequest}
               value={aiPromptDraft}
@@ -4699,6 +4870,7 @@ function ShellEditor(props) {
               onClose={() => {
                 setAIPromptRequest(null);
                 setAIPromptDraft("");
+                setAIPromptStyle(null);
               }}
             />
           ) : null}
@@ -4833,6 +5005,7 @@ function ShellEditor(props) {
               editable={editable}
               labels={labels}
               candidates={aiCandidates}
+              operationNotice={operationNotice}
               patchCandidates={patchCandidates}
               pendingAIAction={pendingAIAction}
               selectedBlock={selectedBlock}
@@ -5295,6 +5468,7 @@ function AiDrawer({
   editable,
   labels,
   candidates,
+  operationNotice = {},
   patchCandidates = [],
   pendingAIAction = null,
   selectedBlock,
@@ -5312,6 +5486,7 @@ function AiDrawer({
   const [candidatePlacement, setCandidatePlacement] = useState("cursor");
   return (
     <div className="nb-drawer-body">
+      <OperationNotice notice={operationNotice} source="ai" />
       <SelectionContextPanel labels={labels} selectedBlock={selectedBlock} />
       <div className="nb-ai-inline-actions">
         {[
@@ -5637,9 +5812,18 @@ function VisualPreviewDialog({
   );
 }
 
-function AIPromptDialog({ labels, request, value, onChange, onSubmit, onClose }) {
+function AIPromptDialog({
+  anchorStyle = null,
+  labels,
+  request,
+  value,
+  onChange,
+  onSubmit,
+  onClose,
+}) {
   const inputRef = useRef(null);
   const operation = cleanText(request?.operation || "");
+  const anchored = Boolean(anchorStyle);
   useEffect(() => {
     inputRef.current?.focus();
     const onKeyDown = (event) => {
@@ -5652,7 +5836,9 @@ function AIPromptDialog({ labels, request, value, onChange, onSubmit, onClose })
   }, [onClose]);
   return (
     <div
-      className="nb-preview-dialog nb-ai-prompt-dialog"
+      className={`nb-preview-dialog nb-ai-prompt-dialog ${
+        anchored ? "is-anchored" : ""
+      }`}
       role="dialog"
       aria-modal="true"
       aria-label={label(labels, "ai_prompt_required_title")}
@@ -5664,6 +5850,7 @@ function AIPromptDialog({ labels, request, value, onChange, onSubmit, onClose })
     >
       <form
         className="nb-preview-dialog-panel nb-ai-prompt-panel"
+        style={anchorStyle || undefined}
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault();

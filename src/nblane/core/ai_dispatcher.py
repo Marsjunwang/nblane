@@ -300,6 +300,7 @@ def _build_user_prompt(
         "visual_kind": visual_kind,
         "title": _clean_text(meta.get("title")).strip(),
         "summary": _clean_text(meta.get("summary")).strip(),
+        "abstract": _clean_text(meta.get("abstract")).strip(),
         "tags": meta.get("tags") if isinstance(meta.get("tags"), list) else [],
         "target_text": context,
         "surrounding_blocks": surrounding,
@@ -417,7 +418,7 @@ def generate_ai_patch(
     clean_operation = _operation(operation, clean_visual_kind)
     target = _target_from_selection(selected_block)
     if (
-        clean_operation in {"formula", "visual", "outline"}
+        clean_operation in {"formula", "visual"}
         and not _clean_text(prompt).strip()
         and not target.selection_text.strip()
     ):

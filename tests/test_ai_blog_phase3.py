@@ -59,6 +59,42 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertGreaterEqual(len(patch_payload["block_patches"]), 4)
         self.assertEqual(patch_payload["block_patches"][0]["block"]["type"], "heading")
 
+    def test_outline_patch_can_use_article_context_without_prompt_or_selection(self) -> None:
+        raw_outline = "## Context\n- Current draft\n\n## Next\n- Expand"
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", return_value=raw_outline):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={"title": "Draft"},
+                markdown="Existing article context",
+                selected_block={"cursor_block_id": "b1"},
+                operation="outline",
+            )
+
+        self.assertEqual(patch_payload["operation"], "outline")
+        self.assertIn("## Context", patch_payload["markdown_fallback"])
+        self.assertEqual(patch_payload["block_patches"][0]["block"]["type"], "heading")
+
+    def test_ai_prompt_includes_optional_abstract_meta(self) -> None:
+        seen_user_prompt = ""
+
+        def fake_chat(_system: str, user: str, **_kwargs) -> str:
+            nonlocal seen_user_prompt
+            seen_user_prompt = user
+            return "## Context\n- Point"
+
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", side_effect=fake_chat):
+            ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={"title": "Draft", "abstract": "Paper-style abstract"},
+                markdown="Existing article context",
+                selected_block={"cursor_block_id": "b1"},
+                operation="outline",
+            )
+
+        self.assertIn('"abstract": "Paper-style abstract"', seen_user_prompt)
+
     def test_diagram_patch_uses_visual_block_with_mermaid(self) -> None:
         raw = "flowchart TD\n  A[Login] --> B{Valid?}\n  B --> C[Home]"
         with patch("nblane.core.ai_dispatcher.llm_client.chat", return_value=raw):
