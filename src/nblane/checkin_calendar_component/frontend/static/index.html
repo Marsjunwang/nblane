@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nblane check-in calendar</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html,
+    body {
+      background: transparent;
+      margin: 0;
+      overflow: hidden;
+      padding: 0;
+    }
+    .kb-cal-mini {
+      aspect-ratio: 2 / 1;
+      display: grid;
+      gap: 2px;
+      grid-template-rows: 1.55rem 1.05rem minmax(0, 1fr);
+      height: var(--calendar-height, 166px);
+      min-height: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+    .kb-cal-nav {
+      align-items: center;
+      display: grid;
+      gap: 2px;
+      grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+      min-height: 0;
+    }
+    .kb-cal-nav-btn,
+    .kb-cal-title,
+    .kb-cal-day {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      font: inherit;
+      margin: 0;
+      padding: 0;
+    }
+    .kb-cal-nav-btn {
+      align-items: center;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 5px;
+      color: #334155;
+      display: flex;
+      font-size: 2rem;
+      font-weight: 900;
+      height: 1.45rem;
+      justify-content: center;
+      line-height: 0.75;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .kb-cal-nav-btn:hover,
+    .kb-cal-title:hover {
+      background: #eef2ff;
+      border-color: #c7d2fe;
+      color: #1d4ed8;
+    }
+    .kb-cal-title {
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      color: #0f172a;
+      font-size: 1.08rem;
+      font-weight: 900;
+      height: 1.55rem;
+      line-height: 1.35rem;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .kb-cal-grid {
+      display: grid;
+      gap: 1px;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      min-height: 0;
+    }
+    .kb-cal-weekday {
+      color: #64748b;
+      font-size: 1rem;
+      font-weight: 900;
+      line-height: 1.05rem;
+      min-width: 0;
+      overflow: hidden;
+      text-align: center;
+    }
+    .kb-cal-days {
+      grid-template-rows: repeat(6, minmax(0, 1fr));
+    }
+    .kb-cal-cell {
+      min-height: 0;
+      min-width: 0;
+    }
+    .kb-cal-empty {
+      display: block;
+    }
+    .kb-cal-day {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 3px;
+      color: #334155;
+      display: block;
+      overflow: hidden;
+      position: relative;
+    }
+    .kb-cal-day:hover {
+      background: #f8fafc;
+      border-color: #94a3b8;
+      color: #0f172a;
+    }
+    .kb-cal-day.selected {
+      background: #eef2ff;
+      border-color: #4f46e5;
+      color: #312e81;
+    }
+    .kb-cal-day.today .kb-cal-num {
+      color: #be123c;
+      font-weight: 900;
+    }
+    .kb-cal-day.has-learning,
+    .kb-cal-day.has-exercise {
+      background: #fbfdff;
+      border-color: #cbd5e1;
+    }
+    .kb-cal-day.has-learning.has-exercise {
+      background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+    }
+    .kb-cal-day.selected.has-learning,
+    .kb-cal-day.selected.has-exercise {
+      background: #eef2ff;
+      border-color: #4f46e5;
+    }
+    .kb-cal-num {
+      align-items: center;
+      display: flex;
+      font-size: 0.78rem;
+      font-weight: 900;
+      height: 50%;
+      justify-content: center;
+      left: 0;
+      line-height: 1;
+      position: absolute;
+      top: 0;
+      width: 50%;
+    }
+    .kb-cal-badges {
+      inset: 0;
+      min-height: 0;
+      pointer-events: none;
+      position: absolute;
+    }
+    .kb-cal-badge {
+      align-items: center;
+      border: 1px solid transparent;
+      border-radius: 0;
+      display: flex;
+      font-size: 0.62rem;
+      font-weight: 900;
+      height: 50%;
+      justify-content: center;
+      line-height: 1;
+      overflow: hidden;
+      padding: 0;
+      position: absolute;
+      text-overflow: clip;
+      white-space: nowrap;
+      width: 50%;
+    }
+    .kb-cal-badge.learning {
+      background: #bfdbfe;
+      border-color: #93c5fd;
+      color: #1e40af;
+      right: 0;
+      top: 0;
+    }
+    .kb-cal-badge.exercise {
+      background: #bbf7d0;
+      border-color: #86efac;
+      bottom: 0;
+      color: #166534;
+      right: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const READY = "streamlit:componentReady";
+    const SET_VALUE = "streamlit:setComponentValue";
+    const SET_HEIGHT = "streamlit:setFrameHeight";
+    const RENDER = "streamlit:render";
+
+    let args = {
+      payload: {},
+      selected_day: "",
+      today: "",
+      ui: {},
+      height: 166,
+    };
+    let sequence = 0;
+
+    function send(type, data) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type,
+        ...data,
+      }, "*");
+    }
+
+    function setHeight() {
+      const height = Number(args.height || 166);
+      send(SET_HEIGHT, { height });
+    }
+
+    function componentValue(value) {
+      send(SET_VALUE, {
+        dataType: "json",
+        value,
+      });
+    }
+
+    function text(value) {
+      return String(value == null ? "" : value);
+    }
+
+    function esc(value) {
+      return text(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function monthShift(year, month, offset) {
+      const total = year * 12 + (month - 1) + offset;
+      const nextYear = Math.floor(total / 12);
+      const nextMonth = total % 12 + 1;
+      return [nextYear, nextMonth];
+    }
+
+    function monthLabel(year, month) {
+      return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
+    }
+
+    function dayLabelFromMonth(label) {
+      return `${label}-01`;
+    }
+
+    function eventId(action, day) {
+      return `${Date.now()}-${++sequence}-${action}-${day}`;
+    }
+
+    function emit(action, month, day, open) {
+      componentValue({
+        action,
+        month,
+        day,
+        open: Boolean(open),
+        event_id: eventId(action, day),
+      });
+    }
+
+    function markerHtml(counts, ui) {
+      const learning = Number(counts && counts.learning ? counts.learning : 0);
+      const exercise = Number(counts && counts.exercise ? counts.exercise : 0);
+      let out = "";
+      if (learning) {
+        const tmpl = text(ui.kb_checkin_strip_learning_short || ui.kb_calendar_learning_short || "L{count}");
+        out += `<span class="kb-cal-badge learning">${esc(tmpl.replace("{count}", learning))}</span>`;
+      }
+      if (exercise) {
+        const tmpl = text(ui.kb_checkin_strip_exercise_short || ui.kb_calendar_exercise_short || "E{count}");
+        out += `<span class="kb-cal-badge exercise">${esc(tmpl.replace("{count}", exercise))}</span>`;
+      }
+      return out;
+    }
+
+    function render() {
+      const payload = args.payload || {};
+      const ui = args.ui || {};
+      const year = Number(payload.year || 0);
+      const month = Number(payload.month || 0);
+      const currentMonth = monthLabel(year, month);
+      const [prevYear, prevMonth] = monthShift(year, month, -1);
+      const [nextYear, nextMonth] = monthShift(year, month, 1);
+      const prev = monthLabel(prevYear, prevMonth);
+      const next = monthLabel(nextYear, nextMonth);
+      const today = text(args.today || payload.today || "");
+      const todayMonth = today.slice(0, 7) || currentMonth;
+      const selected = text(args.selected_day || "");
+      const title = text(payload.month_label || currentMonth);
+
+      const weekdays = Array.isArray(payload.weekdays) ? payload.weekdays : [];
+      const days = Array.isArray(payload.days) ? payload.days : [];
+      const weekdayCells = weekdays.slice(0, 7)
+        .map((weekday) => `<span class="kb-cal-weekday">${esc(weekday)}</span>`)
+        .join("");
+      const dayCells = days.map((item) => {
+        if (!item || typeof item !== "object") {
+          return '<span class="kb-cal-cell kb-cal-empty"></span>';
+        }
+        const day = text(item.date || "");
+        const counts = item.counts || {};
+        const classes = ["kb-cal-cell", "kb-cal-day"];
+        if (day === selected) classes.push("selected");
+        if (item.is_today) classes.push("today");
+        if (Number(counts.learning || 0)) classes.push("has-learning");
+        if (Number(counts.exercise || 0)) classes.push("has-exercise");
+        const label = `${day} ${text(item.summary || "")}`.trim();
+        return `
+          <button
+            type="button"
+            class="${classes.join(" ")}"
+            data-action="select_day"
+            data-month="${esc(currentMonth)}"
+            data-day="${esc(day)}"
+            title="${esc(label)}"
+            aria-label="${esc(label)}">
+            <span class="kb-cal-num">${esc(item.day || "")}</span>
+            <span class="kb-cal-badges">${markerHtml(counts, ui)}</span>
+          </button>`;
+      }).join("");
+
+      document.documentElement.style.setProperty("--calendar-height", `${Number(args.height || 166)}px`);
+      document.getElementById("root").innerHTML = `
+        <div class="kb-cal-mini">
+          <div class="kb-cal-nav">
+            <button type="button" class="kb-cal-nav-btn" data-action="prev_month" data-month="${esc(prev)}" data-day="${esc(dayLabelFromMonth(prev))}" aria-label="${esc(ui.previous_month || "Previous month")}">&lsaquo;</button>
+            <button type="button" class="kb-cal-title" data-action="today" data-month="${esc(todayMonth)}" data-day="${esc(today)}" aria-label="${esc(ui.kb_checkin_today_short || "Today")}" title="${esc(ui.kb_checkin_today_short || "Today")}">${esc(title)}</button>
+            <button type="button" class="kb-cal-nav-btn" data-action="next_month" data-month="${esc(next)}" data-day="${esc(dayLabelFromMonth(next))}" aria-label="${esc(ui.next_month || "Next month")}">&rsaquo;</button>
+          </div>
+          <div class="kb-cal-grid kb-cal-weekdays">${weekdayCells}</div>
+          <div class="kb-cal-grid kb-cal-days">${dayCells}</div>
+        </div>`;
+      document.querySelectorAll("button[data-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.dataset.action || "";
+          emit(
+            action,
+            button.dataset.month || currentMonth,
+            button.dataset.day || today,
+            action === "select_day"
+          );
+        });
+      });
+      setHeight();
+    }
+
+    window.addEventListener("message", (event) => {
+      const data = event.data || {};
+      if (data.type !== RENDER) return;
+      args = data.args || args;
+      render();
+    });
+
+    send(READY, { apiVersion: 1 });
+    setHeight();
+  </script>
+</body>
+</html>

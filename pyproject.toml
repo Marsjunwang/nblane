@@ -46,3 +46,6 @@ include = ["nblane*", "schemas*"]
     "frontend/static/index.html",
     "frontend/static/assets/*",
 ]
+"nblane.checkin_calendar_component" = [
+    "frontend/static/index.html",
+]

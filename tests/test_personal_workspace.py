@@ -89,6 +89,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                     id="learning_2026-04-28_1",
                     habit_id="learning",
                     summary="Read paper notes",
+                    links=["https://example.com/paper"],
                 ),
                 Checkin(
                     date=today.isoformat(),
@@ -140,6 +141,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                     "kind": "learning",
                     "label": "学习",
                     "detail": "Read paper notes",
+                    "links": ["https://example.com/paper"],
                     "can_delete": True,
                 },
                 {
@@ -148,6 +150,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                     "kind": "exercise",
                     "label": "锻炼",
                     "detail": "跑步 · 30 分钟 · 中等",
+                    "links": [],
                     "can_delete": True,
                 },
             ],
@@ -246,6 +249,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                     "kind": "learning",
                     "label": "学习",
                     "detail": "Read paper notes",
+                    "links": [],
                     "can_delete": True,
                 },
                 {
@@ -254,6 +258,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                     "kind": "exercise",
                     "label": "锻炼",
                     "detail": "跑步 · 30 分钟 · 中等",
+                    "links": [],
                     "can_delete": True,
                 },
             ],
@@ -345,6 +350,111 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
         )
         self.assertFalse(hasattr(helpers, "_checkin_query_href"))
         self.assertFalse(hasattr(helpers, "_month_calendar_html"))
+
+    def test_toolbar_calendar_component_event_updates_once(self) -> None:
+        """Calendar component events update state and are de-duplicated."""
+        helpers = _load_kanban_page_helpers()
+        fake_st = types.SimpleNamespace(session_state={}, query_params={})
+        event = {
+            "action": "select_day",
+            "month": "2026-04",
+            "day": "2026-04-28",
+            "open": True,
+            "event_id": "evt-1",
+        }
+
+        with patch.object(helpers, "st", fake_st):
+            self.assertTrue(
+                helpers._handle_checkin_calendar_event("demo", event)
+            )
+            self.assertFalse(
+                helpers._handle_checkin_calendar_event("demo", event)
+            )
+
+        self.assertEqual(
+            fake_st.session_state["kb_toolbar_checkin_month_demo"],
+            "2026-04",
+        )
+        self.assertEqual(
+            fake_st.session_state["kb_toolbar_checkin_day_demo"],
+            "2026-04-28",
+        )
+        self.assertTrue(
+            fake_st.session_state["kb_toolbar_checkin_detail_open_demo"]
+        )
+        self.assertEqual(
+            fake_st.session_state["kb_toolbar_checkin_event_id_demo"],
+            "evt-1",
+        )
+
+    def test_record_links_html_keeps_external_links_clickable(self) -> None:
+        """Learning links render as safe external anchors."""
+        helpers = _load_kanban_page_helpers()
+
+        html = helpers._record_links_html(
+            ["https://example.com/paper", "javascript:alert(1)"]
+        )
+
+        self.assertIn('href="https://example.com/paper"', html)
+        self.assertIn('target="_blank" rel="noopener noreferrer"', html)
+        self.assertNotIn('href="javascript:', html)
+        self.assertIn("javascript:alert(1)", html)
+
+    def test_toolbar_exercise_form_saves_selected_options(self) -> None:
+        """Toolbar exercise check-ins keep user-selected type and intensity."""
+        helpers = _load_kanban_page_helpers()
+
+        class FakeForm:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeStreamlit:
+            def form(self, *args, **kwargs):
+                return FakeForm()
+
+            def selectbox(self, label, options, **kwargs):
+                if "intensity" in str(kwargs.get("key", "")):
+                    return "hard"
+                return "running"
+
+            def number_input(self, *args, **kwargs):
+                return 45.0
+
+            def text_area(self, *args, **kwargs):
+                return "Tempo run"
+
+            def form_submit_button(self, *args, **kwargs):
+                return True
+
+            def rerun(self):
+                raise RuntimeError("rerun")
+
+        with (
+            patch.object(helpers, "st", FakeStreamlit()),
+            patch.object(helpers, "record_exercise_checkin") as mock_record,
+        ):
+            with self.assertRaises(RuntimeError):
+                helpers._render_add_exercise_form(
+                    "demo",
+                    Path("/tmp/demo"),
+                    date(2026, 4, 28),
+                    {
+                        "kb_exercise_type_running": "跑步",
+                        "kb_exercise_intensity_hard": "较累",
+                    },
+                )
+
+        mock_record.assert_called_once_with(
+            Path("/tmp/demo"),
+            when=date(2026, 4, 28),
+            workout_type="running",
+            duration_min=45.0,
+            intensity="hard",
+            note="Tempo run",
+        )
 
 
 if __name__ == "__main__":

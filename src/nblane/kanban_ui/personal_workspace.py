@@ -327,6 +327,7 @@ def checkin_record_payload(
         "kind": kind,
         "label": _checkin_kind_label(checkin, ui),
         "detail": _checkin_detail(checkin, ui),
+        "links": list(checkin.links),
         "can_delete": bool(checkin.id),
     }
 

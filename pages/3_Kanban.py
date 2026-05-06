@@ -9,10 +9,12 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 from html import escape
+from urllib.parse import urlparse
 
 import streamlit as st
 import yaml
 
+from nblane.checkin_calendar_component import st_checkin_calendar
 from nblane.core import gap as gap_engine
 from nblane.core import llm as llm_client
 from nblane.core.file_state import (
@@ -59,6 +61,8 @@ from nblane.core.io import (
 from nblane.kanban_board_component import st_kanban_board
 from nblane.kanban_ui import render_kanban_board
 from nblane.kanban_ui.personal_workspace import (
+    EXERCISE_INTENSITIES,
+    EXERCISE_TYPES,
     checkin_month_payload,
     delete_workspace_checkin,
     record_exercise_checkin,
@@ -832,12 +836,6 @@ def _checkin_lines(value: object) -> list[str]:
     return out
 
 
-def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
-    """Return year/month shifted by whole months."""
-    total = year * 12 + (month - 1) + offset
-    return total // 12, total % 12 + 1
-
-
 def _month_state(profile: str) -> tuple[int, int]:
     """Return the toolbar calendar month from session state."""
     today = date.today()
@@ -899,32 +897,6 @@ def _day_payload(payload: dict, day: date) -> dict:
         "records": [],
         "summary": "",
     }
-
-
-def _month_marker_text(counts: dict, ui: dict[str, str]) -> str:
-    """Return compact text markers for one date cell."""
-    learning = int(counts.get("learning") or 0)
-    exercise = int(counts.get("exercise") or 0)
-    badges: list[str] = []
-    if learning:
-        template = ui.get(
-            "kb_checkin_strip_learning_short",
-            ui.get("kb_calendar_learning_short", "L{count}"),
-        )
-        text = template.format(
-            count=learning
-        )
-        badges.append(text)
-    if exercise:
-        template = ui.get(
-            "kb_checkin_strip_exercise_short",
-            ui.get("kb_calendar_exercise_short", "E{count}"),
-        )
-        text = template.format(
-            count=exercise
-        )
-        badges.append(text)
-    return " ".join(badges)
 
 
 def _checkin_query_value(name: str) -> str:
@@ -1002,7 +974,44 @@ def _sync_checkin_query_state(profile: str) -> None:
     if raw_open:
         st.session_state[f"kb_toolbar_checkin_detail_open_{profile}"] = (
             raw_open == "1"
-        )
+    )
+
+
+def _checkin_calendar_event_key(profile: str) -> str:
+    """Session key for the latest toolbar calendar component event."""
+    return f"kb_toolbar_checkin_event_id_{profile}"
+
+
+def _handle_checkin_calendar_event(profile: str, event: dict | None) -> bool:
+    """Apply one calendar component event to toolbar check-in state."""
+    if not isinstance(event, dict):
+        return False
+    action = str(event.get("action") or "")
+    if action not in {"select_day", "prev_month", "next_month", "today"}:
+        return False
+    event_id = str(event.get("event_id") or "")
+    event_key = _checkin_calendar_event_key(profile)
+    if event_id and st.session_state.get(event_key) == event_id:
+        return False
+
+    month_label = str(event.get("month") or "").strip()[:7]
+    day_iso = str(event.get("day") or "").strip()[:10]
+    try:
+        year_text, month_text = month_label.split("-", 1)
+        date(int(year_text), int(month_text), 1)
+        parsed_day = date.fromisoformat(day_iso)
+    except (TypeError, ValueError):
+        return False
+
+    if event_id:
+        st.session_state[event_key] = event_id
+    _store_checkin_calendar_state(
+        profile,
+        month_label=month_label,
+        day_iso=parsed_day.isoformat(),
+        open_detail=bool(event.get("open")),
+    )
+    return True
 
 
 def _render_month_calendar(
@@ -1012,196 +1021,114 @@ def _render_month_calendar(
     today: date,
     ui: dict[str, str],
 ) -> None:
-    """Render the compact toolbar month calendar with same-session buttons."""
-    year = int(payload["year"])
-    month = int(payload["month"])
-    prev_year, prev_month = _shift_month(year, month, -1)
-    next_year, next_month = _shift_month(year, month, 1)
-    prev_month_label = f"{prev_year:04d}-{prev_month:02d}"
-    next_month_label = f"{next_year:04d}-{next_month:02d}"
-    current_month_label = f"{year:04d}-{month:02d}"
-    today_month_label = f"{today.year:04d}-{today.month:02d}"
-    title = str(payload.get("month_label") or current_month_label)
-    selected_iso = selected_day.isoformat()
-
-    with st.container(key="kb_toolbar_checkin_calendar"):
-        with st.container(key=f"kb_cal_nav_{profile}"):
-            prev_col, title_col, next_col = st.columns(
-                [0.25, 1, 0.25],
-                gap="small",
-                vertical_alignment="center",
-            )
-            if prev_col.button(
-                "<",
-                key=f"kb_cal_prev_{profile}_{current_month_label}",
-                help="Previous month",
-                use_container_width=True,
-            ):
-                _store_checkin_calendar_state(
-                    profile,
-                    month_label=prev_month_label,
-                    day_iso=f"{prev_month_label}-01",
-                    open_detail=False,
-                )
-                st.rerun()
-            if title_col.button(
-                title,
-                key=f"kb_cal_today_{profile}_{current_month_label}",
-                help=ui.get("kb_checkin_today_short", "Today"),
-                use_container_width=True,
-            ):
-                _store_checkin_calendar_state(
-                    profile,
-                    month_label=today_month_label,
-                    day_iso=today.isoformat(),
-                    open_detail=False,
-                )
-                st.rerun()
-            if next_col.button(
-                ">",
-                key=f"kb_cal_next_{profile}_{current_month_label}",
-                help="Next month",
-                use_container_width=True,
-            ):
-                _store_checkin_calendar_state(
-                    profile,
-                    month_label=next_month_label,
-                    day_iso=f"{next_month_label}-01",
-                    open_detail=False,
-                )
-                st.rerun()
-
-        weekday_cols = st.columns(7, gap="small")
-        for idx, weekday in enumerate(payload.get("weekdays", [])[:7]):
-            weekday_cols[idx].markdown(
-                f'<span class="kb-cal-weekday">{escape(str(weekday))}</span>',
-                unsafe_allow_html=True,
-            )
-
-        weeks = payload.get("weeks")
-        if not weeks:
-            days = list(payload.get("days", []))
-            weeks = [days[idx : idx + 7] for idx in range(0, len(days), 7)]
-
-        for week_idx, week in enumerate(weeks):
-            day_cols = st.columns(7, gap="small")
-            for day_idx, item in enumerate(list(week)[:7]):
-                if not isinstance(item, dict):
-                    day_cols[day_idx].markdown(
-                        '<span class="kb-cal-empty">&nbsp;</span>',
-                        unsafe_allow_html=True,
-                    )
-                    continue
-                day_iso = str(item.get("date") or "")
-                counts = item.get("counts") or {}
-                marker = _month_marker_text(counts, ui)
-                day_title = f"{day_iso} {item.get('summary') or ''}".strip()
-                label = str(item.get("day") or "")
-                if marker:
-                    label = f"{label}\n{marker}"
-                button_type = (
-                    "primary" if day_iso == selected_iso else "secondary"
-                )
-                if day_cols[day_idx].button(
-                    label,
-                    key=(
-                        f"kb_cal_day_{profile}_{week_idx}_{day_idx}_{day_iso}"
-                    ),
-                    help=day_title,
-                    type=button_type,
-                    use_container_width=True,
-                ):
-                    _store_checkin_calendar_state(
-                        profile,
-                        month_label=current_month_label,
-                        day_iso=day_iso,
-                        open_detail=True,
-                    )
-                    st.rerun()
+    """Render the compact toolbar month calendar via component events."""
+    event = st_checkin_calendar(
+        payload=payload,
+        selected_day=selected_day.isoformat(),
+        today=today.isoformat(),
+        ui={
+            "kb_checkin_today_short": ui.get("kb_checkin_today_short", "Today"),
+            "kb_checkin_strip_learning_short": ui.get(
+                "kb_checkin_strip_learning_short",
+                ui.get("kb_calendar_learning_short", "L{count}"),
+            ),
+            "kb_checkin_strip_exercise_short": ui.get(
+                "kb_checkin_strip_exercise_short",
+                ui.get("kb_calendar_exercise_short", "E{count}"),
+            ),
+            "previous_month": ui.get("kb_checkin_prev_month", "Previous month"),
+            "next_month": ui.get("kb_checkin_next_month", "Next month"),
+        },
+        key=f"kb_toolbar_checkin_calendar_{profile}",
+    )
+    if _handle_checkin_calendar_event(profile, event):
+        st.rerun()
 
 
-def _render_month_calendar_styles() -> None:
-    """Inject compact styles for the toolbar month calendar."""
+def _render_toolbar_checkin_styles() -> None:
+    """Inject compact styles for toolbar check-in details."""
     st.markdown(
         """
         <style>
-        .kb-cal-weekday {
-          display: block;
-          color: #64748b;
-          font-size: 0.7rem;
-          font-weight: 800;
-          line-height: 0.82rem;
-          min-width: 0;
-          overflow: hidden;
-          text-align: center;
-        }
-        .kb-cal-empty {
-          display: block;
-          height: 1.34rem;
-        }
-        .st-key-kb_toolbar_checkin_calendar {
-          container-type: inline-size;
-          margin: 0;
-          min-height: 0;
-          overflow: hidden;
-          padding: 0;
-        }
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stElementContainer"],
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stMarkdownContainer"],
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stVerticalBlock"],
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stHorizontalBlock"] {
-          gap: 0;
-          margin: 0;
-          min-height: 0;
-          padding: 0;
-        }
-        .st-key-kb_toolbar_checkin_calendar [data-testid="column"] {
-          padding: 0 1px;
-        }
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stMarkdownContainer"] p {
-          margin: 0;
-        }
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stButton"] {
-          margin: 0;
-        }
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stButton"] > button {
-          border-radius: 3px;
-          box-shadow: none;
-          height: 1.34rem;
-          min-height: 1.34rem;
-          overflow: hidden;
-          padding: 0.04rem 0.08rem;
-        }
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stButton"] > button p {
-          display: -webkit-box;
-          font-size: 0.62rem;
-          font-weight: 800;
-          line-height: 0.62rem;
-          margin: 0;
-          overflow: hidden;
-          text-align: center;
-          text-overflow: clip;
-          white-space: pre-line;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 2;
-        }
-        .st-key-kb_toolbar_checkin_calendar [class*="st-key-kb_cal_nav_"] [data-testid="stButton"] > button {
-          height: 1.42rem;
-          min-height: 1.42rem;
-        }
-        .st-key-kb_toolbar_checkin_calendar [class*="st-key-kb_cal_nav_"] [data-testid="stButton"] > button p {
-          font-size: 0.78rem;
-          line-height: 0.92rem;
-          white-space: nowrap;
-          -webkit-line-clamp: 1;
-        }
         .st-key-kb_toolbar_checkin_detail {
           margin-top: 0.25rem;
+        }
+        .kb-checkin-links {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.25rem;
+          margin-top: 0.16rem;
+        }
+        .kb-checkin-link {
+          background: #f8fafc;
+          border: 1px solid #dbeafe;
+          border-radius: 4px;
+          color: #1d4ed8;
+          display: inline-flex;
+          font-size: 0.72rem;
+          font-weight: 700;
+          line-height: 1;
+          max-width: 100%;
+          overflow: hidden;
+          padding: 0.18rem 0.32rem;
+          text-decoration: none;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .kb-checkin-link:hover {
+          background: #eff6ff;
+          border-color: #93c5fd;
+          text-decoration: none;
+        }
+        .kb-checkin-link-text {
+          color: #475569;
+          display: inline-block;
+          font-size: 0.72rem;
+          line-height: 1.1;
+          overflow-wrap: anywhere;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _safe_record_link(url: object) -> str:
+    """Return a safe absolute learning link for rendering."""
+    clean = str(url or "").strip()
+    if not clean:
+        return ""
+    parsed = urlparse(clean)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return clean
+
+
+def _record_links_html(links: object) -> str:
+    """Return compact HTML for a check-in record's learning links."""
+    raw_links = links if isinstance(links, list) else []
+    chips: list[str] = []
+    text_bits: list[str] = []
+    for index, raw in enumerate(raw_links, start=1):
+        clean = str(raw or "").strip()
+        if not clean:
+            continue
+        safe = _safe_record_link(clean)
+        label = f"Link {index}"
+        if safe:
+            chips.append(
+                '<a class="kb-checkin-link" '
+                f'href="{escape(safe, quote=True)}" '
+                'target="_blank" rel="noopener noreferrer">'
+                f"{escape(label)}</a>"
+            )
+        else:
+            text_bits.append(
+                f'<span class="kb-checkin-link-text">{escape(clean)}</span>'
+            )
+    if not chips and not text_bits:
+        return ""
+    return '<div class="kb-checkin-links">' + "".join(chips + text_bits) + "</div>"
 
 
 def _render_checkin_records(
@@ -1230,6 +1157,9 @@ def _render_checkin_records(
         cols = st.columns([0.85, 2.2, 0.55], gap="small")
         cols[0].caption(str(item.get("label") or ""))
         cols[1].caption(str(item.get("detail") or ""))
+        link_html = _record_links_html(item.get("links"))
+        if link_html:
+            cols[1].markdown(link_html, unsafe_allow_html=True)
         can_delete = bool(item.get("can_delete") and item.get("id"))
         if cols[2].button(
             "x",
@@ -1317,12 +1247,32 @@ def _render_add_exercise_form(
         f"kb_toolbar_exercise_form_{profile}_{selected_day.isoformat()}",
         clear_on_submit=True,
     ):
+        workout_type = st.selectbox(
+            ui.get("kb_exercise_type", "Type"),
+            list(EXERCISE_TYPES),
+            index=list(EXERCISE_TYPES).index("other"),
+            key=f"kb_toolbar_exercise_type_{profile}_{selected_day.isoformat()}",
+            format_func=lambda value: ui.get(
+                f"kb_exercise_type_{value}",
+                str(value).replace("_", " ").title(),
+            ),
+        )
         duration_min = st.number_input(
             ui.get("kb_exercise_duration", "Duration (min)"),
             key=f"kb_toolbar_exercise_duration_{profile}_{selected_day.isoformat()}",
             min_value=0.0,
             step=5.0,
             value=0.0,
+        )
+        intensity = st.selectbox(
+            ui.get("kb_exercise_intensity", "Intensity"),
+            list(EXERCISE_INTENSITIES),
+            index=list(EXERCISE_INTENSITIES).index("moderate"),
+            key=f"kb_toolbar_exercise_intensity_{profile}_{selected_day.isoformat()}",
+            format_func=lambda value: ui.get(
+                f"kb_exercise_intensity_{value}",
+                str(value).title(),
+            ),
         )
         note = st.text_area(
             ui.get("kb_capture_note", "Note"),
@@ -1339,9 +1289,9 @@ def _render_add_exercise_form(
     record_exercise_checkin(
         profile_path,
         when=selected_day,
-        workout_type="other",
+        workout_type=str(workout_type or "other"),
         duration_min=float(duration_min or 0.0),
-        intensity="moderate",
+        intensity=str(intensity or "moderate"),
         note=str(note or "").strip(),
     )
     st.rerun()
@@ -1353,7 +1303,7 @@ def _render_toolbar_checkin(
     ui: dict[str, str],
 ) -> None:
     """Render the compact top-right month check-in calendar."""
-    _render_month_calendar_styles()
+    _render_toolbar_checkin_styles()
     _sync_checkin_query_state(profile)
     today = date.today()
     year, month = _month_state(profile)
