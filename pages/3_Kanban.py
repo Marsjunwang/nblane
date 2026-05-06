@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 from html import escape
-from urllib.parse import urlencode
 
 import streamlit as st
 import yaml
@@ -902,26 +901,30 @@ def _day_payload(payload: dict, day: date) -> dict:
     }
 
 
-def _month_marker_html(counts: dict, ui: dict[str, str]) -> str:
-    """Return compact colored HTML markers for one date cell."""
+def _month_marker_text(counts: dict, ui: dict[str, str]) -> str:
+    """Return compact text markers for one date cell."""
     learning = int(counts.get("learning") or 0)
     exercise = int(counts.get("exercise") or 0)
     badges: list[str] = []
     if learning:
-        text = ui.get("kb_checkin_month_learning_short", "学{count}").format(
+        template = ui.get(
+            "kb_checkin_strip_learning_short",
+            ui.get("kb_calendar_learning_short", "L{count}"),
+        )
+        text = template.format(
             count=learning
         )
-        badges.append(
-            f'<span class="kb-cal-badge learning">{escape(text)}</span>'
-        )
+        badges.append(text)
     if exercise:
-        text = ui.get("kb_checkin_month_exercise_short", "练{count}").format(
+        template = ui.get(
+            "kb_checkin_strip_exercise_short",
+            ui.get("kb_calendar_exercise_short", "E{count}"),
+        )
+        text = template.format(
             count=exercise
         )
-        badges.append(
-            f'<span class="kb-cal-badge exercise">{escape(text)}</span>'
-        )
-    return "".join(badges)
+        badges.append(text)
+    return " ".join(badges)
 
 
 def _checkin_query_value(name: str) -> str:
@@ -935,17 +938,39 @@ def _checkin_query_value(name: str) -> str:
     return str(raw or "").strip()
 
 
-def _checkin_query_href(**updates: str) -> str:
-    """Build a same-page link that updates toolbar check-in state."""
+def _set_checkin_query_params(
+    *,
+    month_label: str,
+    day_iso: str,
+    open_detail: bool,
+) -> None:
+    """Mirror toolbar check-in state into URL query parameters."""
     try:
-        params = dict(st.query_params)
+        st.query_params["kb_ci_month"] = month_label
+        st.query_params["kb_ci_day"] = day_iso
+        st.query_params["kb_ci_open"] = "1" if open_detail else "0"
     except Exception:
-        params = {}
-    for key in ("kb_ci_month", "kb_ci_day", "kb_ci_open"):
-        params.pop(key, None)
-    params.update({key: value for key, value in updates.items() if value})
-    query = urlencode(params, doseq=True)
-    return f"?{query}" if query else "?"
+        pass
+
+
+def _store_checkin_calendar_state(
+    profile: str,
+    *,
+    month_label: str,
+    day_iso: str,
+    open_detail: bool,
+) -> None:
+    """Update toolbar check-in state without leaving the current session."""
+    st.session_state[f"kb_toolbar_checkin_month_{profile}"] = month_label
+    st.session_state[f"kb_toolbar_checkin_day_{profile}"] = day_iso
+    st.session_state[f"kb_toolbar_checkin_detail_open_{profile}"] = (
+        open_detail
+    )
+    _set_checkin_query_params(
+        month_label=month_label,
+        day_iso=day_iso,
+        open_detail=open_detail,
+    )
 
 
 def _sync_checkin_query_state(profile: str) -> None:
@@ -980,98 +1005,119 @@ def _sync_checkin_query_state(profile: str) -> None:
         )
 
 
-def _month_calendar_html(
+def _render_month_calendar(
     profile: str,
     payload: dict,
     selected_day: date,
     today: date,
     ui: dict[str, str],
-) -> str:
-    """Return the compact toolbar month calendar HTML."""
+) -> None:
+    """Render the compact toolbar month calendar with same-session buttons."""
     year = int(payload["year"])
     month = int(payload["month"])
     prev_year, prev_month = _shift_month(year, month, -1)
     next_year, next_month = _shift_month(year, month, 1)
     prev_month_label = f"{prev_year:04d}-{prev_month:02d}"
     next_month_label = f"{next_year:04d}-{next_month:02d}"
+    current_month_label = f"{year:04d}-{month:02d}"
     today_month_label = f"{today.year:04d}-{today.month:02d}"
-    prev_href = _checkin_query_href(
-        kb_ci_month=prev_month_label,
-        kb_ci_day=f"{prev_month_label}-01",
-        kb_ci_open="0",
-    )
-    next_href = _checkin_query_href(
-        kb_ci_month=next_month_label,
-        kb_ci_day=f"{next_month_label}-01",
-        kb_ci_open="0",
-    )
-    today_href = _checkin_query_href(
-        kb_ci_month=today_month_label,
-        kb_ci_day=today.isoformat(),
-        kb_ci_open="0",
-    )
-    title = escape(str(payload.get("month_label") or f"{year:04d}-{month:02d}"))
-    profile_label = escape(profile)
-
-    weekday_cells = "".join(
-        f'<span class="kb-cal-weekday">{escape(str(weekday))}</span>'
-        for weekday in payload.get("weekdays", [])
-    )
-    day_cells: list[str] = []
+    title = str(payload.get("month_label") or current_month_label)
     selected_iso = selected_day.isoformat()
-    for item in payload.get("days", []):
-        if not isinstance(item, dict):
-            day_cells.append('<span class="kb-cal-cell kb-cal-empty"></span>')
-            continue
-        day_iso = str(item.get("date") or "")
-        day_href = _checkin_query_href(
-            kb_ci_month=f"{year:04d}-{month:02d}",
-            kb_ci_day=day_iso,
-            kb_ci_open="1",
-        )
-        classes = ["kb-cal-cell", "kb-cal-day"]
-        if day_iso == selected_iso:
-            classes.append("selected")
-        if item.get("is_today"):
-            classes.append("today")
-        counts = item.get("counts") or {}
-        if int(counts.get("learning") or 0):
-            classes.append("has-learning")
-        if int(counts.get("exercise") or 0):
-            classes.append("has-exercise")
-        marker_html = _month_marker_html(counts, ui)
-        count_title = escape(str(item.get("summary") or ""))
-        day_title = escape(
-            f"{day_iso} {item.get('summary') or ''}".strip()
-        )
-        day_cells.append(
-            '<a class="'
-            + " ".join(classes)
-            + f'" href="{escape(day_href, quote=True)}"'
-            + f' title="{day_title}" aria-label="{day_title}">'
-            + f'<span class="kb-cal-num">{escape(str(item.get("day") or ""))}</span>'
-            + f'<span class="kb-cal-badges" title="{count_title}">'
-            + marker_html
-            + "</span></a>"
-        )
 
-    return (
-        f'<div class="kb-cal-mini" data-profile="{profile_label}">'
-        '<div class="kb-cal-nav">'
-        f'<a class="kb-cal-nav-btn" href="{escape(prev_href, quote=True)}" '
-        'aria-label="Previous month">‹</a>'
-        f'<a class="kb-cal-title" href="{escape(today_href, quote=True)}" '
-        f'title="{escape(ui.get("kb_checkin_today_short", "Today"))}" '
-        f'aria-label="{escape(ui.get("kb_checkin_today_short", "Today"))}">'
-        f"{title}</a>"
-        f'<a class="kb-cal-nav-btn" href="{escape(next_href, quote=True)}" '
-        'aria-label="Next month">›</a>'
-        "</div>"
-        f'<div class="kb-cal-grid kb-cal-weekdays">{weekday_cells}</div>'
-        '<div class="kb-cal-grid kb-cal-days">'
-        + "".join(day_cells)
-        + "</div></div>"
-    )
+    with st.container(key="kb_toolbar_checkin_calendar"):
+        with st.container(key=f"kb_cal_nav_{profile}"):
+            prev_col, title_col, next_col = st.columns(
+                [0.25, 1, 0.25],
+                gap="small",
+                vertical_alignment="center",
+            )
+            if prev_col.button(
+                "<",
+                key=f"kb_cal_prev_{profile}_{current_month_label}",
+                help="Previous month",
+                use_container_width=True,
+            ):
+                _store_checkin_calendar_state(
+                    profile,
+                    month_label=prev_month_label,
+                    day_iso=f"{prev_month_label}-01",
+                    open_detail=False,
+                )
+                st.rerun()
+            if title_col.button(
+                title,
+                key=f"kb_cal_today_{profile}_{current_month_label}",
+                help=ui.get("kb_checkin_today_short", "Today"),
+                use_container_width=True,
+            ):
+                _store_checkin_calendar_state(
+                    profile,
+                    month_label=today_month_label,
+                    day_iso=today.isoformat(),
+                    open_detail=False,
+                )
+                st.rerun()
+            if next_col.button(
+                ">",
+                key=f"kb_cal_next_{profile}_{current_month_label}",
+                help="Next month",
+                use_container_width=True,
+            ):
+                _store_checkin_calendar_state(
+                    profile,
+                    month_label=next_month_label,
+                    day_iso=f"{next_month_label}-01",
+                    open_detail=False,
+                )
+                st.rerun()
+
+        weekday_cols = st.columns(7, gap="small")
+        for idx, weekday in enumerate(payload.get("weekdays", [])[:7]):
+            weekday_cols[idx].markdown(
+                f'<span class="kb-cal-weekday">{escape(str(weekday))}</span>',
+                unsafe_allow_html=True,
+            )
+
+        weeks = payload.get("weeks")
+        if not weeks:
+            days = list(payload.get("days", []))
+            weeks = [days[idx : idx + 7] for idx in range(0, len(days), 7)]
+
+        for week_idx, week in enumerate(weeks):
+            day_cols = st.columns(7, gap="small")
+            for day_idx, item in enumerate(list(week)[:7]):
+                if not isinstance(item, dict):
+                    day_cols[day_idx].markdown(
+                        '<span class="kb-cal-empty">&nbsp;</span>',
+                        unsafe_allow_html=True,
+                    )
+                    continue
+                day_iso = str(item.get("date") or "")
+                counts = item.get("counts") or {}
+                marker = _month_marker_text(counts, ui)
+                day_title = f"{day_iso} {item.get('summary') or ''}".strip()
+                label = str(item.get("day") or "")
+                if marker:
+                    label = f"{label}\n{marker}"
+                button_type = (
+                    "primary" if day_iso == selected_iso else "secondary"
+                )
+                if day_cols[day_idx].button(
+                    label,
+                    key=(
+                        f"kb_cal_day_{profile}_{week_idx}_{day_idx}_{day_iso}"
+                    ),
+                    help=day_title,
+                    type=button_type,
+                    use_container_width=True,
+                ):
+                    _store_checkin_calendar_state(
+                        profile,
+                        month_label=current_month_label,
+                        day_iso=day_iso,
+                        open_detail=True,
+                    )
+                    st.rerun()
 
 
 def _render_month_calendar_styles() -> None:
@@ -1079,172 +1125,19 @@ def _render_month_calendar_styles() -> None:
     st.markdown(
         """
         <style>
-        .kb-cal-mini {
-          aspect-ratio: 2 / 1;
-          box-sizing: border-box;
-          display: grid;
-          gap: 2px;
-          grid-template-rows: 1.55rem 1.05rem minmax(0, 1fr);
-          margin: 0;
-          min-height: 0;
-          overflow: hidden;
-          width: 100%;
-        }
-        .kb-cal-nav {
-          align-items: center;
-          display: grid;
-          gap: 2px;
-          grid-template-columns: 2rem minmax(0, 1fr) 2rem;
-          min-height: 0;
-        }
-        .kb-cal-nav-btn {
-          align-items: center;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 5px;
-          color: #334155;
-          display: flex;
-          font-size: 2rem;
-          font-weight: 900;
-          height: 1.45rem;
-          justify-content: center;
-          line-height: 0.75;
-          overflow: hidden;
-          text-decoration: none;
-          white-space: nowrap;
-        }
-        .kb-cal-nav-btn:hover {
-          background: #eef2ff;
-          border-color: #c7d2fe;
-          color: #1d4ed8;
-          text-decoration: none;
-        }
-        .kb-cal-title {
-          color: #0f172a;
-          font-size: 1.08rem;
-          font-weight: 900;
-          line-height: 1.55rem;
-          overflow: hidden;
-          text-align: center;
-          text-overflow: ellipsis;
-          text-decoration: none;
-          white-space: nowrap;
-        }
-        .kb-cal-title:hover {
-          color: #1d4ed8;
-          text-decoration: none;
-        }
-        .kb-cal-grid {
-          display: grid;
-          gap: 1px;
-          grid-template-columns: repeat(7, minmax(0, 1fr));
-          min-height: 0;
-        }
         .kb-cal-weekday {
+          display: block;
           color: #64748b;
-          font-size: 1rem;
-          font-weight: 900;
-          line-height: 1.05rem;
+          font-size: 0.7rem;
+          font-weight: 800;
+          line-height: 0.82rem;
           min-width: 0;
           overflow: hidden;
           text-align: center;
         }
-        .kb-cal-days {
-          grid-template-rows: repeat(6, minmax(0, 1fr));
-        }
-        .kb-cal-cell {
-          min-height: 0;
-          min-width: 0;
-        }
-        .kb-cal-day {
-          background: #ffffff;
-          border: 1px solid #e5e7eb;
-          border-radius: 3px;
-          color: #334155;
+        .kb-cal-empty {
           display: block;
-          overflow: hidden;
-          position: relative;
-          text-decoration: none;
-        }
-        .kb-cal-day:hover {
-          background: #f8fafc;
-          border-color: #94a3b8;
-          color: #0f172a;
-          text-decoration: none;
-        }
-        .kb-cal-day.selected {
-          background: #eef2ff;
-          border-color: #4f46e5;
-          color: #312e81;
-        }
-        .kb-cal-day.today .kb-cal-num {
-          color: #be123c;
-          font-weight: 900;
-        }
-        .kb-cal-day.has-learning,
-        .kb-cal-day.has-exercise {
-          background: #fbfdff;
-          border-color: #cbd5e1;
-        }
-        .kb-cal-day.has-learning.has-exercise {
-          background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-        }
-        .kb-cal-day.selected.has-learning,
-        .kb-cal-day.selected.has-exercise {
-          background: #eef2ff;
-          border-color: #4f46e5;
-        }
-        .kb-cal-num {
-          align-items: center;
-          display: flex;
-          font-size: 0.78rem;
-          font-weight: 900;
-          height: 50%;
-          justify-content: center;
-          left: 0;
-          line-height: 1;
-          position: absolute;
-          top: 0;
-          width: 50%;
-        }
-        .kb-cal-badges {
-          inset: 0;
-          min-height: 0;
-          pointer-events: none;
-          position: absolute;
-        }
-        .kb-cal-badge {
-          align-items: center;
-          border: 1px solid transparent;
-          border-radius: 0;
-          box-sizing: border-box;
-          display: flex;
-          font-size: 0.62rem;
-          font-weight: 900;
-          height: 50%;
-          justify-content: center;
-          line-height: 1;
-          max-width: none;
-          overflow: hidden;
-          padding: 0;
-          position: absolute;
-          text-overflow: clip;
-          white-space: nowrap;
-          width: 50%;
-        }
-        .kb-cal-badge.learning {
-          background: #bfdbfe;
-          border-color: #93c5fd;
-          color: #1e40af;
-          right: 0;
-          top: 0;
-        }
-        .kb-cal-badge.exercise {
-          background: #bbf7d0;
-          border-color: #86efac;
-          color: #166534;
-          bottom: 0;
-          right: 0;
+          height: 1.34rem;
         }
         .st-key-kb_toolbar_checkin_calendar {
           container-type: inline-size;
@@ -1255,14 +1148,52 @@ def _render_month_calendar_styles() -> None:
         }
         .st-key-kb_toolbar_checkin_calendar [data-testid="stElementContainer"],
         .st-key-kb_toolbar_checkin_calendar [data-testid="stMarkdownContainer"],
-        .st-key-kb_toolbar_checkin_calendar [data-testid="stVerticalBlock"] {
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stVerticalBlock"],
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stHorizontalBlock"] {
           gap: 0;
           margin: 0;
           min-height: 0;
           padding: 0;
         }
+        .st-key-kb_toolbar_checkin_calendar [data-testid="column"] {
+          padding: 0 1px;
+        }
         .st-key-kb_toolbar_checkin_calendar [data-testid="stMarkdownContainer"] p {
           margin: 0;
+        }
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stButton"] {
+          margin: 0;
+        }
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stButton"] > button {
+          border-radius: 3px;
+          box-shadow: none;
+          height: 1.34rem;
+          min-height: 1.34rem;
+          overflow: hidden;
+          padding: 0.04rem 0.08rem;
+        }
+        .st-key-kb_toolbar_checkin_calendar [data-testid="stButton"] > button p {
+          display: -webkit-box;
+          font-size: 0.62rem;
+          font-weight: 800;
+          line-height: 0.62rem;
+          margin: 0;
+          overflow: hidden;
+          text-align: center;
+          text-overflow: clip;
+          white-space: pre-line;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+        }
+        .st-key-kb_toolbar_checkin_calendar [class*="st-key-kb_cal_nav_"] [data-testid="stButton"] > button {
+          height: 1.42rem;
+          min-height: 1.42rem;
+        }
+        .st-key-kb_toolbar_checkin_calendar [class*="st-key-kb_cal_nav_"] [data-testid="stButton"] > button p {
+          font-size: 0.78rem;
+          line-height: 0.92rem;
+          white-space: nowrap;
+          -webkit-line-clamp: 1;
         }
         .st-key-kb_toolbar_checkin_detail {
           margin-top: 0.25rem;
@@ -1437,11 +1368,7 @@ def _render_toolbar_checkin(
     selected_payload = _day_payload(payload, selected_day)
     detail_key = f"kb_toolbar_checkin_detail_open_{profile}"
 
-    with st.container(key="kb_toolbar_checkin_calendar"):
-        st.markdown(
-            _month_calendar_html(profile, payload, selected_day, today, ui),
-            unsafe_allow_html=True,
-        )
+    _render_month_calendar(profile, payload, selected_day, today, ui)
 
     if not st.session_state.get(detail_key):
         return

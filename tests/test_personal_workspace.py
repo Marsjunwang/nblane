@@ -16,6 +16,7 @@ except ModuleNotFoundError:
     sys.modules.setdefault("streamlit", types.SimpleNamespace())
 
 from nblane.core.activity_log import ActivityLog, Checkin
+from nblane.core.paths import REPO_ROOT
 from nblane.kanban_ui.personal_workspace import (
     EXERCISE_HABIT_ID,
     LEARNING_HABIT_ID,
@@ -28,6 +29,18 @@ from nblane.kanban_ui.personal_workspace import (
     recent_day_window,
     workspace_habit_id,
 )
+
+
+def _load_kanban_page_helpers():
+    """Load Kanban page helpers without running the page body."""
+    path = REPO_ROOT / "pages" / "3_Kanban.py"
+    source = path.read_text(encoding="utf-8")
+    marker = "# -- Page "
+    helper_source = source.split(marker, 1)[0]
+    module = types.ModuleType("kanban_page_helpers")
+    module.__file__ = str(path)
+    exec(compile(helper_source, str(path), "exec"), module.__dict__)
+    return module
 
 
 class TestPersonalWorkspaceHelpers(unittest.TestCase):
@@ -297,6 +310,41 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), original)
         mock_st.error.assert_called_once()
         mock_refresh.assert_not_called()
+
+    def test_toolbar_calendar_state_updates_without_navigation_url(self) -> None:
+        """Date clicks update Streamlit state instead of building anchor links."""
+        helpers = _load_kanban_page_helpers()
+        fake_st = types.SimpleNamespace(session_state={}, query_params={})
+
+        with patch.object(helpers, "st", fake_st):
+            helpers._store_checkin_calendar_state(
+                "demo",
+                month_label="2026-04",
+                day_iso="2026-04-28",
+                open_detail=True,
+            )
+
+        self.assertEqual(
+            fake_st.session_state["kb_toolbar_checkin_month_demo"],
+            "2026-04",
+        )
+        self.assertEqual(
+            fake_st.session_state["kb_toolbar_checkin_day_demo"],
+            "2026-04-28",
+        )
+        self.assertTrue(
+            fake_st.session_state["kb_toolbar_checkin_detail_open_demo"]
+        )
+        self.assertEqual(
+            fake_st.query_params,
+            {
+                "kb_ci_month": "2026-04",
+                "kb_ci_day": "2026-04-28",
+                "kb_ci_open": "1",
+            },
+        )
+        self.assertFalse(hasattr(helpers, "_checkin_query_href"))
+        self.assertFalse(hasattr(helpers, "_month_calendar_html"))
 
 
 if __name__ == "__main__":
