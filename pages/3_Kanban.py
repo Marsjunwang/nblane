@@ -1,7 +1,7 @@
 """Kanban -- visual task board editor for kanban.md.
 
 Primary persist actions use the toolbar **Reload** / **Save** pattern.
-Skill Tree uses a title-row **Save** instead; see docs/zh/web-ui-product.md.
+Skill Tree uses a title-row **Save** instead; see docs/zh/product/web-experience.md.
 """
 
 from __future__ import annotations

@@ -1,3 +1,10 @@
+---
+status: active
+owner: docs
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # 看板使用手册
 
 看板是 nblane **私人操作系统（Private OS）** 里的 **当前执行面**：用本地文件 `profiles/<档案名>/kanban.md` 记录本周在推进什么、排队什么、已完成什么。可与 **技能树**、**证据池** 通过「已完成 → 证据」流程衔接。
@@ -11,7 +18,7 @@
 | 文件 | 作用 |
 |------|------|
 | `kanban.md` | 主看板（四列任务） |
-| `kanban-archive.md` | 可选；从「已完成」**归档**出去的历史（见 [kanban-archive.md](kanban-archive.md)） |
+| `kanban-archive.md` | 可选；从「已完成」**归档**出去的历史；只承接历史，不参与默认上下文 |
 
 在页面点 **保存** 或多数会自动落盘的操作后，内容会写回 `kanban.md`。**从文件重新加载** 会丢弃当前浏览器里未保存的改动，以磁盘为准。
 
@@ -87,7 +94,7 @@
 - **归档所选**：追加写入 `kanban-archive.md`，并从主看板 Done 列移除；
 - **删除所选**：仅从 `kanban.md` 删除，不写入归档文件。
 
-归档规则与 MCP/CLI 行为见 [kanban-archive.md](kanban-archive.md)。
+归档文件只供人读与备份；`nblane ingest-kanban` 与 MCP `profile://kanban` 仍只消费 `kanban.md` 原文。
 
 ---
 
@@ -110,7 +117,15 @@
 
 ---
 
-## 8. 与命令行对照
+## 8. 归档细节
+
+- 每个档案在 `profiles/<名称>/` 下可有 `kanban-archive.md`，与 `kanban.md` 并列。
+- `kanban.md` 仍是主看板；归档文件只承接从主看板「已完成」列移出的历史任务。
+- 每次归档会在 `kanban-archive.md` 末尾追加一节：`## Archived · YYYY-MM-DD`，其下任务行格式与 `kanban.md` 中 Done 列一致。
+- 「已完成 -> 证据（AI）」写入的是 `evidence-pool.yaml` / `skill-tree.yaml`，不替代归档文件。
+- 可选勾选「应用后将来源「已完成」任务标为已结晶」：在主看板 Done 列写入 `crystallized: true`，用于区分「仍待回顾」与「已处理」。
+
+## 9. 与命令行对照
 
 | 你在 Web 上做的事 | CLI（示例） |
 |-------------------|-------------|
@@ -120,7 +135,7 @@
 
 ---
 
-## 9. 常见问题
+## 10. 常见问题
 
 **Q：改完没出现在磁盘？**  
 A：点 **保存**，或触发会自动保存的操作（如移动列、添加任务等）。若怀疑不同步，用 **从文件重新加载** 对齐磁盘。
@@ -133,9 +148,8 @@ A：用 **归档所选** 把历史挪到 `kanban-archive.md`，或 **删除** �
 
 ---
 
-## 10. 相关文档
+## 11. 相关文档
 
-- [kanban-archive.md](kanban-archive.md) — 归档文件说明  
 - [Web 使用手册](web-ui.md) — Streamlit 总览与 CLI 对照表  
-- [profile-documents-relationship.md](../profile-documents-relationship.md) — 看板与证据闭环  
-- [evidence.md](evidence.md) — 证据池与技能树字段  
+- [数据契约](../architecture/data-contracts.md) — 看板与证据闭环
+- [Evidence 参考](../reference/evidence.md) — 证据池与技能树字段

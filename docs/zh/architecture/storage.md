@@ -1,8 +1,13 @@
+---
+status: active
+owner: engineering
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # 文件存储演进
 
 本文评估 nblane 当前「文件 + YAML/Markdown + Git 备份」的数据方案，是否能支撑后续个人网站、公开作品集、简历生成、博客、媒体与多用户。它是产品 / 架构决策文档，不代表这些 public surface 功能已经实现。
-
-**English summary:** [../file-storage-evolution.md](../file-storage-evolution.md)
 
 | 项 | 值 |
 |----|----|
@@ -361,8 +366,8 @@ Git -> export / backup / audit snapshot
 
 ## 10. 相关文档
 
-- [Profile 文档关系与闭环](../profile-documents-relationship.md)
-- [产品设计](product.md)
-- [架构与设计原则](architecture.md)
-- [Web 体验设计](web-ui-product.md)
-- [技能证据 Skill evidence](evidence.md)
+- [数据契约](data-contracts.md)
+- [产品总览](../product/overview.md)
+- [架构总览](overview.md)
+- [Web 体验设计](../product/web-experience.md)
+- [技能证据 Skill evidence](../reference/evidence.md)

@@ -4,7 +4,7 @@ problem_pool:
 project_pool:
 - nblane team OS file layout
 evidence_pool:
-- docs/zh/design.md
+- docs/zh/project/milestones.md
 method_pool:
 - python nblane.py validate
 - python nblane.py gap <name> "task"

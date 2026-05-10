@@ -1,8 +1,15 @@
+---
+status: active
+owner: docs
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # Web 使用手册（Streamlit）
 
 本文说明如何**运行与操作**本地 Streamlit 界面。信息架构、首屏原则与 backlog 见
-[web-ui-product.md](web-ui-product.md)；页面清单与文件映射见
-[design.md §3.4](design.md)。
+[Web 体验设计](../product/web-experience.md)；页面清单与文件映射见
+[当前状态](../project/status.md)。
 
 | 项目 | 说明 |
 |------|------|
@@ -13,7 +20,7 @@
 
 ## 1. 前置条件
 
-1. 安装：`pip install -e .`（见 [setup.md](setup.md)）。
+1. 安装：`pip install -e .`（见 [安装与 LLM 配置](setup.md)）。
 2. 至少一个 `profiles/` 下的档案（`nblane init <名称>`）。
 3. 可选 **LLM**：在 `.env` 配置 `LLM_API_KEY` 等，以使用差距页 AI 教练、首页简历摄入、看板「已完成→证据」。未配置时仍可使用规则差距分析与全部非 AI 编辑。
 
@@ -29,7 +36,7 @@
   `UI_LANG` 不同，例如中文界面配英文模型输出。
 - **`NBLANE_UI_EMOJI`**：设为 `0`、`false`、`no` 或 `off` 时，关闭首页指标、
   技能状态行、看板列标题、团队池 tab 等处的 emoji 前缀（见
-  [architecture.md](architecture.md)「Web 界面语言」）。
+  [架构总览](../architecture/overview.md)）。
 - **`NBLANE_ROOT`**：若自动解析到的仓库不对，设为包含 `profiles/` 的目录。
 
 ---
@@ -56,7 +63,7 @@
 6. 导出上下文前或阶段复盘时打开 **Profile Health**。
 7. 整理公开资料、博客、简历、项目/成果草稿或构建静态站时打开 **Public Site**。
 
-产品层地图见 [web-ui-product.md §4](web-ui-product.md)。
+产品层地图见 [Web 体验设计](../product/web-experience.md)。
 
 ---
 
@@ -99,7 +106,7 @@
 - 新建与编辑任务时，**按列只突出主字段**（如进行中：背景 + 开始日；队列：原因 + 阻塞；已完成：结果 + 背景）；其余在 **「更多字段」** 折叠中填写（详见 [看板使用手册 · §4](kanban.md)）。
 - 任务下可维护 **子任务（勾选）** 与自由备注。
 - **移动列** 用列名 **按钮**（非「完成状态」菜单）；可选 **自动填写开始/结束日期**（移入进行中/已完成时）。
-- **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [kanban-archive.md](kanban-archive.md)。
+- **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [看板使用手册](kanban.md)。
 - **已完成 → 证据** 折叠区 — 多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
 - **本轮看板优化方向**：`kanban.md` 使用稳定 task id（保留 `id` meta 行；
   无 id 的旧任务会生成兼容 id），并明确拖拽方向：纵向指针位置决定插入
@@ -148,17 +155,15 @@
 | 公开站校验 / 构建 | `nblane public validate <名称>` / `nblane public build <名称>` |
 | 博客与简历草稿 | `nblane public blog …`、`nblane public draft-blog …`、`nblane public draft-resume …` |
 
-详见 [profile-documents-relationship.md](../profile-documents-relationship.md)、
-[evidence.md](evidence.md)、[public-site.md](public-site.md)。
+详见 [数据契约](../architecture/data-contracts.md)、
+[Evidence 参考](../reference/evidence.md)、[公开站点](public-site.md)。
 
 ---
 
 ## 7. 相关文档
 
-- [Web 体验设计（Streamlit）](web-ui-product.md) — 信息架构、品牌、backlog
-- [设计手册 §3.4](design.md) — 已交付页面表
-- [架构 — Web 界面语言](architecture.md)
+- [Web 体验设计（Streamlit）](../product/web-experience.md) — 信息架构、品牌、backlog
+- [当前状态](../project/status.md) — 已交付页面表
+- [架构总览](../architecture/overview.md)
 - [公开个人网站、博客与简历](public-site.md) — Public Surface v1
-- [MCP 服务器](mcp.md) — Cursor 集成（非 Streamlit）
-
-**English:** [../web-ui.md](../web-ui.md)
+- [MCP 服务器](../reference/mcp.md) — Cursor / 外部 Agent 集成

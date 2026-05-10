@@ -1,22 +1,25 @@
+---
+status: active
+owner: product
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # Web 体验设计（Streamlit）
 
-本章说明与 [product.md](product.md) 中产品分层对齐的 **信息架构、首屏叙事、标题与品牌一致性、版式节奏**。不是完整视觉规范；可选实现项以 **backlog** 列出供后续迭代。
+本章说明与 [产品总览](overview.md) 中产品分层对齐的 **信息架构、首屏叙事、标题与品牌一致性、版式节奏**。不是完整视觉规范；可选实现项以 **backlog** 列出供后续迭代。
 
 | 项目 | 说明 |
 |------|------|
 | 范围 | 本地 Streamlit（`app.py`、`pages/`） |
-| 对照 | [design.md](design.md) §3.4（已交付页面清单） |
+| 对照 | [当前状态](../project/status.md)（已交付页面清单） |
 | 非目标 | 自定义 CSS / 组件库、MCP 界面、替换 Streamlit 框架 |
-
-**英文版：** [web-ui-product.md](../web-ui-product.md)
-
----
 
 ## 1. 角色与范围
 
-Web 是与 CLI、仓库目录（`profiles/`、`teams/`）一致的 **本地、文件驱动工具**。它 **不是** [product.md](product.md) 路线图中的 **Public Surface**：无托管页面、无对外分享 URL。
+Web 是与 CLI、仓库目录（`profiles/`、`teams/`）一致的 **本地、文件驱动工具**。Public Surface 的静态站构建能力已在 [公开站点指南](../guides/public-site.md) 中单独说明。
 
-**边界：** 所有变更落盘为 Markdown / YAML；行为应能与 [design.md](design.md) 中的 `nblane` 命令对照解释。
+**边界：** 所有变更落盘为 Markdown / YAML；行为应能与 [CLI 参考](../reference/cli.md) 中的 `nblane` 命令对照解释。
 
 ---
 
@@ -24,7 +27,7 @@ Web 是与 CLI、仓库目录（`profiles/`、`teams/`）一致的 **本地、�
 
 ### 2.1 功能覆盖与叙事
 
-| 产品层（[product.md](product.md)） | 当前 Web 映射 | 缺口 |
+| 产品层（[产品总览](overview.md)） | 当前 Web 映射 | 缺口 |
 |-----------------------------------|---------------|------|
 | **Private OS**（技能、目标、项目、证据） | 技能树、看板、首页概览、证据池 | 无独立 **目标** 入口；首页偏重 SKILL.md 与摘要，与新用户理解「技能树主阵地」的关系不够直观 |
 | **Agent OS** | 差距分析（规则 + 可选 LLM）、与 context 相关的文案 | 缺少显式说明：本页是 **与 Agent 协作** 的界面 |
@@ -98,7 +101,7 @@ flowchart LR
 
 **日常使用：** 看板 + 技能树微调；在配置 LLM 时周期性做差距分析与简历 / 看板摄入。
 
-**页面与文件、功能对照** 以 [design.md](design.md) §3.4 为准。
+**页面与文件、功能对照** 以 [当前状态](../project/status.md) 为准。
 
 ---
 
@@ -137,7 +140,7 @@ flowchart LR
 
 ## 8. 相关文档
 
-- [product.md](product.md) — Private / Agent / Team OS 定义
-- [design.md](design.md) — §3.4 Web UI 表、里程碑
-- [web-ui.md](web-ui.md) — 使用手册（运行方式、侧栏、分页面、与 CLI 对照）
-- [README.md](../../README.md) — 快速开始与文档索引
+- [产品总览](overview.md) — Private / Agent / Team OS 定义
+- [当前状态](../project/status.md) — Web UI 表与已交付能力
+- [Web 使用手册](../guides/web-ui.md) — 使用手册（运行方式、侧栏、分页面、与 CLI 对照）
+- [文档英文入口](../../README.md) — 指向中文事实源的简短索引

@@ -1,22 +1,41 @@
-# nblane documentation (English)
+---
+status: active
+owner: docs
+last_verified: 2026-05-08
+source_of_truth: false
+---
 
-Chinese readers: [zh/README.md](zh/README.md).
+# nblane Documentation
 
-| Doc | Description |
-|-----|-------------|
-| [Installation & LLM configuration](setup.md) | Install, dependencies, `.env`, non-OpenAI providers |
-| [Tencent Cloud small-team deployment](deploy-tencent-cloud.md) | HTTPS, login, permissions, Git backup, systemd / Caddy |
-| [Product design (v0.2)](product.md) | Human + Agent + Team co-evolution, structure, roadmap, repo mapping |
-| [Web experience design (Streamlit)](web-ui-product.md) | IA, first-screen narrative, brand, journeys, backlog · [中文](zh/web-ui-product.md) |
-| [Web UI user guide](web-ui.md) | Run Streamlit, sidebar, each page, CLI parity · [中文](zh/web-ui.md) |
-| [Public Site, Blog, and Resume](public-site.md) | Shipped public surface: profile/resume/blog/project files, static build, Public Site page · [中文](zh/public-site.md) |
-| Kanban user guide (zh) | [zh/kanban.md](zh/kanban.md) — columns, ingest, archive workflow |
-| Kanban archive (zh) | [zh/kanban-archive.md](zh/kanban-archive.md) — `kanban-archive.md` vs `kanban.md` |
-| [Design manual & milestones](design.md) | How to implement, milestones, data contracts, CLI, acceptance |
-| [Architecture & design principles](architecture.md) | Layout, engineering rules, relation to product vision |
-| [SKILL.md format reference](profile-format.md) | Sections and update cadence |
-| [Skill tree schema guide](skill-tree-schema.md) | `schemas/` and personal `skill-tree.yaml` |
-| [Skill evidence](evidence.md) | Provenance fields, CLI, Web UI, context / gap / validate |
-| [Profile documents relationship (Demo 1)](profile-documents-relationship.md) | Artifact roles, resume & kanban loops, update order, LLM contracts |
-| [File storage evolution](file-storage-evolution.md) | File-first boundaries, public website storage, media, and multi-user evolution · [中文](zh/file-storage-evolution.md) |
-| [MCP server (Cursor)](mcp.md) | stdio resources, env vars, using nblane MCP from any project on the same machine |
+The Chinese documentation under [`docs/zh/`](zh/README.md) is the source of truth for product decisions, architecture, project status, and implementation plans.
+
+English docs are intentionally kept as a small entry point to avoid stale mirrored content. If a link, command, or behavior conflicts with the Chinese docs, prefer the Chinese source.
+
+## Start Here
+
+| Need | Canonical doc |
+|------|---------------|
+| Product overview | [`zh/product/overview.md`](zh/product/overview.md) |
+| Current core loop | [`zh/product/core-loop.md`](zh/product/core-loop.md) |
+| Roadmap | [`zh/product/roadmap.md`](zh/product/roadmap.md) |
+| Project status | [`zh/project/status.md`](zh/project/status.md) |
+| Milestones | [`zh/project/milestones.md`](zh/project/milestones.md) |
+| Architecture overview | [`zh/architecture/overview.md`](zh/architecture/overview.md) |
+| Data contracts | [`zh/architecture/data-contracts.md`](zh/architecture/data-contracts.md) |
+| AI / Agent architecture | [`zh/architecture/ai-architecture.md`](zh/architecture/ai-architecture.md) |
+| Setup | [`zh/guides/setup.md`](zh/guides/setup.md) |
+| Web UI guide | [`zh/guides/web-ui.md`](zh/guides/web-ui.md) |
+| Kanban guide | [`zh/guides/kanban.md`](zh/guides/kanban.md) |
+| Public Site guide | [`zh/guides/public-site.md`](zh/guides/public-site.md) |
+| Blog editor guide | [`zh/guides/blog-editor.md`](zh/guides/blog-editor.md) |
+| MCP reference | [`zh/reference/mcp.md`](zh/reference/mcp.md) |
+| CLI reference | [`zh/reference/cli.md`](zh/reference/cli.md) |
+| Agent harness integration | [`zh/reference/agent-harness.md`](zh/reference/agent-harness.md) |
+
+## Maintenance
+
+- Keep product and project status in `docs/zh/product/` and `docs/zh/project/`.
+- Keep architecture contracts in `docs/zh/architecture/`.
+- Keep user-facing operation docs in `docs/zh/guides/`.
+- Keep command/protocol/schema details in `docs/zh/reference/`.
+- Do not recreate long-lived English mirrors unless the project commits to synchronized maintenance.

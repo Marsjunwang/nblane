@@ -21,8 +21,8 @@ As you update the files, the agent updates too. This is co-evolution.
 ## Quick Start
 
 ```bash
-# Full setup and LLM config: docs/setup.md
-# Rebuilding bundled frontend components also needs Node.js/npm; see docs/setup.md
+# Full setup and LLM config: docs/zh/guides/setup.md
+# Rebuilding bundled frontend components also needs Node.js/npm; see docs/zh/guides/setup.md
 pip install -e .
 
 # Create your profile
@@ -67,7 +67,7 @@ nblane gap yourname --node grasp_planning
 # Show team + product pool summary
 nblane team example-team
 
-# Skill evidence — inline on a node, or shared pool + refs (see docs/evidence.md)
+# Skill evidence — inline on a node, or shared pool + refs (see docs/zh/reference/evidence.md)
 nblane evidence yourname ros2_basics add \
   --type project --title "Real robot bringup demo"
 # Create a pool record once (prints id); link it from multiple skills
@@ -97,7 +97,7 @@ nblane public build yourname --out dist/public/yourname --base-url https://www.e
 **Resources** over stdio: `profile://context`, `profile://summary`,
 `profile://kanban`, `profile://gap/{task}` (URL-encode the task segment).
 **Tools** can append growth log rows, inline evidence, interaction JSONL, and
-method drafts (see [docs/mcp.md](docs/mcp.md) · [中文](docs/zh/mcp.md)).
+method drafts (see [MCP reference](docs/zh/reference/mcp.md)).
 Ingest and full evidence editing remain **CLI / Web**.
 
 ### Web UI
@@ -108,13 +108,13 @@ streamlit run app.py
 
 Seven surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
 View**, **Profile Health**, and **Public Site**. Step-by-step usage:
-[docs/web-ui.md](docs/web-ui.md) · [中文](docs/zh/web-ui.md). Product IA and backlog:
-[docs/web-ui-product.md](docs/web-ui-product.md).
+[Web UI guide](docs/zh/guides/web-ui.md). Product IA and backlog:
+[Web experience](docs/zh/product/web-experience.md).
 
 Small-team / cloud deployment adds app-level login, profile/team permissions,
 lightweight file conflict checks, and optional Git backup. Configure
-`NBLANE_AUTH_FILE` and see [docs/deploy-tencent-cloud.md](docs/deploy-tencent-cloud.md)
-· [中文](docs/zh/tencent-cloud-deploy.md).
+`NBLANE_AUTH_FILE` and see
+[Tencent Cloud deployment](docs/zh/guides/deployment-tencent-cloud.md).
 
 ---
 
@@ -123,10 +123,10 @@ lightweight file conflict checks, and optional Git backup. Configure
 End state: `skill-tree.yaml` and `evidence-pool.yaml` stay truthful, `SKILL.md`
 generated blocks match the tree (`nblane sync`), and `nblane context` exports a
 fresh system prompt. Order matters: **pool → tree → validate → sync** (see
-[Profile documents relationship](docs/profile-documents-relationship.md)).
+[Data contracts](docs/zh/architecture/data-contracts.md)).
 
 1. **Bootstrap** — `pip install -e .`, configure `LLM_API_KEY` if you use AI
-   features ([setup](docs/setup.md)). `nblane init yourname`, pick a
+   features ([setup](docs/zh/guides/setup.md)). `nblane init yourname`, pick a
    `schema:` in `skill-tree.yaml`, and copy node ids you care about from
    `schemas/`.
 
@@ -154,7 +154,7 @@ fresh system prompt. Order matters: **pool → tree → validate → sync** (see
 6. **Adjust skills directly (anytime)** — **Skill Tree** page or YAML: set
    `status`, `note`, inline evidence, **Evidence pool** rows, and
    `evidence_refs` per node. Or use `nblane evidence` subcommands for
-   scriptable edits ([evidence](docs/evidence.md)).
+   scriptable edits ([evidence](docs/zh/reference/evidence.md)).
 
 7. **Check gaps before big tasks** — `nblane gap yourname "…"` (optional
    `--llm-router`) to see prerequisites and missing depth.
@@ -163,7 +163,7 @@ fresh system prompt. Order matters: **pool → tree → validate → sync** (see
    `nblane sync yourname --write` if anything drifted. Refresh the agent with
    `nblane context yourname` and paste into your tool of choice.
 
-**中文说明：** 上述步骤与 [中文文档索引](docs/zh/README.md)、[Profile 文档关系与闭环](docs/profile-documents-relationship.md) 中的「简历摄入 / 看板闭环」一致；命令与页面名以英文界面为准，`LLM_REPLY_LANG=zh` 时提示与 Streamlit 文案为中文。
+**中文说明：** 上述步骤与 [中文文档索引](docs/zh/README.md)、[数据契约](docs/zh/architecture/data-contracts.md) 中的「简历摄入 / 看板闭环」一致；命令与页面名以英文界面为准，`LLM_REPLY_LANG=zh` 时提示与 Streamlit 文案为中文。
 
 ---
 
@@ -202,21 +202,24 @@ nblane/
 
 ## Docs
 
-- [中文文档](docs/zh/README.md)
-- [Documentation index (English)](docs/README.md)
-- [Installation & LLM Configuration](docs/setup.md)
-- [Product Design (v0.2)](docs/product.md)
-- [Web experience design (Streamlit)](docs/web-ui-product.md) · [中文](docs/zh/web-ui-product.md)
-- [Web UI user guide](docs/web-ui.md) · [中文](docs/zh/web-ui.md)
-- [Public Site, Blog, and Resume](docs/public-site.md) · [中文](docs/zh/public-site.md)
-- Kanban user guide · [中文](docs/zh/kanban.md)
-- [Design Manual & Milestones](docs/design.md) · [中文](docs/zh/design.md)
-- [Architecture & Design Principles](docs/architecture.md)
-- [SKILL.md Format Reference](docs/profile-format.md)
-- [Skill Tree Schema Guide](docs/skill-tree-schema.md)
-- [Skill evidence (CLI, YAML, Web)](docs/evidence.md) · [中文](docs/zh/evidence.md)
-- [Profile documents relationship](docs/profile-documents-relationship.md)
-- [MCP server (Cursor, any workspace)](docs/mcp.md) · [中文](docs/zh/mcp.md)
+- [中文文档总览](docs/zh/README.md) — canonical project documentation.
+- [English docs entry](docs/README.md) — short pointer to the canonical Chinese docs.
+- [Product overview](docs/zh/product/overview.md)
+- [Core loop](docs/zh/product/core-loop.md)
+- [Roadmap](docs/zh/product/roadmap.md)
+- [Current status](docs/zh/project/status.md)
+- [Milestones](docs/zh/project/milestones.md)
+- [Architecture overview](docs/zh/architecture/overview.md)
+- [Module map](docs/zh/architecture/module-map.md)
+- [AI architecture](docs/zh/architecture/ai-architecture.md)
+- [Data contracts](docs/zh/architecture/data-contracts.md)
+- [Setup](docs/zh/guides/setup.md)
+- [Web UI guide](docs/zh/guides/web-ui.md)
+- [Kanban guide](docs/zh/guides/kanban.md)
+- [Public site guide](docs/zh/guides/public-site.md)
+- [MCP reference](docs/zh/reference/mcp.md)
+- [Agent harness strategy](docs/zh/reference/agent-harness.md)
+- [Evidence reference](docs/zh/reference/evidence.md)
 
 ---
 

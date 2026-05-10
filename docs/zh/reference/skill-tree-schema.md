@@ -1,3 +1,10 @@
+---
+status: active
+owner: engineering
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # 技能树 Schema 指南
 
 ## 概览

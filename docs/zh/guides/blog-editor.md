@@ -1,3 +1,10 @@
+---
+status: active
+owner: docs
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # Blog 编辑器使用说明书
 
 适用版本：Phase 4B 已完成（截至 2026-05-02）。覆盖 BlockNote 富文本编辑、内联 AI（slash + 选区浮层）、流式生成、候选审核、公式 / 配图 / 大纲 / Diagram 四大专项、AI Editor Reviewer，以及 markdown + `.blocknote.json` sidecar 双轨保存。
@@ -21,7 +28,7 @@ npm run build
 环境最低要求：
 - Streamlit ≥ 1.31（`@st.fragment` 依赖）
 - Node ≥ 20
-- LLM 与 Visual 提供方按 [docs/setup.md](setup.md) 配置；缺失时 AI 入口仍可见，但触发时会在编辑器顶部红条提示具体缺失项。
+- LLM 与 Visual 提供方按 [安装与 LLM 配置](setup.md) 配置；缺失时 AI 入口仍可见，但触发时会在编辑器顶部红条提示具体缺失项。
 
 ---
 

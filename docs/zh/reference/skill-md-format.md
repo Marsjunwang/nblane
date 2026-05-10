@@ -1,3 +1,10 @@
+---
+status: active
+owner: docs
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # SKILL.md 格式说明
 
 ## 为何重要

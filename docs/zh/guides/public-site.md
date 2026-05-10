@@ -1,9 +1,14 @@
+---
+status: active
+owner: docs
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # 公开个人网站、博客与简历
 
 本文说明已经落地的公开层：个人网站、博客和简历由 profile 下显式公开的
 YAML / Markdown 文件生成，不直接渲染内部 profile 文件。
-
-English version: [../public-site.md](../public-site.md).
 
 **当前状态：** Public Surface v1 已落地。仓库现在包含 profile 级公开数据文件、
 `nblane public ...` CLI、静态站构建器，以及 Streamlit **Public Site** 页面。

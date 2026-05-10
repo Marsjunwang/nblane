@@ -1,3 +1,10 @@
+---
+status: active
+owner: engineering
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # 安装与 LLM 配置
 
 ## 环境要求
@@ -144,4 +151,4 @@ LLM_MODEL=llama3
 nblane auth hash-password
 ```
 
-腾讯云部署步骤见 [腾讯云小团队部署](tencent-cloud-deploy.md)。
+腾讯云部署步骤见 [腾讯云小团队部署](deployment-tencent-cloud.md)。

@@ -1,3 +1,10 @@
+---
+status: active
+owner: engineering
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # 技能证据（Skill evidence）
 
 在 **skill-tree** 节点上挂载结构化证明，用于差距分析、校验与 agent
@@ -105,5 +112,4 @@ nblane evidence <profile> pool deprecate <evidence_id> --replaced-by NEW_ID
 **迁移：** 仅内联的旧数据行为不变；若要把重复条目迁入池，先写入
 `evidence-pool.yaml`，再把节点改为 `evidence_refs`，最后跑 `nblane validate`。
 
-更完整说明见 [设计手册 §5](../design.md#5-demo-1-phase-1-skill-provenance-evidence)
-（英文锚点）与 [Skill evidence（英文）](../evidence.md)。
+更完整说明见 [数据契约](../architecture/data-contracts.md) 与 [CLI 参考](cli.md)。

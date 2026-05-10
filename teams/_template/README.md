@@ -5,7 +5,7 @@
 - **team.yaml**：团队元数据、成员 profile 名（对应 `profiles/{name}/`）、协作规则。
 - **product-pool.yaml**：共享产品池（问题、项目、证据、方法、决策）。
 
-设计说明见 [设计手册（中文）](../../docs/zh/design.md) §7 与 [产品设计](../../docs/zh/product.md) 中 Team OS 章节。
+设计说明见 [模块总览](../../docs/zh/architecture/module-map.md) 与 [产品总览](../../docs/zh/product/overview.md) 中 Team OS 章节。
 
 查看汇总：
 

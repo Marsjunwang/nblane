@@ -1,3 +1,10 @@
+---
+status: active
+owner: engineering
+last_verified: 2026-05-08
+source_of_truth: true
+---
+
 # MCP 服务器（Cursor 等客户端）
 
 nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，通过 **stdio** 与 Cursor 通信。客户端可读 **Resources**（如 `profile://context`），也可调用 **Tools** 写入部分 profile 文件。
@@ -33,7 +40,7 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 
 ### 未通过 MCP 暴露（请用 CLI 或 Web）
 
-- **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync`**、**`validate`**、看板**正文编辑** — 请用 **CLI** 或 **Streamlit**（见 [web-ui.md](web-ui.md)）。
+- **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync`**、**`validate`**、看板**正文编辑** — 请用 **CLI** 或 **Streamlit**（见 [Web 使用手册](../guides/web-ui.md)）。
 - `nblane context --no-kanban`：MCP 的 `profile://context` **固定带 kanban**；若不要看板请用 CLI 或本地文件。
 
 ---
@@ -182,6 +189,6 @@ pip install -e .
 
 ## 另见
 
-- 设计：[设计手册与里程碑](design.md) 中 Demo 1 Phase 2–5（MCP 与 Cursor）
+- 架构：[AI 架构](../architecture/ai-architecture.md) 与 [Agent Harness 集成](agent-harness.md)
 - 命令行对照：`nblane context`、`nblane gap`
-- Streamlit：[Web 使用手册](web-ui.md)
+- Streamlit：[Web 使用手册](../guides/web-ui.md)

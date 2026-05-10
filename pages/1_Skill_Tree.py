@@ -1,7 +1,7 @@
 """Skill Tree -- visual editor for skill-tree.yaml.
 
 Primary persist action is the title-row **Save** (not a separate toolbar).
-Kanban uses **Reload** / **Save** in a toolbar; see docs/zh/web-ui-product.md.
+Kanban uses **Reload** / **Save** in a toolbar; see docs/zh/product/web-experience.md.
 """
 
 from __future__ import annotations

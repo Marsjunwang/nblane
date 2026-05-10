@@ -516,8 +516,8 @@ _HOME: dict[str, dict[str, str]] = {
         ),
         "home_nav_compact": (
             "**Sidebar:** Skill Tree · Gap Analysis · Kanban · "
-            "Team View. More: `docs/design.md`, "
-            "`docs/web-ui-product.md`."
+            "Team View. More: `docs/zh/project/status.md`, "
+            "`docs/zh/product/web-experience.md`."
         ),
         "home_nav_expander": "Page map (detail)",
         "home_nav_detail": (
@@ -590,7 +590,7 @@ _HOME: dict[str, dict[str, str]] = {
         ),
         "home_nav_compact": (
             "**侧栏：** 技能树 · 差距分析 · 看板 · 团队视图。"
-            "详见 `docs/zh/design.md`、`docs/zh/web-ui-product.md`。"
+            "详见 `docs/zh/project/status.md`、`docs/zh/product/web-experience.md`。"
         ),
         "home_nav_expander": "页面说明（详细）",
         "home_nav_detail": (

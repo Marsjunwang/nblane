@@ -16,7 +16,7 @@ Commands:
     nblane evidence <name> pool add --type <t> --title <t>
                                     Create a pool record (shared id)
     nblane evidence <name> pool remove <evidence_id> [--prune-refs]
-                                    Remove a pool row (see docs/evidence.md)
+                                    Remove a pool row (see docs/zh/reference/evidence.md)
     nblane evidence <name> pool deprecate <evidence_id> [--replaced-by ID]
                                     Mark pool row deprecated (soft retire)
     nblane evidence <name> link <skill_id> <evidence_id>
