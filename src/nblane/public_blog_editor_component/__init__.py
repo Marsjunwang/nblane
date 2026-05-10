@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover - optional web dependency
     components = None
 
 _FRONTEND_DIR = Path(__file__).parent / "frontend" / "static"
+_ASSET_REF_RE = re.compile(r"""(?:src|href)=["']\./(?P<path>assets/[^"']+)["']""")
 _DISPLAY_MATH_RE = re.compile(
     r"(?m)^\s*(?:\$\$|\\\[)\s*(?:$|[^\s])|"
     r"\\begin\{(?:align\*?|equation\*?|gather\*?|multline\*?|split|aligned|matrix|pmatrix|bmatrix|cases)\}"
@@ -20,7 +21,18 @@ _DISPLAY_MATH_RE = re.compile(
 
 def blocknote_component_available() -> bool:
     """Return True when the built frontend bundle is present."""
-    return (_FRONTEND_DIR / "index.html").exists()
+    index_path = _FRONTEND_DIR / "index.html"
+    if not index_path.is_file():
+        return False
+    try:
+        index_html = index_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    asset_refs = {
+        match.group("path").split("?", 1)[0].split("#", 1)[0]
+        for match in _ASSET_REF_RE.finditer(index_html)
+    }
+    return all((_FRONTEND_DIR / asset_ref).is_file() for asset_ref in asset_refs)
 
 
 _component_func = None

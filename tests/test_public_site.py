@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -1693,6 +1694,13 @@ class TestPublicSite(unittest.TestCase):
         )
         html = static_index.read_text(encoding="utf-8")
         self.assertIn("./assets/", html)
+        asset_refs = {
+            match.group("path").split("?", 1)[0].split("#", 1)[0]
+            for match in re.finditer(r"""(?:src|href)=["']\./(?P<path>assets/[^"']+)["']""", html)
+        }
+        self.assertTrue(asset_refs)
+        for asset_ref in asset_refs:
+            self.assertTrue((static_index.parent / asset_ref).is_file(), asset_ref)
         self.assertNotIn('src="/assets/', html)
         self.assertNotIn('href="/assets/', html)
         bundle_text = "\n".join(

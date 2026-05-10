@@ -2099,7 +2099,6 @@ function LegacyMarkdownEditor(props) {
       if (
         loadedDocumentRef.current === documentId &&
         loadedInitialMarkdownRef.current === initialMarkdown &&
-        loadedInitialBlocksRef.current === initialBlocksSeed &&
         loadedSourceModeRef.current === editorSourceMode
       ) {
         return;
