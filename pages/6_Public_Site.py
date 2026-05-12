@@ -5960,12 +5960,6 @@ def _render_blog_tab(
 
 ui = _ui()
 
-st.set_page_config(
-    page_title=ui["page_title"],
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 require_login()
 selected = select_profile()
 render_git_backup_notices()

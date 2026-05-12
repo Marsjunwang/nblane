@@ -193,10 +193,6 @@ def _skill_summary(name: str) -> str:
 # -- Page --------------------------------------------------------
 
 ui = gap_ui()
-st.set_page_config(
-    page_title=ui["page_title"], layout="wide"
-)
-
 require_login()
 
 if "gap_result" not in st.session_state:

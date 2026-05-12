@@ -311,10 +311,6 @@ def _refresh_session_rows_from_disk(
 # -- Page --------------------------------------------------------
 
 ui = skill_tree_ui()
-st.set_page_config(
-    page_title=ui["page_title"], layout="wide"
-)
-
 require_login()
 selected = select_profile()
 render_git_backup_notices()

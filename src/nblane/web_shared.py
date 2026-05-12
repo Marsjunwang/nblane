@@ -359,6 +359,42 @@ def render_llm_unavailable(ui: dict[str, str]) -> None:
     st.caption(ui["ai_add_key_caption"])
 
 
+def render_workspace_navigation() -> None:
+    """Render grouped product navigation with stable page labels."""
+    u = common_ui()
+    groups = [
+        (
+            u["sidebar_nav_home_group"],
+            [("app.py", u["sidebar_nav_dashboard"])],
+        ),
+        (
+            u["sidebar_nav_work_group"],
+            [("pages/3_Kanban.py", u["sidebar_nav_kanban"])],
+        ),
+        (
+            u["sidebar_nav_growth_group"],
+            [
+                ("pages/1_Skill_Tree.py", u["sidebar_nav_skill_map"]),
+                ("pages/2_Gap_Analysis.py", u["sidebar_nav_gap"]),
+                ("pages/5_Profile_Health.py", u["sidebar_nav_health"]),
+            ],
+        ),
+        (
+            u["sidebar_nav_output_group"],
+            [("pages/6_Public_Site.py", u["sidebar_nav_public"])],
+        ),
+        (
+            u["sidebar_nav_team_group"],
+            [("pages/4_Team_View.py", u["sidebar_nav_team"])],
+        ),
+    ]
+    with st.expander(u["sidebar_nav_title"], expanded=True):
+        for group, links in groups:
+            st.caption(group)
+            for path, label in links:
+                st.page_link(path, label=label)
+
+
 def select_profile() -> str:
     """Render a sidebar profile selector and return the chosen name.
 
@@ -439,6 +475,8 @@ def select_profile() -> str:
                             st.error(str(exc))
 
         render_llm_settings()
+        if not st.session_state.get("_nblane_native_navigation", False):
+            render_workspace_navigation()
 
     if (
         not profiles

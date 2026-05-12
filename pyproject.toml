@@ -52,6 +52,10 @@ include = ["nblane*", "schemas*"]
 "nblane.goal_presence_component" = [
     "frontend/dist/assets/*",
 ]
+"nblane.home_dashboard_component" = [
+    "frontend/static/index.html",
+    "frontend/static/assets/*",
+]
 
 [tool.streamlit.component]
 components = [

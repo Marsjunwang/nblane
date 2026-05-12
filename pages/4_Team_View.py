@@ -41,10 +41,6 @@ _POOL_EMOJI = {
 apply_ui_language_from_session()
 
 ui = team_ui()
-st.set_page_config(
-    page_title=ui["page_title"], layout="wide"
-)
-
 require_login()
 selected_profile = select_profile()
 render_git_backup_notices()

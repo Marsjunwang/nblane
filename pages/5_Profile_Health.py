@@ -19,11 +19,6 @@ apply_ui_language_from_session()
 
 ui = profile_health_ui()
 
-st.set_page_config(
-    page_title=ui["page_title"],
-    layout="wide",
-)
-
 require_login()
 selected = select_profile()
 render_git_backup_notices()
