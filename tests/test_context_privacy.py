@@ -98,6 +98,110 @@ custom_private: hidden value
         self.assertNotIn("private_notes", prompt)
         self.assertNotIn("hidden", prompt)
 
+    def test_current_goal_enters_context_when_allowed(self) -> None:
+        """Visible/discreet/hidden UI modes do not block Agent context."""
+        for visibility in ("visible", "discreet", "hidden"):
+            with self.subTest(visibility=visibility):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    profile = root / "alice"
+                    profile.mkdir()
+                    (profile / "SKILL.md").write_text(
+                        "# Alice\n\nPublic skill profile.",
+                        encoding="utf-8",
+                    )
+                    (profile / "goals.yaml").write_text(
+                        f"""
+schema_version: "1.0"
+profile: alice
+current_goal_id: g
+goals:
+  - id: g
+    title: Ship current goal
+    label: Safe stage goal
+    ui_visibility: {visibility}
+    include_in_agent_context: true
+    summary: Agent-visible summary
+    focus:
+      - Goal focus item
+""",
+                        encoding="utf-8",
+                    )
+                    with patch("nblane.core.context.PROFILES_DIR", root):
+                        prompt = generate("alice")
+
+                self.assertIn("## Current Goal", prompt)
+                self.assertIn("Ship current goal", prompt)
+                self.assertIn("Agent-visible summary", prompt)
+                self.assertIn("Goal focus item", prompt)
+
+    def test_current_goal_excluded_when_agent_context_disabled(self) -> None:
+        """include_in_agent_context controls context independently of UI."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "alice"
+            profile.mkdir()
+            (profile / "SKILL.md").write_text(
+                "# Alice\n\nPublic skill profile.",
+                encoding="utf-8",
+            )
+            (profile / "goals.yaml").write_text(
+                """
+schema_version: "1.0"
+profile: alice
+current_goal_id: g
+goals:
+  - id: g
+    title: Excluded current goal
+    ui_visibility: visible
+    include_in_agent_context: false
+""",
+                encoding="utf-8",
+            )
+            with patch("nblane.core.context.PROFILES_DIR", root):
+                prompt = generate("alice")
+
+        self.assertNotIn("## Current Goal", prompt)
+        self.assertNotIn("Excluded current goal", prompt)
+
+    def test_private_current_goal_never_enters_context(self) -> None:
+        """Private goal details stay out even if the YAML flag is true."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "alice"
+            profile.mkdir()
+            (profile / "SKILL.md").write_text(
+                "# Alice\n\nPublic skill profile.",
+                encoding="utf-8",
+            )
+            (profile / "goals.yaml").write_text(
+                """
+schema_version: "1.0"
+profile: alice
+current_goal_id: g
+goals:
+  - id: g
+    title: Sensitive private goal
+    label: Sensitive label
+    ui_visibility: private
+    include_in_agent_context: true
+    summary: Sensitive summary
+    focus:
+      - Sensitive focus
+    notes: Sensitive notes
+""",
+                encoding="utf-8",
+            )
+            with patch("nblane.core.context.PROFILES_DIR", root):
+                prompt = generate("alice")
+
+        self.assertNotIn("## Current Goal", prompt)
+        self.assertNotIn("Sensitive private goal", prompt)
+        self.assertNotIn("Sensitive label", prompt)
+        self.assertNotIn("Sensitive summary", prompt)
+        self.assertNotIn("Sensitive focus", prompt)
+        self.assertNotIn("Sensitive notes", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

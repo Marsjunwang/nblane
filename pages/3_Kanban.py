@@ -96,10 +96,12 @@ from nblane.web_auth import require_login
 from nblane.web_shared import (
     apply_ui_language_from_session,
     assert_files_current,
+    current_goal_agent_context,
     drop_streamlit_widget_keys,
     ensure_file_snapshot,
     remember_allow_and_drop_yaml_preview_keys,
     refresh_file_snapshots,
+    render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
@@ -1810,7 +1812,11 @@ def _handle_board_event(
             render_llm_unavailable(ui)
             return
         with st.spinner(ui["ingest_spinner"]):
-            patch, err = ingest_kanban_done_json(profile, [task])
+            patch, err = ingest_kanban_done_json(
+                profile,
+                [task],
+                goal_context=current_goal_agent_context(profile),
+            )
         if err is not None:
             st.error(ui["ingest_err"].format(msg=err))
             return
@@ -1849,6 +1855,7 @@ _pool_path = _pdir / "evidence-pool.yaml"
 _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
 _activity_path = _pdir / "activity-log.yaml"
+_goals_path = _pdir / "goals.yaml"
 for _path in (
     _kanban_path,
     _archive_path,
@@ -1856,6 +1863,7 @@ for _path in (
     _tree_path,
     _skill_path,
     _activity_path,
+    _goals_path,
 ):
     ensure_file_snapshot(_path)
 
@@ -1869,6 +1877,7 @@ header_left, header_calendar = st.columns(
 with header_left:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
+    render_current_goal_strip(selected, compact=True)
     settings_col, _spacer_col = st.columns(
         [2, 1],
         gap="small",
@@ -2047,6 +2056,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
                     patch, err = ingest_kanban_done_json(
                         selected,
                         chosen,
+                        goal_context=current_goal_agent_context(selected),
                     )
                 if err is not None:
                     st.error(ui["ingest_err"].format(msg=err))

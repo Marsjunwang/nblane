@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 from nblane.core.context import generate
 from nblane.core.crystallize import write_method_draft
 from nblane.core.gap import analyze, format_text
+from nblane.core.goals import current_goal, goal_for_agent_context
 from nblane.core.growth_log import append_growth_log_row
 from nblane.core.interaction import append_interaction_record
 from nblane.core.io import (
@@ -91,6 +92,12 @@ def build_summary_text(profile_name: str) -> str:
         f"# Profile summary: {profile_name}",
         "",
     ]
+
+    goal_text = goal_for_agent_context(current_goal(profile_name))
+    if goal_text:
+        lines.append("## Current Goal")
+        lines.append(goal_text)
+        lines.append("")
 
     tree = load_skill_tree_raw(pdir)
     if tree is None:

@@ -317,6 +317,7 @@ def analyze(
     use_rule_match: bool = True,
     use_llm_router: bool = False,
     persist_router_keywords: bool = True,
+    goal_context: str = "",
 ) -> GapResult:
     """Run gap analysis: optional rule overlap + optional LLM routing.
 
@@ -374,13 +375,19 @@ def analyze(
                 error="Empty task text.",
                 error_key="empty_task",
             )
+        match_text = task.strip()
+        if goal_context and goal_context.strip():
+            match_text = (
+                f"{match_text}\n\nCurrent goal context:\n"
+                f"{goal_context.strip()}"
+            )
 
         ranked: list[tuple[str, int]] = []
         roots_rule: list[str] = []
 
         if use_rule_match:
             ranked = score_nodes(
-                task, schema_data, learned=learned
+                match_text, schema_data, learned=learned
             )
             if ranked:
                 max_sc = ranked[0][1]
@@ -400,7 +407,7 @@ def analyze(
             )
 
             outcome = route_task_to_nodes(
-                task.strip(), str(schema_name), index
+                match_text, str(schema_name), index
             )
             if outcome.ok:
                 roots_llm = [

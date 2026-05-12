@@ -10,6 +10,8 @@ from unittest.mock import patch
 import yaml
 
 from nblane.core.io import (
+    load_goal_book,
+    load_goal_book_raw,
     load_evidence_pool,
     load_evidence_pool_raw,
     load_schema,
@@ -59,6 +61,41 @@ class TestIoLoaders(unittest.TestCase):
 
             self.assertIsNone(load_evidence_pool_raw(prof))
             self.assertIsNone(load_evidence_pool(prof))
+
+    def test_goal_book_loaders_accept_name_and_path(self) -> None:
+        """Goal raw and typed loaders share path resolution."""
+        raw = {
+            "schema_version": "1.0",
+            "profile": "u1",
+            "updated": "",
+            "current_goal_id": "g1",
+            "goals": [
+                {
+                    "id": "g1",
+                    "title": "Ship goal",
+                    "ui_visibility": "visible",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "u1"
+            prof.mkdir()
+            (prof / "goals.yaml").write_text(
+                yaml.dump(raw, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            with patch("nblane.core.goals.PROFILES_DIR", Path(tmp)):
+                loaded_raw = load_goal_book_raw("u1")
+
+            book = load_goal_book(prof)
+
+        self.assertEqual(loaded_raw["current_goal_id"], "g1")
+        self.assertEqual(loaded_raw["goals"][0]["title"], "Ship goal")
+        self.assertEqual(book.current_goal_id, "g1")
+        goal = book.current()
+        self.assertIsNotNone(goal)
+        assert goal is not None
+        self.assertEqual(goal.title, "Ship goal")
 
     def test_schema_loaders_share_yaml_read(self) -> None:
         """Schema raw and typed loaders read the same document."""

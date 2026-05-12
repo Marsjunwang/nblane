@@ -7,6 +7,7 @@ Run with:
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -14,6 +15,14 @@ import streamlit as st
 
 from nblane.core import git_backup
 from nblane.core import llm as llm_client
+from nblane.core.goals import (
+    GOAL_STATUSES,
+    GOAL_UI_VISIBILITIES,
+    Goal,
+    GoalBook,
+    goal_for_ui,
+    save_goal_book,
+)
 from nblane.core.io import (
     STATUSES,
     profile_dir,
@@ -29,6 +38,7 @@ from nblane.core.profile_ingest_llm import ingest_resume_json
 from nblane.web_cache import (
     clear_web_cache,
     load_evidence_pool_raw,
+    load_goal_book_raw,
     load_schema_raw,
     load_skill_md,
     load_skill_tree_raw,
@@ -40,6 +50,7 @@ from nblane.web_shared import (
     ensure_file_snapshot,
     remember_allow_and_drop_yaml_preview_keys,
     refresh_file_snapshots,
+    render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
@@ -65,8 +76,270 @@ render_git_backup_notices()
 _skill_md_path = profile_dir(selected) / "SKILL.md"
 _tree_path = profile_dir(selected) / "skill-tree.yaml"
 _pool_path = profile_dir(selected) / "evidence-pool.yaml"
-for _path in (_skill_md_path, _tree_path, _pool_path):
+_goals_path = profile_dir(selected) / "goals.yaml"
+for _path in (_skill_md_path, _tree_path, _pool_path, _goals_path):
     ensure_file_snapshot(_path)
+
+
+def _goal_lines_text(items: list[str]) -> str:
+    """Render list fields as one item per line."""
+    return "\n".join(items or [])
+
+
+def _goal_text_lines(value: str) -> list[str]:
+    """Parse one-item-per-line goal fields."""
+    return [
+        line.strip()
+        for line in value.splitlines()
+        if line.strip()
+    ]
+
+
+def _goal_status_label(status: str) -> str:
+    return ui.get(f"goal_status_{status}", status)
+
+
+def _goal_visibility_label(visibility: str) -> str:
+    return ui.get(f"goal_visibility_{visibility}", visibility)
+
+
+def _goal_book_for_home(profile: str) -> GoalBook:
+    """Load the current goal book through the Streamlit cache."""
+    return GoalBook.from_dict(
+        load_goal_book_raw(profile),
+        profile=profile,
+    )
+
+
+def _goal_form_key(profile: str, field: str) -> str:
+    """Stable widget key for the Home goal form."""
+    return f"home_goal_{profile}_{field}"
+
+
+def _goal_default_id() -> str:
+    """Return a stable id shape for the first current goal."""
+    return f"goal_{date.today().strftime('%Y%m%d')}_current"
+
+
+def _render_goal_preview(goal: Goal) -> None:
+    """Render the Home module's privacy-safe current goal preview."""
+    payload = goal_for_ui(goal)
+    st.caption(ui["goal_preview"])
+    if payload is None:
+        st.info(ui["goal_private_locked"])
+        return
+    visibility = str(payload.get("visibility") or "")
+    if visibility == "hidden":
+        st.markdown(f"**{ui['goal_strip_hidden']}**")
+        return
+    if visibility == "discreet":
+        label = str(
+            payload.get("label") or ui["goal_strip_default_label"]
+        )
+        status = _goal_status_label(str(payload.get("status") or ""))
+        target = str(payload.get("target") or "")
+        text = f"**{label}** · {ui['goal_strip_status']}: {status}"
+        if target:
+            text += f" · {ui['goal_strip_target']}: {target}"
+        st.markdown(text)
+        return
+    title = str(payload.get("title") or payload.get("label") or "")
+    status = _goal_status_label(str(payload.get("status") or ""))
+    target = str(payload.get("target") or "")
+    text = f"**{title or ui['goal_strip_default_label']}**"
+    if status:
+        text += f" · {ui['goal_strip_status']}: {status}"
+    if target:
+        text += f" · {ui['goal_strip_target']}: {target}"
+    st.markdown(text)
+    summary = str(payload.get("summary") or "")
+    if summary:
+        st.caption(summary)
+    focus = payload.get("focus")
+    if isinstance(focus, list) and focus:
+        st.caption(
+            f"{ui['goal_strip_focus']}: "
+            + " · ".join(str(item) for item in focus[:3] if item)
+        )
+
+
+def _render_current_goal_module(profile: str) -> None:
+    """Render the lightweight Current Goal editor on Home."""
+    book = _goal_book_for_home(profile)
+    goal = book.current()
+
+    with st.container(border=True):
+        st.subheader(ui["goal_module_title"])
+        st.caption(ui["goal_module_caption"])
+
+        reveal_private = True
+        if goal is None:
+            st.info(ui["goal_no_current"])
+        elif goal.ui_visibility == "private":
+            reveal_private = st.checkbox(
+                ui["goal_reveal_private"],
+                value=False,
+                key=_goal_form_key(profile, "reveal_private"),
+            )
+            if not reveal_private:
+                st.info(ui["goal_private_locked"])
+        else:
+            _render_goal_preview(goal)
+
+        if goal is not None and goal.ui_visibility == "private" and not reveal_private:
+            return
+
+        form_title = (
+            ui["goal_edit_title"]
+            if goal is not None
+            else ui["goal_create_title"]
+        )
+        with st.expander(form_title, expanded=goal is None):
+            existing = goal or Goal(
+                id=_goal_default_id(),
+                title="",
+                label="",
+            )
+            with st.form(_goal_form_key(profile, "form")):
+                title = st.text_input(
+                    ui["goal_field_title"],
+                    value=existing.title,
+                    key=_goal_form_key(profile, "title"),
+                )
+                label = st.text_input(
+                    ui["goal_field_label"],
+                    value=existing.label,
+                    key=_goal_form_key(profile, "label"),
+                )
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    status = st.selectbox(
+                        ui["goal_field_status"],
+                        GOAL_STATUSES,
+                        index=GOAL_STATUSES.index(existing.status)
+                        if existing.status in GOAL_STATUSES
+                        else 0,
+                        format_func=_goal_status_label,
+                        key=_goal_form_key(profile, "status"),
+                    )
+                with c2:
+                    start = st.text_input(
+                        ui["goal_field_start"],
+                        value=existing.start,
+                        key=_goal_form_key(profile, "start"),
+                    )
+                with c3:
+                    target = st.text_input(
+                        ui["goal_field_target"],
+                        value=existing.target,
+                        key=_goal_form_key(profile, "target"),
+                    )
+                ui_visibility = st.selectbox(
+                    ui["goal_field_ui_visibility"],
+                    GOAL_UI_VISIBILITIES,
+                    index=GOAL_UI_VISIBILITIES.index(
+                        existing.ui_visibility
+                    )
+                    if existing.ui_visibility in GOAL_UI_VISIBILITIES
+                    else 1,
+                    format_func=_goal_visibility_label,
+                    key=_goal_form_key(profile, "ui_visibility"),
+                )
+                include_agent = st.checkbox(
+                    ui["goal_field_agent_context"],
+                    value=(
+                        existing.include_in_agent_context
+                        and ui_visibility != "private"
+                    ),
+                    disabled=ui_visibility == "private",
+                    key=_goal_form_key(profile, "agent_context"),
+                )
+                _include_public = st.checkbox(
+                    ui["goal_field_public_output"],
+                    value=False,
+                    disabled=True,
+                    key=_goal_form_key(profile, "public_output"),
+                )
+                st.caption(ui["goal_public_disabled_caption"])
+                summary = st.text_area(
+                    ui["goal_field_summary"],
+                    value=existing.summary,
+                    key=_goal_form_key(profile, "summary"),
+                )
+                target_skills = st.text_area(
+                    ui["goal_field_target_skills"],
+                    value=_goal_lines_text(existing.target_skills),
+                    key=_goal_form_key(profile, "target_skills"),
+                )
+                success_criteria = st.text_area(
+                    ui["goal_field_success_criteria"],
+                    value=_goal_lines_text(existing.success_criteria),
+                    key=_goal_form_key(profile, "success_criteria"),
+                )
+                focus = st.text_area(
+                    ui["goal_field_focus"],
+                    value=_goal_lines_text(existing.focus),
+                    key=_goal_form_key(profile, "focus"),
+                )
+                evidence_refs = st.text_area(
+                    ui["goal_field_evidence_refs"],
+                    value=_goal_lines_text(existing.evidence_refs),
+                    key=_goal_form_key(profile, "evidence_refs"),
+                )
+                task_refs = st.text_area(
+                    ui["goal_field_task_refs"],
+                    value=_goal_lines_text(existing.task_refs),
+                    key=_goal_form_key(profile, "task_refs"),
+                )
+                output_refs = st.text_area(
+                    ui["goal_field_output_refs"],
+                    value=_goal_lines_text(existing.output_refs),
+                    key=_goal_form_key(profile, "output_refs"),
+                )
+                notes = st.text_area(
+                    ui["goal_field_notes"],
+                    value=existing.notes,
+                    key=_goal_form_key(profile, "notes"),
+                )
+                submitted = st.form_submit_button(
+                    ui["goal_save"],
+                    type="primary",
+                )
+            if submitted:
+                if not title.strip():
+                    st.warning(ui["goal_title_required"])
+                    st.stop()
+                assert_files_current([_goals_path])
+                next_goal = Goal(
+                    id=existing.id or _goal_default_id(),
+                    title=title.strip(),
+                    label=label.strip(),
+                    status=status,
+                    start=start.strip(),
+                    target=target.strip(),
+                    ui_visibility=ui_visibility,
+                    include_in_agent_context=include_agent,
+                    include_in_public_output=False,
+                    summary=summary.strip(),
+                    target_skills=_goal_text_lines(target_skills),
+                    success_criteria=_goal_text_lines(success_criteria),
+                    focus=_goal_text_lines(focus),
+                    evidence_refs=_goal_text_lines(evidence_refs),
+                    task_refs=_goal_text_lines(task_refs),
+                    output_refs=_goal_text_lines(output_refs),
+                    notes=notes.strip(),
+                )
+                by_id = book.by_id()
+                by_id[next_goal.id] = next_goal
+                book.goals = list(by_id.values())
+                book.current_goal_id = next_goal.id
+                book.profile = profile
+                save_goal_book(profile, book)
+                refresh_file_snapshots([_goals_path])
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["goal_saved"])
+                st.rerun()
 
 def _parse_skill_md_sections(
     text: str,
@@ -132,6 +405,7 @@ def _save_skill_md(
 st.title(ui["app_page_title"])
 st.caption(ui["app_caption"].format(profile=selected))
 st.caption(ui["page_context_line"])
+render_current_goal_strip(selected, compact=True)
 
 # -- Tabs: Overview | Editor | Raw ----------------------------
 
@@ -148,6 +422,9 @@ tab_overview, tab_editor, tab_raw = st.tabs(
 tree = load_skill_tree_raw(selected)
 
 with tab_overview:
+    _render_current_goal_module(selected)
+    st.divider()
+
     if tree is not None:
         schema_name = tree.get("schema", "")
         schema = (

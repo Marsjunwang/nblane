@@ -17,6 +17,7 @@ from nblane.core.yaml_io import _load_yaml_dict, _load_yaml_file
 STATUSES = ("locked", "learning", "solid", "expert")
 EVIDENCE_POOL_FILENAME = "evidence-pool.yaml"
 SKILL_TREE_FILENAME = "skill-tree.yaml"
+GOALS_FILENAME = "goals.yaml"
 
 
 def validate_profile_name(name: str) -> str:
@@ -180,6 +181,27 @@ def save_evidence_pool(name: str, data: dict) -> None:
         [path],
         action=f"update {name}/evidence-pool.yaml",
     )
+
+
+def load_goal_book(name_or_dir: str | Path):
+    """Load goals.yaml as a typed GoalBook."""
+    from nblane.core.goals import load_goal_book as _load_goal_book
+
+    return _load_goal_book(name_or_dir)
+
+
+def load_goal_book_raw(name_or_dir: str | Path) -> dict:
+    """Load goals.yaml as a normalized raw dict."""
+    from nblane.core.goals import load_goal_book_raw as _load_goal_book_raw
+
+    return _load_goal_book_raw(name_or_dir)
+
+
+def save_goal_book(name: str, data: dict) -> None:
+    """Write goals.yaml with today's date updated."""
+    from nblane.core.goals import save_goal_book as _save_goal_book
+
+    _save_goal_book(name, data)
 
 
 def load_skill_md(name: str) -> str:

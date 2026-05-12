@@ -39,6 +39,7 @@ from nblane.web_shared import (
     assert_files_current,
     ensure_file_snapshot,
     refresh_file_snapshots,
+    render_current_goal_strip,
     render_git_backup_notices,
     select_profile,
     skill_status_emoji,
@@ -322,12 +323,14 @@ for _path in (
     _pdir / "skill-tree.yaml",
     _pdir / EVIDENCE_POOL_FILENAME,
     _pdir / "SKILL.md",
+    _pdir / "goals.yaml",
 ):
     ensure_file_snapshot(_path)
 tree = load_skill_tree_raw(selected)
 if tree is None:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
+    render_current_goal_strip(selected, compact=True)
     st.error(
         ui["error_no_tree"].format(profile=selected)
     )
@@ -355,6 +358,7 @@ _head_l, _head_r = st.columns([5, 1])
 with _head_l:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
+    render_current_goal_strip(selected, compact=True)
 with _head_r:
     if st.button(
         ui["save_button"],

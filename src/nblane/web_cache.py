@@ -73,6 +73,14 @@ def _cached_load_evidence_pool_raw(
 
 
 @_cached_data
+def _cached_load_goal_book_raw(
+    name_or_dir: str | Path,
+    mtime_ns: int,
+) -> dict:
+    return io.load_goal_book_raw(name_or_dir)
+
+
+@_cached_data
 def _cached_load_schema_raw(
     schema_name: str,
     mtime_ns: int,
@@ -118,6 +126,14 @@ def load_evidence_pool_raw(name_or_dir: str | Path) -> dict | None:
         return io.load_evidence_pool_raw(name_or_dir)
     path = _profile_path(name_or_dir, io.EVIDENCE_POOL_FILENAME)
     return _cached_load_evidence_pool_raw(name_or_dir, _mtime_ns(path))
+
+
+def load_goal_book_raw(name_or_dir: str | Path) -> dict:
+    """Load goals.yaml with Streamlit cache when available."""
+    if not _streamlit_runtime_exists():
+        return io.load_goal_book_raw(name_or_dir)
+    path = _profile_path(name_or_dir, io.GOALS_FILENAME)
+    return _cached_load_goal_book_raw(name_or_dir, _mtime_ns(path))
 
 
 def load_schema_raw(schema_name: str) -> dict | None:

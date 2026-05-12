@@ -119,6 +119,20 @@ _COMMON: dict[str, dict[str, str]] = {
             "Read-only YAML below reflects the current merge; toggling "
             "status re-merges the same draft without a new LLM call."
         ),
+        "goal_strip_hidden": "Goal set",
+        "goal_strip_default_label": "Stage goal",
+        "goal_strip_status": "Status",
+        "goal_strip_target": "Target",
+        "goal_strip_focus": "Focus",
+        "goal_status_active": "Active",
+        "goal_status_paused": "Paused",
+        "goal_status_completed": "Completed",
+        "goal_status_archived": "Archived",
+        "goal_visibility_visible": "visible",
+        "goal_visibility_discreet": "discreet",
+        "goal_visibility_hidden": "hidden",
+        "goal_visibility_private": "private",
+        "goal_no_current": "No current goal set.",
     },
     "zh": {
         "status_locked": "锁定",
@@ -173,6 +187,20 @@ _COMMON: dict[str, dict[str, str]] = {
             "下方 YAML 为只读预览，随当前合并选项即时更新；"
             "切换「允许 AI 更新状态」会重算同一草案，无需再次点生成。"
         ),
+        "goal_strip_hidden": "目标已设置",
+        "goal_strip_default_label": "阶段目标",
+        "goal_strip_status": "状态",
+        "goal_strip_target": "目标日期",
+        "goal_strip_focus": "Focus",
+        "goal_status_active": "进行中",
+        "goal_status_paused": "暂停",
+        "goal_status_completed": "已完成",
+        "goal_status_archived": "已归档",
+        "goal_visibility_visible": "visible",
+        "goal_visibility_discreet": "discreet",
+        "goal_visibility_hidden": "hidden",
+        "goal_visibility_private": "private",
+        "goal_no_current": "尚未设置 current goal。",
     },
 }
 
@@ -230,6 +258,9 @@ _GAP: dict[str, dict[str, str]] = {
         "checkbox_select": "Select",
         "use_rule_match": "Rule keyword overlap",
         "use_llm_router": "AI route to skill nodes (first pass)",
+        "use_goal_context": "Use current goal context",
+        "goal_context_used": "Current goal context is included in this analysis.",
+        "goal_context_not_used": "Current goal context is not included.",
         "manual_node_label": "Or choose a schema node (manual)",
         "manual_node_none": "(automatic only)",
         "gap_error_no_roots": (
@@ -304,6 +335,9 @@ _GAP: dict[str, dict[str, str]] = {
         "checkbox_select": "选择",
         "use_rule_match": "规则关键词重叠",
         "use_llm_router": "AI 首轮匹配到技能节点",
+        "use_goal_context": "使用 current goal 作为分析上下文",
+        "goal_context_used": "本次分析已包含 current goal context。",
+        "goal_context_not_used": "本次分析未包含 current goal context。",
         "manual_node_label": "或手动指定模式中的节点",
         "manual_node_none": "（仅自动匹配）",
         "gap_error_no_roots": (
@@ -508,6 +542,40 @@ _HOME: dict[str, dict[str, str]] = {
         "tab_raw": "📝 Raw",
         "sub_overview": "Skill overview",
         "sub_category": "Category breakdown",
+        "goal_module_title": "Current Goal",
+        "goal_module_caption": (
+            "A 4-8 week anchor for gap analysis, evidence review, "
+            "and output planning."
+        ),
+        "goal_create_title": "Create current goal",
+        "goal_edit_title": "Edit current goal",
+        "goal_reveal_private": "Reveal private goal in this session",
+        "goal_private_locked": (
+            "This goal is private. Reveal it in this session to edit details."
+        ),
+        "goal_field_title": "Title",
+        "goal_field_label": "Discreet label",
+        "goal_field_status": "Status",
+        "goal_field_start": "Start date",
+        "goal_field_target": "Target date",
+        "goal_field_summary": "Summary",
+        "goal_field_target_skills": "Target skills (one per line)",
+        "goal_field_success_criteria": "Success criteria (one per line)",
+        "goal_field_focus": "This week's focus (one per line)",
+        "goal_field_evidence_refs": "Evidence refs (one per line)",
+        "goal_field_task_refs": "Task refs (one per line)",
+        "goal_field_output_refs": "Output refs (one per line)",
+        "goal_field_notes": "Private notes",
+        "goal_field_ui_visibility": "UI visibility",
+        "goal_field_agent_context": "Include in Agent context",
+        "goal_field_public_output": "Allow future public output reference",
+        "goal_public_disabled_caption": (
+            "P0 stores this flag but public site generation does not read goals.yaml."
+        ),
+        "goal_save": "Save current goal",
+        "goal_saved": "Current goal saved.",
+        "goal_title_required": "Title is required.",
+        "goal_preview": "Preview",
         "home_expander_cat": "{cat} — {total} nodes",
         "info_no_skill_tree": (
             "skill-tree.yaml is not initialized yet. "
@@ -582,6 +650,39 @@ _HOME: dict[str, dict[str, str]] = {
         "tab_raw": "📝 原文",
         "sub_overview": "技能概览",
         "sub_category": "按分类",
+        "goal_module_title": "Current Goal",
+        "goal_module_caption": (
+            "4-8 周阶段目标，用来统一差距分析、证据整理和输出规划。"
+        ),
+        "goal_create_title": "创建 current goal",
+        "goal_edit_title": "编辑 current goal",
+        "goal_reveal_private": "本会话显示 private goal",
+        "goal_private_locked": (
+            "该 goal 标记为 private。需在本会话显式显示后才能编辑明文细节。"
+        ),
+        "goal_field_title": "标题",
+        "goal_field_label": "隐私替代标签",
+        "goal_field_status": "状态",
+        "goal_field_start": "开始日期",
+        "goal_field_target": "目标日期",
+        "goal_field_summary": "摘要",
+        "goal_field_target_skills": "目标技能（每行一项）",
+        "goal_field_success_criteria": "成功标准（每行一项）",
+        "goal_field_focus": "本周 focus（每行一项）",
+        "goal_field_evidence_refs": "Evidence refs（每行一项）",
+        "goal_field_task_refs": "Task refs（每行一项）",
+        "goal_field_output_refs": "Output refs（每行一项）",
+        "goal_field_notes": "私密备注",
+        "goal_field_ui_visibility": "UI 展示级别",
+        "goal_field_agent_context": "进入 Agent context",
+        "goal_field_public_output": "允许未来公开输出引用",
+        "goal_public_disabled_caption": (
+            "P0 只保存该字段，公开站构建不会读取 goals.yaml。"
+        ),
+        "goal_save": "保存 current goal",
+        "goal_saved": "Current goal 已保存。",
+        "goal_title_required": "标题不能为空。",
+        "goal_preview": "预览",
         "home_expander_cat": "{cat} — 共 {total} 个节点",
         "info_no_skill_tree": (
             "skill-tree.yaml 尚未初始化。"

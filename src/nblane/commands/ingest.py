@@ -98,12 +98,17 @@ def cmd_ingest_kanban(
 
     _require_profile(name)
     from nblane.core.io import KANBAN_DONE, parse_kanban
+    from nblane.core.goals import current_goal, goal_for_agent_context
     from nblane.core.profile_ingest import run_ingest_patch
     from nblane.core.profile_ingest_llm import ingest_kanban_done_json
 
     sections = parse_kanban(name)
     done_tasks = sections.get(KANBAN_DONE) or []
-    patch, err = ingest_kanban_done_json(name, done_tasks)
+    patch, err = ingest_kanban_done_json(
+        name,
+        done_tasks,
+        goal_context=goal_for_agent_context(current_goal(name)),
+    )
     if err is not None:
         print(f"ERROR: {err}", file=sys.stderr)
         sys.exit(1)

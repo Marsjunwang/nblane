@@ -16,6 +16,12 @@ from nblane.core.file_state import (
     assert_unchanged,
     snapshot_file,
 )
+from nblane.core.goals import (
+    Goal,
+    GoalBook,
+    goal_for_agent_context,
+    goal_for_ui,
+)
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -29,6 +35,7 @@ from nblane.web_auth import (
     allowed_profiles,
     can_create_profiles,
 )
+from nblane.web_cache import load_goal_book_raw
 from nblane.web_i18n import common_ui
 
 
@@ -443,6 +450,73 @@ def select_profile() -> str:
         _PERSIST_KEY,
         profiles[0] if profiles else "",
     )
+
+
+def _current_goal_for_web(profile: str) -> Goal | None:
+    """Load the current goal through the Streamlit cache wrapper."""
+    raw = load_goal_book_raw(profile)
+    return GoalBook.from_dict(raw, profile=profile).current()
+
+
+def current_goal_agent_context(profile: str) -> str:
+    """Return current goal text allowed for internal AI prompts."""
+    return goal_for_agent_context(_current_goal_for_web(profile))
+
+
+def _goal_status_label(ui: dict[str, str], status: str) -> str:
+    """Human label for a goal status value."""
+    return ui.get(f"goal_status_{status}", status)
+
+
+def render_current_goal_strip(
+    profile: str,
+    *,
+    compact: bool = True,
+) -> None:
+    """Render a privacy-safe current-goal strip for personal pages."""
+    ui = common_ui()
+    payload = goal_for_ui(_current_goal_for_web(profile))
+    if not payload:
+        return
+
+    visibility = str(payload.get("visibility") or "")
+    status = _goal_status_label(ui, str(payload.get("status") or ""))
+    target = str(payload.get("target") or "").strip()
+
+    if visibility == "hidden":
+        st.caption(f"{ui['goal_strip_hidden']} · {status}")
+        return
+
+    with st.container(border=True):
+        if visibility == "discreet":
+            label = str(
+                payload.get("label")
+                or ui["goal_strip_default_label"]
+            )
+            line = f"**{label}** · {ui['goal_strip_status']}: {status}"
+            if target:
+                line += f" · {ui['goal_strip_target']}: {target}"
+            st.markdown(line)
+            return
+
+        title = str(payload.get("title") or "").strip()
+        label = str(payload.get("label") or "").strip()
+        line = (
+            f"**{title or label or ui['goal_strip_default_label']}**"
+            f" · {ui['goal_strip_status']}: {status}"
+        )
+        if target:
+            line += f" · {ui['goal_strip_target']}: {target}"
+        st.markdown(line)
+        summary = str(payload.get("summary") or "").strip()
+        if summary and not compact:
+            st.caption(summary)
+        focus = payload.get("focus")
+        if isinstance(focus, list) and focus:
+            st.caption(
+                f"{ui['goal_strip_focus']}: "
+                + " · ".join(str(item) for item in focus[:3] if item)
+            )
 
 
 def _file_state_key(path: Path) -> str:

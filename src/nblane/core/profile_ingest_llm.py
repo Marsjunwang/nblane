@@ -225,6 +225,9 @@ def _system_prompt_kanban_zh() -> str:
         "- node_updates 每项必须含 **rationale**（1–3 句）：说明为何更新该节点，"
         "并引用任务中的具体事实（可与 source_excerpt 呼应）。\n"
         "禁止空 rationale 或空 source_excerpt（若无把握则不要输出该条）。\n\n"
+        "### Current goal\n\n"
+        "若 user 消息包含 Current goal，它只能用于判断优先级和解释方向；"
+        "不得从 goal 本身编造 evidence。每条 evidence 仍必须由 Done 任务原文支撑。\n\n"
         + _kanban_evidence_contract_zh()
         + "\n"
         + _status_rubric_kanban_zh()
@@ -246,6 +249,10 @@ def _system_prompt_kanban_en() -> str:
         "why this node changes, citing concrete task facts.\n"
         "Do not emit empty rationale or source_excerpt (omit the row if "
         "unsure).\n\n"
+        "### Current goal\n\n"
+        "If the user message includes Current goal, use it only for "
+        "priority and interpretation. Never invent evidence from the goal; "
+        "each evidence row must still be grounded in the Done task text.\n\n"
         + _kanban_evidence_contract_en()
         + "\n"
         + _status_rubric_kanban_en()
@@ -352,10 +359,18 @@ def _user_message_kanban(
     index: dict[str, dict],
     pool_text: str,
     tree_text: str,
+    goal_context: str = "",
 ) -> str:
     """Build user message for kanban Done ingest."""
+    goal_block = ""
+    if goal_context.strip():
+        goal_block = (
+            "Current goal (context only; do not invent evidence from it):\n"
+            f"{goal_context.strip()}\n\n"
+        )
     return (
         f"Schema file: {schema_name}\n\n"
+        f"{goal_block}"
         "Allowed nodes (id: label):\n"
         f"{_catalog_lines(index)}\n\n"
         "Current evidence pool (summary — ids already stored; "
@@ -441,6 +456,7 @@ def ingest_resume_json(profile_name: str, resume_text: str) -> tuple[
 def ingest_kanban_done_json(
     profile_name: str,
     done_tasks: list[KanbanTask],
+    goal_context: str = "",
 ) -> tuple[dict | None, str | None]:
     """Call LLM to produce ingest JSON from Done-column tasks."""
     if not done_tasks:
@@ -473,6 +489,7 @@ def ingest_kanban_done_json(
             index,
             pool_text,
             tree_text,
+            goal_context=goal_context,
         )
     )
     reply = llm_client.chat(system, user, temperature=0.2)

@@ -9,6 +9,7 @@ from nblane.web_auth import require_login
 from nblane.web_i18n import profile_health_ui
 from nblane.web_shared import (
     apply_ui_language_from_session,
+    render_current_goal_strip,
     render_git_backup_notices,
     select_profile,
 )
@@ -30,6 +31,7 @@ report = analyze_profile_health(selected)
 counts = report.summary_counts
 
 st.title(ui["title"])
+render_current_goal_strip(selected, compact=True)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric(ui["errors"], counts["error"])

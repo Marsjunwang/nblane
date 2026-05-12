@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from nblane.core.evidence_resolve import resolve_skill_node
+from nblane.core.goals import current_goal, goal_for_agent_context
 from nblane.core.io import (
     load_evidence_pool,
     load_schema,
@@ -211,6 +212,7 @@ def build_system_prompt(
     mode: str,
     *,
     evidence_section: str | None = None,
+    goal_section: str | None = None,
 ) -> str:
     """Assemble a system prompt from profile components."""
     parts = [
@@ -239,6 +241,16 @@ def build_system_prompt(
             "## Skill evidence (solid / expert)",
             "",
             evidence_section.strip(),
+        ]
+
+    if goal_section:
+        parts += [
+            "",
+            "---",
+            "",
+            "## Current Goal",
+            "",
+            goal_section.strip(),
         ]
 
     if kanban_text is not None:
@@ -288,6 +300,7 @@ def generate(
         if ev_lines
         else None
     )
+    goal_section = goal_for_agent_context(current_goal(pdir))
 
     return build_system_prompt(
         profile_text,
@@ -295,4 +308,5 @@ def generate(
         kanban_text,
         mode,
         evidence_section=evidence_section,
+        goal_section=goal_section,
     )

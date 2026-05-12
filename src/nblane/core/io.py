@@ -28,6 +28,7 @@ from nblane.core.models import (
 from nblane.core.paths import PROFILES_DIR, SCHEMAS_DIR, TEAMS_DIR
 from nblane.core.profile_io import (
     EVIDENCE_POOL_FILENAME,
+    GOALS_FILENAME,
     SKILL_TREE_FILENAME,
     STATUSES,
     safe_profile_dir,
@@ -97,6 +98,21 @@ def load_evidence_pool_raw(name_or_dir: str | Path) -> dict | None:
 def save_evidence_pool(name: str, data: dict) -> None:
     """Write evidence-pool.yaml with today's date updated."""
     return profile_io.save_evidence_pool(name, data)
+
+
+def load_goal_book(name_or_dir: str | Path):
+    """Load goals.yaml as a typed GoalBook."""
+    return profile_io.load_goal_book(name_or_dir)
+
+
+def load_goal_book_raw(name_or_dir: str | Path) -> dict:
+    """Load goals.yaml as a normalized raw dict."""
+    return profile_io.load_goal_book_raw(name_or_dir)
+
+
+def save_goal_book(name: str, data: dict) -> None:
+    """Write goals.yaml with today's date updated."""
+    return profile_io.save_goal_book(name, data)
 
 
 def load_skill_md(name: str) -> str:
@@ -269,6 +285,7 @@ def save_product_pool(team_id: str, data: dict) -> None:
 
 __all__ = [
     "EVIDENCE_POOL_FILENAME",
+    "GOALS_FILENAME",
     "KANBAN_ARCHIVE_FILENAME",
     "KANBAN_DOING",
     "KANBAN_DONE",
@@ -293,6 +310,8 @@ __all__ = [
     "list_teams",
     "load_evidence_pool",
     "load_evidence_pool_raw",
+    "load_goal_book",
+    "load_goal_book_raw",
     "load_product_pool",
     "load_schema",
     "load_schema_raw",
@@ -304,6 +323,7 @@ __all__ = [
     "profile_dir",
     "render_kanban",
     "save_evidence_pool",
+    "save_goal_book",
     "save_kanban",
     "save_product_pool",
     "save_skill_tree",

@@ -23,8 +23,10 @@ from nblane.web_auth import require_login
 from nblane.web_shared import (
     apply_ui_language_from_session,
     assert_files_current,
+    current_goal_agent_context,
     ensure_file_snapshot,
     refresh_file_snapshots,
+    render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
@@ -209,6 +211,7 @@ ensure_file_snapshot(_tree_path)
 
 st.title(ui["title"])
 st.caption(ui["page_context_line"])
+render_current_goal_strip(selected, compact=True)
 
 tree_for_opts = load_skill_tree_raw(selected)
 schema_name_opts = (
@@ -235,6 +238,21 @@ with col_right_top:
         render_llm_unavailable(ui)
 
 with col_left:
+    goal_context = current_goal_agent_context(selected)
+    use_goal_context = st.checkbox(
+        ui["use_goal_context"],
+        value=bool(goal_context),
+        disabled=not bool(goal_context),
+        key="gap_use_goal_context",
+    )
+    active_goal_context = (
+        goal_context if goal_context and use_goal_context else ""
+    )
+    st.caption(
+        ui["goal_context_used"]
+        if active_goal_context
+        else ui["goal_context_not_used"]
+    )
     task = st.text_area(
         ui["task_label"],
         placeholder=ui["task_placeholder"],
@@ -281,6 +299,7 @@ if run and can_run:
                 selected,
                 task,
                 explicit_node=manual_node,
+                goal_context=active_goal_context,
             )
         else:
             result = gap_engine.analyze(
@@ -288,6 +307,7 @@ if run and can_run:
                 task,
                 use_rule_match=use_rule,
                 use_llm_router=use_llm,
+                goal_context=active_goal_context,
             )
     if result.error:
         st.error(_gap_error_text(ui, result))
@@ -298,7 +318,12 @@ if run and can_run:
         gap_text = gap_engine.format_for_llm(result)
         user_msg = (
             f"Skill tree:\n{skill_summary}\n\n"
-            f"Gap analysis:\n{gap_text}"
+            + (
+                f"Current goal context:\n{active_goal_context}\n\n"
+                if active_goal_context
+                else ""
+            )
+            + f"Gap analysis:\n{gap_text}"
         )
         with st.spinner(ui["spinner_ai"]):
             ai_reply = llm_client.chat(

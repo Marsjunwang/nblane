@@ -42,6 +42,24 @@ class TestWebCache(unittest.TestCase):
 
         clear.assert_not_called()
 
+    def test_load_goal_book_raw_falls_back_without_runtime(self) -> None:
+        """Goal cache wrapper mirrors other profile YAML loaders."""
+        expected = {"profile": "u1", "goals": []}
+        with (
+            patch(
+                "nblane.web_cache._streamlit_runtime_exists",
+                return_value=False,
+            ),
+            patch(
+                "nblane.web_cache.io.load_goal_book_raw",
+                return_value=expected,
+            ) as load_raw,
+        ):
+            got = web_cache.load_goal_book_raw("u1")
+
+        self.assertEqual(got, expected)
+        load_raw.assert_called_once_with("u1")
+
 
 if __name__ == "__main__":
     unittest.main()

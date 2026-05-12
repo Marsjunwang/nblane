@@ -129,6 +129,7 @@ from nblane.web_shared import (
     assert_files_current,
     ensure_file_snapshot,
     refresh_file_snapshots,
+    render_current_goal_strip,
     render_git_backup_notices,
     select_profile,
     stash_git_backup_results,
@@ -5979,6 +5980,7 @@ required_paths = [
 
 st.title(ui["title"])
 st.caption(ui["caption"])
+render_current_goal_strip(selected, compact=True)
 
 if not all(path.exists() for path in required_paths):
     st.warning(ui["init_needed"])

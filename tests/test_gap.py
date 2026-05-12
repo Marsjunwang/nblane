@@ -38,6 +38,32 @@ class TestGapAnalyze(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertTrue(len(result.closure) > 0)
 
+    def test_goal_context_affects_matching_without_replacing_task(self) -> None:
+        """goal_context is used for routing but result.task remains user text."""
+        result = analyze(
+            "template",
+            "zzzqqq",
+            use_llm_router=False,
+            goal_context="OpenVLA robot control",
+        )
+
+        self.assertIsNone(result.error)
+        self.assertEqual(result.task, "zzzqqq")
+        self.assertTrue(len(result.top_matches) > 0)
+
+    def test_explicit_node_ignores_goal_context_for_root(self) -> None:
+        """Manual node selection stays authoritative."""
+        result = analyze(
+            "template",
+            "OpenVLA robot control",
+            explicit_node="linux_basics",
+            goal_context="OpenVLA robot control",
+        )
+
+        self.assertIsNone(result.error)
+        self.assertEqual(result.top_matches[0]["id"], "linux_basics")
+        self.assertEqual(result.top_matches[0]["source"], "explicit")
+
     def test_no_roots_when_both_matchers_off(self) -> None:
         """Neither rule nor LLM yields an error."""
         result = analyze(
