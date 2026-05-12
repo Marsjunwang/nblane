@@ -9,6 +9,8 @@ build/
 .venv/
 .streamlit/
 node_modules/
+!src/nblane/goal_presence_component/frontend/dist/
+!src/nblane/goal_presence_component/frontend/dist/**
 
 # Personal profiles (SKILL.md, skill-tree, evidence-pool, kanban, etc.)
 # Keep only profiles/template/ in the repo as a reference layout.

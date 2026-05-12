@@ -30,8 +30,15 @@ render_git_backup_notices()
 report = analyze_profile_health(selected)
 counts = report.summary_counts
 
-st.title(ui["title"])
-render_current_goal_strip(selected, compact=True)
+_head_l, _head_goal = st.columns(
+    [5, 2],
+    gap="medium",
+    vertical_alignment="top",
+)
+with _head_l:
+    st.title(ui["title"])
+with _head_goal:
+    render_current_goal_strip(selected, compact=True, align="right")
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric(ui["errors"], counts["error"])

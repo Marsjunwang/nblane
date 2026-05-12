@@ -1,0 +1,181 @@
+:host {
+  color: var(--st-text-color, #1f2937);
+  font-family: var(--st-font-family, system-ui, sans-serif);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.goal-presence {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 32px;
+  width: 100%;
+}
+
+.goal-presence.align-right {
+  align-items: flex-end;
+}
+
+.goal-chip {
+  align-items: center;
+  appearance: none;
+  background: color-mix(in srgb, var(--st-background-color, #ffffff) 86%, var(--st-secondary-background-color, #f3f4f6));
+  border: 1px solid color-mix(in srgb, var(--st-text-color, #1f2937) 14%, transparent);
+  border-radius: 999px;
+  color: var(--st-text-color, #1f2937);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 7px;
+  min-height: 30px;
+  max-width: min(100%, 520px);
+  padding: 4px 10px;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.goal-chip:hover {
+  background: var(--st-secondary-background-color, #f3f4f6);
+  border-color: color-mix(in srgb, var(--st-primary-color, #ff4b4b) 42%, transparent);
+}
+
+.goal-chip:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color, #ff4b4b) 28%, transparent);
+  outline: none;
+}
+
+.goal-prefix {
+  color: color-mix(in srgb, var(--st-text-color, #1f2937) 62%, transparent);
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.goal-label {
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-meta {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.goal-status {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.goal-status.active {
+  background: color-mix(in srgb, #16a34a 15%, transparent);
+  color: #166534;
+}
+
+.goal-status.paused {
+  background: color-mix(in srgb, #d97706 15%, transparent);
+  color: #92400e;
+}
+
+.goal-status.completed {
+  background: color-mix(in srgb, #2563eb 14%, transparent);
+  color: #1d4ed8;
+}
+
+.goal-status.archived {
+  background: color-mix(in srgb, #6b7280 15%, transparent);
+  color: #4b5563;
+}
+
+.goal-target {
+  color: color-mix(in srgb, var(--st-text-color, #1f2937) 62%, transparent);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.goal-caret {
+  border: solid color-mix(in srgb, var(--st-text-color, #1f2937) 50%, transparent);
+  border-width: 0 1.5px 1.5px 0;
+  display: inline-block;
+  height: 6px;
+  margin: -3px 0 0 1px;
+  transform: rotate(45deg);
+  transition: transform 120ms ease;
+  width: 6px;
+}
+
+.goal-caret.open {
+  margin-top: 2px;
+  transform: rotate(-135deg);
+}
+
+.goal-panel {
+  background: var(--st-background-color, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--st-text-color, #1f2937) 12%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 8px 26px color-mix(in srgb, #111827 9%, transparent);
+  max-width: min(100%, 430px);
+  padding: 10px 12px;
+}
+
+.goal-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  margin: 0;
+}
+
+.goal-panel-row {
+  color: color-mix(in srgb, var(--st-text-color, #1f2937) 72%, transparent);
+  font-size: 12px;
+  line-height: 17px;
+  margin: 6px 0 0;
+}
+
+.goal-panel-row strong {
+  color: var(--st-text-color, #1f2937);
+  font-weight: 650;
+}
+
+.goal-focus-list {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.goal-focus-list li {
+  color: color-mix(in srgb, var(--st-text-color, #1f2937) 76%, transparent);
+  font-size: 12px;
+  line-height: 17px;
+  margin: 2px 0;
+}
+
+@media (max-width: 520px) {
+  .goal-presence,
+  .goal-presence.align-right {
+    align-items: stretch;
+  }
+
+  .goal-chip {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .goal-prefix,
+  .goal-target {
+    display: none;
+  }
+}

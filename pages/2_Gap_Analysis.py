@@ -209,9 +209,16 @@ render_git_backup_notices()
 _tree_path = profile_dir(selected) / "skill-tree.yaml"
 ensure_file_snapshot(_tree_path)
 
-st.title(ui["title"])
-st.caption(ui["page_context_line"])
-render_current_goal_strip(selected, compact=True)
+_head_l, _head_goal = st.columns(
+    [5, 2],
+    gap="medium",
+    vertical_alignment="top",
+)
+with _head_l:
+    st.title(ui["title"])
+    st.caption(ui["page_context_line"])
+with _head_goal:
+    render_current_goal_strip(selected, compact=True, align="right")
 
 tree_for_opts = load_skill_tree_raw(selected)
 schema_name_opts = (

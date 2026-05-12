@@ -31,6 +31,7 @@ from nblane.core.io import (
     list_profiles,
     profile_dir,
 )
+from nblane.goal_presence_component import st_goal_presence
 from nblane.web_auth import (
     allowed_profiles,
     can_create_profiles,
@@ -468,55 +469,124 @@ def _goal_status_label(ui: dict[str, str], status: str) -> str:
     return ui.get(f"goal_status_{status}", status)
 
 
+def _goal_presence_key(profile: str) -> str:
+    """Return a stable Streamlit component key for a profile goal chip."""
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", profile).strip("_")
+    return f"goal_presence_{safe or 'profile'}"
+
+
+def _build_goal_presence_payload(
+    projection: dict[str, object] | None,
+    ui: dict[str, str],
+    *,
+    goal: Goal | None = None,
+    compact: bool = True,
+) -> dict[str, object] | None:
+    """Build the redacted React payload from a UI-safe goal projection."""
+    if not projection:
+        return None
+    visibility = str(projection.get("visibility") or "")
+    if visibility == "private":
+        return None
+
+    status_value = str(projection.get("status") or "")
+    target = str(projection.get("target") or "").strip()
+    texts = {
+        "current": ui["goal_presence_current"],
+        "default_label": ui["goal_strip_default_label"],
+        "details": ui["goal_presence_details"],
+        "edit_home": ui["goal_presence_edit_home"],
+        "focus": ui["goal_strip_focus"],
+        "goal_set": ui["goal_strip_hidden"],
+        "hidden_note": ui["goal_presence_hidden_note"],
+        "target": ui["goal_strip_target"],
+    }
+    payload: dict[str, object] = {
+        "id": str(projection.get("id") or ""),
+        "visibility": visibility,
+        "compact": bool(compact),
+        "status": {
+            "value": status_value,
+            "label": _goal_status_label(ui, status_value),
+        },
+        "texts": texts,
+    }
+    if target:
+        payload["target"] = target
+
+    if visibility == "hidden":
+        return payload
+
+    label = str(
+        projection.get("label") or ui["goal_strip_default_label"]
+    ).strip()
+    if label:
+        payload["label"] = label
+
+    if visibility == "discreet":
+        if goal is not None:
+            payload["agent_context_label"] = (
+                ui["goal_presence_agent_context_on"]
+                if goal.include_in_agent_context
+                else ui["goal_presence_agent_context_off"]
+            )
+        return payload
+
+    title = str(projection.get("title") or "").strip()
+    summary = str(projection.get("summary") or "").strip()
+    focus = projection.get("focus")
+    if title:
+        payload["title"] = title
+    if summary:
+        payload["summary"] = summary
+    if isinstance(focus, list):
+        clean_focus = []
+        for item in focus[:3]:
+            text = str(item).strip()
+            if text:
+                clean_focus.append(text)
+        payload["focus"] = clean_focus
+    if goal is not None:
+        payload["agent_context_label"] = (
+            ui["goal_presence_agent_context_on"]
+            if goal.include_in_agent_context
+            else ui["goal_presence_agent_context_off"]
+        )
+    return payload
+
+
+def goal_presence_payload(
+    profile: str,
+    ui: dict[str, str] | None = None,
+    *,
+    compact: bool = True,
+) -> dict[str, object] | None:
+    """Return the privacy-safe React payload for the current profile goal."""
+    current = _current_goal_for_web(profile)
+    return _build_goal_presence_payload(
+        goal_for_ui(current),
+        ui or common_ui(),
+        goal=current,
+        compact=compact,
+    )
+
+
 def render_current_goal_strip(
     profile: str,
     *,
     compact: bool = True,
+    align: str = "left",
 ) -> None:
-    """Render a privacy-safe current-goal strip for personal pages."""
+    """Render a privacy-safe current-goal presence chip for personal pages."""
     ui = common_ui()
-    payload = goal_for_ui(_current_goal_for_web(profile))
+    payload = goal_presence_payload(profile, ui, compact=compact)
     if not payload:
         return
-
-    visibility = str(payload.get("visibility") or "")
-    status = _goal_status_label(ui, str(payload.get("status") or ""))
-    target = str(payload.get("target") or "").strip()
-
-    if visibility == "hidden":
-        st.caption(f"{ui['goal_strip_hidden']} · {status}")
-        return
-
-    with st.container(border=True):
-        if visibility == "discreet":
-            label = str(
-                payload.get("label")
-                or ui["goal_strip_default_label"]
-            )
-            line = f"**{label}** · {ui['goal_strip_status']}: {status}"
-            if target:
-                line += f" · {ui['goal_strip_target']}: {target}"
-            st.markdown(line)
-            return
-
-        title = str(payload.get("title") or "").strip()
-        label = str(payload.get("label") or "").strip()
-        line = (
-            f"**{title or label or ui['goal_strip_default_label']}**"
-            f" · {ui['goal_strip_status']}: {status}"
-        )
-        if target:
-            line += f" · {ui['goal_strip_target']}: {target}"
-        st.markdown(line)
-        summary = str(payload.get("summary") or "").strip()
-        if summary and not compact:
-            st.caption(summary)
-        focus = payload.get("focus")
-        if isinstance(focus, list) and focus:
-            st.caption(
-                f"{ui['goal_strip_focus']}: "
-                + " · ".join(str(item) for item in focus[:3] if item)
-            )
+    st_goal_presence(
+        payload=payload,
+        key=_goal_presence_key(profile),
+        align=align,
+    )
 
 
 def _file_state_key(path: Path) -> str:

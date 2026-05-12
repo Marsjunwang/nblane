@@ -1875,9 +1875,20 @@ header_left, header_calendar = st.columns(
     vertical_alignment="top",
 )
 with header_left:
-    st.title(ui["title"])
-    st.caption(ui["page_context_line"])
-    render_current_goal_strip(selected, compact=True)
+    title_col, goal_col = st.columns(
+        [5, 2],
+        gap="medium",
+        vertical_alignment="top",
+    )
+    with title_col:
+        st.title(ui["title"])
+        st.caption(ui["page_context_line"])
+    with goal_col:
+        render_current_goal_strip(
+            selected,
+            compact=True,
+            align="right",
+        )
     settings_col, _spacer_col = st.columns(
         [2, 1],
         gap="small",

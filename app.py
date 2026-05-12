@@ -45,6 +45,7 @@ from nblane.web_cache import (
 )
 from nblane.web_i18n import home_ui
 from nblane.web_shared import (
+    apply_ui_language_from_session,
     assert_files_current,
     drop_streamlit_widget_keys,
     ensure_file_snapshot,
@@ -59,6 +60,8 @@ from nblane.web_shared import (
     ui_emoji_enabled,
 )
 from nblane.web_auth import require_login
+
+apply_ui_language_from_session()
 
 ui = home_ui()
 
@@ -168,7 +171,7 @@ def _render_current_goal_module(profile: str) -> None:
     book = _goal_book_for_home(profile)
     goal = book.current()
 
-    with st.container(border=True):
+    with st.container():
         st.subheader(ui["goal_module_title"])
         st.caption(ui["goal_module_caption"])
 
@@ -402,10 +405,17 @@ def _save_skill_md(
 
 # -- Page header -----------------------------------------------
 
-st.title(ui["app_page_title"])
-st.caption(ui["app_caption"].format(profile=selected))
-st.caption(ui["page_context_line"])
-render_current_goal_strip(selected, compact=True)
+_head_l, _head_goal = st.columns(
+    [5, 2],
+    gap="medium",
+    vertical_alignment="top",
+)
+with _head_l:
+    st.title(ui["app_page_title"])
+    st.caption(ui["app_caption"].format(profile=selected))
+    st.caption(ui["page_context_line"])
+with _head_goal:
+    render_current_goal_strip(selected, compact=True, align="right")
 
 # -- Tabs: Overview | Editor | Raw ----------------------------
 

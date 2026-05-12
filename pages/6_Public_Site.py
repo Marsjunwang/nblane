@@ -5978,9 +5978,16 @@ required_paths = [
     _path(selected, OUTPUTS_FILENAME),
 ]
 
-st.title(ui["title"])
-st.caption(ui["caption"])
-render_current_goal_strip(selected, compact=True)
+_head_l, _head_goal = st.columns(
+    [5, 2],
+    gap="medium",
+    vertical_alignment="top",
+)
+with _head_l:
+    st.title(ui["title"])
+    st.caption(ui["caption"])
+with _head_goal:
+    render_current_goal_strip(selected, compact=True, align="right")
 
 if not all(path.exists() for path in required_paths):
     st.warning(ui["init_needed"])

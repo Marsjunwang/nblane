@@ -328,9 +328,20 @@ for _path in (
     ensure_file_snapshot(_path)
 tree = load_skill_tree_raw(selected)
 if tree is None:
-    st.title(ui["title"])
-    st.caption(ui["page_context_line"])
-    render_current_goal_strip(selected, compact=True)
+    _empty_head_l, _empty_head_goal = st.columns(
+        [5, 2],
+        gap="medium",
+        vertical_alignment="top",
+    )
+    with _empty_head_l:
+        st.title(ui["title"])
+        st.caption(ui["page_context_line"])
+    with _empty_head_goal:
+        render_current_goal_strip(
+            selected,
+            compact=True,
+            align="right",
+        )
     st.error(
         ui["error_no_tree"].format(profile=selected)
     )
@@ -354,11 +365,16 @@ if _save_toast:
 
 # -- Title + save (top right) -------------------------------------
 
-_head_l, _head_r = st.columns([5, 1])
+_head_l, _head_goal, _head_r = st.columns(
+    [5, 2, 1],
+    gap="medium",
+    vertical_alignment="top",
+)
 with _head_l:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
-    render_current_goal_strip(selected, compact=True)
+with _head_goal:
+    render_current_goal_strip(selected, compact=True, align="right")
 with _head_r:
     if st.button(
         ui["save_button"],
