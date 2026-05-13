@@ -38,11 +38,15 @@ const READY = "streamlit:componentReady";
 const SET_VALUE = "streamlit:setComponentValue";
 const SET_HEIGHT = "streamlit:setFrameHeight";
 const RENDER = "streamlit:render";
+const GRAPH_HEIGHT = 438;
+const SKILL_RING_SIZE = 132;
+const SKILL_RING_STROKE = 12;
+const SKILL_RING_RADIUS = 52;
 
 const NODE_COLORS = {
   north_star: "#6b4fb3",
   goal: "#256b5d",
-  project_case: "#52606d",
+  project_case: "#6f7b82",
   skill: "#2f6fed",
   gap: "#9f1d1d",
   next_action: "#2f9e73",
@@ -90,12 +94,19 @@ const LAYER_LABELS = {
   governance: "Governance",
 };
 
+const SKILL_STATUS_META = [
+  { key: "expert", color: "#2f9e73", fallback: "Expert" },
+  { key: "solid", color: "#2f6fed", fallback: "Solid" },
+  { key: "learning", color: "#b7822b", fallback: "Learning" },
+  { key: "locked", color: "#a2afb9", fallback: "Locked" },
+];
+
 function sendBack(type, payload) {
   window.parent.postMessage({ isStreamlitMessage: true, type, ...payload }, "*");
 }
 
 function setFrameHeight(height) {
-  sendBack(SET_HEIGHT, { height: Math.max(620, Math.ceil(height || document.body.scrollHeight || 900)) });
+  sendBack(SET_HEIGHT, { height: Math.max(720, Math.ceil(height || document.body.scrollHeight || 980)) });
 }
 
 function setComponentValue(value) {
@@ -121,6 +132,10 @@ function linesText(value) {
   return asArray(value).map((item) => cleanText(item)).filter(Boolean).join("\n");
 }
 
+function formatPercent(value) {
+  return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
+}
+
 function linkPayload(link) {
   return {
     node_id: cleanText(link.nodeId),
@@ -131,9 +146,19 @@ function linkPayload(link) {
   };
 }
 
+function translatedNodeType(ui, type) {
+  const clean = cleanText(type);
+  return label(ui, `dashboard_node_${clean}`, clean.replace(/_/g, " "));
+}
+
+function statusLabel(ui, status) {
+  const clean = cleanText(status);
+  return label(ui, `dashboard_skill_status_${clean}`, label(ui, `status_${clean}`, clean));
+}
+
 function nodeColor(node) {
   if (node.placeholder || node.implemented === false) {
-    return "#8b9691";
+    return "#a6b2ad";
   }
   return NODE_COLORS[node.type] || "#68716f";
 }
@@ -223,6 +248,68 @@ function emptyGoalEditor() {
   };
 }
 
+function isConcreteNode(node) {
+  return Boolean(node) && node.implemented !== false && !node.placeholder;
+}
+
+function graphInsight(payload) {
+  const total = payload.graph.nodes.length;
+  const realCount = payload.graph.nodes.filter(isConcreteNode).length;
+  const placeholderCount = payload.graph.nodes.filter((node) => node.placeholder || node.implemented === false).length;
+  return {
+    total,
+    realCount,
+    placeholderCount,
+    mostlyPlaceholder: total > 0 && (realCount === 0 || placeholderCount >= realCount),
+  };
+}
+
+function preferredNode(payload) {
+  const goalIds = new Set(asArray(payload.activeGoals).map((goal) => goal.id).filter(Boolean));
+  const realNodes = payload.graph.nodes.filter(isConcreteNode);
+  return (
+    realNodes.find((node) =>
+      (node.type === "goal" && goalIds.has(node.recordId)) ||
+      Boolean(node.ownerPath) ||
+      node.type === "skill" ||
+      node.type === "task" ||
+      node.type === "north_star"
+    ) ||
+    realNodes[0] ||
+    null
+  );
+}
+
+function skillSegments(counts, total) {
+  const raw = SKILL_STATUS_META.map((item) => ({
+    ...item,
+    count: Math.max(0, Number(counts[item.key]) || 0),
+  }));
+  if (!total) {
+    return raw.map((item) => ({ ...item, dasharray: "", dashoffset: 0 }));
+  }
+
+  const visible = raw.filter((item) => item.count > 0);
+  const circumference = 2 * Math.PI * SKILL_RING_RADIUS;
+  const gap = visible.length > 1 ? 8 : 0;
+  const available = circumference - gap * visible.length;
+  let offset = 0;
+
+  return raw.map((item) => {
+    if (!item.count) {
+      return { ...item, dasharray: "", dashoffset: 0 };
+    }
+    const length = (item.count / total) * available;
+    const segment = {
+      ...item,
+      dasharray: `${length} ${circumference}`,
+      dashoffset: -offset,
+    };
+    offset += length + gap;
+    return segment;
+  });
+}
+
 function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
   const ui = payload.ui;
   const northStar = payload.northStar;
@@ -232,48 +319,69 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
     northStar.locked || northStar.visibility === "private"
       ? label(ui, "north_star_private_display", "Private North Star")
       : cleanText(northStar.displayText, label(ui, "north_star_empty", "No North Star set"));
+  const primaryMeta = [
+    primary.status ? label(ui, `goal_status_${primary.status}`, primary.status) : "",
+    primary.target ? `${label(ui, "goal_strip_target", "Target")}: ${primary.target}` : "",
+  ].filter(Boolean);
 
   return (
     <section className="hd-context-header">
       <div className="hd-context-main">
-        <div className="hd-context-north">
+        <div className="hd-context-card hd-context-north">
           <span className="hd-eyebrow">{label(ui, "north_star_strip_title", "North Star")}</span>
           <strong>{northStarText}</strong>
-          <span className="hd-tag">
-            {label(ui, `north_star_visibility_${northStar.visibility}`, northStar.visibility)}
-          </span>
+          <div className="hd-context-meta">
+            <span className="hd-context-badge">
+              {label(ui, `north_star_visibility_${northStar.visibility}`, northStar.visibility)}
+            </span>
+          </div>
         </div>
-        <div className="hd-context-primary">
+        <div className="hd-context-card hd-context-primary">
           <span className="hd-eyebrow">{label(ui, "dashboard_primary_goal", "Primary goal")}</span>
           <strong>{primary.title}</strong>
-          <span>{primary.status ? label(ui, `goal_status_${primary.status}`, primary.status) : label(ui, "goal_no_current", "No current goal set.")}</span>
+          {primary.summary ? (
+            <p className="hd-context-copy">{primary.summary}</p>
+          ) : (
+            <div className="hd-context-meta">
+              {primaryMeta.length ? primaryMeta.map((item) => (
+                <span key={item} className="hd-context-badge">{item}</span>
+              )) : (
+                <span className="hd-context-badge">{label(ui, "goal_no_current", "No current goal set.")}</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
       <div className="hd-context-goals">
-        <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
-        <div className="hd-goal-orb-row">
+        <div className="hd-context-goals-head">
+          <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
+          <span className="hd-context-count">{activeGoals.length}</span>
+        </div>
+        <div className="hd-goal-rail">
           {activeGoals.length ? activeGoals.map((goal) => {
             const display = goalDisplay(goal, ui);
             return (
               <button
                 key={goal.id || display.title}
-                className={`hd-goal-orb ${goal.isPrimary ? "primary" : ""}`}
+                className={`hd-goal-pill ${goal.isPrimary ? "primary" : ""}`}
                 type="button"
                 title={`${display.title} · ${goal.isPrimary ? label(ui, "dashboard_primary_goal", "Primary") : label(ui, `goal_status_${display.status}`, display.status || "active")}`}
                 onClick={() => onSelectGoal(goal.id)}
               >
-                <span className="hd-goal-orb-dot" />
+                <span className="hd-goal-pill-dot" />
                 <strong>{display.title}</strong>
               </button>
             );
           }) : <span className="hd-empty-inline">{label(ui, "goal_no_current", "No current goal set.")}</span>}
         </div>
       </div>
+
       <div className="hd-context-actions">
-        <button className="hd-primary" type="button" onClick={onCreateGoal}>
+        <button className="hd-primary full" type="button" onClick={onCreateGoal}>
           {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
         </button>
-        <button className="hd-ghost" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+        <button className="hd-ghost full" type="button" onClick={() => onEmit(openProfileContextEvent())}>
           {label(ui, "north_star_edit_action", "Edit Profile Context")}
         </button>
       </div>
@@ -284,12 +392,22 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
 function CanvasNode({ data, selected }) {
   const node = data.node;
   return (
-    <div className={`hd-flow-node type-${node.type} ${node.suggested ? "suggested" : ""} ${node.placeholder ? "placeholder" : ""} ${node.implemented === false ? "not-implemented" : ""} ${node.locked ? "locked" : ""} ${selected ? "selected" : ""}`}>
+    <div
+      className={[
+        "hd-flow-node",
+        `type-${node.type}`,
+        node.suggested ? "suggested" : "",
+        node.placeholder ? "placeholder" : "",
+        node.implemented === false ? "not-implemented" : "",
+        node.locked ? "locked" : "",
+        selected ? "selected" : "",
+      ].filter(Boolean).join(" ")}
+    >
       <Handle type="target" position={Position.Left} className="hd-flow-handle" />
       <span className="hd-node-dot" style={{ background: nodeColor(node) }} />
       <div>
         <strong>{node.label}</strong>
-        <span>{node.metric || node.status || node.layer || node.type}</span>
+        <span>{node.metric || node.status || node.layer || translatedNodeType({}, node.type)}</span>
       </div>
       <Handle type="source" position={Position.Right} className="hd-flow-handle" />
     </div>
@@ -315,33 +433,36 @@ function canvasLayout(nodes, layers) {
   });
   const positions = new Map();
   const place = (items, x, startY) => {
-    const step = items.length > 3 ? 84 : 102;
+    const step = items.length > 4 ? 88 : 98;
     items.forEach((node, index) => {
       positions.set(node.id, { x, y: startY + index * step });
     });
   };
   layers.forEach((layer, index) => {
-    place(byLayer.get(layer) || [], index * 236, 68);
+    place(byLayer.get(layer) || [], index * 226, 72);
   });
   return positions;
 }
 
-function flowData(payload) {
-  const layers = graphLayers(payload);
-  const positions = canvasLayout(payload.graph.nodes, layers);
+function flowData(payload, hiddenLayers) {
+  const visibleNodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+  const visibleLayers = graphLayers(payload).filter((layer) =>
+    !hiddenLayers.has(layer) && visibleNodes.some((node) => node.layer === layer)
+  );
+  const positions = canvasLayout(visibleNodes, visibleLayers);
   const layerCounts = new Map();
-  payload.graph.nodes.forEach((node) => {
+  visibleNodes.forEach((node) => {
     layerCounts.set(node.layer, (layerCounts.get(node.layer) || 0) + 1);
   });
-  const layerNodes = layers.map((layer, index) => ({
+  const layerNodes = visibleLayers.map((layer, index) => ({
     id: `layer:${layer}`,
     type: "layerHeader",
-    position: { x: index * 236, y: 0 },
+    position: { x: index * 226, y: 0 },
     data: { label: layerLabel(payload.ui, layer), count: layerCounts.get(layer) || 0 },
     draggable: false,
     selectable: false,
   }));
-  const graphNodes = payload.graph.nodes.map((node) => ({
+  const graphNodes = visibleNodes.map((node) => ({
     id: node.id,
     type: "contextNode",
     position: positions.get(node.id) || { x: 0, y: 0 },
@@ -356,64 +477,119 @@ function flowData(payload) {
       source: edge.from,
       target: edge.to,
       type: "smoothstep",
-      animated: edge.type === "readiness" || edge.relation === "watches",
+      animated: edge.relation === "watches",
       className: `hd-flow-edge ${edge.suggested ? "suggested" : ""} ${edge.placeholder ? "placeholder" : ""}`,
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 14,
-        height: 14,
+        width: 12,
+        height: 12,
       },
       label: edge.relation && edge.relation !== edge.type ? edge.relation : undefined,
       labelStyle: { fill: "#60716b", fontSize: 10, fontWeight: 700 },
-      labelBgStyle: { fill: "rgba(255,255,255,.86)" },
+      labelBgStyle: { fill: "rgba(255,255,255,.9)" },
       style: edge.suggested || edge.placeholder
-        ? { strokeDasharray: "5 5", strokeWidth: 2.1 }
-        : { strokeWidth: 2.3 },
+        ? { strokeDasharray: "5 5", strokeWidth: 1.8 }
+        : { strokeWidth: 2.1 },
     }));
   return { nodes: [...layerNodes, ...graphNodes], edges };
 }
 
 function nodeWeight(node) {
   if (node.type === "north_star") {
-    return 13;
+    return 8;
   }
   if (node.type === "goal") {
-    return node.isPrimary ? 11 : 9;
+    return node.isPrimary ? 6.6 : 5.6;
   }
   if (node.type === "skill") {
-    return 7.2;
+    return 5;
   }
-  return 5.6;
+  return 3.6;
 }
 
-function ContextCanvas({ payload, selectedNodeId, onSelectNode, viewMode, setViewMode }) {
+function CanvasSetupBanner({ payload, insight, hiddenLayers, onEmit, onCreateGoal }) {
   const ui = payload.ui;
-  const data = useMemo(() => flowData(payload), [payload]);
+  const missing = [];
+  if (!payload.northStar.isSet) {
+    missing.push(label(ui, "dashboard_canvas_missing_north_star", "North Star missing"));
+  }
+  if (!payload.primaryGoal.isSet) {
+    missing.push(label(ui, "dashboard_canvas_missing_goal", "Current goal missing"));
+  }
+  if (!Number(payload.sources.active_total || 0)) {
+    missing.push(label(ui, "dashboard_canvas_missing_sources", "No captured sources yet"));
+  }
+  const allHidden = hiddenLayers.size >= graphLayers(payload).length && graphLayers(payload).length > 0;
+  if (!missing.length && !insight.mostlyPlaceholder && !allHidden) {
+    return null;
+  }
+
+  return (
+    <div className="hd-canvas-banner">
+      <div className="hd-canvas-banner-copy">
+        <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
+        <strong>
+          {allHidden
+            ? label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")
+            : label(ui, "dashboard_canvas_setup_title", "The canvas is still in setup")}
+        </strong>
+        <p>
+          {allHidden
+            ? label(ui, "dashboard_canvas_reset_filters", "Show all layers to continue.")
+            : label(
+              ui,
+              "dashboard_canvas_setup_hint",
+              "Add North Star and a current goal first, then capture sources to replace the skeleton.",
+            )}
+        </p>
+      </div>
+
+      {missing.length ? (
+        <div className="hd-canvas-banner-tags">
+          {missing.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      ) : null}
+
+      <div className="hd-canvas-banner-actions">
+        {!payload.northStar.isSet ? (
+          <button className="hd-ghost" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+            {label(ui, "north_star_edit_action", "Edit Profile Context")}
+          </button>
+        ) : null}
+        {payload.northStar.isSet && !payload.primaryGoal.isSet ? (
+          <button className="hd-primary" type="button" onClick={onCreateGoal}>
+            {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreateGoal, viewMode, setViewMode }) {
+  const ui = payload.ui;
   const graphRef = useRef(null);
   const [hiddenLayers, setHiddenLayers] = useState(() => new Set());
-  const filterLayers = useMemo(
-    () => graphLayers(payload),
-    [payload],
-  );
-  const graph3d = useMemo(
-    () => {
-      const nodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
-      const nodeIds = new Set(nodes.map((node) => node.id));
-      return {
-        nodes: nodes.map((node) => ({ ...node, name: node.label })),
-        links: payload.graph.edges
-          .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
-          .map((edge) => ({
-            source: edge.from,
-            target: edge.to,
-            suggested: edge.suggested,
-            placeholder: edge.placeholder,
-            relation: edge.relation,
-          })),
-      };
-    },
-    [payload, hiddenLayers],
-  );
+  const filterLayers = useMemo(() => graphLayers(payload), [payload]);
+  const insight = useMemo(() => graphInsight(payload), [payload]);
+  const data = useMemo(() => flowData(payload, hiddenLayers), [payload, hiddenLayers]);
+  const graph3d = useMemo(() => {
+    const nodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    return {
+      nodes: nodes.map((node) => ({ ...node, name: node.label })),
+      links: payload.graph.edges
+        .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
+        .map((edge) => ({
+          source: edge.from,
+          target: edge.to,
+          suggested: edge.suggested,
+          placeholder: edge.placeholder,
+          relation: edge.relation,
+        })),
+    };
+  }, [payload, hiddenLayers]);
+
   function toggleLayer(layer) {
     setHiddenLayers((current) => {
       const next = new Set(current);
@@ -426,6 +602,12 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, viewMode, setVie
     });
   }
 
+  function showAllLayers() {
+    setHiddenLayers(new Set());
+  }
+
+  const allLayersHidden = filterLayers.length > 0 && hiddenLayers.size >= filterLayers.length;
+
   return (
     <section className="hd-canvas-panel">
       <header>
@@ -435,84 +617,117 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, viewMode, setVie
         </div>
         <div className="hd-segmented">
           <button className={viewMode === "canvas" ? "active" : ""} type="button" onClick={() => setViewMode("canvas")}>
-            {label(ui, "dashboard_view_canvas", "Canvas")}
+            {label(ui, "dashboard_view_canvas", "2D Canvas")}
           </button>
           <button className={viewMode === "3d" ? "active" : ""} type="button" onClick={() => setViewMode("3d")}>
             {label(ui, "dashboard_view_3d_graph", "3D Graph")}
           </button>
         </div>
       </header>
+
+      <div className="hd-canvas-toolbar">
+        <div className="hd-filter-row">
+          {filterLayers.map((layer) => (
+            <button
+              key={layer}
+              className={hiddenLayers.has(layer) ? "" : "active"}
+              type="button"
+              onClick={() => toggleLayer(layer)}
+            >
+              {layerLabel(ui, layer)}
+            </button>
+          ))}
+        </div>
+        {hiddenLayers.size ? (
+          <button className="hd-ghost hd-toolbar-reset" type="button" onClick={showAllLayers}>
+            {label(ui, "dashboard_canvas_reset_filters", "Show all layers")}
+          </button>
+        ) : null}
+      </div>
+
+      <CanvasSetupBanner
+        payload={payload}
+        insight={insight}
+        hiddenLayers={hiddenLayers}
+        onEmit={onEmit}
+        onCreateGoal={onCreateGoal}
+      />
+
       {viewMode === "3d" ? (
         <div className="hd-graph3d">
-          <p className="hd-graph-note">
-            {label(ui, "dashboard_graph_3d_hint", "North Star flows into goals, goals connect to skills and tasks, then evidence and output. Rotate to explore; click any node to inspect.")}
-          </p>
-          <div className="hd-filter-row">
-            {filterLayers.map((layer) => (
-              <button
-                key={layer}
-                className={hiddenLayers.has(layer) ? "" : "active"}
-                type="button"
-                onClick={() => toggleLayer(layer)}
-              >
-                {layerLabel(ui, layer)}
-              </button>
-            ))}
+          <div className="hd-canvas-note">
+            {label(
+              ui,
+              "dashboard_graph_3d_hint",
+              "North Star flows through goals, work context, activity, sources, evidence, claims, capability, output, feedback, and governance.",
+            )}
           </div>
-          <Suspense fallback={<p className="hd-empty">{label(ui, "dashboard_graph_loading", "Loading graph...")}</p>}>
-            <ForceGraph3D
-              ref={graphRef}
-              graphData={graph3d}
-              nodeLabel="label"
-              nodeColor={(node) => nodeColor(node)}
-              nodeVal={(node) => nodeWeight(node)}
-              nodeRelSize={8.4}
-              nodeResolution={40}
-              linkLabel="relation"
-              linkColor={(link) => (link.suggested || link.placeholder ? "rgba(104,113,111,.28)" : "rgba(37,107,93,.55)")}
-              linkWidth={(link) => (link.suggested || link.placeholder ? 1.4 : 2.2)}
-              linkOpacity={0.72}
-              linkDirectionalArrowLength={(link) => (link.suggested || link.placeholder ? 0 : 5)}
-              linkDirectionalArrowRelPos={0.98}
-              linkDirectionalArrowResolution={24}
-              linkDirectionalParticles={(link) => (link.suggested || link.placeholder ? 0 : 2)}
-              linkDirectionalParticleWidth={1.8}
-              linkDirectionalParticleResolution={16}
-              linkDirectionalParticleSpeed={0.006}
-              backgroundColor="rgba(255,255,255,0)"
-              height={318}
-              dagMode="lr"
-              dagLevelDistance={128}
-              cooldownTicks={80}
-              enableNodeDrag={false}
-              showNavInfo={false}
-              onEngineStop={() => graphRef.current?.zoomToFit?.(450, 16)}
-              onNodeClick={(node) => onSelectNode(node.id)}
-            />
-          </Suspense>
+          {allLayersHidden ? (
+            <div className="hd-canvas-surface hd-canvas-surface-empty">
+              <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+            </div>
+          ) : (
+            <Suspense fallback={<p className="hd-empty hd-canvas-surface-empty">{label(ui, "dashboard_graph_loading", "Loading graph...")}</p>}>
+              <ForceGraph3D
+                ref={graphRef}
+                graphData={graph3d}
+                nodeLabel="label"
+                nodeColor={(node) => nodeColor(node)}
+                nodeVal={(node) => nodeWeight(node)}
+                nodeRelSize={5.3}
+                nodeResolution={24}
+                linkLabel="relation"
+                linkColor={(link) => (link.suggested || link.placeholder ? "rgba(104,113,111,.18)" : "rgba(37,107,93,.34)")}
+                linkWidth={(link) => (link.suggested || link.placeholder ? 1 : 1.5)}
+                linkOpacity={0.44}
+                linkDirectionalArrowLength={(link) => (link.suggested || link.placeholder ? 0 : 4)}
+                linkDirectionalArrowRelPos={0.98}
+                linkDirectionalArrowResolution={12}
+                linkDirectionalParticles={(link) => (link.suggested || link.placeholder ? 0 : 1)}
+                linkDirectionalParticleWidth={1.6}
+                linkDirectionalParticleResolution={10}
+                linkDirectionalParticleSpeed={0.0045}
+                backgroundColor="rgba(255,255,255,0)"
+                height={GRAPH_HEIGHT}
+                dagMode="lr"
+                dagLevelDistance={104}
+                cooldownTicks={42}
+                enableNodeDrag={false}
+                showNavInfo={false}
+                onEngineStop={() => graphRef.current?.zoomToFit?.(320, 40)}
+                onNodeClick={(node) => onSelectNode(node.id)}
+              />
+            </Suspense>
+          )}
         </div>
       ) : (
         <div className="hd-flow-wrap">
-          <ReactFlow
-            nodes={data.nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId }))}
-            edges={data.edges}
-            nodeTypes={NODE_TYPES}
-            defaultEdgeOptions={{
-              interactionWidth: 18,
-            }}
-            fitView
-            fitViewOptions={{ padding: 0.16 }}
-            minZoom={0.35}
-            maxZoom={1.6}
-            panOnDrag
-            zoomOnScroll
-            nodesDraggable={false}
-            onNodeClick={(_, node) => onSelectNode(node.id)}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background color="#d9e1dd" gap={24} size={1} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
+          {allLayersHidden ? (
+            <div className="hd-canvas-surface hd-canvas-surface-empty">
+              <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+            </div>
+          ) : (
+            <ReactFlow
+              nodes={data.nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId }))}
+              edges={data.edges}
+              nodeTypes={NODE_TYPES}
+              defaultEdgeOptions={{
+                interactionWidth: 18,
+              }}
+              fitView
+              fitViewOptions={{ padding: 0.2 }}
+              minZoom={0.36}
+              maxZoom={1.5}
+              panOnDrag
+              zoomOnScroll
+              nodesDraggable={false}
+              onNodeClick={(_, node) => onSelectNode(node.id)}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background color="#dde6e1" gap={24} size={1} />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          )}
         </div>
       )}
     </section>
@@ -538,46 +753,56 @@ function GoalForm({ payload, goal, mode, onCancel, onEmit }) {
   return (
     <form className="hd-inspector-form" onSubmit={submit}>
       <input name="id" type="hidden" defaultValue={cleanText(source.id)} />
-      <label>
-        {label(ui, "goal_field_title", "Title")}
-        <input name="title" defaultValue={cleanText(source.title)} required />
-      </label>
-      <label>
-        {label(ui, "goal_field_label", "Discreet label")}
-        <input name="label" defaultValue={cleanText(source.label)} />
-      </label>
-      <div className="hd-form-row">
+
+      <div className="hd-form-block">
         <label>
-          {label(ui, "goal_field_status", "Status")}
-          <select name="status" defaultValue={cleanText(source.status, "active")}>
-            {statusOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_status_${option}`, option)}</option>)}
-          </select>
+          {label(ui, "goal_field_title", "Title")}
+          <input name="title" defaultValue={cleanText(source.title)} required />
         </label>
         <label>
-          {label(ui, "goal_field_target", "Target date")}
-          <input name="target" defaultValue={cleanText(source.target)} placeholder="YYYY-MM-DD" />
+          {label(ui, "goal_field_label", "Discreet label")}
+          <input name="label" defaultValue={cleanText(source.label)} />
+        </label>
+        <div className="hd-form-row">
+          <label>
+            {label(ui, "goal_field_status", "Status")}
+            <select name="status" defaultValue={cleanText(source.status, "active")}>
+              {statusOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_status_${option}`, option)}</option>)}
+            </select>
+          </label>
+          <label>
+            {label(ui, "goal_field_target", "Target date")}
+            <input name="target" defaultValue={cleanText(source.target)} placeholder="YYYY-MM-DD" />
+          </label>
+        </div>
+      </div>
+
+      <div className="hd-form-block">
+        <label>
+          {label(ui, "goal_field_summary", "Summary")}
+          <textarea name="summary" defaultValue={cleanText(source.summary)} rows="3" />
+        </label>
+        <label>
+          {label(ui, "goal_field_alignment", "North Star alignment")}
+          <textarea name="alignment" defaultValue={cleanText(source.alignment)} rows="3" />
         </label>
       </div>
-      <label>
-        {label(ui, "goal_field_summary", "Summary")}
-        <textarea name="summary" defaultValue={cleanText(source.summary)} rows="2" />
-      </label>
-      <label>
-        {label(ui, "goal_field_alignment", "North Star alignment")}
-        <textarea name="alignment" defaultValue={cleanText(source.alignment)} rows="2" />
-      </label>
-      <div className="hd-form-row">
-        <label>
-          {label(ui, "goal_field_ui_visibility", "UI visibility")}
-          <select name="ui_visibility" defaultValue={cleanText(source.ui_visibility, "discreet")}>
-            {visibilityOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_visibility_${option}`, option)}</option>)}
-          </select>
-        </label>
-        <label className="hd-check">
-          <input name="include_in_agent_context" type="checkbox" defaultChecked={source.include_in_agent_context !== false} />
-          {label(ui, "goal_field_agent_context", "Agent context")}
-        </label>
+
+      <div className="hd-form-block">
+        <div className="hd-form-row">
+          <label>
+            {label(ui, "goal_field_ui_visibility", "UI visibility")}
+            <select name="ui_visibility" defaultValue={cleanText(source.ui_visibility, "discreet")}>
+              {visibilityOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_visibility_${option}`, option)}</option>)}
+            </select>
+          </label>
+          <label className="hd-check">
+            <input name="include_in_agent_context" type="checkbox" defaultChecked={source.include_in_agent_context !== false} />
+            {label(ui, "goal_field_agent_context", "Agent context")}
+          </label>
+        </div>
       </div>
+
       <details>
         <summary>{label(ui, "dashboard_goal_advanced_fields", "Advanced goal fields")}</summary>
         <label>{label(ui, "goal_field_start", "Start date")}<input name="start" defaultValue={cleanText(source.start)} placeholder="YYYY-MM-DD" /></label>
@@ -589,12 +814,14 @@ function GoalForm({ payload, goal, mode, onCancel, onEmit }) {
         <label>{label(ui, "goal_field_output_refs", "Output refs")}<textarea name="output_refs" defaultValue={linesText(source.output_refs)} rows="2" /></label>
         <label>{label(ui, "goal_field_notes", "Notes")}<textarea name="notes" defaultValue={cleanText(source.notes)} rows="3" /></label>
       </details>
+
       {mode === "create" ? (
         <label className="hd-check">
           <input name="set_as_primary" type="checkbox" defaultChecked={!payload.primaryGoal.isSet} />
           {label(ui, "dashboard_set_as_primary", "Set as primary")}
         </label>
       ) : null}
+
       <div className="hd-form-actions">
         <button className="hd-ghost" type="button" onClick={onCancel}>{label(ui, "dashboard_goal_close_form", "Close")}</button>
         <button className="hd-primary" type="submit">{label(ui, "goal_save", "Save goal")}</button>
@@ -689,16 +916,16 @@ function nodeRelations(payload, nodeId) {
 
 function PlaceholderInspector({ payload, node, relations }) {
   const ui = payload.ui;
-  if (!node.placeholder && node.implemented !== false) {
+  if (!node.placeholder && node.implemented !== false && !node.suggested) {
     return null;
   }
   return (
-      <div className="hd-placeholder-box">
-      <span className="hd-section-label">{label(ui, "dashboard_inspector_owner_reserved", "Interface reserved")}</span>
+    <div className="hd-placeholder-box">
+      <span className="hd-section-label">{label(ui, "dashboard_inspector_owner_reserved", "Setup state")}</span>
       <p>
         {node.implemented === false
-          ? label(ui, "dashboard_inspector_placeholder_hint", "This graph node is planned but does not have a backing record yet.")
-          : label(ui, "dashboard_source_to_evidence_hint", "This graph node is suggested by the dashboard graph.")}
+          ? label(ui, "dashboard_inspector_placeholder_hint", "This area is still a scaffold and does not have a backing record yet.")
+          : label(ui, "dashboard_source_to_evidence_hint", "This node is still a suggested part of the dashboard graph.")}
       </p>
       {relations.length ? (
         <ul>
@@ -714,10 +941,46 @@ function PlaceholderInspector({ payload, node, relations }) {
   );
 }
 
-function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, onEmit, onSelectNode }) {
+function EmptyInspector({ payload, onEmit, onCreateGoal }) {
+  const ui = payload.ui;
+  const missingNorthStar = !payload.northStar.isSet;
+  const missingGoal = !payload.primaryGoal.isSet;
+
+  return (
+    <aside className="hd-inspector hd-inspector-empty">
+      <header>
+        <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
+        <h3>{label(ui, "dashboard_inspector_setup_title", "Choose a real node or finish setup")}</h3>
+      </header>
+      <div className="hd-inspector-empty-body">
+        <p className="hd-inspector-summary">
+          {label(
+            ui,
+            "dashboard_inspector_setup_hint",
+            "This graph is still mostly scaffolded. Start with North Star, then set a current goal.",
+          )}
+        </p>
+        <div className="hd-action-row">
+          {missingNorthStar ? (
+            <button className="hd-primary" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+              {label(ui, "north_star_edit_action", "Edit Profile Context")}
+            </button>
+          ) : null}
+          {!missingNorthStar && missingGoal ? (
+            <button className="hd-primary" type="button" onClick={onCreateGoal}>
+              {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, onEmit }) {
   const ui = payload.ui;
   const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
-  const selectedNode = nodesById.get(selectedNodeId) || payload.graph.nodes.find((node) => node.type === "goal") || null;
+  const selectedNode = selectedNodeId ? nodesById.get(selectedNodeId) || null : null;
   const relations = selectedNode ? nodeRelations(payload, selectedNode.id) : [];
 
   if (goalEditor?.mode === "create") {
@@ -741,11 +1004,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
   }
 
   if (!selectedNode) {
-    return (
-      <aside className="hd-inspector">
-        <p className="hd-empty">{label(ui, "dashboard_inspector_empty", "Select a node to inspect it.")}</p>
-      </aside>
-    );
+    return <EmptyInspector payload={payload} onEmit={onEmit} onCreateGoal={() => setGoalEditor({ mode: "create" })} />;
   }
 
   if (selectedNode.type === "goal" && selectedGoal) {
@@ -777,18 +1036,20 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
   return (
     <aside className="hd-inspector">
       <header>
-        <span className="hd-eyebrow">{selectedNode.type}</span>
+        <span className="hd-eyebrow">{translatedNodeType(ui, selectedNode.type)}</span>
         <h3>{selectedNode.label}</h3>
       </header>
       <div className="hd-inspector-meta">
         {selectedNode.layer ? <span>{layerLabel(ui, selectedNode.layer)}</span> : null}
-        {selectedNode.implemented === false ? <span>{label(ui, "dashboard_placeholder_metric", "planned")}</span> : null}
+        {selectedNode.implemented === false ? <span>{label(ui, "dashboard_placeholder_metric", "Planned")}</span> : null}
         {selectedNode.metric ? <span>{selectedNode.metric}</span> : null}
         {selectedNode.status ? <span>{selectedNode.status}</span> : null}
       </div>
       <PlaceholderInspector payload={payload} node={selectedNode} relations={relations} />
       <p className="hd-inspector-summary">
-        {selectedNode.suggested || selectedNode.placeholder ? label(ui, "skill_alignment_suggested", "suggested") : label(ui, "dashboard_inspector_node_hint", "Open the owner page for details.")}
+        {selectedNode.suggested || selectedNode.placeholder
+          ? label(ui, "skill_alignment_suggested", "suggested")
+          : label(ui, "dashboard_inspector_node_hint", "Open the owner page for details.")}
       </p>
       <div className="hd-action-row">
         {selectedNode.ownerPath && selectedNode.ownerPath !== "profile_context" && selectedNode.implemented !== false ? (
@@ -808,6 +1069,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
 function HomeCaptureForm({ payload, onEmit }) {
   const ui = payload.ui;
   const currentGoalId = primaryGoalId(payload);
+  const sourceActive = Number(payload.sources.active_total || 0);
 
   function submit(event) {
     event.preventDefault();
@@ -824,6 +1086,11 @@ function HomeCaptureForm({ payload, onEmit }) {
       <header>
         <span className="hd-eyebrow">{label(ui, "dashboard_today_capture_sources", "Capture / Sources")}</span>
         <strong>{label(ui, "dashboard_capture_title", "Capture source")}</strong>
+        <p className="hd-capture-caption">
+          {sourceActive > 0
+            ? `${sourceActive} ${label(ui, "dashboard_source_inbox_title", "Source inbox")}`
+            : label(ui, "dashboard_source_to_evidence_hint", "Captured sources stay in inbox until reviewed into evidence candidates.")}
+        </p>
       </header>
       <label>
         {label(ui, "goal_field_title", "Title")}
@@ -851,7 +1118,7 @@ function HomeCaptureForm({ payload, onEmit }) {
       </label>
       <label>
         {label(ui, "dashboard_capture_raw_text", "Note")}
-        <textarea name="raw_text" rows="3" />
+        <textarea name="raw_text" rows="4" />
       </label>
       <label>
         {label(ui, "dashboard_capture_tags", "Tags")}
@@ -862,50 +1129,169 @@ function HomeCaptureForm({ payload, onEmit }) {
   );
 }
 
-function TodayLane({ payload, onEmit }) {
+function SkillProgressCard({ payload }) {
+  const ui = payload.ui;
+  const counts = payload.charts.skills.counts || {};
+  const totalCount = Math.max(0, Number(payload.charts.skills.total) || 0);
+  const countSum = SKILL_STATUS_META.reduce((sum, item) => sum + (Number(counts[item.key]) || 0), 0);
+  const total = totalCount || countSum;
+  const lit = Math.max(0, Number(payload.charts.skills.lit) || 0);
+  const litRate = total ? (Number(payload.charts.skills.litRate) || (lit / total)) : 0;
+  const segments = skillSegments(counts, total);
+
+  return (
+    <article className="hd-summary-card hd-skill-card">
+      <div className="hd-summary-head">
+        <div>
+          <span className="hd-eyebrow">{label(ui, "dashboard_skill_progress_title", "Skill Progress")}</span>
+          <h4>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</h4>
+        </div>
+        <span className="hd-summary-chip">{label(ui, "dashboard_skill_lit_rate", "Lit rate")}: {formatPercent(litRate)}</span>
+      </div>
+
+      <div className="hd-skill-meter">
+        <div className="hd-skill-ring">
+          <svg viewBox={`0 0 ${SKILL_RING_SIZE} ${SKILL_RING_SIZE}`} aria-hidden="true">
+            <circle
+              cx={SKILL_RING_SIZE / 2}
+              cy={SKILL_RING_SIZE / 2}
+              r={SKILL_RING_RADIUS}
+              fill="none"
+              stroke="rgba(216, 225, 220, .9)"
+              strokeWidth={SKILL_RING_STROKE}
+            />
+            {segments.map((segment) => (
+              segment.count ? (
+                <circle
+                  key={segment.key}
+                  cx={SKILL_RING_SIZE / 2}
+                  cy={SKILL_RING_SIZE / 2}
+                  r={SKILL_RING_RADIUS}
+                  fill="none"
+                  stroke={segment.color}
+                  strokeWidth={SKILL_RING_STROKE}
+                  strokeLinecap="round"
+                  strokeDasharray={segment.dasharray}
+                  strokeDashoffset={segment.dashoffset}
+                  transform={`rotate(-90 ${SKILL_RING_SIZE / 2} ${SKILL_RING_SIZE / 2})`}
+                />
+              ) : null
+            ))}
+          </svg>
+          <div className="hd-skill-ring-center">
+            <strong>{lit}/{total}</strong>
+            <span>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</span>
+          </div>
+        </div>
+
+        <div className="hd-skill-legend">
+          {SKILL_STATUS_META.map((item) => (
+            <div key={item.key} className="hd-skill-legend-item">
+              <span className="hd-skill-legend-dot" style={{ background: item.color }} />
+              <span>{statusLabel(ui, item.key)}</span>
+              <strong>{Number(counts[item.key]) || 0}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="hd-summary-copy">
+        {total
+          ? `${label(ui, "dashboard_skill_progress_caption", "solid + expert lit rate")} · ${formatPercent(litRate)}`
+          : label(ui, "dashboard_skill_progress_empty", "No skill tree data yet.")}
+      </p>
+    </article>
+  );
+}
+
+function Workbench({ payload, onEmit }) {
   const ui = payload.ui;
   const doing = asArray(payload.kanban.doing);
   const evidenceCandidates = Number(payload.pendingEvidence.done_uncrystallized_count || 0);
   const unlinkedAtomic = Number(payload.pendingEvidence.unlinked_count || 0);
   const health = payload.charts.health;
-  const sourceActive = Number(payload.sources.active_total || 0);
-  const sourceTitles = asArray(payload.sources.active_titles).map((item) => cleanText(item)).filter(Boolean);
   const gapRisk = Number(payload.skills.evidence_risk_count || 0) + asArray(payload.skills.target_learning_locked).length;
+
   return (
-    <section className="hd-today-lane">
-      <div className="hd-today-metrics">
-        <article>
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
-          <strong>{payload.kanban.doing_total || doing.length || 0}</strong>
-          <p>{doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
-        </article>
-        <article className="hd-today-capture-card">
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_capture_sources", "Capture / Sources")}</span>
-          <strong>{sourceActive}</strong>
-          <p>{sourceTitles.slice(0, 2).join(" / ") || label(ui, "dashboard_source_inbox_empty", "No source items captured yet.")}</p>
+    <section className="hd-workbench">
+      <header className="hd-workbench-header">
+        <div>
+          <span className="hd-eyebrow">{label(ui, "dashboard_workbench_title", "Workbench")}</span>
+          <h3>{label(ui, "dashboard_workbench_caption", "Today's signals, capture inbox, and quick actions.")}</h3>
+        </div>
+      </header>
+
+      <div className="hd-workbench-layout">
+        <div className="hd-workbench-left">
+          <SkillProgressCard payload={payload} />
+
+          <article className="hd-summary-card">
+            <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
+            <strong>{payload.kanban.doing_total || doing.length || 0}</strong>
+            <p>{doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
+          </article>
+
+          <article className="hd-summary-card">
+            <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
+            <strong>{evidenceCandidates}</strong>
+            <p>{label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}</p>
+          </article>
+
+          <article className="hd-summary-card">
+            <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
+            <strong>{gapRisk}</strong>
+            <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
+          </article>
+
+          <article className="hd-summary-card">
+            <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
+            <strong>{payload.charts.public.draft}</strong>
+            <p>{label(ui, "dashboard_public_published", "Published")}: {payload.charts.public.published}</p>
+          </article>
+        </div>
+
+        <div className="hd-workbench-right">
           <HomeCaptureForm payload={payload} onEmit={onEmit} />
-        </article>
-        <article>
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
-          <strong>{evidenceCandidates}</strong>
-          <p>{label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}</p>
-        </article>
-        <article>
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
-          <strong>{gapRisk}</strong>
-          <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
-        </article>
-        <article>
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
-          <strong>{payload.charts.public.draft}</strong>
-          <p>{label(ui, "dashboard_public_published", "Published")}: {payload.charts.public.published} · {label(ui, "dashboard_feedback_planned", "Feedback interface reserved.")}</p>
-        </article>
-      </div>
-      <div className="hd-today-actions">
-        {payload.quickLinks.map((link) => (
-          <button key={link.path} className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent(link.path))}>{cleanText(link.label, link.id)}</button>
-        ))}
-        <span className="hd-health-inline">{label(ui, "dashboard_health_title", "Health")}: {health.error}/{health.warning}/{health.info}</span>
+
+          <section className="hd-side-panel">
+            <header>
+              <span className="hd-eyebrow">{label(ui, "dashboard_quick_title", "Quick entries")}</span>
+              <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
+            </header>
+            <div className="hd-quick-grid">
+              {payload.quickLinks.map((link) => (
+                <button key={link.path} className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent(link.path))}>
+                  {cleanText(link.label, link.id)}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="hd-side-panel">
+            <header>
+              <span className="hd-eyebrow">{label(ui, "dashboard_health_title", "Health")}</span>
+              <strong>{label(ui, "dashboard_health_title", "Health")}</strong>
+            </header>
+            <div className="hd-health-grid">
+              <div className="hd-health-chip">
+                <span>{label(ui, "dashboard_health_errors", "Errors")}</span>
+                <strong>{health.error}</strong>
+              </div>
+              <div className="hd-health-chip">
+                <span>{label(ui, "dashboard_health_warnings", "Warnings")}</span>
+                <strong>{health.warning}</strong>
+              </div>
+              <div className="hd-health-chip">
+                <span>{label(ui, "dashboard_health_info", "Info")}</span>
+                <strong>{health.info}</strong>
+              </div>
+              <div className="hd-health-chip">
+                <span>{label(ui, "dashboard_health_context_ready", "Context ready")}</span>
+                <strong>{payload.health.context_ready ? label(ui, "dashboard_yes", "Yes") : label(ui, "dashboard_no", "No")}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </section>
   );
@@ -918,10 +1304,11 @@ function Dashboard({ args }) {
   const [viewMode, setViewMode] = useState("canvas");
 
   useEffect(() => {
-    const primaryId = primaryGoalId(payload);
-    const firstGoalNode = payload.graph.nodes.find((node) => node.type === "goal" && (!primaryId || node.recordId === primaryId));
-    if (!selectedNodeId && firstGoalNode) {
-      setSelectedNodeId(firstGoalNode.id);
+    const availableIds = new Set(payload.graph.nodes.map((node) => node.id));
+    const nextPreferred = preferredNode(payload);
+    const nextId = availableIds.has(selectedNodeId) ? selectedNodeId : cleanText(nextPreferred?.id);
+    if (nextId !== selectedNodeId) {
+      setSelectedNodeId(nextId);
     }
     window.setTimeout(() => setFrameHeight(), 0);
   }, [payload, selectedNodeId]);
@@ -947,6 +1334,7 @@ function Dashboard({ args }) {
         onCreateGoal={() => setGoalEditor({ mode: "create" })}
         onSelectGoal={selectGoal}
       />
+
       <div className="hd-canvas-workbench">
         <ContextCanvas
           payload={payload}
@@ -955,6 +1343,8 @@ function Dashboard({ args }) {
             setSelectedNodeId(nodeId);
             setGoalEditor(null);
           }}
+          onEmit={emit}
+          onCreateGoal={() => setGoalEditor({ mode: "create" })}
           viewMode={viewMode}
           setViewMode={setViewMode}
         />
@@ -966,7 +1356,8 @@ function Dashboard({ args }) {
           onEmit={emit}
         />
       </div>
-      <TodayLane payload={payload} onEmit={emit} />
+
+      <Workbench payload={payload} onEmit={emit} />
     </main>
   );
 }
