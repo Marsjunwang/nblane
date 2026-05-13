@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from nblane.core.evidence_ops import (
-    pool_id_referenced_by_nodes,
-    prune_pool_id_in_rows,
+from nblane.core.evidence_review import (
+    EVIDENCE_REVIEW_PAGE,
+    skill_evidence_summaries,
 )
-from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.evidence_resolve import (
     resolve_node_evidence_dict,
 )
@@ -62,6 +61,14 @@ def _level_label(level: int, ui: dict[str, str]) -> str:
     if key is not None:
         return ui[key]
     return ui["level_n"].format(n=level)
+
+
+def _signal_value_label(ui: dict[str, str], prefix: str, value: object) -> str:
+    """Return localized evidence signal values."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return ui.get(f"{prefix}_{raw}", raw)
 
 
 def _build_rows(
@@ -351,6 +358,10 @@ index = schema_node_index(schema) if schema else {}
 
 rows = _session_rows(selected, tree, index)
 pool_entries = _session_pool_entries(selected)
+evidence_signal_by_id = {
+    str(item.get("id", "")): item
+    for item in skill_evidence_summaries(selected)
+}
 
 _save_toast = st.session_state.pop(
     "_skill_tree_save_toast",
@@ -392,138 +403,11 @@ with _head_r:
 
 st.caption(ui["save_caption"])
 
-with st.expander(ui["pool_expander"], expanded=False):
-    st.caption(ui["pool_caption"])
-    with st.form("skill_tree_evidence_pool_form"):
-        c0, c1 = st.columns(2)
-        with c0:
-            new_pid = st.text_input(
-                ui["pool_id_optional"],
-                key="pool_form_id",
-            )
-        with c1:
-            new_pt = st.selectbox(
-                ui["evidence_type"],
-                sorted(EVIDENCE_TYPES),
-                key="pool_form_type",
-            )
-        new_title = st.text_input(
-            ui["evidence_title"],
-            key="pool_form_title",
-        )
-        c2, c3 = st.columns(2)
-        with c2:
-            new_date = st.text_input(
-                ui["evidence_date"],
-                key="pool_form_date",
-            )
-        with c3:
-            new_url = st.text_input(
-                ui["evidence_url"],
-                key="pool_form_url",
-            )
-        new_sum = st.text_area(
-            ui["evidence_summary"],
-            key="pool_form_summary",
-            height=68,
-        )
-        submitted = st.form_submit_button(
-            ui["pool_add_button"],
-        )
-        if submitted:
-            t = str(new_title or "").strip()
-            if not t:
-                st.error(ui["evidence_title"] + " required.")
-            else:
-                existing_ids = {
-                    str(e.get("id", "") or "").strip()
-                    for e in pool_entries
-                    if str(e.get("id", "") or "").strip()
-                }
-                pid = str(new_pid or "").strip()
-                if pid and pid in existing_ids:
-                    st.error(f"Id {pid!r} already exists.")
-                else:
-                    if not pid:
-                        pid = new_evidence_id(
-                            t,
-                            existing_ids,
-                        )
-                    row = {
-                        "id": pid,
-                        "type": new_pt,
-                        "title": t,
-                    }
-                    ds = str(new_date or "").strip()
-                    if ds:
-                        row["date"] = ds
-                    us = str(new_url or "").strip()
-                    if us:
-                        row["url"] = us
-                    ss = str(new_sum or "").strip()
-                    if ss:
-                        row["summary"] = ss
-                    pool_entries.append(row)
-                    st.session_state["_skill_tree_save_toast"] = (
-                        ui["pool_added"]
-                    )
-                    st.rerun()
-
-    st.markdown(f"**{ui['pool_list_heading']}**")
-    prune_refs_del = st.checkbox(
-        ui["pool_prune_refs"],
-        key=f"pool_delete_prune_{selected}",
-        value=False,
-    )
-    if pool_entries:
-        st.caption(ui["pool_delete_hint"])
-    for idx, prow in enumerate(pool_entries):
-        pid = str(prow.get("id", "") or "").strip()
-        if not pid:
-            continue
-        title_s = str(prow.get("title", "") or "").strip()
-        label = (
-            f"`{pid}` — {title_s}" if title_s else f"`{pid}`"
-        )
-        c_del_l, c_del_r = st.columns([5, 1])
-        with c_del_l:
-            st.markdown(label)
-        with c_del_r:
-            if st.button(
-                ui["pool_delete_remove"],
-                key=f"pool_del_{selected}_{idx}",
-            ):
-                ref_tree = {
-                    "nodes": _rows_to_nodes(rows),
-                }
-                refs = pool_id_referenced_by_nodes(
-                    ref_tree,
-                    pid,
-                )
-                if refs and not prune_refs_del:
-                    st.error(
-                        ui["pool_delete_blocked"].format(
-                            pid=pid,
-                            nodes=", ".join(refs),
-                        )
-                    )
-                else:
-                    if refs and prune_refs_del:
-                        prune_pool_id_in_rows(
-                            rows,
-                            pid,
-                        )
-                    for j, e in enumerate(pool_entries):
-                        eid = str(
-                            e.get("id", "") or ""
-                        ).strip()
-                        if eid == pid:
-                            pool_entries.pop(j)
-                            break
-                    st.session_state[
-                        "_skill_tree_save_toast"
-                    ] = ui["pool_deleted_session"]
-                    st.rerun()
+st.page_link(
+    EVIDENCE_REVIEW_PAGE,
+    label=ui["evidence_review_link"],
+    help=ui["pool_caption"],
+)
 
 # -- Global metrics -----------------------------------------------
 
@@ -632,6 +516,38 @@ for cat_tab, cat in zip(cat_tabs, categories):
                                     _ST_EV_FOCUS
                                 ] = r["id"]
                                 st.rerun()
+                        signal = evidence_signal_by_id.get(r["id"], {})
+                        strength_label = _signal_value_label(
+                            ui,
+                            "evidence_strength",
+                            signal.get("highest_strength", "unrated"),
+                        )
+                        review_label = _signal_value_label(
+                            ui,
+                            "evidence_review_status",
+                            signal.get("review_status", ""),
+                        )
+                        signal_parts = [
+                            ui["evidence_signal_count"].format(
+                                n=signal.get("evidence_count", 0)
+                            ),
+                            ui["evidence_signal_strength"].format(
+                                strength=strength_label
+                            ),
+                        ]
+                        if review_label:
+                            signal_parts.append(
+                                ui["evidence_signal_review"].format(
+                                    status=review_label
+                                )
+                            )
+                        st.caption(" · ".join(signal_parts))
+                        if signal.get("risk_level"):
+                            st.warning(
+                                ui["evidence_signal_risk"].format(
+                                    reason=signal.get("risk_reason", "")
+                                )
+                            )
 
                     with c_status:
                         key = (

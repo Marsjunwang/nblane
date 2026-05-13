@@ -26,7 +26,12 @@ test("normalizes chart totals and quick links", () => {
         lit: 3,
         lit_rate: 0.3,
       },
-      evidence: { done_uncrystallized: 2, unlinked: 1 },
+      evidence: {
+        done_uncrystallized: 2,
+        unlinked: 1,
+        needs_review: 4,
+        status_risk: 5,
+      },
       public: { draft: 3, published: 1 },
       health: { error: 0, warning: 2, info: 1 },
     },
@@ -114,6 +119,8 @@ test("normalizes chart totals and quick links", () => {
   assert.equal(payload.charts.skills.counts.solid, 2);
   assert.equal(payload.charts.skills.litRate, 0.3);
   assert.equal(payload.charts.evidence.unlinked, 1);
+  assert.equal(payload.charts.evidence.needsReview, 4);
+  assert.equal(payload.charts.evidence.statusRisk, 5);
   assert.equal(payload.quickLinks[0].path, "pages/3_Kanban.py");
   assert.equal(payload.northStar.displayText, "Build useful robot systems.");
   assert.equal(payload.activeGoals[0].isPrimary, true);

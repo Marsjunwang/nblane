@@ -1243,6 +1243,9 @@ function Workbench({ payload, onEmit }) {
   const doing = asArray(payload.kanban.doing);
   const evidenceCandidates = Number(payload.pendingEvidence.done_uncrystallized_count || 0);
   const unlinkedAtomic = Number(payload.pendingEvidence.unlinked_count || 0);
+  const needsReview = Number(payload.pendingEvidence.needs_review_count || 0);
+  const statusRisk = Number(payload.pendingEvidence.status_risk_count || 0);
+  const evidenceAttention = evidenceCandidates + unlinkedAtomic + needsReview + statusRisk;
   const gapRisk = Number(payload.skills.evidence_risk_count || 0) + asArray(payload.skills.target_learning_locked).length;
   const quickLinks = asArray(payload.quickLinks);
 
@@ -1268,8 +1271,16 @@ function Workbench({ payload, onEmit }) {
 
         <article className="hd-summary-card hd-workbench-evidence">
           <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
-          <strong>{evidenceCandidates}</strong>
-          <p>{label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}</p>
+          <strong>{evidenceAttention}</strong>
+          <p>
+            {label(ui, "dashboard_done_uncrystallized", "Done not crystallized")}: {evidenceCandidates}
+            {" · "}
+            {label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}
+            {" · "}
+            {label(ui, "dashboard_atomic_evidence_needs_review", "Needs review")}: {needsReview}
+            {" · "}
+            {label(ui, "dashboard_atomic_evidence_status_risk", "Status risks")}: {statusRisk}
+          </p>
         </article>
 
         <article className="hd-summary-card hd-workbench-gap">

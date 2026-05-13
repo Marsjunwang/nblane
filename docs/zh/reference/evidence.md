@@ -47,6 +47,20 @@ system prompt 展示「能力是否有据可查」。
 `evidence_refs: [id, …]` 引用池 id。可与内联 `evidence` 混用；YAML 中重复的
 引用 id 会规范为一条。
 
+可选审阅字段：
+
+| 字段 | 可选值 | 说明 |
+|------|--------|------|
+| `strength` | `weak` \| `medium` \| `strong` \| `high_trust` | evidence 本身的可信强度；缺失时 UI 显示为 `unrated`，不会自动当作强证据 |
+| `confidence` | `low` \| `medium` \| `high` | 对该 evidence 摘要/归因的置信度 |
+| `review_status` | `needs_review` \| `reviewed` | 是否已人工审阅；缺失时视为 `needs_review` |
+| `public_readiness` | `private` \| `draftable` \| `public_ready` \| `published` | 是否适合整理为公开输出；不等于 Public Site 发布状态 |
+| `source_refs` | 字符串列表 | 关联的 commit、test、kanban、source、artifact 等来源引用 |
+
+v1 强度规则：`learning` 可由 weak / unrated evidence 支撑；`solid` 至少需要
+`medium`；`expert` 至少需要 `strong`。低于门槛会进入 Evidence Review /
+Profile Health 警告，但不会阻止保存，因为 skill status 仍由用户人工确认。
+
 ## 命令行
 
 **内联追加**（与原先一致）：

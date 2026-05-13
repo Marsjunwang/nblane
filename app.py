@@ -22,6 +22,7 @@ from nblane.core.home_dashboard import (
     dashboard_public_summary as _dashboard_public_summary,
     dashboard_skill_summary as _dashboard_skill_summary,
 )
+from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
 from nblane.core.inbox import add_inbox_item, load_inbox, save_inbox
 from nblane.core import llm as llm_client
 from nblane.core.goals import (
@@ -1007,7 +1008,7 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> None:
     if action == "open_section":
         section = str(payload.get("section") or "").strip()
         if section == "evidence":
-            st.switch_page("pages/1_Skill_Tree.py")
+            st.switch_page(EVIDENCE_REVIEW_PAGE)
 
 
 def _page_link(path: str, label: str, *, help_text: str = "") -> None:
@@ -1080,6 +1081,8 @@ def _render_dashboard_status_overview(
         (
             pending_summary.get("done_uncrystallized_count", 0)
             + pending_summary.get("unlinked_count", 0)
+            + pending_summary.get("needs_review_count", 0)
+            + pending_summary.get("status_risk_count", 0)
         ),
     )
     cols[4].metric(
@@ -1144,7 +1147,7 @@ def _render_dashboard_doing(kanban_summary: dict) -> None:
 
 def _render_dashboard_pending_evidence(pending_summary: dict) -> None:
     st.subheader(ui["dashboard_pending_evidence_title"])
-    c1, c2 = st.columns(2)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.metric(
             ui["dashboard_done_uncrystallized"],
@@ -1161,11 +1164,36 @@ def _render_dashboard_pending_evidence(pending_summary: dict) -> None:
             st.caption(
                 f"- `{item.get('id', '')}` · {item.get('title', '')}"
             )
+    with c3:
+        st.metric(
+            ui["dashboard_needs_review_evidence"],
+            pending_summary.get("needs_review_count", 0),
+        )
+        for item in pending_summary.get("needs_review") or []:
+            st.caption(
+                f"- `{item.get('id', '')}` · {item.get('title', '')}"
+            )
+    with c4:
+        st.metric(
+            ui["dashboard_status_risk_evidence"],
+            pending_summary.get("status_risk_count", 0),
+        )
+        for item in pending_summary.get("status_risks") or []:
+            st.caption(
+                f"- `{item.get('id', '')}` · {item.get('label', '')}"
+            )
     if (
         pending_summary.get("done_uncrystallized_count", 0) == 0
         and pending_summary.get("unlinked_count", 0) == 0
+        and pending_summary.get("needs_review_count", 0) == 0
+        and pending_summary.get("status_risk_count", 0) == 0
     ):
         st.success(ui["dashboard_pending_evidence_empty"])
+    _page_link(
+        EVIDENCE_REVIEW_PAGE,
+        ui["quick_evidence_review"],
+        help_text=ui["quick_evidence_review_help"],
+    )
 
 
 def _render_dashboard_health(health_summary: dict) -> None:
@@ -1243,26 +1271,32 @@ def _render_dashboard_public(public_summary: dict) -> None:
 
 def _render_quick_entries() -> None:
     st.subheader(ui["dashboard_quick_title"])
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        _page_link(
-            "pages/1_Skill_Tree.py",
-            ui["quick_skill_tree"],
-            help_text=ui["quick_skill_tree_help"],
-        )
-    with c2:
-        _page_link(
-            "pages/2_Gap_Analysis.py",
-            ui["quick_gap"],
-            help_text=ui["quick_gap_help"],
-        )
-    with c3:
         _page_link(
             "pages/3_Kanban.py",
             ui["quick_kanban"],
             help_text=ui["quick_kanban_help"],
         )
+    with c2:
+        _page_link(
+            EVIDENCE_REVIEW_PAGE,
+            ui["quick_evidence_review"],
+            help_text=ui["quick_evidence_review_help"],
+        )
+    with c3:
+        _page_link(
+            "pages/1_Skill_Tree.py",
+            ui["quick_skill_tree"],
+            help_text=ui["quick_skill_tree_help"],
+        )
     with c4:
+        _page_link(
+            "pages/2_Gap_Analysis.py",
+            ui["quick_gap"],
+            help_text=ui["quick_gap_help"],
+        )
+    with c5:
         _page_link(
             "pages/6_Public_Site.py",
             ui["quick_public_site"],
@@ -1647,6 +1681,11 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 "pages/3_Kanban.py",
                 title=ui["sidebar_nav_kanban"],
                 icon=":material/view_kanban:",
+            ),
+            st.Page(
+                EVIDENCE_REVIEW_PAGE,
+                title=ui["sidebar_nav_evidence_review"],
+                icon=":material/fact_check:",
             ),
         ],
         ui["sidebar_nav_growth_group"]: [

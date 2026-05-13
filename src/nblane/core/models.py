@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 EVIDENCE_TYPES = frozenset(
     {"project", "paper", "course", "practice"}
 )
+EVIDENCE_STRENGTHS = ("weak", "medium", "strong", "high_trust")
+EVIDENCE_CONFIDENCES = ("low", "medium", "high")
+EVIDENCE_REVIEW_STATUSES = ("needs_review", "reviewed")
+EVIDENCE_PUBLIC_READINESS = (
+    "private",
+    "draftable",
+    "public_ready",
+    "published",
+)
 
 
 @dataclass
@@ -57,6 +66,11 @@ class EvidenceRecord:
     date: str = ""
     url: str = ""
     summary: str = ""
+    strength: str = ""
+    confidence: str = ""
+    review_status: str = ""
+    public_readiness: str = ""
+    source_refs: list[str] = field(default_factory=list)
     deprecated: bool = False
     replaced_by: str = ""
 
@@ -82,6 +96,17 @@ class EvidenceRecord:
             date=str(d.get("date", "") or ""),
             url=str(d.get("url", "") or ""),
             summary=str(d.get("summary", "") or ""),
+            strength=str(d.get("strength", "") or ""),
+            confidence=str(d.get("confidence", "") or ""),
+            review_status=str(d.get("review_status", "") or ""),
+            public_readiness=str(d.get("public_readiness", "") or ""),
+            source_refs=[
+                str(item).strip()
+                for item in (d.get("source_refs") or [])
+                if item is not None and str(item).strip()
+            ]
+            if isinstance(d.get("source_refs"), list)
+            else [],
             deprecated=bool(d.get("deprecated", False)),
             replaced_by=str(d.get("replaced_by", "") or ""),
         )
@@ -99,6 +124,16 @@ class EvidenceRecord:
             out["url"] = self.url
         if self.summary:
             out["summary"] = self.summary
+        if self.strength:
+            out["strength"] = self.strength
+        if self.confidence:
+            out["confidence"] = self.confidence
+        if self.review_status:
+            out["review_status"] = self.review_status
+        if self.public_readiness:
+            out["public_readiness"] = self.public_readiness
+        if self.source_refs:
+            out["source_refs"] = list(self.source_refs)
         if self.deprecated:
             out["deprecated"] = True
         if self.replaced_by:

@@ -100,6 +100,71 @@ class TestProfileHealth(unittest.TestCase):
                 report = analyze_profile_health("evuser")
         self.assertTrue(any(i.category == "evidence" for i in report.issues))
 
+    def test_status_with_insufficient_evidence_strength_warns(self) -> None:
+        """solid needs medium+ and expert needs strong+, without validate errors."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._template_profile(Path(tmp_s), "strengthuser")
+            _pool = {
+                "profile": "strengthuser",
+                "evidence_entries": [
+                    {
+                        "id": "ev_weak",
+                        "type": "project",
+                        "title": "Weak proof",
+                        "strength": "weak",
+                        "review_status": "reviewed",
+                    },
+                    {
+                        "id": "ev_medium",
+                        "type": "project",
+                        "title": "Medium proof",
+                        "strength": "medium",
+                        "review_status": "reviewed",
+                    },
+                ],
+            }
+            tree = {
+                "profile": "strengthuser",
+                "schema": "robotics-engineer",
+                "updated": "2026-03-21",
+                "nodes": [
+                    {
+                        "id": "pose_estimation",
+                        "status": "solid",
+                        "evidence_refs": ["ev_weak"],
+                    },
+                    {
+                        "id": "experiment_design",
+                        "status": "expert",
+                        "evidence_refs": ["ev_medium"],
+                    },
+                ],
+            }
+            (profile / "evidence-pool.yaml").write_text(
+                yaml.dump(_pool, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            (profile / "skill-tree.yaml").write_text(
+                yaml.dump(tree, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.profile_health.profile_dir",
+                lambda _name: profile,
+            ):
+                report = analyze_profile_health("strengthuser")
+
+        evidence_issues = [
+            issue for issue in report.issues if issue.category == "evidence"
+        ]
+        self.assertGreaterEqual(len(evidence_issues), 2)
+        self.assertFalse(
+            any(
+                issue.category == "validate" and issue.severity == "error"
+                for issue in report.issues
+            )
+        )
+
     def test_done_task_not_crystallized_is_info(self) -> None:
         """Done tasks without crystallized true show a kanban info issue."""
         with tempfile.TemporaryDirectory() as tmp_s:

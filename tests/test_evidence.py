@@ -16,6 +16,7 @@ from nblane.core.gap import format_text
 from nblane.core.models import (
     EVIDENCE_TYPES,
     EvidencePool,
+    EvidenceRecord,
     SkillNode,
     SkillTree,
 )
@@ -81,6 +82,27 @@ class TestEvidenceModel(unittest.TestCase):
                 {"project", "paper", "course", "practice"}
             ),
         )
+
+    def test_evidence_record_review_fields_round_trip(self) -> None:
+        """Evidence pool rows preserve review and strength metadata."""
+        raw = {
+            "id": "ev_1",
+            "type": "project",
+            "title": "Reviewed project",
+            "strength": "strong",
+            "confidence": "high",
+            "review_status": "reviewed",
+            "public_readiness": "draftable",
+            "source_refs": ["commit:abc", "test:demo"],
+        }
+        record = EvidenceRecord.from_dict(raw)
+
+        self.assertEqual(record.strength, "strong")
+        self.assertEqual(record.confidence, "high")
+        self.assertEqual(record.review_status, "reviewed")
+        self.assertEqual(record.public_readiness, "draftable")
+        self.assertEqual(record.source_refs, ["commit:abc", "test:demo"])
+        self.assertEqual(record.to_dict(), raw)
 
 
 class TestEvidenceValidate(unittest.TestCase):

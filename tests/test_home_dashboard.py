@@ -76,6 +76,8 @@ class TestHomeDashboard(unittest.TestCase):
                         "id": "ev_linked",
                         "type": "project",
                         "title": "Linked evidence",
+                        "strength": "medium",
+                        "review_status": "reviewed",
                     },
                     {
                         "id": "ev_unused",
@@ -210,6 +212,8 @@ class TestHomeDashboard(unittest.TestCase):
 
         self.assertEqual(summary["done_uncrystallized_count"], 1)
         self.assertEqual(summary["unlinked_count"], 1)
+        self.assertEqual(summary["needs_review_count"], 1)
+        self.assertEqual(summary["status_risk_count"], 1)
         self.assertEqual(summary["unlinked"][0]["id"], "ev_unused")
 
     def test_source_summary_counts_active_inbox_without_raw_text(self) -> None:
@@ -325,7 +329,15 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertFalse(nodes["source:inbox"]["placeholder"])
         self.assertEqual(nodes["evidence_candidate:pending"]["layer"], "evidence")
         self.assertEqual(nodes["evidence_candidate:pending"]["metric"], "1")
-        self.assertEqual(nodes["atomic_evidence:pool"]["metric"], "2")
+        self.assertEqual(
+            nodes["evidence_candidate:pending"]["owner_path"],
+            "pages/2_Evidence_Review.py",
+        )
+        self.assertEqual(nodes["atomic_evidence:pool"]["metric"], "3")
+        self.assertEqual(
+            nodes["atomic_evidence:pool"]["owner_path"],
+            "pages/2_Evidence_Review.py",
+        )
         for node_id in (
             "project_case:planned",
             "daily_work:planned",
@@ -348,6 +360,12 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertIn("ROS 2 Basics", graph_text)
         self.assertTrue(
             any(link["path"] == "pages/3_Kanban.py" for link in payload["quick_links"])
+        )
+        self.assertTrue(
+            any(
+                link["path"] == "pages/2_Evidence_Review.py"
+                for link in payload["quick_links"]
+            )
         )
 
     def test_dashboard_payload_redacts_private_goal_editor(self) -> None:

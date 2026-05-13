@@ -117,4 +117,8 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
     assert "Sensitive north star" not in text
     nodes = {node["id"]: node for node in dumped["nodes"]}
     assert nodes["evidence_candidate:pending"]["metric"] == "1"
-    assert nodes["atomic_evidence:pool"]["metric"] == "1"
+    assert nodes["atomic_evidence:pool"]["metric"] == "2"
+    assert (
+        nodes["atomic_evidence:pool"]["owner_path"]
+        == "pages/2_Evidence_Review.py"
+    )

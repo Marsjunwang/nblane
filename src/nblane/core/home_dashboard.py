@@ -9,7 +9,11 @@ import yaml
 
 from nblane.core import io as io_facade
 from nblane.core import profile_health
-from nblane.core.evidence_resolve import resolved_evidence_count
+from nblane.core.evidence_review import (
+    EVIDENCE_REVIEW_PAGE,
+    build_evidence_review,
+    evidence_status_risks,
+)
 from nblane.core.goals import (
     GOAL_STATUSES,
     GOAL_UI_VISIBILITIES,
@@ -44,6 +48,13 @@ QUICK_LINKS: tuple[dict[str, str], ...] = (
         "label_key": "quick_kanban",
         "help_key": "quick_kanban_help",
         "kind": "work",
+    },
+    {
+        "id": "evidence_review",
+        "path": EVIDENCE_REVIEW_PAGE,
+        "label_key": "quick_evidence_review",
+        "help_key": "quick_evidence_review_help",
+        "kind": "growth",
     },
     {
         "id": "skill_tree",
@@ -345,22 +356,21 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
     schema_raw = io_facade.load_schema_raw(schema_name) if schema_name else None
     counts, total, index = _status_counts(tree_raw, schema_raw)
     lit = counts.get("expert", 0) + counts.get("solid", 0)
-    pool = io_facade.load_evidence_pool(profile)
     risk_nodes: list[dict[str, str]] = []
-    for node in _as_list(tree_raw.get("nodes")):
-        if not isinstance(node, dict) or not node.get("id"):
-            continue
-        status = str(node.get("status", "locked") or "locked")
-        if status not in ("solid", "expert"):
-            continue
-        if resolved_evidence_count(node, pool) > 0:
-            continue
-        node_id = str(node.get("id"))
+    for risk in evidence_status_risks(profile):
+        node_id = str(risk.get("id", "") or "")
         risk_nodes.append(
             {
                 "id": node_id,
-                "label": _node_label(index, node_id),
-                "status": status,
+                "label": str(risk.get("label") or _node_label(index, node_id)),
+                "status": str(risk.get("status", "") or ""),
+                "risk_level": str(risk.get("risk_level", "") or ""),
+                "highest_strength": str(
+                    risk.get("highest_strength", "") or "unrated"
+                ),
+                "required_strength": str(
+                    risk.get("required_strength", "") or ""
+                ),
             }
         )
 
@@ -381,44 +391,22 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
 
 def dashboard_pending_evidence_summary(profile: ProfileRef) -> dict:
     """Return lightweight evidence items that need review or linking."""
-    pdir = _profile_path(profile)
-    pool_raw = _read_yaml_mapping(pdir / "evidence-pool.yaml")
-    tree_raw = io_facade.load_skill_tree_raw(profile)
-    refs: set[str] = set()
-    if isinstance(tree_raw, dict):
-        for node in _as_list(tree_raw.get("nodes")):
-            if not isinstance(node, dict):
-                continue
-            for ref in _as_list(node.get("evidence_refs")):
-                text = str(ref).strip()
-                if text:
-                    refs.add(text)
-
-    entries = [
-        entry
-        for entry in _as_list(pool_raw.get("evidence_entries"))
-        if isinstance(entry, dict) and not bool(entry.get("deprecated", False))
-    ]
-    unlinked: list[dict[str, str]] = []
-    for entry in entries:
-        eid = str(entry.get("id", "") or "").strip()
-        if not eid or eid in refs:
-            continue
-        unlinked.append(
-            {
-                "id": eid,
-                "title": str(entry.get("title", "") or eid),
-                "type": str(entry.get("type", "") or ""),
-            }
-        )
-
-    kanban = dashboard_kanban_summary(profile)
+    review = build_evidence_review(profile)
+    summary = review.get("summary") or {}
     return {
-        "total_entries": len(entries),
-        "unlinked_count": len(unlinked),
-        "unlinked": unlinked[:5],
-        "done_uncrystallized_count": kanban["done_uncrystallized_count"],
-        "done_uncrystallized": kanban["done_uncrystallized"],
+        "total_entries": int(summary.get("total_entries", 0) or 0),
+        "unlinked_count": int(summary.get("unlinked_count", 0) or 0),
+        "unlinked": list(review.get("unlinked") or [])[:5],
+        "needs_review_count": int(summary.get("needs_review_count", 0) or 0),
+        "needs_review": list(review.get("needs_review") or [])[:5],
+        "status_risk_count": int(summary.get("status_risk_count", 0) or 0),
+        "status_risks": list(review.get("status_risks") or [])[:5],
+        "done_uncrystallized_count": int(
+            summary.get("done_uncrystallized_count", 0) or 0
+        ),
+        "done_uncrystallized": list(
+            review.get("done_uncrystallized") or []
+        )[:5],
     }
 
 
@@ -824,6 +812,8 @@ def _graph_payload(
     evidence_count = (
         int(pending.get("done_uncrystallized_count") or 0)
         + int(pending.get("unlinked_count") or 0)
+        + int(pending.get("needs_review_count") or 0)
+        + int(pending.get("status_risk_count") or 0)
     )
     nodes.append(
         {
@@ -839,7 +829,7 @@ def _graph_payload(
             "status": "pending" if evidence_count else "clear",
             "locked": False,
             "suggested": False,
-            "owner_path": "pages/1_Skill_Tree.py",
+            "owner_path": EVIDENCE_REVIEW_PAGE,
         }
     )
     nodes.append(
@@ -1031,6 +1021,8 @@ def dashboard_payload(
             "evidence": {
                 "done_uncrystallized": pending.get("done_uncrystallized_count", 0),
                 "unlinked": pending.get("unlinked_count", 0),
+                "needs_review": pending.get("needs_review_count", 0),
+                "status_risk": pending.get("status_risk_count", 0),
             },
             "public": {
                 "draft": public.get("draft_total", 0),

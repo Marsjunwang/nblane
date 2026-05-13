@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
 from nblane.core.goals import Goal, GoalSkillLink, goal_for_ui
 
 WORKSPACE_GRAPH_LAYERS: tuple[str, ...] = (
@@ -450,6 +451,12 @@ def workspace_graph_payload(
         )
 
     candidate_count = int(pending.get("done_uncrystallized_count") or 0)
+    unlinked_count = int(pending.get("unlinked_count") or 0)
+    needs_review_count = int(pending.get("needs_review_count") or 0)
+    status_risk_count = int(pending.get("status_risk_count") or 0)
+    atomic_attention_count = (
+        unlinked_count + needs_review_count + status_risk_count
+    )
     nodes.append(
         _node(
             id="evidence_candidate:pending",
@@ -458,7 +465,7 @@ def workspace_graph_payload(
             label=_ui_text(ui, "dashboard_evidence_candidate_title", "Evidence candidates"),
             metric=str(candidate_count),
             status="pending" if candidate_count else "clear",
-            owner_path="pages/3_Kanban.py",
+            owner_path=EVIDENCE_REVIEW_PAGE,
             placeholder=False,
         )
     )
@@ -468,9 +475,9 @@ def workspace_graph_payload(
             type="atomic_evidence",
             layer="evidence",
             label=_ui_text(ui, "dashboard_atomic_evidence_title", "Atomic evidence"),
-            metric=str(pending.get("total_entries", 0) or 0),
-            status="pending" if pending.get("unlinked_count") else "clear",
-            owner_path="pages/1_Skill_Tree.py",
+            metric=str(atomic_attention_count),
+            status="pending" if atomic_attention_count else "clear",
+            owner_path=EVIDENCE_REVIEW_PAGE,
         )
     )
     nodes.append(

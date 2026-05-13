@@ -292,6 +292,8 @@ export function normalizePayload(payload) {
       evidence: {
         doneUncrystallized: Math.max(0, Number(evidenceChart.done_uncrystallized) || 0),
         unlinked: Math.max(0, Number(evidenceChart.unlinked) || 0),
+        needsReview: Math.max(0, Number(evidenceChart.needs_review) || 0),
+        statusRisk: Math.max(0, Number(evidenceChart.status_risk) || 0),
       },
       public: {
         draft: Math.max(0, Number(publicChart.draft) || 0),

@@ -6,7 +6,13 @@ import copy
 import re
 
 from nblane.core.ingest_models import IngestPatch
-from nblane.core.models import EVIDENCE_TYPES
+from nblane.core.models import (
+    EVIDENCE_CONFIDENCES,
+    EVIDENCE_PUBLIC_READINESS,
+    EVIDENCE_REVIEW_STATUSES,
+    EVIDENCE_STRENGTHS,
+    EVIDENCE_TYPES,
+)
 from nblane.core.validate import ALLOWED_STATUS
 
 
@@ -165,6 +171,27 @@ def _normalize_evidence_row(row: dict) -> dict | None:
         val = row.get(key)
         if val is not None and str(val).strip():
             out[key] = str(val).strip()
+    strength = str(row.get("strength", "") or "").strip()
+    if strength in EVIDENCE_STRENGTHS:
+        out["strength"] = strength
+    confidence = str(row.get("confidence", "") or "").strip()
+    if confidence in EVIDENCE_CONFIDENCES:
+        out["confidence"] = confidence
+    review_status = str(row.get("review_status", "") or "").strip()
+    if review_status in EVIDENCE_REVIEW_STATUSES:
+        out["review_status"] = review_status
+    public_readiness = str(row.get("public_readiness", "") or "").strip()
+    if public_readiness in EVIDENCE_PUBLIC_READINESS:
+        out["public_readiness"] = public_readiness
+    source_refs = row.get("source_refs")
+    if isinstance(source_refs, list):
+        refs = [
+            str(item).strip()
+            for item in source_refs
+            if str(item).strip()
+        ]
+        if refs:
+            out["source_refs"] = refs
     if row.get("deprecated") is True:
         out["deprecated"] = True
     rb = str(row.get("replaced_by", "") or "").strip()

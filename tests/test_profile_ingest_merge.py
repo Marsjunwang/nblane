@@ -188,6 +188,51 @@ class TestMergeIngestPatch(unittest.TestCase):
             msg=m.warnings,
         )
 
+    def test_evidence_review_metadata_survives_merge(self) -> None:
+        """Ingest merge preserves supported evidence review metadata."""
+        pool = {
+            "profile": "t",
+            "evidence_entries": [],
+        }
+        tree = {
+            "profile": "t",
+            "schema": "robotics-engineer",
+            "updated": "2026-01-01",
+            "nodes": [
+                {"id": "ros2_basics", "status": "locked"},
+            ],
+        }
+        patch = {
+            "evidence_entries": [
+                {
+                    "type": "project",
+                    "title": "Reviewed demo",
+                    "strength": "medium",
+                    "confidence": "high",
+                    "review_status": "reviewed",
+                    "public_readiness": "draftable",
+                    "source_refs": ["kanban:done_ship"],
+                }
+            ],
+            "node_updates": [
+                {
+                    "id": "ros2_basics",
+                    "evidence_refs": ["first_1"],
+                }
+            ],
+        }
+
+        merged = merge_ingest_patch("t", pool, tree, patch)
+
+        self.assertTrue(merged.ok)
+        assert merged.merged_pool is not None
+        row = merged.merged_pool["evidence_entries"][0]
+        self.assertEqual(row["strength"], "medium")
+        self.assertEqual(row["confidence"], "high")
+        self.assertEqual(row["review_status"], "reviewed")
+        self.assertEqual(row["public_readiness"], "draftable")
+        self.assertEqual(row["source_refs"], ["kanban:done_ship"])
+
     def test_status_ignored_by_default(self) -> None:
         """status in patch is ignored unless allow_status_change."""
         pool = {

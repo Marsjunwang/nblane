@@ -5,15 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from nblane.core import io as io_facade
-from nblane.core.evidence_resolve import resolved_evidence_count
+from nblane.core.evidence_review import evidence_status_risks
 from nblane.core.io import (
     KANBAN_DONE,
-    load_evidence_pool,
-    load_schema_raw,
     load_skill_tree_raw,
     parse_kanban,
     profile_dir,
-    schema_node_index,
 )
 from nblane.core.sync import get_drifted_blocks
 from nblane.core.validate import validate_one
@@ -76,22 +73,6 @@ def _issue(
     )
 
 
-def _schema_labels(tree_raw: dict | None) -> dict[str, str]:
-    """Return node id -> schema label for a tree snapshot."""
-    if not isinstance(tree_raw, dict):
-        return {}
-    schema_name = tree_raw.get("schema")
-    if not schema_name:
-        return {}
-    schema_raw = load_schema_raw(str(schema_name))
-    if schema_raw is None:
-        return {}
-    return {
-        nid: str(meta.get("label") or nid)
-        for nid, meta in schema_node_index(schema_raw).items()
-    }
-
-
 def _validate_issues(profile_name: str) -> tuple[list[HealthIssue], bool]:
     """Run validate and return issues plus publish-blocking flag."""
     pdir = profile_dir(profile_name)
@@ -149,33 +130,35 @@ def _sync_issues(profile_name: str) -> tuple[list[HealthIssue], bool]:
     ], True
 
 
-def _evidence_issues(
-    profile_path,
-    tree_raw: dict | None,
-) -> list[HealthIssue]:
-    """Warn when solid/expert nodes lack materialized evidence."""
+def _evidence_issues(profile_path, tree_raw: dict | None) -> list[HealthIssue]:
+    """Warn when solid/expert nodes lack evidence or enough strength."""
     if not isinstance(tree_raw, dict):
         return []
-    pool = load_evidence_pool(profile_path)
-    labels = _schema_labels(tree_raw)
     issues: list[HealthIssue] = []
-    for node in tree_raw.get("nodes") or []:
-        if not isinstance(node, dict):
-            continue
-        status = str(node.get("status", "locked") or "locked")
-        if status not in ("solid", "expert"):
-            continue
-        if resolved_evidence_count(node, pool) > 0:
-            continue
-        nid = str(node.get("id", "") or "").strip()
-        label = labels.get(nid, nid)
+    for risk in evidence_status_risks(profile_path):
+        nid = str(risk.get("id", "") or "").strip()
+        label = str(risk.get("label", "") or nid)
+        status = str(risk.get("status", "") or "")
+        risk_level = str(risk.get("risk_level", "") or "")
+        required = str(risk.get("required_strength", "") or "")
+        highest = str(risk.get("highest_strength", "") or "unrated")
+        if risk_level == "missing_evidence":
+            detail = f"{nid} ({label}) is {status} with no resolved evidence."
+        else:
+            detail = (
+                f"{nid} ({label}) is {status}; highest evidence strength "
+                f"is {highest}, expected {required}+."
+            )
         issues.append(
             _issue(
                 "warning",
                 "evidence",
-                "Solid/expert node has no evidence",
-                f"{nid} ({label}) is {status} with no resolved evidence.",
-                "Add inline evidence or link an evidence-pool record.",
+                "Skill status lacks sufficient evidence",
+                detail,
+                (
+                    "Add/link stronger evidence in Evidence Review or "
+                    "reconsider the skill status."
+                ),
             )
         )
     return issues
