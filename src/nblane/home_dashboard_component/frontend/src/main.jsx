@@ -1066,10 +1066,11 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
   );
 }
 
-function HomeCaptureForm({ payload, onEmit }) {
+function HomeCaptureForm({ payload, onEmit, className = "" }) {
   const ui = payload.ui;
   const currentGoalId = primaryGoalId(payload);
   const sourceActive = Number(payload.sources.active_total || 0);
+  const formClassName = ["hd-capture-form", className].filter(Boolean).join(" ");
 
   function submit(event) {
     event.preventDefault();
@@ -1082,7 +1083,7 @@ function HomeCaptureForm({ payload, onEmit }) {
   }
 
   return (
-    <form className="hd-capture-form" onSubmit={submit}>
+    <form className={formClassName} onSubmit={submit}>
       <header>
         <span className="hd-eyebrow">{label(ui, "dashboard_today_capture_sources", "Capture / Sources")}</span>
         <strong>{label(ui, "dashboard_capture_title", "Capture source")}</strong>
@@ -1129,7 +1130,7 @@ function HomeCaptureForm({ payload, onEmit }) {
   );
 }
 
-function SkillProgressCard({ payload }) {
+function SkillProgressCard({ payload, className = "" }) {
   const ui = payload.ui;
   const counts = payload.charts.skills.counts || {};
   const totalCount = Math.max(0, Number(payload.charts.skills.total) || 0);
@@ -1138,13 +1139,18 @@ function SkillProgressCard({ payload }) {
   const lit = Math.max(0, Number(payload.charts.skills.lit) || 0);
   const litRate = total ? (Number(payload.charts.skills.litRate) || (lit / total)) : 0;
   const segments = skillSegments(counts, total);
+  const summaryMessage = total
+    ? `${label(ui, "dashboard_skill_progress_caption", "solid + expert lit rate")} · ${formatPercent(litRate)}`
+    : label(ui, "dashboard_skill_progress_empty", "No skill tree data yet.");
+  const cardClassName = ["hd-summary-card", "hd-skill-card", className].filter(Boolean).join(" ");
 
   return (
-    <article className="hd-summary-card hd-skill-card">
+    <article className={cardClassName}>
       <div className="hd-summary-head">
         <div>
           <span className="hd-eyebrow">{label(ui, "dashboard_skill_progress_title", "Skill Progress")}</span>
           <h4>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</h4>
+          <p className="hd-skill-head-copy">{summaryMessage}</p>
         </div>
         <span className="hd-summary-chip">{label(ui, "dashboard_skill_lit_rate", "Lit rate")}: {formatPercent(litRate)}</span>
       </div>
@@ -1194,13 +1200,41 @@ function SkillProgressCard({ payload }) {
           ))}
         </div>
       </div>
-
-      <p className="hd-summary-copy">
-        {total
-          ? `${label(ui, "dashboard_skill_progress_caption", "solid + expert lit rate")} · ${formatPercent(litRate)}`
-          : label(ui, "dashboard_skill_progress_empty", "No skill tree data yet.")}
-      </p>
     </article>
+  );
+}
+
+function HealthSummaryPanel({ payload, className = "" }) {
+  const ui = payload.ui;
+  const health = payload.charts.health || {};
+  const contextReady = Boolean(payload.health?.context_ready);
+  const panelClassName = ["hd-side-panel", "hd-health-panel", className].filter(Boolean).join(" ");
+
+  return (
+    <section className={panelClassName}>
+      <header>
+        <span className="hd-eyebrow">{label(ui, "dashboard_health_title", "Health")}</span>
+        <strong>{label(ui, "dashboard_health_title", "Health")}</strong>
+      </header>
+      <div className="hd-health-grid">
+        <div className="hd-health-chip">
+          <span>{label(ui, "dashboard_health_errors", "Errors")}</span>
+          <strong>{Number(health.error) || 0}</strong>
+        </div>
+        <div className="hd-health-chip">
+          <span>{label(ui, "dashboard_health_warnings", "Warnings")}</span>
+          <strong>{Number(health.warning) || 0}</strong>
+        </div>
+        <div className="hd-health-chip">
+          <span>{label(ui, "dashboard_health_info", "Info")}</span>
+          <strong>{Number(health.info) || 0}</strong>
+        </div>
+        <div className="hd-health-chip">
+          <span>{label(ui, "dashboard_health_context_ready", "Context ready")}</span>
+          <strong>{contextReady ? label(ui, "dashboard_yes", "Yes") : label(ui, "dashboard_no", "No")}</strong>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1209,8 +1243,8 @@ function Workbench({ payload, onEmit }) {
   const doing = asArray(payload.kanban.doing);
   const evidenceCandidates = Number(payload.pendingEvidence.done_uncrystallized_count || 0);
   const unlinkedAtomic = Number(payload.pendingEvidence.unlinked_count || 0);
-  const health = payload.charts.health;
   const gapRisk = Number(payload.skills.evidence_risk_count || 0) + asArray(payload.skills.target_learning_locked).length;
+  const quickLinks = asArray(payload.quickLinks);
 
   return (
     <section className="hd-workbench">
@@ -1222,76 +1256,49 @@ function Workbench({ payload, onEmit }) {
       </header>
 
       <div className="hd-workbench-layout">
-        <div className="hd-workbench-left">
-          <SkillProgressCard payload={payload} />
+        <SkillProgressCard payload={payload} className="hd-workbench-skill" />
 
-          <article className="hd-summary-card">
-            <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
-            <strong>{payload.kanban.doing_total || doing.length || 0}</strong>
-            <p>{doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
-          </article>
+        <HomeCaptureForm payload={payload} onEmit={onEmit} className="hd-workbench-capture" />
 
-          <article className="hd-summary-card">
-            <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
-            <strong>{evidenceCandidates}</strong>
-            <p>{label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}</p>
-          </article>
+        <article className="hd-summary-card hd-workbench-focus">
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
+          <strong>{payload.kanban.doing_total || doing.length || 0}</strong>
+          <p>{doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
+        </article>
 
-          <article className="hd-summary-card">
-            <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
-            <strong>{gapRisk}</strong>
-            <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
-          </article>
+        <article className="hd-summary-card hd-workbench-evidence">
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
+          <strong>{evidenceCandidates}</strong>
+          <p>{label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}</p>
+        </article>
 
-          <article className="hd-summary-card">
-            <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
-            <strong>{payload.charts.public.draft}</strong>
-            <p>{label(ui, "dashboard_public_published", "Published")}: {payload.charts.public.published}</p>
-          </article>
-        </div>
+        <article className="hd-summary-card hd-workbench-gap">
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
+          <strong>{gapRisk}</strong>
+          <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
+        </article>
 
-        <div className="hd-workbench-right">
-          <HomeCaptureForm payload={payload} onEmit={onEmit} />
+        <article className="hd-summary-card hd-workbench-output">
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
+          <strong>{payload.charts.public.draft}</strong>
+          <p>{label(ui, "dashboard_public_published", "Published")}: {payload.charts.public.published}</p>
+        </article>
 
-          <section className="hd-side-panel">
-            <header>
-              <span className="hd-eyebrow">{label(ui, "dashboard_quick_title", "Quick entries")}</span>
-              <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
-            </header>
-            <div className="hd-quick-grid">
-              {payload.quickLinks.map((link) => (
-                <button key={link.path} className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent(link.path))}>
-                  {cleanText(link.label, link.id)}
-                </button>
-              ))}
-            </div>
-          </section>
+        <section className="hd-side-panel hd-workbench-quick">
+          <header>
+            <span className="hd-eyebrow">{label(ui, "dashboard_quick_title", "Quick entries")}</span>
+            <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
+          </header>
+          <div className="hd-quick-grid">
+            {quickLinks.map((link) => (
+              <button key={link.path} className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent(link.path))}>
+                {cleanText(link.label, link.id)}
+              </button>
+            ))}
+          </div>
+        </section>
 
-          <section className="hd-side-panel">
-            <header>
-              <span className="hd-eyebrow">{label(ui, "dashboard_health_title", "Health")}</span>
-              <strong>{label(ui, "dashboard_health_title", "Health")}</strong>
-            </header>
-            <div className="hd-health-grid">
-              <div className="hd-health-chip">
-                <span>{label(ui, "dashboard_health_errors", "Errors")}</span>
-                <strong>{health.error}</strong>
-              </div>
-              <div className="hd-health-chip">
-                <span>{label(ui, "dashboard_health_warnings", "Warnings")}</span>
-                <strong>{health.warning}</strong>
-              </div>
-              <div className="hd-health-chip">
-                <span>{label(ui, "dashboard_health_info", "Info")}</span>
-                <strong>{health.info}</strong>
-              </div>
-              <div className="hd-health-chip">
-                <span>{label(ui, "dashboard_health_context_ready", "Context ready")}</span>
-                <strong>{payload.health.context_ready ? label(ui, "dashboard_yes", "Yes") : label(ui, "dashboard_no", "No")}</strong>
-              </div>
-            </div>
-          </section>
-        </div>
+        <HealthSummaryPanel payload={payload} className="hd-workbench-health" />
       </div>
     </section>
   );
