@@ -556,6 +556,7 @@ def analyze_kanban_task_gap(
     use_rule_match: bool = True,
     use_llm_router: bool = False,
     persist_router_keywords: bool = False,
+    goal_context: str = "",
 ) -> GapResult:
     """Run gap analysis for a kanban task found by stable task id."""
     found = _find_task_by_id(sections, task_id)
@@ -572,6 +573,12 @@ def analyze_kanban_task_gap(
         use_rule_match=use_rule_match,
         use_llm_router=use_llm_router,
         persist_router_keywords=persist_router_keywords,
+        goal_context=goal_context,
+        source_kind="kanban_task",
+        source_id=task_id,
+        source_label=task.title,
+        context_refs={"task_refs": [task_id]},
+        goal_context_used=bool(goal_context.strip()),
     )
 
 

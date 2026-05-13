@@ -1550,6 +1550,7 @@ def _handle_board_event(
                 use_rule_match=True,
                 use_llm_router=llm_client.is_configured(),
                 persist_router_keywords=False,
+                goal_context=current_goal_agent_context(profile),
             )
         state = st.session_state.setdefault(_gap_results_key(profile), {})
         state[task_id] = result

@@ -113,6 +113,7 @@ const WRITE_ACTIONS = new Set([
   "discard_visual_candidate",
   "create_post",
   "draft_from_evidence",
+  "draft_from_claims",
   "draft_from_done",
   "library_create_folder",
   "library_create_post",
@@ -193,9 +194,11 @@ const DEFAULT_LABELS = {
   draft: "draft",
   draft_from_done: "Draft from Done",
   draft_from_evidence: "Draft from evidence",
+  draft_from_claims: "Draft from claims",
   draft_from_title: "Draft from title",
   editor: "Editor",
   evidence_id: "Evidence ID",
+  claim_ids: "Claim IDs",
   example: "Example",
   exit_focus: "Exit focus",
   filter_posts: "Filter",
@@ -293,6 +296,7 @@ const DEFAULT_LABELS = {
   raw_yaml: "Markdown source",
   related_evidence: "Related evidence",
   related_kanban: "Related kanban",
+  related_claims: "Related claims",
   right_panel: "Tools",
   run_check: "Run check",
   rerun_check: "Run check again",
@@ -449,7 +453,7 @@ function normalizeMeta(raw) {
       meta[key] = "";
     }
   }
-  for (const key of ["tags", "related_evidence", "related_kanban"]) {
+  for (const key of ["tags", "related_evidence", "related_kanban", "related_claims"]) {
     if (!Array.isArray(meta[key])) {
       meta[key] = listFromCsv(meta[key]);
     } else {
@@ -906,12 +910,13 @@ function candidateMeta(candidate) {
     "tags",
     "related_evidence",
     "related_kanban",
+    "related_claims",
   ]) {
     if (candidate[key] !== undefined && meta[key] === undefined) {
       meta[key] = candidate[key];
     }
   }
-  for (const key of ["tags", "related_evidence", "related_kanban"]) {
+  for (const key of ["tags", "related_evidence", "related_kanban", "related_claims"]) {
     if (meta[key] !== undefined) {
       meta[key] = Array.isArray(meta[key])
         ? meta[key].map((item) => cleanText(item).trim()).filter(Boolean)
@@ -3102,6 +3107,7 @@ function ShellEditor(props) {
   const [newPostTitle, setNewPostTitle] = useState("");
   const [newPostCategory, setNewPostCategory] = useState(initialNewPostCategory);
   const [evidenceId, setEvidenceId] = useState("");
+  const [claimIds, setClaimIds] = useState("");
   const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
   const [largePreview, setLargePreview] = useState({ source: "", key: "" });
   const [layout, setLayoutState] = useState(() =>
@@ -4867,6 +4873,24 @@ function ShellEditor(props) {
                 {label(labels, "draft_from_evidence")}
               </button>
             </div>
+            <div className="nb-inline-form">
+              <input
+                value={claimIds}
+                disabled={!editable}
+                placeholder={label(labels, "claim_ids")}
+                onChange={(event) => setClaimIds(event.target.value)}
+              />
+              <button
+                type="button"
+                className="nb-button"
+                disabled={!editable || !claimIds.trim()}
+                onClick={() =>
+                  emitAction("draft_from_claims", { claim_ids: claimIds.trim() })
+                }
+              >
+                {label(labels, "draft_from_claims")}
+              </button>
+            </div>
             <button
               type="button"
               className="nb-button wide"
@@ -5272,6 +5296,14 @@ function MetaDrawer({ editable, labels, meta, onText, onList }) {
           onChange={(event) => onList("related_kanban", event.target.value)}
         />
       </label>
+      <label className="nb-field">
+        <span>{label(labels, "related_claims")}</span>
+        <input
+          value={csvFromValue(meta.related_claims)}
+          readOnly={!editable}
+          onChange={(event) => onList("related_claims", event.target.value)}
+        />
+      </label>
     </div>
   );
 }
@@ -5626,6 +5658,7 @@ function AiDrawer({
   currentTitle,
 }) {
   const [evidenceId, setEvidenceId] = useState("");
+  const [claimIds, setClaimIds] = useState("");
   const [candidatePlacement, setCandidatePlacement] = useState("cursor");
   return (
     <div className="nb-drawer-body">
@@ -5684,6 +5717,22 @@ function AiDrawer({
           className="nb-button"
           disabled={!editable || !evidenceId.trim()}
           onClick={() => onRun({ source: "evidence", evidence_id: evidenceId.trim() })}
+        >
+          {label(labels, "generate_candidate")}
+        </button>
+      </div>
+      <div className="nb-inline-form">
+        <input
+          value={claimIds}
+          disabled={!editable}
+          placeholder={label(labels, "claim_ids")}
+          onChange={(event) => setClaimIds(event.target.value)}
+        />
+        <button
+          type="button"
+          className="nb-button"
+          disabled={!editable || !claimIds.trim()}
+          onClick={() => onRun({ source: "claims", claim_ids: claimIds.trim() })}
         >
           {label(labels, "generate_candidate")}
         </button>

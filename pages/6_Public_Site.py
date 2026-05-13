@@ -34,6 +34,7 @@ from nblane.core import ai_stream_tasks
 from nblane.core import ai_blog_reviewer
 from nblane.core import visual_candidate_store
 from nblane.core import visual_generation
+from nblane.core.claims import accepted_claims
 from nblane.core.public_curation import (
     evidence_contexts,
     group_project,
@@ -53,6 +54,7 @@ from nblane.core.public_site import (
     PublicSiteError,
     RESUME_SOURCE_FILENAME,
     add_blog_media_bytes,
+    blog_candidate_from_claims,
     blog_candidate_from_evidence,
     blog_candidate_from_kanban_done,
     blog_candidate_from_title,
@@ -67,8 +69,10 @@ from nblane.core.public_site import (
     create_blog_draft,
     delete_blog_media,
     draft_blog_from_evidence,
+    draft_blog_from_claims,
     draft_blog_from_kanban_done,
     draft_project_update,
+    draft_project_update_from_claims,
     draft_resume_for_target,
     format_blog_document,
     init_public_layer,
@@ -84,6 +88,7 @@ from nblane.core.public_site import (
     render_blog_post_preview,
     render_public_site_preview,
     render_resume_markdown,
+    resume_bullet_candidates_from_claims,
     save_blog_post,
     validate_blog_text_for_publish,
     validate_public_layer,
@@ -123,7 +128,7 @@ except ImportError:  # pragma: no cover - optional while core API lands in paral
 from nblane.core.io import profile_dir
 from nblane.core.paths import REPO_ROOT
 from nblane.web_auth import require_login
-from nblane.web_cache import clear_web_cache
+from nblane.web_cache import clear_web_cache, load_evidence_pool_raw
 from nblane.web_shared import (
     apply_ui_language_from_session,
     assert_files_current,
@@ -177,6 +182,10 @@ def _ui() -> dict[str, str]:
             "tags_help": "用逗号分隔",
             "related_evidence": "关联 evidence",
             "related_kanban": "关联看板项",
+            "related_claims": "关联 claims",
+            "draft_from_claims": "从 claims 生成博客草稿",
+            "claim_ids": "Claim IDs",
+            "accepted_claims_empty": "暂无 accepted claims。",
             "insert_marker": "插入位置标记",
             "media": "媒体",
             "formula_block": "公式",
@@ -204,8 +213,10 @@ def _ui() -> dict[str, str]:
             "evidence_id": "Evidence ID",
             "target": "目标岗位 / 方向",
             "draft_resume": "生成定制简历草稿",
+            "draft_resume_bullets_from_claims": "从 claims 生成简历 bullet 候选",
             "project_id": "Project ID",
             "draft_update": "生成项目更新草稿",
+            "draft_update_from_claims": "从 claims 生成项目更新草稿",
             "output_dir": "输出目录",
             "base_url": "Base URL",
             "base_url_help": "生产部署域名，可包含子路径，例如 https://www.example.com/site。",
@@ -476,6 +487,10 @@ def _ui() -> dict[str, str]:
         "tags_help": "Comma-separated",
         "related_evidence": "Related evidence",
         "related_kanban": "Related kanban",
+        "related_claims": "Related claims",
+        "draft_from_claims": "Draft blog from claims",
+        "claim_ids": "Claim IDs",
+        "accepted_claims_empty": "No accepted claims yet.",
         "insert_marker": "Insert marker",
         "media": "Media",
         "formula_block": "Formula",
@@ -503,8 +518,10 @@ def _ui() -> dict[str, str]:
         "evidence_id": "Evidence ID",
         "target": "Target role / direction",
         "draft_resume": "Draft targeted resume",
+        "draft_resume_bullets_from_claims": "Draft resume bullets from claims",
         "project_id": "Project ID",
         "draft_update": "Draft project update",
+        "draft_update_from_claims": "Draft project update from claims",
         "output_dir": "Output directory",
         "base_url": "Base URL",
         "base_url_help": "Production site URL, optionally with a sub-path, e.g. https://www.example.com/site.",
@@ -3794,6 +3811,33 @@ def _render_blog_react_shell_fragment(
             st.error(str(exc))
         return True
 
+    if action == "draft_from_claims":
+        _blog_shell_store_draft(
+            selected,
+            latest_post.slug,
+            event_meta,
+            event_body,
+            dirty=dirty,
+            blocks_json=event_blocks,
+        )
+        claim_ids = payload.get("claim_ids")
+        if isinstance(claim_ids, str):
+            claim_ids = _csv_values(claim_ids)
+        if not isinstance(claim_ids, list):
+            claim_ids = []
+        try:
+            path = draft_blog_from_claims(
+                selected,
+                [str(item).strip() for item in claim_ids if str(item).strip()],
+            )
+            st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+        return True
+
     if action == "draft_from_done":
         _blog_shell_store_draft(
             selected,
@@ -3985,6 +4029,15 @@ def _render_blog_react_shell_fragment(
                     selected,
                     str(payload.get("evidence_id", "") or "").strip(),
                 )
+            elif source == "claims":
+                raw_claim_ids = payload.get("claim_ids")
+                if isinstance(raw_claim_ids, str):
+                    claim_ids = _csv_values(raw_claim_ids)
+                elif isinstance(raw_claim_ids, list):
+                    claim_ids = [str(item).strip() for item in raw_claim_ids if str(item).strip()]
+                else:
+                    claim_ids = []
+                candidate = blog_candidate_from_claims(selected, claim_ids)
             elif source == "kanban_done":
                 candidate = blog_candidate_from_kanban_done(selected)
             else:
@@ -4497,6 +4550,12 @@ def _blog_meta_from_state(
                 _csv_text(original_meta.get("related_kanban")),
             )
         ),
+        "related_claims": _csv_values(
+            st.session_state.get(
+                _blog_editor_key(selected, slug, "related_claims"),
+                _csv_text(original_meta.get("related_claims")),
+            )
+        ),
     }
 
 
@@ -4659,6 +4718,39 @@ def _render_blog_article_panel(
             except Exception as exc:
                 st.error(str(exc))
 
+    with st.expander(ui["draft_from_claims"]):
+        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+        if not claims:
+            st.caption(ui["accepted_claims_empty"])
+        claim_ids = [str(claim.get("id", "")) for claim in claims]
+        picked_claims = st.multiselect(
+            ui["claim_ids"],
+            options=claim_ids,
+            format_func=lambda claim_id: next(
+                (
+                    f"{claim_id} - {claim.get('text', '')}"
+                    for claim in claims
+                    if str(claim.get("id", "")) == claim_id
+                ),
+                claim_id,
+            ),
+            key=f"blog_left_claim_ids:{selected}",
+        )
+        if st.button(
+            ui["draft_from_claims"],
+            key=f"blog_left_draft_from_claims:{selected}",
+            disabled=not picked_claims,
+        ):
+            try:
+                path = draft_blog_from_claims(selected, picked_claims)
+                st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(str(path))
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
     if st.button(ui["draft_from_done"], key=f"blog_left_draft_from_done:{selected}"):
         try:
             path = draft_blog_from_kanban_done(selected)
@@ -4742,6 +4834,11 @@ def _render_blog_meta_panel(
         ui["related_kanban"],
         value=_csv_text(meta.get("related_kanban")),
         key=_blog_editor_key(selected, slug, "related_kanban"),
+    )
+    st.text_input(
+        ui["related_claims"],
+        value=_csv_text(meta.get("related_claims")),
+        key=_blog_editor_key(selected, slug, "related_claims"),
     )
 
 
@@ -5084,6 +5181,37 @@ def _render_blog_ai_panel(
             except Exception as exc:
                 st.error(str(exc))
 
+    with st.expander(ui["draft_from_claims"], expanded=False):
+        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+        if not claims:
+            st.caption(ui["accepted_claims_empty"])
+        claim_ids = [str(claim.get("id", "")) for claim in claims]
+        picked_claims = st.multiselect(
+            ui["claim_ids"],
+            options=claim_ids,
+            format_func=lambda claim_id: next(
+                (
+                    f"{claim_id} - {claim.get('text', '')}"
+                    for claim in claims
+                    if str(claim.get("id", "")) == claim_id
+                ),
+                claim_id,
+            ),
+            key=_blog_editor_key(selected, latest_post.slug, "ai_claim_ids"),
+        )
+        if st.button(
+            ui["generate_candidate"],
+            key=_blog_editor_key(selected, latest_post.slug, "ai_generate_claims"),
+            disabled=not picked_claims,
+        ):
+            try:
+                candidate = blog_candidate_from_claims(selected, picked_claims)
+                st.session_state[candidate_key] = candidate.body
+                st.session_state[meta_key] = candidate.to_dict()
+                st.success(ui["ai_candidate"])
+            except Exception as exc:
+                st.error(str(exc))
+
     if st.button(
         ui["draft_from_done"],
         key=_blog_editor_key(selected, latest_post.slug, "ai_generate_done"),
@@ -5178,7 +5306,12 @@ def _render_blog_ai_panel(
                     value = str(candidate_meta.get(field_name, "") or "").strip()
                     if value:
                         next_meta[field_name] = value
-                for field_name in ("tags", "related_evidence", "related_kanban"):
+                for field_name in (
+                    "tags",
+                    "related_evidence",
+                    "related_kanban",
+                    "related_claims",
+                ):
                     values = candidate_meta.get(field_name)
                     if isinstance(values, list):
                         next_meta[field_name] = [
@@ -5217,6 +5350,7 @@ def _render_blog_ai_panel(
                         "tags",
                         "related_evidence",
                         "related_kanban",
+                        "related_claims",
                     ):
                         values = candidate_meta.get(field_name)
                         if isinstance(values, list):
@@ -6056,6 +6190,51 @@ with tab_resume:
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(f"{html_path}\n{md_path}")
+    with st.expander(ui["draft_resume_bullets_from_claims"]):
+        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+        if not claims:
+            st.caption(ui["accepted_claims_empty"])
+        claim_ids = [str(claim.get("id", "")) for claim in claims]
+        picked_claims = st.multiselect(
+            ui["claim_ids"],
+            options=claim_ids,
+            format_func=lambda claim_id: next(
+                (
+                    f"{claim_id} - {claim.get('text', '')}"
+                    for claim in claims
+                    if str(claim.get("id", "")) == claim_id
+                ),
+                claim_id,
+            ),
+            key=f"resume_claim_ids:{selected}",
+        )
+        if st.button(
+            ui["draft_resume_bullets_from_claims"],
+            key=f"resume_generate_claim_bullets:{selected}",
+            disabled=not picked_claims,
+        ):
+            try:
+                bullets = resume_bullet_candidates_from_claims(
+                    selected,
+                    picked_claims,
+                )
+                st.session_state[f"resume_claim_bullets:{selected}"] = [
+                    bullet.to_dict()
+                    for bullet in bullets
+                ]
+            except Exception as exc:
+                st.error(str(exc))
+        bullets = st.session_state.get(f"resume_claim_bullets:{selected}", [])
+        if isinstance(bullets, list) and bullets:
+            st.code(
+                yaml.dump(
+                    bullets,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                ),
+                language="yaml",
+            )
 
 with tab_curation:
     st.caption(ui["curation_caption"])
@@ -6255,6 +6434,55 @@ with tab_build:
         if st.button(ui["draft_update"]):
             try:
                 path = draft_project_update(selected, project_id.strip())
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(str(path))
+            except Exception as exc:
+                st.error(str(exc))
+
+    with st.expander(ui["draft_update_from_claims"]):
+        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+        if not claims:
+            st.caption(ui["accepted_claims_empty"])
+        claim_ids = [str(claim.get("id", "")) for claim in claims]
+        project_ids = [
+            str(project.get("id", "") or "")
+            for project in load_projects(selected)
+            if isinstance(project, dict) and str(project.get("id", "") or "")
+        ]
+        if not project_ids:
+            st.caption(ui["current_projects"])
+            project_id = ""
+        else:
+            project_id = st.selectbox(
+                ui["project_id"],
+                options=project_ids,
+                key=f"project_update_claim_project:{selected}",
+            )
+        picked_claims = st.multiselect(
+            ui["claim_ids"],
+            options=claim_ids,
+            format_func=lambda claim_id: next(
+                (
+                    f"{claim_id} - {claim.get('text', '')}"
+                    for claim in claims
+                    if str(claim.get("id", "")) == claim_id
+                ),
+                claim_id,
+            ),
+            key=f"project_update_claim_ids:{selected}",
+        )
+        if st.button(
+            ui["draft_update_from_claims"],
+            key=f"project_update_from_claims:{selected}",
+            disabled=not project_id or not picked_claims,
+        ):
+            try:
+                path = draft_project_update_from_claims(
+                    selected,
+                    project_id,
+                    picked_claims,
+                )
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(str(path))

@@ -24,6 +24,7 @@ from schemas.blocknote_doc import Document as BlockNoteDocument
 from schemas.blocknote_doc import coerce_blocks, document_to_dict
 from nblane.core import git_backup, llm, visual_generation
 from nblane.core.ai_blog_prompts import get_prompt
+from nblane.core.claims import accepted_claim_index, claim_index
 from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
@@ -356,6 +357,7 @@ class BlogDraftCandidate:
     tags: list[str] = field(default_factory=list)
     related_evidence: list[str] = field(default_factory=list)
     related_kanban: list[str] = field(default_factory=list)
+    related_claims: list[str] = field(default_factory=list)
     cover_prompt: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -367,9 +369,29 @@ class BlogDraftCandidate:
             "tags": list(self.tags),
             "related_evidence": list(self.related_evidence),
             "related_kanban": list(self.related_kanban),
+            "related_claims": list(self.related_claims),
             "cover_prompt": self.cover_prompt,
             "warnings": list(self.warnings),
             "body": self.body,
+        }
+
+
+@dataclass
+class ResumeBulletCandidate:
+    """Resume bullet candidate generated from accepted claims."""
+
+    text: str
+    related_claims: list[str] = field(default_factory=list)
+    related_evidence: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Serialize for UI previews."""
+        return {
+            "text": self.text,
+            "related_claims": list(self.related_claims),
+            "related_evidence": list(self.related_evidence),
+            "warnings": list(self.warnings),
         }
 
 
@@ -2236,6 +2258,7 @@ def _normalize_blog_meta(meta: dict) -> dict:
         "tags",
         "related_evidence",
         "related_kanban",
+        "related_claims",
         "category_path",
         "aliases",
     ):
@@ -2335,6 +2358,41 @@ def _evidence_index(name: str) -> dict[str, dict]:
                 if eid:
                     out[eid] = item
     return out
+
+
+def _claim_index(name: str) -> dict[str, dict]:
+    """Return all claim id -> claim from evidence-pool.yaml."""
+    raw = _read_yaml_mapping(_profile_path(name) / "evidence-pool.yaml")
+    return claim_index(raw)
+
+
+def _accepted_claim_index(name: str) -> dict[str, dict]:
+    """Return accepted claim id -> claim from evidence-pool.yaml."""
+    raw = _read_yaml_mapping(_profile_path(name) / "evidence-pool.yaml")
+    return accepted_claim_index(raw)
+
+
+def _validate_claim_refs(
+    result: PublicValidationResult,
+    label: str,
+    refs: list[str],
+    known_claims: dict[str, dict],
+    known_evidence_ids: set[str],
+) -> None:
+    """Validate claim provenance for public-output front matter."""
+    for ref in refs:
+        claim = known_claims.get(ref)
+        if claim is None:
+            result.errors.append(f"{label}: unknown claim ref '{ref}'")
+            continue
+        if str(claim.get("status", "") or "") != "accepted":
+            result.errors.append(f"{label}: claim ref '{ref}' is not accepted")
+        for evidence_ref in _as_string_list(claim.get("evidence_refs")):
+            if evidence_ref not in known_evidence_ids:
+                result.errors.append(
+                    f"{label}: claim ref '{ref}' has unknown evidence ref "
+                    f"'{evidence_ref}'"
+                )
 
 
 def _skill_refs_for_evidence(name: str, refs: list[str]) -> list[str]:
@@ -3367,6 +3425,7 @@ def validate_blog_text_for_publish(
         root,
         post,
         known_evidence_ids=_evidence_ids(name),
+        known_claims=_claim_index(name),
         include_refs=True,
         require_publish_ready=True,
     )
@@ -3379,6 +3438,7 @@ def _validate_blog_post(
     post: BlogPost,
     *,
     known_evidence_ids: set[str],
+    known_claims: dict[str, dict] | None = None,
     include_refs: bool,
     require_publish_ready: bool,
 ) -> None:
@@ -3415,6 +3475,11 @@ def _validate_blog_post(
         list,
     ):
         type_diagnostics.append(f"{label}: 'related_kanban' must be a list")
+    if "related_claims" in post.meta and not isinstance(
+        post.meta.get("related_claims"),
+        list,
+    ):
+        type_diagnostics.append(f"{label}: 'related_claims' must be a list")
     cover = post.meta.get("cover", "")
     if require_publish_ready or str(cover or "").strip():
         _validate_blog_cover(
@@ -3428,6 +3493,13 @@ def _validate_blog_post(
             result,
             label,
             _as_string_list(post.meta.get("related_evidence")),
+            known_evidence_ids,
+        )
+        _validate_claim_refs(
+            result,
+            label,
+            _as_string_list(post.meta.get("related_claims")),
+            known_claims or {},
             known_evidence_ids,
         )
     if require_publish_ready or post.body.strip():
@@ -3448,6 +3520,7 @@ def validate_public_layer(
     root = _profile_path(name)
     result = PublicValidationResult()
     known_ids = _evidence_ids(name)
+    known_claims = _claim_index(name)
     blog_taxonomy = load_blog_taxonomy(name)
     public_library = load_public_library(name)
     _validate_blog_taxonomy(result, blog_taxonomy)
@@ -3586,6 +3659,7 @@ def validate_public_layer(
                 root,
                 post,
                 known_evidence_ids=known_ids,
+                known_claims=known_claims,
                 include_refs=include_refs,
                 require_publish_ready=(post.status == "published"),
             )
@@ -6952,6 +7026,7 @@ def create_blog_draft(
     summary: str = "",
     related_evidence: list[str] | None = None,
     related_kanban: list[str] | None = None,
+    related_claims: list[str] | None = None,
     slug: str | None = None,
     category_path: list[str] | None = None,
     respect_taxonomy: bool = True,
@@ -6986,6 +7061,7 @@ def create_blog_draft(
         "category_path": post_category,
         "related_evidence": related_evidence or [],
         "related_kanban": related_kanban or [],
+        "related_claims": related_claims or [],
     }
     _write_blog_post_file(
         name,
@@ -7047,6 +7123,7 @@ def _candidate_from_mapping(
         tags=_candidate_string_list(data.get("tags")),
         related_evidence=_candidate_string_list(data.get("related_evidence")),
         related_kanban=_candidate_string_list(data.get("related_kanban")),
+        related_claims=_candidate_string_list(data.get("related_claims")),
         cover_prompt=str(data.get("cover_prompt", "") or "").strip(),
         warnings=_candidate_string_list(data.get("warnings")),
     )
@@ -7154,6 +7231,216 @@ def draft_blog_from_evidence(name: str, evidence_id: str) -> Path:
         summary=candidate.summary,
         related_evidence=candidate.related_evidence,
         related_kanban=candidate.related_kanban,
+        related_claims=candidate.related_claims,
+    )
+
+
+def blog_candidate_from_claims(
+    name: str,
+    claim_ids: list[str],
+) -> BlogDraftCandidate:
+    """Return a blog draft candidate from accepted claims without writing."""
+    known_claims = _accepted_claim_index(name)
+    evidence = _evidence_index(name)
+    selected: list[dict] = []
+    missing: list[str] = []
+    for claim_id in _candidate_string_list(claim_ids):
+        claim = known_claims.get(claim_id)
+        if claim is None:
+            missing.append(claim_id)
+            continue
+        selected.append(claim)
+    if missing:
+        raise PublicSiteError(f"Unknown claim id(s): {', '.join(missing)}")
+    if not selected:
+        raise PublicSiteError("At least one accepted claim is required")
+
+    related_evidence: list[str] = []
+    for claim in selected:
+        for evidence_id in _as_string_list(claim.get("evidence_refs")):
+            if evidence_id not in related_evidence:
+                related_evidence.append(evidence_id)
+    supporting_evidence = [
+        evidence[evidence_id]
+        for evidence_id in related_evidence
+        if evidence_id in evidence
+    ]
+    title = str(selected[0].get("text", "") or selected[0].get("id", "Claim draft"))
+    title = title.strip().rstrip(".。")
+    if len(title) > 80:
+        title = title[:77].rstrip() + "..."
+
+    fallback_lines = ["## What the evidence supports", ""]
+    for claim in selected:
+        fallback_lines.append(f"- {claim.get('text', '')}")
+    fallback_lines.extend(["", "## Supporting evidence", ""])
+    for row in supporting_evidence:
+        fallback_lines.append(f"- `{row.get('id', '')}` {row.get('title', '')}")
+    fallback_lines.extend(
+        [
+            "",
+            "## Public narrative",
+            "",
+            "Turn the accepted claims into a publishable narrative without adding unsupported facts.",
+        ]
+    )
+    fallback = "\n".join(fallback_lines) + "\n"
+    system = (
+        "You draft public blog candidates from accepted nblane claims and "
+        "their supporting evidence. Use only the provided claims and evidence. "
+        "Do not invent metrics, dates, links, employers, publications, or "
+        "extra claims. Return Markdown body only. The result is a candidate "
+        "for human review."
+    )
+    body = _chat_or_fallback(
+        system,
+        _dump_yaml(
+            {
+                "claims": selected,
+                "supporting_evidence": supporting_evidence,
+            }
+        ),
+        fallback,
+    )
+    warnings = [
+        "Review claim wording, links, metrics, and private details before publishing.",
+    ]
+    dangling = [
+        evidence_id
+        for evidence_id in related_evidence
+        if evidence_id not in evidence
+    ]
+    if dangling:
+        warnings.append(
+            "Some claim evidence refs are missing: " + ", ".join(dangling)
+        )
+    return BlogDraftCandidate(
+        title=title or "Claim-backed draft",
+        body=body,
+        tags=["claims"],
+        summary="Draft public article from accepted claims.",
+        related_evidence=related_evidence,
+        related_claims=[str(claim.get("id", "")) for claim in selected],
+        warnings=warnings,
+    )
+
+
+def _accepted_claim_selection(
+    name: str,
+    claim_ids: list[str],
+) -> tuple[list[dict], list[str], list[dict], list[str]]:
+    """Return accepted claims, evidence ids, supporting evidence, and warnings."""
+    known_claims = _accepted_claim_index(name)
+    evidence = _evidence_index(name)
+    selected: list[dict] = []
+    missing: list[str] = []
+    for claim_id in _candidate_string_list(claim_ids):
+        claim = known_claims.get(claim_id)
+        if claim is None:
+            missing.append(claim_id)
+            continue
+        selected.append(claim)
+    if missing:
+        raise PublicSiteError(f"Unknown claim id(s): {', '.join(missing)}")
+    if not selected:
+        raise PublicSiteError("At least one accepted claim is required")
+    related_evidence: list[str] = []
+    for claim in selected:
+        for evidence_id in _as_string_list(claim.get("evidence_refs")):
+            if evidence_id not in related_evidence:
+                related_evidence.append(evidence_id)
+    supporting_evidence = [
+        evidence[evidence_id]
+        for evidence_id in related_evidence
+        if evidence_id in evidence
+    ]
+    warnings: list[str] = []
+    dangling = [
+        evidence_id
+        for evidence_id in related_evidence
+        if evidence_id not in evidence
+    ]
+    if dangling:
+        warnings.append(
+            "Some claim evidence refs are missing: " + ", ".join(dangling)
+        )
+    return selected, related_evidence, supporting_evidence, warnings
+
+
+def resume_bullet_candidates_from_claims(
+    name: str,
+    claim_ids: list[str],
+) -> list[ResumeBulletCandidate]:
+    """Return resume bullet candidates from accepted claims without writing."""
+    selected, related_evidence, supporting_evidence, warnings = _accepted_claim_selection(
+        name,
+        claim_ids,
+    )
+    fallback_lines = [
+        f"- {str(claim.get('text', '') or '').strip()}"
+        for claim in selected
+        if str(claim.get("text", "") or "").strip()
+    ]
+    fallback = "\n".join(fallback_lines) or "- Add a claim-backed resume bullet."
+    system = (
+        "You convert accepted nblane claims into concise resume bullets. "
+        "Use only the provided claims and supporting evidence. Do not invent "
+        "metrics, employers, dates, titles, links, or unverified outcomes. "
+        "Return only a Markdown bullet list."
+    )
+    body = _chat_or_fallback(
+        system,
+        _dump_yaml(
+            {
+                "claims": selected,
+                "supporting_evidence": supporting_evidence,
+            }
+        ),
+        fallback,
+    )
+    bullets: list[ResumeBulletCandidate] = []
+    for line in body.splitlines():
+        text = re.sub(r"^\s*[-*]\s+", "", line).strip()
+        if not text:
+            continue
+        bullets.append(
+            ResumeBulletCandidate(
+                text=text,
+                related_claims=[str(claim.get("id", "")) for claim in selected],
+                related_evidence=related_evidence,
+                warnings=list(warnings),
+            )
+        )
+    if not bullets:
+        bullets.append(
+            ResumeBulletCandidate(
+                text=fallback.lstrip("- ").strip(),
+                related_claims=[str(claim.get("id", "")) for claim in selected],
+                related_evidence=related_evidence,
+                warnings=list(warnings),
+            )
+        )
+    review_warning = (
+        "Review claim wording, metrics, scope, and private details before adding to resume-source.yaml."
+    )
+    for bullet in bullets:
+        if review_warning not in bullet.warnings:
+            bullet.warnings.append(review_warning)
+    return bullets
+
+
+def draft_blog_from_claims(name: str, claim_ids: list[str]) -> Path:
+    """Create a blog draft from accepted claims."""
+    candidate = blog_candidate_from_claims(name, claim_ids)
+    return create_blog_draft(
+        name,
+        title=candidate.title,
+        body=candidate.body,
+        tags=candidate.tags,
+        summary=candidate.summary,
+        related_evidence=candidate.related_evidence,
+        related_kanban=candidate.related_kanban,
+        related_claims=candidate.related_claims,
     )
 
 
@@ -7212,6 +7499,7 @@ def draft_blog_from_kanban_done(name: str) -> Path:
         summary=candidate.summary,
         related_evidence=candidate.related_evidence,
         related_kanban=candidate.related_kanban,
+        related_claims=candidate.related_claims,
     )
 
 
@@ -7294,6 +7582,77 @@ def draft_project_update(name: str, project_id: str) -> Path:
     git_backup.record_change(
         [path],
         action=f"draft {name} project update",
+    )
+    return path
+
+
+def draft_project_update_from_claims(
+    name: str,
+    project_id: str,
+    claim_ids: list[str],
+) -> Path:
+    """Append a draft project update from accepted claims."""
+    root = _profile_path(name)
+    path = root / PROJECTS_FILENAME
+    raw = _read_yaml_mapping(path)
+    projects = raw.get("projects") or []
+    if not isinstance(projects, list):
+        raise PublicSiteError(f"{PROJECTS_FILENAME}: projects must be a list")
+    target: dict | None = None
+    for item in projects:
+        if isinstance(item, dict) and str(item.get("id", "")) == project_id:
+            target = item
+            break
+    if target is None:
+        raise PublicSiteError(f"Unknown project id: {project_id}")
+
+    selected, related_evidence, supporting_evidence, warnings = _accepted_claim_selection(
+        name,
+        claim_ids,
+    )
+    title = f"{target.get('title', project_id)} claim-backed update"
+    fallback_lines = [f"Update draft for {target.get('title', project_id)}.", ""]
+    fallback_lines.append("Supported claims:")
+    for claim in selected:
+        fallback_lines.append(f"- {claim.get('text', '')}")
+    fallback = "\n".join(fallback_lines) + "\n"
+    system = (
+        "You draft a public project update from accepted nblane claims, "
+        "supporting evidence, and a project row. Use only the provided facts. "
+        "Do not invent claims, metrics, dates, links, employers, or outcomes. "
+        "Return Markdown body only."
+    )
+    body = _chat_or_fallback(
+        system,
+        _dump_yaml(
+            {
+                "project": target,
+                "claims": selected,
+                "supporting_evidence": supporting_evidence,
+            }
+        ),
+        fallback,
+    )
+    updates = target.setdefault("draft_updates", [])
+    if not isinstance(updates, list):
+        updates = []
+        target["draft_updates"] = updates
+    updates.append(
+        {
+            "id": _slugify(f"{date.today().isoformat()}-{project_id}-claims"),
+            "date": date.today().isoformat(),
+            "status": "draft",
+            "title": title,
+            "body": body,
+            "related_claims": [str(claim.get("id", "")) for claim in selected],
+            "evidence_refs": related_evidence,
+            "warnings": warnings,
+        }
+    )
+    _write_yaml(path, {"projects": projects})
+    git_backup.record_change(
+        [path],
+        action=f"draft {name} project update from claims",
     )
     return path
 

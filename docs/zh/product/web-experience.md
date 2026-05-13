@@ -3,7 +3,7 @@
 ## status: active
 
 owner: product
-last_verified: 2026-05-12
+last_verified: 2026-05-13
 source_of_truth: true
 
 # Web 体验设计（Streamlit）
@@ -548,6 +548,16 @@ Goal
 - Evidence Review 已支持编辑 evidence row 的 `project_refs`、`experience_refs`、`source_refs`，并提供最小 Project / Experience case 编辑入口。
 - Dashboard / Workspace Graph 已能读取 research source 和 project case；私密 project title 不进入 graph payload。
 - Profile Health 已对内部 workspace refs 做 dangling warning，不阻断 context 发布。
+
+### 6.5 P2 当前落地状态
+
+以下 P2 已有最小可用实现：
+
+- Evidence Review 已新增 Claim Candidates tab：从已选 evidence 生成候选，人工应用后写入 `evidence-pool.yaml.claims`，不创建独立 Claims 页面，也不自动提升 skill status。
+- Evidence Review read model 已提供 accepted claims 的 evidence / skill / project / experience / source / output 反查索引，供页面和后续 Dashboard 使用。
+- Gap Analysis 已支持从手动输入、privacy-safe current goal、Doing / Queue kanban task 选择上下文；Kanban inline Gap 也会带入允许进入 agent context 的 current goal。
+- GapResult 已记录 source provenance 和 goal context 使用状态；展示和 CLI / LLM 格式化会显示来源，但不改变原有匹配结果结构。
+- Public Site / Output Studio 的 Blog front matter 已支持 `related_claims`；可从 accepted claims 生成 Blog 候选/草稿、project update 草稿和 resume bullet 候选，并在发布校验中检查 claim id、accepted 状态和 supporting evidence refs。
 
 
 ## 7. 已知摩擦与 backlog

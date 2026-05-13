@@ -421,10 +421,9 @@ def cmd_evidence_pool_remove(
     if opts.prune_refs:
         new_tree = prune_pool_id_from_tree(tree, eid)
 
-    merged_pool = {
-        "profile": name,
-        "evidence_entries": new_plain,
-    }
+    merged_pool = dict(pool_raw)
+    merged_pool["profile"] = name
+    merged_pool["evidence_entries"] = new_plain
     outcome = apply_merged_profile(
         name,
         merged_pool,

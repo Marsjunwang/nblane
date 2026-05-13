@@ -16,6 +16,15 @@ EVIDENCE_PUBLIC_READINESS = (
     "public_ready",
     "published",
 )
+CLAIM_TYPES = (
+    "achievement",
+    "skill",
+    "impact",
+    "role",
+    "learning",
+    "project",
+)
+CLAIM_STATUSES = ("accepted",)
 
 
 @dataclass
@@ -168,6 +177,7 @@ class EvidencePool:
     profile: str = ""
     updated: str = ""
     evidence_entries: list[EvidenceRecord] = field(default_factory=list)
+    claims: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: dict) -> EvidencePool:
@@ -182,6 +192,11 @@ class EvidencePool:
             profile=str(d.get("profile", "") or ""),
             updated=str(d.get("updated", "") or ""),
             evidence_entries=entries,
+            claims=[
+                dict(item)
+                for item in (d.get("claims") or [])
+                if isinstance(item, dict)
+            ],
         )
 
     def to_dict(self) -> dict:
@@ -193,6 +208,8 @@ class EvidencePool:
                 e.to_dict() for e in self.evidence_entries
             ],
         }
+        if self.claims:
+            out["claims"] = [dict(item) for item in self.claims]
         return out
 
     def by_id(self) -> dict[str, EvidenceRecord]:
@@ -377,3 +394,8 @@ class GapResult:
     roots_from_rule: list[str] = field(default_factory=list)
     roots_from_llm: list[str] = field(default_factory=list)
     learned_merged: bool = False
+    source_kind: str = ""
+    source_id: str = ""
+    source_label: str = ""
+    context_refs: dict[str, list[str]] = field(default_factory=dict)
+    goal_context_used: bool = False

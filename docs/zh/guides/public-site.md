@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-08
+last_verified: 2026-05-13
 source_of_truth: true
 ---
 
@@ -61,6 +61,11 @@ auth/users.yaml
 
 公开项目是 evidence 的聚合视图。`evidence-pool.yaml` 继续保留原子工作
 留痕；只有人工确认后，才把多条 evidence id 聚合进 `projects.yaml`。
+
+Blog front matter 也可以通过 `related_claims` 记录 accepted claim provenance。
+这些 claim 来自 `evidence-pool.yaml` 顶层 `claims` 列表，不是独立
+`claims.yaml`。发布校验会检查 claim id 是否存在、状态是否为 `accepted`，
+以及 claim 里的 `evidence_refs` 是否仍存在；静态站不会直接渲染 claim id。
 
 ## CLI
 
@@ -320,10 +325,14 @@ Web UI 新增 **Public Site** 页面：
   Editor / Articles / Tools / Preview tab、专注模式和 browser `localStorage`
   布局记忆。Streamlit 继续负责文件 I/O、session state、上传落盘、AI / 视觉调用、
   发布校验、静态预览与 Git backup。
+  Blog front matter 支持 `related_claims`；可以从 accepted claims 生成候选或草稿，
+  并把 claim 的 supporting evidence 合并到 `related_evidence`。
 - **Resume** 编辑 `resume-source.yaml`，预览生成简历，并生成定制简历草稿。
+  Resume 也可以从 accepted claims 生成 bullet 候选预览；候选不会自动写回
+  `resume-source.yaml`。
 - **Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
   生成 draft 项目。
-- **Build** 校验并构建静态站，也可以生成项目更新草稿。
+- **Build** 校验并构建静态站，也可以从项目 evidence 或 accepted claims 生成项目更新草稿。
 
 该页面复用现有 profile 选择器、文件 snapshot 冲突保护、缓存清理与可选 Git
 备份。

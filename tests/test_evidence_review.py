@@ -73,6 +73,18 @@ class TestEvidenceReview(unittest.TestCase):
                         "deprecated": True,
                     },
                 ],
+                "claims": [
+                    {
+                        "id": "claim:demo",
+                        "status": "accepted",
+                        "type": "achievement",
+                        "text": "Demo claim.",
+                        "evidence_refs": ["ev_medium"],
+                        "skill_refs": ["experiment_design"],
+                        "project_refs": ["project:demo"],
+                        "experience_refs": ["experience:robotics-lab"],
+                    }
+                ],
             },
         )
         _write_yaml(
@@ -168,6 +180,11 @@ class TestEvidenceReview(unittest.TestCase):
         self.assertEqual(
             medium["source_refs"],
             ["source:research:20260513-001"],
+        )
+        self.assertEqual(medium["claim_refs"], ["claim:demo"])
+        self.assertEqual(
+            review["claim_usage"]["by_skill"]["experiment_design"][0]["id"],
+            "claim:demo",
         )
         self.assertEqual(review["project_options"][0]["id"], "project:demo")
         self.assertEqual(

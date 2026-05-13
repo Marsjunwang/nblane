@@ -5,6 +5,10 @@ from __future__ import annotations
 import streamlit as st
 
 from nblane.core import gap as gap_engine
+from nblane.core.gap_context import (
+    default_gap_context_key,
+    gap_context_options,
+)
 from nblane.core import learned_keywords as lk_store
 from nblane.core import llm as llm_client
 from nblane.core.io import (
@@ -241,26 +245,75 @@ with col_right_top:
         render_llm_unavailable(ui)
 
 with col_left:
+    context_options = gap_context_options(selected)
+    previous_context_key = str(
+        st.session_state.get("gap_context_source", "") or ""
+    )
+    default_context_key = default_gap_context_key(
+        context_options,
+        previous_context_key,
+    )
+    context_keys = [option.key for option in context_options]
+    context_key = st.selectbox(
+        ui["context_source_label"],
+        options=context_keys,
+        index=context_keys.index(default_context_key)
+        if default_context_key in context_keys
+        else 0,
+        format_func=lambda key: next(
+            (
+                option.label
+                for option in context_options
+                if option.key == key
+            ),
+            key,
+        ),
+        key="gap_context_source",
+    )
+    selected_context = next(
+        (
+            option
+            for option in context_options
+            if option.key == context_key
+        ),
+        context_options[0],
+    )
     goal_context = current_goal_agent_context(selected)
+    is_goal_context_source = selected_context.kind == "current_goal"
     use_goal_context = st.checkbox(
         ui["use_goal_context"],
-        value=bool(goal_context),
-        disabled=not bool(goal_context),
+        value=bool(goal_context) and not is_goal_context_source,
+        disabled=not bool(goal_context) or is_goal_context_source,
         key="gap_use_goal_context",
     )
     active_goal_context = (
-        goal_context if goal_context and use_goal_context else ""
+        goal_context
+        if goal_context and use_goal_context and not is_goal_context_source
+        else ""
     )
     st.caption(
         ui["goal_context_used"]
         if active_goal_context
         else ui["goal_context_not_used"]
     )
-    task = st.text_area(
-        ui["task_label"],
-        placeholder=ui["task_placeholder"],
-        height=100,
-    )
+    if selected_context.kind == "manual":
+        task = st.text_area(
+            ui["task_label"],
+            placeholder=ui["task_placeholder"],
+            height=100,
+        )
+    else:
+        st.caption(
+            ui["context_privacy_label"].format(
+                state=selected_context.privacy_state or "-"
+            )
+        )
+        task = st.text_area(
+            ui["task_label"],
+            value=selected_context.body,
+            height=150,
+            disabled=True,
+        )
     use_rule = st.checkbox(
         ui["use_rule_match"],
         value=True,
@@ -303,6 +356,11 @@ if run and can_run:
                 task,
                 explicit_node=manual_node,
                 goal_context=active_goal_context,
+                source_kind=selected_context.kind,
+                source_id=selected_context.id,
+                source_label=selected_context.label,
+                context_refs=selected_context.refs,
+                goal_context_used=bool(active_goal_context),
             )
         else:
             result = gap_engine.analyze(
@@ -311,6 +369,11 @@ if run and can_run:
                 use_rule_match=use_rule,
                 use_llm_router=use_llm,
                 goal_context=active_goal_context,
+                source_kind=selected_context.kind,
+                source_id=selected_context.id,
+                source_label=selected_context.label,
+                context_refs=selected_context.refs,
+                goal_context_used=bool(active_goal_context),
             )
     if result.error:
         st.error(_gap_error_text(ui, result))
@@ -366,6 +429,13 @@ vc3.metric(
 
 if result.learned_merged:
     st.caption(ui["router_learned_caption"])
+if result.source_kind:
+    st.caption(
+        ui["result_source_line"].format(
+            source=result.source_label or result.source_id or result.source_kind,
+            kind=result.source_kind,
+        )
+    )
 
 # -- Closure progress ------------------------------------------
 

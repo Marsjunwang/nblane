@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-05-13
 source_of_truth: true
 ---
 
@@ -23,7 +23,7 @@ source_of_truth: true
 |------|------|----------|
 | `SKILL.md` | 身份、研究品味、工作风格、生成块 | 人写章节是事实源；生成块是派生 |
 | `skill-tree.yaml` | 节点 `status/note/evidence/evidence_refs` | 技能状态事实源 |
-| `evidence-pool.yaml` | 稳定 evidence id 和摘要 | 共享证据目录 |
+| `evidence-pool.yaml` | 稳定 evidence id、摘要和 accepted claim bridge | 共享证据目录；P2 claim 桥接事实源 |
 | `kanban.md` | 当前任务、Done、Queue、Someday | 当前执行事实源 |
 | `kanban-archive.md` | 从 Done 归档出去的历史任务 | 历史备份，不参与默认上下文 |
 | `agent-profile.yaml` | Agent 对用户的结构化 prior | Agent prior 事实源 |
@@ -54,6 +54,57 @@ evidence-pool.yaml
 - `evidence_refs` 只能引用已存在的 pool id。
 - `status` 提升需要人确认。
 - `SKILL.md` 生成块不要手改。
+
+### Evidence -> Claim Bridge
+
+```text
+selected evidence
+  -> claim candidates
+  -> human selection
+  -> evidence-pool.yaml claims[]
+  -> Output Studio related_claims / provenance
+```
+
+P2 不新增独立 `claims.yaml`。Web 中的 Claim 先作为 Evidence Review 和
+Output Studio 的桥接层：生成态候选只保存在会话预览中；只有用户点击应用后，
+才写入 `evidence-pool.yaml` 顶层 `claims` 列表，且状态固定为 `accepted`。
+
+`evidence-pool.yaml` 允许的最小形态：
+
+```yaml
+evidence_entries:
+  - id: ev_demo
+    title: Demo
+    summary: Built and shipped a demo.
+
+claims:
+  - id: claim:demo-shipped
+    status: accepted
+    type: achievement
+    text: Built and shipped a robotics demo.
+    evidence_refs: [ev_demo]
+    skill_refs: [robotics]
+    project_refs: []
+    experience_refs: []
+    source_refs: []
+    output_refs: []
+    public_readiness: draftable
+    confidence: medium
+    rationale: Derived from reviewed evidence.
+    warnings: []
+    generated_by: rule:evidence_review
+    created: 2026-05-13
+```
+
+不变量：
+
+- Claim `type` 只能是 `achievement`、`skill`、`impact`、`role`、`learning`、`project`。
+- 持久化 claim 只保存 `accepted`；不保存 rejected 候选，避免早期审阅队列膨胀。
+- Claim 去重键是 `normalized(text) + evidence_refs + skill_refs`；重复应用时更新已有 claim metadata，不追加重复行。
+- Claim 可以引用多条 evidence；因此它放在 `evidence-pool.yaml.claims` 顶层，不嵌入单条 evidence row。
+- 写入 claim 不自动修改 `skill-tree.yaml`，也不自动提升 skill status。
+- `evidence_refs` 必须存在；未知 evidence ref 不能静默写入。未知 skill ref 必须报 warning 或被拒绝 / 丢弃后提示。
+- Evidence pool 的编辑、压缩和保存路径必须保留未知顶层字段，尤其不能丢弃 `claims`。
 
 ### Kanban Done -> Evidence
 
@@ -87,6 +138,9 @@ private profile facts
 - 公开站不读取 private `skill-tree.yaml`、`kanban.md`、`agent-profile.yaml`、auth 文件。
 - Blog draft 必须显式 `status: published` 才进入正式输出。
 - Media 只复制被公开对象引用的文件。
+- Blog front matter 可保存 `related_claims`；发布校验会检查 claim id 存在、状态为 `accepted`、claim 引用的 evidence 存在。
+- Project update 草稿和 resume bullet 候选也可从 accepted claims 生成，并保留 `related_claims` / `evidence_refs` provenance；resume bullet 第一版只返回候选预览，不自动写入 `resume-source.yaml`。
+- 公开输出不直接渲染 claim id；`related_claims` 只用于 provenance、候选生成和发布前检查。
 
 ## 规划中的新增契约
 
@@ -125,6 +179,7 @@ research/drafts.yaml
 - Research 默认 private。
 - Claim 必须引用 source/chunk，或标记为 human note。
 - Blog 可引用 source/claim，但公开发布前必须检查 private source 和 unsupported claim。
+- 注意：这里的 `research/claims.yaml` 是未来 Research Workspace 的 source-aware claim store；P2 Web claim bridge 已落地在 `evidence-pool.yaml.claims`，不等同于独立 Research claim store。
 
 ### AI Run
 

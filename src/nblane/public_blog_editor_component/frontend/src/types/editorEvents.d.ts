@@ -10,6 +10,7 @@ export type EditorAction =
   | "filter_posts"
   | "create_post"
   | "draft_from_evidence"
+  | "draft_from_claims"
   | "draft_from_done"
   | "generate_ai_candidate"
   | "ai_inline_action"

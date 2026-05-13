@@ -150,6 +150,20 @@ nodes:
         self.assertIn("Title: Right", args[1])
         self.assertEqual(args[2], None)
         self.assertFalse(kwargs["persist_router_keywords"])
+        self.assertEqual(kwargs["goal_context"], "")
+
+    @patch("nblane.core.kanban_ai.gap.analyze")
+    def test_analyze_kanban_task_gap_passes_goal_context(self, mock_analyze) -> None:
+        """Task-level gap can include the privacy-safe current goal."""
+        mock_analyze.return_value = GapResult(task="ok")
+        sections = {"Doing": [KanbanTask(title="Right", id="task-b")]}
+
+        analyze_kanban_task_gap("template", sections, "task-b", goal_context="Goal")
+
+        _, kwargs = mock_analyze.call_args
+        self.assertEqual(kwargs["goal_context"], "Goal")
+        self.assertEqual(kwargs["source_kind"], "kanban_task")
+        self.assertTrue(kwargs["goal_context_used"])
 
     def test_analyze_missing_task_returns_gap_error(self) -> None:
         """Missing ids produce a structured GapResult error."""

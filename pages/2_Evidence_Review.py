@@ -8,6 +8,7 @@ import streamlit as st
 import yaml
 
 from nblane.core import llm as llm_client
+from nblane.core.claims import apply_claim_candidates, generate_claim_candidates
 from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.evidence_review import (
     build_evidence_review,
@@ -154,16 +155,28 @@ def _pool_entries() -> list[dict]:
 def _save_pool(entries: list[dict], message: str) -> None:
     """Persist evidence-pool.yaml and refresh generated context blocks."""
     assert_files_current([_pool_path, _skill_path])
+    pool_raw = load_evidence_pool_raw(selected) or {}
+    pool_raw["profile"] = selected
+    pool_raw["evidence_entries"] = entries
     save_evidence_pool(
         selected,
-        {
-            "profile": selected,
-            "evidence_entries": entries,
-        },
+        pool_raw,
     )
     if _skill_path.exists():
         write_generated_blocks(_pdir)
     refresh_file_snapshots([_pool_path, _skill_path])
+    stash_git_backup_results()
+    clear_web_cache()
+    st.success(message)
+
+
+def _save_pool_raw(pool_raw: dict, message: str) -> None:
+    """Persist a full evidence-pool mapping without dropping top-level claims."""
+    assert_files_current([_pool_path])
+    pool = dict(pool_raw or {})
+    pool["profile"] = selected
+    save_evidence_pool(selected, pool)
+    refresh_file_snapshots([_pool_path])
     stash_git_backup_results()
     clear_web_cache()
     st.success(message)
@@ -785,6 +798,158 @@ def _render_links(review: dict) -> None:
         st.caption(f"- `{row['id']}` {row['title']}")
 
 
+def _claim_source_score(row: dict) -> tuple[int, str]:
+    """Sort better claim sources first."""
+    score = 0
+    if row.get("review_status") == "reviewed":
+        score += 4
+    if row.get("public_readiness") in ("draftable", "public_ready", "published"):
+        score += 3
+    for ref_key in ("skill_refs", "project_refs", "experience_refs", "source_refs"):
+        if row.get(ref_key):
+            score += 1
+    return (-score, str(row.get("id", "")))
+
+
+def _claim_candidate_key() -> str:
+    return f"evidence_review_claim_candidates_{selected}"
+
+
+def _render_claim_candidates(review: dict) -> None:
+    """Generate and accept evidence-backed claim candidates."""
+    st.subheader(ui["claim_candidates_title"])
+    rows = sorted(list(review.get("evidence_rows") or []), key=_claim_source_score)
+    if not rows:
+        st.caption(ui["link_empty"])
+        return
+
+    default_ids = [str(row.get("id", "")) for row in rows[:3] if row.get("id")]
+    picked = st.multiselect(
+        ui["claim_pick_evidence"],
+        options=[str(row.get("id", "")) for row in rows],
+        default=default_ids,
+        format_func=lambda eid: next(
+            (
+                _row_label(row)
+                for row in rows
+                if str(row.get("id", "")) == eid
+            ),
+            eid,
+        ),
+        key=f"evidence_review_claim_pick_{selected}",
+    )
+    if st.button(
+        ui["claim_generate"],
+        type="primary",
+        disabled=not picked,
+        key=f"evidence_review_claim_generate_{selected}",
+    ):
+        candidates = generate_claim_candidates(selected, picked)
+        st.session_state[_claim_candidate_key()] = candidates
+        if not candidates:
+            st.warning(ui["claim_candidates_empty"])
+        else:
+            st.rerun()
+
+    claims = [
+        item
+        for item in (review.get("claim_rows") or [])
+        if isinstance(item, dict) and str(item.get("status", "accepted")) == "accepted"
+    ]
+    if claims:
+        with st.expander(ui["claim_existing_title"], expanded=False):
+            for claim in claims[:20]:
+                st.caption(
+                    f"- `{claim.get('id', '')}` "
+                    f"{claim.get('text', '')}"
+                )
+
+    candidates = st.session_state.get(_claim_candidate_key(), [])
+    if not isinstance(candidates, list) or not candidates:
+        st.caption(ui["claim_candidates_empty"])
+        return
+
+    include: list[bool] = []
+    st.markdown(f"**{ui['claim_candidates_preview']}**")
+    for idx, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            include.append(False)
+            continue
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 6])
+            with c1:
+                include.append(
+                    st.checkbox(
+                        ui["claim_adopt"],
+                        value=True,
+                        key=f"evidence_review_claim_include_{selected}_{idx}",
+                        label_visibility="collapsed",
+                    )
+                )
+            with c2:
+                st.markdown(str(candidate.get("text", "") or ""))
+                meta = [
+                    f"`{candidate.get('type', '')}`",
+                    ui["claim_evidence_refs"].format(
+                        refs=", ".join(candidate.get("evidence_refs") or []) or "-"
+                    ),
+                    ui["claim_skill_refs"].format(
+                        refs=", ".join(candidate.get("skill_refs") or []) or "-"
+                    ),
+                    ui["claim_public_readiness"].format(
+                        value=_public_readiness_label(
+                            str(candidate.get("public_readiness", "") or "private")
+                        )
+                    ),
+                    ui["claim_confidence"].format(
+                        value=_confidence_label(
+                            str(candidate.get("confidence", "") or "medium")
+                        )
+                    ),
+                ]
+                st.caption(" · ".join(meta))
+                warnings = candidate.get("warnings") or []
+                if isinstance(warnings, list):
+                    for warning in warnings:
+                        st.caption(f"- {warning}")
+
+    selected_candidates = [
+        candidate
+        for candidate, selected_flag in zip(candidates, include, strict=False)
+        if selected_flag and isinstance(candidate, dict)
+    ]
+    if not st.button(
+        ui["claim_apply_selected"].format(n=len(selected_candidates)),
+        type="primary",
+        disabled=not selected_candidates,
+        key=f"evidence_review_claim_apply_{selected}",
+    ):
+        return
+
+    pool_raw = load_evidence_pool_raw(selected) or {
+        "profile": selected,
+        "evidence_entries": _pool_entries(),
+    }
+    skill_ids = {
+        str(option.get("id", "") or "")
+        for option in (review.get("skill_options") or [])
+        if str(option.get("id", "") or "")
+    }
+    merged_pool, applied, warnings = apply_claim_candidates(
+        pool_raw,
+        selected_candidates,
+        known_skill_ids=skill_ids,
+    )
+    for warning in warnings:
+        st.warning(warning)
+    if not applied:
+        st.warning(ui["claim_apply_empty"])
+        return
+    _save_pool_raw(merged_pool, ui["claim_applied"].format(n=len(applied)))
+    st.session_state.pop(_claim_candidate_key(), None)
+    st.rerun()
+
+
 def _option_label(option: dict) -> str:
     """Render a compact id/status option label."""
     label = str(option.get("label", "") or option.get("id", ""))
@@ -1288,6 +1453,7 @@ m4.metric(ui["metric_status_risk"], summary.get("status_risk_count", 0))
 tabs = st.tabs(
     [
         ui["tab_queue"],
+        ui["tab_claims"],
         ui["tab_pool"],
         ui["tab_links"],
         ui["tab_refs"],
@@ -1297,10 +1463,12 @@ tabs = st.tabs(
 with tabs[0]:
     _render_done_ingest(review_payload)
 with tabs[1]:
-    _render_pool_editor(review_payload)
+    _render_claim_candidates(review_payload)
 with tabs[2]:
-    _render_links(review_payload)
+    _render_pool_editor(review_payload)
 with tabs[3]:
-    _render_refs(review_payload)
+    _render_links(review_payload)
 with tabs[4]:
+    _render_refs(review_payload)
+with tabs[5]:
     _render_risks(review_payload)

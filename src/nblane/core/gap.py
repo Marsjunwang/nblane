@@ -318,6 +318,11 @@ def analyze(
     use_llm_router: bool = False,
     persist_router_keywords: bool = True,
     goal_context: str = "",
+    source_kind: str = "",
+    source_id: str = "",
+    source_label: str = "",
+    context_refs: dict[str, list[str]] | None = None,
+    goal_context_used: bool = False,
 ) -> GapResult:
     """Run gap analysis: optional rule overlap + optional LLM routing.
 
@@ -325,19 +330,28 @@ def analyze(
     """
     p_dir = PROFILES_DIR / profile_name
     tree = load_skill_tree_raw(p_dir)
+    provenance = {
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_label": source_label,
+        "context_refs": context_refs or {},
+        "goal_context_used": bool(goal_context_used or goal_context.strip()),
+    }
     if tree is None:
-        return GapResult(error="skill-tree.yaml not found.")
+        return GapResult(error="skill-tree.yaml not found.", **provenance)
 
     schema_name = tree.get("schema")
     if not schema_name:
         return GapResult(
-            error="skill-tree.yaml has no 'schema' field."
+            error="skill-tree.yaml has no 'schema' field.",
+            **provenance,
         )
 
     schema_data = load_schema_raw(str(schema_name))
     if schema_data is None:
         return GapResult(
-            error=f"Schema not found: {schema_name}"
+            error=f"Schema not found: {schema_name}",
+            **provenance,
         )
 
     index = schema_node_index(schema_data)
@@ -357,6 +371,7 @@ def analyze(
                     f"Node '{explicit_node}' not in schema."
                 ),
                 error_key="node_unknown",
+                **provenance,
             )
         roots = [explicit_node]
         top_matches = [
@@ -374,6 +389,7 @@ def analyze(
             return GapResult(
                 error="Empty task text.",
                 error_key="empty_task",
+                **provenance,
             )
         match_text = task.strip()
         if goal_context and goal_context.strip():
@@ -442,6 +458,7 @@ def analyze(
                     "matching, or pick a node manually."
                 ),
                 error_key="no_roots",
+                **provenance,
             )
 
         top_matches = _build_top_matches(
@@ -487,6 +504,7 @@ def analyze(
         roots_from_rule=roots_from_rule,
         roots_from_llm=roots_from_llm,
         learned_merged=learned_merged,
+        **provenance,
     )
 
 
@@ -498,6 +516,14 @@ def format_text(result: GapResult) -> str:
     lines: list[str] = []
     if result.task:
         lines.append(f"Task: {result.task}")
+        if result.source_kind:
+            label = result.source_label or result.source_id
+            source = result.source_kind
+            if label:
+                source += f": {label}"
+            lines.append(f"Source: {source}")
+        if result.goal_context_used:
+            lines.append("Goal context: included")
         lines.append("")
 
     lines.append("Top matches (id: score):")
@@ -556,6 +582,11 @@ def format_text(result: GapResult) -> str:
 def format_for_llm(result: GapResult) -> str:
     """Render a GapResult as plain text for LLM prompt."""
     lines = [f"Task: {result.task}", ""]
+    if result.source_kind:
+        label = result.source_label or result.source_id
+        lines.extend([f"Source: {result.source_kind} {label}".strip(), ""])
+    if result.goal_context_used:
+        lines.extend(["Current goal context was included.", ""])
     lines.append("Top matched nodes:")
     for m in result.top_matches:
         src = m.get("source", "")

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-08
+last_verified: 2026-05-13
 source_of_truth: true
 ---
 
@@ -57,11 +57,12 @@ source_of_truth: true
 1. 侧栏选定档案。
 2. 打开 **技能树** — 看状态、备注、内联证据、证据池与引用；点 **保存**
    写入 `skill-tree.yaml`、`evidence-pool.yaml` 并尽量同步 SKILL.md 生成块。
-3. 大任务前打开 **差距分析** — 填写任务、分析；若已配置 LLM 可开 AI 教练。
-4. **看板** 管理日常推进；**已完成** 任务可通过折叠区 **摄入为证据**。
-5. 协作编辑共享池时用 **团队视图**。
-6. 导出上下文前或阶段复盘时打开 **Profile Health**。
-7. 整理公开资料、博客、简历、项目/成果草稿或构建静态站时打开 **Public Site**。
+3. 打开 **Evidence Review** — 审阅 Done 任务摄入、编辑证据引用，并从已确认 evidence 生成 claim candidates。
+4. 大任务前打开 **差距分析** — 手动输入，或直接选择 current goal / Kanban task 作为上下文；若已配置 LLM 可开 AI 教练。
+5. **看板** 管理日常推进；**已完成** 任务可通过折叠区 **摄入为证据**。
+6. 协作编辑共享池时用 **团队视图**。
+7. 导出上下文前或阶段复盘时打开 **Profile Health**。
+8. 整理公开资料、博客、简历、项目/成果草稿或构建静态站时打开 **Public Site**。
 
 产品层地图见 [Web 体验设计](../product/web-experience.md)。
 
@@ -89,15 +90,37 @@ source_of_truth: true
 - **证据池** 折叠区维护共享目录；节点可多选 **引用** 池 id。**保存** 一次
   落盘树 + 池并尝试同步 SKILL.md。
 
-### 5.3 差距分析（`pages/2_Gap_Analysis.py`）
+### 5.3 Evidence Review（`pages/2_Evidence_Review.py`）
 
-- 输入任务 → **分析**（规则匹配；可选 AI 首轮路由或手动选节点）。
+- **审阅队列** — 承接看板 Done -> Evidence 的候选流，人工选择后才写入
+  `evidence-pool.yaml` 和必要的 `skill-tree.yaml` 引用。
+- **Claim Candidates** — 选择 1-N 条 evidence 后生成 claim candidates；候选只在
+  当前会话预览中存在，点击 **应用所选** 后才写入 `evidence-pool.yaml` 顶层
+  `claims` 列表。
+- Claim card 会展示文本、类型、支撑 evidence、关联 skill、公开准备度、置信度
+  和 warning。应用 claim 不会自动改 `skill-tree.yaml` status，也不会创建独立
+  `claims.yaml`。
+- **证据池 / 链接 / 引用 / 风险** — 继续维护 evidence row、skill/project/
+  experience/source refs 和断链提示；保存路径会保留已有 `claims`。
+
+### 5.4 差距分析（`pages/2_Gap_Analysis.py`）
+
+- 选择上下文来源：**手动输入**、**Current goal**、**Kanban task**。页面会优先复用
+  上次选择；否则优先选择 Doing / Queue task，再选择允许进入 Agent context 的
+  current goal，最后回退手动输入。
+- 选择 Kanban task 时，任务正文会自动带入 title、context、why、outcome、
+  blocked_by、dates、subtasks、details，不需要重复手输任务描述。
+- private goal 或 `include_in_agent_context=false` 的 goal 不会出现在 Current goal
+  选项中。手动输入和 Kanban task 默认可附加 privacy-safe current goal context；
+  Current goal source 本身不会重复追加 goal context。
+- 点击 **分析** 后执行规则匹配；可选 AI 首轮路由或手动选节点。
 - 展示匹配、依赖闭包、建议下一步。
+- 结果会显示来源 provenance，例如 manual / current goal / kanban task，以及是否使用了 current goal context。
 - **AI 分析** 区 — 已配置 LLM 时为教练与追问；未配置时统一 **未配置 AI**
   提示（与首页、看板一致）。
 - **写回** — 勾选缺口节点并选择新状态，写回 `skill-tree.yaml`。
 
-### 5.4 看板（`pages/3_Kanban.py`）
+### 5.5 看板（`pages/3_Kanban.py`）
 
 **详细步骤与 FAQ：** [看板使用手册](kanban.md)。
 
@@ -108,24 +131,27 @@ source_of_truth: true
 - **移动列** 用列名 **按钮**（非「完成状态」菜单）；可选 **自动填写开始/结束日期**（移入进行中/已完成时）。
 - **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [看板使用手册](kanban.md)。
 - **已完成 → 证据** 折叠区 — 多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
+- Kanban 卡片上的 **Gap** 预览会带入 privacy-safe current goal context，与
+  差距分析页选择 Kanban task 时的上下文一致；不会自动写回 goal、kanban 或
+  skill-tree。
 - **本轮看板优化方向**：`kanban.md` 使用稳定 task id（保留 `id` meta 行；
   无 id 的旧任务会生成兼容 id），并明确拖拽方向：纵向指针位置决定插入
   `to_index`；拖入另一列会映射为 `to_section`，再沿用手动移动的 done flag /
   自动日期规则。页面级拖拽逐步接入期间，显式移动控件仍是可靠 fallback。
 
-### 5.5 团队视图（`pages/4_Team_View.py`）
+### 5.6 团队视图（`pages/4_Team_View.py`）
 
 - 选择 **团队**（`teams/` 下目录名）。
 - 编辑团队字段与各 **产品池** tab，保存 `team.yaml` 与
   `product-pool.yaml`。
 
-### 5.6 Profile Health（`pages/5_Profile_Health.py`）
+### 5.7 Profile Health（`pages/5_Profile_Health.py`）
 
 - 只读报告，与 `nblane health <名称>` 同源。
 - 检查校验结果、生成块 drift、solid/expert 节点缺证据、Done 任务未结晶。
 - 不写入 profile 文件。
 
-### 5.7 Public Site（`pages/6_Public_Site.py`）
+### 5.8 Public Site（`pages/6_Public_Site.py`）
 
 - 为当前档案初始化缺失的公开层文件。
 - **Profile** 编辑公开姓名、headline、简介、联系方式、头像、原始 YAML，并提供
@@ -133,6 +159,15 @@ source_of_truth: true
 - **Blog** 通过 React / BlockNote 编辑器 shell 管理 draft / published 文章，
   支持结构化 front matter、媒体插入、AI 候选、发布检查、公开页预览，以及
   Streamlit 承接的新建/上传辅助工具。
+- Blog 支持 `related_claims` front matter。可以从 accepted claims 生成候选或草稿；
+  系统会自动合并 claim 的 supporting evidence 到 `related_evidence`，发布校验会
+  检查 claim id、accepted 状态和 evidence refs。
+- Resume 可以从 accepted claims 生成 bullet 候选预览；候选不会自动写入
+  `resume-source.yaml`，需要人工复制或后续确认流处理。
+- Build / 项目更新工具可以从 accepted claims 生成 project update 草稿，并在
+  `projects.yaml` 的 `draft_updates` 中保留 `related_claims` 与 `evidence_refs`。
+- 若只有 evidence 而没有 accepted claim，先到 Evidence Review 生成并应用
+  claim candidates，再回到 Public Site 用 claim provenance 生成公开输出。
 - **Resume** 编辑 `resume-source.yaml`，预览生成 Markdown，并生成定制简历草稿。
 - **Known Info** 将选中的 evidence 整理成 draft 公开项目。
 - **Build** 校验并写出静态站，默认到 `dist/public/<profile>`，也可指定输出目录；

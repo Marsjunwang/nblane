@@ -97,6 +97,16 @@ def _make_profile(root: Path, name: str = "alice") -> Path:
                     "summary": "Verified public fact",
                 }
             ],
+            "claims": [
+                {
+                    "id": "claim:public",
+                    "status": "accepted",
+                    "type": "achievement",
+                    "text": "Built a public demo from verified evidence.",
+                    "evidence_refs": ["ev_public"],
+                    "skill_refs": ["real_robot_ops"],
+                }
+            ],
         },
     )
     _write_yaml(
@@ -1652,6 +1662,146 @@ class TestPublicSite(unittest.TestCase):
             self.assertEqual(candidate.title, "Public Evidence")
             self.assertIn("Verified public fact", candidate.body)
             self.assertEqual(candidate.related_evidence, ["ev_public"])
+
+    def test_blog_candidate_from_claims_does_not_write_post(self) -> None:
+        """Claim-backed candidates stay in memory and carry provenance."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            before = sorted(path.name for path in (profile / "blog").glob("*.md"))
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.llm.is_configured", return_value=False),
+            ):
+                candidate = public_site.blog_candidate_from_claims(
+                    "alice",
+                    ["claim:public"],
+                )
+
+            after = sorted(path.name for path in (profile / "blog").glob("*.md"))
+            self.assertEqual(after, before)
+            self.assertEqual(candidate.related_claims, ["claim:public"])
+            self.assertEqual(candidate.related_evidence, ["ev_public"])
+            self.assertIn("Built a public demo", candidate.body)
+
+    def test_draft_blog_from_claims_writes_related_claims(self) -> None:
+        """Accepted claims are stored in draft front matter."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.llm.is_configured", return_value=False),
+            ):
+                path = public_site.draft_blog_from_claims(
+                    "alice",
+                    ["claim:public"],
+                )
+                post = public_site.parse_blog_post(path)
+
+            self.assertEqual(post.meta["related_claims"], ["claim:public"])
+            self.assertEqual(post.meta["related_evidence"], ["ev_public"])
+
+    def test_resume_bullet_candidates_from_claims_do_not_write_resume_source(self) -> None:
+        """Claim-backed resume bullets stay as preview candidates."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            before = (profile / "resume-source.yaml").read_text(encoding="utf-8")
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.llm.is_configured", return_value=False),
+            ):
+                bullets = public_site.resume_bullet_candidates_from_claims(
+                    "alice",
+                    ["claim:public"],
+                )
+
+            after = (profile / "resume-source.yaml").read_text(encoding="utf-8")
+            self.assertEqual(after, before)
+            self.assertEqual(len(bullets), 1)
+            self.assertEqual(bullets[0].related_claims, ["claim:public"])
+            self.assertEqual(bullets[0].related_evidence, ["ev_public"])
+            self.assertIn("Built a public demo", bullets[0].text)
+
+    def test_draft_project_update_from_claims_writes_provenance(self) -> None:
+        """Claim-backed project updates carry claim and evidence refs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.llm.is_configured", return_value=False),
+            ):
+                path = public_site.draft_project_update_from_claims(
+                    "alice",
+                    "demo_project",
+                    ["claim:public"],
+                )
+
+            projects = yaml.safe_load(path.read_text(encoding="utf-8"))["projects"]
+            project = next(item for item in projects if item["id"] == "demo_project")
+            update = project["draft_updates"][-1]
+            self.assertEqual(update["related_claims"], ["claim:public"])
+            self.assertEqual(update["evidence_refs"], ["ev_public"])
+            self.assertIn("Built a public demo", update["body"])
+
+    def test_public_validation_rejects_bad_claim_refs(self) -> None:
+        """Public validation checks related_claims and their evidence refs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            _write_blog(
+                profile / "blog" / "bad-claim.md",
+                title="Bad Claim",
+                status="published",
+                evidence=[],
+                extra_meta={"related_claims": ["missing_claim"]},
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                result = public_site.validate_public_layer("alice")
+
+            self.assertTrue(
+                any("unknown claim ref 'missing_claim'" in item for item in result.errors)
+            )
+
+    def test_public_validation_rejects_non_accepted_claim_refs(self) -> None:
+        """Public validation distinguishes known but non-accepted claim refs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            pool = yaml.safe_load(
+                (profile / "evidence-pool.yaml").read_text(encoding="utf-8")
+            )
+            pool["claims"].append(
+                {
+                    "id": "claim:rejected",
+                    "status": "rejected",
+                    "type": "achievement",
+                    "text": "Rejected claim should not publish.",
+                    "evidence_refs": ["ev_public"],
+                }
+            )
+            _write_yaml(profile / "evidence-pool.yaml", pool)
+            _write_blog(
+                profile / "blog" / "bad-claim-status.md",
+                title="Bad Claim Status",
+                status="published",
+                evidence=[],
+                extra_meta={"related_claims": ["claim:rejected"]},
+            )
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                result = public_site.validate_public_layer("alice")
+
+            self.assertTrue(
+                any("claim ref 'claim:rejected' is not accepted" in item for item in result.errors)
+            )
 
     def test_blog_candidate_from_title_is_complete_and_non_mutating(self) -> None:
         """Title-only generation returns full candidate fields in memory."""
