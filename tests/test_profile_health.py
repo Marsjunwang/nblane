@@ -208,6 +208,138 @@ class TestProfileHealth(unittest.TestCase):
             )
         )
 
+    def test_dangling_workspace_refs_warn_without_blocking_publish(self) -> None:
+        """Internal dangling refs are warnings, not publish blockers."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._template_profile(Path(tmp_s), "refsuser")
+            (profile / "evidence-pool.yaml").write_text(
+                yaml.dump(
+                    {
+                        "profile": "refsuser",
+                        "evidence_entries": [
+                            {
+                                "id": "ev_1",
+                                "title": "Evidence",
+                                "project_refs": ["project:missing"],
+                                "experience_refs": ["experience:missing"],
+                                "source_refs": ["source:research:20260513-404"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.profile_health.profile_dir",
+                lambda _name: profile,
+            ), patch(
+                "nblane.core.profile_health.validate_one",
+                return_value=([], []),
+            ), patch(
+                "nblane.core.profile_health.get_drifted_blocks",
+                return_value=[],
+            ):
+                report = analyze_profile_health("refsuser")
+
+        ref_issues = [issue for issue in report.issues if issue.category == "refs"]
+        self.assertGreaterEqual(len(ref_issues), 3)
+        self.assertTrue(report.can_publish_context)
+
+    def test_valid_workspace_refs_do_not_warn(self) -> None:
+        """Existing project, experience, and source refs pass health checks."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._template_profile(Path(tmp_s), "validrefs")
+            (profile / "project-board.yaml").write_text(
+                yaml.dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "validrefs",
+                        "project_cases": [
+                            {
+                                "id": "project:demo",
+                                "title": "Demo",
+                                "source_refs": ["source:research:20260513-001"],
+                                "experience_refs": ["experience:lab"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (profile / "experience.yaml").write_text(
+                yaml.dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "validrefs",
+                        "experience_cases": [
+                            {
+                                "id": "experience:lab",
+                                "organization": "Lab",
+                                "project_refs": ["project:demo"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (profile / "research" / "sources.yaml").write_text(
+                yaml.dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "validrefs",
+                        "sources": [
+                            {
+                                "id": "source:research:20260513-001",
+                                "title": "Source",
+                                "project_refs": ["project:demo"],
+                                "experience_refs": ["experience:lab"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (profile / "evidence-pool.yaml").write_text(
+                yaml.dump(
+                    {
+                        "profile": "validrefs",
+                        "evidence_entries": [
+                            {
+                                "id": "ev_1",
+                                "title": "Evidence",
+                                "project_refs": ["project:demo"],
+                                "experience_refs": ["experience:lab"],
+                                "source_refs": ["source:research:20260513-001"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.profile_health.profile_dir",
+                lambda _name: profile,
+            ), patch(
+                "nblane.core.profile_health.validate_one",
+                return_value=([], []),
+            ), patch(
+                "nblane.core.profile_health.get_drifted_blocks",
+                return_value=[],
+            ):
+                report = analyze_profile_health("validrefs")
+
+        self.assertFalse(any(issue.category == "refs" for issue in report.issues))
+
 
 class TestHealthCliExit(unittest.TestCase):
     """CLI exit policy for health reports."""

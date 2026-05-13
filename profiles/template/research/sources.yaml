@@ -1,0 +1,7 @@
+# Research sources for {Name}
+# Sources are not evidence until reviewed into evidence candidates.
+
+schema_version: "1.0"
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+sources: []

@@ -244,6 +244,7 @@ def workspace_graph_payload(
     public: dict[str, Any],
     health: dict[str, Any],
     sources: dict[str, Any] | None = None,
+    projects: dict[str, Any] | None = None,
     ui: dict[str, str] | None = None,
     view: str = "context",
 ) -> dict[str, Any]:
@@ -343,14 +344,63 @@ def workspace_graph_payload(
 
     primary_node_id = _primary_goal_node_id(goal_node_ids, primary_goal_id)
 
+    project_summary = projects or {}
+    project_cases = [
+        item
+        for item in list(project_summary.get("cases") or [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ][:3]
+    project_node_ids: list[str] = []
+    if project_cases:
+        for case in project_cases:
+            record_id = str(case.get("id") or "").strip()
+            node_id = record_id
+            project_node_ids.append(node_id)
+            is_private = str(case.get("visibility") or "private") == "private"
+            nodes.append(
+                _node(
+                    id=node_id,
+                    type="project_case",
+                    layer="work_context",
+                    label=(
+                        _ui_text(ui, "dashboard_private_project_case", "Private project case")
+                        if is_private
+                        else str(case.get("title") or record_id)
+                    ),
+                    metric=str(case.get("kind") or ""),
+                    record_id=record_id,
+                    status=str(case.get("status") or ""),
+                    locked=is_private,
+                    owner_path="pages/2_Evidence_Review.py",
+                    implemented=True,
+                )
+            )
+            edges.append(_edge(primary_node_id, node_id, "contains"))
+    else:
+        project_node_ids.append("project_case:planned")
+        nodes.append(
+            _node(
+                id="project_case:planned",
+                type="project_case",
+                layer="work_context",
+                label=_ui_text(ui, "dashboard_node_project_case", "Project Cases"),
+                metric=_ui_text(ui, "dashboard_placeholder_metric", "planned"),
+                status="planned",
+                implemented=False,
+                placeholder=True,
+                suggested=True,
+            )
+        )
+        edges.append(
+            _edge(
+                primary_node_id,
+                "project_case:planned",
+                "contains",
+                placeholder=True,
+            )
+        )
+
     placeholder_chain = (
-        (
-            "project_case:planned",
-            "project_case",
-            "work_context",
-            _ui_text(ui, "dashboard_node_project_case", "Project Cases"),
-            "planned",
-        ),
         (
             "daily_work:planned",
             "daily_work",
@@ -388,17 +438,15 @@ def workspace_graph_payload(
             )
         )
 
-    edges.append(
-        _edge(primary_node_id, "project_case:planned", "contains", placeholder=True)
-    )
+    project_anchor_id = project_node_ids[0]
     for activity_id in ("daily_work:planned", "research:planned", "agent_run:planned"):
         edges.append(
             _edge(
-                "project_case:planned",
+                project_anchor_id,
                 activity_id,
                 "contains",
                 suggested=True,
-                placeholder=True,
+                placeholder=project_anchor_id == "project_case:planned",
             )
         )
 
@@ -422,7 +470,14 @@ def workspace_graph_payload(
             )
         )
         edges.append(_edge(primary_node_id, node_id, "drives"))
-        edges.append(_edge("project_case:planned", node_id, "contains", placeholder=True))
+        edges.append(
+            _edge(
+                project_anchor_id,
+                node_id,
+                "contains",
+                placeholder=project_anchor_id == "project_case:planned",
+            )
+        )
 
     source_summary = sources or {}
     source_active = int(source_summary.get("active_total") or 0)
@@ -436,7 +491,7 @@ def workspace_graph_payload(
             label=_ui_text(ui, "dashboard_source_inbox_title", "Inbox sources"),
             metric=str(source_active),
             status="pending" if source_active else "clear",
-            owner_path="",
+            owner_path="pages/7_Research.py",
             implemented=source_implemented,
             placeholder=not source_implemented,
             suggested=not source_implemented,
@@ -518,6 +573,13 @@ def workspace_graph_payload(
             suggested=True,
         )
     )
+    evidence_by_project = project_summary.get("evidence_by_project") or {}
+    if isinstance(evidence_by_project, dict):
+        for node_id in project_node_ids:
+            if not node_id.startswith("project:"):
+                continue
+            if evidence_by_project.get(node_id):
+                edges.append(_edge(node_id, "atomic_evidence:pool", "supports"))
 
     nodes.append(
         _node(

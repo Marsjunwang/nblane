@@ -5,8 +5,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from nblane.core.profile_io import (
+    init_profile,
     safe_profile_dir,
     validate_profile_name,
 )
@@ -56,6 +58,18 @@ class TestProfileNameSafety(unittest.TestCase):
             (root / "escape").symlink_to(outside, target_is_directory=True)
             with self.assertRaises(ValueError):
                 safe_profile_dir("escape", root)
+
+    def test_init_profile_copies_internal_p1_fact_sources(self) -> None:
+        """New profiles include project, experience, and research source files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            root.mkdir()
+            with patch("nblane.core.profile_io.PROFILES_DIR", root):
+                profile = init_profile("alice")
+
+            self.assertTrue((profile / "project-board.yaml").exists())
+            self.assertTrue((profile / "experience.yaml").exists())
+            self.assertTrue((profile / "research" / "sources.yaml").exists())
 
 
 if __name__ == "__main__":

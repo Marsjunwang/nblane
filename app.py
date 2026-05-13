@@ -23,7 +23,6 @@ from nblane.core.home_dashboard import (
     dashboard_skill_summary as _dashboard_skill_summary,
 )
 from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
-from nblane.core.inbox import add_inbox_item, load_inbox, save_inbox
 from nblane.core import llm as llm_client
 from nblane.core.goals import (
     GOAL_STATUSES,
@@ -50,6 +49,11 @@ from nblane.core.profile_ingest import (
     schema_node_labels,
 )
 from nblane.core.profile_ingest_llm import ingest_resume_json
+from nblane.core.research_sources import (
+    add_research_source,
+    load_research_sources,
+    save_research_sources,
+)
 from nblane.core.profile_context import (
     GENERATED_BLOCKS,
     IDENTITY_FIELDS,
@@ -103,13 +107,14 @@ _skill_md_path = Path()
 _tree_path = Path()
 _pool_path = Path()
 _goals_path = Path()
-_inbox_path = Path()
+_research_sources_path = Path()
 
 
 def _prepare_home_state() -> None:
     """Initialize auth, profile selection, and Home file snapshots."""
     global selected
-    global _skill_md_path, _tree_path, _pool_path, _goals_path, _inbox_path
+    global _skill_md_path, _tree_path, _pool_path, _goals_path
+    global _research_sources_path
 
     require_login()
     selected = select_profile()
@@ -119,8 +124,14 @@ def _prepare_home_state() -> None:
     _tree_path = profile_dir(selected) / "skill-tree.yaml"
     _pool_path = profile_dir(selected) / "evidence-pool.yaml"
     _goals_path = profile_dir(selected) / "goals.yaml"
-    _inbox_path = profile_dir(selected) / "inbox.yaml"
-    for path in (_skill_md_path, _tree_path, _pool_path, _goals_path, _inbox_path):
+    _research_sources_path = profile_dir(selected) / "research" / "sources.yaml"
+    for path in (
+        _skill_md_path,
+        _tree_path,
+        _pool_path,
+        _goals_path,
+        _research_sources_path,
+    ):
         ensure_file_snapshot(path)
 
 
@@ -216,8 +227,18 @@ def _home_capture_text(payload: dict, *keys: str) -> str:
     return ""
 
 
-def _capture_home_inbox_item(profile: str, payload: dict) -> None:
-    """Capture one Home dashboard source into the profile inbox."""
+def _capture_kind(raw_kind: str) -> str:
+    """Map dashboard capture types to research source kinds."""
+    return {
+        "note": "note",
+        "link": "web",
+        "resource": "other",
+        "idea": "note",
+    }.get(raw_kind, "other")
+
+
+def _capture_home_research_source(profile: str, payload: dict) -> None:
+    """Capture one Home dashboard source into Research Source Inbox."""
     title = _home_capture_text(payload, "title")
     if not title:
         st.warning(ui["dashboard_capture_title_required"])
@@ -231,28 +252,26 @@ def _capture_home_inbox_item(profile: str, payload: dict) -> None:
         "graph_layer": "source",
         "capture_event": "capture_inbox_submit",
     }
-    if goal_id:
-        metadata["goal_id"] = goal_id
     if source_url:
         metadata["source_url"] = source_url
 
-    assert_files_current([_inbox_path])
-    inbox = load_inbox(profile)
-    item = add_inbox_item(
+    assert_files_current([_research_sources_path])
+    inbox = load_research_sources(profile)
+    item = add_research_source(
         inbox,
         title,
-        type=_home_capture_text(payload, "type") or "note",
-        source=source,
-        captured_by="human",
-        raw_text=_home_capture_text(payload, "raw_text", "rawText", "note"),
-        visibility="private",
+        kind=_capture_kind(_home_capture_text(payload, "type") or "note"),
+        url=source_url or source,
         status="inbox",
+        notes=_home_capture_text(payload, "raw_text", "rawText", "note"),
+        visibility="private",
+        origin="home_capture",
         tags=payload.get("tags"),
+        goal_refs=[goal_id] if goal_id else [],
         metadata=metadata,
-        note="Captured from Home dashboard.",
     )
-    save_inbox(profile, inbox)
-    refresh_file_snapshots([_inbox_path])
+    save_research_sources(profile, inbox)
+    refresh_file_snapshots([_research_sources_path])
     stash_git_backup_results()
     clear_web_cache()
     st.success(ui["dashboard_capture_saved"].format(id=item.id))
@@ -970,7 +989,7 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> None:
     payload = payload if isinstance(payload, dict) else {}
 
     if action == "capture_inbox_submit":
-        _capture_home_inbox_item(profile, payload)
+        _capture_home_research_source(profile, payload)
         return
     if action == "edit_goal_submit":
         _edit_dashboard_goal(profile, payload)
@@ -1271,7 +1290,7 @@ def _render_dashboard_public(public_summary: dict) -> None:
 
 def _render_quick_entries() -> None:
     st.subheader(ui["dashboard_quick_title"])
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
         _page_link(
             "pages/3_Kanban.py",
@@ -1286,17 +1305,23 @@ def _render_quick_entries() -> None:
         )
     with c3:
         _page_link(
+            "pages/7_Research.py",
+            ui["quick_research"],
+            help_text=ui["quick_research_help"],
+        )
+    with c4:
+        _page_link(
             "pages/1_Skill_Tree.py",
             ui["quick_skill_tree"],
             help_text=ui["quick_skill_tree_help"],
         )
-    with c4:
+    with c5:
         _page_link(
             "pages/2_Gap_Analysis.py",
             ui["quick_gap"],
             help_text=ui["quick_gap_help"],
         )
-    with c5:
+    with c6:
         _page_link(
             "pages/6_Public_Site.py",
             ui["quick_public_site"],
@@ -1689,6 +1714,11 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
             ),
         ],
         ui["sidebar_nav_growth_group"]: [
+            st.Page(
+                "pages/7_Research.py",
+                title=ui["sidebar_nav_research"],
+                icon=":material/travel_explore:",
+            ),
             st.Page(
                 "pages/1_Skill_Tree.py",
                 title=ui["sidebar_nav_skill_map"],

@@ -1,0 +1,7 @@
+# Internal project cases for {Name}
+# Public project output remains in projects.yaml.
+
+schema_version: "1.0"
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+project_cases: []

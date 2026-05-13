@@ -518,8 +518,8 @@ Goal
 | P0 | `st.title` / `select_profile` / scope strip 顺序统一 | 先解决“当前是谁、当前目标是什么、写入哪里”这三个认知问题 |
 | P1 | 独立 Pending Evidence / Evidence Review 页 | 提升 evidence 在 UI 中的地位，降低技能树页复杂度 |
 | P1 | 技能树页突出 evidence strength / missing evidence | 避免 status 变成主观自评 |
-| P1 | 最小 project / experience refs 编辑入口 | 为 Composite Evidence、Resume 和 Project Case 聚合打基础 |
-| P1 | Research Source Inbox 最小入口 | 让外部资料先进入 source inbox，不直接污染 evidence |
+| P1 | 最小 project / experience refs 编辑入口（已落地） | 为 Composite Evidence、Resume 和 Project Case 聚合打基础 |
+| P1 | Research Source Inbox 最小入口（已落地） | 让外部资料先进入 source inbox，不直接污染 evidence |
 | P2 | 在 Evidence Review / Output Studio 中生成 claim candidates | 先让 claim 成为桥接层，而不是先做 claims 独立页面 |
 | P2 | 差距分析支持从 goal / kanban task 带入上下文 | 减少重复输入，提高行动建议质量 |
 | P2 | Review 候选生成入口，与 Profile Health 职责拆开 | 让复盘成为 evidence / next action / public output 的来源 |
@@ -538,6 +538,17 @@ Goal
 - 不建议先做 claims 独立页面。短期 claim 更适合作为 Evidence Review 和 Output Studio 的中间层对象。
 - 不建议把 Agent Activity 放到最前面。治理层应建立在核心成长闭环已经可用之后。
 
+### 6.4 P1 当前落地状态
+
+以下 P1 已有最小可用实现：
+
+- `project-board.yaml`：内部 Project Case 事实源，用于承载私有项目上下文，不替代公开层 `projects.yaml`。
+- `experience.yaml`：内部 Experience Case 事实源，用于承载组织、角色、时间段和求职视角上下文，不替代 `resume-source.yaml`。
+- `research/sources.yaml`：Research Source Inbox 事实源；首页 capture 与 Research 页写入这里，不直接写 evidence、skill status 或 public output。
+- Evidence Review 已支持编辑 evidence row 的 `project_refs`、`experience_refs`、`source_refs`，并提供最小 Project / Experience case 编辑入口。
+- Dashboard / Workspace Graph 已能读取 research source 和 project case；私密 project title 不进入 graph payload。
+- Profile Health 已对内部 workspace refs 做 dangling warning，不阻断 context 发布。
+
 
 ## 7. 已知摩擦与 backlog
 
@@ -550,7 +561,7 @@ Goal
 | 缺少 Goal 对象入口                     | 当前 UI 无阶段目标，导致推荐和 gap 缺少锚点；Goal 应全局常驻而非普通 Home tab                       | 需设计 / 需改代码 |
 | Goal 明文常驻有隐私风险                   | 目标应支持 UI 隐藏、Agent context 隐藏和 public output 隔离，常驻上下文不等于明文展示              | 需设计 / 需改代码 |
 | Capture 入口偏弱                     | 捕获应跨页面低摩擦进入 inbox，而不是只作为首页普通操作                                           | 需设计 / 需改代码 |
-| 外部研究资料入口缺失                       | 小红书、X/Twitter 收藏、最新论文、repo、网页应先进入 Research Source Inbox，而非直接进入 evidence  | 需设计 / 需改代码 |
+| 外部研究资料入口缺失                       | 最小 Research Source Inbox 已落地；后续仍需 connector、Reading Room、claim / citation 链路         | 已有最小实现 / 后续增强 |
 | 论文阅读与翻译链路缺失                      | 需要 Reading Room 承载翻译、摘要、术语解释、claim 提取和 citation，而不是塞进 Public Site        | 需设计 / 需改代码 |
 | Agent 写回审阅分散                     | AI/Agent candidates 分散在看板、差距、技能树、Public Site，缺统一审阅入口                     | 需设计 / 需改代码 |
 | 远程 Agent 执行缺少项目闭环                | Codex / Claude Code 等远程改项目应关联 Project Board / Kanban task，并进入 patch 审阅   | 需设计 / 需改代码 |

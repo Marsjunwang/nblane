@@ -6,12 +6,16 @@ from dataclasses import dataclass, field
 
 from nblane.core import io as io_facade
 from nblane.core.evidence_review import evidence_status_risks
+from nblane.core.experience import load_experience_book
 from nblane.core.io import (
     KANBAN_DONE,
+    load_evidence_pool_raw,
     load_skill_tree_raw,
     parse_kanban,
     profile_dir,
 )
+from nblane.core.project_board import load_project_board
+from nblane.core.research_sources import load_research_sources
 from nblane.core.sync import get_drifted_blocks
 from nblane.core.validate import validate_one
 
@@ -21,6 +25,7 @@ HEALTH_CATEGORIES = (
     "sync",
     "evidence",
     "kanban",
+    "refs",
     "freshness",
 )
 
@@ -256,6 +261,75 @@ def _tree_shape_issues(tree_raw: dict | None) -> list[HealthIssue]:
     return issues
 
 
+def _as_string_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def _dangling_ref_issue(owner: str, ref: str, target: str) -> HealthIssue:
+    return _issue(
+        "warning",
+        "refs",
+        "Dangling workspace reference",
+        f"{owner} references missing {target}: {ref}",
+        "Fix refs in Evidence Review or Research Source Inbox.",
+    )
+
+
+def _ref_integrity_issues(profile_path) -> list[HealthIssue]:
+    """Warn about dangling internal project/experience/research refs."""
+    issues: list[HealthIssue] = []
+    projects = load_project_board(profile_path).by_id()
+    experiences = load_experience_book(profile_path).by_id()
+    sources = load_research_sources(profile_path).by_id()
+    project_ids = set(projects)
+    experience_ids = set(experiences)
+    source_ids = set(sources)
+
+    pool_raw = load_evidence_pool_raw(profile_path) or {}
+    for row in pool_raw.get("evidence_entries") or []:
+        if not isinstance(row, dict):
+            continue
+        eid = str(row.get("id", "") or "").strip() or "evidence row"
+        owner = f"evidence {eid}"
+        for ref in _as_string_list(row.get("project_refs")):
+            if ref not in project_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "project case"))
+        for ref in _as_string_list(row.get("experience_refs")):
+            if ref not in experience_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "experience case"))
+        for ref in _as_string_list(row.get("source_refs")):
+            if ref.startswith("source:research:") and ref not in source_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "research source"))
+
+    for source in sources.values():
+        owner = f"source {source.id}"
+        for ref in source.project_refs:
+            if ref not in project_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "project case"))
+        for ref in source.experience_refs:
+            if ref not in experience_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "experience case"))
+
+    for project in projects.values():
+        owner = f"project {project.id}"
+        for ref in project.experience_refs:
+            if ref not in experience_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "experience case"))
+        for ref in project.source_refs:
+            if ref.startswith("source:research:") and ref not in source_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "research source"))
+    return issues
+
+
 def analyze_profile_health(name: str) -> HealthReport:
     """Analyze one profile without writing any files."""
     pdir = profile_dir(name)
@@ -269,6 +343,7 @@ def analyze_profile_health(name: str) -> HealthReport:
     issues.extend(_tree_shape_issues(tree_raw))
     issues.extend(_evidence_issues(pdir, tree_raw))
     issues.extend(_kanban_issues(name, pdir))
+    issues.extend(_ref_integrity_issues(pdir))
 
     return HealthReport(
         profile=name,

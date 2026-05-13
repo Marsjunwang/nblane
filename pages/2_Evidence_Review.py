@@ -13,6 +13,14 @@ from nblane.core.evidence_review import (
     build_evidence_review,
     normalize_evidence_strength,
 )
+from nblane.core.experience import (
+    EXPERIENCE_STATUSES,
+    EXPERIENCE_VISIBILITIES,
+    add_experience_case,
+    load_experience_book,
+    save_experience_book,
+    update_experience_case,
+)
 from nblane.core.io import (
     EVIDENCE_POOL_FILENAME,
     KANBAN_DONE,
@@ -28,6 +36,15 @@ from nblane.core.models import (
     EVIDENCE_REVIEW_STATUSES,
     EVIDENCE_STRENGTHS,
     EVIDENCE_TYPES,
+)
+from nblane.core.project_board import (
+    PROJECT_KINDS,
+    PROJECT_STATUSES,
+    PROJECT_VISIBILITIES,
+    add_project_case,
+    load_project_board,
+    save_project_board,
+    update_project_case,
 )
 from nblane.core.profile_ingest import (
     filter_ingest_patch,
@@ -72,7 +89,19 @@ _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
 _kanban_path = _pdir / "kanban.md"
 _goals_path = _pdir / "goals.yaml"
-for _path in (_pool_path, _tree_path, _skill_path, _kanban_path, _goals_path):
+_project_path = _pdir / "project-board.yaml"
+_experience_path = _pdir / "experience.yaml"
+_research_sources_path = _pdir / "research" / "sources.yaml"
+for _path in (
+    _pool_path,
+    _tree_path,
+    _skill_path,
+    _kanban_path,
+    _goals_path,
+    _project_path,
+    _experience_path,
+    _research_sources_path,
+):
     ensure_file_snapshot(_path)
 
 
@@ -169,11 +198,13 @@ def _compact_row(row: dict) -> dict:
     public_readiness = str(row.get("public_readiness", "") or "").strip()
     if public_readiness:
         out["public_readiness"] = public_readiness
-    source_refs = row.get("source_refs") or []
-    if isinstance(source_refs, list):
-        refs = [str(item).strip() for item in source_refs if str(item).strip()]
+    for ref_key in ("source_refs", "project_refs", "experience_refs"):
+        raw_refs = row.get(ref_key) or []
+        if not isinstance(raw_refs, list):
+            continue
+        refs = [str(item).strip() for item in raw_refs if str(item).strip()]
         if refs:
-            out["source_refs"] = refs
+            out[ref_key] = refs
     if bool(row.get("deprecated", False)):
         out["deprecated"] = True
     replaced_by = str(row.get("replaced_by", "") or "").strip()
@@ -595,6 +626,19 @@ def _render_pool_form(
             value=_lines_text(existing.get("source_refs")),
             height=70,
         )
+        c_refs1, c_refs2 = st.columns(2)
+        with c_refs1:
+            project_refs = st.text_area(
+                ui["pool_project_refs"],
+                value=_lines_text(existing.get("project_refs")),
+                height=70,
+            )
+        with c_refs2:
+            experience_refs = st.text_area(
+                ui["pool_experience_refs"],
+                value=_lines_text(existing.get("experience_refs")),
+                height=70,
+            )
         replaced_by = ""
         if row is not None:
             replaced_by = st.text_input(
@@ -643,6 +687,8 @@ def _render_pool_form(
             "review_status": review_status,
             "public_readiness": public_readiness,
             "source_refs": _text_lines(source_refs),
+            "project_refs": _text_lines(project_refs),
+            "experience_refs": _text_lines(experience_refs),
             "deprecated": bool(existing.get("deprecated", False)),
             "replaced_by": replaced_by,
         }
@@ -739,6 +785,469 @@ def _render_links(review: dict) -> None:
         st.caption(f"- `{row['id']}` {row['title']}")
 
 
+def _option_label(option: dict) -> str:
+    """Render a compact id/status option label."""
+    label = str(option.get("label", "") or option.get("id", ""))
+    option_id = str(option.get("id", "") or "")
+    status = str(option.get("status", "") or "")
+    suffix = f" · {status}" if status else ""
+    return f"{label} ({option_id}){suffix}"
+
+
+def _existing_ref_defaults(refs: object, options: list[str]) -> list[str]:
+    """Keep defaults valid for Streamlit multiselect options."""
+    allowed = set(options)
+    return [ref for ref in _clean_refs(refs) if ref in allowed]
+
+
+def _clean_refs(refs: object) -> list[str]:
+    """Normalize ref values to unique non-empty strings."""
+    if not isinstance(refs, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for ref in refs:
+        clean = str(ref).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            out.append(clean)
+    return out
+
+
+def _save_project_board_for_page(board, message: str) -> None:
+    """Persist project-board.yaml from Evidence Review."""
+    assert_files_current([_project_path])
+    save_project_board(selected, board)
+    refresh_file_snapshots([_project_path])
+    stash_git_backup_results()
+    clear_web_cache()
+    st.success(message)
+
+
+def _save_experience_book_for_page(book, message: str) -> None:
+    """Persist experience.yaml from Evidence Review."""
+    assert_files_current([_experience_path])
+    save_experience_book(selected, book)
+    refresh_file_snapshots([_experience_path])
+    stash_git_backup_results()
+    clear_web_cache()
+    st.success(message)
+
+
+def _render_case_options(review: dict) -> None:
+    """Display currently available refs targets."""
+    st.subheader(ui["refs_options_title"])
+    c1, c2, c3 = st.columns(3)
+    option_sets = (
+        (c1, ui["refs_projects"], review.get("project_options") or []),
+        (c2, ui["refs_experiences"], review.get("experience_options") or []),
+        (c3, ui["refs_sources"], review.get("source_options") or []),
+    )
+    for column, title, options in option_sets:
+        with column:
+            st.markdown(f"**{title}**")
+            if not options:
+                st.caption(ui["refs_options_empty"])
+                continue
+            for option in options[:12]:
+                st.caption(f"- `{option.get('id', '')}` {option.get('label', '')}")
+
+
+def _render_evidence_ref_linker(review: dict) -> None:
+    """Edit evidence row refs to project, experience, and source records."""
+    rows = list(review.get("evidence_rows") or [])
+    if not rows:
+        st.caption(ui["link_empty"])
+        return
+    project_options = list(review.get("project_options") or [])
+    experience_options = list(review.get("experience_options") or [])
+    source_options = list(review.get("source_options") or [])
+    project_ids = [str(option.get("id", "")) for option in project_options]
+    experience_ids = [str(option.get("id", "")) for option in experience_options]
+    source_ids = [str(option.get("id", "")) for option in source_options]
+
+    st.subheader(ui["refs_linker_title"])
+    evidence_id = st.selectbox(
+        ui["link_pick_evidence"],
+        options=[str(row.get("id", "")) for row in rows],
+        format_func=lambda eid: next(
+            (
+                _row_label(row)
+                for row in rows
+                if str(row.get("id", "")) == eid
+            ),
+            eid,
+        ),
+        key=f"evidence_review_refs_eid_{selected}",
+    )
+    current = next(
+        (row for row in rows if str(row.get("id", "")) == evidence_id),
+        {},
+    )
+    project_refs = st.multiselect(
+        ui["pool_project_refs"],
+        options=project_ids,
+        default=_existing_ref_defaults(current.get("project_refs"), project_ids),
+        format_func=lambda pid: next(
+            (
+                _option_label(option)
+                for option in project_options
+                if str(option.get("id", "")) == pid
+            ),
+            pid,
+        ),
+        key=f"evidence_review_refs_projects_{selected}",
+    )
+    experience_refs = st.multiselect(
+        ui["pool_experience_refs"],
+        options=experience_ids,
+        default=_existing_ref_defaults(
+            current.get("experience_refs"),
+            experience_ids,
+        ),
+        format_func=lambda eid: next(
+            (
+                _option_label(option)
+                for option in experience_options
+                if str(option.get("id", "")) == eid
+            ),
+            eid,
+        ),
+        key=f"evidence_review_refs_experiences_{selected}",
+    )
+    source_refs = st.multiselect(
+        ui["pool_source_refs"],
+        options=source_ids,
+        default=_existing_ref_defaults(current.get("source_refs"), source_ids),
+        format_func=lambda sid: next(
+            (
+                _option_label(option)
+                for option in source_options
+                if str(option.get("id", "")) == sid
+            ),
+            sid,
+        ),
+        key=f"evidence_review_refs_sources_{selected}",
+    )
+    manual_refs = st.text_area(
+        ui["refs_manual_source_refs"],
+        value="\n".join(
+            ref
+            for ref in _clean_refs(current.get("source_refs"))
+            if ref not in set(source_ids)
+        ),
+        height=70,
+    )
+    if not st.button(ui["refs_save"], type="primary"):
+        return
+
+    entries = _pool_entries()
+    for index, row in enumerate(entries):
+        if str(row.get("id", "") or "") != evidence_id:
+            continue
+        updated = dict(row)
+        updated["project_refs"] = project_refs
+        updated["experience_refs"] = experience_refs
+        updated["source_refs"] = [*source_refs, *_text_lines(manual_refs)]
+        entries[index] = _compact_row(updated)
+        _save_pool(entries, ui["refs_saved"])
+        st.rerun()
+    st.error(ui["refs_evidence_missing"])
+
+
+def _render_project_case_form(board, *, case=None, prefix: str) -> None:
+    """Render an add/edit form for one project case."""
+    existing = case
+    with st.form(prefix):
+        case_id = st.text_input(
+            ui["refs_case_id"],
+            value=getattr(existing, "id", ""),
+            disabled=existing is not None,
+        )
+        title = st.text_input(
+            ui["refs_project_title"],
+            value=getattr(existing, "title", ""),
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            current_status = getattr(existing, "status", "active")
+            status = st.selectbox(
+                ui["refs_status"],
+                PROJECT_STATUSES,
+                index=PROJECT_STATUSES.index(current_status)
+                if current_status in PROJECT_STATUSES
+                else 0,
+            )
+        with c2:
+            current_kind = getattr(existing, "kind", "internal")
+            kind = st.selectbox(
+                ui["refs_kind"],
+                PROJECT_KINDS,
+                index=PROJECT_KINDS.index(current_kind)
+                if current_kind in PROJECT_KINDS
+                else 0,
+            )
+        with c3:
+            current_visibility = getattr(existing, "visibility", "private")
+            visibility = st.selectbox(
+                ui["refs_visibility"],
+                PROJECT_VISIBILITIES,
+                index=PROJECT_VISIBILITIES.index(current_visibility)
+                if current_visibility in PROJECT_VISIBILITIES
+                else 0,
+            )
+        time_range = st.text_input(
+            ui["refs_time_range"],
+            value=getattr(existing, "time_range", ""),
+        )
+        summary = st.text_area(
+            ui["refs_summary"],
+            value=getattr(existing, "summary", ""),
+            height=80,
+        )
+        c4, c5 = st.columns(2)
+        with c4:
+            goal_refs = st.text_area(
+                ui["refs_goal_refs"],
+                value=_lines_text(getattr(existing, "goal_refs", [])),
+                height=70,
+            )
+            source_refs = st.text_area(
+                ui["pool_source_refs"],
+                value=_lines_text(getattr(existing, "source_refs", [])),
+                height=70,
+            )
+            output_refs = st.text_area(
+                ui["refs_output_refs"],
+                value=_lines_text(getattr(existing, "output_refs", [])),
+                height=70,
+            )
+        with c5:
+            task_refs = st.text_area(
+                ui["refs_task_refs"],
+                value=_lines_text(getattr(existing, "task_refs", [])),
+                height=70,
+            )
+            experience_refs = st.text_area(
+                ui["pool_experience_refs"],
+                value=_lines_text(getattr(existing, "experience_refs", [])),
+                height=70,
+            )
+        notes = st.text_area(
+            ui["refs_notes"],
+            value=getattr(existing, "notes", ""),
+            height=80,
+        )
+        submitted = st.form_submit_button(
+            ui["pool_update"] if existing is not None else ui["refs_add_project"],
+            type="primary",
+        )
+    if not submitted:
+        return
+    try:
+        if existing is None:
+            add_project_case(
+                board,
+                title,
+                case_id=case_id,
+                status=status,
+                kind=kind,
+                time_range=time_range,
+                summary=summary,
+                goal_refs=_text_lines(goal_refs),
+                task_refs=_text_lines(task_refs),
+                source_refs=_text_lines(source_refs),
+                experience_refs=_text_lines(experience_refs),
+                output_refs=_text_lines(output_refs),
+                visibility=visibility,
+                notes=notes,
+            )
+        else:
+            update_project_case(
+                board,
+                existing.id,
+                title=title,
+                status=status,
+                kind=kind,
+                time_range=time_range,
+                summary=summary,
+                goal_refs=_text_lines(goal_refs),
+                task_refs=_text_lines(task_refs),
+                source_refs=_text_lines(source_refs),
+                experience_refs=_text_lines(experience_refs),
+                output_refs=_text_lines(output_refs),
+                visibility=visibility,
+                notes=notes,
+            )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    _save_project_board_for_page(board, ui["refs_case_saved"])
+    st.rerun()
+
+
+def _render_experience_case_form(book, *, case=None, prefix: str) -> None:
+    """Render an add/edit form for one experience case."""
+    existing = case
+    with st.form(prefix):
+        case_id = st.text_input(
+            ui["refs_case_id"],
+            value=getattr(existing, "id", ""),
+            disabled=existing is not None,
+        )
+        organization = st.text_input(
+            ui["refs_experience_organization"],
+            value=getattr(existing, "organization", ""),
+        )
+        role = st.text_input(
+            ui["refs_experience_role"],
+            value=getattr(existing, "role", ""),
+        )
+        location = st.text_input(
+            ui["refs_experience_location"],
+            value=getattr(existing, "location", ""),
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            current_status = getattr(existing, "status", "active")
+            status = st.selectbox(
+                ui["refs_status"],
+                EXPERIENCE_STATUSES,
+                index=EXPERIENCE_STATUSES.index(current_status)
+                if current_status in EXPERIENCE_STATUSES
+                else 0,
+            )
+        with c2:
+            current_visibility = getattr(existing, "visibility", "private")
+            visibility = st.selectbox(
+                ui["refs_visibility"],
+                EXPERIENCE_VISIBILITIES,
+                index=EXPERIENCE_VISIBILITIES.index(current_visibility)
+                if current_visibility in EXPERIENCE_VISIBILITIES
+                else 0,
+            )
+        time_range = st.text_input(
+            ui["refs_time_range"],
+            value=getattr(existing, "time_range", ""),
+        )
+        summary = st.text_area(
+            ui["refs_summary"],
+            value=getattr(existing, "summary", ""),
+            height=80,
+        )
+        c3, c4 = st.columns(2)
+        with c3:
+            project_refs = st.text_area(
+                ui["pool_project_refs"],
+                value=_lines_text(getattr(existing, "project_refs", [])),
+                height=70,
+            )
+        with c4:
+            source_refs = st.text_area(
+                ui["pool_source_refs"],
+                value=_lines_text(getattr(existing, "source_refs", [])),
+                height=70,
+            )
+        notes = st.text_area(
+            ui["refs_notes"],
+            value=getattr(existing, "notes", ""),
+            height=80,
+        )
+        submitted = st.form_submit_button(
+            ui["pool_update"] if existing is not None else ui["refs_add_experience"],
+            type="primary",
+        )
+    if not submitted:
+        return
+    try:
+        if existing is None:
+            add_experience_case(
+                book,
+                organization,
+                case_id=case_id,
+                role=role,
+                location=location,
+                status=status,
+                time_range=time_range,
+                summary=summary,
+                project_refs=_text_lines(project_refs),
+                source_refs=_text_lines(source_refs),
+                visibility=visibility,
+                notes=notes,
+            )
+        else:
+            update_experience_case(
+                book,
+                existing.id,
+                organization=organization,
+                role=role,
+                location=location,
+                status=status,
+                time_range=time_range,
+                summary=summary,
+                project_refs=_text_lines(project_refs),
+                source_refs=_text_lines(source_refs),
+                visibility=visibility,
+                notes=notes,
+            )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    _save_experience_book_for_page(book, ui["refs_case_saved"])
+    st.rerun()
+
+
+def _render_case_editor() -> None:
+    """Render minimal project and experience case editors."""
+    st.subheader(ui["refs_case_editor_title"])
+    board = load_project_board(selected)
+    book = load_experience_book(selected)
+    project_tab, experience_tab = st.tabs(
+        [ui["refs_projects"], ui["refs_experiences"]]
+    )
+    with project_tab:
+        with st.expander(ui["refs_add_project"], expanded=not board.project_cases):
+            _render_project_case_form(
+                board,
+                prefix=f"evidence_review_project_add_{selected}",
+            )
+        for case in board.project_cases:
+            with st.expander(f"{case.title or case.id} · {case.status}"):
+                _render_project_case_form(
+                    board,
+                    case=case,
+                    prefix=f"evidence_review_project_{selected}_{case.id}",
+                )
+    with experience_tab:
+        with st.expander(
+            ui["refs_add_experience"],
+            expanded=not book.experience_cases,
+        ):
+            _render_experience_case_form(
+                book,
+                prefix=f"evidence_review_experience_add_{selected}",
+            )
+        for case in book.experience_cases:
+            label = " · ".join(
+                item for item in (case.organization, case.role) if item
+            )
+            with st.expander(f"{label or case.id} · {case.status}"):
+                _render_experience_case_form(
+                    book,
+                    case=case,
+                    prefix=f"evidence_review_experience_{selected}_{case.id}",
+                )
+
+
+def _render_refs(review: dict) -> None:
+    """Render project/experience/source refs tooling."""
+    _render_case_options(review)
+    st.divider()
+    _render_evidence_ref_linker(review)
+    st.divider()
+    _render_case_editor()
+
+
 def _render_risks(review: dict) -> None:
     risks = list(review.get("status_risks") or [])
     if not risks:
@@ -781,6 +1290,7 @@ tabs = st.tabs(
         ui["tab_queue"],
         ui["tab_pool"],
         ui["tab_links"],
+        ui["tab_refs"],
         ui["tab_risks"],
     ]
 )
@@ -791,4 +1301,6 @@ with tabs[1]:
 with tabs[2]:
     _render_links(review_payload)
 with tabs[3]:
+    _render_refs(review_payload)
+with tabs[4]:
     _render_risks(review_payload)

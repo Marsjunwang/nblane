@@ -23,7 +23,6 @@ from nblane.core.goals import (
     goal_for_ui,
 )
 from nblane.core.goal_alignment import skill_node_options
-from nblane.core.inbox import load_inbox, summarize_inbox
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -37,6 +36,8 @@ from nblane.core.profile_context import (
     north_star_payload_from_identity,
     parse_identity_fields,
 )
+from nblane.core.project_board import load_project_board
+from nblane.core.research_sources import load_research_sources
 from nblane.core.workspace_graph import workspace_graph_payload
 
 ProfileRef = str | Path
@@ -54,6 +55,13 @@ QUICK_LINKS: tuple[dict[str, str], ...] = (
         "path": EVIDENCE_REVIEW_PAGE,
         "label_key": "quick_evidence_review",
         "help_key": "quick_evidence_review_help",
+        "kind": "growth",
+    },
+    {
+        "id": "research",
+        "path": "pages/7_Research.py",
+        "label_key": "quick_research",
+        "help_key": "quick_research_help",
         "kind": "growth",
     },
     {
@@ -108,6 +116,25 @@ def _read_yaml_mapping(path: Path) -> dict:
 
 def _as_list(raw: object) -> list:
     return raw if isinstance(raw, list) else []
+
+
+def _clean_string_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def _pool_entries(profile: ProfileRef) -> list[dict[str, Any]]:
+    raw = io_facade.load_evidence_pool_raw(profile) or {}
+    entries = raw.get("evidence_entries") or []
+    return [dict(item) for item in entries if isinstance(item, dict)]
 
 
 def _status_counts(
@@ -412,33 +439,77 @@ def dashboard_pending_evidence_summary(profile: ProfileRef) -> dict:
 
 def dashboard_source_summary(profile: ProfileRef) -> dict:
     """Return privacy-safe source inbox counts for the Home dashboard."""
-    path = _profile_path(profile) / "inbox.yaml"
+    path = _profile_path(profile) / "research" / "sources.yaml"
     try:
-        inbox = load_inbox(profile)
-        summary = summarize_inbox(inbox)
+        inbox = load_research_sources(profile)
         error = ""
     except OSError as exc:
         return {
             "error": str(exc),
             "implemented": False,
+            "source_inbox_total": 0,
             "inbox_total": 0,
             "active_total": 0,
             "status_counts": {},
             "active_titles": [],
         }
 
-    status_counts = summary.status_counts
+    status_counts: dict[str, int] = {}
+    active_titles: list[str] = []
+    for source in inbox.sources:
+        status_counts[source.status] = status_counts.get(source.status, 0) + 1
+        if source.status in {
+            "inbox",
+            "reading",
+            "summarized",
+            "candidate_ready",
+        }:
+            active_titles.append(source.title)
     active_total = sum(
         int(status_counts.get(status, 0) or 0)
-        for status in ("inbox", "captured", "clarified", "active")
+        for status in ("inbox", "reading", "summarized", "candidate_ready")
     )
     return {
         "error": error,
-        "implemented": path.exists() or summary.total_items > 0,
-        "inbox_total": summary.total_items,
+        "implemented": path.exists() or bool(inbox.sources),
+        "source_inbox_total": len(inbox.sources),
+        "inbox_total": len(inbox.sources),
         "active_total": active_total,
         "status_counts": status_counts,
-        "active_titles": summary.active_titles[:5],
+        "active_titles": active_titles[:5],
+    }
+
+
+def dashboard_project_summary(profile: ProfileRef) -> dict:
+    """Return privacy-safe project-case graph hints."""
+    board = load_project_board(profile)
+    cases = []
+    for case in board.project_cases:
+        if not case.id:
+            continue
+        cases.append(
+            {
+                "id": case.id,
+                "title": case.title,
+                "status": case.status,
+                "kind": case.kind,
+                "visibility": case.visibility,
+            }
+        )
+
+    evidence_rows = _pool_entries(profile)
+    evidence_by_project: dict[str, list[str]] = {}
+    for row in evidence_rows:
+        eid = str(row.get("id", "") or "").strip()
+        if not eid:
+            continue
+        for ref in _clean_string_list(row.get("project_refs")):
+            evidence_by_project.setdefault(ref, []).append(eid)
+
+    return {
+        "implemented": bool(cases),
+        "cases": cases,
+        "evidence_by_project": evidence_by_project,
     }
 
 
@@ -972,6 +1043,7 @@ def dashboard_payload(
     skills = dashboard_skill_summary(profile)
     pending = dashboard_pending_evidence_summary(profile)
     sources = dashboard_source_summary(profile)
+    projects = dashboard_project_summary(profile)
     health = dashboard_health_summary(profile)
     public = dashboard_public_summary(profile)
     book = _goal_book(profile)
@@ -1007,6 +1079,7 @@ def dashboard_payload(
         "kanban": kanban,
         "skills": skills,
         "sources": sources,
+        "projects": projects,
         "pending_evidence": pending,
         "health": health,
         "public": public,
@@ -1038,6 +1111,7 @@ def dashboard_payload(
             skills=skills,
             pending=pending,
             sources=sources,
+            projects=projects,
             public=public,
             health=health,
             ui=ui,

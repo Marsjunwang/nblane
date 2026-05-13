@@ -71,6 +71,8 @@ class EvidenceRecord:
     review_status: str = ""
     public_readiness: str = ""
     source_refs: list[str] = field(default_factory=list)
+    project_refs: list[str] = field(default_factory=list)
+    experience_refs: list[str] = field(default_factory=list)
     deprecated: bool = False
     replaced_by: str = ""
 
@@ -107,6 +109,20 @@ class EvidenceRecord:
             ]
             if isinstance(d.get("source_refs"), list)
             else [],
+            project_refs=[
+                str(item).strip()
+                for item in (d.get("project_refs") or [])
+                if item is not None and str(item).strip()
+            ]
+            if isinstance(d.get("project_refs"), list)
+            else [],
+            experience_refs=[
+                str(item).strip()
+                for item in (d.get("experience_refs") or [])
+                if item is not None and str(item).strip()
+            ]
+            if isinstance(d.get("experience_refs"), list)
+            else [],
             deprecated=bool(d.get("deprecated", False)),
             replaced_by=str(d.get("replaced_by", "") or ""),
         )
@@ -134,6 +150,10 @@ class EvidenceRecord:
             out["public_readiness"] = self.public_readiness
         if self.source_refs:
             out["source_refs"] = list(self.source_refs)
+        if self.project_refs:
+            out["project_refs"] = list(self.project_refs)
+        if self.experience_refs:
+            out["experience_refs"] = list(self.experience_refs)
         if self.deprecated:
             out["deprecated"] = True
         if self.replaced_by:

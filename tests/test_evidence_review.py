@@ -57,6 +57,9 @@ class TestEvidenceReview(unittest.TestCase):
                         "title": "Medium project note",
                         "strength": "medium",
                         "review_status": "reviewed",
+                        "project_refs": ["project:demo"],
+                        "experience_refs": ["experience:robotics-lab"],
+                        "source_refs": ["source:research:20260513-001"],
                     },
                     {
                         "id": "ev_unlinked",
@@ -97,6 +100,51 @@ class TestEvidenceReview(unittest.TestCase):
                 ],
             },
         )
+        _write_yaml(
+            profile / "project-board.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "project_cases": [
+                    {
+                        "id": "project:demo",
+                        "title": "Demo Project",
+                        "status": "active",
+                    }
+                ],
+            },
+        )
+        _write_yaml(
+            profile / "experience.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "experience_cases": [
+                    {
+                        "id": "experience:robotics-lab",
+                        "organization": "Robotics Lab",
+                        "role": "Engineer",
+                        "status": "active",
+                    }
+                ],
+            },
+        )
+        (profile / "research").mkdir()
+        _write_yaml(
+            profile / "research" / "sources.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "sources": [
+                    {
+                        "id": "source:research:20260513-001",
+                        "kind": "paper",
+                        "title": "Demo source",
+                        "status": "inbox",
+                    }
+                ],
+            },
+        )
         return profile
 
     def test_build_evidence_review_counts_derived_queues(self) -> None:
@@ -112,6 +160,24 @@ class TestEvidenceReview(unittest.TestCase):
         self.assertEqual(summary["status_risk_count"], 3)
         self.assertEqual(review["unlinked"][0]["id"], "ev_unlinked")
         self.assertEqual(review["needs_review"][0]["strength"], "unrated")
+        medium = next(
+            row for row in review["evidence_rows"] if row["id"] == "ev_medium"
+        )
+        self.assertEqual(medium["project_refs"], ["project:demo"])
+        self.assertEqual(medium["experience_refs"], ["experience:robotics-lab"])
+        self.assertEqual(
+            medium["source_refs"],
+            ["source:research:20260513-001"],
+        )
+        self.assertEqual(review["project_options"][0]["id"], "project:demo")
+        self.assertEqual(
+            review["experience_options"][0]["id"],
+            "experience:robotics-lab",
+        )
+        self.assertEqual(
+            review["source_options"][0]["id"],
+            "source:research:20260513-001",
+        )
         self.assertFalse(
             any(row["id"] == "ev_old" for row in review["evidence_rows"])
         )

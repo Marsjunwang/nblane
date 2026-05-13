@@ -7,12 +7,15 @@ from typing import Any
 
 from nblane.core import io as io_facade
 from nblane.core.io import KANBAN_DONE, STATUSES, schema_node_index
+from nblane.core.experience import load_experience_book
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
     EVIDENCE_PUBLIC_READINESS,
     EVIDENCE_REVIEW_STATUSES,
     EVIDENCE_STRENGTHS,
 )
+from nblane.core.project_board import load_project_board
+from nblane.core.research_sources import load_research_sources
 
 EVIDENCE_REVIEW_PAGE = "pages/2_Evidence_Review.py"
 UNRATED_STRENGTH = "unrated"
@@ -104,6 +107,61 @@ def _pool_by_id(profile: str | Path) -> dict[str, dict[str, Any]]:
         if eid:
             out[eid] = row
     return out
+
+
+def _project_options(profile: str | Path) -> list[dict[str, str]]:
+    """Return project case options for evidence refs."""
+    board = load_project_board(profile)
+    options: list[dict[str, str]] = []
+    for case in board.project_cases:
+        if not case.id:
+            continue
+        options.append(
+            {
+                "id": case.id,
+                "label": case.title or case.id,
+                "status": case.status,
+            }
+        )
+    return options
+
+
+def _experience_options(profile: str | Path) -> list[dict[str, str]]:
+    """Return experience case options for evidence refs."""
+    book = load_experience_book(profile)
+    options: list[dict[str, str]] = []
+    for case in book.experience_cases:
+        if not case.id:
+            continue
+        parts = [case.organization]
+        if case.role:
+            parts.append(case.role)
+        label = " · ".join(part for part in parts if part) or case.id
+        options.append(
+            {
+                "id": case.id,
+                "label": label,
+                "status": case.status,
+            }
+        )
+    return options
+
+
+def _source_options(profile: str | Path) -> list[dict[str, str]]:
+    """Return research source options for evidence refs."""
+    inbox = load_research_sources(profile)
+    options: list[dict[str, str]] = []
+    for source in inbox.sources:
+        if not source.id:
+            continue
+        options.append(
+            {
+                "id": source.id,
+                "label": source.title or source.id,
+                "status": source.status,
+            }
+        )
+    return options
 
 
 def _tree_raw(profile: str | Path) -> dict[str, Any]:
@@ -346,6 +404,8 @@ def _evidence_row_payload(
             row.get("public_readiness")
         ),
         "source_refs": _clean_string_list(row.get("source_refs")),
+        "project_refs": _clean_string_list(row.get("project_refs")),
+        "experience_refs": _clean_string_list(row.get("experience_refs")),
         "deprecated": bool(row.get("deprecated", False)),
         "replaced_by": str(row.get("replaced_by", "") or ""),
         "skill_refs": [item["id"] for item in used_by],
@@ -400,5 +460,8 @@ def build_evidence_review(profile: str | Path) -> dict[str, object]:
         "status_risks": status_risks,
         "skill_summaries": skill_summaries,
         "skill_options": skill_options,
+        "project_options": _project_options(profile),
+        "experience_options": _experience_options(profile),
+        "source_options": _source_options(profile),
         "usage": usage,
     }

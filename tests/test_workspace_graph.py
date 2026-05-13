@@ -80,7 +80,44 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
             profile / "evidence-pool.yaml",
             {
                 "profile": "alice",
-                "evidence_entries": [{"id": "ev_1", "title": "Atomic row"}],
+                "evidence_entries": [
+                    {
+                        "id": "ev_1",
+                        "title": "Atomic row",
+                        "project_refs": ["project:secret"],
+                        "source_refs": ["source:research:20260513-001"],
+                    }
+                ],
+            },
+        )
+        _write_yaml(
+            profile / "project-board.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "project_cases": [
+                    {
+                        "id": "project:secret",
+                        "title": "Sensitive project title",
+                        "status": "active",
+                        "visibility": "private",
+                    }
+                ],
+            },
+        )
+        (profile / "research").mkdir()
+        _write_yaml(
+            profile / "research" / "sources.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "sources": [
+                    {
+                        "id": "source:research:20260513-001",
+                        "title": "Sensitive source title",
+                        "status": "inbox",
+                    }
+                ],
             },
         )
         (profile / "kanban.md").write_text(
@@ -115,7 +152,11 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
     assert "Private launch goal" not in text
     assert "Secret Skill" not in text
     assert "Sensitive north star" not in text
+    assert "Sensitive project title" not in text
+    assert "Sensitive source title" not in text
     nodes = {node["id"]: node for node in dumped["nodes"]}
+    assert nodes["project:secret"]["layer"] == "work_context"
+    assert nodes["source:inbox"]["owner_path"] == "pages/7_Research.py"
     assert nodes["evidence_candidate:pending"]["metric"] == "1"
     assert nodes["atomic_evidence:pool"]["metric"] == "2"
     assert (

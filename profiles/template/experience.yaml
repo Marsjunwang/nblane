@@ -1,0 +1,7 @@
+# Internal experience cases for {Name}
+# Resume output remains in resume-source.yaml.
+
+schema_version: "1.0"
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+experience_cases: []

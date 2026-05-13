@@ -78,6 +78,7 @@ class TestHomeDashboard(unittest.TestCase):
                         "title": "Linked evidence",
                         "strength": "medium",
                         "review_status": "reviewed",
+                        "project_refs": ["project:nblane"],
                     },
                     {
                         "id": "ev_unused",
@@ -169,6 +170,40 @@ class TestHomeDashboard(unittest.TestCase):
                 ],
             },
         )
+        _write_yaml(
+            profile / "project-board.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "project_cases": [
+                    {
+                        "id": "project:nblane",
+                        "title": "Private Nblane Project",
+                        "status": "active",
+                        "kind": "internal",
+                        "visibility": "private",
+                    }
+                ],
+            },
+        )
+        research_dir = profile / "research"
+        research_dir.mkdir()
+        _write_yaml(
+            research_dir / "sources.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "sources": [
+                    {
+                        "id": "source:research:20260513-001",
+                        "kind": "web",
+                        "title": "Captured research source",
+                        "status": "inbox",
+                        "visibility": "private",
+                    }
+                ],
+            },
+        )
         blog_dir = profile / "blog"
         blog_dir.mkdir()
         (blog_dir / "draft.md").write_text(
@@ -223,8 +258,9 @@ class TestHomeDashboard(unittest.TestCase):
             summary = dashboard_source_summary(profile)
 
         self.assertEqual(summary["inbox_total"], 1)
+        self.assertEqual(summary["source_inbox_total"], 1)
         self.assertEqual(summary["active_total"], 1)
-        self.assertEqual(summary["active_titles"], ["Captured source"])
+        self.assertEqual(summary["active_titles"], ["Captured research source"])
 
     def test_health_summary_counts_report(self) -> None:
         """Health summary is a compact view of analyze_profile_health."""
@@ -297,6 +333,7 @@ class TestHomeDashboard(unittest.TestCase):
         )
         self.assertEqual(payload["goal_counts"]["active"], 2)
         self.assertEqual(payload["sources"]["active_total"], 1)
+        self.assertEqual(payload["projects"]["cases"][0]["id"], "project:nblane")
         self.assertEqual(len(payload["active_goals"]), 2)
         self.assertEqual(
             payload["skill_alignment"]["confirmed_links"][0]["node_id"],
@@ -326,7 +363,13 @@ class TestHomeDashboard(unittest.TestCase):
         nodes = {node["id"]: node for node in payload["graph"]["nodes"]}
         self.assertEqual(nodes["source:inbox"]["layer"], "source")
         self.assertEqual(nodes["source:inbox"]["metric"], "1")
+        self.assertEqual(
+            nodes["source:inbox"]["owner_path"],
+            "pages/7_Research.py",
+        )
         self.assertFalse(nodes["source:inbox"]["placeholder"])
+        self.assertIn("project:nblane", nodes)
+        self.assertTrue(nodes["project:nblane"]["locked"])
         self.assertEqual(nodes["evidence_candidate:pending"]["layer"], "evidence")
         self.assertEqual(nodes["evidence_candidate:pending"]["metric"], "1")
         self.assertEqual(
@@ -339,7 +382,6 @@ class TestHomeDashboard(unittest.TestCase):
             "pages/2_Evidence_Review.py",
         )
         for node_id in (
-            "project_case:planned",
             "daily_work:planned",
             "research:planned",
             "agent_run:planned",
@@ -358,6 +400,7 @@ class TestHomeDashboard(unittest.TestCase):
         graph_text = yaml.dump(payload["graph"], allow_unicode=True)
         self.assertIn("Reliable robot learning systems.", graph_text)
         self.assertIn("ROS 2 Basics", graph_text)
+        self.assertNotIn("Private Nblane Project", graph_text)
         self.assertTrue(
             any(link["path"] == "pages/3_Kanban.py" for link in payload["quick_links"])
         )
