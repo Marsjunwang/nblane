@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from nblane.core.evidence_resolve import resolve_skill_node
-from nblane.core.goals import current_goal, goal_for_agent_context
+from nblane.core.goals import GoalBook, goal_for_agent_context, load_goal_book
 from nblane.core.io import (
     load_evidence_pool,
     load_schema,
@@ -15,6 +15,12 @@ from nblane.core.io import (
 )
 from nblane.core.models import Evidence
 from nblane.core.paths import PROFILES_DIR
+from nblane.core.profile_context import (
+    normalize_north_star_visibility,
+    north_star_context_from_identity,
+    parse_identity_fields,
+    update_identity_fields,
+)
 from nblane.core.profile_io import safe_profile_dir
 
 PREAMBLE = """\
@@ -270,6 +276,52 @@ def build_system_prompt(
     return "\n".join(parts)
 
 
+def _profile_text_for_agent_context(profile_text: str) -> str:
+    """Redact Identity fields that are explicitly private for agent context."""
+    identity = parse_identity_fields(profile_text)
+    if normalize_north_star_visibility(
+        identity.get("North Star Visibility")
+    ) != "private":
+        return profile_text
+    return update_identity_fields(
+        profile_text,
+        {
+            "North Star": "",
+            "North Star Brief": "",
+        },
+    )
+
+
+def _stage_goal_context(profile_dir: Path, profile_text: str) -> str:
+    """Return North Star + primary/active goals allowed in agent context."""
+    book = load_goal_book(profile_dir)
+    identity = parse_identity_fields(profile_text)
+    lines: list[str] = []
+    north_star = north_star_context_from_identity(identity, for_agent=True)
+    if north_star:
+        lines.append("North Star:")
+        lines.append(north_star)
+
+    primary = book.primary()
+    primary_context = goal_for_agent_context(primary)
+    if primary_context:
+        lines.append("Primary goal:")
+        lines.append(primary_context)
+
+    primary_id = primary.id if primary is not None else ""
+    active_contexts: list[str] = []
+    for goal in book.active_goals():
+        if goal.id == primary_id:
+            continue
+        context = goal_for_agent_context(goal)
+        if context:
+            active_contexts.append(context)
+    if active_contexts:
+        lines.append("Active goals:")
+        lines.extend(active_contexts)
+    return "\n\n".join(lines)
+
+
 def generate(
     profile_name: str,
     mode: str = "chat",
@@ -284,7 +336,8 @@ def generate(
             f"SKILL.md not found for profile '{profile_name}'"
         )
 
-    profile_text = skill_md.read_text(encoding="utf-8")
+    raw_profile_text = skill_md.read_text(encoding="utf-8")
+    profile_text = _profile_text_for_agent_context(raw_profile_text)
     agent_profile_text = _render_agent_profile(
         pdir / "agent-profile.yaml"
     )
@@ -300,7 +353,7 @@ def generate(
         if ev_lines
         else None
     )
-    goal_section = goal_for_agent_context(current_goal(pdir))
+    goal_section = _stage_goal_context(pdir, raw_profile_text)
 
     return build_system_prompt(
         profile_text,

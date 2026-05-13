@@ -27,6 +27,7 @@ source_of_truth: true
 |------|------|
 | [overview.md](product/overview.md) | nblane 是什么、用户是谁、核心对象和非目标 |
 | [core-loop.md](product/core-loop.md) | 当前最小闭环：捕获、计划、执行、证据、研究、发布、Agent 复用 |
+| [growth-graph.md](product/growth-graph.md) | 成长关系图谱：事实沉淀为 evidence，evidence 支撑 skill，skill 构成 North Star 的能力地基 |
 | [roadmap.md](product/roadmap.md) | 当前统一路线图，替代旧 `product.md` / `design.md` 中分散的 Demo Phase |
 | [web-experience.md](product/web-experience.md) | Streamlit Web 体验设计和 backlog |
 

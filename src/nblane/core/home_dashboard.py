@@ -15,8 +15,11 @@ from nblane.core.goals import (
     GOAL_UI_VISIBILITIES,
     Goal,
     GoalBook,
+    GoalSkillLink,
     goal_for_ui,
 )
+from nblane.core.goal_alignment import skill_node_options
+from nblane.core.inbox import load_inbox, summarize_inbox
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -26,6 +29,11 @@ from nblane.core.io import (
     schema_node_index,
 )
 from nblane.core.paths import REPO_ROOT
+from nblane.core.profile_context import (
+    north_star_payload_from_identity,
+    parse_identity_fields,
+)
+from nblane.core.workspace_graph import workspace_graph_payload
 
 ProfileRef = str | Path
 
@@ -124,10 +132,23 @@ def _status_counts(
     return counts, sum(counts.values()), fallback_index
 
 
-def _current_goal(profile: ProfileRef):
+def _goal_book(profile: ProfileRef) -> GoalBook:
     raw = io_facade.load_goal_book_raw(profile)
-    book = GoalBook.from_dict(raw, profile=_profile_name(profile))
-    return book.current()
+    return GoalBook.from_dict(raw, profile=_profile_name(profile))
+
+
+def _current_goal(profile: ProfileRef):
+    return _goal_book(profile).current()
+
+
+def _profile_identity(profile: ProfileRef) -> dict[str, str]:
+    path = _profile_path(profile) / "SKILL.md"
+    if not path.exists():
+        return parse_identity_fields("")
+    try:
+        return parse_identity_fields(path.read_text(encoding="utf-8"))
+    except OSError:
+        return parse_identity_fields("")
 
 
 def _goal_editor_payload(goal: Goal | None) -> dict:
@@ -143,7 +164,9 @@ def _goal_editor_payload(goal: Goal | None) -> dict:
             "ui_visibility": "discreet",
             "include_in_agent_context": True,
             "summary": "",
+            "alignment": "",
             "target_skills": [],
+            "skill_links": [],
             "success_criteria": [],
             "focus": [],
             "evidence_refs": [],
@@ -161,7 +184,9 @@ def _goal_editor_payload(goal: Goal | None) -> dict:
         "ui_visibility": goal.ui_visibility,
         "include_in_agent_context": goal.include_in_agent_context,
         "summary": goal.summary,
+        "alignment": goal.alignment,
         "target_skills": list(goal.target_skills),
+        "skill_links": [link.to_dict() for link in goal.skill_links],
         "success_criteria": list(goal.success_criteria),
         "focus": list(goal.focus),
         "evidence_refs": list(goal.evidence_refs),
@@ -171,18 +196,31 @@ def _goal_editor_payload(goal: Goal | None) -> dict:
     }
 
 
-def _goal_payload(profile: ProfileRef) -> dict:
+def _goal_payload_from_goal(goal: Goal | None, *, editable: bool = True) -> dict:
     """Return privacy-safe goal display plus editable fields when allowed."""
-    goal = _current_goal(profile)
     projection = goal_for_ui(goal)
     locked = goal is not None and projection is None
     return {
         "is_set": goal is not None,
         "locked": locked,
         "projection": projection,
-        "editor": {} if locked else _goal_editor_payload(goal),
+        "editor": {} if locked or not editable else _goal_editor_payload(goal),
         "status_options": list(GOAL_STATUSES),
         "visibility_options": list(GOAL_UI_VISIBILITIES),
+    }
+
+
+def _goal_payload(profile: ProfileRef) -> dict:
+    """Return the primary goal payload for compatibility callers."""
+    return _goal_payload_from_goal(_current_goal(profile))
+
+
+def _goal_card_payload(goal: Goal, primary_id: str = "") -> dict:
+    """Return compact active-goal display metadata."""
+    return {
+        **_goal_payload_from_goal(goal, editable=True),
+        "id": goal.id,
+        "is_primary": bool(goal.id and goal.id == primary_id),
     }
 
 
@@ -202,8 +240,18 @@ def _target_skill_hits(
     tree_raw: dict | None,
     index: dict[str, dict[str, Any]],
 ) -> tuple[list[str], list[dict[str, str]]]:
-    goal = _current_goal(profile)
-    targets = list(goal.target_skills) if goal is not None else []
+    book = _goal_book(profile)
+    targets: list[str] = []
+    seen_targets: set[str] = set()
+    for goal in book.active_goals():
+        if goal.ui_visibility == "private":
+            continue
+        for target in goal.target_skills:
+            clean = str(target).strip()
+            if not clean or clean in seen_targets:
+                continue
+            seen_targets.add(clean)
+            targets.append(clean)
     if not targets or not isinstance(tree_raw, dict):
         return targets, []
 
@@ -374,6 +422,38 @@ def dashboard_pending_evidence_summary(profile: ProfileRef) -> dict:
     }
 
 
+def dashboard_source_summary(profile: ProfileRef) -> dict:
+    """Return privacy-safe source inbox counts for the Home dashboard."""
+    path = _profile_path(profile) / "inbox.yaml"
+    try:
+        inbox = load_inbox(profile)
+        summary = summarize_inbox(inbox)
+        error = ""
+    except OSError as exc:
+        return {
+            "error": str(exc),
+            "implemented": False,
+            "inbox_total": 0,
+            "active_total": 0,
+            "status_counts": {},
+            "active_titles": [],
+        }
+
+    status_counts = summary.status_counts
+    active_total = sum(
+        int(status_counts.get(status, 0) or 0)
+        for status in ("inbox", "captured", "clarified", "active")
+    )
+    return {
+        "error": error,
+        "implemented": path.exists() or summary.total_items > 0,
+        "inbox_total": summary.total_items,
+        "active_total": active_total,
+        "status_counts": status_counts,
+        "active_titles": summary.active_titles[:5],
+    }
+
+
 def dashboard_health_summary(profile: ProfileRef) -> dict:
     """Return profile-health counts and the first actionable issues."""
     if isinstance(profile, Path):
@@ -481,9 +561,54 @@ def dashboard_public_summary(profile: ProfileRef) -> dict:
     }
 
 
+def _goal_graph_label(
+    goal_payload: dict,
+    ui: dict[str, str] | None,
+    *,
+    fallback_key: str = "dashboard_graph_goal_missing",
+) -> str:
+    projection = goal_payload.get("projection")
+    if isinstance(projection, dict):
+        return str(
+            projection.get("title")
+            or projection.get("label")
+            or _ui_text(ui, "goal_strip_hidden", "Goal set")
+        )
+    if goal_payload.get("locked"):
+        return _ui_text(ui, "goal_private_locked", "Private goal")
+    return _ui_text(ui, fallback_key, "Set current goal")
+
+
+def _safe_goal_skill_links(goal: Goal | None) -> list[GoalSkillLink]:
+    if goal is None or goal.ui_visibility == "private":
+        return []
+    return list(goal.skill_links)
+
+
+def _suggested_skill_nodes(
+    skills: dict,
+) -> list[dict[str, object]]:
+    skill_nodes = list(skills.get("target_learning_locked") or [])
+    if not skill_nodes:
+        skill_nodes = list(skills.get("evidence_risk_nodes") or [])
+    return [
+        {
+            "node_id": str(node.get("id") or ""),
+            "label": str(node.get("label") or node.get("id") or ""),
+            "metric": str(node.get("status") or ""),
+            "suggested": True,
+        }
+        for node in skill_nodes
+        if isinstance(node, dict)
+    ]
+
+
 def _graph_payload(
     *,
-    goal: dict,
+    north_star: dict,
+    primary_goal: dict,
+    primary_goal_id: str,
+    active_goals: list[Goal],
     kanban: dict,
     skills: dict,
     pending: dict,
@@ -491,53 +616,185 @@ def _graph_payload(
     health: dict,
     ui: dict[str, str] | None,
 ) -> dict:
-    """Build a compact fixed-layout relation graph for the React dashboard."""
-    projection = goal.get("projection")
-    goal_label = _ui_text(ui, "dashboard_graph_goal_missing", "Set goal")
-    if isinstance(projection, dict):
-        goal_label = str(
-            projection.get("title")
-            or projection.get("label")
-            or _ui_text(ui, "goal_strip_hidden", "Goal set")
-        )
-    elif goal.get("locked"):
-        goal_label = _ui_text(ui, "goal_private_locked", "Private goal")
+    """Build a compact relation graph for the React dashboard canvas."""
+    nodes: list[dict[str, object]] = []
+    edges: list[dict[str, object]] = []
 
-    nodes: list[dict[str, object]] = [
-        {
-            "id": "goal",
-            "type": "goal",
-            "label": goal_label,
-            "metric": _ui_text(ui, "dashboard_metric_goal", "Current goal"),
-        }
-    ]
-    edges: list[dict[str, str]] = []
-
-    skill_nodes = list(skills.get("target_learning_locked") or [])
-    if not skill_nodes:
-        skill_nodes = list(skills.get("evidence_risk_nodes") or [])
-    if not skill_nodes:
-        skill_nodes = [
+    if north_star.get("is_set"):
+        if north_star.get("locked"):
+            label = _ui_text(ui, "north_star_private_display", "Private North Star")
+        else:
+            label = str(
+                north_star.get("display_text")
+                or _ui_text(ui, "north_star_hidden_display", "North Star set")
+            )
+        nodes.append(
             {
-                "id": "skill_lit",
-                "label": _ui_text(ui, "dashboard_metric_skill_lit", "Skill lit"),
-                "status": f"{skills.get('lit', 0)}/{skills.get('total', 0)}",
+                "id": "north_star",
+                "type": "north_star",
+                "label": label,
+                "metric": _ui_text(ui, "north_star_strip_title", "North Star"),
+                "locked": bool(north_star.get("locked")),
+                "suggested": False,
+                "owner_path": "profile_context",
             }
-        ]
-    for idx, node in enumerate(skill_nodes[:3]):
-        node_id = f"skill_{idx}"
+        )
+
+    goal_node_ids: dict[str, str] = {}
+    shown_goals = [goal for goal in active_goals if goal.id]
+    if not shown_goals:
+        nodes.append(
+            {
+                "id": "goal:missing",
+                "type": "goal",
+                "label": _goal_graph_label(primary_goal, ui),
+                "metric": _ui_text(ui, "dashboard_primary_goal", "Primary goal"),
+                "record_id": "",
+                "status": "",
+                "locked": False,
+                "suggested": True,
+                "owner_path": "",
+                "is_primary": True,
+            }
+        )
+        if north_star.get("is_set"):
+            edges.append(
+                {
+                    "from": "north_star",
+                    "to": "goal:missing",
+                    "type": "alignment",
+                    "suggested": True,
+                }
+            )
+
+    for goal_obj in shown_goals:
+        payload = _goal_payload_from_goal(goal_obj, editable=False)
+        node_id = f"goal:{goal_obj.id}"
+        goal_node_ids[goal_obj.id] = node_id
+        is_primary = bool(goal_obj.id and goal_obj.id == primary_goal_id)
         nodes.append(
             {
                 "id": node_id,
-                "type": "skill",
-                "label": str(node.get("label") or node.get("id") or ""),
-                "metric": str(node.get("status") or ""),
+                "type": "goal",
+                "label": _goal_graph_label(
+                    payload,
+                    ui,
+                    fallback_key=(
+                        "dashboard_primary_goal"
+                        if is_primary
+                        else "dashboard_active_goal"
+                    ),
+                ),
+                "metric": _ui_text(
+                    ui,
+                    "dashboard_primary_goal" if is_primary else "dashboard_active_goal",
+                    "Primary goal" if is_primary else "Active goal",
+                ),
+                "record_id": goal_obj.id,
+                "status": goal_obj.status,
+                "locked": bool(payload.get("locked")),
+                "suggested": False,
+                "owner_path": "",
+                "is_primary": is_primary,
             }
         )
-        edges.append({"from": "goal", "to": node_id})
+        if north_star.get("is_set"):
+            edges.append(
+                {
+                    "from": "north_star",
+                    "to": node_id,
+                    "type": "alignment",
+                    "suggested": False,
+                }
+            )
 
+    skill_nodes: dict[str, dict[str, object]] = {}
+    for goal_obj in shown_goals:
+        goal_node_id = goal_node_ids.get(goal_obj.id)
+        if not goal_node_id:
+            continue
+        for link in _safe_goal_skill_links(goal_obj):
+            if not link.node_id:
+                continue
+            skill_node_id = f"skill:{link.node_id}"
+            skill_nodes.setdefault(
+                skill_node_id,
+                {
+                    "id": skill_node_id,
+                    "type": "skill",
+                    "label": link.label or link.node_id,
+                    "metric": link.source,
+                    "record_id": link.node_id,
+                    "status": "",
+                    "locked": False,
+                    "suggested": False,
+                    "owner_path": "pages/1_Skill_Tree.py",
+                },
+            )
+            edges.append(
+                {
+                    "from": goal_node_id,
+                    "to": skill_node_id,
+                    "type": "skill_link",
+                    "suggested": False,
+                }
+            )
+
+    if not skill_nodes:
+        for idx, node in enumerate(_suggested_skill_nodes(skills)[:4]):
+            node_id = f"skill:suggested:{idx}"
+            skill_nodes[node_id] = {
+                "id": node_id,
+                "type": "skill",
+                "label": str(node.get("label") or node.get("node_id") or ""),
+                "metric": _ui_text(ui, "skill_alignment_suggested", "suggested"),
+                "record_id": str(node.get("node_id") or ""),
+                "status": str(node.get("metric") or ""),
+                "locked": False,
+                "suggested": True,
+                "owner_path": "pages/1_Skill_Tree.py",
+            }
+            if primary_goal_id and primary_goal_id in goal_node_ids:
+                edges.append(
+                    {
+                        "from": goal_node_ids[primary_goal_id],
+                        "to": node_id,
+                        "type": "skill_link",
+                        "suggested": True,
+                    }
+                )
+
+    if not skill_nodes:
+        node_id = "skill:lit"
+        skill_nodes[node_id] = {
+            "id": node_id,
+            "type": "skill",
+            "label": _ui_text(ui, "dashboard_metric_skill_lit", "Skill lit"),
+            "metric": f"{skills.get('lit', 0)}/{skills.get('total', 0)}",
+            "record_id": "",
+            "status": "",
+            "locked": False,
+            "suggested": True,
+            "owner_path": "pages/1_Skill_Tree.py",
+        }
+    nodes.extend(skill_nodes.values())
+
+    primary_node_id = (
+        goal_node_ids.get(primary_goal_id)
+        if primary_goal_id
+        else next(iter(goal_node_ids.values()), "goal:missing")
+    )
+    if "skill:lit" in skill_nodes and primary_node_id:
+        edges.append(
+            {
+                "from": primary_node_id,
+                "to": "skill:lit",
+                "type": "skill_link",
+                "suggested": True,
+            }
+        )
     for idx, item in enumerate((kanban.get("doing") or [])[:3]):
-        node_id = f"task_{idx}"
+        node_id = f"task:{idx}"
         nodes.append(
             {
                 "id": node_id,
@@ -548,9 +805,21 @@ def _graph_payload(
                     if item.get("blocked_by")
                     else _ui_text(ui, "dashboard_metric_doing", "Doing")
                 ),
+                "record_id": "",
+                "status": "blocked" if item.get("blocked_by") else "doing",
+                "locked": False,
+                "suggested": False,
+                "owner_path": "pages/3_Kanban.py",
             }
         )
-        edges.append({"from": "goal", "to": node_id})
+        edges.append(
+            {
+                "from": primary_node_id,
+                "to": node_id,
+                "type": "task_ref",
+                "suggested": False,
+            }
+        )
 
     evidence_count = (
         int(pending.get("done_uncrystallized_count") or 0)
@@ -566,6 +835,11 @@ def _graph_payload(
                 "Evidence to organize",
             ),
             "metric": str(evidence_count),
+            "record_id": "",
+            "status": "pending" if evidence_count else "clear",
+            "locked": False,
+            "suggested": False,
+            "owner_path": "pages/1_Skill_Tree.py",
         }
     )
     nodes.append(
@@ -574,6 +848,11 @@ def _graph_payload(
             "type": "output",
             "label": _ui_text(ui, "dashboard_output_title", "Output"),
             "metric": str(public.get("draft_total", 0)),
+            "record_id": "",
+            "status": "draft",
+            "locked": False,
+            "suggested": False,
+            "owner_path": "pages/6_Public_Site.py",
         }
     )
     health_counts = health.get("counts") or {}
@@ -587,14 +866,47 @@ def _graph_payload(
                 f"{health_counts.get('warning', 0)}/"
                 f"{health_counts.get('info', 0)}"
             ),
+            "record_id": "",
+            "status": "warning" if health_counts.get("warning", 0) else "ok",
+            "locked": False,
+            "suggested": False,
+            "owner_path": "pages/5_Profile_Health.py",
         }
     )
-    for idx in range(min(len(skill_nodes), 3)):
-        edges.append({"from": f"skill_{idx}", "to": "evidence"})
+    for node_id in list(skill_nodes)[:4]:
+        edges.append(
+            {
+                "from": node_id,
+                "to": "evidence",
+                "type": "evidence_ref",
+                "suggested": False,
+            }
+        )
     for idx in range(min(len(kanban.get("doing") or []), 3)):
-        edges.append({"from": f"task_{idx}", "to": "evidence"})
-    edges.append({"from": "evidence", "to": "output"})
-    edges.append({"from": "health", "to": "goal"})
+        edges.append(
+            {
+                "from": f"task:{idx}",
+                "to": "evidence",
+                "type": "crystallize",
+                "suggested": False,
+            }
+        )
+    edges.append(
+        {
+            "from": "evidence",
+            "to": "output",
+            "type": "output_ref",
+            "suggested": False,
+        }
+    )
+    edges.append(
+        {
+            "from": primary_node_id,
+            "to": "health",
+            "type": "readiness",
+            "suggested": False,
+        }
+    )
     return {"nodes": nodes, "edges": edges}
 
 
@@ -612,24 +924,99 @@ def _quick_links_payload(ui: dict[str, str] | None) -> list[dict[str, str]]:
     ]
 
 
+def _candidate_dicts(value: object) -> list[dict[str, object]]:
+    """Normalize pending alignment candidates for JSON payloads."""
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in value:
+        if isinstance(item, GoalSkillLink):
+            link = item
+        else:
+            link = GoalSkillLink.from_dict(item)
+        if link is None or link.node_id in seen:
+            continue
+        seen.add(link.node_id)
+        out.append(link.to_dict())
+    return out
+
+
+def _goal_skill_alignment_payload(
+    profile: ProfileRef,
+    active_goals: list[Goal],
+    primary_goal_id: str,
+    pending_candidates: dict[str, list[dict[str, object]]] | None,
+) -> dict[str, object]:
+    by_goal: dict[str, dict[str, object]] = {}
+    for goal in active_goals:
+        if not goal.id:
+            continue
+        confirmed = []
+        if goal.ui_visibility != "private":
+            confirmed = [link.to_dict() for link in goal.skill_links]
+        by_goal[goal.id] = {
+            "confirmed": confirmed,
+            "candidates": _candidate_dicts(
+                (pending_candidates or {}).get(goal.id, [])
+            ),
+        }
+    return {
+        "primary_goal_id": primary_goal_id,
+        "by_goal": by_goal,
+        "candidates": by_goal.get(primary_goal_id, {}).get("candidates", []),
+        "confirmed_links": by_goal.get(primary_goal_id, {}).get("confirmed", []),
+        "skill_options": skill_node_options(profile),
+    }
+
+
 def dashboard_payload(
     profile: ProfileRef,
     *,
     ui: dict[str, str] | None = None,
     ai: dict[str, object] | None = None,
+    skill_alignment_candidates: dict[str, list[dict[str, object]]] | None = None,
 ) -> dict:
     """Return the stable JSON payload consumed by the React Home dashboard."""
     kanban = dashboard_kanban_summary(profile)
     skills = dashboard_skill_summary(profile)
     pending = dashboard_pending_evidence_summary(profile)
+    sources = dashboard_source_summary(profile)
     health = dashboard_health_summary(profile)
     public = dashboard_public_summary(profile)
-    goal = _goal_payload(profile)
+    book = _goal_book(profile)
+    primary = book.primary()
+    primary_goal_id = primary.id if primary is not None else ""
+    primary_goal = _goal_payload_from_goal(primary)
+    active_goal_models = book.active_goals()
+    active_goal_payloads = [
+        _goal_card_payload(goal, primary_goal_id)
+        for goal in active_goal_models
+    ]
+    north_star = north_star_payload_from_identity(
+        _profile_identity(profile),
+        ui=ui,
+    )
+    skill_alignment = _goal_skill_alignment_payload(
+        profile,
+        active_goal_models,
+        primary_goal_id,
+        skill_alignment_candidates,
+    )
     return {
         "profile": _profile_name(profile),
-        "goal": goal,
+        "north_star": north_star,
+        "goal": primary_goal,
+        "primary_goal": primary_goal,
+        "active_goals": active_goal_payloads,
+        "goal_counts": {
+            "active": len(active_goal_models),
+            "total": len(book.goals),
+        },
+        "skill_alignment": skill_alignment,
         "kanban": kanban,
         "skills": skills,
+        "sources": sources,
         "pending_evidence": pending,
         "health": health,
         "public": public,
@@ -650,11 +1037,15 @@ def dashboard_payload(
                 "published": public.get("published_total", 0),
             },
         },
-        "graph": _graph_payload(
-            goal=goal,
+        "graph": workspace_graph_payload(
+            north_star=north_star,
+            primary_goal=primary_goal,
+            primary_goal_id=primary_goal_id,
+            active_goals=active_goal_models,
             kanban=kanban,
             skills=skills,
             pending=pending,
+            sources=sources,
             public=public,
             health=health,
             ui=ui,

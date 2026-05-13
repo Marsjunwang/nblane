@@ -15,6 +15,7 @@ from nblane.core.home_dashboard import (
     dashboard_kanban_summary,
     dashboard_pending_evidence_summary,
     dashboard_public_summary,
+    dashboard_source_summary,
     dashboard_skill_summary,
 )
 from nblane.core.profile_health import HealthReport
@@ -95,10 +96,40 @@ class TestHomeDashboard(unittest.TestCase):
                         "id": "g1",
                         "title": "Robotics demo",
                         "status": "active",
+                        "alignment": "Turns the North Star into a demo.",
                         "target_skills": ["ros2_basics"],
+                        "skill_links": [
+                            {
+                                "node_id": "ros2_basics",
+                                "label": "ROS 2 Basics",
+                                "source": "rule",
+                                "score": 3,
+                                "rationale": "Needed for nodes and launch files.",
+                            }
+                        ],
+                    },
+                    {
+                        "id": "g2",
+                        "title": "Write public notes",
+                        "label": "Writing goal",
+                        "status": "active",
+                        "ui_visibility": "discreet",
                     }
                 ],
             },
+        )
+        (profile / "SKILL.md").write_text(
+            "# Alice · nblane Profile\n\n"
+            "## Identity\n\n"
+            "- **Name**: Alice\n"
+            "- **Domain**: Robotics\n"
+            "- **Journey**: Year 2 of 5\n"
+            "- **Current Role**: Research engineer\n"
+            "- **North Star**: Build reliable robot learning systems.\n"
+            "- **North Star Brief**: Reliable robot learning systems.\n"
+            "- **North Star Visibility**: discreet\n\n"
+            "---\n",
+            encoding="utf-8",
         )
         _write_yaml(
             profile / "public-profile.yaml",
@@ -117,6 +148,25 @@ class TestHomeDashboard(unittest.TestCase):
             },
         )
         _write_yaml(profile / "outputs.yaml", {"outputs": []})
+        _write_yaml(
+            profile / "inbox.yaml",
+            {
+                "profile": "alice",
+                "items": [
+                    {
+                        "id": "inbox_1",
+                        "type": "note",
+                        "title": "Captured source",
+                        "status": "inbox",
+                        "visibility": "private",
+                        "metadata": {
+                            "graph_layer": "source",
+                            "goal_id": "g1",
+                        },
+                    }
+                ],
+            },
+        )
         blog_dir = profile / "blog"
         blog_dir.mkdir()
         (blog_dir / "draft.md").write_text(
@@ -162,6 +212,16 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertEqual(summary["unlinked_count"], 1)
         self.assertEqual(summary["unlinked"][0]["id"], "ev_unused")
 
+    def test_source_summary_counts_active_inbox_without_raw_text(self) -> None:
+        """Source summary exposes counts and safe titles, not raw source bodies."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._profile(Path(tmp_s))
+            summary = dashboard_source_summary(profile)
+
+        self.assertEqual(summary["inbox_total"], 1)
+        self.assertEqual(summary["active_total"], 1)
+        self.assertEqual(summary["active_titles"], ["Captured source"])
+
     def test_health_summary_counts_report(self) -> None:
         """Health summary is a compact view of analyze_profile_health."""
         report = HealthReport(profile="alice", can_publish_context=False)
@@ -206,6 +266,17 @@ class TestHomeDashboard(unittest.TestCase):
                 profile,
                 ui=ui,
                 ai={"configured": True, "label": "test-model"},
+                skill_alignment_candidates={
+                    "g1": [
+                        {
+                            "node_id": "moveit2",
+                            "label": "MoveIt2",
+                            "source": "ai",
+                            "score": 4,
+                            "rationale": "AI candidate.",
+                        }
+                    ]
+                },
             )
 
         self.assertEqual(payload["profile"], "alice")
@@ -215,7 +286,66 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertFalse(payload["goal"]["locked"])
         self.assertEqual(payload["goal"]["projection"]["visibility"], "discreet")
         self.assertEqual(payload["goal"]["editor"]["title"], "Robotics demo")
+        self.assertEqual(payload["north_star"]["visibility"], "discreet")
+        self.assertEqual(
+            payload["north_star"]["display_text"],
+            "Reliable robot learning systems.",
+        )
+        self.assertEqual(payload["goal_counts"]["active"], 2)
+        self.assertEqual(payload["sources"]["active_total"], 1)
+        self.assertEqual(len(payload["active_goals"]), 2)
+        self.assertEqual(
+            payload["skill_alignment"]["confirmed_links"][0]["node_id"],
+            "ros2_basics",
+        )
+        self.assertEqual(
+            payload["skill_alignment"]["candidates"][0]["node_id"],
+            "moveit2",
+        )
         self.assertGreaterEqual(len(payload["graph"]["nodes"]), 4)
+        self.assertEqual(
+            payload["graph"]["layers"],
+            [
+                "direction",
+                "objective",
+                "work_context",
+                "activity",
+                "source",
+                "evidence",
+                "claim",
+                "capability",
+                "output",
+                "feedback",
+                "governance",
+            ],
+        )
+        nodes = {node["id"]: node for node in payload["graph"]["nodes"]}
+        self.assertEqual(nodes["source:inbox"]["layer"], "source")
+        self.assertEqual(nodes["source:inbox"]["metric"], "1")
+        self.assertFalse(nodes["source:inbox"]["placeholder"])
+        self.assertEqual(nodes["evidence_candidate:pending"]["layer"], "evidence")
+        self.assertEqual(nodes["evidence_candidate:pending"]["metric"], "1")
+        self.assertEqual(nodes["atomic_evidence:pool"]["metric"], "2")
+        for node_id in (
+            "project_case:planned",
+            "daily_work:planned",
+            "research:planned",
+            "agent_run:planned",
+            "composite_evidence:planned",
+            "claim:planned",
+            "feedback:planned",
+            "capacity:planned",
+        ):
+            self.assertTrue(nodes[node_id]["placeholder"])
+            self.assertFalse(nodes[node_id]["implemented"])
+            self.assertEqual(nodes[node_id]["status"], "planned")
+        node_ids = set(nodes)
+        for edge in payload["graph"]["edges"]:
+            self.assertIn(edge["from"], node_ids)
+            self.assertIn(edge["to"], node_ids)
+        graph_text = yaml.dump(payload["graph"], allow_unicode=True)
+        self.assertIn("Reliable robot learning systems.", graph_text)
+        self.assertIn("ROS 2 Basics", graph_text)
         self.assertTrue(
             any(link["path"] == "pages/3_Kanban.py" for link in payload["quick_links"])
         )
@@ -238,6 +368,25 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertEqual(payload["goal"]["editor"], {})
         graph_text = yaml.dump(payload["graph"], allow_unicode=True)
         self.assertNotIn("Sensitive title", graph_text)
+
+    def test_dashboard_payload_redacts_private_north_star(self) -> None:
+        """Private North Star text does not enter the React payload graph."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._profile(Path(tmp_s))
+            skill_path = profile / "SKILL.md"
+            skill_path.write_text(
+                skill_path.read_text(encoding="utf-8").replace(
+                    "- **North Star Visibility**: discreet",
+                    "- **North Star Visibility**: private",
+                ),
+                encoding="utf-8",
+            )
+            payload = dashboard_payload(profile)
+
+        self.assertTrue(payload["north_star"]["locked"])
+        self.assertEqual(payload["north_star"]["display_text"], "")
+        dump = yaml.dump(payload, allow_unicode=True)
+        self.assertNotIn("Build reliable robot learning systems", dump)
 
     def test_dashboard_payload_empty_profile_defaults(self) -> None:
         """Empty profiles still provide renderable fallback payload fields."""

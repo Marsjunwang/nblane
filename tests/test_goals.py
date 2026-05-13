@@ -10,6 +10,7 @@ from unittest.mock import patch
 from nblane.core.goals import (
     Goal,
     GoalBook,
+    GoalSkillLink,
     current_goal,
     goal_for_agent_context,
     goal_for_public_output,
@@ -49,9 +50,19 @@ class TestGoals(unittest.TestCase):
                         title="8 周内完成 Agent 项目",
                         label="Agent 项目阶段目标",
                         target="2026-07-07",
+                        alignment="This goal turns the north star into a demo.",
                         focus=["写博客", "整理 evidence"],
                         success_criteria=["demo 可运行"],
                         target_skills=["vla", "agent"],
+                        skill_links=[
+                            GoalSkillLink(
+                                node_id="ros2_basics",
+                                label="ROS 2 Basics",
+                                source="rule+ai",
+                                score=4,
+                                rationale="Needed for launch files.",
+                            )
+                        ],
                     )
                 ],
             )
@@ -66,6 +77,12 @@ class TestGoals(unittest.TestCase):
         assert goal is not None
         self.assertEqual(goal.title, "8 周内完成 Agent 项目")
         self.assertEqual(goal.focus, ["写博客", "整理 evidence"])
+        self.assertEqual(
+            goal.alignment,
+            "This goal turns the north star into a demo.",
+        )
+        self.assertEqual(goal.skill_links[0].node_id, "ros2_basics")
+        self.assertEqual(goal.skill_links[0].source, "rule+ai")
         self.assertEqual(goal.ui_visibility, "discreet")
         self.assertTrue(goal.include_in_agent_context)
         self.assertFalse(goal.include_in_public_output)
@@ -100,6 +117,14 @@ class TestGoals(unittest.TestCase):
                         "include_in_agent_context": "yes",
                         "include_in_public_output": "no",
                         "focus": "not-a-list",
+                        "skill_links": [
+                            {
+                                "node_id": "ros2_basics",
+                                "source": "bad",
+                                "score": "-2",
+                            },
+                            "bad-row",
+                        ],
                     }
                 ],
             }
@@ -110,8 +135,28 @@ class TestGoals(unittest.TestCase):
         self.assertEqual(goal.status, "active")
         self.assertEqual(goal.ui_visibility, "discreet")
         self.assertEqual(goal.focus, [])
+        self.assertEqual(goal.skill_links[0].source, "manual")
+        self.assertEqual(goal.skill_links[0].score, 0)
         self.assertTrue(goal.include_in_agent_context)
         self.assertFalse(goal.include_in_public_output)
+
+    def test_goal_book_primary_and_active_helpers(self) -> None:
+        """Primary/current aliases and active-goal list remain stable."""
+        book = GoalBook(
+            current_goal_id="g2",
+            goals=[
+                Goal(id="g1", title="First", status="active"),
+                Goal(id="g2", title="Second", status="active"),
+                Goal(id="g3", title="Done", status="completed"),
+            ],
+        )
+
+        self.assertEqual(book.primary().id, "g2")
+        self.assertEqual(book.current().id, "g2")
+        self.assertEqual([g.id for g in book.active_goals()], ["g1", "g2"])
+        self.assertTrue(book.set_primary("g1"))
+        self.assertEqual(book.current_goal_id, "g1")
+        self.assertFalse(book.set_primary("missing"))
 
     def test_ui_projection_respects_visibility(self) -> None:
         """UI projection redacts title/details according to visibility."""

@@ -10,7 +10,17 @@ IDENTITY_FIELDS: tuple[str, ...] = (
     "Journey",
     "Current Role",
     "North Star",
+    "North Star Brief",
+    "North Star Visibility",
 )
+
+NORTH_STAR_VISIBILITIES: tuple[str, ...] = (
+    "visible",
+    "discreet",
+    "hidden",
+    "private",
+)
+DEFAULT_NORTH_STAR_VISIBILITY = "discreet"
 
 LONG_NARRATIVE_SECTIONS: tuple[str, ...] = (
     "Research Fingerprint",
@@ -79,6 +89,86 @@ def section_body(text: str, title: str) -> str:
     for heading, body in parse_skill_md_sections(text):
         if section_title(heading) == title:
             return body
+    return ""
+
+
+def normalize_north_star_visibility(value: object) -> str:
+    """Normalize the Identity North Star display preference."""
+    raw = str(value or "").strip().lower()
+    if raw == "public":
+        raw = "visible"
+    return (
+        raw
+        if raw in NORTH_STAR_VISIBILITIES
+        else DEFAULT_NORTH_STAR_VISIBILITY
+    )
+
+
+def _compact_text(value: object, max_chars: int = 120) -> str:
+    """Return a single-line display summary without writing it back."""
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 3)].rstrip() + "..."
+
+
+def north_star_payload_from_identity(
+    identity: dict[str, str],
+    *,
+    ui: dict[str, str] | None = None,
+) -> dict[str, object]:
+    """Return a privacy-aware North Star payload for UI read models."""
+    full = str(identity.get("North Star", "") or "").strip()
+    brief = str(identity.get("North Star Brief", "") or "").strip()
+    visibility = normalize_north_star_visibility(
+        identity.get("North Star Visibility")
+    )
+    is_set = bool(full or brief)
+
+    def text(key: str, fallback: str) -> str:
+        if not ui:
+            return fallback
+        return str(ui.get(key, fallback) or fallback)
+
+    if not is_set:
+        display = text("north_star_empty", "No North Star set")
+    elif visibility == "visible":
+        display = full or brief
+    elif visibility == "discreet":
+        display = brief or _compact_text(full)
+    elif visibility == "hidden":
+        display = text("north_star_hidden_display", "North Star set")
+    else:
+        display = ""
+
+    return {
+        "visibility": visibility,
+        "display_text": display,
+        "is_set": is_set,
+        "locked": visibility == "private",
+        "has_brief": bool(brief),
+    }
+
+
+def north_star_context_from_identity(
+    identity: dict[str, str],
+    *,
+    for_agent: bool = False,
+) -> str:
+    """Return North Star text allowed for matching or agent prompts."""
+    full = str(identity.get("North Star", "") or "").strip()
+    brief = str(identity.get("North Star Brief", "") or "").strip()
+    visibility = normalize_north_star_visibility(
+        identity.get("North Star Visibility")
+    )
+    if visibility == "private":
+        return ""
+    if for_agent:
+        return full or brief
+    if visibility == "visible":
+        return full or brief
+    if visibility == "discreet":
+        return brief or _compact_text(full)
     return ""
 
 

@@ -202,6 +202,77 @@ goals:
         self.assertNotIn("Sensitive focus", prompt)
         self.assertNotIn("Sensitive notes", prompt)
 
+    def test_private_north_star_is_redacted_from_context(self) -> None:
+        """North Star Visibility private redacts SKILL.md and goal section."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "alice"
+            profile.mkdir()
+            (profile / "SKILL.md").write_text(
+                "# Alice\n\n"
+                "## Identity\n\n"
+                "- **Name**: Alice\n"
+                "- **North Star**: Sensitive long-term direction\n"
+                "- **North Star Brief**: Sensitive brief\n"
+                "- **North Star Visibility**: private\n",
+                encoding="utf-8",
+            )
+            with patch("nblane.core.context.PROFILES_DIR", root):
+                prompt = generate("alice")
+
+        self.assertNotIn("Sensitive long-term direction", prompt)
+        self.assertNotIn("Sensitive brief", prompt)
+        self.assertIn("- **North Star Visibility**: private", prompt)
+
+    def test_active_goals_and_confirmed_skill_links_enter_context(self) -> None:
+        """Agent context includes primary plus other active goals."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "alice"
+            profile.mkdir()
+            (profile / "SKILL.md").write_text(
+                "# Alice\n\n"
+                "## Identity\n\n"
+                "- **North Star**: Build useful robot systems.\n"
+                "- **North Star Visibility**: visible\n",
+                encoding="utf-8",
+            )
+            (profile / "goals.yaml").write_text(
+                """
+schema_version: "1.0"
+profile: alice
+current_goal_id: g1
+goals:
+  - id: g1
+    title: Primary robot demo
+    status: active
+    ui_visibility: visible
+    include_in_agent_context: true
+    skill_links:
+      - node_id: ros2_basics
+        label: ROS 2 Basics
+        source: rule
+        score: 3
+        rationale: Needs launch files.
+  - id: g2
+    title: Secondary writing goal
+    status: active
+    ui_visibility: visible
+    include_in_agent_context: true
+""",
+                encoding="utf-8",
+            )
+            with patch("nblane.core.context.PROFILES_DIR", root):
+                prompt = generate("alice")
+
+        self.assertIn("North Star:", prompt)
+        self.assertIn("Build useful robot systems.", prompt)
+        self.assertIn("Primary goal:", prompt)
+        self.assertIn("Primary robot demo", prompt)
+        self.assertIn("ros2_basics", prompt)
+        self.assertIn("Active goals:", prompt)
+        self.assertIn("Secondary writing goal", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

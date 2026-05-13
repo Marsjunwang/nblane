@@ -8,6 +8,8 @@ from pathlib import Path
 from nblane.core.profile_context import (
     apply_profile_context_structured_edits,
     extract_generated_blocks,
+    north_star_context_from_identity,
+    north_star_payload_from_identity,
     parse_identity_fields,
     section_body,
 )
@@ -42,6 +44,55 @@ class TestProfileContextEditor(unittest.TestCase):
         self.assertIn(
             "- **North Star**: Build useful real-world robot learning systems.",
             updated,
+        )
+        self.assertEqual(
+            next_parsed["North Star Visibility"],
+            "discreet",
+        )
+
+    def test_north_star_brief_and_visibility_round_trip(self) -> None:
+        """North Star display metadata lives in Identity bullets."""
+        text = TEMPLATE_SKILL.read_text(encoding="utf-8")
+        updated = apply_profile_context_structured_edits(
+            text,
+            identity_fields={
+                "North Star": "Build useful real-world robot learning systems.",
+                "North Star Brief": "Useful robot learning systems.",
+                "North Star Visibility": "hidden",
+            },
+        )
+        identity = parse_identity_fields(updated)
+
+        self.assertEqual(
+            identity["North Star Brief"],
+            "Useful robot learning systems.",
+        )
+        self.assertEqual(identity["North Star Visibility"], "hidden")
+        payload = north_star_payload_from_identity(identity)
+        self.assertTrue(payload["is_set"])
+        self.assertEqual(payload["visibility"], "hidden")
+        self.assertEqual(payload["display_text"], "North Star set")
+        self.assertEqual(
+            north_star_context_from_identity(identity, for_agent=True),
+            "Build useful real-world robot learning systems.",
+        )
+
+    def test_private_north_star_redacts_payload_and_agent_context(self) -> None:
+        """Private North Star does not expose its text to payload/context."""
+        identity = {
+            "North Star": "Sensitive five-year direction",
+            "North Star Brief": "Safe brief",
+            "North Star Visibility": "private",
+        }
+        payload = north_star_payload_from_identity(identity)
+
+        self.assertTrue(payload["is_set"])
+        self.assertTrue(payload["locked"])
+        self.assertEqual(payload["display_text"], "")
+        self.assertEqual(north_star_context_from_identity(identity), "")
+        self.assertEqual(
+            north_star_context_from_identity(identity, for_agent=True),
+            "",
         )
 
     def test_narrative_save_preserves_generated_blocks(self) -> None:

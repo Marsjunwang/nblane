@@ -17,8 +17,10 @@ from nblane.core.yaml_io import _load_yaml_dict
 GOALS_FILENAME = "goals.yaml"
 GOAL_STATUSES = ("active", "paused", "completed", "archived")
 GOAL_UI_VISIBILITIES = ("visible", "discreet", "hidden", "private")
+GOAL_SKILL_LINK_SOURCES = ("rule", "ai", "manual", "rule+ai")
 DEFAULT_GOAL_STATUS = "active"
 DEFAULT_GOAL_UI_VISIBILITY = "discreet"
+DEFAULT_GOAL_SKILL_LINK_SOURCE = "manual"
 
 
 def _clean_text(value: object) -> str:
@@ -78,11 +80,83 @@ def _clean_ui_visibility(value: object) -> str:
     )
 
 
+def _clean_skill_link_source(value: object) -> str:
+    """Normalize a goal-skill link provenance value."""
+    raw = _clean_text(value).lower()
+    return (
+        raw
+        if raw in GOAL_SKILL_LINK_SOURCES
+        else DEFAULT_GOAL_SKILL_LINK_SOURCE
+    )
+
+
+def _clean_int(value: object, default: int = 0) -> int:
+    """Normalize integer-ish YAML values."""
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _profile_path(name_or_dir: str | Path) -> Path:
     """Resolve a profile name or path to its profile directory."""
     if isinstance(name_or_dir, Path):
         return name_or_dir
     return safe_profile_dir(name_or_dir, PROFILES_DIR)
+
+
+@dataclass
+class GoalSkillLink:
+    """A confirmed relationship between one goal and one skill node."""
+
+    node_id: str
+    label: str = ""
+    source: str = DEFAULT_GOAL_SKILL_LINK_SOURCE
+    score: int = 0
+    rationale: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: object) -> GoalSkillLink | None:
+        """Build a normalized goal-skill link from raw YAML."""
+        if not isinstance(raw, dict):
+            return None
+        node_id = _clean_text(raw.get("node_id") or raw.get("id"))
+        if not node_id:
+            return None
+        return cls(
+            node_id=node_id,
+            label=_clean_text(raw.get("label")),
+            source=_clean_skill_link_source(raw.get("source")),
+            score=max(0, _clean_int(raw.get("score"), 0)),
+            rationale=_clean_text(raw.get("rationale")),
+        )
+
+    def to_dict(self) -> dict:
+        """Serialize the link with stable field order."""
+        return {
+            "node_id": self.node_id,
+            "label": self.label,
+            "source": _clean_skill_link_source(self.source),
+            "score": max(0, _clean_int(self.score, 0)),
+            "rationale": self.rationale,
+        }
+
+
+def _clean_skill_links(value: object) -> list[GoalSkillLink]:
+    """Normalize a list of goal-skill link records."""
+    if not isinstance(value, list):
+        return []
+    out: list[GoalSkillLink] = []
+    seen: set[str] = set()
+    for item in value:
+        link = GoalSkillLink.from_dict(item)
+        if link is None or link.node_id in seen:
+            continue
+        seen.add(link.node_id)
+        out.append(link)
+    return out
 
 
 @dataclass
@@ -99,7 +173,9 @@ class Goal:
     include_in_agent_context: bool = True
     include_in_public_output: bool = False
     summary: str = ""
+    alignment: str = ""
     target_skills: list[str] = field(default_factory=list)
+    skill_links: list[GoalSkillLink] = field(default_factory=list)
     success_criteria: list[str] = field(default_factory=list)
     focus: list[str] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
@@ -138,7 +214,9 @@ class Goal:
             include_in_agent_context=include_agent,
             include_in_public_output=include_public,
             summary=_clean_text(raw.get("summary")),
+            alignment=_clean_text(raw.get("alignment")),
             target_skills=_clean_list(raw.get("target_skills")),
+            skill_links=_clean_skill_links(raw.get("skill_links")),
             success_criteria=_clean_list(raw.get("success_criteria")),
             focus=_clean_list(raw.get("focus")),
             evidence_refs=_clean_list(raw.get("evidence_refs")),
@@ -170,7 +248,9 @@ class Goal:
             "include_in_agent_context": include_agent,
             "include_in_public_output": include_public,
             "summary": self.summary,
+            "alignment": self.alignment,
             "target_skills": list(self.target_skills),
+            "skill_links": [link.to_dict() for link in self.skill_links],
             "success_criteria": list(self.success_criteria),
             "focus": list(self.focus),
             "evidence_refs": list(self.evidence_refs),
@@ -236,13 +316,33 @@ class GoalBook:
         return {goal.id: goal for goal in self.goals if goal.id}
 
     def current(self) -> Goal | None:
-        """Return the current non-archived goal, if any."""
+        """Return the primary non-archived goal, if any.
+
+        ``current`` is kept as the compatibility name for callers that still
+        treat the primary stage goal as a single current goal.
+        """
+        return self.primary()
+
+    def primary(self) -> Goal | None:
+        """Return the primary non-archived goal, if any."""
         if not self.current_goal_id:
             return None
         goal = self.by_id().get(self.current_goal_id)
         if goal is None or goal.status == "archived":
             return None
         return goal
+
+    def active_goals(self) -> list[Goal]:
+        """Return goals currently active in this stage."""
+        return [goal for goal in self.goals if goal.status == "active"]
+
+    def set_primary(self, goal_id: str) -> bool:
+        """Set the primary goal pointer when the id exists and is usable."""
+        goal = self.by_id().get(goal_id)
+        if goal is None or goal.status == "archived":
+            return False
+        self.current_goal_id = goal.id
+        return True
 
 
 def _default_raw(profile: str = "") -> dict:
@@ -326,8 +426,10 @@ def goal_for_ui(goal: Goal | None) -> dict[str, object] | None:
         "start": goal.start,
         "target": goal.target,
         "summary": goal.summary,
+        "alignment": goal.alignment,
         "focus": list(goal.focus[:3]),
         "target_skills": list(goal.target_skills),
+        "skill_links": [link.to_dict() for link in goal.skill_links],
         "success_criteria": list(goal.success_criteria),
     }
 
@@ -354,8 +456,18 @@ def goal_for_agent_context(goal: Goal | None) -> str:
         lines.append(f"- target: {goal.target}")
     if goal.summary:
         lines.append(f"- summary: {goal.summary}")
+    if goal.alignment:
+        lines.append(f"- north star alignment: {goal.alignment}")
     if goal.target_skills:
         lines.append("- target skills: " + ", ".join(goal.target_skills))
+    if goal.skill_links:
+        lines.append("- confirmed skill links:")
+        for link in goal.skill_links:
+            label = f" — {link.label}" if link.label else ""
+            src = f" [{link.source}]" if link.source else ""
+            lines.append(f"  - {link.node_id}{label}{src}")
+            if link.rationale:
+                lines.append(f"    rationale: {link.rationale}")
     if goal.success_criteria:
         lines.append("- success criteria:")
         lines.extend(f"  - {item}" for item in goal.success_criteria)
@@ -370,4 +482,3 @@ def goal_for_agent_context(goal: Goal | None) -> str:
 def goal_for_public_output(goal: Goal | None) -> str:
     """Return goal text allowed for public output; disabled in P0."""
     return ""
-

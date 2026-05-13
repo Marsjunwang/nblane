@@ -1,5 +1,14 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  Position,
+  ReactFlow,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 import "./style.css";
 import {
@@ -9,27 +18,76 @@ import {
   goalDraftFromFormData,
   normalizePayload,
 } from "./payload.js";
-import { goalSubmitEvent, navigationEvent, openSectionEvent } from "./events.js";
+import {
+  archiveGoalEvent,
+  captureInboxSubmitEvent,
+  confirmGoalSkillLinksEvent,
+  createGoalSubmitEvent,
+  editGoalSubmitEvent,
+  manualGoalSkillLinkEvent,
+  navigationEvent,
+  openProfileContextEvent,
+  requestGoalSkillAiMatchEvent,
+  requestGoalSkillRuleMatchEvent,
+  setPrimaryGoalEvent,
+} from "./events.js";
+
+const ForceGraph3D = lazy(() => import("react-force-graph-3d"));
 
 const READY = "streamlit:componentReady";
 const SET_VALUE = "streamlit:setComponentValue";
 const SET_HEIGHT = "streamlit:setFrameHeight";
 const RENDER = "streamlit:render";
 
-const STATUS_COLORS = {
-  expert: "#2f6fed",
-  solid: "#2f9e73",
-  learning: "#c88916",
-  locked: "#a7b1ad",
+const NODE_COLORS = {
+  north_star: "#6b4fb3",
+  goal: "#256b5d",
+  project_case: "#52606d",
+  skill: "#2f6fed",
+  gap: "#9f1d1d",
+  next_action: "#2f9e73",
+  task: "#8b6f20",
+  daily_work: "#8b6f20",
+  research: "#b35a34",
+  agent_run: "#52606d",
+  source: "#b35a34",
+  evidence: "#6b4fb3",
+  evidence_candidate: "#6b4fb3",
+  atomic_evidence: "#6b4fb3",
+  composite_evidence: "#6b4fb3",
+  claim: "#256b5d",
+  output: "#b35a34",
+  feedback: "#2f9e73",
+  capacity: "#68716f",
+  health: "#68716f",
 };
 
-const NODE_COLORS = {
-  goal: "#256b5d",
-  skill: "#2f6fed",
-  task: "#8b6f20",
-  evidence: "#6b4fb3",
-  output: "#b35a34",
-  health: "#68716f",
+const FALLBACK_LAYERS = [
+  "direction",
+  "objective",
+  "work_context",
+  "activity",
+  "source",
+  "evidence",
+  "claim",
+  "capability",
+  "output",
+  "feedback",
+  "governance",
+];
+
+const LAYER_LABELS = {
+  direction: "Direction",
+  objective: "Objective",
+  work_context: "Work Context",
+  activity: "Activity",
+  source: "Source",
+  evidence: "Evidence",
+  claim: "Claim",
+  capability: "Capability",
+  output: "Output",
+  feedback: "Feedback",
+  governance: "Governance",
 };
 
 function sendBack(type, payload) {
@@ -37,7 +95,7 @@ function sendBack(type, payload) {
 }
 
 function setFrameHeight(height) {
-  sendBack(SET_HEIGHT, { height: Math.max(520, Math.ceil(height || document.body.scrollHeight || 860)) });
+  sendBack(SET_HEIGHT, { height: Math.max(620, Math.ceil(height || document.body.scrollHeight || 900)) });
 }
 
 function setComponentValue(value) {
@@ -63,440 +121,858 @@ function linesText(value) {
   return asArray(value).map((item) => cleanText(item)).filter(Boolean).join("\n");
 }
 
-function MetricCard({ labelText, value, detail, tone = "" }) {
+function linkPayload(link) {
+  return {
+    node_id: cleanText(link.nodeId),
+    label: cleanText(link.label),
+    source: cleanText(link.source, "manual"),
+    score: Math.max(0, Number(link.score) || 0),
+    rationale: cleanText(link.rationale),
+  };
+}
+
+function nodeColor(node) {
+  if (node.placeholder || node.implemented === false) {
+    return "#8b9691";
+  }
+  return NODE_COLORS[node.type] || "#68716f";
+}
+
+function layerLabel(ui, layer) {
+  const clean = cleanText(layer);
+  return label(ui, `dashboard_layer_${clean}`, LAYER_LABELS[clean] || clean.replace(/_/g, " "));
+}
+
+function graphLayers(payload) {
+  const fromPayload = asArray(payload.graph.layers).map((layer) => cleanText(layer)).filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  const add = (layer) => {
+    if (!layer || seen.has(layer)) {
+      return;
+    }
+    seen.add(layer);
+    out.push(layer);
+  };
+  fromPayload.forEach(add);
+  if (!out.length) {
+    FALLBACK_LAYERS.forEach((layer) => {
+      if (payload.graph.nodes.some((node) => node.layer === layer)) {
+        add(layer);
+      }
+    });
+  }
+  payload.graph.nodes.forEach((node) => add(node.layer));
+  return out;
+}
+
+function captureDraftFromFormData(formData) {
+  const tags = cleanText(formData.get("tags"))
+    .split(/[,\n]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  return {
+    title: cleanText(formData.get("title")),
+    type: cleanText(formData.get("type"), "note"),
+    source: cleanText(formData.get("source")),
+    source_url: cleanText(formData.get("source_url")),
+    raw_text: cleanText(formData.get("raw_text")),
+    goal_id: cleanText(formData.get("goal_id")),
+    tags,
+  };
+}
+
+function goalIdFromNode(node) {
+  return cleanText(node?.recordId || (cleanText(node?.id).startsWith("goal:") ? cleanText(node.id).slice(5) : ""));
+}
+
+function goalById(payload, goalId) {
+  if (!goalId) {
+    return null;
+  }
+  return asArray(payload.activeGoals).find((goal) => goal.id === goalId) || null;
+}
+
+function primaryGoalId(payload) {
   return (
-    <div className={`hd-metric ${tone ? `tone-${tone}` : ""}`}>
-      <span className="hd-metric-label">{labelText}</span>
-      <strong>{value}</strong>
-      {detail ? <span className="hd-metric-detail">{detail}</span> : null}
-    </div>
+    cleanText(payload.skillAlignment.primaryGoalId) ||
+    cleanText(payload.primaryGoal.editor?.id) ||
+    cleanText(payload.primaryGoal.projection?.id)
   );
 }
 
-function SkillDonut({ chart, ui }) {
-  const counts = chart.counts || {};
-  const total = Math.max(0, Number(chart.total) || 0);
-  const lit = Math.max(0, Number(chart.lit) || 0);
-  const circumference = 100;
-  let offset = 25;
-  const segments = ["expert", "solid", "learning", "locked"].map((key) => {
-    const value = total ? (counts[key] || 0) / total * circumference : 0;
-    const segment = { key, value, offset };
-    offset -= value;
-    return segment;
-  });
-  return (
-    <div className="hd-donut-card">
-      <svg viewBox="0 0 42 42" className="hd-donut" aria-hidden="true">
-        <circle className="hd-donut-bg" cx="21" cy="21" r="15.915" />
-        {segments.map((segment) =>
-          segment.value > 0 ? (
-            <circle
-              key={segment.key}
-              className="hd-donut-segment"
-              cx="21"
-              cy="21"
-              r="15.915"
-              stroke={STATUS_COLORS[segment.key]}
-              strokeDasharray={`${segment.value} ${circumference - segment.value}`}
-              strokeDashoffset={segment.offset}
-            />
-          ) : null
-        )}
-        <text x="21" y="20.2" textAnchor="middle" className="hd-donut-main">{lit}</text>
-        <text x="21" y="25.4" textAnchor="middle" className="hd-donut-sub">/{total || 0}</text>
-      </svg>
-      <div className="hd-legend">
-        {["expert", "solid", "learning", "locked"].map((key) => (
-          <span key={key}>
-            <i style={{ background: STATUS_COLORS[key] }} />
-            {label(ui, `status_${key}`, key)} {counts[key] || 0}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+function emptyGoalEditor() {
+  return {
+    id: "",
+    title: "",
+    label: "",
+    status: "active",
+    start: "",
+    target: "",
+    ui_visibility: "discreet",
+    include_in_agent_context: true,
+    summary: "",
+    alignment: "",
+    target_skills: [],
+    success_criteria: [],
+    focus: [],
+    evidence_refs: [],
+    task_refs: [],
+    output_refs: [],
+    notes: "",
+  };
 }
 
-function StackedBar({ values }) {
-  const total = values.reduce((sum, item) => sum + item.value, 0);
-  return (
-    <div className="hd-stackbar" aria-hidden="true">
-      {values.map((item) => (
-        <span
-          key={item.key}
-          style={{
-            width: `${total ? Math.max(6, item.value / total * 100) : 0}%`,
-            background: item.color,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function GoalHero({ payload, onEmit }) {
+function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
   const ui = payload.ui;
-  const goal = payload.goal;
-  const display = goalDisplay(goal, ui);
-  const editor = goal.editor || {};
-  const [editing, setEditing] = useState(!goal.isSet && !goal.locked);
-  const statusOptions = goal.statusOptions.length ? goal.statusOptions : ["active", "paused", "completed", "archived"];
-  const visibilityOptions = goal.visibilityOptions.length ? goal.visibilityOptions : ["visible", "discreet", "hidden", "private"];
+  const northStar = payload.northStar;
+  const primary = goalDisplay(payload.primaryGoal, ui);
+  const activeGoals = asArray(payload.activeGoals);
+  const northStarText =
+    northStar.locked || northStar.visibility === "private"
+      ? label(ui, "north_star_private_display", "Private North Star")
+      : cleanText(northStar.displayText, label(ui, "north_star_empty", "No North Star set"));
 
-  useEffect(() => {
-    setEditing(!goal.isSet && !goal.locked);
-  }, [goal.isSet, goal.locked]);
+  return (
+    <section className="hd-context-header">
+      <div className="hd-context-main">
+        <div className="hd-context-north">
+          <span className="hd-eyebrow">{label(ui, "north_star_strip_title", "North Star")}</span>
+          <strong>{northStarText}</strong>
+          <span className="hd-tag">
+            {label(ui, `north_star_visibility_${northStar.visibility}`, northStar.visibility)}
+          </span>
+        </div>
+        <div className="hd-context-primary">
+          <span className="hd-eyebrow">{label(ui, "dashboard_primary_goal", "Primary goal")}</span>
+          <strong>{primary.title}</strong>
+          <span>{primary.status ? label(ui, `goal_status_${primary.status}`, primary.status) : label(ui, "goal_no_current", "No current goal set.")}</span>
+        </div>
+      </div>
+      <div className="hd-context-goals">
+        <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
+        <div className="hd-goal-orb-row">
+          {activeGoals.length ? activeGoals.map((goal) => {
+            const display = goalDisplay(goal, ui);
+            return (
+              <button
+                key={goal.id || display.title}
+                className={`hd-goal-orb ${goal.isPrimary ? "primary" : ""}`}
+                type="button"
+                title={`${display.title} · ${goal.isPrimary ? label(ui, "dashboard_primary_goal", "Primary") : label(ui, `goal_status_${display.status}`, display.status || "active")}`}
+                onClick={() => onSelectGoal(goal.id)}
+              >
+                <span className="hd-goal-orb-dot" />
+                <strong>{display.title}</strong>
+              </button>
+            );
+          }) : <span className="hd-empty-inline">{label(ui, "goal_no_current", "No current goal set.")}</span>}
+        </div>
+      </div>
+      <div className="hd-context-actions">
+        <button className="hd-primary" type="button" onClick={onCreateGoal}>
+          {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
+        </button>
+        <button className="hd-ghost" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+          {label(ui, "north_star_edit_action", "Edit Profile Context")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function CanvasNode({ data, selected }) {
+  const node = data.node;
+  return (
+    <div className={`hd-flow-node type-${node.type} ${node.suggested ? "suggested" : ""} ${node.placeholder ? "placeholder" : ""} ${node.implemented === false ? "not-implemented" : ""} ${node.locked ? "locked" : ""} ${selected ? "selected" : ""}`}>
+      <Handle type="target" position={Position.Left} className="hd-flow-handle" />
+      <span className="hd-node-dot" style={{ background: nodeColor(node) }} />
+      <div>
+        <strong>{node.label}</strong>
+        <span>{node.metric || node.status || node.layer || node.type}</span>
+      </div>
+      <Handle type="source" position={Position.Right} className="hd-flow-handle" />
+    </div>
+  );
+}
+
+function LayerHeaderNode({ data }) {
+  return (
+    <div className="hd-flow-layer">
+      <strong>{data.label}</strong>
+      <span>{data.count}</span>
+    </div>
+  );
+}
+
+const NODE_TYPES = { contextNode: CanvasNode, layerHeader: LayerHeaderNode };
+
+function canvasLayout(nodes, layers) {
+  const byLayer = new Map();
+  nodes.forEach((node) => {
+    const layer = cleanText(node.layer, "activity");
+    byLayer.set(layer, [...(byLayer.get(layer) || []), node]);
+  });
+  const positions = new Map();
+  const place = (items, x, startY) => {
+    const step = items.length > 3 ? 84 : 102;
+    items.forEach((node, index) => {
+      positions.set(node.id, { x, y: startY + index * step });
+    });
+  };
+  layers.forEach((layer, index) => {
+    place(byLayer.get(layer) || [], index * 236, 68);
+  });
+  return positions;
+}
+
+function flowData(payload) {
+  const layers = graphLayers(payload);
+  const positions = canvasLayout(payload.graph.nodes, layers);
+  const layerCounts = new Map();
+  payload.graph.nodes.forEach((node) => {
+    layerCounts.set(node.layer, (layerCounts.get(node.layer) || 0) + 1);
+  });
+  const layerNodes = layers.map((layer, index) => ({
+    id: `layer:${layer}`,
+    type: "layerHeader",
+    position: { x: index * 236, y: 0 },
+    data: { label: layerLabel(payload.ui, layer), count: layerCounts.get(layer) || 0 },
+    draggable: false,
+    selectable: false,
+  }));
+  const graphNodes = payload.graph.nodes.map((node) => ({
+    id: node.id,
+    type: "contextNode",
+    position: positions.get(node.id) || { x: 0, y: 0 },
+    data: { node },
+    draggable: false,
+  }));
+  const nodeIds = new Set(graphNodes.map((node) => node.id));
+  const edges = payload.graph.edges
+    .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
+    .map((edge, index) => ({
+      id: `${edge.from}-${edge.to}-${index}`,
+      source: edge.from,
+      target: edge.to,
+      type: "smoothstep",
+      animated: edge.type === "readiness" || edge.relation === "watches",
+      className: `hd-flow-edge ${edge.suggested ? "suggested" : ""} ${edge.placeholder ? "placeholder" : ""}`,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 14,
+        height: 14,
+      },
+      label: edge.relation && edge.relation !== edge.type ? edge.relation : undefined,
+      labelStyle: { fill: "#60716b", fontSize: 10, fontWeight: 700 },
+      labelBgStyle: { fill: "rgba(255,255,255,.86)" },
+      style: edge.suggested || edge.placeholder
+        ? { strokeDasharray: "5 5", strokeWidth: 2.1 }
+        : { strokeWidth: 2.3 },
+    }));
+  return { nodes: [...layerNodes, ...graphNodes], edges };
+}
+
+function nodeWeight(node) {
+  if (node.type === "north_star") {
+    return 13;
+  }
+  if (node.type === "goal") {
+    return node.isPrimary ? 11 : 9;
+  }
+  if (node.type === "skill") {
+    return 7.2;
+  }
+  return 5.6;
+}
+
+function ContextCanvas({ payload, selectedNodeId, onSelectNode, viewMode, setViewMode }) {
+  const ui = payload.ui;
+  const data = useMemo(() => flowData(payload), [payload]);
+  const graphRef = useRef(null);
+  const [hiddenLayers, setHiddenLayers] = useState(() => new Set());
+  const filterLayers = useMemo(
+    () => graphLayers(payload),
+    [payload],
+  );
+  const graph3d = useMemo(
+    () => {
+      const nodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+      const nodeIds = new Set(nodes.map((node) => node.id));
+      return {
+        nodes: nodes.map((node) => ({ ...node, name: node.label })),
+        links: payload.graph.edges
+          .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
+          .map((edge) => ({
+            source: edge.from,
+            target: edge.to,
+            suggested: edge.suggested,
+            placeholder: edge.placeholder,
+            relation: edge.relation,
+          })),
+      };
+    },
+    [payload, hiddenLayers],
+  );
+  function toggleLayer(layer) {
+    setHiddenLayers((current) => {
+      const next = new Set(current);
+      if (next.has(layer)) {
+        next.delete(layer);
+      } else {
+        next.add(layer);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <section className="hd-canvas-panel">
+      <header>
+        <div>
+          <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
+          <h3>{label(ui, "dashboard_graph_title", "Context Canvas")}</h3>
+        </div>
+        <div className="hd-segmented">
+          <button className={viewMode === "canvas" ? "active" : ""} type="button" onClick={() => setViewMode("canvas")}>
+            {label(ui, "dashboard_view_canvas", "Canvas")}
+          </button>
+          <button className={viewMode === "3d" ? "active" : ""} type="button" onClick={() => setViewMode("3d")}>
+            {label(ui, "dashboard_view_3d_graph", "3D Graph")}
+          </button>
+        </div>
+      </header>
+      {viewMode === "3d" ? (
+        <div className="hd-graph3d">
+          <p className="hd-graph-note">
+            {label(ui, "dashboard_graph_3d_hint", "North Star flows into goals, goals connect to skills and tasks, then evidence and output. Rotate to explore; click any node to inspect.")}
+          </p>
+          <div className="hd-filter-row">
+            {filterLayers.map((layer) => (
+              <button
+                key={layer}
+                className={hiddenLayers.has(layer) ? "" : "active"}
+                type="button"
+                onClick={() => toggleLayer(layer)}
+              >
+                {layerLabel(ui, layer)}
+              </button>
+            ))}
+          </div>
+          <Suspense fallback={<p className="hd-empty">{label(ui, "dashboard_graph_loading", "Loading graph...")}</p>}>
+            <ForceGraph3D
+              ref={graphRef}
+              graphData={graph3d}
+              nodeLabel="label"
+              nodeColor={(node) => nodeColor(node)}
+              nodeVal={(node) => nodeWeight(node)}
+              nodeRelSize={8.4}
+              nodeResolution={40}
+              linkLabel="relation"
+              linkColor={(link) => (link.suggested || link.placeholder ? "rgba(104,113,111,.28)" : "rgba(37,107,93,.55)")}
+              linkWidth={(link) => (link.suggested || link.placeholder ? 1.4 : 2.2)}
+              linkOpacity={0.72}
+              linkDirectionalArrowLength={(link) => (link.suggested || link.placeholder ? 0 : 5)}
+              linkDirectionalArrowRelPos={0.98}
+              linkDirectionalArrowResolution={24}
+              linkDirectionalParticles={(link) => (link.suggested || link.placeholder ? 0 : 2)}
+              linkDirectionalParticleWidth={1.8}
+              linkDirectionalParticleResolution={16}
+              linkDirectionalParticleSpeed={0.006}
+              backgroundColor="rgba(255,255,255,0)"
+              height={318}
+              dagMode="lr"
+              dagLevelDistance={128}
+              cooldownTicks={80}
+              enableNodeDrag={false}
+              showNavInfo={false}
+              onEngineStop={() => graphRef.current?.zoomToFit?.(450, 16)}
+              onNodeClick={(node) => onSelectNode(node.id)}
+            />
+          </Suspense>
+        </div>
+      ) : (
+        <div className="hd-flow-wrap">
+          <ReactFlow
+            nodes={data.nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId }))}
+            edges={data.edges}
+            nodeTypes={NODE_TYPES}
+            defaultEdgeOptions={{
+              interactionWidth: 18,
+            }}
+            fitView
+            fitViewOptions={{ padding: 0.16 }}
+            minZoom={0.35}
+            maxZoom={1.6}
+            panOnDrag
+            zoomOnScroll
+            nodesDraggable={false}
+            onNodeClick={(_, node) => onSelectNode(node.id)}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background color="#d9e1dd" gap={24} size={1} />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function GoalForm({ payload, goal, mode, onCancel, onEmit }) {
+  const ui = payload.ui;
+  const source = goal?.editor || emptyGoalEditor();
+  const statusOptions = payload.primaryGoal.statusOptions.length ? payload.primaryGoal.statusOptions : ["active", "paused", "completed", "archived"];
+  const visibilityOptions = payload.primaryGoal.visibilityOptions.length ? payload.primaryGoal.visibilityOptions : ["visible", "discreet", "hidden", "private"];
 
   function submit(event) {
     event.preventDefault();
     const draft = goalDraftFromFormData(new FormData(event.currentTarget));
-    onEmit(goalSubmitEvent(draft));
+    if (mode === "create") {
+      onEmit(createGoalSubmitEvent(draft));
+    } else {
+      onEmit(editGoalSubmitEvent(goal.id, draft));
+    }
   }
 
   return (
-    <section className="hd-goal-hero">
-      <div className="hd-goal-copy">
-        <div className="hd-eyebrow">{display.eyebrow}</div>
-        <h2>{display.title}</h2>
-        {display.summary ? <p>{display.summary}</p> : null}
-        <div className="hd-goal-meta">
-          {display.status ? <span className={`hd-pill status-${display.status}`}>{label(ui, `goal_status_${display.status}`, display.status)}</span> : null}
-          {display.target ? <span className="hd-pill">{label(ui, "goal_strip_target", "Target")}: {display.target}</span> : null}
-          {payload.ai?.configured ? <span className="hd-pill">{label(ui, "dashboard_ai_ready", "AI ready")}</span> : <span className="hd-pill muted">{label(ui, "dashboard_ai_not_ready", "AI off")}</span>}
-        </div>
-        {display.focus.length ? (
-          <ul className="hd-focus-list">
-            {display.focus.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        ) : null}
+    <form className="hd-inspector-form" onSubmit={submit}>
+      <input name="id" type="hidden" defaultValue={cleanText(source.id)} />
+      <label>
+        {label(ui, "goal_field_title", "Title")}
+        <input name="title" defaultValue={cleanText(source.title)} required />
+      </label>
+      <label>
+        {label(ui, "goal_field_label", "Discreet label")}
+        <input name="label" defaultValue={cleanText(source.label)} />
+      </label>
+      <div className="hd-form-row">
+        <label>
+          {label(ui, "goal_field_status", "Status")}
+          <select name="status" defaultValue={cleanText(source.status, "active")}>
+            {statusOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_status_${option}`, option)}</option>)}
+          </select>
+        </label>
+        <label>
+          {label(ui, "goal_field_target", "Target date")}
+          <input name="target" defaultValue={cleanText(source.target)} placeholder="YYYY-MM-DD" />
+        </label>
       </div>
-      <div className="hd-goal-actions">
-        {goal.locked ? (
-          <div className="hd-locked">{label(ui, "goal_private_locked", "This goal is private.")}</div>
-        ) : (
-          <button className="hd-primary" type="button" onClick={() => setEditing((value) => !value)}>
-            {editing ? label(ui, "dashboard_goal_close_form", "Close") : goal.isSet ? label(ui, "dashboard_goal_edit_inline", "Edit goal") : label(ui, "dashboard_goal_create_inline", "Create goal")}
-          </button>
-        )}
+      <label>
+        {label(ui, "goal_field_summary", "Summary")}
+        <textarea name="summary" defaultValue={cleanText(source.summary)} rows="2" />
+      </label>
+      <label>
+        {label(ui, "goal_field_alignment", "North Star alignment")}
+        <textarea name="alignment" defaultValue={cleanText(source.alignment)} rows="2" />
+      </label>
+      <div className="hd-form-row">
+        <label>
+          {label(ui, "goal_field_ui_visibility", "UI visibility")}
+          <select name="ui_visibility" defaultValue={cleanText(source.ui_visibility, "discreet")}>
+            {visibilityOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_visibility_${option}`, option)}</option>)}
+          </select>
+        </label>
+        <label className="hd-check">
+          <input name="include_in_agent_context" type="checkbox" defaultChecked={source.include_in_agent_context !== false} />
+          {label(ui, "goal_field_agent_context", "Agent context")}
+        </label>
       </div>
-      {editing && !goal.locked ? (
-        <form className="hd-goal-form" onSubmit={submit}>
-          <input name="id" type="hidden" defaultValue={cleanText(editor.id)} />
-          <label>
-            {label(ui, "goal_field_title", "Title")}
-            <input name="title" defaultValue={cleanText(editor.title)} required />
-          </label>
-          <label>
-            {label(ui, "goal_field_label", "Discreet label")}
-            <input name="label" defaultValue={cleanText(editor.label)} />
-          </label>
-          <label>
-            {label(ui, "goal_field_status", "Status")}
-            <select name="status" defaultValue={cleanText(editor.status, "active")}>
-              {statusOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_status_${option}`, option)}</option>)}
-            </select>
-          </label>
-          <label>
-            {label(ui, "goal_field_target", "Target date")}
-            <input name="target" defaultValue={cleanText(editor.target)} placeholder="YYYY-MM-DD" />
-          </label>
-          <label className="wide">
-            {label(ui, "goal_field_summary", "Summary")}
-            <textarea name="summary" defaultValue={cleanText(editor.summary)} rows="2" />
-          </label>
-          <label>
-            {label(ui, "goal_field_target_skills", "Target skills")}
-            <textarea name="target_skills" defaultValue={linesText(editor.target_skills)} rows="3" />
-          </label>
-          <label>
-            {label(ui, "goal_field_focus", "Focus")}
-            <textarea name="focus" defaultValue={linesText(editor.focus)} rows="3" />
-          </label>
-          <label className="wide">
-            {label(ui, "goal_field_success_criteria", "Success criteria")}
-            <textarea name="success_criteria" defaultValue={linesText(editor.success_criteria)} rows="3" />
-          </label>
-          <details className="wide hd-details">
-            <summary>{label(ui, "dashboard_goal_advanced_fields", "Advanced goal fields")}</summary>
-            <div className="hd-advanced-grid">
-              <label>
-                {label(ui, "goal_field_start", "Start date")}
-                <input name="start" defaultValue={cleanText(editor.start)} placeholder="YYYY-MM-DD" />
-              </label>
-              <label>
-                {label(ui, "goal_field_ui_visibility", "UI visibility")}
-                <select name="ui_visibility" defaultValue={cleanText(editor.ui_visibility, "discreet")}>
-                  {visibilityOptions.map((option) => <option key={option} value={option}>{label(ui, `goal_visibility_${option}`, option)}</option>)}
-                </select>
-              </label>
-              <label>
-                {label(ui, "goal_field_evidence_refs", "Evidence refs")}
-                <textarea name="evidence_refs" defaultValue={linesText(editor.evidence_refs)} rows="3" />
-              </label>
-              <label>
-                {label(ui, "goal_field_task_refs", "Task refs")}
-                <textarea name="task_refs" defaultValue={linesText(editor.task_refs)} rows="3" />
-              </label>
-              <label>
-                {label(ui, "goal_field_output_refs", "Output refs")}
-                <textarea name="output_refs" defaultValue={linesText(editor.output_refs)} rows="3" />
-              </label>
-              <label>
-                {label(ui, "goal_field_notes", "Notes")}
-                <textarea name="notes" defaultValue={cleanText(editor.notes)} rows="3" />
-              </label>
-            </div>
-          </details>
-          <label className="hd-checkbox wide">
-            <input
-              name="include_in_agent_context"
-              type="checkbox"
-              defaultChecked={editor.include_in_agent_context !== false}
-            />
-            {label(ui, "goal_field_agent_context", "Include in Agent context")}
-          </label>
-          <div className="hd-form-actions wide">
-            <button className="hd-primary" type="submit">{label(ui, "goal_save", "Save current goal")}</button>
-          </div>
-        </form>
+      <details>
+        <summary>{label(ui, "dashboard_goal_advanced_fields", "Advanced goal fields")}</summary>
+        <label>{label(ui, "goal_field_start", "Start date")}<input name="start" defaultValue={cleanText(source.start)} placeholder="YYYY-MM-DD" /></label>
+        <label>{label(ui, "goal_field_target_skills", "Target skills")}<textarea name="target_skills" defaultValue={linesText(source.target_skills)} rows="3" /></label>
+        <label>{label(ui, "goal_field_success_criteria", "Success criteria")}<textarea name="success_criteria" defaultValue={linesText(source.success_criteria)} rows="3" /></label>
+        <label>{label(ui, "goal_field_focus", "Focus")}<textarea name="focus" defaultValue={linesText(source.focus)} rows="3" /></label>
+        <label>{label(ui, "goal_field_evidence_refs", "Evidence refs")}<textarea name="evidence_refs" defaultValue={linesText(source.evidence_refs)} rows="2" /></label>
+        <label>{label(ui, "goal_field_task_refs", "Task refs")}<textarea name="task_refs" defaultValue={linesText(source.task_refs)} rows="2" /></label>
+        <label>{label(ui, "goal_field_output_refs", "Output refs")}<textarea name="output_refs" defaultValue={linesText(source.output_refs)} rows="2" /></label>
+        <label>{label(ui, "goal_field_notes", "Notes")}<textarea name="notes" defaultValue={cleanText(source.notes)} rows="3" /></label>
+      </details>
+      {mode === "create" ? (
+        <label className="hd-check">
+          <input name="set_as_primary" type="checkbox" defaultChecked={!payload.primaryGoal.isSet} />
+          {label(ui, "dashboard_set_as_primary", "Set as primary")}
+        </label>
       ) : null}
-    </section>
-  );
-}
-
-function DoingPanel({ payload, onEmit }) {
-  const ui = payload.ui;
-  const doing = asArray(payload.kanban.doing);
-  return (
-    <section className="hd-panel hd-doing">
-      <header>
-        <div>
-          <span className="hd-eyebrow">{label(ui, "dashboard_metric_doing", "Doing")}</span>
-          <h3>{label(ui, "dashboard_doing_title", "This week's Doing")}</h3>
-        </div>
-        <button className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent("pages/3_Kanban.py"))}>
-          {label(ui, "quick_kanban", "Kanban")}
-        </button>
-      </header>
-      {doing.length ? (
-        <div className="hd-task-list">
-          {doing.map((item, index) => (
-            <article className="hd-task" key={`${item.title}-${index}`}>
-              <strong>{cleanText(item.title)}</strong>
-              <div className="hd-task-meta">
-                {item.started_on ? <span>{label(ui, "dashboard_doing_started", "started {date}").replace("{date}", item.started_on)}</span> : null}
-                {item.tags ? <span>{item.tags}</span> : null}
-              </div>
-              {item.blocked_by ? <span className="hd-blocked">{label(ui, "dashboard_doing_blocked", "Blocked by: {blocked}").replace("{blocked}", item.blocked_by)}</span> : null}
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="hd-empty">{label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
-      )}
-    </section>
-  );
-}
-
-function OverviewPanel({ payload }) {
-  const ui = payload.ui;
-  const charts = payload.charts;
-  const health = charts.health;
-  const evidenceTotal = charts.evidence.doneUncrystallized + charts.evidence.unlinked;
-  return (
-    <section className="hd-panel hd-overview">
-      <header>
-        <div>
-          <span className="hd-eyebrow">{label(ui, "dashboard_status_overview", "Status overview")}</span>
-          <h3>{label(ui, "dashboard_overview_map_title", "Map of now")}</h3>
-        </div>
-      </header>
-      <SkillDonut chart={charts.skills} ui={ui} />
-      <div className="hd-metric-grid">
-        <MetricCard labelText={label(ui, "dashboard_metric_pending_evidence", "Evidence")} value={evidenceTotal} detail={`${label(ui, "dashboard_done_uncrystallized", "Done")}: ${charts.evidence.doneUncrystallized}`} />
-        <MetricCard labelText={label(ui, "dashboard_public_drafts", "Drafts")} value={charts.public.draft} detail={`${label(ui, "dashboard_public_published", "Published")}: ${charts.public.published}`} />
-        <MetricCard labelText={label(ui, "dashboard_health_title", "Health")} value={`${health.error}/${health.warning}/${health.info}`} detail={label(ui, "dashboard_metric_health_help", "Errors / warnings / info")} tone={health.error ? "danger" : health.warning ? "warn" : "ok"} />
+      <div className="hd-form-actions">
+        <button className="hd-ghost" type="button" onClick={onCancel}>{label(ui, "dashboard_goal_close_form", "Close")}</button>
+        <button className="hd-primary" type="submit">{label(ui, "goal_save", "Save goal")}</button>
       </div>
-      <StackedBar
-        values={[
-          { key: "published", value: charts.public.published, color: "#2f9e73" },
-          { key: "draft", value: charts.public.draft, color: "#c88916" },
-        ]}
-      />
-    </section>
+    </form>
   );
 }
 
-function RelationGraph({ payload }) {
+function GoalSkillAlignment({ payload, goalId, onEmit }) {
   const ui = payload.ui;
-  const nodes = payload.graph.nodes;
-  const edges = payload.graph.edges;
-  const positions = useMemo(() => {
-    const map = new Map();
-    const byType = {
-      goal: nodes.filter((node) => node.type === "goal"),
-      skill: nodes.filter((node) => node.type === "skill"),
-      task: nodes.filter((node) => node.type === "task"),
-      evidence: nodes.filter((node) => node.type === "evidence"),
-      output: nodes.filter((node) => node.type === "output"),
-      health: nodes.filter((node) => node.type === "health"),
-    };
-    const placeColumn = (items, x, startY, step) => {
-      items.forEach((node, index) => {
-        map.set(node.id, { x, y: startY + index * step });
-      });
-    };
-    placeColumn(byType.goal, 72, 180, 1);
-    placeColumn(byType.skill, 250, 80, 82);
-    placeColumn(byType.task, 250, 276, 74);
-    placeColumn(byType.evidence, 455, 190, 1);
-    placeColumn(byType.output, 640, 132, 1);
-    placeColumn(byType.health, 640, 262, 1);
-    return map;
-  }, [nodes]);
-  return (
-    <section className="hd-panel hd-graph-panel">
-      <header>
-        <div>
-          <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
-          <h3>{label(ui, "dashboard_graph_title", "Goal to evidence map")}</h3>
-        </div>
-      </header>
-      <svg className="hd-graph" viewBox="0 0 720 380" role="img" aria-label={label(ui, "dashboard_graph_title", "Goal to evidence map")}>
-        {edges.map((edge, index) => {
-          const from = positions.get(edge.from);
-          const to = positions.get(edge.to);
-          if (!from || !to) {
-            return null;
-          }
-          const mid = (from.x + to.x) / 2;
-          return (
-            <path
-              key={`${edge.from}-${edge.to}-${index}`}
-              className="hd-edge"
-              d={`M ${from.x + 72} ${from.y} C ${mid} ${from.y}, ${mid} ${to.y}, ${to.x - 72} ${to.y}`}
-            />
-          );
-        })}
-        {nodes.map((node) => {
-          const pos = positions.get(node.id);
-          if (!pos) {
-            return null;
-          }
-          return (
-            <g key={node.id} className={`hd-node node-${node.type}`} transform={`translate(${pos.x - 72} ${pos.y - 28})`}>
-              <rect width="144" height="56" rx="8" />
-              <circle cx="18" cy="28" r="5" fill={NODE_COLORS[node.type] || "#68716f"} />
-              <text className="hd-node-label" x="30" y="24">{cleanText(node.label).slice(0, 28)}</text>
-              <text className="hd-node-metric" x="30" y="40">{cleanText(node.metric).slice(0, 24)}</text>
-            </g>
-          );
-        })}
-      </svg>
-    </section>
-  );
-}
+  const alignment = payload.skillAlignment.byGoal[goalId] || { confirmed: [], candidates: [] };
+  const candidates = asArray(alignment.candidates);
+  const confirmed = asArray(alignment.confirmed);
+  const [selected, setSelected] = useState(() => new Set(candidates.map((link) => link.nodeId)));
+  const [manualNodeId, setManualNodeId] = useState("");
 
-function EvidencePanel({ payload, onEmit }) {
-  const ui = payload.ui;
-  const pending = payload.pendingEvidence;
-  const done = asArray(pending.done_uncrystallized);
-  const unlinked = asArray(pending.unlinked);
+  useEffect(() => {
+    setSelected(new Set(candidates.map((link) => link.nodeId)));
+  }, [candidates.map((link) => link.nodeId).join("|")]);
+
+  const selectedLinks = candidates.filter((link) => selected.has(link.nodeId));
   return (
-    <section className="hd-panel hd-evidence">
-      <header>
-        <div>
-          <span className="hd-eyebrow">{label(ui, "dashboard_pending_evidence_title", "Evidence")}</span>
-          <h3>{label(ui, "dashboard_evidence_inbox_title", "Evidence inbox")}</h3>
-        </div>
-        <button className="hd-ghost" type="button" onClick={() => onEmit(openSectionEvent("evidence"))}>
-          {label(ui, "dashboard_open_section", "Open")}
+    <div className="hd-align-box">
+      <div className="hd-align-actions">
+        <button className="hd-ghost" type="button" onClick={() => onEmit(requestGoalSkillRuleMatchEvent(goalId))}>
+          {label(ui, "skill_alignment_rule", "Rule match")}
         </button>
-      </header>
-      <div className="hd-two-counts">
-        <MetricCard labelText={label(ui, "dashboard_done_uncrystallized", "Done not crystallized")} value={pending.done_uncrystallized_count || 0} />
-        <MetricCard labelText={label(ui, "dashboard_unlinked_evidence", "Unlinked pool rows")} value={pending.unlinked_count || 0} />
+        <button className="hd-ghost" type="button" disabled={!payload.ai?.configured} onClick={() => onEmit(requestGoalSkillAiMatchEvent(goalId))}>
+          {label(ui, "skill_alignment_ai", "AI match")}
+        </button>
       </div>
-      {[...done.slice(0, 2), ...unlinked.slice(0, 2)].length ? (
-        <ul className="hd-compact-list">
-          {done.slice(0, 2).map((item, index) => <li key={`done-${index}`}>{cleanText(item.title)}</li>)}
-          {unlinked.slice(0, 2).map((item) => <li key={item.id}>{cleanText(item.title, item.id)}</li>)}
+      <span className="hd-section-label">{label(ui, "skill_alignment_confirmed", "Confirmed links")}</span>
+      {confirmed.length ? (
+        <ul className="hd-link-list">
+          {confirmed.map((link) => <li key={link.nodeId}>{cleanText(link.label, link.nodeId)} <span>{link.source}</span></li>)}
         </ul>
       ) : (
-        <p className="hd-empty">{label(ui, "dashboard_pending_evidence_empty", "No pending evidence.")}</p>
+        <p className="hd-empty">{label(ui, "skill_alignment_no_links", "No confirmed skill links yet.")}</p>
       )}
-    </section>
+      <span className="hd-section-label">{label(ui, "skill_alignment_candidates", "Candidates")}</span>
+      {candidates.length ? (
+        <div className="hd-candidate-list">
+          {candidates.map((link) => (
+            <label key={link.nodeId} className="hd-candidate">
+              <input
+                type="checkbox"
+                checked={selected.has(link.nodeId)}
+                onChange={(event) => {
+                  const next = new Set(selected);
+                  if (event.currentTarget.checked) {
+                    next.add(link.nodeId);
+                  } else {
+                    next.delete(link.nodeId);
+                  }
+                  setSelected(next);
+                }}
+              />
+              <span><strong>{cleanText(link.label, link.nodeId)}</strong><small>{link.source}{link.score ? ` · ${link.score}` : ""}</small></span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="hd-empty">{label(ui, "skill_alignment_no_candidates", "Run rule match or AI match to get candidates.")}</p>
+      )}
+      <button className="hd-primary full" type="button" disabled={!selectedLinks.length} onClick={() => onEmit(confirmGoalSkillLinksEvent(goalId, selectedLinks.map(linkPayload)))}>
+        {label(ui, "skill_alignment_confirm", "Confirm links")}
+      </button>
+      <div className="hd-manual-row">
+        <select value={manualNodeId} onChange={(event) => setManualNodeId(event.currentTarget.value)}>
+          <option value="">{label(ui, "skill_alignment_manual_label", "Manual add")}</option>
+          {payload.skillAlignment.skillOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+        </select>
+        <button className="hd-ghost" type="button" disabled={!manualNodeId} onClick={() => onEmit(manualGoalSkillLinkEvent(goalId, manualNodeId))}>
+          {label(ui, "skill_alignment_manual_add", "Add")}
+        </button>
+      </div>
+    </div>
   );
 }
 
-function RightRail({ payload, onEmit }) {
+function nodeRelations(payload, nodeId) {
+  return payload.graph.edges
+    .filter((edge) => edge.from === nodeId || edge.to === nodeId)
+    .map((edge) => ({
+      direction: edge.from === nodeId ? "to" : "from",
+      relation: cleanText(edge.relation, edge.type),
+      peer: edge.from === nodeId ? edge.to : edge.from,
+      placeholder: edge.placeholder,
+      suggested: edge.suggested,
+    }));
+}
+
+function PlaceholderInspector({ payload, node, relations }) {
   const ui = payload.ui;
-  const health = payload.health;
-  const counts = health.counts || {};
-  const publicLayer = payload.publicLayer;
+  if (!node.placeholder && node.implemented !== false) {
+    return null;
+  }
   return (
-    <aside className="hd-rail">
-      <section className="hd-panel compact">
-        <span className="hd-eyebrow">{label(ui, "dashboard_health_title", "Profile Health")}</span>
-        <div className="hd-health-badges">
-          <span className={counts.error ? "danger" : ""}>{label(ui, "dashboard_health_errors", "Errors")} {counts.error || 0}</span>
-          <span className={counts.warning ? "warn" : ""}>{label(ui, "dashboard_health_warnings", "Warnings")} {counts.warning || 0}</span>
-          <span>{label(ui, "dashboard_health_info", "Info")} {counts.info || 0}</span>
-        </div>
-        <button className="hd-ghost full" type="button" onClick={() => onEmit(navigationEvent("pages/5_Profile_Health.py"))}>{label(ui, "quick_profile_health", "Profile Health")}</button>
-      </section>
-      <section className="hd-panel compact">
-        <span className="hd-eyebrow">{label(ui, "dashboard_output_title", "Output")}</span>
-        <MetricCard labelText={label(ui, "dashboard_public_drafts", "Drafts")} value={publicLayer.draft_total || 0} detail={`${label(ui, "dashboard_public_published", "Published")}: ${publicLayer.published_total || 0}`} />
-        <button className="hd-ghost full" type="button" onClick={() => onEmit(navigationEvent("pages/6_Public_Site.py"))}>{label(ui, "quick_public_site", "Public Site")}</button>
-      </section>
-      <section className="hd-panel compact">
-        <span className="hd-eyebrow">{label(ui, "dashboard_quick_title", "Quick entries")}</span>
-        <div className="hd-link-list">
-          {payload.quickLinks.slice(0, 5).map((link) => (
-            <button key={link.path} type="button" onClick={() => onEmit(navigationEvent(link.path))}>
-              {cleanText(link.label, link.id)}
-            </button>
+      <div className="hd-placeholder-box">
+      <span className="hd-section-label">{label(ui, "dashboard_inspector_owner_reserved", "Interface reserved")}</span>
+      <p>
+        {node.implemented === false
+          ? label(ui, "dashboard_inspector_placeholder_hint", "This graph node is planned but does not have a backing record yet.")
+          : label(ui, "dashboard_source_to_evidence_hint", "This graph node is suggested by the dashboard graph.")}
+      </p>
+      {relations.length ? (
+        <ul>
+          {relations.slice(0, 4).map((relation) => (
+            <li key={`${relation.direction}-${relation.relation}-${relation.peer}`}>
+              <strong>{relation.relation}</strong>
+              <span>{relation.direction} {relation.peer}</span>
+            </li>
           ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, onEmit, onSelectNode }) {
+  const ui = payload.ui;
+  const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
+  const selectedNode = nodesById.get(selectedNodeId) || payload.graph.nodes.find((node) => node.type === "goal") || null;
+  const relations = selectedNode ? nodeRelations(payload, selectedNode.id) : [];
+
+  if (goalEditor?.mode === "create") {
+    return (
+      <aside className="hd-inspector">
+        <header><span className="hd-eyebrow">{label(ui, "dashboard_add_active_goal", "Add Active Goal")}</span><h3>{label(ui, "goal_create_title", "Create goal")}</h3></header>
+        <GoalForm payload={payload} goal={{ editor: emptyGoalEditor() }} mode="create" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
+      </aside>
+    );
+  }
+
+  const selectedGoalId = goalIdFromNode(selectedNode);
+  const selectedGoal = goalById(payload, selectedGoalId);
+  if (goalEditor?.mode === "edit" && selectedGoal) {
+    return (
+      <aside className="hd-inspector">
+        <header><span className="hd-eyebrow">{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</span><h3>{goalDisplay(selectedGoal, ui).title}</h3></header>
+        <GoalForm payload={payload} goal={selectedGoal} mode="edit" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
+      </aside>
+    );
+  }
+
+  if (!selectedNode) {
+    return (
+      <aside className="hd-inspector">
+        <p className="hd-empty">{label(ui, "dashboard_inspector_empty", "Select a node to inspect it.")}</p>
+      </aside>
+    );
+  }
+
+  if (selectedNode.type === "goal" && selectedGoal) {
+    const display = goalDisplay(selectedGoal, ui);
+    return (
+      <aside className="hd-inspector">
+        <header>
+          <span className="hd-eyebrow">{selectedGoal.isPrimary ? label(ui, "dashboard_primary_goal", "Primary goal") : label(ui, "dashboard_active_goal", "Active goal")}</span>
+          <h3>{display.title}</h3>
+        </header>
+        <div className="hd-inspector-meta">
+          {selectedNode.layer ? <span>{layerLabel(ui, selectedNode.layer)}</span> : null}
+          {display.status ? <span>{label(ui, `goal_status_${display.status}`, display.status)}</span> : null}
+          {display.target ? <span>{label(ui, "goal_strip_target", "Target")}: {display.target}</span> : null}
+          {selectedGoal.locked ? <span>{label(ui, "goal_visibility_private", "Private")}</span> : null}
         </div>
-      </section>
+        <PlaceholderInspector payload={payload} node={selectedNode} relations={relations} />
+        <p className="hd-inspector-summary">{cleanText(selectedGoal.editor?.summary || display.summary, label(ui, "goal_module_caption", "A stage goal for this profile."))}</p>
+        <div className="hd-action-row">
+          {!selectedGoal.locked ? <button className="hd-primary" type="button" onClick={() => setGoalEditor({ mode: "edit", goalId: selectedGoal.id })}>{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</button> : null}
+          {!selectedGoal.isPrimary ? <button className="hd-ghost" type="button" onClick={() => onEmit(setPrimaryGoalEvent(selectedGoal.id))}>{label(ui, "dashboard_set_primary", "Set primary")}</button> : null}
+          <button className="hd-ghost danger" type="button" onClick={() => onEmit(archiveGoalEvent(selectedGoal.id))}>{label(ui, "dashboard_archive_goal", "Archive")}</button>
+        </div>
+        {!selectedGoal.locked ? <GoalSkillAlignment payload={payload} goalId={selectedGoal.id} onEmit={onEmit} /> : null}
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="hd-inspector">
+      <header>
+        <span className="hd-eyebrow">{selectedNode.type}</span>
+        <h3>{selectedNode.label}</h3>
+      </header>
+      <div className="hd-inspector-meta">
+        {selectedNode.layer ? <span>{layerLabel(ui, selectedNode.layer)}</span> : null}
+        {selectedNode.implemented === false ? <span>{label(ui, "dashboard_placeholder_metric", "planned")}</span> : null}
+        {selectedNode.metric ? <span>{selectedNode.metric}</span> : null}
+        {selectedNode.status ? <span>{selectedNode.status}</span> : null}
+      </div>
+      <PlaceholderInspector payload={payload} node={selectedNode} relations={relations} />
+      <p className="hd-inspector-summary">
+        {selectedNode.suggested || selectedNode.placeholder ? label(ui, "skill_alignment_suggested", "suggested") : label(ui, "dashboard_inspector_node_hint", "Open the owner page for details.")}
+      </p>
+      <div className="hd-action-row">
+        {selectedNode.ownerPath && selectedNode.ownerPath !== "profile_context" && selectedNode.implemented !== false ? (
+          <button className="hd-primary" type="button" onClick={() => onEmit(navigationEvent(selectedNode.ownerPath))}>{label(ui, "dashboard_open_section", "Open")}</button>
+        ) : null}
+        {selectedNode.ownerPath === "profile_context" && selectedNode.implemented !== false ? (
+          <button className="hd-primary" type="button" onClick={() => onEmit(openProfileContextEvent())}>{label(ui, "north_star_edit_action", "Edit Profile Context")}</button>
+        ) : null}
+      </div>
+      {selectedNode.type === "skill" && selectedNode.implemented !== false ? (
+        <button className="hd-ghost full" type="button" onClick={() => onEmit(navigationEvent("pages/2_Gap_Analysis.py"))}>{label(ui, "quick_gap", "Gap Analysis")}</button>
+      ) : null}
     </aside>
+  );
+}
+
+function HomeCaptureForm({ payload, onEmit }) {
+  const ui = payload.ui;
+  const currentGoalId = primaryGoalId(payload);
+
+  function submit(event) {
+    event.preventDefault();
+    const draft = captureDraftFromFormData(new FormData(event.currentTarget));
+    if (!draft.title) {
+      return;
+    }
+    onEmit(captureInboxSubmitEvent(draft));
+    event.currentTarget.reset();
+  }
+
+  return (
+    <form className="hd-capture-form" onSubmit={submit}>
+      <header>
+        <span className="hd-eyebrow">{label(ui, "dashboard_today_capture_sources", "Capture / Sources")}</span>
+        <strong>{label(ui, "dashboard_capture_title", "Capture source")}</strong>
+      </header>
+      <label>
+        {label(ui, "goal_field_title", "Title")}
+        <input name="title" required placeholder={label(ui, "dashboard_capture_title_placeholder", "What did you notice?")} />
+      </label>
+      <input type="hidden" name="goal_id" value={currentGoalId} />
+      <div className="hd-form-row">
+        <label>
+          {label(ui, "dashboard_capture_type", "Type")}
+          <select name="type" defaultValue="note">
+            <option value="note">{label(ui, "dashboard_capture_type_note", "Note")}</option>
+            <option value="link">{label(ui, "dashboard_capture_type_link", "Link")}</option>
+            <option value="resource">{label(ui, "dashboard_capture_type_resource", "Resource")}</option>
+            <option value="idea">{label(ui, "dashboard_capture_type_idea", "Idea")}</option>
+          </select>
+        </label>
+        <label>
+          {label(ui, "dashboard_capture_source", "Source URL or origin")}
+          <input name="source" />
+        </label>
+      </div>
+      <label>
+        {label(ui, "dashboard_capture_source", "Source URL or origin")}
+        <input name="source_url" type="url" />
+      </label>
+      <label>
+        {label(ui, "dashboard_capture_raw_text", "Note")}
+        <textarea name="raw_text" rows="3" />
+      </label>
+      <label>
+        {label(ui, "dashboard_capture_tags", "Tags")}
+        <input name="tags" placeholder="project/nblane, flow/learning" />
+      </label>
+      <button className="hd-primary full" type="submit">{label(ui, "dashboard_capture_submit", "Capture")}</button>
+    </form>
+  );
+}
+
+function TodayLane({ payload, onEmit }) {
+  const ui = payload.ui;
+  const doing = asArray(payload.kanban.doing);
+  const evidenceCandidates = Number(payload.pendingEvidence.done_uncrystallized_count || 0);
+  const unlinkedAtomic = Number(payload.pendingEvidence.unlinked_count || 0);
+  const health = payload.charts.health;
+  const sourceActive = Number(payload.sources.active_total || 0);
+  const sourceTitles = asArray(payload.sources.active_titles).map((item) => cleanText(item)).filter(Boolean);
+  const gapRisk = Number(payload.skills.evidence_risk_count || 0) + asArray(payload.skills.target_learning_locked).length;
+  return (
+    <section className="hd-today-lane">
+      <div className="hd-today-metrics">
+        <article>
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
+          <strong>{payload.kanban.doing_total || doing.length || 0}</strong>
+          <p>{doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
+        </article>
+        <article className="hd-today-capture-card">
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_capture_sources", "Capture / Sources")}</span>
+          <strong>{sourceActive}</strong>
+          <p>{sourceTitles.slice(0, 2).join(" / ") || label(ui, "dashboard_source_inbox_empty", "No source items captured yet.")}</p>
+          <HomeCaptureForm payload={payload} onEmit={onEmit} />
+        </article>
+        <article>
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
+          <strong>{evidenceCandidates}</strong>
+          <p>{label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}</p>
+        </article>
+        <article>
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
+          <strong>{gapRisk}</strong>
+          <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
+        </article>
+        <article>
+          <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
+          <strong>{payload.charts.public.draft}</strong>
+          <p>{label(ui, "dashboard_public_published", "Published")}: {payload.charts.public.published} · {label(ui, "dashboard_feedback_planned", "Feedback interface reserved.")}</p>
+        </article>
+      </div>
+      <div className="hd-today-actions">
+        {payload.quickLinks.map((link) => (
+          <button key={link.path} className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent(link.path))}>{cleanText(link.label, link.id)}</button>
+        ))}
+        <span className="hd-health-inline">{label(ui, "dashboard_health_title", "Health")}: {health.error}/{health.warning}/{health.info}</span>
+      </div>
+    </section>
   );
 }
 
 function Dashboard({ args }) {
   const payload = useMemo(() => normalizePayload(args.payload || {}), [args]);
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [goalEditor, setGoalEditor] = useState(null);
+  const [viewMode, setViewMode] = useState("canvas");
 
   useEffect(() => {
+    const primaryId = primaryGoalId(payload);
+    const firstGoalNode = payload.graph.nodes.find((node) => node.type === "goal" && (!primaryId || node.recordId === primaryId));
+    if (!selectedNodeId && firstGoalNode) {
+      setSelectedNodeId(firstGoalNode.id);
+    }
     window.setTimeout(() => setFrameHeight(), 0);
-  }, [payload]);
+  }, [payload, selectedNodeId]);
 
   function emit(event) {
     setComponentValue(event);
     window.setTimeout(() => setFrameHeight(), 0);
   }
 
+  function selectGoal(goalId) {
+    const node = payload.graph.nodes.find((item) => item.type === "goal" && item.recordId === goalId);
+    if (node) {
+      setSelectedNodeId(node.id);
+      setGoalEditor(null);
+    }
+  }
+
   return (
     <main className="hd-shell">
-      <GoalHero payload={payload} onEmit={emit} />
-      <div className="hd-workbench">
-        <div className="hd-left">
-          <DoingPanel payload={payload} onEmit={emit} />
-          <EvidencePanel payload={payload} onEmit={emit} />
-        </div>
-        <div className="hd-center">
-          <OverviewPanel payload={payload} />
-          <RelationGraph payload={payload} />
-        </div>
-        <RightRail payload={payload} onEmit={emit} />
+      <ContextHeader
+        payload={payload}
+        onEmit={emit}
+        onCreateGoal={() => setGoalEditor({ mode: "create" })}
+        onSelectGoal={selectGoal}
+      />
+      <div className="hd-canvas-workbench">
+        <ContextCanvas
+          payload={payload}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={(nodeId) => {
+            setSelectedNodeId(nodeId);
+            setGoalEditor(null);
+          }}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+        />
+        <InspectorPanel
+          payload={payload}
+          selectedNodeId={selectedNodeId}
+          goalEditor={goalEditor}
+          setGoalEditor={setGoalEditor}
+          onEmit={emit}
+        />
       </div>
+      <TodayLane payload={payload} onEmit={emit} />
     </main>
   );
 }
 
 function App() {
-  const [args, setArgs] = useState({ payload: {}, height: 860 });
+  const [args, setArgs] = useState({ payload: {}, height: 900 });
   useEffect(() => {
     initStreamlitBridge(setArgs);
   }, []);

@@ -22,6 +22,10 @@ from nblane.core.goals import (
     goal_for_agent_context,
     goal_for_ui,
 )
+from nblane.core.profile_context import (
+    north_star_context_from_identity,
+    parse_identity_fields,
+)
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -36,7 +40,7 @@ from nblane.web_auth import (
     allowed_profiles,
     can_create_profiles,
 )
-from nblane.web_cache import load_goal_book_raw
+from nblane.web_cache import load_goal_book_raw, load_skill_md
 from nblane.web_i18n import common_ui
 
 
@@ -498,8 +502,38 @@ def _current_goal_for_web(profile: str) -> Goal | None:
 
 
 def current_goal_agent_context(profile: str) -> str:
-    """Return current goal text allowed for internal AI prompts."""
-    return goal_for_agent_context(_current_goal_for_web(profile))
+    """Return stage-goal text allowed for internal AI prompts."""
+    book = GoalBook.from_dict(load_goal_book_raw(profile), profile=profile)
+    lines: list[str] = []
+
+    north_star = north_star_context_from_identity(
+        parse_identity_fields(load_skill_md(profile)),
+        for_agent=True,
+    )
+    if north_star:
+        lines.append("North Star:")
+        lines.append(north_star)
+
+    primary = book.primary()
+    primary_context = goal_for_agent_context(primary)
+    if primary_context:
+        lines.append("Primary goal:")
+        lines.append(primary_context)
+
+    active_contexts: list[str] = []
+    primary_id = primary.id if primary is not None else ""
+    for goal in book.active_goals():
+        if goal.id == primary_id:
+            continue
+        context = goal_for_agent_context(goal)
+        if context:
+            active_contexts.append(context)
+
+    if active_contexts:
+        lines.append("Active goals:")
+        lines.extend(active_contexts)
+
+    return "\n\n".join(lines)
 
 
 def _goal_status_label(ui: dict[str, str], status: str) -> str:

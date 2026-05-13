@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import re
 
 import yaml
 import streamlit as st
@@ -21,14 +22,22 @@ from nblane.core.home_dashboard import (
     dashboard_public_summary as _dashboard_public_summary,
     dashboard_skill_summary as _dashboard_skill_summary,
 )
+from nblane.core.inbox import add_inbox_item, load_inbox, save_inbox
 from nblane.core import llm as llm_client
 from nblane.core.goals import (
     GOAL_STATUSES,
     GOAL_UI_VISIBILITIES,
     Goal,
     GoalBook,
+    GoalSkillLink,
     goal_for_ui,
     save_goal_book,
+)
+from nblane.core.goal_alignment import (
+    ai_match_goal_to_skills,
+    manual_goal_skill_link,
+    merge_goal_skill_candidates,
+    rule_match_goal_to_skills,
 )
 from nblane.core.io import (
     profile_dir,
@@ -44,8 +53,11 @@ from nblane.core.profile_context import (
     GENERATED_BLOCKS,
     IDENTITY_FIELDS,
     LONG_NARRATIVE_SECTIONS,
+    NORTH_STAR_VISIBILITIES,
     apply_profile_context_structured_edits,
     extract_generated_blocks,
+    normalize_north_star_visibility,
+    north_star_context_from_identity,
     parse_identity_fields,
     parse_skill_md_sections,
     rejoin_sections,
@@ -67,7 +79,6 @@ from nblane.web_shared import (
     ensure_file_snapshot,
     remember_allow_and_drop_yaml_preview_keys,
     refresh_file_snapshots,
-    render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
     select_profile,
@@ -91,12 +102,13 @@ _skill_md_path = Path()
 _tree_path = Path()
 _pool_path = Path()
 _goals_path = Path()
+_inbox_path = Path()
 
 
 def _prepare_home_state() -> None:
     """Initialize auth, profile selection, and Home file snapshots."""
     global selected
-    global _skill_md_path, _tree_path, _pool_path, _goals_path
+    global _skill_md_path, _tree_path, _pool_path, _goals_path, _inbox_path
 
     require_login()
     selected = select_profile()
@@ -106,7 +118,8 @@ def _prepare_home_state() -> None:
     _tree_path = profile_dir(selected) / "skill-tree.yaml"
     _pool_path = profile_dir(selected) / "evidence-pool.yaml"
     _goals_path = profile_dir(selected) / "goals.yaml"
-    for path in (_skill_md_path, _tree_path, _pool_path, _goals_path):
+    _inbox_path = profile_dir(selected) / "inbox.yaml"
+    for path in (_skill_md_path, _tree_path, _pool_path, _goals_path, _inbox_path):
         ensure_file_snapshot(path)
 
 
@@ -151,6 +164,100 @@ def _goal_book_for_home(profile: str) -> GoalBook:
     )
 
 
+def _goal_skill_candidate_state_key(profile: str) -> str:
+    """Session-state key for unconfirmed goal-skill candidates."""
+    return f"_home_goal_skill_candidates_{profile}"
+
+
+def _goal_skill_candidates_for_home(
+    profile: str,
+) -> dict[str, list[dict[str, object]]]:
+    """Return pending alignment candidates for the dashboard payload."""
+    raw = st.session_state.get(_goal_skill_candidate_state_key(profile), {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def _set_goal_skill_candidates(
+    profile: str,
+    goal_id: str,
+    candidates: list[GoalSkillLink],
+) -> None:
+    """Store unconfirmed candidates in session state."""
+    key = _goal_skill_candidate_state_key(profile)
+    raw = st.session_state.get(key, {})
+    state = raw if isinstance(raw, dict) else {}
+    state[goal_id] = [candidate.to_dict() for candidate in candidates]
+    st.session_state[key] = state
+
+
+def _save_goal_book_for_home(
+    profile: str,
+    book: GoalBook,
+    success_message: str,
+) -> None:
+    """Persist goals.yaml and refresh Home caches/snapshots."""
+    assert_files_current([_goals_path])
+    book.profile = profile
+    save_goal_book(profile, book)
+    refresh_file_snapshots([_goals_path])
+    stash_git_backup_results()
+    clear_web_cache()
+    st.success(success_message)
+    st.rerun()
+
+
+def _home_capture_text(payload: dict, *keys: str) -> str:
+    """Return the first non-empty text value from a dashboard payload."""
+    for key in keys:
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _capture_home_inbox_item(profile: str, payload: dict) -> None:
+    """Capture one Home dashboard source into the profile inbox."""
+    title = _home_capture_text(payload, "title")
+    if not title:
+        st.warning(ui["dashboard_capture_title_required"])
+        return
+
+    source_url = _home_capture_text(payload, "source_url", "sourceUrl", "url")
+    source = _home_capture_text(payload, "source") or source_url
+    goal_id = _home_capture_text(payload, "goal_id", "goalId")
+    metadata: dict[str, object] = {
+        "source_surface": "home_capture",
+        "graph_layer": "source",
+        "capture_event": "capture_inbox_submit",
+    }
+    if goal_id:
+        metadata["goal_id"] = goal_id
+    if source_url:
+        metadata["source_url"] = source_url
+
+    assert_files_current([_inbox_path])
+    inbox = load_inbox(profile)
+    item = add_inbox_item(
+        inbox,
+        title,
+        type=_home_capture_text(payload, "type") or "note",
+        source=source,
+        captured_by="human",
+        raw_text=_home_capture_text(payload, "raw_text", "rawText", "note"),
+        visibility="private",
+        status="inbox",
+        tags=payload.get("tags"),
+        metadata=metadata,
+        note="Captured from Home dashboard.",
+    )
+    save_inbox(profile, inbox)
+    refresh_file_snapshots([_inbox_path])
+    stash_git_backup_results()
+    clear_web_cache()
+    st.success(ui["dashboard_capture_saved"].format(id=item.id))
+    st.rerun()
+
+
 def _goal_form_key(profile: str, field: str) -> str:
     """Stable widget key for the Home goal form."""
     return f"home_goal_{profile}_{field}"
@@ -159,6 +266,24 @@ def _goal_form_key(profile: str, field: str) -> str:
 def _goal_default_id() -> str:
     """Return a stable id shape for the first current goal."""
     return f"goal_{date.today().strftime('%Y%m%d')}_current"
+
+
+def _goal_id_slug(value: str) -> str:
+    """Return a short id-safe slug for a goal title."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.lower()).strip("_")
+    return slug[:32] or "active"
+
+
+def _unique_goal_id(book: GoalBook, title: str) -> str:
+    """Return a non-conflicting active goal id."""
+    base = f"goal_{date.today().strftime('%Y%m%d')}_{_goal_id_slug(title)}"
+    existing = set(book.by_id())
+    if base not in existing:
+        return base
+    idx = 2
+    while f"{base}_{idx}" in existing:
+        idx += 1
+    return f"{base}_{idx}"
 
 
 def dashboard_kanban_summary(profile: str) -> dict:
@@ -192,7 +317,12 @@ def dashboard_payload(profile: str) -> dict:
         "configured": llm_client.is_configured(),
         "label": llm_client.model_label() if llm_client.is_configured() else "",
     }
-    return _dashboard_payload(profile, ui=ui, ai=ai_payload)
+    return _dashboard_payload(
+        profile,
+        ui=ui,
+        ai=ai_payload,
+        skill_alignment_candidates=_goal_skill_candidates_for_home(profile),
+    )
 
 
 def _render_goal_preview(goal: Goal) -> None:
@@ -340,6 +470,11 @@ def _render_current_goal_module(profile: str) -> None:
                     value=existing.summary,
                     key=_goal_form_key(profile, "summary"),
                 )
+                alignment = st.text_area(
+                    ui["goal_field_alignment"],
+                    value=existing.alignment,
+                    key=_goal_form_key(profile, "alignment"),
+                )
                 target_skills = st.text_area(
                     ui["goal_field_target_skills"],
                     value=_goal_lines_text(existing.target_skills),
@@ -395,7 +530,9 @@ def _render_current_goal_module(profile: str) -> None:
                     include_in_agent_context=include_agent,
                     include_in_public_output=False,
                     summary=summary.strip(),
+                    alignment=alignment.strip(),
                     target_skills=_goal_text_lines(target_skills),
+                    skill_links=list(existing.skill_links),
                     success_criteria=_goal_text_lines(success_criteria),
                     focus=_goal_text_lines(focus),
                     evidence_refs=_goal_text_lines(evidence_refs),
@@ -454,15 +591,51 @@ def _save_skill_md(
     st.rerun()
 
 
-def _save_dashboard_goal(profile: str, payload: dict) -> None:
-    """Persist a Current Goal edit submitted by the React dashboard."""
-    book = _goal_book_for_home(profile)
-    current = book.current()
-    existing = current or Goal(
-        id=str(payload.get("id") or "").strip() or _goal_default_id(),
-        title="",
-        label="",
-    )
+def _dashboard_goal_bool(
+    payload: dict,
+    key: str,
+    default: bool,
+) -> bool:
+    """Normalize dashboard event booleans."""
+    if key not in payload:
+        return default
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _dashboard_goal_lines_or_existing(
+    payload: dict,
+    key: str,
+    existing: list[str],
+) -> list[str]:
+    """Parse list fields while preserving existing values when omitted."""
+    if key not in payload:
+        return list(existing)
+    return _dashboard_goal_lines(payload.get(key))
+
+
+def _dashboard_goal_text_or_existing(
+    payload: dict,
+    key: str,
+    existing: str,
+) -> str:
+    """Parse text fields while preserving existing values when omitted."""
+    if key not in payload:
+        return existing
+    return str(payload.get(key) or "").strip()
+
+
+def _dashboard_goal_from_payload(
+    *,
+    existing: Goal,
+    payload: dict,
+    goal_id: str,
+) -> Goal:
+    """Build a normalized Goal from dashboard form payload."""
     title = str(payload.get("title") or "").strip()
     if not title:
         st.warning(ui["goal_title_required"])
@@ -475,43 +648,308 @@ def _save_dashboard_goal(profile: str, payload: dict) -> None:
     ).strip()
     if ui_visibility not in GOAL_UI_VISIBILITIES:
         ui_visibility = existing.ui_visibility
-    include_agent = bool(payload.get("include_in_agent_context", False))
+    include_agent = _dashboard_goal_bool(
+        payload,
+        "include_in_agent_context",
+        existing.include_in_agent_context,
+    )
     if ui_visibility == "private":
         include_agent = False
 
-    next_goal = Goal(
-        id=existing.id or _goal_default_id(),
+    return Goal(
+        id=goal_id,
         title=title,
-        label=str(payload.get("label") or "").strip(),
+        label=_dashboard_goal_text_or_existing(
+            payload,
+            "label",
+            existing.label,
+        ),
         status=status,
-        start=str(payload.get("start") or "").strip(),
-        target=str(payload.get("target") or "").strip(),
+        start=_dashboard_goal_text_or_existing(
+            payload,
+            "start",
+            existing.start,
+        ),
+        target=_dashboard_goal_text_or_existing(
+            payload,
+            "target",
+            existing.target,
+        ),
         ui_visibility=ui_visibility,
         include_in_agent_context=include_agent,
         include_in_public_output=False,
-        summary=str(payload.get("summary") or "").strip(),
-        target_skills=_dashboard_goal_lines(payload.get("target_skills")),
-        success_criteria=_dashboard_goal_lines(
-            payload.get("success_criteria")
+        summary=_dashboard_goal_text_or_existing(
+            payload,
+            "summary",
+            existing.summary,
         ),
-        focus=_dashboard_goal_lines(payload.get("focus")),
-        evidence_refs=_dashboard_goal_lines(payload.get("evidence_refs")),
-        task_refs=_dashboard_goal_lines(payload.get("task_refs")),
-        output_refs=_dashboard_goal_lines(payload.get("output_refs")),
-        notes=str(payload.get("notes") or "").strip(),
+        alignment=_dashboard_goal_text_or_existing(
+            payload,
+            "alignment",
+            existing.alignment,
+        ),
+        target_skills=_dashboard_goal_lines_or_existing(
+            payload,
+            "target_skills",
+            existing.target_skills,
+        ),
+        skill_links=list(existing.skill_links),
+        success_criteria=_dashboard_goal_lines_or_existing(
+            payload,
+            "success_criteria",
+            existing.success_criteria,
+        ),
+        focus=_dashboard_goal_lines_or_existing(
+            payload,
+            "focus",
+            existing.focus,
+        ),
+        evidence_refs=_dashboard_goal_lines_or_existing(
+            payload,
+            "evidence_refs",
+            existing.evidence_refs,
+        ),
+        task_refs=_dashboard_goal_lines_or_existing(
+            payload,
+            "task_refs",
+            existing.task_refs,
+        ),
+        output_refs=_dashboard_goal_lines_or_existing(
+            payload,
+            "output_refs",
+            existing.output_refs,
+        ),
+        notes=_dashboard_goal_text_or_existing(
+            payload,
+            "notes",
+            existing.notes,
+        ),
     )
-    assert_files_current([_goals_path])
+
+
+def _create_dashboard_goal(profile: str, payload: dict) -> None:
+    """Create a new active goal without overwriting the primary by default."""
+    book = _goal_book_for_home(profile)
+    title = str(payload.get("title") or "").strip()
+    goal_id = str(payload.get("id") or "").strip() or _unique_goal_id(book, title)
+    existing = Goal(id=goal_id, title="", label="")
+    next_goal = _dashboard_goal_from_payload(
+        existing=existing,
+        payload={**payload, "status": payload.get("status") or "active"},
+        goal_id=goal_id,
+    )
     by_id = book.by_id()
     by_id[next_goal.id] = next_goal
     book.goals = list(by_id.values())
-    book.current_goal_id = next_goal.id
-    book.profile = profile
-    save_goal_book(profile, book)
-    refresh_file_snapshots([_goals_path])
-    stash_git_backup_results()
-    clear_web_cache()
-    st.success(ui["goal_saved"])
+    if (
+        not book.primary()
+        or _dashboard_goal_bool(payload, "set_as_primary", False)
+    ):
+        book.current_goal_id = next_goal.id
+    _save_goal_book_for_home(profile, book, ui["goal_saved"])
+
+
+def _edit_dashboard_goal(profile: str, payload: dict) -> None:
+    """Edit an existing goal without changing the primary pointer."""
+    book = _goal_book_for_home(profile)
+    by_id = book.by_id()
+    goal_id = str(payload.get("goal_id") or payload.get("id") or "").strip()
+    existing = by_id.get(goal_id)
+    if existing is None:
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    next_goal = _dashboard_goal_from_payload(
+        existing=existing,
+        payload=payload,
+        goal_id=existing.id,
+    )
+    by_id[next_goal.id] = next_goal
+    book.goals = list(by_id.values())
+    _save_goal_book_for_home(profile, book, ui["goal_saved"])
+
+
+def _archive_dashboard_goal(profile: str, payload: dict) -> None:
+    """Archive a goal and move primary to the next active goal if needed."""
+    book = _goal_book_for_home(profile)
+    by_id = book.by_id()
+    goal_id = str(payload.get("goal_id") or payload.get("id") or "").strip()
+    goal = by_id.get(goal_id)
+    if goal is None:
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    goal.status = "archived"
+    by_id[goal.id] = goal
+    book.goals = list(by_id.values())
+    if book.current_goal_id == goal.id:
+        next_primary = next(
+            (item for item in book.goals if item.status == "active"),
+            None,
+        )
+        book.current_goal_id = next_primary.id if next_primary is not None else ""
+    state = _goal_skill_candidates_for_home(profile)
+    if goal.id in state:
+        del state[goal.id]
+        st.session_state[_goal_skill_candidate_state_key(profile)] = state
+    _save_goal_book_for_home(profile, book, ui["goal_archived"])
+
+
+def _save_dashboard_goal(profile: str, payload: dict) -> None:
+    """Compatibility wrapper for older dashboard goal-submit events."""
+    book = _goal_book_for_home(profile)
+    goal_id = str(payload.get("goal_id") or payload.get("id") or "").strip()
+    if goal_id and goal_id in book.by_id():
+        _edit_dashboard_goal(profile, payload)
+        return
+    _create_dashboard_goal(
+        profile,
+        {**payload, "set_as_primary": not bool(book.primary())},
+    )
+
+
+def _goal_for_alignment_event(
+    profile: str,
+    payload: dict,
+) -> tuple[GoalBook, Goal | None]:
+    """Resolve the goal addressed by a dashboard alignment event."""
+    book = _goal_book_for_home(profile)
+    goal_id = str(payload.get("goal_id") or payload.get("id") or "").strip()
+    goal = book.by_id().get(goal_id) if goal_id else book.current()
+    if goal is not None and goal.status == "archived":
+        goal = None
+    return book, goal
+
+
+def _north_star_context_for_alignment(profile: str) -> str:
+    """Return the privacy-safe North Star context for matching."""
+    skill_content = load_skill_md(profile)
+    identity = parse_identity_fields(skill_content)
+    return north_star_context_from_identity(identity)
+
+
+def _run_goal_skill_rule_match(profile: str, payload: dict) -> None:
+    """Generate rule candidates and keep them pending in session state."""
+    _book, goal = _goal_for_alignment_event(profile, payload)
+    if goal is None:
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    candidates = rule_match_goal_to_skills(
+        profile,
+        goal,
+        _north_star_context_for_alignment(profile),
+    )
+    _set_goal_skill_candidates(profile, goal.id, candidates)
+    st.success(
+        ui["goal_alignment_candidates_ready"].format(n=len(candidates))
+    )
     st.rerun()
+
+
+def _run_goal_skill_ai_match(profile: str, payload: dict) -> None:
+    """Generate AI candidates and merge with pending rule candidates."""
+    if not llm_client.is_configured():
+        render_llm_unavailable(ui)
+        return
+    _book, goal = _goal_for_alignment_event(profile, payload)
+    if goal is None:
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    existing = _goal_skill_candidates_for_home(profile).get(goal.id, [])
+    rule_candidates = [
+        link
+        for link in (GoalSkillLink.from_dict(item) for item in existing)
+        if link is not None and link.source in ("rule", "rule+ai")
+    ]
+    ai_candidates = ai_match_goal_to_skills(
+        profile,
+        goal,
+        _north_star_context_for_alignment(profile),
+    )
+    merged = merge_goal_skill_candidates(rule_candidates, ai_candidates)
+    _set_goal_skill_candidates(profile, goal.id, merged)
+    st.success(
+        ui["goal_alignment_candidates_ready"].format(n=len(merged))
+    )
+    st.rerun()
+
+
+def _normalize_confirmed_links(payload: dict) -> list[GoalSkillLink]:
+    """Parse confirmed links sent by the React dashboard."""
+    raw_links = payload.get("links")
+    if not isinstance(raw_links, list):
+        return []
+    links: list[GoalSkillLink] = []
+    seen: set[str] = set()
+    for item in raw_links:
+        link = GoalSkillLink.from_dict(item)
+        if link is None or link.node_id in seen:
+            continue
+        seen.add(link.node_id)
+        links.append(link)
+    return links
+
+
+def _confirm_goal_skill_links(profile: str, payload: dict) -> None:
+    """Persist selected goal-skill links to goals.yaml."""
+    book, goal = _goal_for_alignment_event(profile, payload)
+    if goal is None:
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    links = _normalize_confirmed_links(payload)
+    if not links:
+        pending = _goal_skill_candidates_for_home(profile).get(goal.id, [])
+        links = [
+            link
+            for link in (GoalSkillLink.from_dict(item) for item in pending)
+            if link is not None
+        ]
+    goal.skill_links = links
+    by_id = book.by_id()
+    by_id[goal.id] = goal
+    book.goals = list(by_id.values())
+    state = _goal_skill_candidates_for_home(profile)
+    if goal.id in state:
+        del state[goal.id]
+        st.session_state[_goal_skill_candidate_state_key(profile)] = state
+    _save_goal_book_for_home(
+        profile,
+        book,
+        ui["goal_alignment_links_saved"],
+    )
+
+
+def _manual_goal_skill_link(profile: str, payload: dict) -> None:
+    """Append or replace one manual goal-skill link."""
+    book, goal = _goal_for_alignment_event(profile, payload)
+    if goal is None:
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    link = manual_goal_skill_link(
+        profile,
+        str(payload.get("node_id") or "").strip(),
+    )
+    if link is None:
+        st.warning(ui["goal_alignment_node_missing"])
+        return
+    kept = [item for item in goal.skill_links if item.node_id != link.node_id]
+    goal.skill_links = [*kept, link]
+    by_id = book.by_id()
+    by_id[goal.id] = goal
+    book.goals = list(by_id.values())
+    _save_goal_book_for_home(
+        profile,
+        book,
+        ui["goal_alignment_links_saved"],
+    )
+
+
+def _set_primary_goal(profile: str, payload: dict) -> None:
+    """Move the primary goal pointer to an existing goal."""
+    book = _goal_book_for_home(profile)
+    goal_id = str(payload.get("goal_id") or payload.get("id") or "").strip()
+    if not book.set_primary(goal_id):
+        st.warning(ui["goal_alignment_goal_missing"])
+        return
+    _save_goal_book_for_home(profile, book, ui["goal_primary_saved"])
 
 
 def _handle_home_dashboard_event(event: dict | None, profile: str) -> None:
@@ -530,8 +968,36 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> None:
     payload = event.get("payload")
     payload = payload if isinstance(payload, dict) else {}
 
+    if action == "capture_inbox_submit":
+        _capture_home_inbox_item(profile, payload)
+        return
     if action == "edit_goal_submit":
-        _save_dashboard_goal(profile, payload)
+        _edit_dashboard_goal(profile, payload)
+        return
+    if action == "create_goal_submit":
+        _create_dashboard_goal(profile, payload)
+        return
+    if action == "archive_goal":
+        _archive_dashboard_goal(profile, payload)
+        return
+    if action == "request_goal_skill_rule_match":
+        _run_goal_skill_rule_match(profile, payload)
+        return
+    if action == "request_goal_skill_ai_match":
+        _run_goal_skill_ai_match(profile, payload)
+        return
+    if action == "confirm_goal_skill_links":
+        _confirm_goal_skill_links(profile, payload)
+        return
+    if action == "manual_goal_skill_link":
+        _manual_goal_skill_link(profile, payload)
+        return
+    if action == "set_primary_goal":
+        _set_primary_goal(profile, payload)
+        return
+    if action == "set_north_star_display_open_profile_context":
+        st.session_state[f"_open_profile_context_{profile}"] = True
+        st.rerun()
         return
     if action == "navigate":
         path = str(payload.get("path") or "").strip()
@@ -570,6 +1036,8 @@ def _identity_label(field: str) -> str:
         "Journey": "identity_journey",
         "Current Role": "identity_current_role",
         "North Star": "identity_north_star",
+        "North Star Brief": "identity_north_star_brief",
+        "North Star Visibility": "identity_north_star_visibility",
     }
     return ui.get(key_by_field.get(field, ""), field)
 
@@ -972,8 +1440,10 @@ def _render_resume_ingest(profile: str) -> None:
 def _render_profile_context(profile: str) -> None:
     skill_path = profile_dir(profile) / "SKILL.md"
     skill_content = load_skill_md(profile)
+    open_key = f"_open_profile_context_{profile}"
+    expanded = bool(st.session_state.pop(open_key, False))
 
-    with st.expander(ui["profile_context_expander"], expanded=False):
+    with st.expander(ui["profile_context_expander"], expanded=expanded):
         st.caption(ui["profile_context_caption"])
         if not skill_content:
             st.warning(ui["warning_no_skill_md"])
@@ -992,6 +1462,28 @@ def _render_profile_context(profile: str) -> None:
                             _identity_label(field),
                             value=identity.get(field, ""),
                             height=90,
+                            key=f"profile_identity_{profile}_{field}",
+                        )
+                    elif field == "North Star Visibility":
+                        current_visibility = normalize_north_star_visibility(
+                            identity.get(field, "")
+                        )
+                        identity_updates[field] = st.selectbox(
+                            _identity_label(field),
+                            NORTH_STAR_VISIBILITIES,
+                            index=NORTH_STAR_VISIBILITIES.index(
+                                current_visibility
+                            ),
+                            format_func=lambda value: ui.get(
+                                f"north_star_visibility_{value}",
+                                value,
+                            ),
+                            key=f"profile_identity_{profile}_{field}",
+                        )
+                    elif field == "North Star Brief":
+                        identity_updates[field] = st.text_input(
+                            _identity_label(field),
+                            value=identity.get(field, ""),
                             key=f"profile_identity_{profile}_{field}",
                         )
                     else:
@@ -1084,23 +1576,15 @@ def _render_home_page() -> None:
     """Render the Daily Dashboard page."""
     _prepare_home_state()
 
-    _head_l, _head_goal = st.columns(
-        [5, 2],
-        gap="medium",
-        vertical_alignment="top",
-    )
-    with _head_l:
-        st.title(ui["app_page_title"])
-        st.caption(ui["app_caption"].format(profile=selected))
-        st.caption(ui["page_context_line"])
-    with _head_goal:
-        render_current_goal_strip(selected, compact=True, align="right")
+    st.title(ui["app_page_title"])
+    st.caption(ui["app_caption"].format(profile=selected))
+    st.caption(ui["page_context_line"])
 
     home_dashboard_payload = dashboard_payload(selected)
     home_dashboard_event = st_home_dashboard(
         payload=home_dashboard_payload,
         key=f"home_dashboard_{selected}",
-        height=860,
+        height=900,
     )
     if home_dashboard_event is None:
         kanban_summary = home_dashboard_payload["kanban"]
