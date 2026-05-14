@@ -358,6 +358,9 @@ class BlogDraftCandidate:
     related_evidence: list[str] = field(default_factory=list)
     related_kanban: list[str] = field(default_factory=list)
     related_claims: list[str] = field(default_factory=list)
+    related_sources: list[str] = field(default_factory=list)
+    related_research_claims: list[str] = field(default_factory=list)
+    related_citations: list[str] = field(default_factory=list)
     cover_prompt: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -370,6 +373,9 @@ class BlogDraftCandidate:
             "related_evidence": list(self.related_evidence),
             "related_kanban": list(self.related_kanban),
             "related_claims": list(self.related_claims),
+            "related_sources": list(self.related_sources),
+            "related_research_claims": list(self.related_research_claims),
+            "related_citations": list(self.related_citations),
             "cover_prompt": self.cover_prompt,
             "warnings": list(self.warnings),
             "body": self.body,
@@ -2280,6 +2286,9 @@ def _normalize_blog_meta(meta: dict) -> dict:
         "related_evidence",
         "related_kanban",
         "related_claims",
+        "related_sources",
+        "related_research_claims",
+        "related_citations",
         "category_path",
         "aliases",
     ):
@@ -3443,6 +3452,7 @@ def validate_blog_text_for_publish(
             )
     _validate_blog_post(
         result,
+        name,
         root,
         post,
         known_evidence_ids=_evidence_ids(name),
@@ -3453,8 +3463,119 @@ def validate_blog_text_for_publish(
     return result
 
 
+def _unsafe_research_quote(text: str) -> bool:
+    clean = str(text or "").lower()
+    if not clean:
+        return False
+    markers = (
+        "profiles/",
+        "auth/users",
+        ".env",
+        "api_key",
+        "apikey",
+        "secret",
+        "token",
+        "cookie",
+        "password",
+    )
+    return any(marker in clean for marker in markers)
+
+
+def _validate_research_provenance_refs(
+    result: PublicValidationResult,
+    name: str,
+    label: str,
+    post: BlogPost,
+    *,
+    require_publish_ready: bool,
+) -> None:
+    """Validate optional Research Workspace provenance on blog front matter."""
+    source_refs = _as_string_list(post.meta.get("related_sources"))
+    claim_refs = _as_string_list(post.meta.get("related_research_claims"))
+    citation_refs = _as_string_list(post.meta.get("related_citations"))
+    if not source_refs and not claim_refs and not citation_refs:
+        return
+    diagnostics = result.errors if require_publish_ready else result.warnings
+    try:
+        from nblane.core.research_sources import load_research_sources
+        from nblane.core.research_workspace import (
+            load_chunks,
+            load_research_citations,
+            load_research_claims,
+        )
+
+        sources = load_research_sources(_profile_path(name)).by_id()
+        chunks = {chunk.id: chunk for chunk in load_chunks(_profile_path(name))}
+        claims = {claim.id: claim for claim in load_research_claims(_profile_path(name))}
+        citations = {
+            citation.id: citation
+            for citation in load_research_citations(_profile_path(name))
+        }
+    except Exception as exc:
+        diagnostics.append(f"{label}: cannot load research provenance: {exc}")
+        return
+
+    for ref in source_refs:
+        source = sources.get(ref)
+        if source is None:
+            diagnostics.append(f"{label}: unknown research source ref '{ref}'")
+            continue
+        if source.visibility != "public":
+            diagnostics.append(
+                f"{label}: research source '{ref}' is private and cannot be published"
+            )
+
+    for ref in claim_refs:
+        claim = claims.get(ref)
+        if claim is None:
+            diagnostics.append(f"{label}: unknown research claim ref '{ref}'")
+            continue
+        if claim.status != "promoted":
+            diagnostics.append(
+                f"{label}: research claim '{ref}' must be promoted before publish"
+            )
+        for source_ref in claim.source_refs:
+            source = sources.get(source_ref)
+            if source is None:
+                diagnostics.append(
+                    f"{label}: research claim '{ref}' references unknown source '{source_ref}'"
+                )
+            elif source.visibility != "public":
+                diagnostics.append(
+                    f"{label}: research claim '{ref}' references private source '{source_ref}'"
+                )
+        for chunk_ref in claim.chunk_refs:
+            if chunk_ref not in chunks:
+                diagnostics.append(
+                    f"{label}: research claim '{ref}' references unknown chunk '{chunk_ref}'"
+                )
+
+    for ref in citation_refs:
+        citation = citations.get(ref)
+        if citation is None:
+            diagnostics.append(f"{label}: unknown research citation ref '{ref}'")
+            continue
+        if citation.claim_id and citation.claim_id not in claims:
+            diagnostics.append(
+                f"{label}: research citation '{ref}' references unknown claim '{citation.claim_id}'"
+            )
+        if citation.source_id and citation.source_id not in sources:
+            diagnostics.append(
+                f"{label}: research citation '{ref}' references unknown source '{citation.source_id}'"
+            )
+        if citation.chunk_id and citation.chunk_id not in chunks:
+            diagnostics.append(
+                f"{label}: research citation '{ref}' references unknown chunk '{citation.chunk_id}'"
+            )
+        if _unsafe_research_quote(citation.quote):
+            diagnostics.append(
+                f"{label}: research citation '{ref}' quote may leak private paths or secrets"
+            )
+
+
 def _validate_blog_post(
     result: PublicValidationResult,
+    name: str,
     profile_root: Path,
     post: BlogPost,
     *,
@@ -3501,6 +3622,16 @@ def _validate_blog_post(
         list,
     ):
         type_diagnostics.append(f"{label}: 'related_claims' must be a list")
+    for research_field in (
+        "related_sources",
+        "related_research_claims",
+        "related_citations",
+    ):
+        if research_field in post.meta and not isinstance(
+            post.meta.get(research_field),
+            list,
+        ):
+            type_diagnostics.append(f"{label}: '{research_field}' must be a list")
     cover = post.meta.get("cover", "")
     if require_publish_ready or str(cover or "").strip():
         _validate_blog_cover(
@@ -3522,6 +3653,13 @@ def _validate_blog_post(
             _as_string_list(post.meta.get("related_claims")),
             known_claims or {},
             known_evidence_ids,
+        )
+        _validate_research_provenance_refs(
+            result,
+            name,
+            label,
+            post,
+            require_publish_ready=require_publish_ready,
         )
     if require_publish_ready or post.body.strip():
         _validate_blog_body_media(
@@ -3677,6 +3815,7 @@ def validate_public_layer(
             )
             _validate_blog_post(
                 result,
+                name,
                 root,
                 post,
                 known_evidence_ids=known_ids,
@@ -7048,6 +7187,9 @@ def create_blog_draft(
     related_evidence: list[str] | None = None,
     related_kanban: list[str] | None = None,
     related_claims: list[str] | None = None,
+    related_sources: list[str] | None = None,
+    related_research_claims: list[str] | None = None,
+    related_citations: list[str] | None = None,
     slug: str | None = None,
     category_path: list[str] | None = None,
     respect_taxonomy: bool = True,
@@ -7083,6 +7225,9 @@ def create_blog_draft(
         "related_evidence": related_evidence or [],
         "related_kanban": related_kanban or [],
         "related_claims": related_claims or [],
+        "related_sources": related_sources or [],
+        "related_research_claims": related_research_claims or [],
+        "related_citations": related_citations or [],
     }
     _write_blog_post_file(
         name,

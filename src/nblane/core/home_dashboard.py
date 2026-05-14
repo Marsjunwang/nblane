@@ -80,7 +80,7 @@ QUICK_LINKS: tuple[dict[str, str], ...] = (
     },
     {
         "id": "public_site",
-        "path": "pages/6_Public_Site.py",
+        "path": "pages/6_Output_Studio.py",
         "label_key": "quick_public_site",
         "help_key": "quick_public_site_help",
         "kind": "output",
@@ -913,7 +913,7 @@ def _graph_payload(
             "status": "draft",
             "locked": False,
             "suggested": False,
-            "owner_path": "pages/6_Public_Site.py",
+            "owner_path": "pages/6_Output_Studio.py",
         }
     )
     health_counts = health.get("counts") or {}

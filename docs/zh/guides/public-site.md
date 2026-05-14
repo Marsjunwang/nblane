@@ -313,28 +313,30 @@ paper / patent evidence 一对一补成 `outputs.yaml` 成果草稿。
 标题、数量或最近条目；点击后进入全量列表、博客详情、项目/成果列表或完整
 简历。
 
-Web UI 新增 **Public Site** 页面：
+Web UI 已拆为 **Output Studio** 与 **Public Build**：
 
-- **Profile** 提供结构化表单编辑公开姓名、headline、简介、联系方式与头像；
+- **Output Studio / Profile** 提供结构化表单编辑公开姓名、headline、简介、联系方式与头像；
   保存时会把头像写入 `media/` 并同步 `public-profile.yaml` 的 `avatar` 路径。
   右侧提供实时整站预览，未保存的文字和新上传头像也会进入预览；原始 YAML 仍
   在折叠区内可直接编辑。
-- **Blog** 通过 React / BlockNote 编辑器 shell 创建、编辑、检查并发布博客。
+- **Output Studio / Blog** 通过 React / BlockNote 编辑器 shell 创建、编辑、检查并发布博客。
   shell 包含文章筛选、新建草稿、从 evidence / Done 生成、正文编辑区、
   Meta / Media / AI / Visual / Check 右侧抽屉、Public Preview、移动端
   Editor / Articles / Tools / Preview tab、专注模式和 browser `localStorage`
   布局记忆。Streamlit 继续负责文件 I/O、session state、上传落盘、AI / 视觉调用、
   发布校验、静态预览与 Git backup。
-  Blog front matter 支持 `related_claims`；可以从 accepted claims 生成候选或草稿，
-  并把 claim 的 supporting evidence 合并到 `related_evidence`。
-- **Resume** 编辑 `resume-source.yaml`，预览生成简历，并生成定制简历草稿。
+  Blog front matter 支持 `related_claims` 以及 research provenance refs
+  `related_sources`、`related_research_claims`、`related_citations`；可以从
+  accepted claims 或 Research Workspace synthesis 生成候选或草稿。
+- **Output Studio / Resume** 编辑 `resume-source.yaml`，预览生成简历，并生成定制简历草稿。
   Resume 也可以从 accepted claims 生成 bullet 候选预览；候选不会自动写回
   `resume-source.yaml`。
-- **Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
+- **Output Studio / Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
   生成 draft 项目。
-- **Build** 校验并构建静态站，也可以从项目 evidence 或 accepted claims 生成项目更新草稿。
+- **Public Build** 只负责校验、预览并构建静态站，默认输出到
+  `dist/public/<profile>`。
 
-该页面复用现有 profile 选择器、文件 snapshot 冲突保护、缓存清理与可选 Git
+这些页面复用现有 profile 选择器、文件 snapshot 冲突保护、缓存清理与可选 Git
 备份。
 
 ## 当前 v1 与下一步优化
@@ -345,8 +347,9 @@ Web UI 新增 **Public Site** 页面：
   `outputs.yaml`、`blog/**/*.md` 与 profile 媒体目录。
 - **CLI：** 初始化、校验、静态构建、简历生成、博客创建/媒体/发布、草稿生成、
   evidence 到公开项目的人工整理。
-- **Web UI：** **Public Site** 页面，含 Profile、Blog、Resume、Known Info、
-  Build 五个 tab。
+- **Web UI：** **Output Studio** 页面含 Generate、Profile、Blog、Resume、
+  Known Info；**Public Build** 页面含 Validate、Preview、Build。旧 **Public Site**
+  入口保留为跳转页。
 - **静态输出：** 首页、Blog、Projects、Outputs、可选 Resume、复制后的媒体、
   Blog cover 展示、Open Graph / Twitter 图片、`robots.txt`、`sitemap.xml` 与页面
   meta description。

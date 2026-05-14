@@ -138,9 +138,9 @@ private profile facts
 - 公开站不读取 private `skill-tree.yaml`、`kanban.md`、`agent-profile.yaml`、auth 文件。
 - Blog draft 必须显式 `status: published` 才进入正式输出。
 - Media 只复制被公开对象引用的文件。
-- Blog front matter 可保存 `related_claims`；发布校验会检查 claim id 存在、状态为 `accepted`、claim 引用的 evidence 存在。
+- Blog front matter 可保存 `related_claims`、`related_sources`、`related_research_claims`、`related_citations`；发布校验会检查 accepted claim、research source visibility、promoted research claim 与 citation/chunk 断链。
 - Project update 草稿和 resume bullet 候选也可从 accepted claims 生成，并保留 `related_claims` / `evidence_refs` provenance；resume bullet 第一版只返回候选预览，不自动写入 `resume-source.yaml`。
-- 公开输出不直接渲染 claim id；`related_claims` 只用于 provenance、候选生成和发布前检查。
+- 公开输出不直接渲染 claim/source/citation id；这些 refs 只用于 provenance、候选生成和发布前检查。
 
 ### Agent Activity / Writeback Review
 
@@ -192,7 +192,7 @@ items:
 - `applied` 必须记录 `changed_paths` 和 `applied_at`；`failed` 必须记录 `error`。
 - 第一版只有 Review 来源且 owner 为 evidence / kanban / public site 的 pending item 可在 Activity 页直接应用；其他 patch 只审查和跳转 owner 页面。
 
-## 规划中的新增契约
+## 新增 / 规划中的契约
 
 ### Internal Project
 
@@ -215,21 +215,27 @@ project-board.yaml
 - `KanbanTask.project_id` 引用内部 project。
 - Workspace Index 负责发现断链。
 
-### Research Workspace
+### Research Workspace（已落地 P4 v1）
 
 ```text
 research/sources.yaml
 research/chunks/<source_id>.jsonl
 research/claims.yaml
+research/citations.yaml
 research/drafts.yaml
+research/drafts/<draft_id>.md
+research/connectors.yaml
 ```
 
 不变量：
 
 - Research 默认 private。
 - Claim 必须引用 source/chunk，或标记为 human note。
-- Blog 可引用 source/claim，但公开发布前必须检查 private source 和 unsupported claim。
-- 注意：这里的 `research/claims.yaml` 是未来 Research Workspace 的 source-aware claim store；P2 Web claim bridge 已落地在 `evidence-pool.yaml.claims`，不等同于独立 Research claim store。
+- `research/claims.yaml` 是 source-aware research claim store；`evidence-pool.yaml.claims` 仍是 accepted claim bridge，两者不合并。
+- Citation 必须绑定 claim，并至少引用 source 或 chunk；quote 不能泄露本地 profile 路径、secret、token、cookie 等敏感内容。
+- Research draft 可生成 blog candidate，但写入公开层仍是 draft；发布前必须检查 private source 和未 promoted research claim。
+- `research/connectors.yaml` 只保存 provider、query、cursor、last_run、rate_limit、status 和 sanitized options；token、cookie、API key 不得写入 profile。
+- X/Twitter 与小红书第一版以手动导入 / 官方授权为边界，不做 cookie 抓取。
 
 ### AI Run
 

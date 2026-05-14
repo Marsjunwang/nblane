@@ -15,7 +15,7 @@ source_of_truth: true
 
 ```bash
 # 后端 + UI
-.venv/bin/streamlit run pages/6_Public_Site.py
+.venv/bin/streamlit run pages/6_Output_Studio.py
 
 # 前端组件改动后需重新构建
 cd src/nblane/public_blog_editor_component/frontend
@@ -23,7 +23,7 @@ npm install   # 首次或依赖变动后
 npm run build
 ```
 
-打开浏览器访问 `http://127.0.0.1:8510`，左侧选择 Profile，进入 **Public Site** 页 → **Blog** Tab。
+打开浏览器访问 `http://127.0.0.1:8510`，左侧选择 Profile，进入 **Output Studio** 页 → **Blog** Tab。旧 **Public Site** 入口会跳转到 Output Studio / Public Build。
 
 环境最低要求：
 - Streamlit ≥ 1.31（`@st.fragment` 依赖）
@@ -279,7 +279,7 @@ A: 看顶部红条错误。常见原因：① LLM key 缺失；② Visual provid
 A: 不应该。如果出现是 `block_patches` 走了 `markdown_fallback` 降级。检查 React DevTools，应该只有被选中的 block 节点更新。请汇报到 `tests/test_ai_blog_phase3.py` 模式作为回归用例。
 
 **Q3: 候选缩略图不显示？**
-A: 确认 [pages/6_Public_Site.py:1495](../pages/6_Public_Site.py) `_candidate_preview_src_for_patch` 给 `assets[].preview_src` 填了值。小图未填→ 落盘失败；大图未填 → endpoint 路由没注册或 patch_id 不属当前 session。
+A: 确认 [web_output_studio.py](../../src/nblane/web_output_studio.py) 中 `_candidate_preview_src_for_patch` 给 `assets[].preview_src` 填了值。小图未填→ 落盘失败；大图未填 → endpoint 路由没注册或 patch_id 不属当前 session。
 
 **Q4: Mermaid 公开站点不显示？**
 A: 公开站点用预渲染 SVG，不依赖外部 mermaid runtime。如果空白：① 看构建日志 `mermaid-cli` 是否安装；② 检查 `_render_visual_block_comment` 是否走到 SVG 分支；③ 兜底分支若启用 CDN，需要公开页 layout 注入了 mermaid runtime。
@@ -336,4 +336,4 @@ npm run build   # 主 chunk 应 < 1.0 MB
 | Patch / Block / Event schema | [schemas/ai_patch.py](../schemas/ai_patch.py) · [schemas/blocknote_doc.py](../schemas/blocknote_doc.py) · [schemas/editor_events.py](../schemas/editor_events.py) |
 | 中英 prompt 双集（19×2） | [ai_blog_prompts/](../src/nblane/core/ai_blog_prompts/) |
 | Blog 业务逻辑 / sidecar 双写 / 发布 | [public_site.py](../src/nblane/core/public_site.py) |
-| UI 编排 / Check Tab / Reviewer 接入 | [pages/6_Public_Site.py](../pages/6_Public_Site.py) |
+| UI 编排 / Check Tab / Reviewer 接入 | [web_output_studio.py](../../src/nblane/web_output_studio.py) |

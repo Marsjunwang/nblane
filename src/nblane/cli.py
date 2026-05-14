@@ -31,6 +31,8 @@ Commands:
     nblane public build <name>      Build static public site
     nblane public library tree <name>
                                     Inspect Public Site file tree
+    nblane research connector sync <name> --all [--dry-run]
+                                    Sync Research Workspace connectors
     nblane auth hash-password       Generate a password hash for Web auth
 
 Examples:
@@ -100,6 +102,7 @@ from nblane.commands.public import (
     cmd_public_suggest_groups,
     cmd_public_validate,
 )
+from nblane.commands.research import cmd_research_connector_sync
 from nblane.commands.team import cmd_team
 
 
@@ -713,6 +716,58 @@ def main() -> None:
         help="Write draft outputs to outputs.yaml",
     )
 
+    p_research = sub.add_parser(
+        "research",
+        help="Research Workspace helpers",
+    )
+    research_sub = p_research.add_subparsers(
+        dest="research_command",
+        required=True,
+    )
+    p_research_connector = research_sub.add_parser(
+        "connector",
+        help="Manage Research Workspace connectors",
+    )
+    research_connector_sub = p_research_connector.add_subparsers(
+        dest="research_connector_command",
+        required=True,
+    )
+    p_research_connector_sync = research_connector_sub.add_parser(
+        "sync",
+        help="Sync configured external research connectors",
+    )
+    p_research_connector_sync.add_argument("name", help="Profile name")
+    p_research_connector_sync.add_argument(
+        "--provider",
+        default="",
+        choices=[
+            "",
+            "arxiv",
+            "semantic_scholar",
+            "github",
+            "x_twitter",
+            "xiaohongshu",
+        ],
+        help="Optional provider filter when using --all",
+    )
+    p_research_connector_sync.add_argument(
+        "--id",
+        default="",
+        dest="connector_id",
+        help="Connector id from research/connectors.yaml",
+    )
+    p_research_connector_sync.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_connectors",
+        help="Run all enabled connectors, optionally filtered by --provider",
+    )
+    p_research_connector_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview imports without writing sources or connector state",
+    )
+
     p_auth = sub.add_parser(
         "auth",
         help="Authentication helpers for the Streamlit Web UI",
@@ -913,6 +968,16 @@ def main() -> None:
                 args.name,
                 write_drafts=args.write_drafts,
             )
+    elif args.command == "research":
+        if args.research_command == "connector":
+            if args.research_connector_command == "sync":
+                cmd_research_connector_sync(
+                    args.name,
+                    provider=args.provider,
+                    connector_id=args.connector_id,
+                    all_connectors=args.all_connectors,
+                    dry_run=args.dry_run,
+                )
     elif args.command == "auth":
         if args.auth_command == "hash-password":
             password = args.password

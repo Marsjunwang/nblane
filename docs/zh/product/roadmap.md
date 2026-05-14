@@ -13,13 +13,14 @@ source_of_truth: true
 
 - Profile 文件层：`SKILL.md`、`skill-tree.yaml`、`evidence-pool.yaml`、`kanban.md`、`agent-profile.yaml`。
 - CLI：profile、context、sync、validate、gap、evidence、ingest、health、team、public、auth 等。
-- Web UI：Home、Skill Tree、Gap Analysis、Kanban、Team View、Profile Health、Public Site。
+- Web UI：Home、Skill Tree、Gap Analysis、Kanban、Research Workspace、Output Studio、Public Build、Team View、Profile Health。
 - Skill Provenance：内联 evidence、pool evidence、`evidence_refs`、物化解析。
 - Profile 摄入：简历/长文本、Kanban Done -> LLM JSON patch -> validate/sync。
 - MCP 初版：profile summary/context/kanban/gap resources，以及增长日志、evidence、interaction、method draft 等 tools。
-- Public Surface v1：公开资料、简历、博客、项目、成果、静态站构建。
+- Public Surface v1：公开资料、简历、博客、项目、成果、静态站构建；Output Studio 与 Public Build 已拆分。
 - Blog Editor：BlockNote sidecar、AI patch、视觉候选、Reviewer、Public Library。
 - Personal Workspace 雏形：activity-log learning/exercise check-in。
+- Research Workspace v1：source、chunk、research claim、citation、synthesis draft 与低风险 connector。
 
 ## 下一阶段路线
 

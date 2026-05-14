@@ -106,8 +106,9 @@ Ingest and full evidence editing remain **CLI / Web**.
 streamlit run app.py
 ```
 
-Seven surfaces: **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**, **Team
-View**, **Profile Health**, and **Public Site**. Step-by-step usage:
+Core surfaces include **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**,
+**Research Workspace**, **Output Studio**, **Public Build**, **Team View**,
+and **Profile Health**. Step-by-step usage:
 [Web UI guide](docs/zh/guides/web-ui.md). Product IA and backlog:
 [Web experience](docs/zh/product/web-experience.md).
 

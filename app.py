@@ -1251,7 +1251,7 @@ def _render_dashboard_public(public_summary: dict) -> None:
     if not public_summary.get("initialized"):
         st.info(ui["dashboard_output_empty"])
         _page_link(
-            "pages/6_Public_Site.py",
+            "pages/6_Output_Studio.py",
             ui["quick_public_site"],
             help_text=ui["quick_public_site_help"],
         )
@@ -1282,7 +1282,7 @@ def _render_dashboard_public(public_summary: dict) -> None:
         )
     )
     _page_link(
-        "pages/6_Public_Site.py",
+        "pages/6_Output_Studio.py",
         ui["quick_public_site"],
         help_text=ui["quick_public_site_help"],
     )
@@ -1323,10 +1323,112 @@ def _render_quick_entries() -> None:
         )
     with c6:
         _page_link(
-            "pages/6_Public_Site.py",
+            "pages/6_Output_Studio.py",
             ui["quick_public_site"],
             help_text=ui["quick_public_site_help"],
         )
+
+
+def _goal_summary_text(goal_payload: dict) -> str:
+    projection = goal_payload.get("projection") if isinstance(goal_payload, dict) else None
+    if isinstance(projection, dict):
+        title = str(projection.get("title") or projection.get("label") or "").strip()
+        if title:
+            return title
+    if isinstance(goal_payload, dict) and goal_payload.get("is_set"):
+        return ui["goal_strip_hidden"]
+    return ui["goal_no_current"]
+
+
+def _pending_evidence_total(pending_summary: dict) -> int:
+    return (
+        int(pending_summary.get("done_uncrystallized_count", 0) or 0)
+        + int(pending_summary.get("unlinked_count", 0) or 0)
+        + int(pending_summary.get("needs_review_count", 0) or 0)
+        + int(pending_summary.get("status_risk_count", 0) or 0)
+    )
+
+
+def _health_summary_text(health_summary: dict) -> str:
+    counts = health_summary.get("counts") or {}
+    return (
+        f"{int(counts.get('error', 0) or 0)} / "
+        f"{int(counts.get('warning', 0) or 0)} / "
+        f"{int(counts.get('info', 0) or 0)}"
+    )
+
+
+def _render_home_scope_strip(payload: dict) -> None:
+    st.subheader(ui["dashboard_scope_title"])
+    goal_text = _goal_summary_text(payload.get("primary_goal") or payload.get("goal") or {})
+    health_summary = payload.get("health") or {}
+    ai_payload = payload.get("ai") or {}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(ui["dashboard_scope_profile"], payload.get("profile", selected))
+    c2.metric(ui["dashboard_scope_goal"], goal_text)
+    c3.metric(
+        ui["dashboard_scope_ai"],
+        ui["dashboard_ai_ready"] if ai_payload.get("configured") else ui["dashboard_ai_not_ready"],
+    )
+    c4.metric(ui["dashboard_scope_health"], _health_summary_text(health_summary))
+
+
+def _render_home_priority_cards(payload: dict) -> None:
+    goal_payload = payload.get("primary_goal") or payload.get("goal") or {}
+    kanban_summary = payload.get("kanban") or {}
+    pending_summary = payload.get("pending_evidence") or {}
+    goal_col, work_col, evidence_col = st.columns(3)
+    with goal_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_priority_goal_title']}**")
+            st.write(_goal_summary_text(goal_payload))
+            projection = goal_payload.get("projection") if isinstance(goal_payload, dict) else None
+            if isinstance(projection, dict) and projection.get("summary"):
+                st.caption(str(projection.get("summary")))
+            _page_link("app.py", ui["dashboard_goal_edit_inline"])
+    with work_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_priority_work_title']}**")
+            st.metric(ui["dashboard_metric_doing"], kanban_summary.get("doing_total", 0))
+            doing = kanban_summary.get("doing") or []
+            if doing:
+                for item in doing[:3]:
+                    st.caption(f"- {item.get('title', '')}")
+            else:
+                st.caption(ui["dashboard_doing_empty"])
+            _page_link("pages/3_Kanban.py", ui["quick_kanban"], help_text=ui["quick_kanban_help"])
+    with evidence_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_priority_evidence_title']}**")
+            st.metric(ui["dashboard_metric_pending_evidence"], _pending_evidence_total(pending_summary))
+            st.caption(
+                f"{ui['dashboard_done_uncrystallized']}: "
+                f"{pending_summary.get('done_uncrystallized_count', 0)} · "
+                f"{ui['dashboard_needs_review_evidence']}: "
+                f"{pending_summary.get('needs_review_count', 0)}"
+            )
+            _page_link(
+                EVIDENCE_REVIEW_PAGE,
+                ui["quick_evidence_review"],
+                help_text=ui["quick_evidence_review_help"],
+            )
+
+
+def _render_home_primary_actions() -> None:
+    st.subheader(ui["dashboard_primary_actions_title"])
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        _page_link(
+            "pages/7_Research.py",
+            ui["dashboard_action_capture"],
+            help_text=ui["dashboard_action_capture_help"],
+        )
+    with c2:
+        _page_link("pages/3_Kanban.py", ui["dashboard_action_kanban"])
+    with c3:
+        _page_link(EVIDENCE_REVIEW_PAGE, ui["dashboard_action_evidence"])
+    with c4:
+        _page_link("pages/6_Output_Studio.py", ui["dashboard_action_output"])
 
 
 def _render_resume_ingest(profile: str) -> None:
@@ -1639,46 +1741,78 @@ def _render_home_page() -> None:
     st.caption(ui["app_caption"].format(profile=selected))
     st.caption(ui["page_context_line"])
 
-    home_dashboard_payload = dashboard_payload(selected)
-    home_dashboard_event = st_home_dashboard(
-        payload=home_dashboard_payload,
-        key=f"home_dashboard_{selected}",
-        height=900,
-    )
-    if home_dashboard_event is None:
-        kanban_summary = home_dashboard_payload["kanban"]
-        skill_summary = home_dashboard_payload["skills"]
-        pending_summary = home_dashboard_payload["pending_evidence"]
-        health_summary = home_dashboard_payload["health"]
-        public_summary = home_dashboard_payload["public"]
+    kanban_summary = dashboard_kanban_summary(selected)
+    skill_summary = dashboard_skill_summary(selected)
+    pending_summary = dashboard_pending_evidence_summary(selected)
+    health_summary = dashboard_health_summary(selected)
+    public_summary = dashboard_public_summary(selected)
+    current_goal = _goal_book_for_home(selected).primary()
+    goal_payload = {
+        "is_set": current_goal is not None,
+        "projection": goal_for_ui(current_goal),
+    }
+    home_summary_payload = {
+        "profile": selected,
+        "primary_goal": goal_payload,
+        "goal": goal_payload,
+        "kanban": kanban_summary,
+        "pending_evidence": pending_summary,
+        "health": health_summary,
+        "ai": {
+            "configured": llm_client.is_configured(),
+            "label": llm_client.model_label() if llm_client.is_configured() else "",
+        },
+    }
 
+    _render_home_scope_strip(home_summary_payload)
+    st.divider()
+
+    _render_home_priority_cards(home_summary_payload)
+    st.divider()
+
+    _render_home_primary_actions()
+    st.divider()
+
+    with st.expander(ui["goal_module_title"], expanded=False):
         _render_current_goal_module(selected)
-        st.divider()
 
-        _render_dashboard_status_overview(
-            kanban_summary,
-            skill_summary,
-            pending_summary,
-            health_summary,
-            public_summary,
+    st.divider()
+    _render_dashboard_status_overview(
+        kanban_summary,
+        skill_summary,
+        pending_summary,
+        health_summary,
+        public_summary,
+    )
+    st.divider()
+
+    with st.expander(ui["dashboard_canvas_section_title"], expanded=True):
+        st.caption(ui["dashboard_canvas_section_caption"])
+        home_dashboard_payload = dashboard_payload(selected)
+        home_dashboard_event = st_home_dashboard(
+            payload=home_dashboard_payload,
+            key=f"home_dashboard_{selected}",
+            height=900,
         )
-        st.divider()
+        if home_dashboard_event is not None:
+            _handle_home_dashboard_event(home_dashboard_event, selected)
+            return
 
-        _render_dashboard_doing(kanban_summary)
-        st.divider()
+    st.divider()
 
-        _render_dashboard_pending_evidence(pending_summary)
-        st.divider()
+    _render_dashboard_doing(kanban_summary)
+    st.divider()
 
-        _render_dashboard_health(health_summary)
-        st.divider()
+    _render_dashboard_pending_evidence(pending_summary)
+    st.divider()
 
-        _render_dashboard_public(public_summary)
-        st.divider()
+    _render_dashboard_health(health_summary)
+    st.divider()
 
-        _render_quick_entries()
-    else:
-        _handle_home_dashboard_event(home_dashboard_event, selected)
+    _render_dashboard_public(public_summary)
+    st.divider()
+
+    _render_quick_entries()
 
     with st.expander(ui["home_nav_expander"], expanded=False):
         st.caption(ui["home_nav_compact"])
@@ -1715,11 +1849,6 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
         ],
         ui["sidebar_nav_growth_group"]: [
             st.Page(
-                "pages/7_Research.py",
-                title=ui["sidebar_nav_research"],
-                icon=":material/travel_explore:",
-            ),
-            st.Page(
                 "pages/1_Skill_Tree.py",
                 title=ui["sidebar_nav_skill_map"],
                 icon=":material/account_tree:",
@@ -1728,6 +1857,11 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 "pages/2_Gap_Analysis.py",
                 title=ui["sidebar_nav_gap"],
                 icon=":material/troubleshoot:",
+            ),
+            st.Page(
+                "pages/7_Research.py",
+                title=ui["sidebar_nav_research"],
+                icon=":material/travel_explore:",
             ),
             st.Page(
                 "pages/8_Review.py",
@@ -1747,9 +1881,14 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
         ],
         ui["sidebar_nav_output_group"]: [
             st.Page(
-                "pages/6_Public_Site.py",
+                "pages/6_Output_Studio.py",
                 title=ui["sidebar_nav_public"],
-                icon=":material/language:",
+                icon=":material/edit_note:",
+            ),
+            st.Page(
+                "pages/10_Public_Build.py",
+                title=ui["sidebar_nav_public_build"],
+                icon=":material/rocket_launch:",
             ),
         ],
         ui["sidebar_nav_team_group"]: [

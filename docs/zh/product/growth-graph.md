@@ -944,6 +944,10 @@ Files / Generated Blocks / Evidence Risk / Unsupported Claims / Resume Loops -> 
 workspace_graph_payload(profile, view="context")
 ```
 
+Web 侧栏导航只是这张图谱的任务投影：用户按 Home / Work / Growth / Output / Team
+进入工作流，不等于图谱层级本身被拆成页面层级。页面应帮助用户沿着
+`Source -> Evidence -> Claim -> Skill / Output` 前进，而不是要求用户理解所有底层 owner 文件。
+
 建议节点字段：
 
 ```yaml

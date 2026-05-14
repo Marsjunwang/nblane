@@ -698,7 +698,7 @@ def workspace_graph_payload(
             label=_ui_text(ui, "dashboard_output_title", "Output"),
             metric=str(public.get("draft_total", 0)),
             status="draft" if public.get("draft_total") else "clear",
-            owner_path="pages/6_Public_Site.py",
+            owner_path="pages/6_Output_Studio.py",
         )
     )
     edges.append(_edge("claim:planned", "output", "produces", placeholder=True, suggested=True))

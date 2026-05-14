@@ -28,7 +28,9 @@ nblane 当前功能可用，但产品结构还没有完全收束。主要问题�
 | Kanban | 已实现 | Markdown parser/render、拖拽、子任务、归档、Done -> evidence |
 | Profile Ingest | 已实现 | resume/kanban Done -> LLM JSON patch -> validate/sync |
 | Web UI | 已实现 | Streamlit 多页应用 |
-| Public Site | 已实现 | profile/blog/resume/project/output 静态构建 |
+| Research Workspace | 初版已实现 | source/chunk/claim/citation/synthesis + connectors |
+| Output Studio / Public Build | 已实现 | profile/blog/resume/project output 生产与静态构建拆分 |
+| Public Site | 兼容入口 | 旧页面跳转到 Output Studio / Public Build |
 | Blog Editor | 已实现 | BlockNote、sidecar、AI patch、visual、Reviewer |
 | MCP Server | 初版已实现 | profile resources + write tools |
 | Cursor Skill | 初版已实现 | `sync-cursor` 生成规则文件 |

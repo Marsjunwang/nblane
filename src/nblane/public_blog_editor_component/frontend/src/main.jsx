@@ -297,6 +297,9 @@ const DEFAULT_LABELS = {
   related_evidence: "Related evidence",
   related_kanban: "Related kanban",
   related_claims: "Related claims",
+  related_sources: "Related research sources",
+  related_research_claims: "Related research claims",
+  related_citations: "Related citations",
   right_panel: "Tools",
   run_check: "Run check",
   rerun_check: "Run check again",
@@ -453,7 +456,15 @@ function normalizeMeta(raw) {
       meta[key] = "";
     }
   }
-  for (const key of ["tags", "related_evidence", "related_kanban", "related_claims"]) {
+  for (const key of [
+    "tags",
+    "related_evidence",
+    "related_kanban",
+    "related_claims",
+    "related_sources",
+    "related_research_claims",
+    "related_citations",
+  ]) {
     if (!Array.isArray(meta[key])) {
       meta[key] = listFromCsv(meta[key]);
     } else {
@@ -911,12 +922,23 @@ function candidateMeta(candidate) {
     "related_evidence",
     "related_kanban",
     "related_claims",
+    "related_sources",
+    "related_research_claims",
+    "related_citations",
   ]) {
     if (candidate[key] !== undefined && meta[key] === undefined) {
       meta[key] = candidate[key];
     }
   }
-  for (const key of ["tags", "related_evidence", "related_kanban", "related_claims"]) {
+  for (const key of [
+    "tags",
+    "related_evidence",
+    "related_kanban",
+    "related_claims",
+    "related_sources",
+    "related_research_claims",
+    "related_citations",
+  ]) {
     if (meta[key] !== undefined) {
       meta[key] = Array.isArray(meta[key])
         ? meta[key].map((item) => cleanText(item).trim()).filter(Boolean)
@@ -5302,6 +5324,30 @@ function MetaDrawer({ editable, labels, meta, onText, onList }) {
           value={csvFromValue(meta.related_claims)}
           readOnly={!editable}
           onChange={(event) => onList("related_claims", event.target.value)}
+        />
+      </label>
+      <label className="nb-field">
+        <span>{label(labels, "related_sources")}</span>
+        <input
+          value={csvFromValue(meta.related_sources)}
+          readOnly={!editable}
+          onChange={(event) => onList("related_sources", event.target.value)}
+        />
+      </label>
+      <label className="nb-field">
+        <span>{label(labels, "related_research_claims")}</span>
+        <input
+          value={csvFromValue(meta.related_research_claims)}
+          readOnly={!editable}
+          onChange={(event) => onList("related_research_claims", event.target.value)}
+        />
+      </label>
+      <label className="nb-field">
+        <span>{label(labels, "related_citations")}</span>
+        <input
+          value={csvFromValue(meta.related_citations)}
+          readOnly={!editable}
+          onChange={(event) => onList("related_citations", event.target.value)}
         />
       </label>
     </div>

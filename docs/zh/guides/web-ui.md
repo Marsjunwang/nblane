@@ -62,7 +62,11 @@ source_of_truth: true
 5. **看板** 管理日常推进；**已完成** 任务可通过折叠区 **摄入为证据**。
 6. 协作编辑共享池时用 **团队视图**。
 7. 导出上下文前或阶段复盘时打开 **Profile Health**。
-8. 整理公开资料、博客、简历、项目/成果草稿或构建静态站时打开 **Public Site**。
+8. 资料阅读和研究写作用 **Research Workspace**；整理公开资料、博客、简历、项目/成果草稿时打开 **Output Studio**，校验和构建静态站时打开 **Public Build**。
+
+中文界面的侧栏采用双语标签：中文任务名在前，英文对象名在后，例如
+**研究工作台 Research**、**输出工作台 Studio**、**公开构建 Build**。
+英文别名用于对照文档、文件名和 CLI，不代表需要在中文界面里用英文理解页面职责。
 
 产品层地图见 [Web 体验设计](../product/web-experience.md)。
 
@@ -73,6 +77,10 @@ source_of_truth: true
 ### 5.1 首页（`app.py`）
 
 - **标题与说明** — 浏览器标签与子页统一为「功能 · nblane」风格；标题下
+- **首屏摘要** — 首页先用原生 Streamlit 渲染 Scope strip、当前目标、本周执行、
+  待整理证据与主操作，避免 React 图谱加载时出现“空首页”。
+- **上下文画布** — React Dashboard / Context Canvas 下移到稳定摘要之后，用来浏览
+  `Source -> Evidence -> Claim -> Skill / Output` 的当前投影。
   caption 标明当前档案与 **私人操作系统** 叙事。
 - **标签页**
   - **概览** — 技能指标、分类进度；**简历 / 长文本** 摄入在折叠区内。
@@ -169,27 +177,38 @@ source_of_truth: true
   owner 页面。
 - `dismissed` / `failed` 条目可以 reopen，便于重新审阅。
 
-### 5.10 Public Site（`pages/6_Public_Site.py`）
+### 5.10 Research Workspace（`pages/7_Research.py`）
+
+- **Source Inbox** 继续接收网页、论文、repo、书籍、手动链接和 Home capture；写入
+  `research/sources.yaml`，不会直接写 evidence、skill status 或公开输出。
+- **Reading Room** 对单个 source 生成翻译、摘要、claim candidates 和 citations；保存后仍停留在 source-scoped annotations。
+- **Claims & Citations** 可把 source 切成 `research/chunks/*.jsonl`，创建
+  `research/claims.yaml` research claim，并用 `research/citations.yaml` 绑定
+  claim 到 source/chunk。Research claim 生成 evidence 时仍是 `needs_review` 候选。
+- **Synthesis Drafts** 从 research claims 生成 `research/drafts.yaml` 与
+  `research/drafts/*.md`，并可创建带 `related_sources` /
+  `related_research_claims` / `related_citations` 的博客草稿。
+- **Connectors** 管理 `research/connectors.yaml`，支持 arXiv、Semantic Scholar、
+  GitHub 自动导入；X/Twitter 与小红书第一版走手动导入或官方授权边界。配置文件不保存 token、cookie 或 API key。
+
+### 5.11 Output Studio（`pages/6_Output_Studio.py`）
 
 - 为当前档案初始化缺失的公开层文件。
-- **Profile** 编辑公开姓名、headline、简介、联系方式、头像、原始 YAML，并提供
-  实时整站预览。
-- **Blog** 通过 React / BlockNote 编辑器 shell 管理 draft / published 文章，
-  支持结构化 front matter、媒体插入、AI 候选、发布检查、公开页预览，以及
-  Streamlit 承接的新建/上传辅助工具。
-- Blog 支持 `related_claims` front matter。可以从 accepted claims 生成候选或草稿；
-  系统会自动合并 claim 的 supporting evidence 到 `related_evidence`，发布校验会
-  检查 claim id、accepted 状态和 evidence refs。
-- Resume 可以从 accepted claims 生成 bullet 候选预览；候选不会自动写入
-  `resume-source.yaml`，需要人工复制或后续确认流处理。
-- Build / 项目更新工具可以从 accepted claims 生成 project update 草稿，并在
-  `projects.yaml` 的 `draft_updates` 中保留 `related_claims` 与 `evidence_refs`。
-- 若只有 evidence 而没有 accepted claim，先到 Evidence Review 生成并应用
-  claim candidates，再回到 Public Site 用 claim provenance 生成公开输出。
-- **Resume** 编辑 `resume-source.yaml`，预览生成 Markdown，并生成定制简历草稿。
+- **Generate** 从 reviewed evidence 或 accepted claims 生成 blog draft、resume bullet preview、project update draft。
+- **Profile** 编辑公开姓名、headline、简介、联系方式、头像、原始 YAML，并提供实时整站预览。
+- **Blog** 通过 React / BlockNote 编辑器 shell 管理 draft / published 文章，支持 front matter、媒体、AI 候选、发布检查和公开页预览。
+- Blog 支持 `related_claims` 与 research provenance refs；发布校验会检查 accepted claim、promoted research claim、source visibility 和 citation/chunk 断链。
+- **Resume** 编辑 `resume-source.yaml`，预览 Markdown，并生成定制简历草稿；从 accepted claims 生成的 bullet 候选不会自动写回。
 - **Known Info** 将选中的 evidence 整理成 draft 公开项目。
-- **Build** 校验并写出静态站，默认到 `dist/public/<profile>`，也可指定输出目录；
-  可填写生产 `Base URL` 以生成 SEO 与子路径部署链接。
+
+### 5.12 Public Build（`pages/10_Public_Build.py`）
+
+- 只负责静态站校验、预览和构建，不编辑 Blog / Resume / Known Info。
+- 默认构建到 `dist/public/<profile>`；可选择是否包含 draft/private 预览内容，并填写生产 `Base URL` 生成 SEO 与子路径部署链接。
+
+### 5.13 Public Site 兼容入口（`pages/6_Public_Site.py`）
+
+- 旧入口保留为跳转页，指向 **Output Studio** 与 **Public Build**，避免旧链接失效。
 
 ---
 
