@@ -39,6 +39,7 @@ def _ui() -> dict[str, str]:
 ui = _ui()
 require_login()
 selected = select_profile()
+ui = _ui()
 render_git_backup_notices()
 
 head_l, head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")

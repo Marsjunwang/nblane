@@ -84,8 +84,10 @@ _LLM_BASE_URL_KEY = "_nblane_llm_base_url"
 _LLM_MODEL_CHOICE_KEY = "_nblane_llm_model_choice"
 _LLM_CUSTOM_MODEL_KEY = "_nblane_llm_custom_model"
 _LLM_API_KEY_KEY = "_nblane_llm_api_key"
-_UI_LANG_KEY = "_nblane_ui_lang"
-_LLM_REPLY_LANG_KEY = "_nblane_llm_reply_lang"
+_UI_LANG_KEY = "nblane_ui_lang"
+_UI_LANG_WIDGET_KEY = "_nblane_ui_lang"
+_LLM_REPLY_LANG_KEY = "nblane_llm_reply_lang"
+_LLM_REPLY_LANG_WIDGET_KEY = "_nblane_llm_reply_lang"
 
 _LLM_PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
     "OpenAI": (
@@ -106,6 +108,54 @@ _LLM_PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "Custom": ("", ()),
 }
+
+
+def _env_language(name: str, default: str = "en") -> str:
+    """Return a supported language value from the environment."""
+    raw = os.getenv(name, default).strip().lower()
+    return raw if raw in ("en", "zh") else default
+
+
+def _session_or_env_language(
+    session_key: str,
+    widget_key: str,
+    env_name: str,
+    default: str = "en",
+) -> str:
+    """Return persistent language, migrating old widget state when present."""
+    for key in (session_key, widget_key):
+        raw = st.session_state.get(key)
+        if raw in ("en", "zh"):
+            return raw
+    return _env_language(env_name, default)
+
+
+def _sync_language_widget_to_persistent(
+    session_key: str,
+    widget_key: str,
+) -> None:
+    """Copy a page-local language widget value into persistent state."""
+    value = st.session_state.get(widget_key)
+    if value in ("en", "zh"):
+        st.session_state[session_key] = value
+
+
+def _prepare_language_widget(
+    session_key: str,
+    widget_key: str,
+    env_name: str,
+    default: str = "en",
+) -> str:
+    """Seed a widget key from the persistent language setting."""
+    value = _session_or_env_language(
+        session_key,
+        widget_key,
+        env_name,
+        default,
+    )
+    st.session_state[session_key] = value
+    st.session_state[widget_key] = value
+    return value
 
 
 def _sync_to_persistent() -> None:
@@ -141,8 +191,16 @@ def _ensure_llm_session_defaults() -> None:
     cfg = llm_client.current_config(mask_key=False)
     base_url = str(cfg.get("base_url") or "")
     model = str(cfg.get("model") or "")
-    ui_lang = str(cfg.get("ui_lang") or "en")
-    reply_lang = str(cfg.get("reply_lang") or "en")
+    ui_lang = _session_or_env_language(
+        _UI_LANG_KEY,
+        _UI_LANG_WIDGET_KEY,
+        "UI_LANG",
+    )
+    reply_lang = _session_or_env_language(
+        _LLM_REPLY_LANG_KEY,
+        _LLM_REPLY_LANG_WIDGET_KEY,
+        "LLM_REPLY_LANG",
+    )
     provider = _llm_provider_for(base_url)
     model_options = _llm_model_options(provider)
 
@@ -154,14 +212,9 @@ def _ensure_llm_session_defaults() -> None:
         _LLM_MODEL_CHOICE_KEY,
         model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE,
     )
-    st.session_state.setdefault(
-        _UI_LANG_KEY,
-        ui_lang if ui_lang in ("en", "zh") else "en",
-    )
-    st.session_state.setdefault(
-        _LLM_REPLY_LANG_KEY,
-        reply_lang if reply_lang in ("en", "zh") else "en",
-    )
+    st.session_state.setdefault(_UI_LANG_KEY, ui_lang)
+    st.session_state.setdefault(_LLM_REPLY_LANG_KEY, reply_lang)
+    apply_ui_language_from_session()
 
 
 def _sync_llm_provider_preset() -> None:
@@ -219,13 +272,12 @@ def _apply_llm_sidebar_config(
 
 def apply_ui_language_from_session() -> None:
     """Sync runtime UI language from session state before page UI is built."""
-    ui_lang = st.session_state.get(_UI_LANG_KEY)
-    if ui_lang not in ("en", "zh"):
-        cfg_lang = str(
-            llm_client.current_config().get("ui_lang") or "en"
-        )
-        ui_lang = cfg_lang if cfg_lang in ("en", "zh") else "en"
-        st.session_state[_UI_LANG_KEY] = ui_lang
+    ui_lang = _session_or_env_language(
+        _UI_LANG_KEY,
+        _UI_LANG_WIDGET_KEY,
+        "UI_LANG",
+    )
+    st.session_state[_UI_LANG_KEY] = ui_lang
     if (
         ui_lang in ("en", "zh")
         and ui_lang != llm_client.ui_language()
@@ -235,8 +287,8 @@ def apply_ui_language_from_session() -> None:
 
 def render_llm_settings() -> None:
     """Render app-wide LLM settings in the Streamlit sidebar."""
-    u = common_ui()
     _ensure_llm_session_defaults()
+    u = common_ui()
 
     with st.expander(u["llm_settings_title"]):
         provider_names = list(_LLM_PROVIDER_PRESETS)
@@ -281,6 +333,17 @@ def render_llm_settings() -> None:
             key=_LLM_API_KEY_KEY,
         ).strip()
 
+        _prepare_language_widget(
+            _UI_LANG_KEY,
+            _UI_LANG_WIDGET_KEY,
+            "UI_LANG",
+        )
+        _prepare_language_widget(
+            _LLM_REPLY_LANG_KEY,
+            _LLM_REPLY_LANG_WIDGET_KEY,
+            "LLM_REPLY_LANG",
+        )
+
         ui_lang = st.selectbox(
             u["llm_ui_lang"],
             ["zh", "en"],
@@ -289,7 +352,9 @@ def render_llm_settings() -> None:
                 if value == "zh"
                 else u["llm_reply_lang_en"]
             ),
-            key=_UI_LANG_KEY,
+            key=_UI_LANG_WIDGET_KEY,
+            on_change=_sync_language_widget_to_persistent,
+            args=(_UI_LANG_KEY, _UI_LANG_WIDGET_KEY),
         )
 
         reply_lang = st.selectbox(
@@ -300,8 +365,12 @@ def render_llm_settings() -> None:
                 if value == "zh"
                 else u["llm_reply_lang_en"]
             ),
-            key=_LLM_REPLY_LANG_KEY,
+            key=_LLM_REPLY_LANG_WIDGET_KEY,
+            on_change=_sync_language_widget_to_persistent,
+            args=(_LLM_REPLY_LANG_KEY, _LLM_REPLY_LANG_WIDGET_KEY),
         )
+        st.session_state[_UI_LANG_KEY] = ui_lang
+        st.session_state[_LLM_REPLY_LANG_KEY] = reply_lang
 
         _apply_llm_sidebar_config(
             base_url=base_url,

@@ -164,7 +164,7 @@ fresh system prompt. Order matters: **pool → tree → validate → sync** (see
    `nblane sync yourname --write` if anything drifted. Refresh the agent with
    `nblane context yourname` and paste into your tool of choice.
 
-**中文说明：** 上述步骤与 [中文文档索引](docs/zh/README.md)、[数据契约](docs/zh/architecture/data-contracts.md) 中的「简历摄入 / 看板闭环」一致；命令与页面名以英文界面为准，`LLM_REPLY_LANG=zh` 时提示与 Streamlit 文案为中文。
+**中文说明：** 上述步骤与 [中文文档索引](docs/zh/README.md)、[数据契约](docs/zh/architecture/data-contracts.md) 中的「简历摄入 / 看板闭环」一致；命令与页面名以英文界面为准。`UI_LANG=zh` 控制 Streamlit 界面文案，`LLM_REPLY_LANG=zh` 只控制模型提示与回复语言。
 
 ---
 

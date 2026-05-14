@@ -82,6 +82,7 @@ apply_ui_language_from_session()
 ui = evidence_review_ui()
 require_login()
 selected = select_profile()
+ui = evidence_review_ui()
 render_git_backup_notices()
 
 _pdir = profile_dir(selected)

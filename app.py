@@ -91,9 +91,17 @@ from nblane.web_shared import (
 )
 from nblane.web_auth import require_login
 
-apply_ui_language_from_session()
+ui: dict[str, str] = {}
 
-ui = home_ui()
+
+def _sync_home_ui() -> None:
+    """Refresh Home copy from the current session UI language."""
+    global ui
+    apply_ui_language_from_session()
+    ui = home_ui()
+
+
+_sync_home_ui()
 
 st.set_page_config(
     page_title=ui["app_page_title"],
@@ -118,6 +126,7 @@ def _prepare_home_state() -> None:
 
     require_login()
     selected = select_profile()
+    _sync_home_ui()
     render_git_backup_notices()
 
     _skill_md_path = profile_dir(selected) / "SKILL.md"
@@ -1903,6 +1912,7 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
 def main() -> None:
     """Run the Streamlit app with product-level navigation."""
     st.session_state["_nblane_native_navigation"] = True
+    _sync_home_ui()
     page = st.navigation(_navigation_pages(), expanded=True)
     page.run()
 

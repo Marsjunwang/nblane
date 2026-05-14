@@ -29,8 +29,7 @@ source_of_truth: true
 ## 2. 语言与显示
 
 - **`.env` 中的 `UI_LANG`**：`en`（默认）或 `zh`。控制 `web_i18n.py`
-  提供的 **Streamlit 界面文案**。若未设置，为兼容旧部署，会回退到
-  `LLM_REPLY_LANG`。
+  提供的 **Streamlit 界面文案**，不受 `LLM_REPLY_LANG` 影响。
 - **`.env` 中的 `LLM_REPLY_LANG`**：`en`（默认）或 `zh`。控制模型回复语言，
   以及差距分析、摄入等 AI 路径使用的 **LLM 系统提示语言**。它可以和
   `UI_LANG` 不同，例如中文界面配英文模型输出。

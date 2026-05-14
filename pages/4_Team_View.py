@@ -44,6 +44,7 @@ apply_ui_language_from_session()
 ui = team_ui()
 require_login()
 selected_profile = select_profile()
+ui = team_ui()
 render_git_backup_notices()
 
 st.title(ui["title"])

@@ -37,10 +37,7 @@ _DEFAULT_TIMEOUT_SECONDS = 90.0
 _BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
 _API_KEY: str = os.getenv("LLM_API_KEY", "")
 _MODEL: str = os.getenv("LLM_MODEL", _DEFAULT_MODEL)
-_UI_LANG: str = os.getenv(
-    "UI_LANG",
-    os.getenv("LLM_REPLY_LANG", _DEFAULT_UI_LANG),
-).strip().lower()
+_UI_LANG: str = os.getenv("UI_LANG", _DEFAULT_UI_LANG).strip().lower()
 _REPLY_LANG: str = os.getenv(
     "LLM_REPLY_LANG", _DEFAULT_REPLY_LANG
 ).strip().lower()
@@ -155,8 +152,7 @@ def ui_language() -> str:
     """Return the configured UI language code ('en' or 'zh').
 
     ``UI_LANG`` controls Streamlit interface text independently from model
-    reply language. When ``UI_LANG`` is absent, module initialization falls
-    back to ``LLM_REPLY_LANG`` for compatibility with older deployments.
+    reply language.
     """
     return "zh" if _UI_LANG == "zh" else "en"
 

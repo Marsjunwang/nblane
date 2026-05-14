@@ -58,6 +58,7 @@ apply_ui_language_from_session()
 ui = research_ui()
 require_login()
 selected = select_profile()
+ui = research_ui()
 render_git_backup_notices()
 
 _pdir = profile_dir(selected)

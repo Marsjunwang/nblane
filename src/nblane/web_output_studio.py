@@ -6467,6 +6467,7 @@ def main() -> None:
 
     require_login()
     selected = select_profile()
+    ui = _ui()
     render_git_backup_notices()
 
     root = profile_dir(selected)

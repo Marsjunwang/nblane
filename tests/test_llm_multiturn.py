@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import importlib
 import sys
 import tempfile
 import types
@@ -51,6 +52,31 @@ class TestChatMessages(unittest.TestCase):
                                 raw["api_key"],
                                 "sk-1234567890",
                             )
+
+    def test_ui_lang_default_ignores_reply_language_env(self) -> None:
+        """Missing UI_LANG should not inherit LLM_REPLY_LANG."""
+        from nblane.core import llm
+
+        original = llm.current_config(mask_key=False)
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_REPLY_LANG": "zh",
+            },
+            clear=True,
+        ):
+            reloaded = importlib.reload(llm)
+            try:
+                self.assertEqual(reloaded.ui_language(), "en")
+                self.assertEqual(reloaded.reply_language(), "zh")
+            finally:
+                reloaded.configure(
+                    base_url=str(original["base_url"]),
+                    api_key=str(original["api_key"]),
+                    model=str(original["model"]),
+                    ui_lang=str(original["ui_lang"]),
+                    reply_lang=str(original["reply_lang"]),
+                )
 
     def test_visual_config_reuses_llm_key_for_dashscope(self) -> None:
         """Visual generation defaults to DashScope and can reuse LLM_API_KEY."""

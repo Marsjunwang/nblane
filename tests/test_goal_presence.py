@@ -138,8 +138,59 @@ class TestGoalPresenceI18n(unittest.TestCase):
         )
 
         self.assertLess(
-            source.index("apply_ui_language_from_session()\n\nui = home_ui()"),
+            source.index("_sync_home_ui()\n\nst.set_page_config("),
             source.index("st.set_page_config("),
+        )
+        self.assertIn(
+            "selected = select_profile()\n    _sync_home_ui()\n"
+            "    render_git_backup_notices()",
+            source,
+        )
+        self.assertIn(
+            'st.session_state["_nblane_native_navigation"] = True\n'
+            "    _sync_home_ui()\n    page = st.navigation(",
+            source,
+        )
+
+    def test_page_ui_refreshes_after_sidebar_language(self) -> None:
+        """Pages must refresh UI strings after sidebar settings are applied."""
+        root = Path(__file__).resolve().parent.parent
+        expectations = {
+            "pages/1_Skill_Tree.py": "selected = select_profile()\nui = skill_tree_ui()",
+            "pages/2_Gap_Analysis.py": "selected = select_profile()\nui = gap_ui()",
+            "pages/2_Evidence_Review.py": "selected = select_profile()\nui = evidence_review_ui()",
+            "pages/3_Kanban.py": "selected = select_profile()\nui = kanban_ui()",
+            "pages/4_Team_View.py": "selected_profile = select_profile()\nui = team_ui()",
+            "pages/5_Profile_Health.py": "selected = select_profile()\nui = profile_health_ui()",
+            "pages/6_Public_Site.py": "selected = select_profile()\nui = _ui()",
+            "pages/7_Research.py": "selected = select_profile()\nui = research_ui()",
+            "pages/8_Review.py": "selected = select_profile()\nui = review_ui()",
+            "pages/9_Agent_Activity.py": "selected = select_profile()\nui = agent_activity_ui()",
+            "src/nblane/web_output_studio.py": "selected = select_profile()\n    ui = _ui()",
+            "src/nblane/web_public_build.py": "selected = select_profile()\n    ui = _ui()",
+        }
+        for relative, snippet in expectations.items():
+            source = (root / relative).read_text(encoding="utf-8")
+            self.assertIn(snippet, source, relative)
+
+    def test_language_widgets_use_persistent_session_keys(self) -> None:
+        """Sidebar language widgets must not be page-local source of truth."""
+        source = (
+            Path(__file__).resolve().parent.parent
+            / "src"
+            / "nblane"
+            / "web_shared.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('_UI_LANG_KEY = "nblane_ui_lang"', source)
+        self.assertIn('_UI_LANG_WIDGET_KEY = "_nblane_ui_lang"', source)
+        self.assertIn(
+            "on_change=_sync_language_widget_to_persistent",
+            source,
+        )
+        self.assertIn(
+            "st.session_state[_UI_LANG_KEY] = ui_lang",
+            source,
         )
 
 

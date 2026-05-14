@@ -320,6 +320,7 @@ def _refresh_session_rows_from_disk(
 ui = skill_tree_ui()
 require_login()
 selected = select_profile()
+ui = skill_tree_ui()
 render_git_backup_notices()
 _pdir = profile_dir(selected)
 for _path in (

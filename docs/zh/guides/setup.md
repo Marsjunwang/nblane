@@ -73,7 +73,7 @@ nblane 读取以下环境变量：
 | `VISUAL_BASE_URL` | *(空)* | 可选视觉任务 endpoint 覆盖。通常留空，使用 DashScope 视觉任务 API。 |
 | `VISUAL_IMAGE_MODEL` | `wan2.7-image-pro` | Blog 图片 / 封面默认模型。 |
 | `VISUAL_VIDEO_MODEL` | `wan2.7-videoedit` | Blog 视频编辑默认模型。 |
-| `UI_LANG` | `en` | Streamlit 界面语言：`en` 或 `zh`。未设置时为兼容旧部署，会回退到 `LLM_REPLY_LANG`。 |
+| `UI_LANG` | `en` | Streamlit 界面语言：`en` 或 `zh`。只控制界面文案。 |
 | `LLM_REPLY_LANG` | `en` | 模型回复语言：`en` 或 `zh`。仅控制 AI prompt / 输出语言。 |
 | `NBLANE_AUTH_FILE` | *(空)* | Streamlit Web 登录用户配置。为空时保持本地开发模式；公网部署时应指向私有数据仓库中的 `auth/users.yaml`。 |
 | `NBLANE_DATA_GIT_AUTOCOMMIT` | *(空)* | 设为 `1` 时，写入数据文件后自动生成 Git commit。 |

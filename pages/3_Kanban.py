@@ -1888,6 +1888,7 @@ def _handle_board_event(
 ui = kanban_ui()
 require_login()
 selected = select_profile()
+ui = kanban_ui()
 render_git_backup_notices()
 _pdir = profile_dir(selected)
 _kanban_path = _pdir / "kanban.md"

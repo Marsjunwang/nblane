@@ -206,6 +206,7 @@ if "gap_coach_messages" not in st.session_state:
     st.session_state.gap_coach_messages = []
 
 selected = select_profile()
+ui = gap_ui()
 render_git_backup_notices()
 _tree_path = profile_dir(selected) / "skill-tree.yaml"
 ensure_file_snapshot(_tree_path)

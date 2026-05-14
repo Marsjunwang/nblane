@@ -37,6 +37,7 @@ ui = review_ui()
 st.set_page_config(page_title=ui["page_title"], layout="wide")
 require_login()
 selected = select_profile()
+ui = review_ui()
 render_git_backup_notices()
 
 
