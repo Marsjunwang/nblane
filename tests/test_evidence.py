@@ -79,7 +79,7 @@ class TestEvidenceModel(unittest.TestCase):
         self.assertEqual(
             EVIDENCE_TYPES,
             frozenset(
-                {"project", "paper", "course", "practice"}
+                {"project", "paper", "course", "practice", "learning"}
             ),
         )
 

@@ -16,6 +16,24 @@ POOL_KEYS = (
 )
 
 
+def team_scope_descriptor(team_id: str, view_as_profile: str) -> dict[str, object]:
+    """Return the hard write scope shown by Team View."""
+    clean_team = str(team_id or "").strip()
+    root = f"teams/{clean_team}/" if clean_team else "teams/"
+    return {
+        "write_owner": "team",
+        "team_scope": root,
+        "writes": [
+            f"{root}team.yaml",
+            f"{root}product-pool.yaml",
+        ],
+        "view_as_profile": str(view_as_profile or "").strip(),
+        "profile_scope_note": (
+            "View-as profile is context only; it does not filter, own, or redirect team writes."
+        ),
+    }
+
+
 def summarize_team(team_dir: Path) -> int:
     """Print team summary; return 0 on success."""
     team_path = team_dir / "team.yaml"

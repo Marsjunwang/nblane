@@ -275,6 +275,7 @@ def generate_claim_candidates(
             "project": "achievement",
             "paper": "learning",
             "course": "learning",
+            "learning": "learning",
             "practice": "skill",
         }.get(evidence_type, "achievement")
         text = summary if summary and len(summary) >= len(title) else title

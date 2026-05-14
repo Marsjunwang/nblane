@@ -395,6 +395,27 @@ class ResumeBulletCandidate:
         }
 
 
+@dataclass
+class ProjectUpdateCandidate:
+    """Project update candidate generated from accepted claims."""
+
+    title: str
+    body: str
+    related_claims: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Serialize for UI previews."""
+        return {
+            "title": self.title,
+            "body": self.body,
+            "related_claims": list(self.related_claims),
+            "evidence_refs": list(self.evidence_refs),
+            "warnings": list(self.warnings),
+        }
+
+
 def _profile_path(name: str) -> Path:
     path = profile_dir(name)
     if not path.exists():
@@ -7592,6 +7613,51 @@ def draft_project_update_from_claims(
     claim_ids: list[str],
 ) -> Path:
     """Append a draft project update from accepted claims."""
+    candidate = project_update_candidate_from_claims(name, project_id, claim_ids)
+    root = _profile_path(name)
+    path = root / PROJECTS_FILENAME
+    raw = _read_yaml_mapping(path)
+    projects = raw.get("projects") or []
+    if not isinstance(projects, list):
+        raise PublicSiteError(f"{PROJECTS_FILENAME}: projects must be a list")
+    target: dict | None = None
+    for item in projects:
+        if isinstance(item, dict) and str(item.get("id", "")) == project_id:
+            target = item
+            break
+    if target is None:
+        raise PublicSiteError(f"Unknown project id: {project_id}")
+
+    updates = target.setdefault("draft_updates", [])
+    if not isinstance(updates, list):
+        updates = []
+        target["draft_updates"] = updates
+    updates.append(
+        {
+            "id": _slugify(f"{date.today().isoformat()}-{project_id}-claims"),
+            "date": date.today().isoformat(),
+            "status": "draft",
+            "title": candidate.title,
+            "body": candidate.body,
+            "related_claims": candidate.related_claims,
+            "evidence_refs": candidate.evidence_refs,
+            "warnings": candidate.warnings,
+        }
+    )
+    _write_yaml(path, {"projects": projects})
+    git_backup.record_change(
+        [path],
+        action=f"draft {name} project update from claims",
+    )
+    return path
+
+
+def project_update_candidate_from_claims(
+    name: str,
+    project_id: str,
+    claim_ids: list[str],
+) -> ProjectUpdateCandidate:
+    """Return a project update candidate from accepted claims without writing."""
     root = _profile_path(name)
     path = root / PROJECTS_FILENAME
     raw = _read_yaml_mapping(path)
@@ -7633,28 +7699,18 @@ def draft_project_update_from_claims(
         ),
         fallback,
     )
-    updates = target.setdefault("draft_updates", [])
-    if not isinstance(updates, list):
-        updates = []
-        target["draft_updates"] = updates
-    updates.append(
-        {
-            "id": _slugify(f"{date.today().isoformat()}-{project_id}-claims"),
-            "date": date.today().isoformat(),
-            "status": "draft",
-            "title": title,
-            "body": body,
-            "related_claims": [str(claim.get("id", "")) for claim in selected],
-            "evidence_refs": related_evidence,
-            "warnings": warnings,
-        }
+    review_warning = (
+        "Review claim wording, project scope, links, metrics, and private details before publishing."
     )
-    _write_yaml(path, {"projects": projects})
-    git_backup.record_change(
-        [path],
-        action=f"draft {name} project update from claims",
+    if review_warning not in warnings:
+        warnings.append(review_warning)
+    return ProjectUpdateCandidate(
+        title=title,
+        body=body,
+        related_claims=[str(claim.get("id", "")) for claim in selected],
+        evidence_refs=related_evidence,
+        warnings=warnings,
     )
-    return path
 
 
 def blog_slug_from_path(path: Path) -> str:

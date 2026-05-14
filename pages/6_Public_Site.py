@@ -89,6 +89,7 @@ from nblane.core.public_site import (
     render_blog_post_preview,
     render_public_site_preview,
     render_resume_markdown,
+    project_update_candidate_from_claims,
     resume_bullet_candidates_from_claims,
     save_blog_post,
     validate_blog_text_for_publish,
@@ -152,6 +153,19 @@ def _ui() -> dict[str, str]:
             "caption": "管理个人网站、博客、公开简历与发布构建。",
             "init_needed": "此档案尚未初始化公开层。",
             "init": "初始化公开层",
+            "output_studio": "从证据生成",
+            "output_studio_caption": "先选择 reviewed evidence 或 accepted claims，再生成可追溯的公开输出候选。",
+            "output_source": "来源",
+            "output_source_claims": "Accepted claims",
+            "output_source_evidence": "Evidence",
+            "output_target": "输出目标",
+            "output_target_blog": "Blog draft",
+            "output_target_resume": "Resume bullets preview",
+            "output_target_project": "Project update draft",
+            "output_generate_preview": "生成预览",
+            "output_create_draft": "确认创建草稿",
+            "output_preview_empty": "先生成一个候选预览。",
+            "output_project_required": "请选择 project。",
             "profile": "Profile",
             "blog": "Blog",
             "resume": "Resume",
@@ -457,6 +471,19 @@ def _ui() -> dict[str, str]:
         "caption": "Manage your personal website, blog, public resume, and build output.",
         "init_needed": "This profile has not initialized its public layer.",
         "init": "Initialize public layer",
+        "output_studio": "Output Studio",
+        "output_studio_caption": "Start from reviewed evidence or accepted claims, then create provenance-backed public output.",
+        "output_source": "Source",
+        "output_source_claims": "Accepted claims",
+        "output_source_evidence": "Evidence",
+        "output_target": "Output target",
+        "output_target_blog": "Blog draft",
+        "output_target_resume": "Resume bullets preview",
+        "output_target_project": "Project update draft",
+        "output_generate_preview": "Generate preview",
+        "output_create_draft": "Create confirmed draft",
+        "output_preview_empty": "Generate a candidate preview first.",
+        "output_project_required": "Select a project first.",
         "profile": "Profile",
         "blog": "Blog",
         "resume": "Resume",
@@ -1132,6 +1159,277 @@ def _csv_text(values: object) -> str:
     if not isinstance(values, list):
         return ""
     return ", ".join(str(item) for item in values if str(item).strip())
+
+
+def _claim_label(claims: list[dict], claim_id: str) -> str:
+    return next(
+        (
+            f"{claim_id} - {claim.get('text', '')}"
+            for claim in claims
+            if str(claim.get("id", "")) == claim_id
+        ),
+        claim_id,
+    )
+
+
+def _candidate_preview_key(selected: str) -> str:
+    return f"output_studio_candidate:{selected}"
+
+
+def _render_candidate_preview(candidate: dict, *, ui: dict[str, str]) -> None:
+    st.subheader(ui["preview"])
+    meta = {
+        key: value
+        for key, value in candidate.items()
+        if key != "body" and value not in ("", [], None)
+    }
+    if meta:
+        st.code(
+            yaml.dump(
+                meta,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+            language="yaml",
+        )
+    body = str(candidate.get("body", "") or "")
+    if body:
+        st.text_area(ui["body"], value=body, height=280, disabled=True)
+    warnings = candidate.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        with st.expander(ui["candidate_warnings"], expanded=True):
+            for warning in warnings:
+                st.write(f"- {warning}")
+
+
+def _render_output_studio_tab(*, selected: str, ui: dict[str, str]) -> None:
+    """Render the evidence/claim-first public output entrypoint."""
+    st.caption(ui["output_studio_caption"])
+    claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+    claim_ids = [str(claim.get("id", "")) for claim in claims]
+    contexts = evidence_contexts(selected)
+    evidence_ids = [ctx.id for ctx in contexts]
+    projects = [
+        project
+        for project in load_projects(selected)
+        if isinstance(project, dict) and str(project.get("id", "") or "").strip()
+    ]
+    project_ids = [str(project.get("id", "") or "") for project in projects]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        source_kind = st.radio(
+            ui["output_source"],
+            [ui["output_source_claims"], ui["output_source_evidence"]],
+            horizontal=True,
+            key=f"output_source_kind:{selected}",
+        )
+    with c2:
+        target = st.selectbox(
+            ui["output_target"],
+            [
+                ui["output_target_blog"],
+                ui["output_target_resume"],
+                ui["output_target_project"],
+            ],
+            key=f"output_target:{selected}",
+        )
+    with c3:
+        project_id = ""
+        if target == ui["output_target_project"]:
+            if project_ids:
+                project_id = st.selectbox(
+                    ui["project_id"],
+                    project_ids,
+                    format_func=lambda pid: next(
+                        (
+                            str(project.get("title", "") or pid)
+                            for project in projects
+                            if str(project.get("id", "") or "") == pid
+                        ),
+                        pid,
+                    ),
+                    key=f"output_project:{selected}",
+                )
+            else:
+                st.caption(ui["current_projects"])
+
+    picked_claims: list[str] = []
+    picked_evidence = ""
+    if source_kind == ui["output_source_claims"]:
+        if not claims:
+            st.caption(ui["accepted_claims_empty"])
+        picked_claims = st.multiselect(
+            ui["claim_ids"],
+            claim_ids,
+            format_func=lambda claim_id: _claim_label(claims, claim_id),
+            key=f"output_claim_ids:{selected}",
+        )
+    else:
+        if not evidence_ids:
+            st.caption(ui["evidence"])
+        picked_evidence = st.selectbox(
+            ui["evidence_id"],
+            evidence_ids,
+            format_func=lambda eid: next(
+                (
+                    f"{eid} - {ctx.title}"
+                    for ctx in contexts
+                    if ctx.id == eid
+                ),
+                eid,
+            ),
+            key=f"output_evidence_id:{selected}",
+        ) if evidence_ids else ""
+
+    preview_key = _candidate_preview_key(selected)
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button(
+            ui["output_generate_preview"],
+            key=f"output_generate:{selected}",
+            type="primary",
+        ):
+            try:
+                if target == ui["output_target_blog"]:
+                    if source_kind == ui["output_source_claims"]:
+                        candidate = blog_candidate_from_claims(selected, picked_claims)
+                    else:
+                        candidate = blog_candidate_from_evidence(selected, picked_evidence)
+                    st.session_state[preview_key] = {
+                        "kind": "blog",
+                        "target": target,
+                        "source_kind": source_kind,
+                        "claim_ids": picked_claims,
+                        "evidence_id": picked_evidence,
+                        "project_id": "",
+                        "candidate": candidate.to_dict(),
+                    }
+                elif target == ui["output_target_resume"]:
+                    if source_kind != ui["output_source_claims"]:
+                        raise PublicSiteError(ui["accepted_claims_empty"])
+                    bullets = resume_bullet_candidates_from_claims(selected, picked_claims)
+                    st.session_state[preview_key] = {
+                        "kind": "resume",
+                        "target": target,
+                        "source_kind": source_kind,
+                        "claim_ids": picked_claims,
+                        "evidence_id": "",
+                        "project_id": "",
+                        "candidate": {
+                            "body": "\n".join(f"- {bullet.text}" for bullet in bullets),
+                            "bullets": [bullet.to_dict() for bullet in bullets],
+                        },
+                    }
+                else:
+                    if source_kind != ui["output_source_claims"]:
+                        raise PublicSiteError(ui["accepted_claims_empty"])
+                    if not project_id:
+                        raise PublicSiteError(ui["output_project_required"])
+                    candidate = project_update_candidate_from_claims(
+                        selected,
+                        project_id,
+                        picked_claims,
+                    )
+                    st.session_state[preview_key] = {
+                        "kind": "project_update",
+                        "target": target,
+                        "source_kind": source_kind,
+                        "project_id": project_id,
+                        "claim_ids": picked_claims,
+                        "evidence_id": "",
+                        "candidate": candidate.to_dict(),
+                    }
+            except Exception as exc:
+                st.error(str(exc))
+    preview_state = st.session_state.get(preview_key)
+    with b2:
+        current_context = {
+            "target": target,
+            "source_kind": source_kind,
+            "claim_ids": picked_claims if source_kind == ui["output_source_claims"] else [],
+            "evidence_id": picked_evidence if source_kind == ui["output_source_evidence"] else "",
+            "project_id": project_id if target == ui["output_target_project"] else "",
+        }
+        can_create = (
+            isinstance(preview_state, dict)
+            and preview_state.get("kind") in {"blog", "project_update"}
+            and all(preview_state.get(key) == value for key, value in current_context.items())
+        )
+        if st.button(
+            ui["output_create_draft"],
+            key=f"output_create:{selected}",
+            disabled=not can_create,
+        ):
+            try:
+                if not isinstance(preview_state, dict):
+                    raise PublicSiteError(ui["output_preview_empty"])
+                kind = str(preview_state.get("kind", ""))
+                if kind == "blog":
+                    if preview_state.get("source_kind") == ui["output_source_claims"]:
+                        path = draft_blog_from_claims(
+                            selected,
+                            list(preview_state.get("claim_ids") or []),
+                        )
+                        refs = {"claim_refs": list(preview_state.get("claim_ids") or [])}
+                        source_ref = "output_studio:blog_from_claims"
+                    else:
+                        evidence_id = str(preview_state.get("evidence_id", "") or "")
+                        path = draft_blog_from_evidence(selected, evidence_id)
+                        refs = {"evidence_refs": [evidence_id]}
+                        source_ref = "output_studio:blog_from_evidence"
+                    refs["files"] = [str(path)]
+                    record_writeback_activity(
+                        selected,
+                        source_page="Public Site",
+                        target_owner="public_site",
+                        candidate_type="public_draft",
+                        source_ref=source_ref,
+                        title="Output Studio blog draft",
+                        refs=refs,
+                        payload=preview_state,
+                        changed_paths=[path],
+                        status="applied",
+                    )
+                    st.success(str(path))
+                elif kind == "project_update":
+                    project_id = str(preview_state.get("project_id", "") or "")
+                    path = draft_project_update_from_claims(
+                        selected,
+                        project_id,
+                        list(preview_state.get("claim_ids") or []),
+                    )
+                    record_writeback_activity(
+                        selected,
+                        source_page="Public Site",
+                        target_owner="public_site",
+                        candidate_type="public_draft",
+                        source_ref="output_studio:project_update_from_claims",
+                        title="Output Studio project update",
+                        refs={
+                            "claim_refs": list(preview_state.get("claim_ids") or []),
+                            "files": [str(path)],
+                        },
+                        payload=preview_state,
+                        changed_paths=[path],
+                        status="applied",
+                    )
+                    st.success(str(path))
+                else:
+                    raise PublicSiteError(ui["output_preview_empty"])
+                stash_git_backup_results()
+                clear_web_cache()
+            except Exception as exc:
+                st.error(str(exc))
+
+    preview_state = st.session_state.get(preview_key)
+    if isinstance(preview_state, dict):
+        candidate = preview_state.get("candidate")
+        if isinstance(candidate, dict):
+            _render_candidate_preview(candidate, ui=ui)
+    else:
+        st.caption(ui["output_preview_empty"])
 
 
 def _blog_editor_key(selected: str, slug: str, field: str) -> str:
@@ -6197,8 +6495,9 @@ if not all(path.exists() for path in required_paths):
 for file_path in required_paths:
     ensure_file_snapshot(file_path)
 
-tab_profile, tab_blog, tab_resume, tab_curation, tab_build = st.tabs(
+tab_output, tab_profile, tab_blog, tab_resume, tab_curation, tab_build = st.tabs(
     [
+        ui["output_studio"],
         ui["profile"],
         ui["blog"],
         ui["resume"],
@@ -6206,6 +6505,9 @@ tab_profile, tab_blog, tab_resume, tab_curation, tab_build = st.tabs(
         ui["build"],
     ]
 )
+
+with tab_output:
+    _render_output_studio_tab(selected=selected, ui=ui)
 
 with tab_profile:
     edit_col, preview_col = st.columns([0.95, 1.25])

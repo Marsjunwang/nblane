@@ -1750,6 +1750,30 @@ class TestPublicSite(unittest.TestCase):
             self.assertEqual(update["evidence_refs"], ["ev_public"])
             self.assertIn("Built a public demo", update["body"])
 
+    def test_project_update_candidate_from_claims_does_not_write_projects(self) -> None:
+        """Project update candidates preview provenance without writing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            projects_before = (profile / "projects.yaml").read_text(encoding="utf-8")
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.llm.is_configured", return_value=False),
+            ):
+                candidate = public_site.project_update_candidate_from_claims(
+                    "alice",
+                    "demo_project",
+                    ["claim:public"],
+                )
+
+            projects_after = (profile / "projects.yaml").read_text(encoding="utf-8")
+            self.assertEqual(projects_after, projects_before)
+            self.assertEqual(candidate.related_claims, ["claim:public"])
+            self.assertEqual(candidate.evidence_refs, ["ev_public"])
+            self.assertIn("Built a public demo", candidate.body)
+            self.assertTrue(candidate.warnings)
+
     def test_public_validation_rejects_bad_claim_refs(self) -> None:
         """Public validation checks related_claims and their evidence refs."""
         with tempfile.TemporaryDirectory() as tmp:

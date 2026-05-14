@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 EVIDENCE_TYPES = frozenset(
-    {"project", "paper", "course", "practice"}
+    {"project", "paper", "course", "practice", "learning"}
 )
 EVIDENCE_STRENGTHS = ("weak", "medium", "strong", "high_trust")
 EVIDENCE_CONFIDENCES = ("low", "medium", "high")

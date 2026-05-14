@@ -9,6 +9,7 @@ from nblane.core.io import (
     save_team,
 )
 from nblane.core.paths import TEAMS_DIR
+from nblane.core.team import team_scope_descriptor
 from nblane.web_cache import (
     clear_web_cache,
     load_product_pool,
@@ -59,6 +60,22 @@ if not teams:
 selected_team = st.selectbox(ui["team_select"], teams)
 _team_path = TEAMS_DIR / selected_team / "team.yaml"
 _pool_path = TEAMS_DIR / selected_team / "product-pool.yaml"
+scope = team_scope_descriptor(selected_team, selected_profile)
+
+with st.container(border=True):
+    c_owner, c_scope = st.columns([1, 2])
+    with c_owner:
+        st.caption(ui["write_owner"])
+        st.markdown(f"**{scope['write_owner']}**")
+    with c_scope:
+        st.caption(ui["team_scope"])
+        st.markdown(f"`{scope['team_scope']}`")
+    st.caption(ui["writes"])
+    st.code("\n".join(str(path) for path in scope["writes"]))
+    st.caption(ui["view_as_profile"])
+    st.markdown(f"`{scope['view_as_profile']}`")
+    st.caption(str(scope["profile_scope_note"]))
+
 ensure_file_snapshot(_team_path)
 ensure_file_snapshot(_pool_path)
 
@@ -119,6 +136,7 @@ with st.container(border=True):
         key="team_priorities_input",
     )
 
+    st.caption(ui["save_team_path"].format(path=f"teams/{selected_team}/team.yaml"))
     if st.button(
         ui["save_team"], type="primary"
     ):
@@ -285,6 +303,7 @@ for tab, pool_key in zip(pool_tabs, pool_keys):
 
 st.divider()
 
+st.caption(ui["save_pool_path"].format(path=f"teams/{selected_team}/product-pool.yaml"))
 if st.button(
     ui["save_pool"], type="primary"
 ):
