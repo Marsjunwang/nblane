@@ -972,17 +972,17 @@ def _set_primary_goal(profile: str, payload: dict) -> None:
     _save_goal_book_for_home(profile, book, ui["goal_primary_saved"])
 
 
-def _handle_home_dashboard_event(event: dict | None, profile: str) -> None:
-    """Handle one event emitted by the React Home dashboard."""
+def _handle_home_dashboard_event(event: dict | None, profile: str) -> bool:
+    """Handle one new event emitted by the React Home dashboard."""
     if not isinstance(event, dict):
-        return
+        return False
     action = str(event.get("action") or "").strip()
     if not action:
-        return
+        return False
     event_id = str(event.get("event_id") or "").strip()
     dedupe_key = f"_home_dashboard_event_{profile}"
     if event_id and st.session_state.get(dedupe_key) == event_id:
-        return
+        return False
     if event_id:
         st.session_state[dedupe_key] = event_id
     payload = event.get("payload")
@@ -990,44 +990,48 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> None:
 
     if action == "capture_inbox_submit":
         _capture_home_research_source(profile, payload)
-        return
+        return True
     if action == "edit_goal_submit":
         _edit_dashboard_goal(profile, payload)
-        return
+        return True
     if action == "create_goal_submit":
         _create_dashboard_goal(profile, payload)
-        return
+        return True
     if action == "archive_goal":
         _archive_dashboard_goal(profile, payload)
-        return
+        return True
     if action == "request_goal_skill_rule_match":
         _run_goal_skill_rule_match(profile, payload)
-        return
+        return True
     if action == "request_goal_skill_ai_match":
         _run_goal_skill_ai_match(profile, payload)
-        return
+        return True
     if action == "confirm_goal_skill_links":
         _confirm_goal_skill_links(profile, payload)
-        return
+        return True
     if action == "manual_goal_skill_link":
         _manual_goal_skill_link(profile, payload)
-        return
+        return True
     if action == "set_primary_goal":
         _set_primary_goal(profile, payload)
-        return
+        return True
     if action == "set_north_star_display_open_profile_context":
         st.session_state[f"_open_profile_context_{profile}"] = True
         st.rerun()
-        return
+        return True
     if action == "navigate":
         path = str(payload.get("path") or "").strip()
         if path:
             st.switch_page(path)
-        return
+            return True
+        return False
     if action == "open_section":
         section = str(payload.get("section") or "").strip()
         if section == "evidence":
             st.switch_page(EVIDENCE_REVIEW_PAGE)
+            return True
+        return False
+    return False
 
 
 def _page_link(path: str, label: str, *, help_text: str = "") -> None:
@@ -1778,6 +1782,11 @@ def _render_profile_context(profile: str) -> None:
                 )
 
 
+def _profile_context_open_requested(profile: str) -> bool:
+    """Return whether the dashboard asked to reveal Profile Context."""
+    return bool(st.session_state.get(f"_open_profile_context_{profile}", False))
+
+
 def _render_home_page() -> None:
     """Render the Daily Dashboard page."""
     _prepare_home_state()
@@ -1785,6 +1794,11 @@ def _render_home_page() -> None:
     st.title(ui["app_page_title"])
     st.caption(ui["app_caption"].format(profile=selected))
     st.caption(ui["page_context_line"])
+
+    profile_context_requested = _profile_context_open_requested(selected)
+    if profile_context_requested:
+        _render_profile_context(selected)
+        st.divider()
 
     home_dashboard_payload = dashboard_payload(selected)
     home_dashboard_event = st_home_dashboard(
@@ -1795,8 +1809,8 @@ def _render_home_page() -> None:
     if home_dashboard_event is None:
         _render_home_native_fallback(home_dashboard_payload)
     elif home_dashboard_event.get("action"):
-        _handle_home_dashboard_event(home_dashboard_event, selected)
-        return
+        if _handle_home_dashboard_event(home_dashboard_event, selected):
+            return
 
     with st.expander(ui["home_nav_expander"], expanded=False):
         st.caption(ui["home_nav_compact"])
@@ -1804,8 +1818,9 @@ def _render_home_page() -> None:
 
     _render_resume_ingest(selected)
 
-    st.divider()
-    _render_profile_context(selected)
+    if not profile_context_requested:
+        st.divider()
+        _render_profile_context(selected)
 
 
 def _navigation_pages() -> dict[str, list[st.Page]]:
