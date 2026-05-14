@@ -35,6 +35,14 @@ class TestPublicSiteSplit(unittest.TestCase):
         self.assertTrue(build.exists())
         self.assertIn("pages/6_Output_Studio.py", compat.read_text(encoding="utf-8"))
         self.assertIn("pages/10_Public_Build.py", compat.read_text(encoding="utf-8"))
+        output_text = output.read_text(encoding="utf-8")
+        build_text = build.read_text(encoding="utf-8")
+        self.assertIn("from nblane.web_output_studio import main", output_text)
+        self.assertIn("from nblane.web_public_build import main", build_text)
+        self.assertIn("main()", output_text)
+        self.assertIn("main()", build_text)
+        self.assertNotIn("import *", output_text)
+        self.assertNotIn("import *", build_text)
         self.assertNotIn("with tab_build", output_module.read_text(encoding="utf-8"))
 
     def test_app_navigation_uses_split_output_and_growth_order(self) -> None:

@@ -1431,6 +1431,51 @@ def _render_home_primary_actions() -> None:
         _page_link("pages/6_Output_Studio.py", ui["dashboard_action_output"])
 
 
+def _render_home_native_fallback(payload: dict) -> None:
+    """Render the native Streamlit Home summary when React is unavailable."""
+    kanban_summary = payload.get("kanban") or {}
+    skill_summary = payload.get("skills") or {}
+    pending_summary = payload.get("pending_evidence") or {}
+    health_summary = payload.get("health") or {}
+    public_summary = payload.get("public") or {}
+
+    _render_home_scope_strip(payload)
+    st.divider()
+
+    _render_home_priority_cards(payload)
+    st.divider()
+
+    _render_home_primary_actions()
+    st.divider()
+
+    with st.expander(ui["goal_module_title"], expanded=False):
+        _render_current_goal_module(selected)
+
+    st.divider()
+    _render_dashboard_status_overview(
+        kanban_summary,
+        skill_summary,
+        pending_summary,
+        health_summary,
+        public_summary,
+    )
+    st.divider()
+
+    _render_dashboard_doing(kanban_summary)
+    st.divider()
+
+    _render_dashboard_pending_evidence(pending_summary)
+    st.divider()
+
+    _render_dashboard_health(health_summary)
+    st.divider()
+
+    _render_dashboard_public(public_summary)
+    st.divider()
+
+    _render_quick_entries()
+
+
 def _render_resume_ingest(profile: str) -> None:
     with st.expander(ui["profile_evidence_import_expander"], expanded=False):
         st.caption(ui["profile_evidence_import_caption"])
@@ -1741,78 +1786,17 @@ def _render_home_page() -> None:
     st.caption(ui["app_caption"].format(profile=selected))
     st.caption(ui["page_context_line"])
 
-    kanban_summary = dashboard_kanban_summary(selected)
-    skill_summary = dashboard_skill_summary(selected)
-    pending_summary = dashboard_pending_evidence_summary(selected)
-    health_summary = dashboard_health_summary(selected)
-    public_summary = dashboard_public_summary(selected)
-    current_goal = _goal_book_for_home(selected).primary()
-    goal_payload = {
-        "is_set": current_goal is not None,
-        "projection": goal_for_ui(current_goal),
-    }
-    home_summary_payload = {
-        "profile": selected,
-        "primary_goal": goal_payload,
-        "goal": goal_payload,
-        "kanban": kanban_summary,
-        "pending_evidence": pending_summary,
-        "health": health_summary,
-        "ai": {
-            "configured": llm_client.is_configured(),
-            "label": llm_client.model_label() if llm_client.is_configured() else "",
-        },
-    }
-
-    _render_home_scope_strip(home_summary_payload)
-    st.divider()
-
-    _render_home_priority_cards(home_summary_payload)
-    st.divider()
-
-    _render_home_primary_actions()
-    st.divider()
-
-    with st.expander(ui["goal_module_title"], expanded=False):
-        _render_current_goal_module(selected)
-
-    st.divider()
-    _render_dashboard_status_overview(
-        kanban_summary,
-        skill_summary,
-        pending_summary,
-        health_summary,
-        public_summary,
+    home_dashboard_payload = dashboard_payload(selected)
+    home_dashboard_event = st_home_dashboard(
+        payload=home_dashboard_payload,
+        key=f"home_dashboard_{selected}",
+        height=900,
     )
-    st.divider()
-
-    with st.expander(ui["dashboard_canvas_section_title"], expanded=True):
-        st.caption(ui["dashboard_canvas_section_caption"])
-        home_dashboard_payload = dashboard_payload(selected)
-        home_dashboard_event = st_home_dashboard(
-            payload=home_dashboard_payload,
-            key=f"home_dashboard_{selected}",
-            height=900,
-        )
-        if home_dashboard_event is not None:
-            _handle_home_dashboard_event(home_dashboard_event, selected)
-            return
-
-    st.divider()
-
-    _render_dashboard_doing(kanban_summary)
-    st.divider()
-
-    _render_dashboard_pending_evidence(pending_summary)
-    st.divider()
-
-    _render_dashboard_health(health_summary)
-    st.divider()
-
-    _render_dashboard_public(public_summary)
-    st.divider()
-
-    _render_quick_entries()
+    if home_dashboard_event is None:
+        _render_home_native_fallback(home_dashboard_payload)
+    elif home_dashboard_event.get("action"):
+        _handle_home_dashboard_event(home_dashboard_event, selected)
+        return
 
     with st.expander(ui["home_nav_expander"], expanded=False):
         st.caption(ui["home_nav_compact"])

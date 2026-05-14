@@ -6461,305 +6461,311 @@ def _render_blog_tab(
             st.error(str(exc))
 
 
-ui = _ui()
+def main() -> None:
+    """Render the Output Studio page."""
+    ui = _ui()
 
-require_login()
-selected = select_profile()
-render_git_backup_notices()
+    require_login()
+    selected = select_profile()
+    render_git_backup_notices()
 
-root = profile_dir(selected)
-required_paths = [
-    _path(selected, PUBLIC_PROFILE_FILENAME),
-    _path(selected, RESUME_SOURCE_FILENAME),
-    _path(selected, PROJECTS_FILENAME),
-    _path(selected, OUTPUTS_FILENAME),
-]
-
-_head_l, _head_goal = st.columns(
-    [5, 2],
-    gap="medium",
-    vertical_alignment="top",
-)
-with _head_l:
-    st.title(ui["title"])
-    st.caption(ui["caption"])
-with _head_goal:
-    render_current_goal_strip(selected, compact=True, align="right")
-
-if not all(path.exists() for path in required_paths):
-    st.warning(ui["init_needed"])
-    if st.button(ui["init"]):
-        init_public_layer(selected)
-        stash_git_backup_results()
-        clear_web_cache()
-        st.rerun()
-    st.stop()
-
-for file_path in required_paths:
-    ensure_file_snapshot(file_path)
-
-tab_output, tab_profile, tab_blog, tab_resume, tab_curation = st.tabs(
-    [
-        ui["output_studio"],
-        ui["profile"],
-        ui["blog"],
-        ui["resume"],
-        ui["curation"],
+    root = profile_dir(selected)
+    required_paths = [
+        _path(selected, PUBLIC_PROFILE_FILENAME),
+        _path(selected, RESUME_SOURCE_FILENAME),
+        _path(selected, PROJECTS_FILENAME),
+        _path(selected, OUTPUTS_FILENAME),
     ]
-)
 
-with tab_output:
-    _render_output_studio_tab(selected=selected, ui=ui)
+    _head_l, _head_goal = st.columns(
+        [5, 2],
+        gap="medium",
+        vertical_alignment="top",
+    )
+    with _head_l:
+        st.title(ui["title"])
+        st.caption(ui["caption"])
+    with _head_goal:
+        render_current_goal_strip(selected, compact=True, align="right")
 
-with tab_profile:
-    edit_col, preview_col = st.columns([0.95, 1.25])
-    with edit_col:
-        profile_override, media_overrides = _render_profile_form(
-            selected=selected,
-            root=root,
-            ui=ui,
-        )
-        with st.expander(ui["raw_yaml"]):
-            _render_yaml_editor(
-                key="public_profile_yaml",
-                path=_path(selected, PUBLIC_PROFILE_FILENAME),
-                label=PUBLIC_PROFILE_FILENAME,
+    if not all(path.exists() for path in required_paths):
+        st.warning(ui["init_needed"])
+        if st.button(ui["init"]):
+            init_public_layer(selected)
+            stash_git_backup_results()
+            clear_web_cache()
+            st.rerun()
+        st.stop()
+
+    for file_path in required_paths:
+        ensure_file_snapshot(file_path)
+
+    tab_output, tab_profile, tab_blog, tab_resume, tab_curation = st.tabs(
+        [
+            ui["output_studio"],
+            ui["profile"],
+            ui["blog"],
+            ui["resume"],
+            ui["curation"],
+        ]
+    )
+
+    with tab_output:
+        _render_output_studio_tab(selected=selected, ui=ui)
+
+    with tab_profile:
+        edit_col, preview_col = st.columns([0.95, 1.25])
+        with edit_col:
+            profile_override, media_overrides = _render_profile_form(
                 selected=selected,
+                root=root,
                 ui=ui,
             )
-    with preview_col:
-        _render_site_preview(
+            with st.expander(ui["raw_yaml"]):
+                _render_yaml_editor(
+                    key="public_profile_yaml",
+                    path=_path(selected, PUBLIC_PROFILE_FILENAME),
+                    label=PUBLIC_PROFILE_FILENAME,
+                    selected=selected,
+                    ui=ui,
+                )
+        with preview_col:
+            _render_site_preview(
+                selected=selected,
+                profile_override=profile_override,
+                media_overrides=media_overrides,
+                ui=ui,
+            )
+
+    with tab_blog:
+        _render_blog_tab(selected=selected, root=root, ui=ui)
+
+    with tab_resume:
+        _render_yaml_editor(
+            key="resume_source_yaml",
+            path=_path(selected, RESUME_SOURCE_FILENAME),
+            label=RESUME_SOURCE_FILENAME,
             selected=selected,
-            profile_override=profile_override,
-            media_overrides=media_overrides,
             ui=ui,
         )
-
-with tab_blog:
-    _render_blog_tab(selected=selected, root=root, ui=ui)
-
-with tab_resume:
-    _render_yaml_editor(
-        key="resume_source_yaml",
-        path=_path(selected, RESUME_SOURCE_FILENAME),
-        label=RESUME_SOURCE_FILENAME,
-        selected=selected,
-        ui=ui,
-    )
-    source = load_resume_source(selected)
-    st.subheader(ui["preview"])
-    st.markdown(render_resume_markdown(source))
-    with st.expander(ui["draft_resume"]):
-        target = st.text_input(ui["target"])
-        if st.button(ui["draft_resume"]):
-            if not target.strip():
-                st.warning(ui["target"])
-            else:
-                html_path, md_path = draft_resume_for_target(
-                    selected,
-                    target.strip(),
-                )
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(f"{html_path}\n{md_path}")
-    with st.expander(ui["draft_resume_bullets_from_claims"]):
-        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
-        if not claims:
-            st.caption(ui["accepted_claims_empty"])
-        claim_ids = [str(claim.get("id", "")) for claim in claims]
-        picked_claims = st.multiselect(
-            ui["claim_ids"],
-            options=claim_ids,
-            format_func=lambda claim_id: next(
-                (
-                    f"{claim_id} - {claim.get('text', '')}"
-                    for claim in claims
-                    if str(claim.get("id", "")) == claim_id
+        source = load_resume_source(selected)
+        st.subheader(ui["preview"])
+        st.markdown(render_resume_markdown(source))
+        with st.expander(ui["draft_resume"]):
+            target = st.text_input(ui["target"])
+            if st.button(ui["draft_resume"]):
+                if not target.strip():
+                    st.warning(ui["target"])
+                else:
+                    html_path, md_path = draft_resume_for_target(
+                        selected,
+                        target.strip(),
+                    )
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(f"{html_path}\n{md_path}")
+        with st.expander(ui["draft_resume_bullets_from_claims"]):
+            claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+            if not claims:
+                st.caption(ui["accepted_claims_empty"])
+            claim_ids = [str(claim.get("id", "")) for claim in claims]
+            picked_claims = st.multiselect(
+                ui["claim_ids"],
+                options=claim_ids,
+                format_func=lambda claim_id: next(
+                    (
+                        f"{claim_id} - {claim.get('text', '')}"
+                        for claim in claims
+                        if str(claim.get("id", "")) == claim_id
+                    ),
+                    claim_id,
                 ),
-                claim_id,
-            ),
-            key=f"resume_claim_ids:{selected}",
-        )
-        if st.button(
-            ui["draft_resume_bullets_from_claims"],
-            key=f"resume_generate_claim_bullets:{selected}",
-            disabled=not picked_claims,
-        ):
-            try:
-                bullets = resume_bullet_candidates_from_claims(
-                    selected,
-                    picked_claims,
-                )
-                st.session_state[f"resume_claim_bullets:{selected}"] = [
-                    bullet.to_dict()
-                    for bullet in bullets
-                ]
-            except Exception as exc:
-                st.error(str(exc))
-        bullets = st.session_state.get(f"resume_claim_bullets:{selected}", [])
-        if isinstance(bullets, list) and bullets:
-            st.code(
-                yaml.dump(
-                    bullets,
-                    allow_unicode=True,
-                    default_flow_style=False,
-                    sort_keys=False,
-                ),
-                language="yaml",
+                key=f"resume_claim_ids:{selected}",
             )
-
-with tab_curation:
-    st.caption(ui["curation_caption"])
-    project_path = _path(selected, PROJECTS_FILENAME)
-    ensure_file_snapshot(project_path)
-    contexts = evidence_contexts(selected)
-    rows = [
-        {
-            "id": ctx.id,
-            "type": ctx.type,
-            "date": ctx.date,
-            "title": ctx.title,
-            "skills": ", ".join(ctx.skill_refs),
-            "used_by_projects": ", ".join(ctx.used_by_projects),
-            "used_by_outputs": ", ".join(ctx.used_by_outputs),
-            "used_by_posts": ", ".join(ctx.used_by_posts),
-        }
-        for ctx in contexts
-    ]
-    st.subheader(ui["evidence"])
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-
-    with st.expander(ui["suggest_groups"]):
-        groups = suggest_groups(selected)
-        if groups:
-            st.code(
-                yaml.dump(
-                    [group.to_dict() for group in groups],
-                    allow_unicode=True,
-                    default_flow_style=False,
-                    sort_keys=False,
-                ),
-                language="yaml",
-            )
-        else:
-            st.write("-")
-
-    with st.form("create_project_group"):
-        evidence_options = [ctx.id for ctx in contexts]
-        selected_evidence = st.multiselect(
-            ui["evidence"],
-            options=evidence_options,
-        )
-        new_project_id = st.text_input(ui["project_id"])
-        new_project_title = st.text_input(ui["title_label"])
-        new_project_summary = st.text_area(
-            ui["project_summary"],
-            height=120,
-        )
-        raw_tags = st.text_input(ui["tags"])
-        submitted = st.form_submit_button(ui["create_project_group"])
-        if submitted:
-            tags = [
-                tag.strip()
-                for tag in raw_tags.split(",")
-                if tag.strip()
-            ]
-            try:
-                assert_files_current([project_path])
-                result = group_project(
-                    selected,
-                    project_id=new_project_id,
-                    title=new_project_title,
-                    evidence_ids=selected_evidence,
-                    summary=new_project_summary,
-                    tags=tags,
-                )
-                refresh_file_snapshots([project_path])
-                stash_git_backup_results()
-                clear_web_cache()
-                if result.warnings:
-                    st.warning("\n".join(result.warnings))
-                st.success(ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-
-    st.subheader(ui["current_projects"])
-    projects = load_projects(selected)
-    project_rows = [
-        {
-            "id": str(project.get("id", "") or ""),
-            "status": str(project.get("status", "") or ""),
-            "title": str(project.get("title", "") or ""),
-            "evidence_refs": ", ".join(
-                str(ref)
-                for ref in (project.get("evidence_refs") or [])
-                if str(ref).strip()
-            ),
-        }
-        for project in projects
-        if isinstance(project, dict)
-    ]
-    st.dataframe(project_rows, use_container_width=True, hide_index=True)
-
-    draft_projects = [
-        project
-        for project in projects
-        if isinstance(project, dict)
-        and str(project.get("status", "draft") or "draft") == "draft"
-    ]
-    if draft_projects:
-        project_to_edit = st.selectbox(
-            ui["update_project_refs"],
-            draft_projects,
-            format_func=lambda p: str(
-                p.get("title", "") or p.get("id", "")
-            ),
-        )
-        old_refs = [
-            str(ref).strip()
-            for ref in (project_to_edit.get("evidence_refs") or [])
-            if str(ref).strip()
-        ]
-        refs_to_keep = st.multiselect(
-            ui["keep_evidence_refs"],
-            options=old_refs,
-            default=old_refs,
-        )
-        if st.button(ui["update_project_refs"]):
-            try:
-                assert_files_current([project_path])
-                raw = yaml.safe_load(
-                    project_path.read_text(encoding="utf-8")
-                ) or {}
-                raw_projects = raw.get("projects") or []
-                for project in raw_projects:
-                    if not isinstance(project, dict):
-                        continue
-                    if str(project.get("id", "") or "") == str(
-                        project_to_edit.get("id", "") or ""
-                    ):
-                        project["evidence_refs"] = refs_to_keep
-                        break
-                project_path.write_text(
+            if st.button(
+                ui["draft_resume_bullets_from_claims"],
+                key=f"resume_generate_claim_bullets:{selected}",
+                disabled=not picked_claims,
+            ):
+                try:
+                    bullets = resume_bullet_candidates_from_claims(
+                        selected,
+                        picked_claims,
+                    )
+                    st.session_state[f"resume_claim_bullets:{selected}"] = [
+                        bullet.to_dict()
+                        for bullet in bullets
+                    ]
+                except Exception as exc:
+                    st.error(str(exc))
+            bullets = st.session_state.get(f"resume_claim_bullets:{selected}", [])
+            if isinstance(bullets, list) and bullets:
+                st.code(
                     yaml.dump(
-                        {"projects": raw_projects},
+                        bullets,
                         allow_unicode=True,
                         default_flow_style=False,
                         sort_keys=False,
                     ),
-                    encoding="utf-8",
+                    language="yaml",
                 )
-                git_backup.record_change(
-                    [project_path],
-                    action=(
-                        f"update {selected}/projects.yaml evidence refs"
+
+    with tab_curation:
+        st.caption(ui["curation_caption"])
+        project_path = _path(selected, PROJECTS_FILENAME)
+        ensure_file_snapshot(project_path)
+        contexts = evidence_contexts(selected)
+        rows = [
+            {
+                "id": ctx.id,
+                "type": ctx.type,
+                "date": ctx.date,
+                "title": ctx.title,
+                "skills": ", ".join(ctx.skill_refs),
+                "used_by_projects": ", ".join(ctx.used_by_projects),
+                "used_by_outputs": ", ".join(ctx.used_by_outputs),
+                "used_by_posts": ", ".join(ctx.used_by_posts),
+            }
+            for ctx in contexts
+        ]
+        st.subheader(ui["evidence"])
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+        with st.expander(ui["suggest_groups"]):
+            groups = suggest_groups(selected)
+            if groups:
+                st.code(
+                    yaml.dump(
+                        [group.to_dict() for group in groups],
+                        allow_unicode=True,
+                        default_flow_style=False,
+                        sort_keys=False,
                     ),
+                    language="yaml",
                 )
-                refresh_file_snapshots([project_path])
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            else:
+                st.write("-")
+
+        with st.form("create_project_group"):
+            evidence_options = [ctx.id for ctx in contexts]
+            selected_evidence = st.multiselect(
+                ui["evidence"],
+                options=evidence_options,
+            )
+            new_project_id = st.text_input(ui["project_id"])
+            new_project_title = st.text_input(ui["title_label"])
+            new_project_summary = st.text_area(
+                ui["project_summary"],
+                height=120,
+            )
+            raw_tags = st.text_input(ui["tags"])
+            submitted = st.form_submit_button(ui["create_project_group"])
+            if submitted:
+                tags = [
+                    tag.strip()
+                    for tag in raw_tags.split(",")
+                    if tag.strip()
+                ]
+                try:
+                    assert_files_current([project_path])
+                    result = group_project(
+                        selected,
+                        project_id=new_project_id,
+                        title=new_project_title,
+                        evidence_ids=selected_evidence,
+                        summary=new_project_summary,
+                        tags=tags,
+                    )
+                    refresh_file_snapshots([project_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    if result.warnings:
+                        st.warning("\n".join(result.warnings))
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+        st.subheader(ui["current_projects"])
+        projects = load_projects(selected)
+        project_rows = [
+            {
+                "id": str(project.get("id", "") or ""),
+                "status": str(project.get("status", "") or ""),
+                "title": str(project.get("title", "") or ""),
+                "evidence_refs": ", ".join(
+                    str(ref)
+                    for ref in (project.get("evidence_refs") or [])
+                    if str(ref).strip()
+                ),
+            }
+            for project in projects
+            if isinstance(project, dict)
+        ]
+        st.dataframe(project_rows, use_container_width=True, hide_index=True)
+
+        draft_projects = [
+            project
+            for project in projects
+            if isinstance(project, dict)
+            and str(project.get("status", "draft") or "draft") == "draft"
+        ]
+        if draft_projects:
+            project_to_edit = st.selectbox(
+                ui["update_project_refs"],
+                draft_projects,
+                format_func=lambda p: str(
+                    p.get("title", "") or p.get("id", "")
+                ),
+            )
+            old_refs = [
+                str(ref).strip()
+                for ref in (project_to_edit.get("evidence_refs") or [])
+                if str(ref).strip()
+            ]
+            refs_to_keep = st.multiselect(
+                ui["keep_evidence_refs"],
+                options=old_refs,
+                default=old_refs,
+            )
+            if st.button(ui["update_project_refs"]):
+                try:
+                    assert_files_current([project_path])
+                    raw = yaml.safe_load(
+                        project_path.read_text(encoding="utf-8")
+                    ) or {}
+                    raw_projects = raw.get("projects") or []
+                    for project in raw_projects:
+                        if not isinstance(project, dict):
+                            continue
+                        if str(project.get("id", "") or "") == str(
+                            project_to_edit.get("id", "") or ""
+                        ):
+                            project["evidence_refs"] = refs_to_keep
+                            break
+                    project_path.write_text(
+                        yaml.dump(
+                            {"projects": raw_projects},
+                            allow_unicode=True,
+                            default_flow_style=False,
+                            sort_keys=False,
+                        ),
+                        encoding="utf-8",
+                    )
+                    git_backup.record_change(
+                        [project_path],
+                        action=(
+                            f"update {selected}/projects.yaml evidence refs"
+                        ),
+                    )
+                    refresh_file_snapshots([project_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+
+if __name__ == "__main__":
+    main()

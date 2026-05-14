@@ -184,4 +184,5 @@ def main() -> None:
     _render_site_preview(selected, include_drafts=include_drafts, ui=ui)
 
 
-main()
+if __name__ == "__main__":
+    main()
