@@ -558,6 +558,8 @@ Goal
 - Gap Analysis 已支持从手动输入、privacy-safe current goal、Doing / Queue kanban task 选择上下文；Kanban inline Gap 也会带入允许进入 agent context 的 current goal。
 - GapResult 已记录 source provenance 和 goal context 使用状态；展示和 CLI / LLM 格式化会显示来源，但不改变原有匹配结果结构。
 - Public Site / Output Studio 的 Blog front matter 已支持 `related_claims`；可从 accepted claims 生成 Blog 候选/草稿、project update 草稿和 resume bullet 候选，并在发布校验中检查 claim id、accepted 状态和 supporting evidence refs。
+- Review 已拆为独立页面：基于周 / 阶段窗口生成 evidence、next action、public draft 候选；Health 保持只读体检。
+- Agent Activity / Writeback Review 已有骨架：`agent-activity.yaml` 记录跨页面 candidate / patch / writeback 的 pending、applied、failed、dismissed 状态，Review 来源的 pending 候选可在 Activity 页应用。
 
 
 ## 7. 已知摩擦与 backlog
@@ -573,7 +575,7 @@ Goal
 | Capture 入口偏弱                     | 捕获应跨页面低摩擦进入 inbox，而不是只作为首页普通操作                                           | 需设计 / 需改代码 |
 | 外部研究资料入口缺失                       | 最小 Research Source Inbox 已落地；后续仍需 connector、Reading Room、claim / citation 链路         | 已有最小实现 / 后续增强 |
 | 论文阅读与翻译链路缺失                      | 需要 Reading Room 承载翻译、摘要、术语解释、claim 提取和 citation，而不是塞进 Public Site        | 需设计 / 需改代码 |
-| Agent 写回审阅分散                     | AI/Agent candidates 分散在看板、差距、技能树、Public Site，缺统一审阅入口                     | 需设计 / 需改代码 |
+| Agent 写回审阅分散                     | 已有 Agent Activity 骨架；仍需接入更多 owner 页面和远程 Agent run 记录                     | 已有骨架 / 后续增强 |
 | 远程 Agent 执行缺少项目闭环                | Codex / Claude Code 等远程改项目应关联 Project Board / Kanban task，并进入 patch 审阅   | 需设计 / 需改代码 |
 | 外部 connector 隐私和授权边界             | X/Twitter、小红书等平台应支持手动导入 fallback，cookie / token 不得明文写入 profile           | 需设计 / 需改代码 |
 | Team View + Profile              | `select_profile()` 已显示但团队数据写入 `teams/`，需用硬性 scope 标识区分 view-as 与写入 owner | 需改代码       |
@@ -582,7 +584,7 @@ Goal
 | 中文导航纯净度                          | `home_nav` 等文案中仍有英文页名                                                    | 需改代码       |
 | 未配置 AI 的提示                       | 应统一成共享空状态组件或同一组 i18n key                                                 | 需改代码       |
 | Emoji 密度                         | 可选无 emoji 模式已有基础，但页面使用还需收敛                                               | 需改代码       |
-| Health / Review 职责混合             | Health 应默认只读，Review 应生成候选；短期可合页但职责需拆清                                    | 需设计 / 需改代码 |
+| Health / Review 职责混合             | Review 已拆独立入口，Health 保持只读；后续可增强月复盘和阶段复盘模板                                    | 已拆分 / 后续增强 |
 | Public Site 单页过重                 | Blog / Resume / Projects / Build 功能密度高                                   | 后续拆分       |
 | 推荐动线 vs 页面编号                     | 当前 `1_`-`6_` 顺序偏文件模型，可逐步按日常动线重排                                          | 需改代码       |
 

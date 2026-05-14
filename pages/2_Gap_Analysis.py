@@ -11,6 +11,7 @@ from nblane.core.gap_context import (
 )
 from nblane.core import learned_keywords as lk_store
 from nblane.core import llm as llm_client
+from nblane.core.review_actions import record_writeback_activity
 from nblane.core.io import (
     STATUSES,
     profile_dir,
@@ -638,16 +639,52 @@ if result.gaps:
                         }
                     )
             tree["nodes"] = nodes
-            save_skill_tree(selected, tree)
-            clear_web_cache()
-            refresh_file_snapshots([_tree_path])
-            stash_git_backup_results()
-            st.success(
-                ui["success_updated"]
-                + " "
-                + ", ".join(
-                    f"{k}→{v}"
-                    for k, v in updates.items()
+            try:
+                save_skill_tree(selected, tree)
+                record_writeback_activity(
+                    selected,
+                    source_page="Gap Analysis",
+                    target_owner="skill_tree",
+                    candidate_type="status_update",
+                    source_ref="gap:skill_status",
+                    title="Applied Gap skill status writeback",
+                    summary=", ".join(f"{k}->{v}" for k, v in updates.items()),
+                    refs={
+                        "skill_refs": list(updates.keys()),
+                        "files": [str(_tree_path)],
+                    },
+                    payload={"updates": dict(updates)},
+                    changed_paths=[_tree_path],
+                    status="applied",
                 )
-            )
-            st.rerun()
+                clear_web_cache()
+                refresh_file_snapshots([_tree_path])
+                stash_git_backup_results()
+                st.success(
+                    ui["success_updated"]
+                    + " "
+                    + ", ".join(
+                        f"{k}→{v}"
+                        for k, v in updates.items()
+                    )
+                )
+                st.rerun()
+            except Exception as exc:
+                record_writeback_activity(
+                    selected,
+                    source_page="Gap Analysis",
+                    target_owner="skill_tree",
+                    candidate_type="status_update",
+                    source_ref="gap:skill_status",
+                    title="Failed Gap skill status writeback",
+                    summary=", ".join(f"{k}->{v}" for k, v in updates.items()),
+                    refs={
+                        "skill_refs": list(updates.keys()),
+                        "files": [str(_tree_path)],
+                    },
+                    payload={"updates": dict(updates)},
+                    error=str(exc),
+                    status="failed",
+                )
+                stash_git_backup_results()
+                st.error(str(exc))

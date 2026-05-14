@@ -32,8 +32,12 @@ _head_l, _head_goal = st.columns(
 )
 with _head_l:
     st.title(ui["title"])
+    st.caption(ui["page_context_line"])
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
+
+st.info(ui["review_link_help"])
+st.page_link("pages/8_Review.py", label=ui["review_link"])
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric(ui["errors"], counts["error"])

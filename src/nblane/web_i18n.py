@@ -153,7 +153,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "sidebar_nav_research": "Research",
         "sidebar_nav_skill_map": "Skill Map",
         "sidebar_nav_gap": "Gap Analysis",
+        "sidebar_nav_review": "Review",
         "sidebar_nav_health": "Profile Health",
+        "sidebar_nav_agent_activity": "Agent Activity",
         "sidebar_nav_public": "Public Site",
         "sidebar_nav_team": "Team View",
     },
@@ -242,7 +244,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "sidebar_nav_research": "Research",
         "sidebar_nav_skill_map": "Skill Map",
         "sidebar_nav_gap": "差距分析",
+        "sidebar_nav_review": "Review",
         "sidebar_nav_health": "Profile Health",
+        "sidebar_nav_agent_activity": "Agent Activity",
         "sidebar_nav_public": "Public Site",
         "sidebar_nav_team": "Team View",
     },
@@ -2446,6 +2450,14 @@ _PROFILE_HEALTH: dict[str, dict[str, str]] = {
     "en": {
         "page_title": "Profile Health",
         "title": "Profile Health",
+        "page_context_line": (
+            "Read-only health checks for profile trust, context readiness, "
+            "and publication risks."
+        ),
+        "review_link": "Open Review",
+        "review_link_help": (
+            "Review candidates live in the Review page; Health stays read-only."
+        ),
         "errors": "Errors",
         "warnings": "Warnings",
         "info": "Info",
@@ -2460,6 +2472,13 @@ _PROFILE_HEALTH: dict[str, dict[str, str]] = {
     "zh": {
         "page_title": "档案健康检查",
         "title": "档案健康检查",
+        "page_context_line": (
+            "只读体检页：检查档案可信度、上下文可发布性和公开风险。"
+        ),
+        "review_link": "打开 Review",
+        "review_link_help": (
+            "复盘候选在 Review 页面生成；Health 保持只读。"
+        ),
         "errors": "错误",
         "warnings": "警告",
         "info": "信息",
@@ -2470,6 +2489,152 @@ _PROFILE_HEALTH: dict[str, dict[str, str]] = {
         "severity_error": "错误",
         "severity_warning": "警告",
         "severity_info": "信息",
+    },
+}
+
+_REVIEW: dict[str, dict[str, str]] = {
+    "en": {
+        "page_title": "Review · nblane",
+        "title": "Review",
+        "page_context_line": (
+            "Turn weekly or stage review inputs into evidence, next action, "
+            "and public draft candidates."
+        ),
+        "preset": "Window",
+        "preset_current_week": "Current week",
+        "preset_previous_week": "Previous week",
+        "preset_last_30_days": "Last 30 days",
+        "preset_custom": "Custom",
+        "start_date": "Start",
+        "end_date": "End",
+        "generate": "Generate candidates",
+        "summary": "Summary",
+        "done_tasks": "Done tasks",
+        "activity": "Activity",
+        "learning": "Learning",
+        "inbox": "Inbox",
+        "evidence_candidates": "Evidence candidates",
+        "next_action_candidates": "Next action candidates",
+        "public_draft_candidates": "Public draft candidates",
+        "method_notes": "Method notes",
+        "agent_activity": "Agent Activity",
+        "save_to_activity": "Save selected to Activity",
+        "apply_selected": "Apply selected",
+        "create_public_drafts": "Create selected drafts",
+        "mark_crystallized": "Mark source Done tasks crystallized",
+        "no_candidates": "No candidates for this window.",
+        "saved": "Saved to Activity.",
+        "applied": "Applied.",
+        "failed": "Failed",
+        "select_rows": "Select rows",
+        "candidate_preview": "Preview",
+        "open_activity": "Open Agent Activity",
+        "public_draft_note": "Creates draft blog posts only; it never publishes.",
+    },
+    "zh": {
+        "page_title": "Review · nblane",
+        "title": "Review",
+        "page_context_line": (
+            "把周复盘或阶段复盘整理成 evidence、next action 和 public draft 候选。"
+        ),
+        "preset": "时间窗口",
+        "preset_current_week": "本周",
+        "preset_previous_week": "上周",
+        "preset_last_30_days": "最近 30 天",
+        "preset_custom": "自定义",
+        "start_date": "开始",
+        "end_date": "结束",
+        "generate": "生成候选",
+        "summary": "摘要",
+        "done_tasks": "Done 任务",
+        "activity": "Activity",
+        "learning": "Learning",
+        "inbox": "Inbox",
+        "evidence_candidates": "Evidence 候选",
+        "next_action_candidates": "Next action 候选",
+        "public_draft_candidates": "Public draft 候选",
+        "method_notes": "Method notes",
+        "agent_activity": "Agent Activity",
+        "save_to_activity": "保存所选到 Activity",
+        "apply_selected": "应用所选",
+        "create_public_drafts": "生成所选草稿",
+        "mark_crystallized": "标记来源 Done task 为 crystallized",
+        "no_candidates": "这个时间窗口暂无候选。",
+        "saved": "已保存到 Activity。",
+        "applied": "已应用。",
+        "failed": "失败",
+        "select_rows": "选择行",
+        "candidate_preview": "预览",
+        "open_activity": "打开 Agent Activity",
+        "public_draft_note": "只创建 draft blog，不会发布。",
+    },
+}
+
+_AGENT_ACTIVITY: dict[str, dict[str, str]] = {
+    "en": {
+        "page_title": "Agent Activity · nblane",
+        "title": "Agent Activity",
+        "page_context_line": (
+            "Review cross-page candidates, patches, writebacks, and failed "
+            "apply attempts."
+        ),
+        "status": "Status",
+        "kind": "Kind",
+        "candidate_type": "Candidate type",
+        "source_page": "Source page",
+        "target_owner": "Target owner",
+        "all": "All",
+        "pending": "Pending",
+        "applied": "Applied",
+        "failed": "Failed",
+        "dismissed": "Dismissed",
+        "superseded": "Superseded",
+        "items": "Items",
+        "no_items": "No Activity items match the current filters.",
+        "payload": "Payload",
+        "preview": "Preview",
+        "refs": "Refs",
+        "warnings": "Warnings",
+        "changed_paths": "Changed paths",
+        "apply": "Apply",
+        "dismiss": "Dismiss",
+        "reopen": "Reopen",
+        "open_owner": "Open owner page",
+        "saved": "Saved.",
+        "applied_message": "Applied.",
+        "apply_unavailable": "Only pending Review candidates can be applied here.",
+    },
+    "zh": {
+        "page_title": "Agent Activity · nblane",
+        "title": "Agent Activity",
+        "page_context_line": (
+            "审查跨页面候选、patch、写回结果和失败状态。"
+        ),
+        "status": "状态",
+        "kind": "类型",
+        "candidate_type": "候选类型",
+        "source_page": "来源页面",
+        "target_owner": "目标 owner",
+        "all": "全部",
+        "pending": "待审阅",
+        "applied": "已应用",
+        "failed": "失败",
+        "dismissed": "已丢弃",
+        "superseded": "已替代",
+        "items": "条目",
+        "no_items": "当前过滤条件下没有 Activity 条目。",
+        "payload": "Payload",
+        "preview": "预览",
+        "refs": "Refs",
+        "warnings": "警告",
+        "changed_paths": "变更文件",
+        "apply": "应用",
+        "dismiss": "丢弃",
+        "reopen": "重新打开",
+        "open_owner": "打开 owner 页面",
+        "saved": "已保存。",
+        "applied_message": "已应用。",
+        "apply_unavailable": "这里只能应用 pending 的 Review 候选。",
     },
 }
 
@@ -2615,6 +2780,22 @@ def profile_health_ui() -> dict[str, str]:
     lg = _lang()
     merged = dict(_COMMON.get(lg, _COMMON["en"]))
     merged.update(_PROFILE_HEALTH.get(lg, _PROFILE_HEALTH["en"]))
+    return merged
+
+
+def review_ui() -> dict[str, str]:
+    """Review page."""
+    lg = _lang()
+    merged = dict(_COMMON.get(lg, _COMMON["en"]))
+    merged.update(_REVIEW.get(lg, _REVIEW["en"]))
+    return merged
+
+
+def agent_activity_ui() -> dict[str, str]:
+    """Agent Activity page."""
+    lg = _lang()
+    merged = dict(_COMMON.get(lg, _COMMON["en"]))
+    merged.update(_AGENT_ACTIVITY.get(lg, _AGENT_ACTIVITY["en"]))
     return merged
 
 

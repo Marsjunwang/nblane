@@ -35,6 +35,7 @@ from nblane.core import ai_blog_reviewer
 from nblane.core import visual_candidate_store
 from nblane.core import visual_generation
 from nblane.core.claims import accepted_claims
+from nblane.core.review_actions import record_writeback_activity
 from nblane.core.public_curation import (
     evidence_contexts,
     group_project,
@@ -3073,6 +3074,18 @@ def _persist_blog_editor(
         blocks_json=blocks_json,
         action=f"update {selected}/blog/{post_path.name}",
     )
+    record_writeback_activity(
+        selected,
+        source_page="Public Site",
+        target_owner="public_site",
+        candidate_type="blog_patch",
+        source_ref=f"blog:{route}",
+        title=f"Saved blog editor changes: {route}",
+        refs={"files": [str(saved), str(blog_sidecar_path_for_slug(selected, route))]},
+        payload={"slug": route, "title": meta.get("title", "")},
+        changed_paths=[saved, blog_sidecar_path_for_slug(selected, route), *changed],
+        status="applied",
+    )
     refresh_file_snapshots([saved, blog_sidecar_path_for_slug(selected, route), *changed])
     stash_git_backup_results()
     clear_web_cache()
@@ -3830,6 +3843,25 @@ def _render_blog_react_shell_fragment(
                 selected,
                 [str(item).strip() for item in claim_ids if str(item).strip()],
             )
+            record_writeback_activity(
+                selected,
+                source_page="Public Site",
+                target_owner="public_site",
+                candidate_type="public_draft",
+                source_ref="blog:draft_from_claims",
+                title="Draft blog from claims",
+                refs={
+                    "claim_refs": [
+                        str(item).strip()
+                        for item in claim_ids
+                        if str(item).strip()
+                    ],
+                    "files": [str(path)],
+                },
+                payload={"claim_ids": claim_ids},
+                changed_paths=[path],
+                status="applied",
+            )
             st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
             stash_git_backup_results()
             clear_web_cache()
@@ -3849,6 +3881,18 @@ def _render_blog_react_shell_fragment(
         )
         try:
             path = draft_blog_from_kanban_done(selected)
+            record_writeback_activity(
+                selected,
+                source_page="Public Site",
+                target_owner="public_site",
+                candidate_type="public_draft",
+                source_ref="blog:draft_from_done",
+                title="Draft blog from Done tasks",
+                refs={"files": [str(path)]},
+                payload={"source": "kanban_done"},
+                changed_paths=[path],
+                status="applied",
+            )
             st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
             stash_git_backup_results()
             clear_web_cache()
@@ -4743,6 +4787,18 @@ def _render_blog_article_panel(
         ):
             try:
                 path = draft_blog_from_claims(selected, picked_claims)
+                record_writeback_activity(
+                    selected,
+                    source_page="Public Site",
+                    target_owner="public_site",
+                    candidate_type="public_draft",
+                    source_ref="blog:draft_from_claims",
+                    title="Draft blog from claims",
+                    refs={"claim_refs": picked_claims, "files": [str(path)]},
+                    payload={"claim_ids": picked_claims},
+                    changed_paths=[path],
+                    status="applied",
+                )
                 st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
                 stash_git_backup_results()
                 clear_web_cache()
@@ -4754,6 +4810,18 @@ def _render_blog_article_panel(
     if st.button(ui["draft_from_done"], key=f"blog_left_draft_from_done:{selected}"):
         try:
             path = draft_blog_from_kanban_done(selected)
+            record_writeback_activity(
+                selected,
+                source_page="Public Site",
+                target_owner="public_site",
+                candidate_type="public_draft",
+                source_ref="blog:draft_from_done",
+                title="Draft blog from Done tasks",
+                refs={"files": [str(path)]},
+                payload={"source": "kanban_done"},
+                changed_paths=[path],
+                status="applied",
+            )
             st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
             stash_git_backup_results()
             clear_web_cache()

@@ -1730,9 +1730,19 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 icon=":material/troubleshoot:",
             ),
             st.Page(
+                "pages/8_Review.py",
+                title=ui["sidebar_nav_review"],
+                icon=":material/rate_review:",
+            ),
+            st.Page(
                 "pages/5_Profile_Health.py",
                 title=ui["sidebar_nav_health"],
                 icon=":material/health_and_safety:",
+            ),
+            st.Page(
+                "pages/9_Agent_Activity.py",
+                title=ui["sidebar_nav_agent_activity"],
+                icon=":material/history:",
             ),
         ],
         ui["sidebar_nav_output_group"]: [

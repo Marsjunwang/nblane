@@ -149,9 +149,27 @@ source_of_truth: true
 
 - 只读报告，与 `nblane health <名称>` 同源。
 - 检查校验结果、生成块 drift、solid/expert 节点缺证据、Done 任务未结晶。
-- 不写入 profile 文件。
+- 不写入 profile 文件；阶段 / 周复盘候选已拆到独立 **Review** 页面。
 
-### 5.8 Public Site（`pages/6_Public_Site.py`）
+### 5.8 Review（`pages/8_Review.py`）
+
+- 从周 / 阶段窗口生成 `evidence`、`next_action`、`public_draft` 候选，以及只读
+  `method_note`。
+- 生成候选只读；保存所选会写入 `agent-activity.yaml` 的 pending 队列。
+- Evidence 候选可直接写入 `evidence-pool.yaml`，并可把来源 Done task 标记为
+  `crystallized`；不会自动提升 skill status。
+- Next action 候选可追加到 `kanban.md` 的 Queue。
+- Public draft 候选只创建 draft blog，不发布。
+
+### 5.9 Agent Activity（`pages/9_Agent_Activity.py`）
+
+- 读取 `agent-activity.yaml`，按 status、kind、candidate type、source page 和 owner
+  过滤跨页面候选、patch 和写回结果。
+- pending Review 候选可以在 Activity 页应用；其他来源的 patch 第一版只审查并跳转
+  owner 页面。
+- `dismissed` / `failed` 条目可以 reopen，便于重新审阅。
+
+### 5.10 Public Site（`pages/6_Public_Site.py`）
 
 - 为当前档案初始化缺失的公开层文件。
 - **Profile** 编辑公开姓名、headline、简介、联系方式、头像、原始 YAML，并提供

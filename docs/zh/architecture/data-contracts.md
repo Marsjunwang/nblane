@@ -142,6 +142,56 @@ private profile facts
 - Project update 草稿和 resume bullet 候选也可从 accepted claims 生成，并保留 `related_claims` / `evidence_refs` provenance；resume bullet 第一版只返回候选预览，不自动写入 `resume-source.yaml`。
 - 公开输出不直接渲染 claim id；`related_claims` 只用于 provenance、候选生成和发布前检查。
 
+### Agent Activity / Writeback Review
+
+```text
+Review / owner page candidate
+  -> agent-activity.yaml items[]
+  -> pending / applied / failed / dismissed / superseded
+  -> owner page or Activity apply
+```
+
+`agent-activity.yaml` 是内部候选、patch 和写回审阅队列，不参与 public build。
+旧 profile 没有该文件时按空队列读取，首次写入时创建。
+
+最小形态：
+
+```yaml
+schema_version: "1.0"
+profile: 王军
+updated: "2026-05-14"
+items:
+  - id: act:review:evidence:abc123
+    kind: candidate
+    candidate_type: evidence
+    source_page: Review
+    source_ref: review:2026-05-11:2026-05-14
+    target_owner: evidence_pool
+    status: pending
+    title: Ship demo
+    summary: demo shipped
+    refs:
+      task_refs: [done-demo]
+      evidence_refs: []
+      claim_refs: []
+      files: [profiles/王军/evidence-pool.yaml]
+    payload: {}
+    preview: ""
+    warnings: []
+    error: ""
+    changed_paths: []
+    created: "2026-05-14T00:00:00+00:00"
+    updated: "2026-05-14T00:00:00+00:00"
+    applied_at: ""
+```
+
+不变量：
+
+- `status` 只能是 `pending`、`applied`、`failed`、`dismissed`、`superseded`。
+- `payload` 保存结构化候选或 patch，`preview` 保存短 YAML / diff / Markdown 摘要；不保存完整私密文件快照。
+- `applied` 必须记录 `changed_paths` 和 `applied_at`；`failed` 必须记录 `error`。
+- 第一版只有 Review 来源且 owner 为 evidence / kanban / public site 的 pending item 可在 Activity 页直接应用；其他 patch 只审查和跳转 owner 页面。
+
 ## 规划中的新增契约
 
 ### Internal Project

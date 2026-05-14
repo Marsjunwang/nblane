@@ -381,7 +381,9 @@ def render_workspace_navigation() -> None:
                 ("pages/7_Research.py", u["sidebar_nav_research"]),
                 ("pages/1_Skill_Tree.py", u["sidebar_nav_skill_map"]),
                 ("pages/2_Gap_Analysis.py", u["sidebar_nav_gap"]),
+                ("pages/8_Review.py", u["sidebar_nav_review"]),
                 ("pages/5_Profile_Health.py", u["sidebar_nav_health"]),
+                ("pages/9_Agent_Activity.py", u["sidebar_nav_agent_activity"]),
             ],
         ),
         (

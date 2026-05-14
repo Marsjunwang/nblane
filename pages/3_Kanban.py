@@ -82,6 +82,7 @@ from nblane.core.profile_ingest import (
     schema_node_labels,
 )
 from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+from nblane.core.review_actions import record_writeback_activity
 from nblane.web_cache import (
     clear_web_cache,
     load_evidence_pool_raw,
@@ -122,6 +123,50 @@ def _load_into_state(profile: str) -> None:
     st.session_state[_state_key(profile)] = ensure_kanban_task_ids(
         parse_kanban(profile),
         profile,
+    )
+
+
+def _record_ingest_activity(
+    profile: str,
+    *,
+    title: str,
+    source_ids: set[str],
+    source_titles: set[str],
+    warnings: list[str] | None = None,
+    error: str = "",
+    status: str = "applied",
+) -> None:
+    """Record Done -> Evidence writeback in Agent Activity."""
+    pdir = profile_dir(profile)
+    record_writeback_activity(
+        profile,
+        source_page="Kanban",
+        target_owner="evidence_pool",
+        candidate_type="evidence",
+        source_ref="kanban:done_to_evidence",
+        title=title,
+        summary="Done -> Evidence writeback",
+        refs={
+            "task_refs": sorted(source_ids),
+            "task_titles": sorted(source_titles),
+            "files": [
+                str(pdir / "evidence-pool.yaml"),
+                str(pdir / "skill-tree.yaml"),
+                str(pdir / "kanban.md"),
+            ],
+        },
+        payload={"source": "kanban_done_to_evidence"},
+        warnings=list(warnings or []),
+        error=error,
+        changed_paths=[
+            pdir / "evidence-pool.yaml",
+            pdir / "skill-tree.yaml",
+            pdir / "SKILL.md",
+            pdir / "kanban.md",
+        ]
+        if status == "applied"
+        else [],
+        status=status,
     )
 
 
@@ -2273,22 +2318,33 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         bump_locked_with_evidence=True,
                         dry_run=False,
                     )
+                    source_titles = (
+                        {str(x) for x in src_done}
+                        if isinstance(src_done, list)
+                        else set()
+                    )
+                    source_ids = (
+                        {str(x) for x in src_done_ids}
+                        if isinstance(src_done_ids, list)
+                        else set()
+                    )
                     if apply.ok:
                         clear_web_cache()
                         refresh_file_snapshots(
                             [_pool_path, _tree_path, _skill_path]
                         )
+                        _record_ingest_activity(
+                            selected,
+                            title="Applied selected Done -> Evidence candidates",
+                            source_ids=source_ids,
+                            source_titles=source_titles,
+                            warnings=apply.warnings,
+                        )
                         stash_git_backup_results()
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
-                            titles = {str(x) for x in src_done}
-                            ids = (
-                                {str(x) for x in src_done_ids}
-                                if isinstance(src_done_ids, list)
-                                else set()
-                            )
                             secs = _get_sections(selected)
-                            _mark_done_crystallized(secs, ids, titles)
+                            _mark_done_crystallized(secs, source_ids, source_titles)
                             _auto_save(selected, secs)
                         del st.session_state[patch_key]
                         for sk in (
@@ -2299,6 +2355,15 @@ with st.expander(ui["ingest_expander"], expanded=False):
                                 del st.session_state[sk]
                         st.rerun()
                     else:
+                        _record_ingest_activity(
+                            selected,
+                            title="Failed selected Done -> Evidence candidates",
+                            source_ids=source_ids,
+                            source_titles=source_titles,
+                            warnings=apply.warnings,
+                            error="; ".join(apply.errors),
+                            status="failed",
+                        )
                         for e in apply.errors:
                             st.error(e)
                         for w in apply.warnings:
@@ -2314,22 +2379,33 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         bump_locked_with_evidence=True,
                         dry_run=False,
                     )
+                    source_titles = (
+                        {str(x) for x in src_done}
+                        if isinstance(src_done, list)
+                        else set()
+                    )
+                    source_ids = (
+                        {str(x) for x in src_done_ids}
+                        if isinstance(src_done_ids, list)
+                        else set()
+                    )
                     if apply.ok:
                         clear_web_cache()
                         refresh_file_snapshots(
                             [_pool_path, _tree_path, _skill_path]
                         )
+                        _record_ingest_activity(
+                            selected,
+                            title="Applied all Done -> Evidence candidates",
+                            source_ids=source_ids,
+                            source_titles=source_titles,
+                            warnings=apply.warnings,
+                        )
                         stash_git_backup_results()
                         st.success(ui["ingest_applied"])
                         if mark_cryst and isinstance(src_done, list):
-                            titles = {str(x) for x in src_done}
-                            ids = (
-                                {str(x) for x in src_done_ids}
-                                if isinstance(src_done_ids, list)
-                                else set()
-                            )
                             secs = _get_sections(selected)
-                            _mark_done_crystallized(secs, ids, titles)
+                            _mark_done_crystallized(secs, source_ids, source_titles)
                             _auto_save(selected, secs)
                         del st.session_state[patch_key]
                         for sk in (
@@ -2340,6 +2416,15 @@ with st.expander(ui["ingest_expander"], expanded=False):
                                 del st.session_state[sk]
                         st.rerun()
                     else:
+                        _record_ingest_activity(
+                            selected,
+                            title="Failed all Done -> Evidence candidates",
+                            source_ids=source_ids,
+                            source_titles=source_titles,
+                            warnings=apply.warnings,
+                            error="; ".join(apply.errors),
+                            status="failed",
+                        )
                         for e in apply.errors:
                             st.error(e)
                         for w in apply.warnings:
