@@ -27,6 +27,9 @@ ACTIVITY_TARGET_OWNERS = (
     "public_site",
     "skill_tree",
     "research",
+    "resume",
+    "output",
+    "work",
     "team",
     "profile_context",
 )

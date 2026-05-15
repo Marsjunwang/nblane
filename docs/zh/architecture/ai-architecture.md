@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-05-15
 source_of_truth: true
 ---
 
@@ -38,13 +38,13 @@ Codex / OpenCode / Cursor / Claude
 
 ## AI Gateway
 
-规划新增：
+已新增 MVP 模块边界：
 
 ```text
 src/nblane/core/ai/
   gateway.py
-  providers.py
-  tasks.py
+  actions.py
+  backends.py
   prompts.py
   structured.py
   runs.py
@@ -60,11 +60,23 @@ src/nblane/core/ai/
 - 重试和一次修复。
 - Streaming。
 - AI run 日志。
+- Activity bridge：需要审阅的 action 自动进入 Agent Activity。
+- ExternalAgentBackend：只创建 Codex/OpenCode handoff 任务，不执行外部 runtime。
 
 兼容：
 
 - `llm.py` 保留旧接口。
 - 未配置新路由时回退到 `LLM_MODEL`。
+
+第一批注册的 action：
+
+- `research.reading_draft`
+- `research.recommend_sources`
+- `resume.bullets_from_claims`
+- `resume.target_for_job`
+- `output.blog_candidate`
+- `output.inline_patch`
+- `work.remote_dev_task`
 
 ## OpenCode / Codex 适合什么
 

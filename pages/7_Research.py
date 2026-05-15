@@ -479,7 +479,12 @@ def _render_reading_room(inbox) -> None:
     b1, b2, b3 = st.columns(3)
     with b1:
         if st.button(ui["generate_reading_draft"], type="primary"):
-            reading, warnings = generate_reading_draft(source, excerpt, mode)
+            reading, warnings = generate_reading_draft(
+                source,
+                excerpt,
+                mode,
+                profile=selected,
+            )
             _store_reading_state(reading)
             st.session_state[_reading_key("warnings")] = warnings
             st.rerun()

@@ -1,0 +1,8 @@
+# Agent Tasks for {Name}
+# External Codex/OpenCode handoff records; outputs must remain candidates.
+# This file is not part of the public surface.
+
+schema_version: "1.0"
+profile: "{Name}"
+updated: "{YYYY-MM-DD}"
+tasks: []

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-05-15
 source_of_truth: true
 ---
 
@@ -44,14 +44,14 @@ MCP = 二者之间的上下文和工具协议
 
 ## 配置生成
 
-规划命令：
+已实现 MVP 命令：
 
 ```bash
 nblane sync-agent-harness --target codex
 nblane sync-agent-harness --target opencode
 ```
 
-生成内容：
+默认打印配置片段；也可以通过 `--out <path>` 写入文件。生成内容：
 
 - Codex `AGENTS.md` 或配置片段。
 - OpenCode agents/subagents markdown。
@@ -61,7 +61,7 @@ nblane sync-agent-harness --target opencode
 
 ## Agent Task Handoff
 
-规划文件：
+已实现 profile-scoped 任务文件：
 
 ```text
 profiles/<name>/agent-tasks.yaml
@@ -87,8 +87,11 @@ tasks:
 交接命令：
 
 ```bash
-nblane agent handoff agenttask_001 --target opencode
+nblane agent handoff agenttask_001 --target opencode --profile <name>
 ```
+
+`--profile` 省略时会扫描现有 profiles 寻找任务 id。MVP 只生成可复制给
+Codex/OpenCode 的 handoff 信息，不启动外部 runtime。
 
 ## 与 MCP 的关系
 

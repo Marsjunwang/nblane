@@ -1,0 +1,463 @@
+"""AI backend implementations hidden behind AI Actions."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from nblane.core import llm
+from nblane.core.agent_tasks import (
+    AGENT_HARNESSES,
+    AGENT_ROLES,
+    create_agent_task,
+)
+from nblane.core.ai.actions import (
+    AIActionRequest,
+    AIActionResult,
+    AIActionSpec,
+)
+from nblane.core.ai.prompts import prompt_for_action
+from nblane.core.ai.runs import new_run_id
+from nblane.core.ai.structured import validate_json_response
+
+
+class DirectLLMBackend:
+    """Direct OpenAI-compatible LLM backend."""
+
+    name = "direct_llm"
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        """Run one action through ``nblane.core.llm``."""
+
+        run_id = new_run_id(request.action)
+        if not llm.is_configured():
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                error="ai_not_configured: LLM_API_KEY is not configured",
+            )
+        prompt = prompt_for_action(request, spec)
+        raw = llm.chat(
+            prompt.system,
+            prompt.user,
+            temperature=spec.temperature,
+        )
+        if raw.startswith("LLM error:") or raw.startswith(
+            "AI features not configured"
+        ):
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                content=raw,
+                error=f"provider_error: {raw}",
+            )
+        if spec.output_mode == "json":
+            validation = validate_json_response(raw, spec.schema)
+            if not validation.ok:
+                return AIActionResult(
+                    ok=False,
+                    action=request.action,
+                    backend=self.name,
+                    run_id=run_id,
+                    content=raw,
+                    structured=validation.data,
+                    error=validation.error,
+                )
+            return AIActionResult(
+                ok=True,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                content=raw,
+                structured=validation.data,
+            )
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            content=raw,
+        )
+
+
+class RuleFallbackBackend:
+    """Deterministic fallback backend for unconfigured AI or low-risk flows."""
+
+    name = "rule_fallback"
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        """Return a deterministic candidate matching the action contract."""
+
+        run_id = new_run_id(request.action)
+        structured, warnings = fallback_structured(request, spec)
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            content=json.dumps(structured, ensure_ascii=False, indent=2),
+            structured=structured,
+            warnings=warnings,
+        )
+
+
+class WorkflowAgentBackend:
+    """Minimal nblane workflow-agent skeleton.
+
+    The MVP workflow reads the business payload and returns deterministic
+    candidates. It deliberately avoids tool loops and direct writeback until the
+    runtime grows a real permission model.
+    """
+
+    name = "workflow_agent"
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        """Run the local workflow skeleton for one action."""
+
+        run_id = new_run_id(request.action)
+        structured, warnings = fallback_structured(request, spec)
+        warnings = [
+            "WorkflowAgentBackend MVP used deterministic local workflow.",
+            *warnings,
+        ]
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            content=json.dumps(structured, ensure_ascii=False, indent=2),
+            structured=structured,
+            warnings=warnings,
+        )
+
+
+class ExternalAgentBackend:
+    """Codex/OpenCode adapter that creates reviewable handoff tasks."""
+
+    name = "external_agent"
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        """Create an external harness task, but do not execute it."""
+
+        run_id = new_run_id(request.action)
+        payload = request.payload if isinstance(request.payload, dict) else {}
+        target = _target_harness(payload)
+        role = _role_for_action(request.action, payload)
+        input_refs = _merge_refs(
+            request.context_refs,
+            payload.get("input_refs"),
+            payload.get("source_refs"),
+        )
+        expected_outputs = _expected_outputs(request.action, payload)
+        title = (
+            _clean_text(payload.get("title"))
+            or _clean_text(payload.get("task_title"))
+            or _clean_text(payload.get("kanban_task_title"))
+            or request.action
+        )
+        related = payload.get("related") if isinstance(payload.get("related"), dict) else {}
+        for key in (
+            "kanban_task_id",
+            "goal_id",
+            "research_source_id",
+            "project_id",
+        ):
+            value = _clean_text(payload.get(key))
+            if value:
+                related[key] = value
+        task = create_agent_task(
+            request.profile,
+            target_harness=target,
+            role=role,
+            title=title,
+            input_refs=input_refs,
+            expected_outputs=expected_outputs,
+            related=related,
+            payload=payload,
+            action_name=request.action,
+            run_id=run_id,
+            status="ready",
+        )
+        structured = {
+            "task_id": task["id"],
+            "target_harness": target,
+            "role": role,
+            "status": task["status"],
+            "input_refs": input_refs,
+            "expected_outputs": expected_outputs,
+            "related": related,
+        }
+        content = (
+            f"Created {target} handoff task {task['id']} for {role}. "
+            "Run `nblane agent handoff "
+            f"{task['id']} --target {target} --profile {request.profile}` "
+            "to generate the external harness instructions."
+        )
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            content=content,
+            structured=structured,
+            warnings=[
+                "External harness was not executed; task is ready for reviewable handoff.",
+            ],
+        )
+
+
+def default_backends() -> dict[str, object]:
+    """Return the standard backend registry."""
+
+    backends = [
+        DirectLLMBackend(),
+        WorkflowAgentBackend(),
+        ExternalAgentBackend(),
+        RuleFallbackBackend(),
+    ]
+    return {backend.name: backend for backend in backends}
+
+
+def fallback_structured(
+    request: AIActionRequest,
+    spec: AIActionSpec,
+) -> tuple[dict[str, Any], list[str]]:
+    """Return deterministic action-shaped data and warnings."""
+
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    warning = "AI fallback used deterministic candidate generation."
+    action = spec.name
+    if action == "research.reading_draft":
+        source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+        excerpt = _clean_text(payload.get("excerpt") or source.get("excerpt"))
+        summary_source = (
+            excerpt
+            or _clean_text(source.get("summary"))
+            or _clean_text(source.get("notes"))
+            or _clean_text(source.get("title"))
+        )
+        summary = " ".join(summary_source.split()[:80]).strip()
+        return (
+            {
+                "excerpt": excerpt,
+                "translation": "",
+                "summary": summary,
+                "key_points": [],
+                "claim_candidates": [],
+                "citations": [],
+                "synthesis_notes": "",
+                "generated_by": "rule_fallback",
+            },
+            [warning],
+        )
+    if action == "research.recommend_sources":
+        sources = _list_payload(payload, "sources", "source_inbox", "items")
+        recommendations = []
+        for source in sources[:5]:
+            if not isinstance(source, dict):
+                continue
+            ref = _clean_text(source.get("id") or source.get("ref"))
+            title = _clean_text(source.get("title") or ref)
+            if not ref and not title:
+                continue
+            recommendations.append(
+                {
+                    "source_ref": ref,
+                    "title": title,
+                    "priority": "review",
+                    "reason": "Available source candidate from deterministic workflow.",
+                }
+            )
+        return (
+            {
+                "recommendations": recommendations,
+                "source_candidates": recommendations,
+                "notes": [warning],
+            },
+            [warning],
+        )
+    if action == "resume.bullets_from_claims":
+        claims = _list_payload(payload, "claims", "claim_candidates")
+        bullets = []
+        for claim in claims[:6]:
+            if not isinstance(claim, dict):
+                continue
+            text = _clean_text(claim.get("text") or claim.get("summary"))
+            if not text:
+                continue
+            refs = _merge_refs(
+                [],
+                claim.get("evidence_refs"),
+                claim.get("source_refs"),
+            )
+            bullets.append({"text": text, "refs": refs})
+        return {"bullets": bullets, "warnings": [warning]}, [warning]
+    if action == "resume.target_for_job":
+        target = _clean_text(payload.get("target") or payload.get("role")) or "target role"
+        claim_refs = _ids_from_payload(payload, "claims", "claim_refs")
+        evidence_refs = _ids_from_payload(payload, "evidence", "evidence_refs")
+        project_refs = _ids_from_payload(payload, "projects", "project_refs")
+        bullets = [
+            {"text": _clean_text(item.get("text")), "refs": _merge_refs([], item.get("refs"))}
+            for item in _list_payload(payload, "claims")[:4]
+            if isinstance(item, dict) and _clean_text(item.get("text"))
+        ]
+        return (
+            {
+                "target": target,
+                "summary": "",
+                "bullets": bullets,
+                "evidence_refs": evidence_refs,
+                "claim_refs": claim_refs,
+                "project_refs": project_refs,
+                "warnings": [warning],
+            },
+            [warning],
+        )
+    if action == "output.blog_candidate":
+        title = _clean_text(payload.get("title")) or "Draft candidate"
+        return (
+            {
+                "title": title,
+                "summary": _clean_text(payload.get("summary")),
+                "outline": [],
+                "source_refs": _merge_refs(
+                    request.context_refs,
+                    payload.get("source_refs"),
+                    payload.get("evidence_refs"),
+                ),
+                "warnings": [warning],
+            },
+            [warning],
+        )
+    if action == "output.inline_patch":
+        return {"patches": [], "warnings": [warning]}, [warning]
+    if action == "work.remote_dev_task":
+        return (
+            {
+                "task_id": "",
+                "target_harness": _target_harness(payload),
+                "role": _role_for_action(action, payload),
+                "status": "blocked",
+                "input_refs": _merge_refs(request.context_refs, payload.get("input_refs")),
+                "expected_outputs": _expected_outputs(action, payload),
+            },
+            [warning],
+        )
+    return {"content": "", "warnings": [warning]}, [warning]
+
+
+def _clean_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _list_payload(payload: dict[str, Any], *keys: str) -> list[Any]:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _merge_refs(*values: object) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        raw_items: list[object]
+        if isinstance(value, list):
+            raw_items = value
+        elif isinstance(value, tuple):
+            raw_items = list(value)
+        elif isinstance(value, str):
+            raw_items = [value]
+        else:
+            raw_items = []
+        for item in raw_items:
+            text = _clean_text(item)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def _ids_from_payload(payload: dict[str, Any], list_key: str, refs_key: str) -> list[str]:
+    refs = _merge_refs(payload.get(refs_key))
+    if refs:
+        return refs
+    out: list[str] = []
+    for item in _list_payload(payload, list_key):
+        if not isinstance(item, dict):
+            continue
+        ref = _clean_text(item.get("id") or item.get("ref"))
+        if ref:
+            out.append(ref)
+    return _merge_refs(out)
+
+
+def _target_harness(payload: dict[str, Any]) -> str:
+    target = _clean_text(
+        payload.get("target_harness")
+        or payload.get("harness")
+        or payload.get("target")
+    ).lower()
+    return target if target in AGENT_HARNESSES else "codex"
+
+
+def _role_for_action(action: str, payload: dict[str, Any]) -> str:
+    role = _clean_text(payload.get("role")).lower()
+    if role in AGENT_ROLES:
+        return role
+    if action.startswith("resume."):
+        return "resume_strategist"
+    if action.startswith("work."):
+        return "remote_dev"
+    if action.startswith("output."):
+        return "reviewer"
+    return "researcher"
+
+
+def _expected_outputs(action: str, payload: dict[str, Any]) -> list[str]:
+    explicit = _merge_refs(payload.get("expected_outputs"))
+    if explicit:
+        return explicit
+    defaults = {
+        "research.reading_draft": ["research_candidate", "claim_candidates"],
+        "research.recommend_sources": ["source_candidates"],
+        "resume.bullets_from_claims": ["resume_bullet_candidates"],
+        "resume.target_for_job": ["resume_candidate", "traceable_refs"],
+        "output.blog_candidate": ["blog_candidate"],
+        "output.inline_patch": ["patch_candidate"],
+        "work.remote_dev_task": ["patch_review", "test_summary", "changed_paths"],
+    }
+    return defaults.get(action, ["candidate"])
+
+
+__all__ = [
+    "DirectLLMBackend",
+    "ExternalAgentBackend",
+    "RuleFallbackBackend",
+    "WorkflowAgentBackend",
+    "default_backends",
+    "fallback_structured",
+]

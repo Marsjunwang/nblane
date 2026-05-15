@@ -33,6 +33,10 @@ Commands:
                                     Inspect Public Site file tree
     nblane research connector sync <name> --all [--dry-run]
                                     Sync Research Workspace connectors
+    nblane sync-agent-harness --target codex|opencode
+                                    Print external harness config snippet
+    nblane agent handoff <task_id> --target codex|opencode [--profile name]
+                                    Print external agent handoff instructions
     nblane auth hash-password       Generate a password hash for Web auth
 
 Examples:
@@ -62,6 +66,10 @@ import sys
 from pathlib import Path
 
 from nblane.core.auth import DEFAULT_ITERATIONS, hash_password
+from nblane.commands.agent import (
+    cmd_agent_handoff,
+    cmd_sync_agent_harness,
+)
 from nblane.commands.evidence import cmd_evidence_dispatch
 from nblane.commands.gap import cmd_gap
 from nblane.commands.health import cmd_health
@@ -80,27 +88,6 @@ from nblane.commands.profile import (
     cmd_status,
     cmd_sync,
     cmd_validate,
-)
-from nblane.commands.public import (
-    cmd_public_build,
-    cmd_public_blog_list,
-    cmd_public_blog_media,
-    cmd_public_blog_new,
-    cmd_public_blog_publish,
-    cmd_public_draft_blog,
-    cmd_public_draft_project_update,
-    cmd_public_draft_resume,
-    cmd_public_group,
-    cmd_public_hydrate,
-    cmd_public_init,
-    cmd_public_library_purge,
-    cmd_public_library_reconcile,
-    cmd_public_library_restore,
-    cmd_public_library_trash,
-    cmd_public_library_tree,
-    cmd_public_resume,
-    cmd_public_suggest_groups,
-    cmd_public_validate,
 )
 from nblane.commands.research import cmd_research_connector_sync
 from nblane.commands.team import cmd_team
@@ -368,6 +355,47 @@ def main() -> None:
         "--stdin",
         action="store_true",
         help="Read draft body from stdin",
+    )
+
+    p_agent_harness = sub.add_parser(
+        "sync-agent-harness",
+        help="Print or write Codex/OpenCode harness config snippets",
+    )
+    p_agent_harness.add_argument(
+        "--target",
+        required=True,
+        choices=["codex", "opencode"],
+        help="External agent harness target",
+    )
+    p_agent_harness.add_argument(
+        "--out",
+        default=None,
+        help="Optional output file; omitted prints to stdout",
+    )
+
+    p_agent = sub.add_parser(
+        "agent",
+        help="External agent task handoff helpers",
+    )
+    agent_sub = p_agent.add_subparsers(
+        dest="agent_command",
+        required=True,
+    )
+    p_agent_handoff = agent_sub.add_parser(
+        "handoff",
+        help="Print Codex/OpenCode handoff instructions for a task",
+    )
+    p_agent_handoff.add_argument("task_id", help="Agent task id")
+    p_agent_handoff.add_argument(
+        "--target",
+        choices=["codex", "opencode"],
+        default=None,
+        help="Override target harness in the rendered handoff",
+    )
+    p_agent_handoff.add_argument(
+        "--profile",
+        default=None,
+        help="Optional profile name; omitted scans all profiles",
     )
 
     p_public = sub.add_parser(
@@ -857,7 +885,41 @@ def main() -> None:
                 "Re-run with --file or --stdin for content._\n"
             )
         cmd_crystallize(args.name, args.project, body)
+    elif args.command == "sync-agent-harness":
+        cmd_sync_agent_harness(
+            args.target,
+            out_path=args.out,
+        )
+    elif args.command == "agent":
+        if args.agent_command == "handoff":
+            cmd_agent_handoff(
+                args.task_id,
+                target=args.target,
+                profile=args.profile,
+            )
     elif args.command == "public":
+        from nblane.commands.public import (
+            cmd_public_build,
+            cmd_public_blog_list,
+            cmd_public_blog_media,
+            cmd_public_blog_new,
+            cmd_public_blog_publish,
+            cmd_public_draft_blog,
+            cmd_public_draft_project_update,
+            cmd_public_draft_resume,
+            cmd_public_group,
+            cmd_public_hydrate,
+            cmd_public_init,
+            cmd_public_library_purge,
+            cmd_public_library_reconcile,
+            cmd_public_library_restore,
+            cmd_public_library_trash,
+            cmd_public_library_tree,
+            cmd_public_resume,
+            cmd_public_suggest_groups,
+            cmd_public_validate,
+        )
+
         if args.public_command == "init":
             cmd_public_init(args.name)
         elif args.public_command == "validate":

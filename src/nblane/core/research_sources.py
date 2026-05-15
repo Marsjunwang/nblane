@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from nblane.core import agent_activity, git_backup
-from nblane.core import llm as llm_client
+from nblane.core import llm as llm_client  # legacy patch point for tests/callers
 from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.file_write import atomic_write_text
 from nblane.core.jsonutil import extract_json_object
@@ -689,6 +689,7 @@ def generate_reading_draft(
     excerpt: str,
     mode: str = "summary",
     *,
+    profile: str = "",
     chat_func=None,
 ) -> tuple[ResearchReading, list[str]]:
     """Return source-scoped reading annotations without writing files."""
@@ -700,13 +701,38 @@ def generate_reading_draft(
         warnings.append(
             "No excerpt, source summary, or source notes were provided; generated a metadata-only reading draft."
         )
-    chat = chat_func
-    if chat is None and llm_client.is_configured():
-        chat = llm_client.chat
-    if chat is None:
-        warnings.append("AI is not configured; used deterministic reading fallback.")
+    if chat_func is None:
+        from nblane.core.ai.gateway import run_ai_action
+
+        refs = [f"research:{source.id}"] if source.id else []
+        result = run_ai_action(
+            "research.reading_draft",
+            {
+                "mode": clean_mode,
+                "source": _source_metadata(source),
+                "excerpt": clean_excerpt,
+            },
+            profile=profile,
+            context_refs=refs,
+            require_review=bool(profile),
+        )
+        warnings.extend(result.warnings)
+        if result.ok and isinstance(result.structured, dict):
+            return (
+                _reading_from_llm_payload(
+                    result.structured,
+                    source=source,
+                    excerpt=clean_excerpt,
+                    mode=clean_mode,
+                ),
+                warnings,
+            )
+        warnings.append(
+            result.error or "AI reading generation failed; used fallback."
+        )
         return fallback, warnings
 
+    chat = chat_func
     system = (
         "You turn one research source into source-scoped reading annotations for nblane. "
         "Use only the provided source metadata and excerpt. Return a JSON object with keys: "
