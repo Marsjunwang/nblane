@@ -38,15 +38,6 @@ from nblane.core.models import (
     EVIDENCE_STRENGTHS,
     EVIDENCE_TYPES,
 )
-from nblane.core.project_board import (
-    PROJECT_KINDS,
-    PROJECT_STATUSES,
-    PROJECT_VISIBILITIES,
-    add_project_case,
-    load_project_board,
-    save_project_board,
-    update_project_case,
-)
 from nblane.core.profile_ingest import (
     filter_ingest_patch,
     ingest_preview_delta,
@@ -56,6 +47,10 @@ from nblane.core.profile_ingest import (
     schema_node_labels,
 )
 from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+from nblane.core.project_board_sync import (
+    add_project_refs_to_ingest_patch,
+    project_refs_for_tasks,
+)
 from nblane.core.sync import write_generated_blocks
 from nblane.web_auth import require_login
 from nblane.web_cache import (
@@ -341,6 +336,8 @@ def _render_done_ingest(review: dict) -> None:
             if err is not None:
                 st.error(err)
             elif patch is not None:
+                source_projects = project_refs_for_tasks(chosen)
+                patch = add_project_refs_to_ingest_patch(patch, source_projects)
                 st.session_state[f"evidence_review_patch_{selected}"] = patch
                 st.session_state[f"evidence_review_done_titles_{selected}"] = [
                     task.title for task in chosen
@@ -348,6 +345,9 @@ def _render_done_ingest(review: dict) -> None:
                 st.session_state[f"evidence_review_done_ids_{selected}"] = [
                     task.id for task in chosen if task.id
                 ]
+                st.session_state[f"evidence_review_done_projects_{selected}"] = (
+                    source_projects
+                )
                 st.rerun()
 
     patch_key = f"evidence_review_patch_{selected}"
@@ -412,10 +412,20 @@ def _render_done_ingest(review: dict) -> None:
         f"evidence_review_done_ids_{selected}",
         [],
     )
+    source_projects = st.session_state.get(
+        f"evidence_review_done_projects_{selected}",
+        [],
+    )
     if isinstance(source_titles, list) and source_titles:
         st.caption(
             ui["done_preview_source"].format(
                 sources="; ".join(str(item) for item in source_titles),
+            )
+        )
+    if isinstance(source_projects, list) and source_projects:
+        st.caption(
+            ui.get("ingest_preview_projects", "Projects: {projects}").format(
+                projects=", ".join(str(item) for item in source_projects),
             )
         )
 
@@ -517,6 +527,7 @@ def _render_done_ingest(review: dict) -> None:
         patch_key,
         f"evidence_review_done_titles_{selected}",
         f"evidence_review_done_ids_{selected}",
+        f"evidence_review_done_projects_{selected}",
     ):
         st.session_state.pop(key, None)
     st.rerun()
@@ -980,16 +991,6 @@ def _clean_refs(refs: object) -> list[str]:
     return out
 
 
-def _save_project_board_for_page(board, message: str) -> None:
-    """Persist project-board.yaml from Evidence Review."""
-    assert_files_current([_project_path])
-    save_project_board(selected, board)
-    refresh_file_snapshots([_project_path])
-    stash_git_backup_results()
-    clear_web_cache()
-    st.success(message)
-
-
 def _save_experience_book_for_page(book, message: str) -> None:
     """Persist experience.yaml from Evidence Review."""
     assert_files_current([_experience_path])
@@ -1121,137 +1122,6 @@ def _render_evidence_ref_linker(review: dict) -> None:
     st.error(ui["refs_evidence_missing"])
 
 
-def _render_project_case_form(board, *, case=None, prefix: str) -> None:
-    """Render an add/edit form for one project case."""
-    existing = case
-    with st.form(prefix):
-        case_id = st.text_input(
-            ui["refs_case_id"],
-            value=getattr(existing, "id", ""),
-            disabled=existing is not None,
-        )
-        title = st.text_input(
-            ui["refs_project_title"],
-            value=getattr(existing, "title", ""),
-        )
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            current_status = getattr(existing, "status", "active")
-            status = st.selectbox(
-                ui["refs_status"],
-                PROJECT_STATUSES,
-                index=PROJECT_STATUSES.index(current_status)
-                if current_status in PROJECT_STATUSES
-                else 0,
-            )
-        with c2:
-            current_kind = getattr(existing, "kind", "internal")
-            kind = st.selectbox(
-                ui["refs_kind"],
-                PROJECT_KINDS,
-                index=PROJECT_KINDS.index(current_kind)
-                if current_kind in PROJECT_KINDS
-                else 0,
-            )
-        with c3:
-            current_visibility = getattr(existing, "visibility", "private")
-            visibility = st.selectbox(
-                ui["refs_visibility"],
-                PROJECT_VISIBILITIES,
-                index=PROJECT_VISIBILITIES.index(current_visibility)
-                if current_visibility in PROJECT_VISIBILITIES
-                else 0,
-            )
-        time_range = st.text_input(
-            ui["refs_time_range"],
-            value=getattr(existing, "time_range", ""),
-        )
-        summary = st.text_area(
-            ui["refs_summary"],
-            value=getattr(existing, "summary", ""),
-            height=80,
-        )
-        c4, c5 = st.columns(2)
-        with c4:
-            goal_refs = st.text_area(
-                ui["refs_goal_refs"],
-                value=_lines_text(getattr(existing, "goal_refs", [])),
-                height=70,
-            )
-            source_refs = st.text_area(
-                ui["pool_source_refs"],
-                value=_lines_text(getattr(existing, "source_refs", [])),
-                height=70,
-            )
-            output_refs = st.text_area(
-                ui["refs_output_refs"],
-                value=_lines_text(getattr(existing, "output_refs", [])),
-                height=70,
-            )
-        with c5:
-            task_refs = st.text_area(
-                ui["refs_task_refs"],
-                value=_lines_text(getattr(existing, "task_refs", [])),
-                height=70,
-            )
-            experience_refs = st.text_area(
-                ui["pool_experience_refs"],
-                value=_lines_text(getattr(existing, "experience_refs", [])),
-                height=70,
-            )
-        notes = st.text_area(
-            ui["refs_notes"],
-            value=getattr(existing, "notes", ""),
-            height=80,
-        )
-        submitted = st.form_submit_button(
-            ui["pool_update"] if existing is not None else ui["refs_add_project"],
-            type="primary",
-        )
-    if not submitted:
-        return
-    try:
-        if existing is None:
-            add_project_case(
-                board,
-                title,
-                case_id=case_id,
-                status=status,
-                kind=kind,
-                time_range=time_range,
-                summary=summary,
-                goal_refs=_text_lines(goal_refs),
-                task_refs=_text_lines(task_refs),
-                source_refs=_text_lines(source_refs),
-                experience_refs=_text_lines(experience_refs),
-                output_refs=_text_lines(output_refs),
-                visibility=visibility,
-                notes=notes,
-            )
-        else:
-            update_project_case(
-                board,
-                existing.id,
-                title=title,
-                status=status,
-                kind=kind,
-                time_range=time_range,
-                summary=summary,
-                goal_refs=_text_lines(goal_refs),
-                task_refs=_text_lines(task_refs),
-                source_refs=_text_lines(source_refs),
-                experience_refs=_text_lines(experience_refs),
-                output_refs=_text_lines(output_refs),
-                visibility=visibility,
-                notes=notes,
-            )
-    except ValueError as exc:
-        st.error(str(exc))
-        return
-    _save_project_board_for_page(board, ui["refs_case_saved"])
-    st.rerun()
-
-
 def _render_experience_case_form(book, *, case=None, prefix: str) -> None:
     """Render an add/edit form for one experience case."""
     existing = case
@@ -1364,45 +1234,31 @@ def _render_experience_case_form(book, *, case=None, prefix: str) -> None:
 
 
 def _render_case_editor() -> None:
-    """Render minimal project and experience case editors."""
+    """Render project-board handoff and minimal experience case editor."""
     st.subheader(ui["refs_case_editor_title"])
-    board = load_project_board(selected)
     book = load_experience_book(selected)
-    project_tab, experience_tab = st.tabs(
-        [ui["refs_projects"], ui["refs_experiences"]]
+    st.page_link(
+        "pages/11_Project_Board.py",
+        label=ui["refs_open_project_board"],
     )
-    with project_tab:
-        with st.expander(ui["refs_add_project"], expanded=not board.project_cases):
-            _render_project_case_form(
-                board,
-                prefix=f"evidence_review_project_add_{selected}",
-            )
-        for case in board.project_cases:
-            with st.expander(f"{case.title or case.id} · {case.status}"):
-                _render_project_case_form(
-                    board,
-                    case=case,
-                    prefix=f"evidence_review_project_{selected}_{case.id}",
-                )
-    with experience_tab:
-        with st.expander(
-            ui["refs_add_experience"],
-            expanded=not book.experience_cases,
-        ):
+    with st.expander(
+        ui["refs_add_experience"],
+        expanded=not book.experience_cases,
+    ):
+        _render_experience_case_form(
+            book,
+            prefix=f"evidence_review_experience_add_{selected}",
+        )
+    for case in book.experience_cases:
+        label = " · ".join(
+            item for item in (case.organization, case.role) if item
+        )
+        with st.expander(f"{label or case.id} · {case.status}"):
             _render_experience_case_form(
                 book,
-                prefix=f"evidence_review_experience_add_{selected}",
+                case=case,
+                prefix=f"evidence_review_experience_{selected}_{case.id}",
             )
-        for case in book.experience_cases:
-            label = " · ".join(
-                item for item in (case.organization, case.role) if item
-            )
-            with st.expander(f"{label or case.id} · {case.status}"):
-                _render_experience_case_form(
-                    book,
-                    case=case,
-                    prefix=f"evidence_review_experience_{selected}_{case.id}",
-                )
 
 
 def _render_refs(review: dict) -> None:

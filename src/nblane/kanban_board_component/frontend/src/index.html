@@ -477,11 +477,15 @@
       gap_ok: "Can solve",
       gap_preview: "Task gap preview",
       links: "Links",
-      move_to: "Move to",
-      new_subtask: "New subtask",
-      no_selected_drafts: "Select at least one draft to apply.",
-      outcome: "Outcome",
-      proposals: "AI proposals",
+	      move_to: "Move to",
+	      new_subtask: "New subtask",
+	      no_milestone: "No milestone",
+	      no_project: "No project",
+	      no_selected_drafts: "Select at least one draft to apply.",
+	      outcome: "Outcome",
+	      milestone: "Milestone",
+	      proposals: "AI proposals",
+	      project: "Project",
       apply_subtasks: "Apply selected",
       draft_status: "{count} drafts",
       granularity: "Granularity",
@@ -545,12 +549,44 @@
     function labelsForSections() {
       return asObj(args.labels || asObj(args.payload).labels);
     }
-    function settings() {
-      return asObj(args.settings || asObj(args.payload).settings);
-    }
-    function uiState() {
-      return asObj(args.ui || asObj(args.payload).ui);
-    }
+	    function settings() {
+	      return asObj(args.settings || asObj(args.payload).settings);
+	    }
+	    function projectOptions() {
+	      return asArr(settings().project_options || settings().projects)
+	        .map((item) => {
+	          const obj = asObj(item);
+	          return {
+	            id: text(obj.id || obj.value || obj.key),
+	            label: text(obj.label || obj.title || obj.id || obj.value),
+	            milestones: asArr(obj.milestones).map((milestone) => {
+	              const m = asObj(milestone);
+	              return {
+	                id: text(m.id || m.value || m.key),
+	                label: text(m.label || m.title || m.id || m.value),
+	              };
+	            }).filter((m) => m.id),
+	          };
+	        })
+	        .filter((item) => item.id);
+	    }
+	    function milestoneOptions(projectId) {
+	      const project = projectOptions().find((item) => item.id === projectId);
+	      return project ? project.milestones : [];
+	    }
+	    function selectOptionsHtml(options, selected, emptyLabel) {
+	      const known = options.some((item) => item.id === selected);
+	      const extra = selected && !known ? [{ id: selected, label: selected }] : [];
+	      return [
+	        `<option value="">${esc(emptyLabel)}</option>`,
+	        ...options.concat(extra).map((item) => (
+	          `<option value="${attr(item.id)}" ${item.id === selected ? "selected" : ""}>${esc(item.label || item.id)}</option>`
+	        )),
+	      ].join("");
+	    }
+	    function uiState() {
+	      return asObj(args.ui || asObj(args.payload).ui);
+	    }
     function languageCode() {
       const labels = labelsForSections();
       const ui = uiState();
@@ -665,8 +701,10 @@
         outcome: text(obj.outcome || ""),
         tags: text(obj.tags || ""),
         started_on: text(obj.started_on || obj.startedOn || ""),
-        completed_on: text(obj.completed_on || obj.completedOn || ""),
-        notes: details,
+	        completed_on: text(obj.completed_on || obj.completedOn || ""),
+	        project_id: text(obj.project_id || obj.projectId || ""),
+	        milestone_id: text(obj.milestone_id || obj.milestoneId || ""),
+	        notes: details,
         details: details ? details.split(/\n+/).map((x) => x.trim()).filter(Boolean) : [],
         crystallized: Boolean(obj.crystallized),
         subtasks: normalizeSubtasks(obj.subtasks),
@@ -1025,8 +1063,26 @@
         </div>
       `;
     }
-    function detailEditHtml(task) {
-      const subtaskRows = task.subtasks.length
+	    function detailEditHtml(task) {
+	      const projects = projectOptions();
+	      const milestones = milestoneOptions(task.project_id);
+	      const projectFields = projects.length ? `
+	          <div class="kb-grid-2">
+	            <label class="kb-field">
+	              <span>${esc(label("project"))}</span>
+	              <select data-field="project_id" aria-label="${attr(label("project"))}">
+	                ${selectOptionsHtml(projects, task.project_id, label("no_project"))}
+	              </select>
+	            </label>
+	            <label class="kb-field">
+	              <span>${esc(label("milestone"))}</span>
+	              <select data-field="milestone_id" aria-label="${attr(label("milestone"))}">
+	                ${selectOptionsHtml(milestones, task.milestone_id, label("no_milestone"))}
+	              </select>
+	            </label>
+	          </div>
+	        ` : "";
+	      const subtaskRows = task.subtasks.length
         ? task.subtasks.map((item) => `
             <div class="kb-subtask-edit-row" data-subtask-row>
               <input type="checkbox" data-subtask-done aria-label="${attr(item.title || label("subtasks"))}" ${item.done ? "checked" : ""}>
@@ -1055,11 +1111,12 @@
             <span>${esc(label("outcome"))}</span>
             <textarea data-field="outcome" aria-label="${attr(label("outcome"))}">${esc(task.outcome)}</textarea>
           </label>
-          <label class="kb-field">
-            <span>${esc(label("tags"))}</span>
-            <input type="text" data-field="tags" value="${attr(task.tags)}" aria-label="${attr(label("tags"))}">
-          </label>
-          <div class="kb-grid-2">
+	          <label class="kb-field">
+	            <span>${esc(label("tags"))}</span>
+	            <input type="text" data-field="tags" value="${attr(task.tags)}" aria-label="${attr(label("tags"))}">
+	          </label>
+	          ${projectFields}
+	          <div class="kb-grid-2">
             <label class="kb-field">
               <span>${esc(label("started_on"))}</span>
               <input type="date" data-field="started_on" value="${attr(task.started_on)}" aria-label="${attr(label("started_on"))}">
@@ -1238,6 +1295,17 @@
       card.subtasks = subtasks;
       return card;
     }
+    function refreshMilestoneSelect(panel) {
+      const projectSelect = panel.querySelector('[data-field="project_id"]');
+      const milestoneSelect = panel.querySelector('[data-field="milestone_id"]');
+      if (!projectSelect || !milestoneSelect) return;
+      const options = milestoneOptions(projectSelect.value);
+      const current = options.some((item) => item.id === milestoneSelect.value)
+        ? milestoneSelect.value
+        : "";
+      milestoneSelect.innerHTML = selectOptionsHtml(options, current, label("no_milestone"));
+      milestoneSelect.value = current;
+    }
     function collectReadSubtasks(cardEl) {
       if (!cardEl) return [];
       const wrap = cardEl.querySelector("[data-subtask-task]");
@@ -1364,6 +1432,10 @@
       });
       document.querySelectorAll("[data-selected-task]").forEach((panel) => {
         const taskId = panel.dataset.selectedTask;
+        const projectSelect = panel.querySelector('[data-field="project_id"]');
+        if (projectSelect) {
+          projectSelect.addEventListener("change", () => refreshMilestoneSelect(panel));
+        }
         panel.querySelectorAll("[data-action]").forEach((button) => {
           button.addEventListener("click", () => {
             const action = button.dataset.action;

@@ -12,6 +12,8 @@ import yaml
 
 from nblane.core.project_board import (
     ProjectBoard,
+    ProjectCase,
+    ProjectMilestone,
     add_project_case,
     archive_project_case,
     load_project_board,
@@ -46,6 +48,37 @@ class TestProjectBoard(unittest.TestCase):
         self.assertEqual(board.profile, "alice")
         self.assertEqual(board.project_cases, [])
         self.assertEqual(raw["project_cases"], [])
+
+    def test_legacy_project_case_loads_without_new_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            (profile / "project-board.yaml").write_text(
+                yaml.dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "alice",
+                        "project_cases": [
+                            {
+                                "id": "project:legacy",
+                                "title": "Legacy 项目",
+                                "status": "active",
+                                "task_refs": ["task_1"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            board = load_project_board(profile)
+
+        case = board.project_cases[0]
+        self.assertEqual(case.title, "Legacy 项目")
+        self.assertEqual(case.evidence_refs, [])
+        self.assertEqual(case.milestones, [])
 
     def test_add_update_archive_and_save_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,6 +115,57 @@ class TestProjectBoard(unittest.TestCase):
         self.assertEqual(loaded.project_cases[0].status, "archived")
         self.assertEqual(loaded.project_cases[0].kind, "research")
         self.assertEqual(loaded.project_cases[0].task_refs, ["task_1"])
+
+    def test_project_case_milestones_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            board = ProjectBoard(
+                profile="alice",
+                project_cases=[
+                    ProjectCase(
+                        id="project:demo",
+                        title="中文 Benchmark",
+                        task_refs=["task_a", "task_a"],
+                        evidence_refs=["ev_1", "ev_1"],
+                        milestones=[
+                            ProjectMilestone(
+                                id="milestone:first-benchmark",
+                                title="First benchmark",
+                                status="active",
+                                target="2026-06",
+                                summary="Run first closed-loop benchmark.",
+                                task_refs=["task_a", "task_b", "task_a"],
+                                evidence_refs=["ev_1", "ev_2"],
+                                source_refs=["source:research:001"],
+                                output_refs=["output:note"],
+                            )
+                        ],
+                    )
+                ],
+            )
+
+            with patch("nblane.core.project_board.date", _FakeDate):
+                save_project_board(profile, board)
+
+            loaded = load_project_board(profile)
+            saved = yaml.safe_load(
+                (profile / "project-board.yaml").read_text(encoding="utf-8")
+            )
+
+        case = loaded.project_cases[0]
+        self.assertEqual(saved["updated"], "2026-05-13")
+        self.assertEqual(saved["project_cases"][0]["task_refs"], ["task_a"])
+        self.assertEqual(
+            saved["project_cases"][0]["milestones"][0]["task_refs"],
+            ["task_a", "task_b"],
+        )
+        self.assertEqual(case.title, "中文 Benchmark")
+        self.assertEqual(case.task_refs, ["task_a"])
+        self.assertEqual(case.evidence_refs, ["ev_1"])
+        self.assertEqual(len(case.milestones), 1)
+        self.assertEqual(case.milestones[0].task_refs, ["task_a", "task_b"])
+        self.assertEqual(case.milestones[0].evidence_refs, ["ev_1", "ev_2"])
 
     def test_duplicate_id_rejected(self) -> None:
         board = ProjectBoard(profile="alice")

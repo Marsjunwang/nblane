@@ -101,6 +101,10 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
                         "title": "Sensitive project title",
                         "status": "active",
                         "visibility": "private",
+                        "goal_refs": ["g1"],
+                        "task_refs": ["task_active"],
+                        "evidence_refs": ["ev_1"],
+                        "source_refs": ["source:research:20260513-001"],
                     }
                 ],
             },
@@ -123,7 +127,9 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
         (profile / "kanban.md").write_text(
             "# alice · Kanban\n\n"
             "## Doing\n\n"
-            "- [ ] Active task\n\n"
+            "- [ ] Active task\n"
+            "  - id: task_active\n"
+            "  - project_id: project:secret\n"
             "## Queue\n\n"
             "## Done\n\n"
             "- [x] Needs review\n\n",
@@ -156,6 +162,7 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
     assert "Sensitive source title" not in text
     nodes = {node["id"]: node for node in dumped["nodes"]}
     assert nodes["project:secret"]["layer"] == "work_context"
+    assert nodes["project:secret"]["owner_path"] == "pages/11_Project_Board.py"
     assert nodes["source:inbox"]["owner_path"] == "pages/7_Research.py"
     assert nodes["evidence_candidate:pending"]["metric"] == "1"
     assert nodes["atomic_evidence:pool"]["metric"] == "2"
@@ -163,3 +170,11 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
         nodes["atomic_evidence:pool"]["owner_path"]
         == "pages/2_Evidence_Review.py"
     )
+    edges = {
+        (edge["from"], edge["to"], edge["type"])
+        for edge in dumped["edges"]
+    }
+    assert ("goal:g1", "project:secret", "contains") in edges
+    assert ("project:secret", "task:0", "contains") in edges
+    assert ("project:secret", "atomic_evidence:pool", "supports") in edges
+    assert ("project:secret", "source:inbox", "contains") in edges

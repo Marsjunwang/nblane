@@ -307,6 +307,34 @@ class TestKanbanParseRender(unittest.TestCase):
         again = self._parse_markdown("p", rendered)
         self.assertEqual(again[KANBAN_QUEUE][0].id, "task-alpha")
 
+    def test_project_and_milestone_meta_roundtrip(self) -> None:
+        """Project Board task metadata parses and renders without loss."""
+        md = """# x · Kanban
+
+> Updated: 2026-01-01
+
+---
+
+## Doing
+
+- [ ] Linked task
+  - id: task-linked
+  - project_id: project:vla-shoe-benchmark
+  - milestone_id: milestone:first-benchmark
+
+---
+"""
+        back = self._parse_markdown("p", md)
+        task = back[KANBAN_DOING][0]
+        self.assertEqual(task.project_id, "project:vla-shoe-benchmark")
+        self.assertEqual(task.milestone_id, "milestone:first-benchmark")
+        rendered = render_kanban("p", back)
+        self.assertIn("  - project_id: project:vla-shoe-benchmark", rendered)
+        self.assertIn("  - milestone_id: milestone:first-benchmark", rendered)
+        again = self._parse_markdown("p", rendered)
+        self.assertEqual(again[KANBAN_DOING][0].project_id, task.project_id)
+        self.assertEqual(again[KANBAN_DOING][0].milestone_id, task.milestone_id)
+
     def test_someday_subtasks_details_roundtrip(self) -> None:
         """Someday tasks keep id, subtasks, and details."""
         sections = {
@@ -368,7 +396,12 @@ class TestKanbanParseRender(unittest.TestCase):
             KANBAN_DOING: [KanbanTask(title="Doing", id="doing")],
             KANBAN_QUEUE: [
                 KanbanTask(title="First", id="q1"),
-                KanbanTask(title="Second", id="q2"),
+                KanbanTask(
+                    title="Second",
+                    id="q2",
+                    project_id="project:demo",
+                    milestone_id="milestone:first",
+                ),
             ],
             KANBAN_DONE: [],
             KANBAN_SOMEDAY: [],
@@ -394,6 +427,8 @@ class TestKanbanParseRender(unittest.TestCase):
             ["q2", "doing"],
         )
         self.assertEqual([t.id for t in result[KANBAN_QUEUE]], ["q1"])
+        self.assertEqual(result[KANBAN_DOING][0].project_id, "project:demo")
+        self.assertEqual(result[KANBAN_DOING][0].milestone_id, "milestone:first")
         self.assertEqual(
             [t.id for t in sections[KANBAN_QUEUE]],
             ["q1", "q2"],
@@ -627,6 +662,38 @@ class TestKanbanParseRender(unittest.TestCase):
                 [task.title for task in saved[KANBAN_DONE]],
                 ["Keep done"],
             )
+
+    def test_archive_done_tasks_preserves_project_metadata(self) -> None:
+        """Archived Done tasks keep project/milestone metadata in the archive."""
+        sections = {
+            KANBAN_DOING: [],
+            KANBAN_DONE: [
+                KanbanTask(
+                    title="Archive linked",
+                    done=True,
+                    id="archive-linked",
+                    project_id="project:demo",
+                    milestone_id="milestone:first",
+                ),
+            ],
+            KANBAN_QUEUE: [],
+            KANBAN_SOMEDAY: [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "p4"
+            prof.mkdir()
+            (prof / "kanban.md").write_text(
+                render_kanban("p4", sections),
+                encoding="utf-8",
+            )
+            with patch("nblane.core.io.profile_dir", lambda _n: prof):
+                archive_kanban_done_tasks("p4", sections, [0])
+
+            archive = (prof / "kanban-archive.md").read_text(encoding="utf-8")
+
+        self.assertIn("Archive linked", archive)
+        self.assertIn("  - project_id: project:demo", archive)
+        self.assertIn("  - milestone_id: milestone:first", archive)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from nblane.core.experience import load_experience_book
 from nblane.core.io import (
     KANBAN_DONE,
     load_evidence_pool_raw,
+    load_goal_book,
     load_skill_tree_raw,
     parse_kanban,
     profile_dir,
@@ -280,7 +281,7 @@ def _dangling_ref_issue(owner: str, ref: str, target: str) -> HealthIssue:
         "refs",
         "Dangling workspace reference",
         f"{owner} references missing {target}: {ref}",
-        "Fix refs in Evidence Review or Research Source Inbox.",
+        "Fix refs in Project Board, Kanban, Evidence Review, or Research Source Inbox.",
     )
 
 
@@ -290,15 +291,26 @@ def _ref_integrity_issues(profile_path) -> list[HealthIssue]:
     projects = load_project_board(profile_path).by_id()
     experiences = load_experience_book(profile_path).by_id()
     sources = load_research_sources(profile_path).by_id()
+    goals = {goal.id for goal in load_goal_book(profile_path).goals if goal.id}
+    kanban = parse_kanban(profile_path)
+    task_ids = {
+        task.id
+        for tasks in kanban.values()
+        for task in tasks
+        if task.id
+    }
     project_ids = set(projects)
     experience_ids = set(experiences)
     source_ids = set(sources)
+    evidence_ids: set[str] = set()
 
     pool_raw = load_evidence_pool_raw(profile_path) or {}
     for row in pool_raw.get("evidence_entries") or []:
         if not isinstance(row, dict):
             continue
         eid = str(row.get("id", "") or "").strip() or "evidence row"
+        if eid != "evidence row":
+            evidence_ids.add(eid)
         owner = f"evidence {eid}"
         for ref in _as_string_list(row.get("project_refs")):
             if ref not in project_ids:
@@ -321,12 +333,73 @@ def _ref_integrity_issues(profile_path) -> list[HealthIssue]:
 
     for project in projects.values():
         owner = f"project {project.id}"
+        for ref in project.goal_refs:
+            if ref not in goals:
+                issues.append(_dangling_ref_issue(owner, ref, "goal"))
+        for ref in project.task_refs:
+            if ref not in task_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "kanban task"))
+        for ref in project.evidence_refs:
+            if ref not in evidence_ids:
+                issues.append(_dangling_ref_issue(owner, ref, "evidence row"))
         for ref in project.experience_refs:
             if ref not in experience_ids:
                 issues.append(_dangling_ref_issue(owner, ref, "experience case"))
         for ref in project.source_refs:
             if ref.startswith("source:research:") and ref not in source_ids:
                 issues.append(_dangling_ref_issue(owner, ref, "research source"))
+        for milestone in project.milestones:
+            milestone_owner = f"milestone {milestone.id or project.id}"
+            for ref in milestone.task_refs:
+                if ref not in task_ids:
+                    issues.append(
+                        _dangling_ref_issue(
+                            milestone_owner,
+                            ref,
+                            "kanban task",
+                        )
+                    )
+            for ref in milestone.evidence_refs:
+                if ref not in evidence_ids:
+                    issues.append(
+                        _dangling_ref_issue(
+                            milestone_owner,
+                            ref,
+                            "evidence row",
+                        )
+                    )
+            for ref in milestone.source_refs:
+                if ref.startswith("source:research:") and ref not in source_ids:
+                    issues.append(
+                        _dangling_ref_issue(
+                            milestone_owner,
+                            ref,
+                            "research source",
+                        )
+                    )
+
+    for tasks in kanban.values():
+        for task in tasks:
+            owner = f"task {task.id or task.title or 'kanban task'}"
+            project_id = str(task.project_id or "").strip()
+            milestone_id = str(task.milestone_id or "").strip()
+            if project_id and project_id not in project_ids:
+                issues.append(_dangling_ref_issue(owner, project_id, "project case"))
+            if milestone_id:
+                project = projects.get(project_id)
+                valid_milestones = {
+                    milestone.id
+                    for milestone in (project.milestones if project else [])
+                    if milestone.id
+                }
+                if milestone_id not in valid_milestones:
+                    issues.append(
+                        _dangling_ref_issue(
+                            owner,
+                            milestone_id,
+                            "project milestone",
+                        )
+                    )
     return issues
 
 

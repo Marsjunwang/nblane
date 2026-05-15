@@ -1,14 +1,4 @@
 act_policy:
-- temporal tokenization
-- latent action space
-- 动作令牌
-- action token
-- 交叉注意力
-- cross-attention
-- 时序条件建模
-- temporal conditional modeling
-- 隐空间引导
-- latent guidance
 - transformer策略头
 - transformer policy head
 - 自回归解码
@@ -99,6 +89,16 @@ act_policy:
 - tokenized_action_space
 - 视觉-语言-动作对齐
 - vlm_action_alignment
+- 动作分块
+- action chunking
+- 变换器架构
+- transformer architecture
+- 条件生成
+- conditional generation
+- 策略网络
+- policy network
+- 状态记忆
+- state memory
 bimanual:
 - 双臂操作
 - Bimanual Manipulation
@@ -111,15 +111,6 @@ bimanual:
 - 机械臂协同
 - Robotic Arm Coordination
 diffusion_policy:
-- 扩散策略
-- diffusion policy
-- 噪声调度
-- noise schedule
-- 逆向过程
-- reverse process
-- 动作采样
-- action sampling
-- 条件生成
 - conditional generation
 - 逆向扩散
 - latent diffusion
@@ -211,6 +202,15 @@ diffusion_policy:
 - multi_step_action_prior
 - 条件生成建模
 - conditional_generation_modeling
+- 去噪过程
+- denoising process
+- 时间一致性
+- temporal consistency
+- conditional diffusion
+- 动作生成
+- action generation
+- 记忆注入
+- memory injection
 docker_deploy:
 - Docker & containerized robot stacks
 - container deployment
@@ -244,15 +244,20 @@ experiment_design:
 - sim2real_gap_quantification
 - 指标敏感性分析
 - metric_sensitivity_analysis
+- benchmark testing
+- 基准测试
+- evaluation protocol
+- 评估协议
+- ablation on memory
+- 记忆模块消融实验
+- 消融实验
+- 性能指标
+- performance metrics
+- 对照实验
+- control experiment
+- 统计显著性
+- statistical significance
 foundation_models_perception:
-- spatial_awareness
-- 掩码生成
-- mask_generation
-- 几何接地
-- geometric_grounding
-- 多模态分割
-- multimodal_segmentation
-- 空间锚点
 - spatial anchor
 - mask grounding
 - 几何感知
@@ -345,6 +350,14 @@ foundation_models_perception:
 - mask_guided_action
 - SAM嵌入重用
 - SAM_embedding_reuse
+- 视觉基础模型
+- vision foundation model
+- 特征缓存
+- feature caching
+- 上下文检索
+- context retrieval
+- 语义理解
+- semantic understanding
 gazebo_basics:
 - Gazebo仿真
 - Gazebo_simulation
@@ -380,13 +393,6 @@ gazebo_basics:
 - world 文件
 - world_file
 imitation_learning:
-- action_chunking
-- 错误恢复
-- error_recovery
-- 行为克隆增强
-- BC augmentation
-- 在线修正
-- online correction
 - 强制策略
 - forcing policy
 - 分布偏移
@@ -480,6 +486,13 @@ imitation_learning:
 - distribution_shift_correction
 - 专家轨迹对齐
 - expert_trajectory_alignment
+- 轨迹回放
+- trajectory replay
+- 序列建模
+- sequence modeling
+- 专家演示
+- 长期依赖
+- long-horizon dependency
 linux_basics:
 - Linux
 - Shell
@@ -623,6 +636,16 @@ paper_reading:
 - experiment_setup_replication
 - 消融表解读
 - ablation_table_interpretation
+- 架构调研
+- architecture survey
+- 记忆机制
+- memory mechanism
+- 文献综述
+- literature review
+- 方法提取
+- method extraction
+- 技术对比
+- technical comparison
 point_cloud:
 - 点云配准
 - point cloud registration
@@ -701,6 +724,16 @@ python_core:
 - matplotlib_attention_heatmap
 - PyTorch数据管道
 - PyTorch_dataloader_pipeline
+- 张量计算
+- tensor computation
+- 内存管理
+- memory management
+- 数据加载
+- data loading
+- 性能分析
+- profiling
+- 注意力机制
+- attention mechanism
 real_robot_ops:
 - 真实机器人部署
 - real-robot deployment
@@ -823,6 +856,23 @@ rl_for_robotics:
 - physics_randomization
 - 实时控制频率
 - realtime_control_frequency
+robot_dataset_curation:
+- fix data issues
+- 修复数据问题
+- memory dataset curation
+- 记忆模块数据整理
+- VLA data replay
+- VLA数据回放
+- 数据清洗
+- data cleaning
+- 序列分块
+- sequence chunking
+- 时间戳对齐
+- timestamp alignment
+- 回放缓冲区
+- replay buffer
+- 分布偏移
+- distribution shift
 ros2_basics:
 - openpi05
 - ROS2 basics for robot control
@@ -974,20 +1024,6 @@ urdf_modeling:
 - 传感器坐标系
 - sensor_frame
 vlm_robot:
-- RT-2
-- OpenVLA
-- 视觉语言动作
-- 推理即控制
-- reasoning-as-control
-- 多模态提示
-- multimodal prompting
-- 开放词汇操控
-- open-vocabulary manipulation
-- 视觉语言模型
-- VLM
-- 机器人控制
-- robot_control
-- 开放词汇控制
 - open_vocabulary_control
 - 真实世界执行
 - real_world_execution
@@ -1074,3 +1110,24 @@ vlm_robot:
 - RT-2_architecture
 - OpenVLA数据协议
 - OpenVLA_data_protocol
+- VLA memory module
+- VLA记忆模块
+- VLA benchmark testing
+- VLA基准测试
+- OpenVLA evaluation
+- OpenVLA评估
+- 记忆模块
+- memory module
+- 基准测试
+- benchmark testing
+- 策略评估
+- policy evaluation
+- 闭环控制
+- closed-loop control
+world_models:
+- memory module architecture
+- 记忆模块架构
+- state representation
+- 状态表征
+- world model for control
+- 控制用世界模型

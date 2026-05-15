@@ -351,11 +351,13 @@ def workspace_graph_payload(
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     ][:3]
     project_node_ids: list[str] = []
+    project_node_by_id: dict[str, str] = {}
     if project_cases:
         for case in project_cases:
             record_id = str(case.get("id") or "").strip()
             node_id = record_id
             project_node_ids.append(node_id)
+            project_node_by_id[record_id] = node_id
             is_private = str(case.get("visibility") or "private") == "private"
             nodes.append(
                 _node(
@@ -371,11 +373,24 @@ def workspace_graph_payload(
                     record_id=record_id,
                     status=str(case.get("status") or ""),
                     locked=is_private,
-                    owner_path="pages/2_Evidence_Review.py",
+                    owner_path="pages/11_Project_Board.py",
                     implemented=True,
                 )
             )
-            edges.append(_edge(primary_node_id, node_id, "contains"))
+            goal_refs = [
+                str(ref or "").strip()
+                for ref in (case.get("goal_refs") or [])
+                if str(ref or "").strip()
+            ]
+            linked_goals = [
+                goal_node_ids[ref]
+                for ref in goal_refs
+                if ref in goal_node_ids
+            ]
+            if not linked_goals:
+                linked_goals = [primary_node_id]
+            for goal_node_id in linked_goals:
+                edges.append(_edge(goal_node_id, node_id, "contains"))
     else:
         project_node_ids.append("project_case:planned")
         nodes.append(
@@ -470,12 +485,14 @@ def workspace_graph_payload(
             )
         )
         edges.append(_edge(primary_node_id, node_id, "drives"))
+        project_id = str(item.get("project_id") or "").strip()
+        task_project_id = project_node_by_id.get(project_id, project_anchor_id)
         edges.append(
             _edge(
-                project_anchor_id,
+                task_project_id,
                 node_id,
                 "contains",
-                placeholder=project_anchor_id == "project_case:planned",
+                placeholder=task_project_id == "project_case:planned",
             )
         )
 
@@ -580,6 +597,13 @@ def workspace_graph_payload(
                 continue
             if evidence_by_project.get(node_id):
                 edges.append(_edge(node_id, "atomic_evidence:pool", "supports"))
+    source_by_project = project_summary.get("source_by_project") or {}
+    if isinstance(source_by_project, dict):
+        for node_id in project_node_ids:
+            if not node_id.startswith("project:"):
+                continue
+            if source_by_project.get(node_id):
+                edges.append(_edge(node_id, "source:inbox", "contains"))
 
     nodes.append(
         _node(

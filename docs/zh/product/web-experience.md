@@ -495,39 +495,43 @@ Goal
 
 ### 6.1 推荐阶段顺序
 
-| 阶段 | 核心对象 | 优先开发 | 为什么先做 |
-|------|----------|----------|------------|
-| P0 | Goal + Dashboard + Capture + Execution | 增加 current goal 常驻入口；Goal 隐私展示；首页改成 Dashboard；全局 capture 入口；Done -> evidence 统一入口；统一页面顶部 profile / scope strip | 没有目标锚点、输入入口和执行闭环，后面的 evidence、gap 和 output 都会发散 |
-| P1 | Evidence Core | 独立 Pending Evidence / Evidence Review 入口；技能树页突出 evidence strength / missing evidence；统一 review preview / apply 流；最小 project / experience refs | `Evidence` 是成长模型中心层，必须先把证据变成一等对象，而不是继续藏在技能树细节里 |
-| P2 | Claim + Skill + Gap + Review | 在 Evidence Review 中生成 claim candidates；差距分析支持从 goal / task 带入上下文；Review 候选入口与 Health 拆责；技能状态与 claim / evidence 更明确联动 | `Claim` 把“发生了什么”翻译成“证明了什么”，它是 Skill 和 Output 可复用的桥 |
-| P3 | Output Studio | Public Site 强化“从 evidence / claim 生成输出”；Resume / Blog / Project 草稿显式显示 provenance；Profile Context 保持高级区定位 | 公开输出应建立在可追溯 evidence / claim 上，而不是先做内容 CMS 再回头补来源 |
-| P4 | Research / Agent / Team / Connectors | Research Source Inbox 与 Reading Room；Agent Activity / Writeback Review；Team View scope hardening；外部 connector 自动化；Output Studio 与 Build 拆分 | 这些能力要么是 source specialization，要么是治理与扩展层，应该建立在通用审阅框架已经稳定之后 |
+
+| 阶段  | 核心对象                                   | 优先开发                                                                                                                                          | 为什么先做                                                     |
+| --- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| P0  | Goal + Dashboard + Capture + Execution | 增加 current goal 常驻入口；Goal 隐私展示；首页改成 Dashboard；全局 capture 入口；Done -> evidence 统一入口；统一页面顶部 profile / scope strip                                | 没有目标锚点、输入入口和执行闭环，后面的 evidence、gap 和 output 都会发散           |
+| P1  | Evidence Core                          | 独立 Pending Evidence / Evidence Review 入口；技能树页突出 evidence strength / missing evidence；统一 review preview / apply 流；最小 project / experience refs | `Evidence` 是成长模型中心层，必须先把证据变成一等对象，而不是继续藏在技能树细节里            |
+| P2  | Claim + Skill + Gap + Review           | 在 Evidence Review 中生成 claim candidates；差距分析支持从 goal / task 带入上下文；Review 候选入口与 Health 拆责；技能状态与 claim / evidence 更明确联动                          | `Claim` 把“发生了什么”翻译成“证明了什么”，它是 Skill 和 Output 可复用的桥        |
+| P3  | Output Studio                          | Public Site 强化“从 evidence / claim 生成输出”；Resume / Blog / Project 草稿显式显示 provenance；Profile Context 保持高级区定位                                     | 公开输出应建立在可追溯 evidence / claim 上，而不是先做内容 CMS 再回头补来源         |
+| P4  | Research / Agent / Team / Connectors   | Research Source Inbox 与 Reading Room；Agent Activity / Writeback Review；Team View scope hardening；外部 connector 自动化；Output Studio 与 Build 拆分    | 这些能力要么是 source specialization，要么是治理与扩展层，应该建立在通用审阅框架已经稳定之后 |
+
 
 ### 6.2 具体调整建议
 
-| 新优先级 | 调整 | 目标 |
-|----------|------|------|
-| P0 | 增加 current goal 常驻入口或轻量 goal 模块 | 让 gap、evidence、output 有共同方向 |
-| P0 | Goal 隐私展示：visible / discreet / hidden / private | 保留目标上下文价值，同时避免敏感目标在投屏、录屏或旁人可见时泄露 |
-| P0 | 首页改成 Dashboard，降低 `SKILL.md` 编辑权重 | 新用户快速知道当前状态和下一步 |
-| P0 | Profile Context 高级区：结构化编辑长期画像，生成块只读 | 保留 Agent Context 价值，同时避免首页变成 Markdown 编辑器 |
-| P0 | 全局 capture 入口或首页轻量 capture bar | 让日常输入不依赖用户先找到正确页面 |
-| P0 | Done -> evidence 审阅体验统一 | 打穿最小成长闭环 |
-| P0 | `st.title` / `select_profile` / scope strip 顺序统一 | 先解决“当前是谁、当前目标是什么、写入哪里”这三个认知问题 |
-| P1 | 独立 Pending Evidence / Evidence Review 页 | 提升 evidence 在 UI 中的地位，降低技能树页复杂度 |
-| P1 | 技能树页突出 evidence strength / missing evidence | 避免 status 变成主观自评 |
-| P1 | 最小 project / experience refs 编辑入口（已落地） | 为 Composite Evidence、Resume 和 Project Case 聚合打基础 |
-| P1 | Research Source Inbox 最小入口（已落地） | 让外部资料先进入 source inbox，不直接污染 evidence |
-| P2 | 在 Evidence Review / Output Studio 中生成 claim candidates | 先让 claim 成为桥接层，而不是先做 claims 独立页面 |
-| P2 | 差距分析支持从 goal / kanban task 带入上下文 | 减少重复输入，提高行动建议质量 |
-| P2 | Review 候选生成入口，与 Profile Health 职责拆开 | 让复盘成为 evidence / next action / public output 的来源 |
-| P2 | Agent Activity / Writeback Review 骨架 | 让跨页面 Agent 候选、patch 和写回状态可审查 |
-| P3 | Public Site 强化“从 evidence / claim 生成输出”入口 | 让公开站不是独立内容 CMS |
-| P3 | Research Reading Room：翻译、摘要、claim 提取 | 把论文和网页从“收藏”推进到可引用的 claim / citation / synthesis |
-| P3 | Team View scope hardening | 用硬性 scope 标识避免用户误解数据写入位置 |
-| P4 | Research Workspace 完整页面 | 支撑 source-aware blog、研究写作、source / chunk / claim / citation 全链路 |
-| P4 | 外部 connector 自动化：X/Twitter、小红书、arXiv、Semantic Scholar、GitHub 等 | 在权限、速率限制和隐私边界明确后，再做自动导入和订阅 |
-| P4 | Output Studio 与 Build 拆分 | 降低 Public Site 单页复杂度 |
+
+| 新优先级 | 调整                                                             | 目标                                                              |
+| ---- | -------------------------------------------------------------- | --------------------------------------------------------------- |
+| P0   | 增加 current goal 常驻入口或轻量 goal 模块                                | 让 gap、evidence、output 有共同方向                                     |
+| P0   | Goal 隐私展示：visible / discreet / hidden / private                | 保留目标上下文价值，同时避免敏感目标在投屏、录屏或旁人可见时泄露                                |
+| P0   | 首页改成 Dashboard，降低 `SKILL.md` 编辑权重                              | 新用户快速知道当前状态和下一步                                                 |
+| P0   | Profile Context 高级区：结构化编辑长期画像，生成块只读                            | 保留 Agent Context 价值，同时避免首页变成 Markdown 编辑器                       |
+| P0   | 全局 capture 入口或首页轻量 capture bar                                 | 让日常输入不依赖用户先找到正确页面                                               |
+| P0   | Done -> evidence 审阅体验统一                                        | 打穿最小成长闭环                                                        |
+| P0   | `st.title` / `select_profile` / scope strip 顺序统一               | 先解决“当前是谁、当前目标是什么、写入哪里”这三个认知问题                                   |
+| P1   | 独立 Pending Evidence / Evidence Review 页                        | 提升 evidence 在 UI 中的地位，降低技能树页复杂度                                 |
+| P1   | 技能树页突出 evidence strength / missing evidence                    | 避免 status 变成主观自评                                                |
+| P1   | 最小 project / experience refs 编辑入口（已落地）                         | 为 Composite Evidence、Resume 和 Project Case 聚合打基础                |
+| P1   | Research Source Inbox 最小入口（已落地）                                | 让外部资料先进入 source inbox，不直接污染 evidence                            |
+| P2   | 在 Evidence Review / Output Studio 中生成 claim candidates         | 先让 claim 成为桥接层，而不是先做 claims 独立页面                                |
+| P2   | 差距分析支持从 goal / kanban task 带入上下文                               | 减少重复输入，提高行动建议质量                                                 |
+| P2   | Review 候选生成入口，与 Profile Health 职责拆开                            | 让复盘成为 evidence / next action / public output 的来源                |
+| P2   | Agent Activity / Writeback Review 骨架                           | 让跨页面 Agent 候选、patch 和写回状态可审查                                    |
+| P3   | Public Site 强化“从 evidence / claim 生成输出”入口                      | 让公开站不是独立内容 CMS                                                  |
+| P3   | Research Reading Room：翻译、摘要、claim 提取                           | 把论文和网页从“收藏”推进到可引用的 claim / citation / synthesis                 |
+| P3   | Team View scope hardening                                      | 用硬性 scope 标识避免用户误解数据写入位置                                        |
+| P4   | Research Workspace 完整页面                                        | 支撑 source-aware blog、研究写作、source / chunk / claim / citation 全链路 |
+| P4   | 外部 connector 自动化：X/Twitter、小红书、arXiv、Semantic Scholar、GitHub 等 | 在权限、速率限制和隐私边界明确后，再做自动导入和订阅                                      |
+| P4   | Output Studio 与 Build 拆分                                       | 降低 Public Site 单页复杂度                                            |
+
 
 ### 6.3 不建议先做的事
 
@@ -572,32 +576,31 @@ Goal
 - Home 首屏已改为原生 Streamlit 摘要先渲染：Scope strip、当前目标、本周执行、待整理证据和主操作先出现，React Context Canvas 下移到后续区域加载。
 - 中文导航已采用中文主标签 + 英文别名；Growth 顺序调整为 Skill Map -> Gap Analysis -> Research -> Review -> Health -> Agent Activity。
 
-
 ## 7. 已知摩擦与 backlog
 
 
-| 项                                | 说明                                                                       | 标签         |
-| -------------------------------- | ------------------------------------------------------------------------ | ---------- |
-| 首页偏 `SKILL.md` 编辑                | Home 首屏已改为原生 Dashboard 摘要，Profile Context / SKILL.md 保留为高级区；后续可继续压缩长表单 | 已优化 / 后续增强 |
-| `SKILL.md` 角色不清                  | 应明确为 Agent Context 叙事出口，而非 skill / evidence / task / goal 的事实源           | 需文档 / 需改代码 |
-| generated block 编辑边界             | `skill_tree`、`current_focus` 应只读并跳转 owner 页面，Raw 保存后提示 drift             | 需改代码       |
-| 缺少 Goal 对象入口                     | 当前 UI 无阶段目标，导致推荐和 gap 缺少锚点；Goal 应全局常驻而非普通 Home tab                       | 需设计 / 需改代码 |
-| Goal 明文常驻有隐私风险                   | 目标应支持 UI 隐藏、Agent context 隐藏和 public output 隔离，常驻上下文不等于明文展示              | 需设计 / 需改代码 |
-| Capture 入口偏弱                     | 捕获应跨页面低摩擦进入 inbox，而不是只作为首页普通操作                                           | 需设计 / 需改代码 |
-| 外部研究资料入口缺失                       | Research Workspace v1 已补 source / chunk / claim / citation / synthesis；后续可增强批量阅读与复现记录         | 已有实现 / 后续增强 |
-| 论文阅读与翻译链路缺失                      | Reading Room 已承载翻译、摘要、claim 提取和 citation；后续可增强 PDF 抽取、图表 chunk 和术语表        | 已有实现 / 后续增强 |
-| Agent 写回审阅分散                     | 已有 Agent Activity 骨架；仍需接入更多 owner 页面和远程 Agent run 记录                     | 已有骨架 / 后续增强 |
-| 远程 Agent 执行缺少项目闭环                | Codex / Claude Code 等远程改项目应关联 Project Board / Kanban task，并进入 patch 审阅   | 需设计 / 需改代码 |
-| 外部 connector 隐私和授权边界             | arXiv / Semantic Scholar / GitHub 已有官方 API 导入；X/Twitter、小红书保留手动导入 fallback，cookie / token 不得明文写入 profile           | 已有实现 / 后续增强 |
-| Team View + Profile              | `select_profile()` 已显示但团队数据写入 `teams/`，需用硬性 scope 标识区分 view-as 与写入 owner | 需改代码       |
-| `st.title` / `select_profile` 顺序 | 页面顺序不一致，影响「当前是谁的上下文」认知                                                   | 需改代码       |
-| 首页标签 `NBL` vs `nblane`           | 品牌串需要统一                                                                  | 需改代码       |
-| 中文导航纯净度                          | 已采用中文主标签 + 英文别名；后续继续清理页面内部残余英文-only 文案                                      | 已优化 / 后续增强 |
-| 未配置 AI 的提示                       | 应统一成共享空状态组件或同一组 i18n key                                                 | 需改代码       |
-| Emoji 密度                         | 可选无 emoji 模式已有基础，但页面使用还需收敛                                               | 需改代码       |
-| Health / Review 职责混合             | Review 已拆独立入口，Health 保持只读；后续可增强月复盘和阶段复盘模板                                    | 已拆分 / 后续增强 |
-| Public Site 单页过重                 | Output Studio 与 Public Build 已拆分，旧 Public Site 入口保留跳转                                | 已拆分       |
-| 推荐动线 vs 页面编号                     | 原生导航已按任务分组和成长闭环排序；文件编号仅保留为兼容实现细节                                       | 已优化       |
+| 项                                | 说明                                                                                                       | 标签          |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------- |
+| 首页偏 `SKILL.md` 编辑                | Home 首屏已改为原生 Dashboard 摘要，Profile Context / SKILL.md 保留为高级区；后续可继续压缩长表单                                   | 已优化 / 后续增强  |
+| `SKILL.md` 角色不清                  | 应明确为 Agent Context 叙事出口，而非 skill / evidence / task / goal 的事实源                                           | 需文档 / 需改代码  |
+| generated block 编辑边界             | `skill_tree`、`current_focus` 应只读并跳转 owner 页面，Raw 保存后提示 drift                                             | 需改代码        |
+| 缺少 Goal 对象入口                     | 当前 UI 无阶段目标，导致推荐和 gap 缺少锚点；Goal 应全局常驻而非普通 Home tab                                                       | 需设计 / 需改代码  |
+| Goal 明文常驻有隐私风险                   | 目标应支持 UI 隐藏、Agent context 隐藏和 public output 隔离，常驻上下文不等于明文展示                                              | 需设计 / 需改代码  |
+| Capture 入口偏弱                     | 捕获应跨页面低摩擦进入 inbox，而不是只作为首页普通操作                                                                           | 需设计 / 需改代码  |
+| 外部研究资料入口缺失                       | Research Workspace v1 已补 source / chunk / claim / citation / synthesis；后续可增强批量阅读与复现记录                    | 已有实现 / 后续增强 |
+| 论文阅读与翻译链路缺失                      | Reading Room 已承载翻译、摘要、claim 提取和 citation；后续可增强 PDF 抽取、图表 chunk 和术语表                                      | 已有实现 / 后续增强 |
+| Agent 写回审阅分散                     | 已有 Agent Activity 骨架；仍需接入更多 owner 页面和远程 Agent run 记录                                                     | 已有骨架 / 后续增强 |
+| 远程 Agent 执行缺少项目闭环                | Codex / Claude Code 等远程改项目应关联 Project Board / Kanban task，并进入 patch 审阅                                   | 需设计 / 需改代码  |
+| 外部 connector 隐私和授权边界             | arXiv / Semantic Scholar / GitHub 已有官方 API 导入；X/Twitter、小红书保留手动导入 fallback，cookie / token 不得明文写入 profile | 已有实现 / 后续增强 |
+| Team View + Profile              | `select_profile()` 已显示但团队数据写入 `teams/`，需用硬性 scope 标识区分 view-as 与写入 owner                                 | 需改代码        |
+| `st.title` / `select_profile` 顺序 | 页面顺序不一致，影响「当前是谁的上下文」认知                                                                                   | 需改代码        |
+| 首页标签 `NBL` vs `nblane`           | 品牌串需要统一                                                                                                  | 需改代码        |
+| 中文导航纯净度                          | 已采用中文主标签 + 英文别名；后续继续清理页面内部残余英文-only 文案                                                                   | 已优化 / 后续增强  |
+| 未配置 AI 的提示                       | 应统一成共享空状态组件或同一组 i18n key                                                                                 | 需改代码        |
+| Emoji 密度                         | 可选无 emoji 模式已有基础，但页面使用还需收敛                                                                               | 需改代码        |
+| Health / Review 职责混合             | Review 已拆独立入口，Health 保持只读；后续可增强月复盘和阶段复盘模板                                                                | 已拆分 / 后续增强  |
+| Public Site 单页过重                 | Output Studio 与 Public Build 已拆分，旧 Public Site 入口保留跳转                                                    | 已拆分         |
+| 推荐动线 vs 页面编号                     | 原生导航已按任务分组和成长闭环排序；文件编号仅保留为兼容实现细节                                                                         | 已优化         |
 
 
 ## 8. 相关文档
@@ -608,3 +611,4 @@ Goal
 - [当前状态](../project/status.md) — 已实现能力和主要缺口
 - [Web 使用手册](../guides/web-ui.md) — 运行方式、页面操作和 CLI 对照
 - [公开站点指南](../guides/public-site.md) — Public Surface 细节
+

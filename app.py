@@ -1850,6 +1850,11 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 icon=":material/view_kanban:",
             ),
             st.Page(
+                "pages/11_Project_Board.py",
+                title=ui["sidebar_nav_project_board"],
+                icon=":material/account_tree:",
+            ),
+            st.Page(
                 EVIDENCE_REVIEW_PAGE,
                 title=ui["sidebar_nav_evidence_review"],
                 icon=":material/fact_check:",

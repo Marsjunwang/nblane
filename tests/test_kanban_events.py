@@ -139,6 +139,23 @@ class TestKanbanEvents(unittest.TestCase):
             )
         )
 
+    def test_apply_card_update_accepts_project_and_milestone(self) -> None:
+        """Edit payloads can assign or clear Project Board metadata."""
+        task = KanbanTask(title="Task", id="task-1")
+
+        updated = apply_kanban_card_update(
+            task,
+            {
+                "project_id": " project:demo ",
+                "milestone_id": " milestone:first ",
+            },
+        )
+
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.project_id, "project:demo")
+        self.assertEqual(updated.milestone_id, "milestone:first")
+
     def test_event_subtask_index_supports_new_and_old_payloads(self) -> None:
         """Current index and older subtask-id payloads both resolve."""
         task = KanbanTask(

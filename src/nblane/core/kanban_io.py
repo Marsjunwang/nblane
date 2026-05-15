@@ -47,6 +47,10 @@ def _normalize_kanban_meta_key(raw_key: str) -> str | None:
     k = raw_key.strip().lower().replace(" ", "_")
     if k in ("id", "task_id"):
         return "id"
+    if k in ("project_id", "project"):
+        return "project_id"
+    if k in ("milestone_id", "milestone"):
+        return "milestone_id"
     if k in ("context", "why", "outcome", "started_on", "completed_on"):
         return k
     if k == "tags":
@@ -86,6 +90,10 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
         task.completed_on = val
     elif field == "crystallized" and isinstance(val, bool):
         task.crystallized = val
+    elif field == "project_id" and isinstance(val, str):
+        task.project_id = val.strip()
+    elif field == "milestone_id" and isinstance(val, str):
+        task.milestone_id = val.strip()
     elif field == "tags" and isinstance(val, str):
         task.tags = val.strip()
 
@@ -227,6 +235,8 @@ def _kanban_task_id_payload(
         _clean_task_text(task.started_on),
         _clean_task_text(task.completed_on),
         "1" if task.crystallized else "0",
+        _clean_task_text(task.project_id),
+        _clean_task_text(task.milestone_id),
     ]
     for subtask in task.subtasks:
         parts.extend(
@@ -698,6 +708,10 @@ def _render_kanban_task_lines(
         meta_pairs.append(("completed_on", task.completed_on.strip()))
     if task.crystallized:
         meta_pairs.append(("crystallized", "true"))
+    if task.project_id.strip():
+        meta_pairs.append(("project_id", task.project_id.strip()))
+    if task.milestone_id.strip():
+        meta_pairs.append(("milestone_id", task.milestone_id.strip()))
     tags_text = _kanban_tags_text(task.tags)
     if tags_text:
         meta_pairs.append(("tags", tags_text))

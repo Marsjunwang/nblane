@@ -82,6 +82,12 @@ from nblane.core.profile_ingest import (
     schema_node_labels,
 )
 from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+from nblane.core.project_board import load_project_board
+from nblane.core.project_board_sync import (
+    add_project_refs_to_ingest_patch,
+    project_refs_for_tasks,
+    sync_project_board_from_kanban,
+)
 from nblane.core.review_actions import record_writeback_activity
 from nblane.web_cache import (
     clear_web_cache,
@@ -188,12 +194,14 @@ def _auto_save(
 ) -> None:
     """Persist changes to kanban.md."""
     path = profile_dir(profile) / "kanban.md"
-    assert_files_current([path])
+    project_path = profile_dir(profile) / "project-board.yaml"
+    assert_files_current([path, project_path])
     ensured = ensure_kanban_task_ids(sections, profile)
     sections.clear()
     sections.update(ensured)
     save_kanban(profile, sections)
-    refresh_file_snapshots([path])
+    sync_project_board_from_kanban(profile, sections)
+    refresh_file_snapshots([path, project_path])
     stash_git_backup_results()
     clear_web_cache()
     _clear_kanban_dirty(profile)
@@ -416,6 +424,8 @@ def _task_payload(task: KanbanTask) -> dict:
         "started_on": task.started_on or "",
         "completed_on": task.completed_on or "",
         "crystallized": task.crystallized,
+        "project_id": task.project_id,
+        "milestone_id": task.milestone_id,
         "subtasks": [
             {
                 "id": f"subtask-{i}",
@@ -573,6 +583,33 @@ def _sections_payload(
     }
 
 
+def _project_options_payload(profile: str) -> list[dict]:
+    """Return active/paused project choices for the board editor."""
+    board = load_project_board(profile)
+    options: list[dict] = []
+    for case in board.project_cases:
+        if not case.id or case.status not in ("active", "paused"):
+            continue
+        options.append(
+            {
+                "id": case.id,
+                "label": case.title or case.id,
+                "status": case.status,
+                "milestones": [
+                    {
+                        "id": milestone.id,
+                        "label": milestone.title or milestone.id,
+                        "status": milestone.status,
+                    }
+                    for milestone in case.milestones
+                    if milestone.id
+                    and milestone.status in ("planned", "active")
+                ],
+            }
+        )
+    return options
+
+
 def _board_labels(ui: dict[str, str]) -> dict[str, str]:
     """Labels consumed by the unified board component."""
     labels = {
@@ -689,6 +726,10 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             "html_lang": llm_client.ui_language(),
             "quick_add": ui.get("kb_quick_add", "+ Add task"),
             "move_to": ui.get("kb_move_to_label", ui.get("move_to", "Move to")),
+            "project": ui.get("kb_project", "Project"),
+            "milestone": ui.get("kb_milestone", "Milestone"),
+            "no_project": ui.get("kb_no_project", "No project"),
+            "no_milestone": ui.get("kb_no_milestone", "No milestone"),
             "confirm_move": ui.get("kb_confirm_move", "Move"),
             "save": ui["save"],
             "save_short": ui.get("kb_save_short", "Save"),
@@ -744,8 +785,32 @@ def _card_date_error_message(fields: list[str], ui: dict[str, str]) -> str:
     return ui.get("kb_invalid_date", fallback).format(fields=field_list)
 
 
+def _normalize_card_project_fields(profile: str, card: dict) -> dict:
+    """Clear stale milestone values when a card changes project."""
+    if "project_id" not in card and "milestone_id" not in card:
+        return card
+    normalized = dict(card)
+    project_id = str(normalized.get("project_id", "") or "").strip()
+    milestone_id = str(normalized.get("milestone_id", "") or "").strip()
+    normalized["project_id"] = project_id
+    normalized["milestone_id"] = milestone_id
+    if not project_id:
+        normalized["milestone_id"] = ""
+        return normalized
+    board = load_project_board(profile)
+    case = board.by_id().get(project_id)
+    if case is None:
+        normalized["milestone_id"] = ""
+        return normalized
+    valid_milestones = {milestone.id for milestone in case.milestones}
+    if milestone_id and milestone_id not in valid_milestones:
+        normalized["milestone_id"] = ""
+    return normalized
+
+
 def _apply_board_card_payload(
     *,
+    profile: str,
     card: dict | None,
     found: tuple[str, int, KanbanTask] | None,
     sections: dict[str, list[KanbanTask]],
@@ -762,6 +827,7 @@ def _apply_board_card_payload(
         st.warning(_card_date_error_message(invalid_dates, ui))
         return found, False, False
     section, idx, task = found
+    card = _normalize_card_project_fields(profile, card)
     updated_task = _apply_task_update(task, card)
     if updated_task is None:
         st.warning(ui["kb_title_required"])
@@ -1431,6 +1497,7 @@ def _handle_board_event(
 
     if action in ("move_card", "reorder"):
         found, card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=payload.get("card"),
             found=found,
             sections=sections,
@@ -1486,6 +1553,7 @@ def _handle_board_event(
         if not isinstance(card, dict):
             card = payload
         _found, _card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=card,
             found=found,
             sections=sections,
@@ -1551,6 +1619,7 @@ def _handle_board_event(
             st.warning(ui["kb_drag_stale"])
             return
         found, card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=payload.get("card"),
             found=found,
             sections=sections,
@@ -1578,6 +1647,7 @@ def _handle_board_event(
             st.warning(ui["kb_drag_stale"])
             return
         found, card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=payload.get("card"),
             found=found,
             sections=sections,
@@ -1607,6 +1677,7 @@ def _handle_board_event(
             st.warning(ui["kb_drag_stale"])
             return
         found, card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=payload.get("card"),
             found=found,
             sections=sections,
@@ -1792,6 +1863,7 @@ def _handle_board_event(
             return
         card = payload.get("card")
         found, _card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=card if isinstance(card, dict) else None,
             found=found,
             sections=sections,
@@ -1844,6 +1916,7 @@ def _handle_board_event(
             st.warning(ui["kb_drag_stale"])
             return
         found, card_applied, ok = _apply_board_card_payload(
+            profile=profile,
             card=payload.get("card"),
             found=found,
             sections=sections,
@@ -1867,6 +1940,10 @@ def _handle_board_event(
             st.error(ui["ingest_err"].format(msg=err))
             return
         if patch is not None:
+            patch = add_project_refs_to_ingest_patch(
+                patch,
+                project_refs_for_tasks([task]),
+            )
             drop_streamlit_widget_keys(
                 [
                     f"pv_pool_{profile}",
@@ -1879,6 +1956,9 @@ def _handle_board_event(
             st.session_state[f"kanban_ingest_source_done_ids_{profile}"] = [
                 task.id
             ]
+            st.session_state[f"kanban_ingest_source_projects_{profile}"] = (
+                project_refs_for_tasks([task])
+            )
             st.session_state[f"kanban_ingest_patch_{profile}"] = patch
             st.rerun()
 
@@ -1898,6 +1978,7 @@ _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
 _activity_path = _pdir / "activity-log.yaml"
 _goals_path = _pdir / "goals.yaml"
+_project_path = _pdir / "project-board.yaml"
 for _path in (
     _kanban_path,
     _archive_path,
@@ -1906,6 +1987,7 @@ for _path in (
     _skill_path,
     _activity_path,
     _goals_path,
+    _project_path,
 ):
     ensure_file_snapshot(_path)
 
@@ -2011,6 +2093,7 @@ board_event = st_kanban_board(
         "auto_dates": auto_dates,
         "focus_mode": focus_mode,
         "lang": llm_client.ui_language(),
+        "project_options": _project_options_payload(selected),
     },
     ai_state=_board_ai_state(selected, ui),
     key=f"kanban_board_{selected}",
@@ -2058,13 +2141,18 @@ with st.expander(ui["done_bulk_title"], expanded=False):
         with b1:
             if st.button(ui["archive_done"], key=f"arch_{selected}"):
                 if pick_bulk:
-                    assert_files_current([_archive_path, _kanban_path])
+                    assert_files_current(
+                        [_archive_path, _kanban_path, _project_path]
+                    )
                     sections = archive_kanban_done_tasks(
                         selected,
                         sections,
                         pick_bulk,
                     )
-                    refresh_file_snapshots([_archive_path, _kanban_path])
+                    sync_project_board_from_kanban(selected, sections)
+                    refresh_file_snapshots(
+                        [_archive_path, _kanban_path, _project_path]
+                    )
                     stash_git_backup_results()
                     st.rerun()
         with b2:
@@ -2114,6 +2202,10 @@ with st.expander(ui["ingest_expander"], expanded=False):
                 if err is not None:
                     st.error(ui["ingest_err"].format(msg=err))
                 elif patch is not None:
+                    patch = add_project_refs_to_ingest_patch(
+                        patch,
+                        project_refs_for_tasks(chosen),
+                    )
                     drop_streamlit_widget_keys(
                         [
                             f"pv_pool_{selected}",
@@ -2126,6 +2218,9 @@ with st.expander(ui["ingest_expander"], expanded=False):
                     st.session_state[
                         f"kanban_ingest_source_done_ids_{selected}"
                     ] = [t.id for t in chosen if t.id]
+                    st.session_state[
+                        f"kanban_ingest_source_projects_{selected}"
+                    ] = project_refs_for_tasks(chosen)
                     st.session_state[
                         f"kanban_ingest_patch_{selected}"
                     ] = patch
@@ -2208,10 +2303,19 @@ with st.expander(ui["ingest_expander"], expanded=False):
             src_done_ids = st.session_state.get(
                 f"kanban_ingest_source_done_ids_{selected}"
             )
+            src_projects = st.session_state.get(
+                f"kanban_ingest_source_projects_{selected}"
+            )
             if isinstance(src_done, list) and src_done:
                 st.caption(
                     ui["ingest_preview_source_done"].format(
                         sources="; ".join(str(x) for x in src_done),
+                    )
+                )
+            if isinstance(src_projects, list) and src_projects:
+                st.caption(
+                    ui.get("ingest_preview_projects", "Projects: {projects}").format(
+                        projects=", ".join(str(x) for x in src_projects),
                     )
                 )
             st.caption(
@@ -2351,6 +2455,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         for sk in (
                             f"kanban_ingest_source_done_{selected}",
                             f"kanban_ingest_source_done_ids_{selected}",
+                            f"kanban_ingest_source_projects_{selected}",
                         ):
                             if sk in st.session_state:
                                 del st.session_state[sk]
@@ -2412,6 +2517,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         for sk in (
                             f"kanban_ingest_source_done_{selected}",
                             f"kanban_ingest_source_done_ids_{selected}",
+                            f"kanban_ingest_source_projects_{selected}",
                         ):
                             if sk in st.session_state:
                                 del st.session_state[sk]

@@ -18,6 +18,7 @@ PROJECT_BOARD_FILENAME = "project-board.yaml"
 PROJECT_STATUSES = ("active", "paused", "completed", "archived")
 PROJECT_KINDS = ("internal", "research", "work", "side_project", "learning")
 PROJECT_VISIBILITIES = ("private", "public")
+MILESTONE_STATUSES = ("planned", "active", "completed", "archived")
 
 
 def profile_dir(name: str) -> Path:
@@ -109,6 +110,64 @@ def _find_case(board: "ProjectBoard", case_id: str) -> "ProjectCase":
 
 
 @dataclass
+class ProjectMilestone:
+    """One milestone inside an internal project case."""
+
+    id: str
+    title: str
+    status: str = "planned"
+    target: str = ""
+    summary: str = ""
+    task_refs: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    source_refs: list[str] = field(default_factory=list)
+    output_refs: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ProjectMilestone":
+        """Build a milestone from YAML."""
+        if not isinstance(data, dict):
+            return cls(id="", title="")
+        return cls(
+            id=_clean_text(data.get("id")),
+            title=_clean_text(data.get("title")),
+            status=_clean_choice(
+                data.get("status"),
+                MILESTONE_STATUSES,
+                "planned",
+            ),
+            target=_clean_text(data.get("target")),
+            summary=_clean_text(data.get("summary")),
+            task_refs=_clean_list(data.get("task_refs")),
+            evidence_refs=_clean_list(data.get("evidence_refs")),
+            source_refs=_clean_list(data.get("source_refs")),
+            output_refs=_clean_list(data.get("output_refs")),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize for YAML output."""
+        out: dict[str, object] = {
+            "id": self.id,
+            "title": self.title,
+            "status": self.status,
+        }
+        for key in ("target", "summary"):
+            value = getattr(self, key)
+            if value:
+                out[key] = value
+        for key in (
+            "task_refs",
+            "evidence_refs",
+            "source_refs",
+            "output_refs",
+        ):
+            values = _clean_list(getattr(self, key))
+            if values:
+                out[key] = list(values)
+        return out
+
+
+@dataclass
 class ProjectCase:
     """One internal project case used to group work and evidence."""
 
@@ -120,9 +179,11 @@ class ProjectCase:
     summary: str = ""
     goal_refs: list[str] = field(default_factory=list)
     task_refs: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
     source_refs: list[str] = field(default_factory=list)
     experience_refs: list[str] = field(default_factory=list)
     output_refs: list[str] = field(default_factory=list)
+    milestones: list[ProjectMilestone] = field(default_factory=list)
     visibility: str = "private"
     notes: str = ""
 
@@ -140,9 +201,17 @@ class ProjectCase:
             summary=_clean_text(data.get("summary")),
             goal_refs=_clean_list(data.get("goal_refs")),
             task_refs=_clean_list(data.get("task_refs")),
+            evidence_refs=_clean_list(data.get("evidence_refs")),
             source_refs=_clean_list(data.get("source_refs")),
             experience_refs=_clean_list(data.get("experience_refs")),
             output_refs=_clean_list(data.get("output_refs")),
+            milestones=[
+                ProjectMilestone.from_dict(item)
+                for item in (data.get("milestones") or [])
+                if isinstance(item, dict)
+            ]
+            if isinstance(data.get("milestones"), list)
+            else [],
             visibility=_clean_choice(
                 data.get("visibility"),
                 PROJECT_VISIBILITIES,
@@ -171,13 +240,20 @@ class ProjectCase:
         for key in (
             "goal_refs",
             "task_refs",
+            "evidence_refs",
             "source_refs",
             "experience_refs",
             "output_refs",
         ):
-            values = getattr(self, key)
+            values = _clean_list(getattr(self, key))
             if values:
                 out[key] = list(values)
+        if self.milestones:
+            out["milestones"] = [
+                milestone.to_dict()
+                for milestone in self.milestones
+                if milestone.id and milestone.title
+            ]
         return out
 
 
@@ -251,8 +327,10 @@ def add_project_case(
     goal_refs: object = None,
     task_refs: object = None,
     source_refs: object = None,
+    evidence_refs: object = None,
     experience_refs: object = None,
     output_refs: object = None,
+    milestones: object = None,
     visibility: str = "private",
     notes: str = "",
 ) -> ProjectCase:
@@ -275,9 +353,17 @@ def add_project_case(
         summary=_clean_text(summary),
         goal_refs=_clean_list(goal_refs),
         task_refs=_clean_list(task_refs),
+        evidence_refs=_clean_list(evidence_refs),
         source_refs=_clean_list(source_refs),
         experience_refs=_clean_list(experience_refs),
         output_refs=_clean_list(output_refs),
+        milestones=[
+            item
+            if isinstance(item, ProjectMilestone)
+            else ProjectMilestone.from_dict(item)
+            for item in (milestones or [])
+            if isinstance(item, (ProjectMilestone, dict))
+        ],
         visibility=_clean_choice(visibility, PROJECT_VISIBILITIES, "private"),
         notes=_clean_text(notes),
     )
@@ -313,12 +399,23 @@ def update_project_case(
     for key in (
         "goal_refs",
         "task_refs",
+        "evidence_refs",
         "source_refs",
         "experience_refs",
         "output_refs",
     ):
         if key in fields:
             setattr(case, key, _clean_list(fields[key]))
+    if "milestones" in fields:
+        raw_milestones = fields["milestones"]
+        if isinstance(raw_milestones, list):
+            case.milestones = [
+                item
+                if isinstance(item, ProjectMilestone)
+                else ProjectMilestone.from_dict(item)
+                for item in raw_milestones
+                if isinstance(item, (ProjectMilestone, dict))
+            ]
     return case
 
 
@@ -354,10 +451,12 @@ def save_project_board(name_or_dir: str | Path, data: ProjectBoard | dict) -> No
 __all__ = [
     "PROJECT_BOARD_FILENAME",
     "PROJECT_KINDS",
+    "MILESTONE_STATUSES",
     "PROJECT_STATUSES",
     "PROJECT_VISIBILITIES",
     "ProjectBoard",
     "ProjectCase",
+    "ProjectMilestone",
     "add_project_case",
     "archive_project_case",
     "load_project_board",

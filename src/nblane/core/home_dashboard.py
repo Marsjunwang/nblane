@@ -347,9 +347,12 @@ def dashboard_kanban_summary(profile: ProfileRef) -> dict:
         "doing": [
             {
                 "title": task.title,
+                "id": task.id,
                 "blocked_by": task.blocked_by,
                 "tags": task.tags,
                 "started_on": task.started_on or "",
+                "project_id": task.project_id,
+                "milestone_id": task.milestone_id,
             }
             for task in doing[:5]
         ],
@@ -494,6 +497,10 @@ def dashboard_project_summary(profile: ProfileRef) -> dict:
                 "status": case.status,
                 "kind": case.kind,
                 "visibility": case.visibility,
+                "goal_refs": list(case.goal_refs),
+                "task_refs": list(case.task_refs),
+                "evidence_refs": list(case.evidence_refs),
+                "source_refs": list(case.source_refs),
             }
         )
 
@@ -506,10 +513,30 @@ def dashboard_project_summary(profile: ProfileRef) -> dict:
         for ref in _clean_string_list(row.get("project_refs")):
             evidence_by_project.setdefault(ref, []).append(eid)
 
+    source_by_project: dict[str, list[str]] = {}
+    for case in board.project_cases:
+        if not case.id:
+            continue
+        for ref in _clean_string_list(case.source_refs):
+            source_by_project.setdefault(case.id, []).append(ref)
+    try:
+        source_inbox = load_research_sources(profile)
+    except OSError:
+        source_inbox = None
+    if source_inbox is not None:
+        for source in source_inbox.sources:
+            if not source.id:
+                continue
+            for ref in _clean_string_list(source.project_refs):
+                source_by_project.setdefault(ref, []).append(source.id)
+    for project_id, refs in list(source_by_project.items()):
+        source_by_project[project_id] = _clean_string_list(refs)
+
     return {
         "implemented": bool(cases),
         "cases": cases,
         "evidence_by_project": evidence_by_project,
+        "source_by_project": source_by_project,
     }
 
 

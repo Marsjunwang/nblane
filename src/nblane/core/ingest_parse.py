@@ -192,6 +192,15 @@ def _normalize_evidence_row(row: dict) -> dict | None:
         ]
         if refs:
             out["source_refs"] = refs
+    project_refs = row.get("project_refs")
+    if isinstance(project_refs, list):
+        refs = [
+            str(item).strip()
+            for item in project_refs
+            if str(item).strip()
+        ]
+        if refs:
+            out["project_refs"] = refs
     if row.get("deprecated") is True:
         out["deprecated"] = True
     rb = str(row.get("replaced_by", "") or "").strip()

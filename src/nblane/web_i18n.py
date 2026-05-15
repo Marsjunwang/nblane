@@ -149,6 +149,7 @@ _COMMON: dict[str, dict[str, str]] = {
         "sidebar_nav_team_group": "Team",
         "sidebar_nav_dashboard": "Daily Dashboard",
         "sidebar_nav_kanban": "Kanban",
+        "sidebar_nav_project_board": "Project Board",
         "sidebar_nav_evidence_review": "Evidence Review",
         "sidebar_nav_research": "Research",
         "sidebar_nav_skill_map": "Skill Map",
@@ -241,6 +242,7 @@ _COMMON: dict[str, dict[str, str]] = {
         "sidebar_nav_team_group": "团队 Team",
         "sidebar_nav_dashboard": "每日仪表盘 Dashboard",
         "sidebar_nav_kanban": "看板 Kanban",
+        "sidebar_nav_project_board": "项目看板 Project",
         "sidebar_nav_evidence_review": "证据审阅 Evidence",
         "sidebar_nav_research": "研究工作台 Research",
         "sidebar_nav_skill_map": "技能地图 Skill Map",
@@ -251,6 +253,138 @@ _COMMON: dict[str, dict[str, str]] = {
         "sidebar_nav_public": "输出工作台 Studio",
         "sidebar_nav_public_build": "公开构建 Build",
         "sidebar_nav_team": "团队视图 Team",
+    },
+}
+
+_PROJECT_BOARD: dict[str, dict[str, str]] = {
+    "en": {
+        "page_title": "Project Board · nblane",
+        "title": "Project Board",
+        "page_context_line": (
+            "Internal project cases connect goals, tasks, sources, evidence, "
+            "milestones, and outputs. Public projects still live in projects.yaml."
+        ),
+        "create_project": "Create project",
+        "create_task": "Create Kanban task",
+        "project_detail": "Project detail",
+        "milestones": "Milestones",
+        "add_milestone": "Add milestone",
+        "save_project": "Save project",
+        "save_milestone": "Save milestone",
+        "archive_project": "Archive project",
+        "edit": "Edit",
+        "saved": "Saved project board.",
+        "task_created": "Created Kanban task.",
+        "empty_board": "No internal projects yet.",
+        "empty_status": "No projects in this status.",
+        "select_project": "Project",
+        "field_id": "ID",
+        "field_title": "Title",
+        "field_status": "Status",
+        "field_kind": "Kind",
+        "field_visibility": "Visibility",
+        "field_time_range": "Time range",
+        "field_summary": "Summary",
+        "field_notes": "Notes",
+        "field_goal_refs": "Goals",
+        "field_task_refs": "Kanban tasks",
+        "field_evidence_refs": "Evidence",
+        "field_source_refs": "Research sources",
+        "field_experience_refs": "Experience cases",
+        "field_output_refs": "Outputs",
+        "field_target": "Target",
+        "field_milestone": "Milestone",
+        "task_title": "Task title",
+        "task_section": "Column",
+        "no_milestone": "No milestone",
+        "id_help": "Leave blank to auto-generate project:<slug>.",
+        "milestone_id_help": "Leave blank to auto-generate milestone:<slug>.",
+        "title_required": "Title is required.",
+        "duplicate_milestone": "Milestone id already exists: {id}",
+        "missing_ref": "missing",
+        "claimed_elsewhere_hint": (
+            "{count} task(s) already belong to another project and are hidden "
+            "from this selector."
+        ),
+        "card_counts": (
+            "Goals {goals} · Tasks {tasks} · Evidence {evidence} · "
+            "Sources {sources} · Milestones {milestones}"
+        ),
+        "metric_unassigned_tasks": "Unassigned tasks",
+        "metric_unassigned_evidence": "Unassigned evidence",
+        "metric_current_goal_projects": "Current-goal projects",
+        "unassigned_evidence_hint": (
+            "{count} reviewed evidence row(s) are not linked to any project."
+        ),
+        "status_active": "Active",
+        "status_paused": "Paused",
+        "status_completed": "Completed",
+        "status_archived": "Archived",
+        "status_planned": "Planned",
+    },
+    "zh": {
+        "page_title": "项目看板 · nblane",
+        "title": "项目看板 Project Board",
+        "page_context_line": (
+            "内部项目案例连接目标、任务、资料、证据、里程碑和输出；公开项目仍由 "
+            "projects.yaml 管理。"
+        ),
+        "create_project": "新建项目",
+        "create_task": "新建 Kanban 任务",
+        "project_detail": "项目详情",
+        "milestones": "里程碑",
+        "add_milestone": "新增里程碑",
+        "save_project": "保存项目",
+        "save_milestone": "保存里程碑",
+        "archive_project": "归档项目",
+        "edit": "编辑",
+        "saved": "已保存项目看板。",
+        "task_created": "已创建 Kanban 任务。",
+        "empty_board": "还没有内部项目。",
+        "empty_status": "这个状态下没有项目。",
+        "select_project": "项目",
+        "field_id": "ID",
+        "field_title": "标题",
+        "field_status": "状态",
+        "field_kind": "类型",
+        "field_visibility": "可见性",
+        "field_time_range": "时间范围",
+        "field_summary": "摘要",
+        "field_notes": "备注",
+        "field_goal_refs": "目标",
+        "field_task_refs": "Kanban 任务",
+        "field_evidence_refs": "Evidence",
+        "field_source_refs": "Research sources",
+        "field_experience_refs": "Experience cases",
+        "field_output_refs": "Outputs",
+        "field_target": "目标日期",
+        "field_milestone": "里程碑",
+        "task_title": "任务标题",
+        "task_section": "列",
+        "no_milestone": "无里程碑",
+        "id_help": "留空会自动生成 project:<slug>。",
+        "milestone_id_help": "留空会自动生成 milestone:<slug>。",
+        "title_required": "标题不能为空。",
+        "duplicate_milestone": "Milestone id 已存在：{id}",
+        "missing_ref": "缺失",
+        "claimed_elsewhere_hint": (
+            "{count} 个任务已属于其他项目，因此不会出现在这个选择器里。"
+        ),
+        "card_counts": (
+            "目标 {goals} · 任务 {tasks} · 证据 {evidence} · "
+            "资料 {sources} · 里程碑 {milestones}"
+        ),
+        "metric_unassigned_tasks": "未归属任务",
+        "metric_unassigned_evidence": "未归属证据",
+        "metric_current_goal_projects": "当前目标项目",
+        "unassigned_evidence_hint": (
+            "{count} 条 reviewed evidence 尚未关联任何项目。"
+        ),
+        "status_active": "进行中",
+        "status_paused": "暂停",
+        "status_completed": "已完成",
+        "status_archived": "已归档",
+        "status_planned": "计划中",
     },
 }
 
@@ -704,7 +838,8 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "refs_save": "Save refs",
         "refs_saved": "Saved evidence refs.",
         "refs_evidence_missing": "Evidence row was not found.",
-        "refs_case_editor_title": "Minimal case editor",
+        "refs_case_editor_title": "Project and experience owners",
+        "refs_open_project_board": "Open Project Board",
         "refs_case_id": "ID",
         "refs_project_title": "Project title",
         "refs_experience_organization": "Organization",
@@ -842,7 +977,8 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "refs_save": "保存引用",
         "refs_saved": "已保存 evidence refs。",
         "refs_evidence_missing": "未找到 evidence 条目。",
-        "refs_case_editor_title": "最小 case 编辑器",
+        "refs_case_editor_title": "项目 / 经历 owner",
+        "refs_open_project_board": "打开项目看板 Project Board",
         "refs_case_id": "ID",
         "refs_project_title": "项目标题",
         "refs_experience_organization": "组织 / 公司",
@@ -1987,6 +2123,10 @@ _KANBAN: dict[str, dict[str, str]] = {
         "field_outcome": "outcome",
         "field_started": "started_on",
         "field_completed": "completed_on",
+        "kb_project": "Project",
+        "kb_milestone": "Milestone",
+        "kb_no_project": "No project",
+        "kb_no_milestone": "No milestone",
         "subtasks_label": "Subtasks (checkbox)",
         "add_subtask": "+ Subtask",
         "crystallized": "Crystallized (ingested)",
@@ -2027,6 +2167,7 @@ _KANBAN: dict[str, dict[str, str]] = {
         "ingest_preview_source_done": (
             "Draft from Done tasks: {sources}"
         ),
+        "ingest_preview_projects": "Projects: {projects}",
         "ingest_rationale": "Rationale",
         "ingest_excerpt": "Source excerpt",
     },
@@ -2368,6 +2509,10 @@ _KANBAN: dict[str, dict[str, str]] = {
         "field_outcome": "结果 outcome",
         "field_started": "开始日 started_on",
         "field_completed": "结束日 completed_on",
+        "kb_project": "项目",
+        "kb_milestone": "里程碑",
+        "kb_no_project": "无项目",
+        "kb_no_milestone": "无里程碑",
         "subtasks_label": "子任务（可勾选）",
         "add_subtask": "+ 子任务",
         "crystallized": "已结晶（已摄入）",
@@ -2405,6 +2550,7 @@ _KANBAN: dict[str, dict[str, str]] = {
         "ingest_preview_source_done": (
             "草案依据的「已完成」任务：{sources}"
         ),
+        "ingest_preview_projects": "项目：{projects}",
         "ingest_rationale": "理由",
         "ingest_excerpt": "原文摘录",
     },
@@ -2980,6 +3126,14 @@ def agent_activity_ui() -> dict[str, str]:
     lg = _lang()
     merged = dict(_COMMON.get(lg, _COMMON["en"]))
     merged.update(_AGENT_ACTIVITY.get(lg, _AGENT_ACTIVITY["en"]))
+    return merged
+
+
+def project_board_ui() -> dict[str, str]:
+    """Project Board page."""
+    lg = _lang()
+    merged = dict(_COMMON.get(lg, _COMMON["en"]))
+    merged.update(_PROJECT_BOARD.get(lg, _PROJECT_BOARD["en"]))
     return merged
 
 

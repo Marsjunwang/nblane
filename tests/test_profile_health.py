@@ -247,10 +247,104 @@ class TestProfileHealth(unittest.TestCase):
         self.assertGreaterEqual(len(ref_issues), 3)
         self.assertTrue(report.can_publish_context)
 
+    def test_dangling_project_board_and_kanban_refs_warn(self) -> None:
+        """Project Board and Kanban project/milestone refs are checked."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._template_profile(Path(tmp_s), "projectrefs")
+            (profile / "project-board.yaml").write_text(
+                yaml.dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "projectrefs",
+                        "project_cases": [
+                            {
+                                "id": "project:demo",
+                                "title": "Demo",
+                                "goal_refs": ["goal_missing"],
+                                "task_refs": ["task_missing"],
+                                "evidence_refs": ["ev_missing"],
+                                "source_refs": ["source:research:missing"],
+                                "milestones": [
+                                    {
+                                        "id": "milestone:first",
+                                        "title": "First",
+                                        "task_refs": ["task_missing"],
+                                        "evidence_refs": ["ev_missing"],
+                                        "source_refs": ["source:research:missing"],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (profile / "kanban.md").write_text(
+                "# projectrefs · Kanban\n\n"
+                "## Doing\n\n"
+                "- [ ] Bad project\n"
+                "  - id: task_bad_project\n"
+                "  - project_id: project:missing\n"
+                "- [ ] Bad milestone\n"
+                "  - id: task_bad_milestone\n"
+                "  - project_id: project:demo\n"
+                "  - milestone_id: milestone:missing\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.profile_health.profile_dir",
+                lambda _name: profile,
+            ), patch(
+                "nblane.core.profile_health.validate_one",
+                return_value=([], []),
+            ), patch(
+                "nblane.core.profile_health.get_drifted_blocks",
+                return_value=[],
+            ):
+                report = analyze_profile_health("projectrefs")
+
+        details = "\n".join(issue.detail for issue in report.issues)
+        self.assertIn("missing goal: goal_missing", details)
+        self.assertIn("missing kanban task: task_missing", details)
+        self.assertIn("missing evidence row: ev_missing", details)
+        self.assertIn("missing research source: source:research:missing", details)
+        self.assertIn("missing project case: project:missing", details)
+        self.assertIn("missing project milestone: milestone:missing", details)
+
     def test_valid_workspace_refs_do_not_warn(self) -> None:
         """Existing project, experience, and source refs pass health checks."""
         with tempfile.TemporaryDirectory() as tmp_s:
             profile = self._template_profile(Path(tmp_s), "validrefs")
+            (profile / "goals.yaml").write_text(
+                yaml.dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "validrefs",
+                        "current_goal_id": "goal_1",
+                        "goals": [
+                            {
+                                "id": "goal_1",
+                                "title": "Goal",
+                                "status": "active",
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (profile / "kanban.md").write_text(
+                "# validrefs · Kanban\n\n"
+                "## Doing\n\n"
+                "- [ ] Linked task\n"
+                "  - id: task_1\n"
+                "  - project_id: project:demo\n"
+                "  - milestone_id: milestone:first\n",
+                encoding="utf-8",
+            )
             (profile / "project-board.yaml").write_text(
                 yaml.dump(
                     {
@@ -260,8 +354,20 @@ class TestProfileHealth(unittest.TestCase):
                             {
                                 "id": "project:demo",
                                 "title": "Demo",
+                                "goal_refs": ["goal_1"],
+                                "task_refs": ["task_1"],
+                                "evidence_refs": ["ev_1"],
                                 "source_refs": ["source:research:20260513-001"],
                                 "experience_refs": ["experience:lab"],
+                                "milestones": [
+                                    {
+                                        "id": "milestone:first",
+                                        "title": "First",
+                                        "task_refs": ["task_1"],
+                                        "evidence_refs": ["ev_1"],
+                                        "source_refs": ["source:research:20260513-001"],
+                                    }
+                                ],
                             }
                         ],
                     },

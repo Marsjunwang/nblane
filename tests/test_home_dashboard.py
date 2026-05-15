@@ -38,7 +38,9 @@ class TestHomeDashboard(unittest.TestCase):
             "# alice · Kanban\n\n"
             "## Doing\n\n"
             "- [ ] Ship robot demo\n"
+            "  - id: task_ship_demo\n"
             "  - blocked by: calibration data\n"
+            "  - project_id: project:nblane\n"
             "- [ ] Write eval notes\n\n"
             "## Queue\n\n"
             "- [ ] Read paper\n\n"
@@ -182,6 +184,10 @@ class TestHomeDashboard(unittest.TestCase):
                         "status": "active",
                         "kind": "internal",
                         "visibility": "private",
+                        "goal_refs": ["g1"],
+                        "task_refs": ["task_ship_demo"],
+                        "evidence_refs": ["ev_linked"],
+                        "source_refs": ["source:research:20260513-001"],
                     }
                 ],
             },
@@ -200,6 +206,7 @@ class TestHomeDashboard(unittest.TestCase):
                         "title": "Captured research source",
                         "status": "inbox",
                         "visibility": "private",
+                        "project_refs": ["project:nblane"],
                     }
                 ],
             },
@@ -370,6 +377,10 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertFalse(nodes["source:inbox"]["placeholder"])
         self.assertIn("project:nblane", nodes)
         self.assertTrue(nodes["project:nblane"]["locked"])
+        self.assertEqual(
+            nodes["project:nblane"]["owner_path"],
+            "pages/11_Project_Board.py",
+        )
         self.assertEqual(nodes["evidence_candidate:pending"]["layer"], "evidence")
         self.assertEqual(nodes["evidence_candidate:pending"]["metric"], "1")
         self.assertEqual(
@@ -397,6 +408,17 @@ class TestHomeDashboard(unittest.TestCase):
         for edge in payload["graph"]["edges"]:
             self.assertIn(edge["from"], node_ids)
             self.assertIn(edge["to"], node_ids)
+        graph_edges = {
+            (edge["from"], edge["to"], edge["type"])
+            for edge in payload["graph"]["edges"]
+        }
+        self.assertIn(("goal:g1", "project:nblane", "contains"), graph_edges)
+        self.assertIn(("project:nblane", "task:0", "contains"), graph_edges)
+        self.assertIn(
+            ("project:nblane", "atomic_evidence:pool", "supports"),
+            graph_edges,
+        )
+        self.assertIn(("project:nblane", "source:inbox", "contains"), graph_edges)
         graph_text = yaml.dump(payload["graph"], allow_unicode=True)
         self.assertIn("Reliable robot learning systems.", graph_text)
         self.assertIn("ROS 2 Basics", graph_text)

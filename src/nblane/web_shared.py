@@ -444,6 +444,7 @@ def render_workspace_navigation() -> None:
             u["sidebar_nav_work_group"],
             [
                 ("pages/3_Kanban.py", u["sidebar_nav_kanban"]),
+                ("pages/11_Project_Board.py", u["sidebar_nav_project_board"]),
                 ("pages/2_Evidence_Review.py", u["sidebar_nav_evidence_review"]),
             ],
         ),

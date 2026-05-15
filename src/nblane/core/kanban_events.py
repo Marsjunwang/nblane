@@ -88,7 +88,15 @@ def apply_kanban_card_update(
         if not title:
             return None
         changes["title"] = title
-    for field in ("context", "why", "blocked_by", "outcome", "tags"):
+    for field in (
+        "context",
+        "why",
+        "blocked_by",
+        "outcome",
+        "tags",
+        "project_id",
+        "milestone_id",
+    ):
         if field in card:
             changes[field] = _clean_text(card.get(field))
     if invalid_kanban_card_date_fields(card):

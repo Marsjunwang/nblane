@@ -87,7 +87,11 @@ class TestParseIngestPatch(unittest.TestCase):
         """Preserves list entries."""
         raw = {
             "evidence_entries": [
-                {"type": "project", "title": "A"},
+                {
+                    "type": "project",
+                    "title": "A",
+                    "project_refs": ["project:demo"],
+                },
             ],
             "node_updates": [
                 {"id": "n1", "evidence_refs": ["x"]},
@@ -96,6 +100,10 @@ class TestParseIngestPatch(unittest.TestCase):
         p = parse_ingest_patch(raw)
         self.assertEqual(len(p.evidence_entries), 1)
         self.assertEqual(len(p.node_updates), 1)
+        self.assertEqual(
+            p.evidence_entries[0]["project_refs"],
+            ["project:demo"],
+        )
 
 
 class TestMergeIngestPatch(unittest.TestCase):
