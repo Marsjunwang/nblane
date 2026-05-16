@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -111,6 +112,11 @@ def normalize_agent_task(
     task_id = _clean_text(out.get("id")) or _new_task_id(title)
     related = out.get("related") if isinstance(out.get("related"), dict) else {}
     payload = out.get("payload") if isinstance(out.get("payload"), dict) else {}
+    result_payload = (
+        out.get("result_payload")
+        if isinstance(out.get("result_payload"), dict)
+        else {}
+    )
     out.update(
         {
             "id": task_id,
@@ -127,6 +133,11 @@ def normalize_agent_task(
             "action_name": _clean_text(out.get("action_name")),
             "run_id": _clean_text(out.get("run_id")),
             "payload": payload,
+            "result_summary": _clean_text(out.get("result_summary")),
+            "changed_paths": _clean_string_list(out.get("changed_paths")),
+            "result_payload": result_payload,
+            "warnings": _clean_string_list(out.get("warnings")),
+            "error": _clean_text(out.get("error")),
             "created": _clean_text(out.get("created")) or current,
             "updated": _clean_text(out.get("updated")) or current,
         }
@@ -296,6 +307,179 @@ def link_activity_item(
     return None
 
 
+def update_agent_task_status(
+    profile: str,
+    task_id: str,
+    status: str,
+    *,
+    error: str = "",
+    warnings: list[str] | tuple[str, ...] | str | None = None,
+    changed_paths: list[str] | tuple[str, ...] | str | None = None,
+    result_summary: str = "",
+    result_payload: dict[str, Any] | None = None,
+    sync_activity: bool = True,
+) -> dict[str, Any] | None:
+    """Update an agent task and mirror review status to Agent Activity."""
+
+    clean_status = _clean_text(status).lower()
+    if clean_status not in AGENT_TASK_STATUSES:
+        raise ValueError(f"Unknown agent task status: {status}")
+
+    def _mutate(task: dict[str, Any], current: str) -> None:
+        task["status"] = clean_status
+        task["updated"] = current
+        if error or clean_status != "failed":
+            task["error"] = _clean_text(error)
+        if warnings is not None:
+            task["warnings"] = _clean_string_list(warnings)
+        if changed_paths is not None:
+            task["changed_paths"] = _clean_string_list(changed_paths)
+        if result_summary:
+            task["result_summary"] = _clean_text(result_summary)
+        if result_payload is not None:
+            task["result_payload"] = (
+                copy.deepcopy(result_payload)
+                if isinstance(result_payload, dict)
+                else {}
+            )
+
+    task = _update_agent_task(profile, task_id, _mutate)
+    if task is not None and sync_activity:
+        _sync_activity_for_task(profile, task)
+    return task
+
+
+def submit_agent_task_candidate(
+    profile: str,
+    task_id: str,
+    *,
+    summary: str,
+    changed_paths: list[str] | tuple[str, ...] | str | None = None,
+    warnings: list[str] | tuple[str, ...] | str | None = None,
+    result_payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Store an external-agent result as a reviewable candidate."""
+
+    return update_agent_task_status(
+        profile,
+        task_id,
+        "candidate_ready",
+        result_summary=summary,
+        changed_paths=changed_paths,
+        warnings=warnings,
+        result_payload=result_payload or {},
+    )
+
+
+def _update_agent_task(
+    profile: str,
+    task_id: str,
+    mutator: Callable[[dict[str, Any], str], None],
+) -> dict[str, Any] | None:
+    """Apply a mutation to one normalized task and persist the queue."""
+
+    clean = _clean_text(task_id)
+    if not clean:
+        return None
+    doc = load_agent_tasks(profile)
+    tasks = list(doc.get("tasks") or [])
+    current = _now()
+    for index, task in enumerate(tasks):
+        if _clean_text(task.get("id")) != clean:
+            continue
+        updated = copy.deepcopy(task)
+        mutator(updated, current)
+        normalized = normalize_agent_task(updated, now=current)
+        if normalized is None:
+            raise ValueError("Agent task must be a mapping")
+        normalized["created"] = task.get("created") or normalized["created"]
+        normalized["updated"] = current
+        tasks[index] = normalized
+        doc["tasks"] = tasks
+        save_agent_tasks(profile, doc)
+        return normalized
+    return None
+
+
+def _sync_activity_for_task(profile: str, task: dict[str, Any]) -> None:
+    """Best-effort sync of agent task result metadata to Agent Activity."""
+
+    activity_item_id = _clean_text(task.get("activity_item_id"))
+    if not activity_item_id:
+        return
+    try:
+        from nblane.core.agent_activity import (
+            load_agent_activity,
+            update_activity_status,
+        )
+    except Exception:
+        return
+
+    existing_payload: dict[str, Any] = {}
+    try:
+        activity = load_agent_activity(profile)
+        for item in activity.get("items") or []:
+            if _clean_text(item.get("id")) != activity_item_id:
+                continue
+            payload = item.get("payload")
+            if isinstance(payload, dict):
+                existing_payload = copy.deepcopy(payload)
+            break
+    except Exception:
+        existing_payload = {}
+
+    status = _clean_text(task.get("status"))
+    activity_status = {
+        "applied": "applied",
+        "cancelled": "dismissed",
+        "failed": "failed",
+    }.get(status, "pending")
+    result = {
+        "task_id": _clean_text(task.get("id")),
+        "status": status,
+        "target_harness": _clean_text(task.get("target_harness")),
+        "role": _clean_text(task.get("role")),
+        "summary": _clean_text(task.get("result_summary")),
+        "changed_paths": _clean_string_list(task.get("changed_paths")),
+        "warnings": _clean_string_list(task.get("warnings")),
+        "error": _clean_text(task.get("error")),
+        "result_payload": (
+            copy.deepcopy(task.get("result_payload"))
+            if isinstance(task.get("result_payload"), dict)
+            else {}
+        ),
+    }
+    payload = dict(existing_payload)
+    payload["agent_task_result"] = result
+    preview = yaml.dump(
+        result,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    ).strip()
+    summary = (
+        result["summary"]
+        or f"{task.get('title') or task.get('id')} ({status or 'ready'})"
+    )
+    try:
+        update_activity_status(
+            profile,
+            activity_item_id,
+            activity_status,
+            error=result["error"] if activity_status == "failed" else "",
+            warnings=result["warnings"],
+            changed_paths=result["changed_paths"],
+            extra={
+                "summary": summary,
+                "preview": preview,
+                "payload": payload,
+                "error": result["error"] if activity_status == "failed" else "",
+            },
+        )
+    except Exception:
+        return
+
+
 def render_agent_handoff(
     task: dict[str, Any],
     *,
@@ -340,6 +524,13 @@ def render_agent_handoff(
             "- Produce candidate, patch, or writeback-review artifacts only.",
             "- Do not silently write accepted research facts, resume facts, or public posts.",
             "- Record changed paths and warnings in the final handoff summary.",
+            "",
+            "## MCP Workflow",
+            "- Read `profile://context` and `profile://kanban` before working.",
+            f"- Read `agent://task/{_clean_text(task.get('id'))}` for the canonical task packet.",
+            "- When work is ready, call `submit_agent_task_candidate` with the task id, summary, changed_paths, warnings, and result_payload.",
+            "- If work fails or blocks, call `update_agent_task_status` with status `failed` or `running` and include a short error or blocker.",
+            "- MCP writes must stay draft-first: update agent task / Activity review metadata only.",
             "",
             "## Suggested Harness Start",
         ]
@@ -397,6 +588,16 @@ def sync_agent_harness_snippet(target: str) -> str:
             f"nblane agent handoff <task_id> --target {clean_target} --profile <name>",
             "```",
             "",
+            "## MCP Resources",
+            "- `profile://context`",
+            "- `profile://kanban`",
+            "- `agent://tasks`",
+            "- `agent://task/{task_id}`",
+            "",
+            "## MCP Tools",
+            "- `submit_agent_task_candidate(task_id, summary, changed_paths, warnings, result_payload)`",
+            "- `update_agent_task_status(task_id, status, error, warnings)`",
+            "",
             "## Permissions",
             "- allow: read repository files, run local checks requested by the task",
             "- ask: write profile data, create public drafts, apply patches",
@@ -420,5 +621,7 @@ __all__ = [
     "normalize_agent_tasks",
     "render_agent_handoff",
     "save_agent_tasks",
+    "submit_agent_task_candidate",
     "sync_agent_harness_snippet",
+    "update_agent_task_status",
 ]

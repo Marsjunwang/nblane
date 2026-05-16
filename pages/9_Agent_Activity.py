@@ -19,6 +19,7 @@ from nblane.web_auth import require_login
 from nblane.web_cache import clear_web_cache
 from nblane.web_i18n import agent_activity_ui
 from nblane.web_shared import (
+    _safe_page_link,
     apply_ui_language_from_session,
     assert_files_current,
     refresh_file_snapshots,
@@ -58,9 +59,45 @@ def _owner_page(target_owner: str) -> str:
         "public_site": "pages/6_Public_Site.py",
         "skill_tree": "pages/1_Skill_Tree.py",
         "research": "pages/7_Research.py",
+        "work": "pages/3_Kanban.py",
         "team": "pages/4_Team_View.py",
         "profile_context": "app.py",
     }.get(target_owner, "app.py")
+
+
+def _agent_task_meta(item: dict) -> dict:
+    """Return compact external-agent metadata for display."""
+
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    action_result = (
+        payload.get("action_result")
+        if isinstance(payload.get("action_result"), dict)
+        else {}
+    )
+    agent_result = (
+        payload.get("agent_task_result")
+        if isinstance(payload.get("agent_task_result"), dict)
+        else {}
+    )
+    meta = {
+        "action_name": item.get("action_name"),
+        "backend": item.get("backend"),
+        "run_id": item.get("run_id"),
+        "input_refs": item.get("input_refs") or [],
+    }
+    for key in ("task_id", "target_harness", "role", "status"):
+        value = agent_result.get(key) or action_result.get(key)
+        if value:
+            meta[f"agent_{key}"] = value
+    return {key: value for key, value in meta.items() if value not in ("", [], None)}
+
+
+def _agent_task_result(item: dict) -> dict:
+    """Return the synced external-agent result payload if present."""
+
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    result = payload.get("agent_task_result")
+    return result if isinstance(result, dict) else {}
 
 
 def _can_apply_here(item: dict) -> bool:
@@ -172,13 +209,18 @@ for item in items:
             "applied_at": item.get("applied_at"),
             "error": item.get("error"),
         }
+        meta.update(_agent_task_meta(item))
         st.code(
             yaml.dump(meta, allow_unicode=True, default_flow_style=False, sort_keys=False),
             language="yaml",
         )
-        d1, d2, d3, d4 = st.tabs(
-            [ui["preview"], ui["payload"], ui["refs"], ui["changed_paths"]]
-        )
+        agent_result = _agent_task_result(item)
+        tab_labels = [ui["preview"], ui["payload"], ui["refs"], ui["changed_paths"]]
+        if agent_result:
+            tab_labels.append(ui.get("agent_task_result", "Agent task result"))
+        tabs = st.tabs(tab_labels)
+        d1, d2, d3, d4 = tabs[:4]
+        d5 = tabs[4] if len(tabs) > 4 else None
         with d1:
             st.code(str(item.get("preview", "") or "-"), language="yaml")
         with d2:
@@ -203,6 +245,17 @@ for item in items:
             )
         with d4:
             st.write(item.get("changed_paths") or [])
+        if d5 is not None:
+            with d5:
+                st.code(
+                    yaml.dump(
+                        agent_result,
+                        allow_unicode=True,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                    language="yaml",
+                )
         warnings = item.get("warnings") if isinstance(item.get("warnings"), list) else []
         for warning in warnings:
             st.warning(str(warning))
@@ -262,6 +315,6 @@ for item in items:
                 st.success(ui["saved"])
                 st.rerun()
         with a4:
-            st.page_link(_owner_page(owner), label=ui["open_owner"])
+            _safe_page_link(_owner_page(owner), ui["open_owner"])
         if not _can_apply_here(item):
             st.caption(ui["apply_unavailable"])

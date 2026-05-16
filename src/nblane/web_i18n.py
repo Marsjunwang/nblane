@@ -2056,6 +2056,18 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_subtasks": "Draft subtasks",
         "kb_ai_subtasks_short": "Sub",
         "kb_ai_done_short": "Evd",
+        "kb_agent_handoff_title": "Agent handoff",
+        "kb_agent_handoff_help": (
+            "Create a reviewable Codex/OpenCode task from a kanban card. "
+            "The external agent result returns to Agent Activity first."
+        ),
+        "kb_agent_handoff_empty": "No kanban task is available for handoff.",
+        "kb_agent_handoff_task": "Task",
+        "kb_agent_handoff_target": "Target harness",
+        "kb_agent_handoff_create": "Create agent handoff",
+        "kb_agent_handoff_created": "Agent handoff task created.",
+        "kb_agent_handoff_command": "Handoff command",
+        "kb_agent_handoff_activity": "Activity item",
         "kb_mark_crystallized": "Mark crystallized",
         "kb_crystallize_short": "Cry",
         "kb_crystallize_done_only": "Only Done tasks can be crystallized.",
@@ -2450,6 +2462,18 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_subtasks": "拆任务",
         "kb_ai_subtasks_short": "拆",
         "kb_ai_done_short": "证",
+        "kb_agent_handoff_title": "Agent 任务交接",
+        "kb_agent_handoff_help": (
+            "从看板卡片创建可审阅的 Codex/OpenCode 任务。"
+            "外部 agent 的结果会先回到 Agent Activity。"
+        ),
+        "kb_agent_handoff_empty": "当前没有可交接的看板任务。",
+        "kb_agent_handoff_task": "任务",
+        "kb_agent_handoff_target": "目标 harness",
+        "kb_agent_handoff_create": "创建 agent handoff",
+        "kb_agent_handoff_created": "已创建 agent handoff 任务。",
+        "kb_agent_handoff_command": "交接命令",
+        "kb_agent_handoff_activity": "Activity 条目",
         "kb_mark_crystallized": "标记已结晶",
         "kb_crystallize_short": "晶",
         "kb_crystallize_done_only": "只有「已完成」任务可以标记为已结晶。",
@@ -2788,6 +2812,7 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "refs": "Refs",
         "warnings": "Warnings",
         "changed_paths": "Changed paths",
+        "agent_task_result": "Agent task result",
         "apply": "Apply",
         "dismiss": "Dismiss",
         "reopen": "Reopen",
@@ -2820,6 +2845,7 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "refs": "Refs",
         "warnings": "警告",
         "changed_paths": "变更文件",
+        "agent_task_result": "Agent task 结果",
         "apply": "应用",
         "dismiss": "丢弃",
         "reopen": "重新打开",

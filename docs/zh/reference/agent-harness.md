@@ -82,6 +82,7 @@ tasks:
       - claims
       - synthesis_draft
     status: ready
+    activity_item_id: act:ai:airun_001
 ```
 
 交接命令：
@@ -93,6 +94,15 @@ nblane agent handoff agenttask_001 --target opencode --profile <name>
 `--profile` 省略时会扫描现有 profiles 寻找任务 id。MVP 只生成可复制给
 Codex/OpenCode 的 handoff 信息，不启动外部 runtime。
 
+Kanban 页面也可以直接从任务创建 `work.remote_dev_task` handoff。创建后会同时写入：
+
+- `profiles/<name>/agent-tasks.yaml`
+- `profiles/<name>/agent-activity.yaml`
+- `profiles/<name>/ai-runs.yaml`
+
+外部 agent 完成后必须通过 MCP `submit_agent_task_candidate` 回传摘要、
+`changed_paths`、warnings 和 result payload；结果保持在 Activity patch 候选态。
+
 ## 与 MCP 的关系
 
 Harness 通过 MCP 读写：
@@ -100,12 +110,17 @@ Harness 通过 MCP 读写：
 ```text
 Resources:
   profile://context
+  profile://kanban
+  agent://tasks
+  agent://task/{task_id}
   workspace://graph
   research://sources
   project://status
   blog://drafts
 
 Tools:
+  submit_agent_task_candidate
+  update_agent_task_status
   create_kanban_task
   capture_research_source
   create_claim

@@ -19,6 +19,14 @@ from mcp.server.fastmcp import FastMCP
 
 from nblane.core.context import generate
 from nblane.core.crystallize import write_method_draft
+from nblane.core.agent_tasks import (
+    AGENT_TASK_STATUSES,
+    get_agent_task,
+    load_agent_tasks,
+    render_agent_handoff,
+    submit_agent_task_candidate,
+    update_agent_task_status,
+)
 from nblane.core.gap import analyze, format_text
 from nblane.core.goals import current_goal, goal_for_agent_context
 from nblane.core.growth_log import append_growth_log_row
@@ -173,6 +181,62 @@ def _profile_text_resource(
         return f"ERROR [{getter}]: {exc}\n"
 
 
+def build_agent_tasks_text(profile_name: str) -> str:
+    """Return a readable agent task queue for MCP clients."""
+
+    doc = load_agent_tasks(profile_name)
+    tasks = list(doc.get("tasks") or [])
+    lines = [
+        f"# Agent tasks: {profile_name}",
+        "",
+    ]
+    if not tasks:
+        lines.append("No agent tasks are queued for this profile.")
+        return "\n".join(lines).rstrip() + "\n"
+    for task in tasks:
+        task_id = str(task.get("id") or "").strip()
+        lines.extend(
+            [
+                f"## {task.get('title') or task_id}",
+                f"- Task id: {task_id}",
+                f"- Status: {task.get('status') or 'ready'}",
+                f"- Target harness: {task.get('target_harness') or 'codex'}",
+                f"- Role: {task.get('role') or 'researcher'}",
+                f"- Activity item: {task.get('activity_item_id') or '(pending)'}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Read one task with `agent://task/{task_id}` before working.",
+            "Submit results with `submit_agent_task_candidate`.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_agent_task_handoff_text(profile_name: str, task_id: str) -> str:
+    """Return one canonical agent task handoff for MCP clients."""
+
+    task = get_agent_task(profile_name, task_id)
+    if task is None:
+        return f"ERROR [agent://task]: unknown agent task {task_id!r}\n"
+    body = render_agent_handoff(task, profile=profile_name)
+    task_yaml = yaml.dump(
+        task,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return (
+        body.rstrip()
+        + "\n\n## Agent Task YAML\n"
+        + "```yaml\n"
+        + task_yaml.rstrip()
+        + "\n```\n"
+    )
+
+
 mcp = FastMCP("nblane")
 
 
@@ -255,6 +319,32 @@ def resource_gap(task: str) -> str:
     if result.error:
         return f"ERROR [profile://gap]: {result.error}\n"
     return format_text(result) + "\n"
+
+
+@mcp.resource(
+    "agent://tasks",
+    mime_type="text/markdown",
+)
+def resource_agent_tasks() -> str:
+    """List current profile agent handoff tasks."""
+
+    return _profile_text_resource("agent://tasks", build_agent_tasks_text)
+
+
+@mcp.resource(
+    "agent://task/{task_id}",
+    mime_type="text/markdown",
+)
+def resource_agent_task(task_id: str) -> str:
+    """One agent task handoff packet for an external harness."""
+
+    name, err = resolve_active_profile()
+    if err is not None or name is None:
+        return f"ERROR [agent://task]: {err}\n"
+    decoded = urllib.parse.unquote(str(task_id or "")).strip()
+    if not decoded:
+        return "ERROR [agent://task]: Empty task id.\n"
+    return build_agent_task_handoff_text(name, decoded)
 
 
 def _tool_profile_or_error() -> tuple[str | None, str | None]:
@@ -354,6 +444,69 @@ def tool_crystallize_method_draft(
         return f"ERROR: {err}\n"
     path = write_method_draft(name, project, body)
     return f"OK: wrote {path}\n"
+
+
+@mcp.tool(name="submit_agent_task_candidate")
+def tool_submit_agent_task_candidate(
+    task_id: str,
+    summary: str,
+    changed_paths: list[str] | None = None,
+    warnings: list[str] | None = None,
+    result_payload: dict | None = None,
+) -> str:
+    """Submit external-agent output to the review queue, not facts."""
+
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    try:
+        task = submit_agent_task_candidate(
+            name,
+            task_id,
+            summary=summary,
+            changed_paths=changed_paths or [],
+            warnings=warnings or [],
+            result_payload=result_payload or {},
+        )
+    except (OSError, ValueError) as exc:
+        return f"ERROR: {exc}\n"
+    if task is None:
+        return f"ERROR: unknown agent task {task_id!r}\n"
+    activity = task.get("activity_item_id") or "(pending)"
+    return (
+        "OK: candidate submitted for "
+        f"{task.get('id')} with Activity item {activity}.\n"
+    )
+
+
+@mcp.tool(name="update_agent_task_status")
+def tool_update_agent_task_status(
+    task_id: str,
+    status: str,
+    error: str = "",
+    warnings: list[str] | None = None,
+) -> str:
+    """Update agent task status and mirror safe review metadata."""
+
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return f"ERROR: {err}\n"
+    clean_status = str(status or "").strip().lower()
+    if clean_status not in AGENT_TASK_STATUSES:
+        return f"ERROR: unknown agent task status {status!r}\n"
+    try:
+        task = update_agent_task_status(
+            name,
+            task_id,
+            clean_status,
+            error=error,
+            warnings=warnings or [],
+        )
+    except (OSError, ValueError) as exc:
+        return f"ERROR: {exc}\n"
+    if task is None:
+        return f"ERROR: unknown agent task {task_id!r}\n"
+    return f"OK: agent task {task.get('id')} status is {task.get('status')}.\n"
 
 
 def main() -> None:

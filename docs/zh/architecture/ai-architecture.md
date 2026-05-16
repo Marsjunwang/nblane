@@ -83,6 +83,14 @@ src/nblane/core/ai/
 Kanban 的任务理解和子任务生成已经通过 `core/ai/` 调用；页面可以选择
 `record_activity=True` 将候选写入 Agent Activity，也可以保持纯函数式预览。
 
+Agent 闭环 v1 已打通：
+
+- Kanban 页面可以从任务创建 `work.remote_dev_task` handoff。
+- `ExternalAgentBackend` 创建 `agent-tasks.yaml` 记录和 Agent Activity patch item。
+- 外部 harness 通过 MCP 读取 `agent://task/{task_id}`，完成后用
+  `submit_agent_task_candidate` 写回候选结果。
+- 写回只更新 `agent-tasks.yaml` 与 `agent-activity.yaml`，不直接修改事实源或发布内容。
+
 ## OpenCode / Codex 适合什么
 
 外部 harness 负责复杂多步任务：
@@ -102,6 +110,9 @@ MCP 是当前阶段的一级集成接口：
 
 - resources：给外部 agent 读 profile、workspace、research、project、blog draft。
 - tools：让外部 agent draft-first 写回 task、claim、synthesis、evidence draft。
+- agent handoff：`agent://tasks`、`agent://task/{task_id}` 以及
+  `submit_agent_task_candidate` / `update_agent_task_status`，用于
+  Codex/OpenCode 结果回到候选态审阅。
 
 ACP 暂不进入核心架构。只有未来 nblane 自建 agent client、agent runtime 或 agent-agent 编排时再评估。
 

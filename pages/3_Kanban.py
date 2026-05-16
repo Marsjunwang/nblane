@@ -47,6 +47,7 @@ from nblane.core.kanban_ai import (
     generate_kanban_task_alignment_options,
     generate_kanban_subtask_proposals_detailed,
 )
+from nblane.core.ai.gateway import create_remote_dev_task
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -931,6 +932,161 @@ def _render_subtask_proposals(
                 _auto_save(profile, sections)
                 proposals_by_task.pop(task_id, None)
                 st.rerun()
+
+
+def _agent_handoff_task_options(
+    sections: dict[str, list[KanbanTask]],
+) -> list[dict]:
+    """Return selectable kanban tasks for external-agent handoff."""
+
+    options: list[dict] = []
+    for section in KANBAN_BOARD_SECTIONS:
+        for task in sections.get(section) or []:
+            task_id = str(task.id or "").strip()
+            title = str(task.title or "").strip()
+            if not task_id or not title:
+                continue
+            options.append(
+                {
+                    "id": task_id,
+                    "section": section,
+                    "label": f"{kanban_section_label(section)} · {title}",
+                    "task": task,
+                }
+            )
+    return options
+
+
+def _render_agent_handoff_panel(
+    profile: str,
+    sections: dict[str, list[KanbanTask]],
+    ui: dict[str, str],
+    *,
+    agent_tasks_path,
+    agent_activity_path,
+    ai_runs_path,
+) -> None:
+    """Create Codex/OpenCode handoff tasks from kanban cards."""
+
+    options = _agent_handoff_task_options(sections)
+    with st.expander(
+        ui.get("kb_agent_handoff_title", "Agent handoff"),
+        expanded=False,
+    ):
+        st.caption(
+            ui.get(
+                "kb_agent_handoff_help",
+                "Create a reviewable Codex/OpenCode task from a kanban card.",
+            )
+        )
+        if not options:
+            st.caption(
+                ui.get(
+                    "kb_agent_handoff_empty",
+                    "No kanban task is available for handoff.",
+                )
+            )
+            return
+        selected_index = st.selectbox(
+            ui.get("kb_agent_handoff_task", "Task"),
+            list(range(len(options))),
+            format_func=lambda idx: options[idx]["label"],
+            key=f"kb_agent_handoff_task_{profile}",
+        )
+        target = st.selectbox(
+            ui.get("kb_agent_handoff_target", "Target harness"),
+            ["codex", "opencode"],
+            key=f"kb_agent_handoff_target_{profile}",
+        )
+        picked = options[int(selected_index)]
+        task: KanbanTask = picked["task"]
+        goal_context = current_goal_agent_context(profile)
+        input_refs = [
+            f"kanban:{task.id}",
+            "profile://context",
+            "profile://kanban",
+        ]
+        if goal_context:
+            input_refs.append("goal:current")
+        related = {
+            "kanban_task_id": task.id,
+            "kanban_section": picked["section"],
+        }
+        if task.project_id:
+            related["project_id"] = task.project_id
+        if task.milestone_id:
+            related["milestone_id"] = task.milestone_id
+        if st.button(
+            ui.get("kb_agent_handoff_create", "Create agent handoff"),
+            type="primary",
+            key=f"kb_agent_handoff_create_{profile}",
+        ):
+            try:
+                assert_files_current(
+                    [agent_tasks_path, agent_activity_path, ai_runs_path]
+                )
+                result = create_remote_dev_task(
+                    profile,
+                    task.title,
+                    target_harness=target,
+                    input_refs=input_refs,
+                    expected_outputs=[
+                        "patch_review",
+                        "test_summary",
+                        "changed_paths",
+                    ],
+                    related=related,
+                    payload={
+                        "role": "remote_dev",
+                        "kanban_task_id": task.id,
+                        "kanban_task_title": task.title,
+                        "kanban_section": picked["section"],
+                        "task": _task_payload(task),
+                        "goal_context": goal_context,
+                    },
+                )
+            except Exception as exc:
+                st.error(str(exc))
+                return
+            refresh_file_snapshots(
+                [agent_tasks_path, agent_activity_path, ai_runs_path]
+            )
+            stash_git_backup_results()
+            clear_web_cache()
+            if not result.ok or not isinstance(result.structured, dict):
+                st.error(result.error or result.content)
+                return
+            task_id = str(result.structured.get("task_id") or "")
+            command = (
+                "nblane agent handoff "
+                f"{task_id} --target {target} --profile {profile}"
+            )
+            st.session_state[f"kb_agent_handoff_last_{profile}"] = {
+                "task_id": task_id,
+                "target": target,
+                "command": command,
+                "activity_item_id": result.activity_item_id,
+                "warnings": list(result.warnings),
+            }
+            st.success(
+                ui.get(
+                    "kb_agent_handoff_created",
+                    "Agent handoff task created.",
+                )
+            )
+        last = st.session_state.get(f"kb_agent_handoff_last_{profile}")
+        if isinstance(last, dict):
+            st.markdown(
+                f"**{ui.get('kb_agent_handoff_command', 'Handoff command')}**"
+            )
+            st.code(str(last.get("command") or ""), language="bash")
+            if last.get("activity_item_id"):
+                st.caption(
+                    f"{ui.get('kb_agent_handoff_activity', 'Activity item')}: "
+                    f"{last.get('activity_item_id')}"
+                )
+            for warning in last.get("warnings") or []:
+                st.warning(str(warning))
 
 
 def _checkin_lines(value: object) -> list[str]:
@@ -1973,6 +2129,9 @@ _pool_path = _pdir / "evidence-pool.yaml"
 _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
 _activity_path = _pdir / "activity-log.yaml"
+_agent_activity_path = _pdir / "agent-activity.yaml"
+_agent_tasks_path = _pdir / "agent-tasks.yaml"
+_ai_runs_path = _pdir / "ai-runs.yaml"
 _goals_path = _pdir / "goals.yaml"
 _project_path = _pdir / "project-board.yaml"
 for _path in (
@@ -1982,6 +2141,9 @@ for _path in (
     _tree_path,
     _skill_path,
     _activity_path,
+    _agent_activity_path,
+    _agent_tasks_path,
+    _ai_runs_path,
     _goals_path,
     _project_path,
 ):
@@ -2043,7 +2205,15 @@ with header_left:
                     _load_into_state(selected)
                     _clear_kanban_dirty(selected)
                     _bump_kanban_widget_epoch(selected)
-                    refresh_file_snapshots([_kanban_path, _activity_path])
+                    refresh_file_snapshots(
+                        [
+                            _kanban_path,
+                            _activity_path,
+                            _agent_activity_path,
+                            _agent_tasks_path,
+                            _ai_runs_path,
+                        ]
+                    )
                     st.rerun()
             with save_col:
                 if st.button(
@@ -2117,6 +2287,15 @@ else:
         auto_dates=auto_dates,
         ui=ui,
     )
+
+_render_agent_handoff_panel(
+    selected,
+    sections,
+    ui,
+    agent_tasks_path=_agent_tasks_path,
+    agent_activity_path=_agent_activity_path,
+    ai_runs_path=_ai_runs_path,
+)
 
 st.divider()
 

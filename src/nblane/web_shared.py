@@ -475,7 +475,24 @@ def render_workspace_navigation() -> None:
         for group, links in groups:
             st.caption(group)
             for path, label in links:
-                st.page_link(path, label=label)
+                _safe_page_link(path, label)
+
+
+def _safe_page_link(path: str, label: str) -> None:
+    """Render a sidebar page link without breaking direct page execution.
+
+    Streamlit's native navigation registers page metadata when running through
+    ``app.py``. If a page is refreshed or tested directly, ``st.page_link`` can
+    raise a missing ``url_pathname`` error. A plain markdown link keeps the
+    fallback navigation usable instead of taking down the sidebar.
+    """
+
+    try:
+        st.page_link(path, label=label)
+        return
+    except Exception:
+        href = "/" if path == "app.py" else f"/{Path(path).stem}"
+        st.markdown(f"- [{label}]({href})")
 
 
 def select_profile() -> str:
@@ -733,11 +750,21 @@ def render_current_goal_strip(
     payload = goal_presence_payload(profile, ui, compact=compact)
     if not payload:
         return
-    st_goal_presence(
-        payload=payload,
-        key=_goal_presence_key(profile),
-        align=align,
-    )
+    try:
+        st_goal_presence(
+            payload=payload,
+            key=_goal_presence_key(profile),
+            align=align,
+        )
+    except Exception:
+        label = str(
+            payload.get("title")
+            or payload.get("label")
+            or payload.get("target")
+            or ""
+        ).strip()
+        if label:
+            st.caption(label)
 
 
 def _file_state_key(path: Path) -> str:

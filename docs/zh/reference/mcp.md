@@ -55,6 +55,17 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | `profile://kanban` | 无 | Markdown 文本 | 无文件时返回一行英文提示。 |
 | `profile://context` | 无 | 纯文本 | 长度可能较大；模式由 `NBLANE_CONTEXT_MODE` 决定。 |
 | `profile://gap/{task}` | **路径段 `task`** | 纯文本 | **必须**把自然语言任务放进 URI 的最后一级；**先做 URL 编码**（如空格→`%20`，中文通常 UTF-8 百分号编码）。服务端会对该段做 `urllib.parse.unquote` 后再分析。 |
+| `agent://tasks` | 无 | Markdown 文本 | 列出当前 profile 的 Codex/OpenCode handoff tasks。 |
+| `agent://task/{task_id}` | **路径段 `task_id`** | Markdown 文本 | 返回单个 agent task 的 handoff、输入 refs、预期产物和 review 规则。 |
+
+**Agent task tools**
+
+| Tool | 参数 | 行为 |
+|------|------|------|
+| `submit_agent_task_candidate` | `task_id`, `summary`, `changed_paths`, `warnings`, `result_payload` | 把外部 agent 结果写回 `agent-tasks.yaml` 和 linked Agent Activity patch item，状态变为 `candidate_ready`。 |
+| `update_agent_task_status` | `task_id`, `status`, `error`, `warnings` | 更新 agent task 状态；`failed` 会同步到 Agent Activity 的 failed 状态。 |
+
+这些 agent tools 是 draft-first：不会直接改 evidence、resume、public site 或代码 patch，只更新 handoff / Activity 审阅元数据。
 
 **Profile 如何选定（所有资源共用）**
 
@@ -106,6 +117,7 @@ pip install -e .
 | 快速扫一眼进度与焦点 | `profile://summary` | 技能树 lit、agent-profile 里的 focus、Doing 看板 |
 | 对齐本周事项 | `profile://kanban` | 原始 `kanban.md` |
 | 准备做一件大活（选型 / 攻坚） | `profile://gap/任务描述`（注意 URL 编码） | 与 CLI **`nblane gap <profile> "<task>"`** 的自然语言模式基本一致（见上文与 CLI 的差异） |
+| 承接 Kanban / Work handoff | `agent://tasks`、`agent://task/{task_id}` | 读取外部 agent 任务包，完成后用 `submit_agent_task_candidate` 回传候选结果 |
 
 **注意：** **Tools** 会修改 `profiles/` 内部分文件（Growth Log、技能树证据行、`interactions/*.jsonl`、方法草案等）。大量编辑（摄入、完整 evidence、团队池）请用 **CLI** 或 **Web**。
 
