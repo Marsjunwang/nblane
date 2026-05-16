@@ -33,6 +33,8 @@ class TestAIGateway(unittest.TestCase):
                 "resume.target_for_job",
                 "output.blog_candidate",
                 "output.inline_patch",
+                "kanban.task_alignment",
+                "kanban.subtasks",
                 "work.remote_dev_task",
             },
         )

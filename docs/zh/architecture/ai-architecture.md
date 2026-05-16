@@ -76,7 +76,12 @@ src/nblane/core/ai/
 - `resume.target_for_job`
 - `output.blog_candidate`
 - `output.inline_patch`
+- `kanban.task_alignment`
+- `kanban.subtasks`
 - `work.remote_dev_task`
+
+Kanban 的任务理解和子任务生成已经通过 `core/ai/` 调用；页面可以选择
+`record_activity=True` 将候选写入 Agent Activity，也可以保持纯函数式预览。
 
 ## OpenCode / Codex 适合什么
 

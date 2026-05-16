@@ -370,17 +370,17 @@ def _gap_results_key(profile: str) -> str:
 
 def _subtask_proposals_key(profile: str) -> str:
     """Session key for per-task AI subtask proposals."""
-    return f"kanban_subtask_proposals_{profile}"
+    return f"kanban_subtask_proposals_{profile}_{llm_client.reply_language()}"
 
 
 def _subtask_alignments_key(profile: str) -> str:
     """Session key for per-task task-understanding alignment options."""
-    return f"kanban_subtask_alignments_{profile}"
+    return f"kanban_subtask_alignments_{profile}_{llm_client.reply_language()}"
 
 
 def _subtask_errors_key(profile: str) -> str:
     """Session key for per-task AI subtask generation diagnostics."""
-    return f"kanban_subtask_errors_{profile}"
+    return f"kanban_subtask_errors_{profile}_{llm_client.reply_language()}"
 
 
 def _task_text_fields(task: KanbanTask) -> list[str]:
@@ -1687,14 +1687,12 @@ def _handle_board_event(
             return
         if card_applied:
             _auto_save(profile, sections)
-        if not llm_client.is_configured():
-            render_llm_unavailable(ui)
-            return
         with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
             alignments = generate_kanban_task_alignment_options(
                 sections,
                 task_id,
                 profile_name=profile,
+                record_activity=True,
             )
         if not alignments:
             st.warning(
@@ -1733,9 +1731,6 @@ def _handle_board_event(
         if found is None:
             st.warning(ui["kb_drag_stale"])
             return
-        if not llm_client.is_configured():
-            render_llm_unavailable(ui)
-            return
         alignment_context = _alignment_context_from_payload(payload)
         if not alignment_context:
             st.warning(
@@ -1755,6 +1750,7 @@ def _handle_board_event(
                 persist_router_keywords=False,
                 alignment_context=alignment_context,
                 granularity=str(payload.get("granularity") or "milestone"),
+                record_activity=True,
             )
         if not result.proposals:
             state = st.session_state.setdefault(_subtask_errors_key(profile), {})

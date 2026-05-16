@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable
@@ -818,6 +819,7 @@ def generate_kanban_task_alignment_options(
     task_id: str,
     *,
     profile_name: str = "",
+    record_activity: bool = False,
 ) -> list[KanbanTaskAlignment]:
     """Generate candidate task understandings without mutating the board."""
     found = _find_task_by_id(sections, task_id)
@@ -829,16 +831,24 @@ def generate_kanban_task_alignment_options(
         sections,
         task_id,
     )
-    reply = llm.chat(
-        _alignment_system_prompt(),
-        _alignment_user_prompt_with_context(task, ai_context),
-        temperature=0.2,
+    from nblane.core.ai.gateway import draft_kanban_task_alignment
+
+    result = draft_kanban_task_alignment(
+        profile_name,
+        task_id=task_id,
+        task_title=task.title,
+        task_text=format_kanban_task_for_ai(task),
+        ai_context=ai_context,
+        reply_language=llm.reply_language(),
+        context_refs=[f"kanban:{task_id}"],
+        require_review=record_activity,
     )
-    if reply.startswith("LLM error:") or reply.startswith(
-        "AI features not configured"
-    ):
+    if not result.ok or not isinstance(result.structured, dict):
         return _fallback_alignments(task)
-    parsed = _parse_alignments(reply, task_id=task_id)
+    parsed = _parse_alignments(
+        json.dumps(result.structured, ensure_ascii=False),
+        task_id=task_id,
+    )
     return parsed or _fallback_alignments(task)
 
 
@@ -1064,6 +1074,7 @@ def generate_kanban_subtask_proposals_detailed(
     persist_router_keywords: bool = False,
     alignment_context: str = "",
     granularity: str = "milestone",
+    record_activity: bool = False,
 ) -> KanbanSubtaskGenerationResult:
     """Generate draft subtasks with diagnostic detail."""
     found = _find_task_by_id(sections, task_id)
@@ -1092,31 +1103,48 @@ def generate_kanban_subtask_proposals_detailed(
         sections,
         task_id,
     )
-    reply = llm.chat(
-        _proposal_system_prompt(granularity),
-        _proposal_user_prompt(
-            task,
-            analysis,
-            alignment_context=alignment_context,
-            ai_context=ai_context,
-            granularity=granularity,
-        ),
-        temperature=0.2,
-    )
-    if reply.startswith("LLM error:") or reply.startswith(
-        "AI features not configured"
-    ):
-        return KanbanSubtaskGenerationResult(
-            error_key="llm_error",
-            message=_generation_message("llm_error"),
-        )
     allowed_gap_ids = {
         _clean_text(node.get("id"))
         for node in analysis.closure
         if _clean_text(node.get("id"))
     }
+    from nblane.core.ai.gateway import draft_kanban_subtasks
+
+    existing = "\n".join(
+        f"- {_clean_text(subtask.title)}" for subtask in task.subtasks
+    ) or "- (none)"
+    result = draft_kanban_subtasks(
+        profile_name,
+        task_id=task_id,
+        task_title=task.title,
+        task_text=format_kanban_task_for_ai(task),
+        existing_subtasks=existing,
+        gap_analysis=gap.format_for_llm(analysis),
+        allowed_gap_ids=sorted(allowed_gap_ids),
+        alignment_context=alignment_context,
+        ai_context=ai_context,
+        granularity=granularity,
+        reply_language=llm.reply_language(),
+        context_refs=[f"kanban:{task_id}"],
+        require_review=record_activity,
+    )
+    if not result.ok:
+        if result.error.startswith("validation_error"):
+            return KanbanSubtaskGenerationResult(
+                error_key="parse_empty",
+                message=_generation_message("parse_empty"),
+            )
+        return KanbanSubtaskGenerationResult(
+            error_key="llm_error",
+            message=_generation_message("llm_error"),
+        )
+    if not isinstance(result.structured, dict):
+        return KanbanSubtaskGenerationResult(
+            error_key="parse_empty",
+            message=_generation_message("parse_empty"),
+        )
     return _parse_proposals_detailed(
-        reply,
+        json.dumps(result.structured, ensure_ascii=False),
         task_id=task_id,
         allowed_gap_ids=allowed_gap_ids,
         existing_titles=[subtask.title for subtask in task.subtasks],

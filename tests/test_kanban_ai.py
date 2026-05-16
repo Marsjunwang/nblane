@@ -28,6 +28,18 @@ from nblane.core.models import GapResult, KanbanSubtask, KanbanTask
 class TestKanbanAi(unittest.TestCase):
     """Kanban AI helpers stay pure until apply."""
 
+    def setUp(self) -> None:
+        """Treat LLM as configured so patched chat calls reach the gateway backend."""
+        self._llm_configured = patch(
+            "nblane.core.llm.is_configured",
+            return_value=True,
+        )
+        self._llm_configured.start()
+
+    def tearDown(self) -> None:
+        """Stop runtime LLM configuration patch."""
+        self._llm_configured.stop()
+
     def _write_profile_prior(self, root: Path, profile: str = "王军") -> None:
         """Create a tiny profile with VLA and shoe-placement priors."""
         pdir = root / profile
@@ -269,6 +281,89 @@ nodes:
         self.assertIn("confirm the intended scope and granularity", system_prompt)
         self.assertIn("Prefer milestone-level decomposition", user_prompt)
         self.assertIn("Title: Plan demo", user_prompt)
+
+    @patch("nblane.core.kanban_ai.llm.chat")
+    def test_alignment_prompt_respects_reply_language(
+        self, mock_chat
+    ) -> None:
+        """Kanban action prompts honor the sidebar model reply language."""
+        mock_chat.return_value = """
+{"alignments": [{"label": "澄清输出", "goal": "产出一个具体清单"}]}
+"""
+        sections = {"Doing": [KanbanTask(title="Plan demo", id="task-1")]}
+
+        with patch("nblane.core.llm._REPLY_LANG", "zh"):
+            alignments = generate_kanban_task_alignment_options(
+                sections,
+                "task-1",
+            )
+
+        self.assertEqual(alignments[0].label, "澄清输出")
+        system_prompt, _user_prompt = mock_chat.call_args.args[:2]
+        self.assertIn("Use Chinese for all natural-language field values", system_prompt)
+        self.assertIn("JSON keys", system_prompt)
+
+    @patch("nblane.core.kanban_ai.llm.chat")
+    def test_record_activity_is_opt_in_for_kanban_actions(
+        self, mock_chat
+    ) -> None:
+        """Kanban AI stays pure by default, but can publish review candidates."""
+        mock_chat.return_value = """
+{"alignments": [{"label": "Clarify output", "goal": "Produce one checklist"}]}
+"""
+        sections = {"Doing": [KanbanTask(title="Plan demo", id="task-1")]}
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with (
+                patch("nblane.core.agent_activity.profile_dir", lambda _name: profile),
+                patch("nblane.core.ai.runs.profile_dir", lambda _name: profile),
+            ):
+                generate_kanban_task_alignment_options(
+                    sections,
+                    "task-1",
+                    profile_name="alice",
+                    record_activity=True,
+                )
+                from nblane.core.agent_activity import activity_items_for_page
+
+                activity = activity_items_for_page(
+                    "alice",
+                    {"target_owner": "kanban"},
+                )
+
+        self.assertEqual(len(activity), 1)
+        self.assertEqual(activity[0]["action_name"], "kanban.task_alignment")
+        self.assertEqual(activity[0]["backend"], "direct_llm")
+
+    def test_alignment_falls_back_without_configured_ai(self) -> None:
+        """Unconfigured AI still returns displayable alignment candidates."""
+        sections = {"Doing": [KanbanTask(title="Plan demo", id="task-1")]}
+
+        with patch("nblane.core.llm.is_configured", return_value=False):
+            alignments = generate_kanban_task_alignment_options(
+                sections,
+                "task-1",
+            )
+
+        self.assertEqual(len(alignments), 3)
+        self.assertEqual(alignments[0].label, "Milestone pass")
+
+    def test_alignment_fallback_respects_reply_language(self) -> None:
+        """Deterministic Kanban fallback also follows reply language."""
+        sections = {"Doing": [KanbanTask(title="规划演示", id="task-1")]}
+
+        with (
+            patch("nblane.core.llm.is_configured", return_value=False),
+            patch("nblane.core.llm._REPLY_LANG", "zh"),
+        ):
+            alignments = generate_kanban_task_alignment_options(
+                sections,
+                "task-1",
+            )
+
+        self.assertEqual(alignments[0].label, "里程碑拆解")
+        self.assertIn("规划演示", alignments[0].goal)
 
     @patch("nblane.core.kanban_ai.llm.chat")
     def test_alignment_prompt_uses_shoe_robotics_prior(
@@ -528,6 +623,43 @@ nodes:
         _system_prompt, user_prompt = mock_chat.call_args.args[:2]
         self.assertIn("Confirmed task understanding", user_prompt)
         self.assertIn("Produce one concrete demo plan", user_prompt)
+
+    @patch("nblane.core.kanban_ai.llm.chat")
+    @patch("nblane.core.kanban_ai.gap.analyze")
+    def test_subtask_prompt_respects_reply_language(
+        self, mock_analyze, mock_chat
+    ) -> None:
+        """Kanban subtask generation carries the selected reply language."""
+        mock_analyze.return_value = GapResult(task="task")
+        mock_chat.return_value = """
+{"subtasks": [{"title": "写范围说明", "reason": "固定意图"}]}
+"""
+        sections = {"Doing": [KanbanTask(title="Plan demo", id="task-1")]}
+
+        with patch("nblane.core.llm._REPLY_LANG", "zh"):
+            proposals = generate_kanban_subtask_proposals(
+                "template",
+                sections,
+                "task-1",
+            )
+
+        self.assertEqual([proposal.title for proposal in proposals], ["写范围说明"])
+        system_prompt, _user_prompt = mock_chat.call_args.args[:2]
+        self.assertIn("Use Chinese for all natural-language field values", system_prompt)
+        self.assertIn("JSON keys", system_prompt)
+
+    def test_subtask_session_keys_include_reply_language(self) -> None:
+        """Switching reply language hides stale Kanban AI drafts."""
+        source = Path("pages/3_Kanban.py").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "kanban_subtask_proposals_{profile}_{llm_client.reply_language()}",
+            source,
+        )
+        self.assertIn(
+            "kanban_subtask_alignments_{profile}_{llm_client.reply_language()}",
+            source,
+        )
 
     def test_parse_filters_existing_vague_and_duplicate_subtasks(
         self,

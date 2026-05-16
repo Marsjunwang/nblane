@@ -352,6 +352,153 @@ def fallback_structured(
         )
     if action == "output.inline_patch":
         return {"patches": [], "warnings": [warning]}, [warning]
+    if action == "kanban.task_alignment":
+        title = _clean_text(payload.get("task_title")) or "this task"
+        task_id = _clean_text(payload.get("task_id"))
+        if _reply_language(payload) == "zh":
+            return (
+                {
+                    "alignments": [
+                        {
+                            "label": "里程碑拆解",
+                            "goal": f"把 {title} 拆成几个高层、可审阅的里程碑。",
+                            "assumptions": [
+                                "任务应保持在实现文件细节之上的粒度。"
+                            ],
+                            "subtask_style": "带证据或验证点的里程碑级子任务",
+                            "task_id": task_id,
+                        },
+                        {
+                            "label": "执行清单",
+                            "goal": f"把 {title} 拆成具体但不过细的可跟踪步骤。",
+                            "assumptions": [
+                                "用户需要一组不乱编文件名的执行清单。"
+                            ],
+                            "subtask_style": "中等粒度、带产物的 checklist",
+                            "task_id": task_id,
+                        },
+                        {
+                            "label": "实现细节",
+                            "goal": f"为 {title} 草拟更低层的执行步骤。",
+                            "assumptions": [
+                                "只有在用户确认时才进入文件或脚本级细节。"
+                            ],
+                            "subtask_style": "偏实现的步骤",
+                            "task_id": task_id,
+                        },
+                    ],
+                    "warnings": [warning],
+                },
+                [warning],
+            )
+        return (
+            {
+                "alignments": [
+                    {
+                        "label": "Milestone pass",
+                        "goal": (
+                            f"Turn {title} into a few high-level, "
+                            "reviewable milestones."
+                        ),
+                        "assumptions": [
+                            "The task should stay above implementation-file detail."
+                        ],
+                        "subtask_style": (
+                            "milestone-level subtasks with evidence or validation"
+                        ),
+                        "task_id": task_id,
+                    },
+                    {
+                        "label": "Execution checklist",
+                        "goal": (
+                            f"Break {title} into concrete but still "
+                            "non-microscopic steps."
+                        ),
+                        "assumptions": [
+                            "The user wants a trackable checklist without invented files."
+                        ],
+                        "subtask_style": "medium-grain checklist with artifacts",
+                        "task_id": task_id,
+                    },
+                    {
+                        "label": "Implementation detail",
+                        "goal": f"Draft lower-level execution steps for {title}.",
+                        "assumptions": [
+                            "Only use file or script-level detail if the user confirms it."
+                        ],
+                        "subtask_style": "implementation-oriented steps",
+                        "task_id": task_id,
+                    },
+                ],
+                "warnings": [warning],
+            },
+            [warning],
+        )
+    if action == "kanban.subtasks":
+        task_id = _clean_text(payload.get("task_id"))
+        allowed_gap_ids = _merge_refs(payload.get("allowed_gap_ids"))
+        gap_node_id = allowed_gap_ids[0] if allowed_gap_ids else ""
+        if _reply_language(payload) == "zh":
+            return (
+                {
+                    "subtasks": [
+                        {
+                            "title": "明确完成证据",
+                            "reason": "先固定这个任务完成时应该留下什么可审阅材料。",
+                            "gap_node_id": gap_node_id,
+                            "artifact": "任务说明",
+                            "verification": "卡片上写清完成证据。",
+                        },
+                        {
+                            "title": "跑一轮可审阅的工作闭环",
+                            "reason": "先产出一个可以检查的候选结果。",
+                            "gap_node_id": gap_node_id,
+                            "artifact": "候选输出",
+                            "verification": "结果已附在任务中或被简要总结。",
+                        },
+                        {
+                            "title": "记录结果和下一个阻塞点",
+                            "reason": "让首轮工作后的下一步继续可执行。",
+                            "gap_node_id": gap_node_id,
+                            "artifact": "review note",
+                            "verification": "记录包含结果、阻塞点和下一步动作。",
+                        },
+                    ],
+                    "task_id": task_id,
+                    "warnings": [warning],
+                },
+                [warning],
+            )
+        return (
+            {
+                "subtasks": [
+                    {
+                        "title": "Define completion evidence",
+                        "reason": "Pins the expected artifact before execution.",
+                        "gap_node_id": gap_node_id,
+                        "artifact": "task note",
+                        "verification": "Completion evidence is written on the card.",
+                    },
+                    {
+                        "title": "Run one reviewable work pass",
+                        "reason": "Creates a concrete candidate result for review.",
+                        "gap_node_id": gap_node_id,
+                        "artifact": "candidate output",
+                        "verification": "Result is attached or summarized for review.",
+                    },
+                    {
+                        "title": "Record result and next blocker",
+                        "reason": "Keeps the task actionable after the first pass.",
+                        "gap_node_id": gap_node_id,
+                        "artifact": "review note",
+                        "verification": "Note includes result, blocker, and next action.",
+                    },
+                ],
+                "task_id": task_id,
+                "warnings": [warning],
+            },
+            [warning],
+        )
     if action == "work.remote_dev_task":
         return (
             {
@@ -369,6 +516,13 @@ def fallback_structured(
 
 def _clean_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _reply_language(payload: dict[str, Any]) -> str:
+    clean = _clean_text(payload.get("reply_language")).lower()
+    if clean in ("en", "zh"):
+        return clean
+    return llm.reply_language()
 
 
 def _list_payload(payload: dict[str, Any], *keys: str) -> list[Any]:
@@ -448,6 +602,8 @@ def _expected_outputs(action: str, payload: dict[str, Any]) -> list[str]:
         "resume.target_for_job": ["resume_candidate", "traceable_refs"],
         "output.blog_candidate": ["blog_candidate"],
         "output.inline_patch": ["patch_candidate"],
+        "kanban.task_alignment": ["alignment_candidates"],
+        "kanban.subtasks": ["subtask_candidates"],
         "work.remote_dev_task": ["patch_review", "test_summary", "changed_paths"],
     }
     return defaults.get(action, ["candidate"])

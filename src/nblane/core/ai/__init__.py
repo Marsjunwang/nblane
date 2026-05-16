@@ -11,6 +11,11 @@ from nblane.core.ai.actions import (
 
 _LAZY_EXPORTS = {
     "create_remote_dev_task": ("nblane.core.ai.gateway", "create_remote_dev_task"),
+    "draft_kanban_subtasks": ("nblane.core.ai.gateway", "draft_kanban_subtasks"),
+    "draft_kanban_task_alignment": (
+        "nblane.core.ai.gateway",
+        "draft_kanban_task_alignment",
+    ),
     "draft_resume_for_job": ("nblane.core.ai.gateway", "draft_resume_for_job"),
     "generate_reading_draft": ("nblane.core.ai.gateway", "generate_reading_draft"),
     "get_action_spec": ("nblane.core.ai.router", "get_action_spec"),
@@ -43,6 +48,8 @@ __all__ = [
     "AIActionSpec",
     "AIBackend",
     "create_remote_dev_task",
+    "draft_kanban_subtasks",
+    "draft_kanban_task_alignment",
     "draft_resume_for_job",
     "generate_reading_draft",
     "get_action_spec",

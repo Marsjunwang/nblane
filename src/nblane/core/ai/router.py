@@ -122,6 +122,59 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             },
         ),
     ),
+    "kanban.task_alignment": AIActionSpec(
+        name="kanban.task_alignment",
+        owner="kanban",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="candidate",
+        schema=schema_for_keys(
+            ["alignments"],
+            properties={
+                "alignments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["label", "goal"],
+                        "properties": {
+                            "label": {"type": "string"},
+                            "goal": {"type": "string"},
+                            "assumptions": {"type": "array"},
+                            "subtask_style": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        ),
+    ),
+    "kanban.subtasks": AIActionSpec(
+        name="kanban.subtasks",
+        owner="kanban",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="candidate",
+        schema=schema_for_keys(
+            ["subtasks"],
+            properties={
+                "subtasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["title"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "gap_node_id": {"type": "string"},
+                            "artifact": {"type": "string"},
+                            "verification": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        ),
+    ),
     "work.remote_dev_task": AIActionSpec(
         name="work.remote_dev_task",
         owner="work",

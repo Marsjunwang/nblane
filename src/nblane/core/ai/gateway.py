@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from nblane.core import llm
 from nblane.core.ai.actions import AIActionRequest, AIActionResult
 from nblane.core.ai.backends import default_backends
 from nblane.core.ai.router import choose_backend, get_action_spec
@@ -194,6 +195,72 @@ def generate_reading_draft(
     )
 
 
+def draft_kanban_task_alignment(
+    profile: str,
+    *,
+    task_id: str,
+    task_title: str,
+    task_text: str,
+    ai_context: str = "",
+    reply_language: str | None = None,
+    context_refs: list[str] | None = None,
+    require_review: bool = False,
+) -> AIActionResult:
+    """Typed helper for ``kanban.task_alignment``."""
+
+    return run_ai_action(
+        "kanban.task_alignment",
+        {
+            "task_id": task_id,
+            "task_title": task_title,
+            "task_text": task_text,
+            "ai_context": ai_context,
+            "reply_language": _reply_language_value(reply_language),
+        },
+        profile=profile if require_review else "",
+        context_refs=context_refs or [],
+        require_review=require_review,
+    )
+
+
+def draft_kanban_subtasks(
+    profile: str,
+    *,
+    task_id: str,
+    task_title: str,
+    task_text: str,
+    existing_subtasks: str,
+    gap_analysis: str,
+    allowed_gap_ids: list[str],
+    alignment_context: str = "",
+    ai_context: str = "",
+    granularity: str = "milestone",
+    reply_language: str | None = None,
+    context_refs: list[str] | None = None,
+    require_review: bool = False,
+) -> AIActionResult:
+    """Typed helper for ``kanban.subtasks``."""
+
+    return run_ai_action(
+        "kanban.subtasks",
+        {
+            "task_id": task_id,
+            "task_title": task_title,
+            "task_text": task_text,
+            "existing_subtasks": existing_subtasks,
+            "gap_analysis": gap_analysis,
+            "allowed_gap_ids": allowed_gap_ids,
+            "alignment_context": alignment_context,
+            "ai_context": ai_context,
+            "granularity": granularity,
+            "reply_language": _reply_language_value(reply_language),
+        },
+        profile=profile if require_review else "",
+        context_refs=context_refs or [],
+        require_review=require_review,
+    )
+
+
 def create_remote_dev_task(
     profile: str,
     title: str,
@@ -234,6 +301,15 @@ def _normalize_context(
     return {}
 
 
+def _reply_language_value(value: str | None) -> str:
+    """Return the action payload reply language."""
+
+    clean = str(value or "").strip().lower()
+    if clean in ("en", "zh"):
+        return clean
+    return llm.reply_language()
+
+
 def _record_if_profile(
     request: AIActionRequest,
     spec: Any,
@@ -260,6 +336,8 @@ def _record_if_profile(
 
 __all__ = [
     "create_remote_dev_task",
+    "draft_kanban_subtasks",
+    "draft_kanban_task_alignment",
     "draft_resume_for_job",
     "generate_reading_draft",
     "recommend_research_sources",
