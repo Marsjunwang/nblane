@@ -380,6 +380,18 @@ nodes:
         self.assertEqual(activity[0]["source_ref"], "kanban:task-1")
         self.assertEqual(activity[0]["target_owner"], "kanban")
         self.assertEqual(activity[0]["candidate_type"], "kanban_subtasks")
+        self.assertEqual(activity[0]["error"], "config parse failed")
+        self.assertEqual(
+            activity[0]["payload"],
+            {
+                "provider": "local_codex_readonly",
+                "task_id": "task-1",
+                "task_title": "VLA memory模块",
+            },
+        )
+        for key in ("command", "stdout", "stderr", "raw_text"):
+            self.assertNotIn(key, activity[0]["payload"])
+        self.assertNotIn("codex exec", activity[0]["summary"])
 
     @patch("nblane.core.kanban_ai.llm.chat")
     def test_generate_alignment_options_does_not_mutate_board(

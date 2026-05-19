@@ -224,6 +224,38 @@ def _shorten(value: object, limit: int = 220) -> str:
     return text[: limit - 1].rstrip() + "..."
 
 
+def _readable_codex_error(*values: object, limit: int = 500) -> str:
+    """Extract the most useful Codex failure line without retaining run logs."""
+
+    text = "\n".join(_clean_text(value) for value in values if _clean_text(value))
+    if not text:
+        return "codex_readonly_failed"
+    patterns = (
+        r"No file descriptors available \(os error \d+\)",
+        r"config(?:uration)?[^.\n]{0,120}(?:failed|error)",
+        r"model [`'\"]?[^`'\"\n]+[`'\"]? does not exist[^.\n]*",
+        r"authentication required[^.\n]*",
+        r"api key auth is not supported",
+        r"Error code:\s*\d+[^.\n]*",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _shorten(match.group(0), limit)
+    for line in text.splitlines():
+        clean = _shorten(line, limit)
+        if not clean:
+            continue
+        if clean.startswith("OpenAI Codex ") or clean.startswith("--------"):
+            continue
+        if clean in {"user", "assistant"}:
+            continue
+        if " WARN " in clean and "failed" not in clean.casefold():
+            continue
+        return clean
+    return _shorten(text, limit)
+
+
 def _format_task_one_line(section: str, task: KanbanTask) -> str:
     """Render a task as one compact prior line."""
     bits = [f"{section}: {task.title}"]
@@ -1475,18 +1507,16 @@ def _record_codex_kanban_failure(
     task_id = _clean_text(task.id)
     if not profile or not task_id:
         return ""
-    error = _shorten(
-        getattr(result, "error", "") or raw_text or "codex_readonly_failed",
-        500,
+    error = _readable_codex_error(
+        getattr(result, "error", ""),
+        getattr(result, "stderr", ""),
+        raw_text,
+        getattr(result, "stdout", ""),
     )
     payload = {
         "provider": "local_codex_readonly",
         "task_id": task_id,
         "task_title": _clean_text(task.title),
-        "command": _shorten(getattr(result, "command", ""), 1200),
-        "stdout": _shorten(getattr(result, "stdout", ""), 2000),
-        "stderr": _shorten(getattr(result, "stderr", ""), 2000),
-        "raw_text": _shorten(raw_text, 4000),
     }
     try:
         from nblane.core.agent_activity import append_activity_item

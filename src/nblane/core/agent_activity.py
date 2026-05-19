@@ -270,8 +270,10 @@ def activity_summary(profile: str) -> dict[str, dict[str, int]]:
 def activity_items_for_page(
     profile: str,
     filters: dict[str, str] | None = None,
+    *,
+    sort: str = "updated_desc",
 ) -> list[dict[str, Any]]:
-    """Return filtered items, pending first then newest updated."""
+    """Return filtered items sorted for review or log-style display."""
     items = list(load_agent_activity(profile).get("items") or [])
     filters = filters or {}
     for key, value in filters.items():
@@ -284,10 +286,44 @@ def activity_items_for_page(
         return 0 if item.get("status") == "pending" else 1
 
     def updated_key(item: dict[str, Any]) -> str:
-        return _clean_text(item.get("updated"))
+        return _clean_text(item.get("updated")) or _clean_text(item.get("created"))
 
+    clean_sort = _clean_text(sort) or "updated_desc"
+    if clean_sort == "updated_asc":
+        return sorted(items, key=updated_key)
     items = sorted(items, key=updated_key, reverse=True)
-    return sorted(items, key=status_rank)
+    if clean_sort == "queue":
+        return sorted(items, key=status_rank)
+    return items
+
+
+def delete_activity_items(profile: str, item_ids: list[str] | tuple[str, ...] | set[str]) -> int:
+    """Delete activity items by id and return the number removed."""
+    wanted = {_clean_text(item_id) for item_id in item_ids}
+    wanted.discard("")
+    if not wanted:
+        return 0
+    activity = load_agent_activity(profile)
+    items = list(activity.get("items") or [])
+    kept = [item for item in items if _clean_text(item.get("id")) not in wanted]
+    removed = len(items) - len(kept)
+    if not removed:
+        return 0
+    activity["items"] = kept
+    save_agent_activity(profile, activity)
+    return removed
+
+
+def delete_activity_items_for_filters(
+    profile: str,
+    filters: dict[str, str] | None = None,
+) -> int:
+    """Delete all activity items matching simple field filters."""
+    matches = activity_items_for_page(profile, filters or {}, sort="updated_desc")
+    return delete_activity_items(
+        profile,
+        [_clean_text(item.get("id")) for item in matches],
+    )
 
 
 __all__ = [
@@ -298,6 +334,8 @@ __all__ = [
     "activity_items_for_page",
     "activity_summary",
     "append_activity_item",
+    "delete_activity_items",
+    "delete_activity_items_for_filters",
     "load_agent_activity",
     "normalize_activity_item",
     "save_agent_activity",
