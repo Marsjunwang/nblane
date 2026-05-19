@@ -38,20 +38,20 @@
     .pr-shell {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
-      gap: 8px;
+      gap: 6px;
       height: 100%;
       min-height: 0;
-      padding: 2px 0 8px;
+      padding: 2px 0 6px;
     }
     .pr-toolbar {
       position: sticky;
       top: 0;
       z-index: 30;
       display: grid;
-      grid-template-columns: minmax(140px, 1fr) auto minmax(180px, 280px) auto;
-      gap: 8px;
+      grid-template-columns: minmax(120px, 1fr) auto minmax(160px, 240px) auto;
+      gap: 6px;
       align-items: center;
-      padding: 9px;
+      padding: 6px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: rgba(255, 255, 255, .97);
@@ -74,7 +74,7 @@
     }
     .pr-search { flex-wrap: nowrap; justify-content: stretch; }
     .pr-button, .pr-icon-button, .pr-input, .pr-select, .pr-textarea {
-      min-height: 34px;
+      min-height: 30px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--paper);
@@ -85,13 +85,13 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 0 10px;
-      font-size: .8rem;
+      padding: 0 8px;
+      font-size: .76rem;
       font-weight: 780;
       line-height: 1;
       white-space: nowrap;
     }
-    .pr-icon-button { width: 34px; padding: 0; font-size: .92rem; }
+    .pr-icon-button { width: 30px; padding: 0; font-size: .88rem; }
     .pr-button.primary {
       border-color: var(--accent);
       background: var(--accent);
@@ -108,8 +108,8 @@
     }
     .pr-input, .pr-select, .pr-textarea {
       width: 100%;
-      padding: 7px 9px;
-      font-size: .84rem;
+      padding: 5px 8px;
+      font-size: .8rem;
     }
     .pr-input:focus, .pr-select:focus, .pr-textarea:focus {
       border-color: rgba(33, 104, 91, .65);
@@ -135,7 +135,7 @@
       height: 100%;
       min-height: 0;
       overflow: auto;
-      padding: 18px 16px 88px;
+      padding: 14px 14px 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--soft);
@@ -234,30 +234,62 @@
       font-size: .8rem;
       line-height: 1.35;
     }
-    .pr-selection-bar {
+    .pr-dock {
       position: sticky;
       bottom: 10px;
       z-index: 24;
-      display: none;
+      display: grid;
       gap: 6px;
-      align-items: center;
+      grid-template-columns: minmax(0, 1fr) auto;
       margin: 12px auto 0;
-      width: min(100%, 780px);
+      width: min(100%, 900px);
       padding: 8px;
       border: 1px solid rgba(33, 104, 91, .26);
       border-radius: 8px;
       background: rgba(255, 255, 255, .97);
       box-shadow: 0 8px 24px rgba(23, 33, 31, .10);
     }
-    .pr-selection-bar.visible { display: flex; }
-    .pr-selection-text {
+    .pr-dock.idle { display: none; }
+    .pr-dock-main {
+      display: grid;
+      gap: 4px;
       min-width: 0;
-      flex: 1 1 auto;
+    }
+    .pr-dock-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--accent-strong);
+      font-size: .78rem;
+      font-weight: 850;
+      line-height: 1.2;
+    }
+    .pr-dock-status {
+      color: var(--muted);
+      font-size: .74rem;
+      font-weight: 760;
+    }
+    .pr-dock-text, .pr-dock-result {
+      min-width: 0;
       overflow: hidden;
       color: var(--muted);
       font-size: .8rem;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .pr-dock-result {
+      color: var(--ink);
+      -webkit-line-clamp: 3;
+    }
+    .pr-dock-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-content: start;
+      justify-content: flex-end;
     }
     .pr-side {
       display: grid;
@@ -344,6 +376,28 @@
     .pr-item:hover { border-color: rgba(33, 104, 91, .45); background: #fbfdfc; }
     .pr-item-title { font-size: .8rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
     .pr-item-meta { color: var(--muted); font-size: .73rem; line-height: 1.25; overflow-wrap: anywhere; }
+    .pr-annotation-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 30px;
+      gap: 6px;
+      align-items: stretch;
+    }
+    .pr-annotation-row .pr-item { min-width: 0; }
+    .pr-danger-button {
+      min-height: 30px;
+      width: 30px;
+      border: 1px solid rgba(159, 29, 29, .24);
+      border-radius: 8px;
+      background: #fff7f7;
+      color: var(--danger);
+      font-size: .86rem;
+      font-weight: 850;
+      line-height: 1;
+    }
+    .pr-danger-button:hover {
+      border-color: rgba(159, 29, 29, .5);
+      background: #ffecec;
+    }
     .pr-empty {
       color: var(--muted);
       font-size: .82rem;
@@ -364,8 +418,10 @@
       .pr-workspace, .pr-workspace.panel-collapsed { grid-template-columns: 1fr; overflow: auto; }
       .pr-viewer { min-height: 540px; }
       .pr-side, .pr-side.collapsed { height: auto; min-height: 0; overflow: visible; }
-      .pr-side.collapsed .pr-panel { display: block; }
-      .pr-side.collapsed .pr-side-rail { display: none; }
+      .pr-side.collapsed .pr-panel { display: none; }
+      .pr-side.collapsed .pr-side-rail { display: inline-flex; }
+      .pr-dock { grid-template-columns: 1fr; }
+      .pr-dock-actions { justify-content: flex-start; }
     }
   </style>
 </head>
@@ -382,9 +438,10 @@
       translation: "Translation",
       ai: "AI",
       claims: "Claims",
-      create_annotation: "Annotate",
+      create_annotation: "Highlight",
       create_chunk: "Chunk",
       create_citation: "Cite",
+      delete_annotation: "Delete annotation",
       translate_selection: "Translate",
       translate_full_paper: "Full translation",
       translate_visible_pages: "Visible pages",
@@ -406,6 +463,7 @@
       actual_size: "1:1",
       panel: "Panel",
       translated: "Translated",
+      translating: "Translating...",
       missing: "Missing",
       stale: "Stale",
       failed: "Failed",
@@ -433,6 +491,10 @@
     let requestedPreviews = new Set();
     let resizeTimer = null;
     let viewportTimer = null;
+    let dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+    let cacheDbPromise = null;
+    const CACHE_DB = "nblane_pdf_reader_cache_v1";
+    const CACHE_STORE = "pages";
 
     function send(type, data) {
       window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
@@ -487,6 +549,112 @@
     }
     function sourceId() {
       return text(asObj(args.source).id || asObj(args.source).source_id);
+    }
+    function sourceMetadata() {
+      return asObj(asObj(args.source).metadata);
+    }
+    function pdfFingerprint() {
+      const source = asObj(args.source);
+      const meta = sourceMetadata();
+      const fromDoc = pdfDoc && pdfDoc.fingerprints && pdfDoc.fingerprints.length ? pdfDoc.fingerprints.join(":") : "";
+      return text(source.fingerprint || source.pdf_fingerprint || source.pdf_sha256 || meta.pdf_sha256 || meta.pdf_asset_ref || fromDoc);
+    }
+    function pdfSourceSignature() {
+      const pdfBase64 = text(args.pdf_base64);
+      const pdfUrl = text(args.pdf_url);
+      const source = asObj(args.source);
+      const sourceKey = text(source.id || source.source_id || source.url || "");
+      const fingerprint = pdfFingerprint();
+      const pdfKey = pdfUrl || (pdfBase64 ? `base64:${pdfBase64.length}:${pdfBase64.slice(0, 80)}:${pdfBase64.slice(-80)}` : "");
+      return `${sourceKey}\n${fingerprint}\n${pdfKey}`;
+    }
+    function pdfCacheIdentity() {
+      return text(pdfFingerprint() || args.pdf_url || pdfSourceSignature());
+    }
+    function pageCacheKey(pageNumber, scale, dpr) {
+      const roundedScale = Math.round(Number(scale || 1) * 1000) / 1000;
+      const roundedDpr = Math.round(Number(dpr || 1) * 100) / 100;
+      return [
+        "page",
+        sourceId() || "source",
+        pdfCacheIdentity() || "pdf",
+        pageNumber,
+        roundedScale,
+        roundedDpr,
+      ].map((part) => encodeURIComponent(text(part))).join("|");
+    }
+    function openCacheDb() {
+      if (!("indexedDB" in window)) return Promise.resolve(null);
+      if (cacheDbPromise) return cacheDbPromise;
+      cacheDbPromise = new Promise((resolve) => {
+        try {
+          const request = indexedDB.open(CACHE_DB, 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE, { keyPath: "key" });
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
+      });
+      return cacheDbPromise;
+    }
+    async function readPageCache(key) {
+      try {
+        const db = await openCacheDb();
+        if (!db) return null;
+        return await new Promise((resolve) => {
+          const tx = db.transaction(CACHE_STORE, "readonly");
+          const request = tx.objectStore(CACHE_STORE).get(key);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => resolve(null);
+        });
+      } catch {
+        return null;
+      }
+    }
+    async function writePageCache(row) {
+      try {
+        const db = await openCacheDb();
+        if (!db) return;
+        await new Promise((resolve) => {
+          const tx = db.transaction(CACHE_STORE, "readwrite");
+          tx.objectStore(CACHE_STORE).put({ ...row, updated: Date.now() });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        });
+        prunePageCache(row.pdf);
+      } catch {}
+    }
+    function renderCacheMaxPages() {
+      const raw = Number(settings().render_cache_max_pages);
+      return Number.isFinite(raw) ? Math.max(8, Math.min(120, raw)) : 48;
+    }
+    async function prunePageCache(pdfIdentity) {
+      try {
+        const db = await openCacheDb();
+        if (!db) return;
+        const rows = await new Promise((resolve) => {
+          const tx = db.transaction(CACHE_STORE, "readonly");
+          const request = tx.objectStore(CACHE_STORE).getAll();
+          request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result : []);
+          request.onerror = () => resolve([]);
+        });
+        const ownRows = rows
+          .filter((row) => row && row.source_id === sourceId() && row.pdf === pdfIdentity)
+          .sort((a, b) => Number(b.updated || 0) - Number(a.updated || 0));
+        const stale = ownRows.slice(renderCacheMaxPages());
+        if (!stale.length) return;
+        await new Promise((resolve) => {
+          const tx = db.transaction(CACHE_STORE, "readwrite");
+          const store = tx.objectStore(CACHE_STORE);
+          stale.forEach((row) => row && row.key && store.delete(row.key));
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        });
+      } catch {}
     }
     function eventId(action) {
       eventSeq += 1;
@@ -593,7 +761,8 @@
     function renderShell(message = "") {
       const source = asObj(args.source);
       const title = text(source.title || source.id || "Paper");
-      const hasSelection = currentSelection && currentSelection.selected_text;
+      syncDockFromArgs();
+      const dockVisible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
       document.getElementById("root").innerHTML = `
         <section class="pr-shell">
           <header class="pr-toolbar">
@@ -624,14 +793,7 @@
           <main class="pr-workspace ${sidePanelCollapsed ? "panel-collapsed" : ""}">
             <section class="pr-viewer" id="viewer">
               <div class="pr-continuous-document" id="continuousDocument"></div>
-              <div class="pr-selection-bar ${hasSelection ? "visible" : ""}" id="selectionBar">
-                <div class="pr-selection-text">${esc(hasSelection ? currentSelection.selected_text : "")}</div>
-                <button class="pr-button primary" data-action="annotate">${esc(label("create_annotation"))}</button>
-                <button class="pr-button" data-action="chunk">${esc(label("create_chunk"))}</button>
-                <button class="pr-button" data-action="cite">${esc(label("create_citation"))}</button>
-                <button class="pr-button" data-action="translate">${esc(label("translate_selection"))}</button>
-                <button class="pr-button" data-action="explain">${esc(label("explain_selection"))}</button>
-              </div>
+              <section class="pr-dock ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             </section>
             <aside class="pr-side ${sidePanelCollapsed ? "collapsed" : ""}">
               <button class="pr-icon-button pr-side-rail" data-action="togglePanel" title="${attr(label("panel"))}">&lt;</button>
@@ -686,6 +848,107 @@
       if (!text(row.translated_text)) return "missing";
       return "translated";
     }
+    function aiRows() {
+      return asArr(args.ai_results || args.ai_responses || args.analysis || args.ai);
+    }
+    function findSelectionTranslation(selection = currentSelection) {
+      const picked = asObj(selection);
+      const refs = asArr(picked.segment_refs).map((row) => text(row)).filter(Boolean);
+      const hash = text(picked.selected_text_hash || picked.source_hash);
+      const selected = text(picked.selected_text).trim();
+      const rows = asArr(args.translations).map((row) => asObj(row));
+      let found = rows.find((row) => (
+        text(row.target_lang || "zh") === targetLang()
+        && text(row.translated_text)
+        && refs.includes(text(row.segment_id || row.scope_ref))
+        && text(row.status || "translated") !== "failed"
+      ));
+      if (found) return found;
+      found = rows.find((row) => (
+        text(row.target_lang || "zh") === targetLang()
+        && text(row.translated_text)
+        && hash
+        && text(row.source_hash || row.selected_text_hash) === hash
+        && text(row.status || "translated") !== "failed"
+      ));
+      if (found) return found;
+      return rows.find((row) => (
+        text(row.target_lang || "zh") === targetLang()
+        && text(row.translated_text)
+        && selected
+        && text(row.source_text).trim()
+        && (text(row.source_text).trim() === selected || selected.includes(text(row.source_text).trim()))
+        && text(row.status || "translated") !== "failed"
+      ));
+    }
+    function latestAiText() {
+      const rows = aiRows().map((row) => asObj(row)).filter((row) => text(row.text || row.answer || row.result || row.content || row.message));
+      const row = rows[rows.length - 1];
+      return row ? text(row.text || row.answer || row.result || row.content || row.message) : "";
+    }
+    function syncDockFromArgs() {
+      if (currentSelection && currentSelection.selected_text) {
+        const hit = findSelectionTranslation(currentSelection);
+        if (hit && text(hit.translated_text)) {
+          dockState = {
+            mode: "translation",
+            status: label("translated"),
+            selected_text: currentSelection.selected_text,
+            result: text(hit.translated_text),
+            selection_hash: text(currentSelection.selected_text_hash),
+          };
+        } else if (dockState.selection_hash !== text(currentSelection.selected_text_hash)) {
+          dockState = {
+            mode: "selection",
+            status: label("selected_text"),
+            selected_text: currentSelection.selected_text,
+            result: "",
+            selection_hash: text(currentSelection.selected_text_hash),
+          };
+        }
+        return;
+      }
+      const aiText = latestAiText();
+      if (aiText) {
+        dockState = { mode: "ai", status: label("ai"), selected_text: "", result: aiText, selection_hash: "" };
+      } else if (!dockState.result && !dockState.selected_text) {
+        dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+      }
+    }
+    function dockHtml() {
+      syncDockFromArgs();
+      const hasSelection = currentSelection && currentSelection.selected_text;
+      const title = dockState.mode === "translation" ? label("translation")
+        : dockState.mode === "ai" ? label("ai")
+        : label("selected_text");
+      return `
+        <div class="pr-dock-main">
+          <div class="pr-dock-head">
+            <span>${esc(title)}</span>
+            <span class="pr-dock-status">${esc(dockState.status || "")}</span>
+          </div>
+          <div class="pr-dock-text">${esc(dockState.selected_text || (hasSelection ? currentSelection.selected_text : ""))}</div>
+          ${dockState.result ? `<div class="pr-dock-result">${esc(dockState.result)}</div>` : ""}
+        </div>
+        <div class="pr-dock-actions">
+          <button class="pr-button primary" data-action="annotate" ${hasSelection ? "" : "disabled"}>${esc(label("create_annotation"))}</button>
+          <button class="pr-button" data-action="translate" ${hasSelection ? "" : "disabled"}>${esc(label("translate_selection"))}</button>
+          <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
+        </div>
+      `;
+    }
+    function refreshDock() {
+      const dock = document.getElementById("selectionDock");
+      if (!dock) return;
+      syncDockFromArgs();
+      const visible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
+      dock.classList.toggle("idle", !visible);
+      dock.innerHTML = dockHtml();
+      dock.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", () => handleAction(button.dataset.action));
+      });
+      setHeight();
+    }
     function translationCounts() {
       const translations = translationBySegment();
       const counts = { translated: 0, missing: 0, stale: 0, failed: 0 };
@@ -706,10 +969,13 @@
           const title = itemText(obj, ["selected_text", "note"]) || id;
           const focused = id && id === focusedAnnotationId;
           return `
-            <button class="pr-item" data-jump-annotation="${attr(id)}" data-page="${page || ""}">
-              <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
-              <div class="pr-item-meta">${esc(id)} - ${esc(obj.locator || (page ? `p. ${page}` : ""))}${focused ? " - focus" : ""}</div>
-            </button>
+            <div class="pr-annotation-row">
+              <button class="pr-item" data-jump-annotation="${attr(id)}" data-page="${page || ""}">
+                <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
+                <div class="pr-item-meta">${esc(id)} - ${esc(obj.locator || (page ? `p. ${page}` : ""))}${focused ? " - focus" : ""}</div>
+              </button>
+              <button class="pr-danger-button" data-delete-annotation="${attr(id)}" data-page="${page || ""}" title="${attr(label("delete_annotation"))}">x</button>
+            </div>
           `;
         }).join("")}</div>`;
       }
@@ -804,6 +1070,14 @@
           emitAction("jump_to_annotation", { annotation_id: id, id, page: page || currentPage, locator: page ? `p. ${page}` : "" });
         });
       });
+      document.querySelectorAll("[data-delete-annotation]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = button.dataset.deleteAnnotation || "";
+          const page = Number(button.dataset.page || 0);
+          if (!id) return;
+          emitAction("annotation_delete", { annotation_id: id, id, page: page || currentPage, locator: page ? `p. ${page}` : "" });
+        });
+      });
       document.querySelectorAll(".pr-item[data-page]:not([data-jump-annotation])").forEach((button) => {
         button.addEventListener("click", () => {
           const page = Number(button.dataset.page || 0);
@@ -838,10 +1112,10 @@
       }
       if (action === "togglePanel") {
         sidePanelCollapsed = !sidePanelCollapsed;
-        renderShell(statusText());
-        renderDocumentSkeleton();
-        setupIntersectionObserver();
-        renderAround(currentPage);
+        document.querySelector(".pr-workspace")?.classList.toggle("panel-collapsed", sidePanelCollapsed);
+        document.querySelector(".pr-side")?.classList.toggle("collapsed", sidePanelCollapsed);
+        refreshSide();
+        refreshDock();
         scheduleViewportUpdate();
         return;
       }
@@ -849,16 +1123,19 @@
       if (action === "ask") {
         sidePanelCollapsed = false;
         activeTab = "ai";
-        renderShell(statusText());
-        renderDocumentSkeleton();
-        setupIntersectionObserver();
-        renderAround(currentPage);
+        dockState = { mode: "ai", status: label("ask_paper"), selected_text: "", result: latestAiText(), selection_hash: "" };
+        document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
+        document.querySelector(".pr-side")?.classList.remove("collapsed");
+        refreshSide();
+        refreshDock();
         window.setTimeout(() => document.getElementById("questionInput")?.focus(), 20);
         return;
       }
       if (action === "askQuestion") {
         const question = text(document.getElementById("questionInput")?.value).trim();
         if (!question) return;
+        dockState = { mode: "ai", status: label("ask_paper"), selected_text: question, result: "", selection_hash: "" };
+        refreshDock();
         return emitAction("ask_paper", { question, page: currentPage, locator: `p. ${currentPage}` });
       }
       if (action === "translateFull") {
@@ -878,8 +1155,30 @@
       if (action === "annotate") return emitAction("annotation_create", { ...selection, note: "" });
       if (action === "chunk") return emitAction("create_chunk_from_selection", selection);
       if (action === "cite") return emitAction("create_citation", selection);
-      if (action === "translate") return emitAction("translate_selection", selection);
-      if (action === "explain") return emitAction("explain_selection", selection);
+      if (action === "translate") {
+        const hit = findSelectionTranslation(selection);
+        dockState = {
+          mode: "translation",
+          status: hit && text(hit.translated_text) ? label("translated") : label("translating"),
+          selected_text: text(selection.selected_text),
+          result: hit && text(hit.translated_text) ? text(hit.translated_text) : "",
+          selection_hash: text(selection.selected_text_hash),
+        };
+        refreshDock();
+        if (hit && text(hit.translated_text)) return;
+        return emitAction("translate_selection", { ...selection, target_lang: targetLang() });
+      }
+      if (action === "explain") {
+        dockState = {
+          mode: "ai",
+          status: label("explain_selection"),
+          selected_text: text(selection.selected_text),
+          result: "",
+          selection_hash: text(selection.selected_text_hash),
+        };
+        refreshDock();
+        return emitAction("explain_selection", selection);
+      }
     }
     function statusText() {
       return `${label("page")} ${currentPage}${totalPages ? ` / ${totalPages}` : ""}`;
@@ -910,6 +1209,20 @@
         layer.addEventListener("keyup", handleSelection);
       });
       applyAllKnownHighlights();
+    }
+    function skeletonPageCount() {
+      return document.querySelectorAll(".pr-page-container").length;
+    }
+    function refreshForArgsUpdate() {
+      focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
+      syncDockFromArgs();
+      refreshSide();
+      refreshDock();
+      applyAllKnownHighlights();
+      updatePageUi();
+      renderAround(currentPage);
+      scheduleViewportUpdate();
+      setHeight();
     }
     function pageElement(pageNumber) {
       return document.getElementById(`pageContainer-${pageNumber}`);
@@ -1001,14 +1314,18 @@
         if (!canvas) return;
         const context = canvas.getContext("2d");
         const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const cacheKey = pageCacheKey(pageNumber, pageScale, dpr);
+        const cached = await readPageCache(cacheKey);
         canvas.width = Math.floor(viewport.width * dpr);
         canvas.height = Math.floor(viewport.height * dpr);
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
-        const hasPreview = applyPagePreview(pageNumber, viewport);
+        if (cached && text(cached.textBody)) textCache.set(pageNumber, text(cached.textBody));
+        const hasPreview = applyCachedPagePreview(pageNumber, viewport, cached) || applyPagePreview(pageNumber, viewport);
         if (state.renderTask) {
           try { state.renderTask.cancel(); } catch {}
         }
+        let renderedOk = false;
         state.renderTask = page.render({
           canvasContext: context,
           viewport,
@@ -1017,14 +1334,28 @@
         try {
           await withTimeout(state.renderTask.promise, 3500, "PDF.js render timed out; using image preview fallback.");
           clearPagePreview(pageNumber);
+          renderedOk = true;
         } catch (error) {
           if (!hasPreview) showPageError(pageNumber, error && error.message ? error.message : error);
           try { state.renderTask.cancel(); } catch {}
         }
         state.renderTask = null;
-        await renderTextLayer(pageNumber, page, viewport);
+        const textBody = await renderTextLayer(pageNumber, page, viewport);
         renderHighlights(pageNumber);
         state.renderedScale = pageScale;
+        try {
+          if (!renderedOk) return;
+          writePageCache({
+            key: cacheKey,
+            source_id: sourceId(),
+            pdf: pdfCacheIdentity(),
+            page: pageNumber,
+            scale: pageScale,
+            dpr,
+            bitmap: canvas.toDataURL("image/png"),
+            textBody,
+          });
+        } catch {}
       } catch (error) {
         if (!applyPagePreview(pageNumber, viewportSize)) showPageError(pageNumber, error && error.message ? error.message : error);
       } finally {
@@ -1035,7 +1366,7 @@
     }
     async function renderTextLayer(pageNumber, page, viewport) {
       const layer = document.getElementById(`textLayer-${pageNumber}`);
-      if (!layer) return;
+      if (!layer) return "";
       layer.innerHTML = "";
       const content = await page.getTextContent();
       const body = content.items.map((item) => text(item.str)).join(" ");
@@ -1054,6 +1385,22 @@
         span.style.fontFamily = style.fontFamily || "sans-serif";
         span.dataset.page = String(pageNumber);
         layer.appendChild(span);
+      }
+      return body;
+    }
+    function applyCachedPagePreview(pageNumber, viewport, cached) {
+      const img = document.getElementById(`pagePreview-${pageNumber}`);
+      const canvas = document.getElementById(`pdfCanvas-${pageNumber}`);
+      if (!img || !canvas || !cached || !text(cached.bitmap)) return false;
+      try {
+        img.src = text(cached.bitmap);
+        img.style.width = `${viewport.width}px`;
+        img.style.height = `${viewport.height}px`;
+        img.classList.add("visible");
+        canvas.classList.add("pending-fallback");
+        return true;
+      } catch {
+        return false;
       }
     }
     function applyPagePreview(pageNumber, viewport) {
@@ -1190,6 +1537,13 @@
         segment_refs: segmentRefs,
         locator: `p. ${pickedPage}`,
       };
+      dockState = {
+        mode: "selection",
+        status: label("selected_text"),
+        selected_text: selectedText,
+        result: "",
+        selection_hash: text(currentSelection.selected_text_hash),
+      };
       renderSelectionBar();
       if (emitPassiveEvents()) emitAction("selection_created", currentSelection);
     }
@@ -1213,16 +1567,9 @@
       return parts.join(" ").replace(/\s+/g, " ").trim();
     }
     function renderSelectionBar() {
-      const bar = document.getElementById("selectionBar");
-      if (!bar) return;
-      const textEl = bar.querySelector(".pr-selection-text");
       const hasSelection = currentSelection && currentSelection.selected_text;
-      bar.classList.toggle("visible", Boolean(hasSelection));
-      if (textEl) textEl.textContent = hasSelection ? currentSelection.selected_text : "";
-      document.querySelectorAll('[data-action="annotate"], [data-action="chunk"], [data-action="cite"], [data-action="translate"], [data-action="explain"]').forEach((button) => {
-        button.disabled = !hasSelection;
-      });
-      setHeight();
+      if (!hasSelection && dockState.mode === "selection") dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+      refreshDock();
     }
     function segmentRefsForSelection(selectedText, pageNumber) {
       const clean = text(selectedText).trim();
@@ -1262,6 +1609,14 @@
     }
     async function pageText(pageNumber) {
       if (textCache.has(pageNumber)) return textCache.get(pageNumber);
+      try {
+        const cached = await readPageCache(pageCacheKey(pageNumber, scaleForPage(pageNumber), Math.max(1, window.devicePixelRatio || 1)));
+        if (cached && text(cached.textBody)) {
+          const body = text(cached.textBody);
+          textCache.set(pageNumber, body);
+          return body;
+        }
+      } catch {}
       if (pdfDoc) {
         const page = await pdfDoc.getPage(pageNumber);
         const content = await page.getTextContent();
@@ -1352,6 +1707,7 @@
       sidePanelCollapsed = text(settings().side_panel_default || "collapsed") !== "open";
       requestedPreviews = new Set();
       currentSelection = null;
+      dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
       textCache = new Map();
       pageBaseSizes = new Map();
       pageRenderStates = new Map();
@@ -1408,16 +1764,16 @@
       try {
         args = asObj(event.data.args);
         focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
-        const pdfSignature = `${text(args.pdf_url)}\n${text(args.pdf_base64)}`;
-        const dataSignature = `${pdfSignature}\n${text(args.source && args.source.id)}\n${text(settings().initial_page || settings().page || "")}`;
-        if (!pdfDoc || dataSignature !== text(onRender.lastSignature)) {
-          onRender.lastSignature = dataSignature;
+        const sourceSignature = pdfSourceSignature();
+        const expectedPages = Math.max(1, totalPages || knownPageCount(currentPage));
+        const skeletonMismatch = skeletonPageCount() > 0 && skeletonPageCount() !== expectedPages;
+        const hasShell = Boolean(document.getElementById("continuousDocument"));
+        const needsLoad = !hasShell || sourceSignature !== text(onRender.lastSignature) || skeletonMismatch;
+        if (needsLoad) {
+          onRender.lastSignature = sourceSignature;
           await loadPdf();
         } else {
-          renderShell("");
-          renderDocumentSkeleton();
-          setupIntersectionObserver();
-          scrollToPage(currentPage);
+          refreshForArgsUpdate();
         }
       } catch (error) {
         renderShell(label("pdf_error"));

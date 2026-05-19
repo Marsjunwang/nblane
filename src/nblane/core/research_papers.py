@@ -1452,7 +1452,7 @@ def _mark_translation_status(
     translation: PaperTranslation,
     segments: dict[str, PaperSegment],
 ) -> PaperTranslation:
-    if translation.segment_id:
+    if (translation.scope_type or "segment") == "segment" and translation.segment_id:
         segment = segments.get(translation.segment_id)
         if segment is None:
             translation.status = "stale"
@@ -1505,6 +1505,28 @@ def _next_translation_id(existing: list[PaperTranslation], source_id: str) -> st
     return f"{prefix}{max_index + 1:04d}"
 
 
+def _translation_storage_scope(translation: PaperTranslation) -> tuple[str, str]:
+    """Return the durable scope used to merge cached translations."""
+
+    scope_type = _clean_text(translation.scope_type) or (
+        "segment" if _clean_text(translation.segment_id) else "selection"
+    )
+    if scope_type == "segment":
+        scope_ref = _clean_text(translation.scope_ref) or _clean_text(translation.segment_id)
+    else:
+        scope_ref = (
+            _clean_text(translation.scope_ref)
+            or _clean_text(translation.source_hash)
+            or text_hash(translation.source_text)
+        )
+    return scope_type, scope_ref
+
+
+def _translation_merge_key(translation: PaperTranslation) -> tuple[str, str, str]:
+    scope_type, scope_ref = _translation_storage_scope(translation)
+    return (scope_type, scope_ref, _clean_text(translation.target_lang) or "zh")
+
+
 def upsert_paper_translations(
     profile: str | Path,
     source_id: str,
@@ -1514,7 +1536,7 @@ def upsert_paper_translations(
 
     segments = _segment_hash_map(profile, source_id)
     existing = load_paper_translations(profile, source_id)
-    by_key = {(row.segment_id, row.target_lang): row for row in existing if row.segment_id}
+    by_key = {_translation_merge_key(row): row for row in existing}
     merged = [row for row in existing]
     for item in rows:
         incoming = _translation_from_input(
@@ -1527,18 +1549,21 @@ def upsert_paper_translations(
         incoming.source_id = source_id
         if not incoming.id or incoming.id == "pending":
             incoming.id = _next_translation_id(merged, source_id)
-        segment = segments.get(incoming.segment_id)
-        if incoming.segment_id and segment is None:
+        incoming.scope_type, incoming.scope_ref = _translation_storage_scope(incoming)
+        if incoming.scope_type == "segment" and incoming.segment_id and not incoming.scope_ref:
+            incoming.scope_ref = incoming.segment_id
+        segment = segments.get(incoming.segment_id) if incoming.scope_type == "segment" else None
+        if incoming.scope_type == "segment" and incoming.segment_id and segment is None:
             incoming.status = "stale"
             incoming.warnings.append("Skipped: segment no longer exists.")
             merged.append(incoming)
             continue
-        if segment is not None and incoming.source_hash != segment.text_hash:
+        if incoming.scope_type == "segment" and segment is not None and incoming.source_hash != segment.text_hash:
             incoming.status = "stale"
             incoming.warnings.append("Skipped: source_hash does not match current segment.")
             merged.append(incoming)
             continue
-        key = (incoming.segment_id, incoming.target_lang)
+        key = _translation_merge_key(incoming)
         old = by_key.get(key)
         if old is None:
             merged.append(incoming)

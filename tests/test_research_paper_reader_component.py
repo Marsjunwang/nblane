@@ -32,8 +32,19 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("renderPreviewOnly", html)
         self.assertIn("pr-continuous-document", html)
         self.assertIn("pr-page-container", html)
+        self.assertIn("pr-dock", html)
+        self.assertIn("selectionDock", html)
+        self.assertIn("data-delete-annotation", html)
+        self.assertNotIn('data-action="chunk"', html)
+        self.assertNotIn('data-action="cite"', html)
         self.assertIn("continuousDocument", html)
         self.assertIn("IntersectionObserver", html)
+        self.assertIn("nblane_pdf_reader_cache_v1", html)
+        self.assertIn("indexedDB.open", html)
+        self.assertIn("applyCachedPagePreview", html)
+        self.assertIn("refreshForArgsUpdate", html)
+        self.assertIn("pdfSourceSignature", html)
+        self.assertIn("render_cache_max_pages", html)
         self.assertIn("scale_mode", html)
         self.assertIn("overscan_pages", html)
         self.assertIn("NBLANE_READER_SEND_FULL_PDF", page_source)
@@ -42,6 +53,8 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn('"view_mode": "continuous"', page_source)
         self.assertIn('"scale_mode": "fit-width"', page_source)
         self.assertIn('"auto_save_progress": True', page_source)
+        self.assertIn('"render_cache": True', page_source)
+        self.assertIn('"translation_dock_default": "bottom"', page_source)
 
         actions = set(re.findall(r'emitAction\("([^"]+)"', html))
         self.assertGreaterEqual(
@@ -49,6 +62,7 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
             {
                 "selection_created",
                 "annotation_create",
+                "annotation_delete",
                 "create_chunk_from_selection",
                 "create_citation",
                 "translate_selection",

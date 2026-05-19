@@ -233,6 +233,62 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(translations[0].status, "stale")
         self.assertIn("Source hash", " ".join(translations[0].warnings))
 
+    def test_selection_translations_are_scoped_by_selection_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            first_hash = text_hash("A selected sentence.")
+            second_hash = text_hash("Another selected sentence.")
+
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "scope_type": "selection",
+                            "scope_ref": first_hash,
+                            "segment_id": "selection:first",
+                            "source_hash": first_hash,
+                            "source_text": "A selected sentence.",
+                            "target_lang": "zh",
+                            "translated_text": "第一句译文。",
+                        },
+                        {
+                            "scope_type": "selection",
+                            "scope_ref": second_hash,
+                            "segment_id": "selection:second",
+                            "source_hash": second_hash,
+                            "source_text": "Another selected sentence.",
+                            "target_lang": "zh",
+                            "translated_text": "第二句译文。",
+                        },
+                    ],
+                )
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "scope_type": "selection",
+                            "scope_ref": first_hash,
+                            "segment_id": "selection:first",
+                            "source_hash": first_hash,
+                            "source_text": "A selected sentence.",
+                            "target_lang": "zh",
+                            "translated_text": "第一句更新译文。",
+                        }
+                    ],
+                )
+
+            translations = load_paper_translations(profile, source_id)
+            by_scope = {(row.scope_type, row.scope_ref): row for row in translations}
+
+        self.assertEqual(len(by_scope), 2)
+        self.assertEqual(by_scope[("selection", first_hash)].translated_text, "第一句更新译文。")
+        self.assertEqual(by_scope[("selection", second_hash)].translated_text, "第二句译文。")
+        self.assertEqual(by_scope[("selection", first_hash)].status, "translated")
+
     def test_ensure_paper_reading_artifacts_prepares_missing_pages_and_segments_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))

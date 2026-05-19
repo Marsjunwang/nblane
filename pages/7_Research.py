@@ -761,6 +761,20 @@ def _render_paper_search(inbox) -> None:
                             "download_pdf": pdf_strategy == _l("download_open_access_pdf", "Download open-access PDF"),
                         },
                     )
+                    refreshed = load_research_sources(selected).by_id()
+                    for source_id in imported:
+                        source = refreshed.get(source_id)
+                        if source is None or not source.metadata.get("pdf_asset_ref"):
+                            continue
+                        try:
+                            ensure_paper_reading_artifacts(_pdir, source_id, prefer_grobid=False)
+                        except Exception as exc:
+                            st.warning(
+                                _l(
+                                    "reading_artifacts_failed",
+                                    "Reading artifacts could not be prepared: {error}",
+                                ).format(error=exc)
+                            )
                     refresh_file_snapshots([_sources_path])
                     stash_git_backup_results()
                     clear_web_cache()
@@ -848,6 +862,7 @@ def _render_paper_search(inbox) -> None:
                 )
                 save_research_sources(selected, inbox)
                 import_paper_pdf(_pdir, source.id, uploaded.getvalue(), uploaded.name)
+                ensure_paper_reading_artifacts(_pdir, source.id, prefer_grobid=False)
                 refresh_file_snapshots([_sources_path])
                 stash_git_backup_results()
                 clear_web_cache()
@@ -1354,18 +1369,24 @@ def _selection_segments(payload: dict, segment_rows) -> list[dict[str, object]]:
     selected_text = _payload_text(payload, "selected_text", "selection_text", "text", "quote")
     if not selected_text:
         return []
+    selected_hash = _payload_text(payload, "selected_text_hash", "text_hash", "source_hash")
+    if not selected_hash:
+        selected_hash = text_hash(selected_text)
+    synthetic_id = f"selection:{selected_hash.rsplit(':', 1)[-1][:16]}"
     page = _payload_int(payload, "page")
     locator = _payload_text(payload, "locator") or (f"p. {page}" if page else "")
     return [
         {
-            "segment_id": _payload_text(payload, "segment_id", "scope_ref") or "selection",
+            "segment_id": _payload_text(payload, "segment_id") or synthetic_id,
             "source_id": payload.get("source_id", ""),
+            "scope_type": "selection",
+            "scope_ref": selected_hash,
             "page": page,
             "order": 0,
             "section_path": [],
             "kind": "selection",
             "text": selected_text,
-            "text_hash": _payload_text(payload, "text_hash", "source_hash", "selected_text_hash"),
+            "text_hash": selected_hash,
             "locator": locator,
             "rects": payload.get("rects") if isinstance(payload.get("rects"), list) else [],
         }
@@ -1490,7 +1511,7 @@ def _render_reader_ai_result(source_id: str) -> None:
     result = st.session_state.get(_reader_key(source_id, "ai_result"))
     if not isinstance(result, dict):
         return
-    with st.expander(_l("reader_ai_result", "Reader AI result"), expanded=True):
+    with st.expander(_l("reader_ai_result", "Reader AI result"), expanded=False):
         st.caption(str(result.get("action") or "AI"))
         for warning in result.get("warnings") or []:
             st.warning(str(warning))
@@ -1504,7 +1525,7 @@ def _render_reader_translation_summary(source_id: str) -> None:
     summary = st.session_state.get(_reader_key(source_id, "translation_summary"))
     if not isinstance(summary, dict):
         return
-    with st.expander(_l("translation_summary", "Translation summary"), expanded=True):
+    with st.expander(_l("translation_summary", "Translation summary"), expanded=False):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(_l("translated", "Translated"), summary.get("translated", 0))
         c2.metric(_l("missing", "Missing"), summary.get("missing", 0))
@@ -1650,18 +1671,49 @@ def _handle_reader_component_event(
                 for item in payload.get("visible_pages", [])
                 if str(item).strip().isdigit()
             } if isinstance(payload.get("visible_pages"), list) else set()
+            primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
+            if not visible_pages and primary_page:
+                visible_pages = {primary_page}
             segments = [
                 segment
                 for segment in segment_rows
                 if (refs and segment.segment_id in refs)
                 or (visible_pages and segment.page in visible_pages)
             ]
-            if not segments:
-                raise ValueError("Reader visible-page translation needs visible pages or segment refs.")
+            segment_payloads = [segment.to_dict() for segment in segments]
+            page_scope_rows: dict[str, dict[str, object]] = {}
+            if not segment_payloads and visible_pages:
+                for page in load_paper_pages(_pdir, source_id):
+                    if page.page not in visible_pages or not str(page.text or "").strip():
+                        continue
+                    page_hash = page.text_hash or text_hash(page.text)
+                    synthetic_id = f"page:{page.page}"
+                    page_scope_rows[synthetic_id] = {
+                        "segment_id": synthetic_id,
+                        "source_id": source_id,
+                        "scope_type": "page",
+                        "scope_ref": f"page:{page.page}:{page_hash}",
+                        "page": page.page,
+                        "order": 0,
+                        "section_path": [],
+                        "kind": "page",
+                        "text": page.text,
+                        "text_hash": page_hash,
+                        "locator": f"p. {page.page}",
+                    }
+                segment_payloads = list(page_scope_rows.values())
+            if not segment_payloads:
+                st.warning(
+                    _l(
+                        "visible_page_translation_no_text",
+                        "No extracted text is available for the visible page yet. Try Extract pages in Reader diagnostics.",
+                    )
+                )
+                return True
             result = translate_paper_segments(
                 selected,
                 source_id,
-                [segment.to_dict() for segment in segments],
+                segment_payloads,
                 target_lang=_payload_text(payload, "target_lang", "language") or "zh",
                 require_review=False,
             )
@@ -1673,12 +1725,31 @@ def _handle_reader_component_event(
                     for row in result.structured.get("translations", [])
                     if isinstance(row, dict)
                 ]
-            segment_ids = {segment.segment_id for segment in segments}
-            savable = [
-                row
-                for row in translations
-                if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
-            ]
+            if page_scope_rows:
+                savable = []
+                for row in translations:
+                    row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
+                    page_row = page_scope_rows.get(row_ref)
+                    if page_row is None:
+                        continue
+                    savable.append(
+                        {
+                            **row,
+                            "scope_type": "page",
+                            "scope_ref": page_row["scope_ref"],
+                            "segment_id": "",
+                            "page": page_row["page"],
+                            "source_hash": page_row["text_hash"],
+                            "source_text": page_row["text"],
+                        }
+                    )
+            else:
+                segment_ids = {segment.segment_id for segment in segments}
+                savable = [
+                    row
+                    for row in translations
+                    if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
+                ]
             if savable:
                 upsert_paper_translations(_pdir, source_id, savable)
                 stash_git_backup_results()
@@ -1690,14 +1761,22 @@ def _handle_reader_component_event(
             return True
 
         if action in {"translate_selection", "translate_segment"}:
-            segments = _selection_segments(payload, segment_rows)
+            selected_text = _selection_text(payload, segment_rows)
+            target_lang = _payload_text(payload, "target_lang", "language") or "zh"
+            translation_payload = dict(payload)
+            if action == "translate_selection" and selected_text:
+                for key in ("segment_refs", "segment_ids", "segment_id", "scope_refs", "scope_ref"):
+                    translation_payload.pop(key, None)
+            segment_refs = set(_payload_list(translation_payload, "segment_refs", "segment_ids", "segment_id"))
+            segments = _selection_segments(translation_payload, segment_rows)
             if not segments:
                 raise ValueError("Reader translation needs selected text or segment refs.")
             result = translate_paper_segments(
                 selected,
                 source_id,
                 segments,
-                target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+                target_lang=target_lang,
+                require_review=False,
             )
             _store_reader_ai_result(source_id, action, result)
             translations = []
@@ -1707,12 +1786,42 @@ def _handle_reader_component_event(
                     for row in result.structured.get("translations", [])
                     if isinstance(row, dict)
                 ]
-            segment_ids = {segment.segment_id for segment in segment_rows}
-            savable = [
-                row
-                for row in translations
-                if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
-            ]
+            if segment_refs:
+                segment_ids = {segment.segment_id for segment in segment_rows}
+                savable = [
+                    {
+                        **row,
+                        "scope_type": "segment",
+                        "scope_ref": str(row.get("segment_id") or row.get("scope_ref") or ""),
+                    }
+                    for row in translations
+                    if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
+                ]
+            else:
+                selected_hash = _payload_text(payload, "selected_text_hash", "text_hash", "source_hash")
+                if not selected_hash and selected_text:
+                    selected_hash = text_hash(selected_text)
+                synthetic_ids = {
+                    str(segment.get("segment_id") or "")
+                    for segment in segments
+                    if isinstance(segment, dict)
+                }
+                savable = []
+                for row in translations:
+                    row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
+                    if synthetic_ids and row_ref and row_ref not in synthetic_ids:
+                        continue
+                    savable.append(
+                        {
+                            **row,
+                            "scope_type": "selection",
+                            "scope_ref": selected_hash,
+                            "segment_id": "",
+                            "source_hash": selected_hash,
+                            "source_text": selected_text,
+                            "target_lang": target_lang,
+                        }
+                    )
             if savable:
                 upsert_paper_translations(_pdir, source_id, savable)
                 stash_git_backup_results()
@@ -1861,23 +1970,21 @@ def _render_paper_reader(inbox) -> None:
             clear_web_cache()
         except Exception as exc:
             st.warning(_l("reading_artifacts_failed", "Reading artifacts could not be prepared: {error}").format(error=exc))
+    status_bits = [
+        f"PDF: {'yes' if source.metadata.get('pdf_asset_ref') else 'missing'}",
+        f"{_l('pages', 'Pages')}: {source.metadata.get('page_count', '') or '?'}",
+        f"{_l('annotations', 'Annotations')}: {len(load_paper_annotations(_pdir, source_id))}",
+        f"{_l('segments', 'Segments')}: {len(load_paper_segments(_pdir, source_id))}",
+        f"{_l('structured_extraction', 'Structure')}: "
+        f"{source.metadata.get('reading_artifacts_status') or source.metadata.get('structure_backend', '') or _l('missing', 'missing')}",
+    ]
     st.markdown(f"**{source.title}**")
+    st.caption(" · ".join(status_bits))
     st.caption(
         _l(
             "reader_caption",
-            "PDF Reader is the primary surface when a PDF asset is attached; the text-mode panels below remain available for fallback and review.",
+            "PDF Reader is the primary surface when a PDF asset is attached; diagnostics and text fallback stay out of the reading path.",
         )
-    )
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("PDF", "yes" if source.metadata.get("pdf_asset_ref") else "missing")
-    m2.metric(_l("pages", "Pages"), source.metadata.get("page_count", ""))
-    m3.metric(_l("annotations", "Annotations"), len(load_paper_annotations(_pdir, source_id)))
-    m4.metric(_l("segments", "Segments"), len(load_paper_segments(_pdir, source_id)))
-    m5.metric(
-        _l("structured_extraction", "Structure"),
-        source.metadata.get("reading_artifacts_status")
-        or source.metadata.get("structure_backend", "")
-        or _l("missing", "missing"),
     )
     if artifact_status.get("warnings"):
         with st.expander(_l("reader_artifact_warnings", "Reader preparation warnings"), expanded=False):
@@ -1886,7 +1993,7 @@ def _render_paper_reader(inbox) -> None:
 
     with st.expander(_l("reader_diagnostics", "Reader diagnostics"), expanded=False):
         _render_grobid_status_block(source)
-        actions = st.columns(5)
+        actions = st.columns(4)
         with actions[0]:
             if st.button(_l("extract_pages", "Extract pages"), disabled=not source.metadata.get("pdf_asset_ref")):
                 try:
@@ -1930,15 +2037,6 @@ def _render_paper_reader(inbox) -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
-        with actions[4]:
-            if st.button(_l("save_last_read", "Save last read")):
-                try:
-                    _save_reader_progress(source_id, int(st.session_state.get(_reader_key(source_id, "page"), source.metadata.get("last_read_page") or 1) or 1))
-                    st.success(ui["saved"])
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-
     page_rows = load_paper_pages(_pdir, source_id)
     segment_rows_for_reader = load_paper_segments(_pdir, source_id)
     annotation_rows_for_reader = load_paper_annotations(_pdir, source_id)
@@ -1965,7 +2063,8 @@ def _render_paper_reader(inbox) -> None:
                 "translation": _l("translation", "Translation"),
                 "ai": "AI",
                 "claims": ui["claims_citations"],
-                "create_annotation": _l("create_annotation", "Create annotation"),
+                "create_annotation": _l("highlight", "Highlight"),
+                "delete_annotation": _l("delete_annotation", "Delete annotation"),
                 "create_chunk": ui["create_chunk"],
                 "create_citation": ui["create_citation"],
                 "translate_selection": _l("translate_selection", "Translate selection"),
@@ -1990,9 +2089,13 @@ def _render_paper_reader(inbox) -> None:
                 "auto_save_progress": True,
                 "side_panel_default": "collapsed",
                 "focus_annotation_id": focus_annotation_id,
+                "height_mode": "viewport",
+                "render_cache": True,
+                "render_cache_max_pages": 48,
+                "translation_dock_default": "bottom",
             },
             key=f"paper_pdf_reader:{selected}:{source_id}",
-            height=820,
+            height=1040,
         )
         _handle_reader_component_event(
             source_id,
@@ -2003,6 +2106,7 @@ def _render_paper_reader(inbox) -> None:
         )
         _render_reader_ai_result(source_id)
         _render_reader_translation_summary(source_id)
+        return
     else:
         st.info(_l("pdf_missing", "No PDF asset is attached; using text-mode Reader."))
 
