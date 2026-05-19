@@ -116,12 +116,12 @@ source_of_truth: true
 
 - **审阅队列** — 承接看板 Done -> Evidence 的候选流，人工选择后才写入
   `evidence-pool.yaml` 和必要的 `skill-tree.yaml` 引用。
-- **Claim Candidates** — 选择 1-N 条 evidence 后生成 claim candidates；候选只在
-  当前会话预览中存在，点击 **应用所选** 后才写入 `evidence-pool.yaml` 顶层
-  `claims` 列表。
-- Claim card 会展示文本、类型、支撑 evidence、关联 skill、公开准备度、置信度
-  和 warning。应用 claim 不会自动改 `skill-tree.yaml` status，也不会创建独立
-  `claims.yaml`。
+- **Claim Studio** — 从 Project / Goal / Skill / All Evidence / Manual 范围生成
+  claim candidates；候选只在当前会话预览中存在，点击 **应用所选** 后才写入
+  profile 级 `claims.yaml`。
+- Claim card 会展示文本、类型、状态、刷新状态、支撑 evidence、关联 skill /
+  project / goal、公开准备度、置信度和 warning。应用 claim 不会自动改
+  `skill-tree.yaml` status，也不会新增顶层 Claims 页面。
 - **证据池 / 链接 / 引用 / 风险** — 继续维护 evidence row、skill/project/
   experience/source refs 和断链提示；保存路径会保留已有 `claims`。
 

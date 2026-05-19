@@ -34,7 +34,7 @@ from nblane.core import ai_stream_tasks
 from nblane.core import ai_blog_reviewer
 from nblane.core import visual_candidate_store
 from nblane.core import visual_generation
-from nblane.core.claims import accepted_claims
+from nblane.core.claims import accepted_claims_for_profile
 from nblane.core.review_actions import record_writeback_activity
 from nblane.core.public_curation import (
     evidence_contexts,
@@ -127,7 +127,7 @@ except ImportError:  # pragma: no cover - optional while core API lands in paral
     trash_public_library_node = None
 from nblane.core.io import profile_dir
 from nblane.web_auth import require_login
-from nblane.web_cache import clear_web_cache, load_evidence_pool_raw
+from nblane.web_cache import clear_web_cache
 from nblane.web_shared import (
     apply_ui_language_from_session,
     assert_files_current,
@@ -1176,7 +1176,7 @@ def _render_candidate_preview(candidate: dict, *, ui: dict[str, str]) -> None:
 def _render_output_studio_tab(*, selected: str, ui: dict[str, str]) -> None:
     """Render the evidence/claim-first public output entrypoint."""
     st.caption(ui["output_studio_caption"])
-    claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+    claims = accepted_claims_for_profile(selected)
     claim_ids = [str(claim.get("id", "")) for claim in claims]
     contexts = evidence_contexts(selected)
     evidence_ids = [ctx.id for ctx in contexts]
@@ -5049,7 +5049,7 @@ def _render_blog_article_panel(
                 st.error(str(exc))
 
     with st.expander(ui["draft_from_claims"]):
-        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+        claims = accepted_claims_for_profile(selected)
         if not claims:
             st.caption(ui["accepted_claims_empty"])
         claim_ids = [str(claim.get("id", "")) for claim in claims]
@@ -5551,7 +5551,7 @@ def _render_blog_ai_panel(
                 st.error(str(exc))
 
     with st.expander(ui["draft_from_claims"], expanded=False):
-        claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+        claims = accepted_claims_for_profile(selected)
         if not claims:
             st.caption(ui["accepted_claims_empty"])
         claim_ids = [str(claim.get("id", "")) for claim in claims]
@@ -6566,7 +6566,7 @@ def main() -> None:
                     clear_web_cache()
                     st.success(f"{html_path}\n{md_path}")
         with st.expander(ui["draft_resume_bullets_from_claims"]):
-            claims = accepted_claims(load_evidence_pool_raw(selected) or {})
+            claims = accepted_claims_for_profile(selected)
             if not claims:
                 st.caption(ui["accepted_claims_empty"])
             claim_ids = [str(claim.get("id", "")) for claim in claims]

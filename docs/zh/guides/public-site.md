@@ -63,9 +63,10 @@ auth/users.yaml
 留痕；只有人工确认后，才把多条 evidence id 聚合进 `projects.yaml`。
 
 Blog front matter 也可以通过 `related_claims` 记录 accepted claim provenance。
-这些 claim 来自 `evidence-pool.yaml` 顶层 `claims` 列表，不是独立
-`claims.yaml`。发布校验会检查 claim id 是否存在、状态是否为 `accepted`，
-以及 claim 里的 `evidence_refs` 是否仍存在；静态站不会直接渲染 claim id。
+这些 claim 来自 profile 级 `claims.yaml`；旧 `evidence-pool.yaml.claims`
+只作为迁移前兼容来源。发布校验会检查 claim id 是否存在、状态是否为
+`accepted`、是否需要 refresh，以及 claim 里的 `evidence_refs` 是否仍存在；
+静态站不会直接渲染 claim id。
 
 ## CLI
 

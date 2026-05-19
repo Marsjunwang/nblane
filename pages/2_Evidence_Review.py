@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+from datetime import date
 from dataclasses import replace
 
 import streamlit as st
 import yaml
 
 from nblane.core import llm as llm_client
-from nblane.core.claims import apply_claim_candidates, generate_claim_candidates
+from nblane.core.claims import (
+    apply_claim_candidates_to_book,
+    claim_book_path,
+    generate_claim_candidates,
+    generate_claim_candidates_for_scope,
+    legacy_claims,
+    load_claim_book,
+    migrate_legacy_claims,
+    refresh_claim_statuses,
+    save_claim_book,
+)
 from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.evidence_review import (
     build_evidence_review,
@@ -1023,64 +1034,65 @@ def _claim_source_score(row: dict) -> tuple[int, str]:
     return (-score, str(row.get("id", "")))
 
 
-def _claim_candidate_key() -> str:
-    return f"evidence_review_claim_candidates_{selected}"
+def _claim_candidate_key(scope: str = "manual") -> str:
+    return f"evidence_review_claim_candidates_{selected}_{scope}"
 
 
-def _render_claim_candidates(review: dict) -> None:
-    """Generate and accept evidence-backed claim candidates."""
-    st.subheader(ui["claim_candidates_title"])
-    rows = sorted(list(review.get("evidence_rows") or []), key=_claim_source_score)
-    if not rows:
-        st.caption(ui["link_empty"])
-        return
-
-    default_ids = [str(row.get("id", "")) for row in rows[:3] if row.get("id")]
-    picked = st.multiselect(
-        ui["claim_pick_evidence"],
-        options=[str(row.get("id", "")) for row in rows],
-        default=default_ids,
-        format_func=lambda eid: next(
-            (
-                _row_label(row)
-                for row in rows
-                if str(row.get("id", "")) == eid
-            ),
-            eid,
+def _claim_meta(candidate: dict) -> list[str]:
+    return [
+        f"`{candidate.get('type', '')}`",
+        f"`{candidate.get('status', 'accepted')}`",
+        f"`{candidate.get('refresh_status', 'current')}`",
+        ui["claim_evidence_refs"].format(
+            refs=", ".join(candidate.get("evidence_refs") or []) or "-"
         ),
-        key=f"evidence_review_claim_pick_{selected}",
-    )
-    if st.button(
-        ui["claim_generate"],
-        type="primary",
-        disabled=not picked,
-        key=f"evidence_review_claim_generate_{selected}",
-    ):
-        candidates = generate_claim_candidates(selected, picked)
-        st.session_state[_claim_candidate_key()] = candidates
-        if not candidates:
-            st.warning(ui["claim_candidates_empty"])
-        else:
-            st.rerun()
-
-    claims = [
-        item
-        for item in (review.get("claim_rows") or [])
-        if isinstance(item, dict) and str(item.get("status", "accepted")) == "accepted"
+        ui["claim_skill_refs"].format(
+            refs=", ".join(candidate.get("skill_refs") or []) or "-"
+        ),
+        ui.get("claim_project_refs", "Projects: {refs}").format(
+            refs=", ".join(candidate.get("project_refs") or []) or "-"
+        ),
+        ui.get("claim_goal_refs", "Goals: {refs}").format(
+            refs=", ".join(candidate.get("goal_refs") or []) or "-"
+        ),
+        ui["claim_public_readiness"].format(
+            value=_public_readiness_label(
+                str(candidate.get("public_readiness", "") or "private")
+            )
+        ),
+        ui["claim_confidence"].format(
+            value=_confidence_label(str(candidate.get("confidence", "") or "medium"))
+        ),
     ]
-    if claims:
-        with st.expander(ui["claim_existing_title"], expanded=False):
-            for claim in claims[:20]:
-                st.caption(
-                    f"- `{claim.get('id', '')}` "
-                    f"{claim.get('text', '')}"
-                )
 
-    candidates = st.session_state.get(_claim_candidate_key(), [])
+
+def _apply_claim_candidates(candidates: list[dict], review: dict) -> None:
+    skill_ids = {
+        str(option.get("id", "") or "")
+        for option in (review.get("skill_options") or [])
+        if str(option.get("id", "") or "")
+    }
+    _, applied, warnings = apply_claim_candidates_to_book(
+        selected,
+        candidates,
+        known_skill_ids=skill_ids,
+    )
+    for warning in warnings:
+        st.warning(warning)
+    if not applied:
+        st.warning(ui["claim_apply_empty"])
+        return
+    clear_web_cache()
+    stash_git_backup_results()
+    st.success(ui["claim_applied"].format(n=len(applied)))
+    st.rerun()
+
+
+def _render_claim_candidate_preview(scope: str, review: dict) -> None:
+    candidates = st.session_state.get(_claim_candidate_key(scope), [])
     if not isinstance(candidates, list) or not candidates:
         st.caption(ui["claim_candidates_empty"])
         return
-
     include: list[bool] = []
     st.markdown(f"**{ui['claim_candidates_preview']}**")
     for idx, candidate in enumerate(candidates):
@@ -1094,72 +1106,277 @@ def _render_claim_candidates(review: dict) -> None:
                     st.checkbox(
                         ui["claim_adopt"],
                         value=True,
-                        key=f"evidence_review_claim_include_{selected}_{idx}",
+                        key=f"evidence_review_claim_include_{selected}_{scope}_{idx}",
                         label_visibility="collapsed",
                     )
                 )
             with c2:
                 st.markdown(str(candidate.get("text", "") or ""))
-                meta = [
-                    f"`{candidate.get('type', '')}`",
-                    ui["claim_evidence_refs"].format(
-                        refs=", ".join(candidate.get("evidence_refs") or []) or "-"
-                    ),
-                    ui["claim_skill_refs"].format(
-                        refs=", ".join(candidate.get("skill_refs") or []) or "-"
-                    ),
-                    ui["claim_public_readiness"].format(
-                        value=_public_readiness_label(
-                            str(candidate.get("public_readiness", "") or "private")
-                        )
-                    ),
-                    ui["claim_confidence"].format(
-                        value=_confidence_label(
-                            str(candidate.get("confidence", "") or "medium")
-                        )
-                    ),
-                ]
-                st.caption(" · ".join(meta))
+                st.caption(" · ".join(_claim_meta(candidate)))
                 warnings = candidate.get("warnings") or []
                 if isinstance(warnings, list):
                     for warning in warnings:
                         st.caption(f"- {warning}")
-
     selected_candidates = [
         candidate
         for candidate, selected_flag in zip(candidates, include, strict=False)
         if selected_flag and isinstance(candidate, dict)
     ]
-    if not st.button(
+    if st.button(
         ui["claim_apply_selected"].format(n=len(selected_candidates)),
         type="primary",
         disabled=not selected_candidates,
-        key=f"evidence_review_claim_apply_{selected}",
+        key=f"evidence_review_claim_apply_{selected}_{scope}",
     ):
-        return
+        _apply_claim_candidates(selected_candidates, review)
 
-    pool_raw = load_evidence_pool_raw(selected) or {
-        "profile": selected,
-        "evidence_entries": _pool_entries(),
-    }
-    skill_ids = {
-        str(option.get("id", "") or "")
-        for option in (review.get("skill_options") or [])
-        if str(option.get("id", "") or "")
-    }
-    merged_pool, applied, warnings = apply_claim_candidates(
-        pool_raw,
-        selected_candidates,
-        known_skill_ids=skill_ids,
+
+def _render_claim_overview(review: dict) -> None:
+    legacy_rows = list(review.get("legacy_claim_rows") or [])
+    st.caption(
+        ui.get("claim_studio_caption", "Claims are stored in {path}.").format(
+            path=str(claim_book_path(selected))
+        )
     )
-    for warning in warnings:
-        st.warning(warning)
-    if not applied:
-        st.warning(ui["claim_apply_empty"])
+    if legacy_rows:
+        st.warning(
+            ui.get(
+                "claim_legacy_warning",
+                "Legacy claims still exist in evidence-pool.yaml.",
+            )
+        )
+        if st.button(
+            ui.get("claim_migrate_legacy", "Migrate legacy claims"),
+            key=f"claim_migrate_legacy_{selected}",
+        ):
+            moved = migrate_legacy_claims(selected)
+            clear_web_cache()
+            stash_git_backup_results()
+            st.success(
+                ui.get("claim_migrated", "Migrated {n} claim(s).").format(n=moved)
+            )
+            st.rerun()
+    claims = [
+        item
+        for item in (review.get("claim_rows") or [])
+        if isinstance(item, dict)
+    ]
+    accepted = [claim for claim in claims if claim.get("status") == "accepted"]
+    drafts = [claim for claim in claims if claim.get("status") == "draft"]
+    stale = [
+        claim for claim in claims if claim.get("refresh_status") == "needs_refresh"
+    ]
+    unsupported = [claim for claim in claims if not claim.get("evidence_refs")]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(ui.get("claim_metric_accepted", "Accepted"), len(accepted))
+    m2.metric(ui.get("claim_metric_draft", "Draft"), len(drafts))
+    m3.metric(ui.get("claim_metric_refresh", "Needs refresh"), len(stale))
+    m4.metric(ui.get("claim_metric_unsupported", "Unsupported"), len(unsupported))
+    if st.button(
+        ui.get("claim_refresh_statuses", "Refresh claim statuses"),
+        key=f"claim_refresh_statuses_{selected}",
+    ):
+        refresh_claim_statuses(selected)
+        clear_web_cache()
+        stash_git_backup_results()
+        st.rerun()
+    if not claims:
+        st.caption(ui["claim_candidates_empty"])
         return
-    _save_pool_raw(merged_pool, ui["claim_applied"].format(n=len(applied)))
-    st.session_state.pop(_claim_candidate_key(), None)
-    st.rerun()
+    for claim in claims[:30]:
+        claim_id = str(claim.get("id", "") or "")
+        with st.expander(
+            f"{claim_id} · {claim.get('status', '')} · {claim.get('refresh_status', '')}",
+            expanded=claim.get("refresh_status") == "needs_refresh",
+        ):
+            new_text = st.text_area(
+                ui.get("claim_text", "Claim text"),
+                value=str(claim.get("text", "") or ""),
+                key=f"claim_text_{selected}_{claim_id}",
+                height=90,
+            )
+            status_options = ["draft", "accepted", "deprecated", "dismissed"]
+            current_status = str(claim.get("status", "accepted") or "accepted")
+            if current_status not in status_options:
+                current_status = "accepted"
+            new_status = st.selectbox(
+                ui.get("claim_status", "Claim status"),
+                status_options,
+                index=status_options.index(current_status),
+                key=f"claim_status_{selected}_{claim_id}",
+            )
+            st.caption(" · ".join(_claim_meta(claim)))
+            if claim.get("stale_reason"):
+                st.warning(str(claim.get("stale_reason")))
+            if st.button(
+                ui.get("claim_save", "Save claim"),
+                key=f"claim_save_{selected}_{claim_id}",
+            ):
+                book = load_claim_book(selected)
+                updated_claims = []
+                for item in book.get("claims") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    if str(item.get("id", "") or "") == claim_id:
+                        item = dict(item)
+                        if str(item.get("text", "") or "") != new_text:
+                            history = list(item.get("history") or [])
+                            history.append(
+                                {
+                                    "text": str(item.get("text", "") or ""),
+                                    "evidence_refs": list(item.get("evidence_refs") or []),
+                                    "updated": str(item.get("updated", "") or ""),
+                                    "captured": date.today().isoformat(),
+                                }
+                            )
+                            item["history"] = history
+                        item["text"] = new_text.strip()
+                        item["status"] = new_status
+                        item["updated"] = date.today().isoformat()
+                    updated_claims.append(item)
+                book["claims"] = updated_claims
+                save_claim_book(selected, book)
+                clear_web_cache()
+                stash_git_backup_results()
+                st.rerun()
+
+
+def _render_claim_scope_generator(review: dict, scope: str) -> None:
+    scope_id = ""
+    options: list[str] = []
+    labels: dict[str, str] = {}
+    if scope == "project":
+        for option in review.get("project_options") or []:
+            option_id = str(option.get("id", "") or "")
+            if option_id:
+                options.append(option_id)
+                labels[option_id] = str(option.get("label", "") or option_id)
+    elif scope == "skill":
+        for option in review.get("skill_options") or []:
+            option_id = str(option.get("id", "") or "")
+            if option_id:
+                options.append(option_id)
+                labels[option_id] = str(option.get("label", "") or option_id)
+    elif scope == "goal":
+        from nblane.core.goals import load_goal_book
+
+        book = load_goal_book(selected)
+        for goal in book.goals:
+            if goal.id:
+                options.append(goal.id)
+                labels[goal.id] = goal.title or goal.label or goal.id
+    if scope in {"project", "skill", "goal"}:
+        if not options:
+            st.caption(ui.get("claim_scope_empty", "No scope options yet."))
+            return
+        scope_id = st.selectbox(
+            ui.get(f"claim_scope_{scope}", scope.title()),
+            options,
+            format_func=lambda value: f"{labels.get(value, value)} ({value})",
+            key=f"claim_scope_{scope}_{selected}",
+        )
+    if st.button(
+        ui["claim_generate"],
+        type="primary",
+        key=f"claim_generate_{scope}_{selected}",
+    ):
+        candidates = generate_claim_candidates_for_scope(
+            selected,
+            scope,
+            scope_id=scope_id,
+        )
+        st.session_state[_claim_candidate_key(scope)] = candidates
+        if not candidates:
+            st.warning(ui["claim_candidates_empty"])
+        else:
+            st.rerun()
+    _render_claim_candidate_preview(scope, review)
+
+
+def _render_claim_manual(review: dict) -> None:
+    rows = sorted(list(review.get("evidence_rows") or []), key=_claim_source_score)
+    if not rows:
+        st.caption(ui["link_empty"])
+        return
+    default_ids = [str(row.get("id", "")) for row in rows[:3] if row.get("id")]
+    picked = st.multiselect(
+        ui["claim_pick_evidence"],
+        options=[str(row.get("id", "")) for row in rows],
+        default=default_ids,
+        format_func=lambda eid: next(
+            (_row_label(row) for row in rows if str(row.get("id", "")) == eid),
+            eid,
+        ),
+        key=f"evidence_review_claim_pick_{selected}",
+    )
+    if st.button(
+        ui["claim_generate"],
+        type="primary",
+        disabled=not picked,
+        key=f"evidence_review_claim_generate_{selected}",
+    ):
+        candidates = generate_claim_candidates(selected, picked)
+        st.session_state[_claim_candidate_key("manual")] = candidates
+        if not candidates:
+            st.warning(ui["claim_candidates_empty"])
+        else:
+            st.rerun()
+    _render_claim_candidate_preview("manual", review)
+
+
+def _render_claim_studio(review: dict) -> None:
+    """Generate, refresh, and manage profile-level public claims."""
+    st.subheader(ui.get("claim_studio_title", "Claim Studio"))
+    st.caption(
+        ui.get(
+            "claim_studio_intro",
+            "Generate reusable public claims from reviewed evidence by project, "
+            "goal, skill, or manual selection.",
+        )
+    )
+    claim_tabs = st.tabs(
+        [
+            ui.get("claim_tab_overview", "Overview"),
+            ui.get("claim_tab_project", "By Project"),
+            ui.get("claim_tab_goal", "By Goal"),
+            ui.get("claim_tab_skill", "By Skill"),
+            ui.get("claim_tab_all", "All Evidence"),
+            ui.get("claim_tab_refresh", "Needs Refresh"),
+            ui.get("claim_tab_manual", "Manual"),
+        ]
+    )
+    with claim_tabs[0]:
+        _render_claim_overview(review)
+    with claim_tabs[1]:
+        _render_claim_scope_generator(review, "project")
+    with claim_tabs[2]:
+        _render_claim_scope_generator(review, "goal")
+    with claim_tabs[3]:
+        _render_claim_scope_generator(review, "skill")
+    with claim_tabs[4]:
+        _render_claim_scope_generator(review, "all")
+    with claim_tabs[5]:
+        stale = [
+            claim
+            for claim in (review.get("claim_rows") or [])
+            if isinstance(claim, dict)
+            and claim.get("refresh_status") == "needs_refresh"
+        ]
+        if not stale:
+            st.success(ui.get("claim_refresh_empty", "No claims need refresh."))
+        for claim in stale:
+            with st.container(border=True):
+                st.markdown(str(claim.get("text", "") or ""))
+                st.caption(" · ".join(_claim_meta(claim)))
+                if claim.get("stale_reason"):
+                    st.warning(str(claim.get("stale_reason")))
+    with claim_tabs[6]:
+        _render_claim_manual(review)
+
+
+def _render_claim_candidates(review: dict) -> None:
+    """Backward-compatible wrapper for the Claim Studio tab."""
+    _render_claim_studio(review)
 
 
 def _option_label(option: dict) -> str:

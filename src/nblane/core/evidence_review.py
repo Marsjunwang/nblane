@@ -5,7 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from nblane.core.claims import claim_usage_index
+from nblane.core.claims import (
+    claim_usage_index_for_profile,
+    claims_with_refresh_status,
+    legacy_claims,
+)
 from nblane.core import io as io_facade
 from nblane.core.io import KANBAN_DONE, STATUSES, schema_node_index
 from nblane.core.experience import load_experience_book
@@ -429,8 +433,7 @@ def _evidence_row_payload(
 def build_evidence_review(profile: str | Path) -> dict[str, object]:
     """Build the Evidence Review page and Dashboard pending-evidence payload."""
     usage = evidence_usage_index(profile)
-    pool_raw = io_facade.load_evidence_pool_raw(profile) or {}
-    claim_usage = claim_usage_index(pool_raw)
+    claim_usage = claim_usage_index_for_profile(profile)
     rows = [
         _evidence_row_payload(row, usage, claim_usage)
         for row in _pool_entries(profile)
@@ -476,10 +479,7 @@ def build_evidence_review(profile: str | Path) -> dict[str, object]:
         "experience_options": _experience_options(profile),
         "source_options": _source_options(profile),
         "usage": usage,
-        "claim_rows": [
-            dict(item)
-            for item in (pool_raw.get("claims") or [])
-            if isinstance(item, dict)
-        ],
+        "claim_rows": claims_with_refresh_status(profile),
+        "legacy_claim_rows": legacy_claims(profile),
         "claim_usage": claim_usage,
     }

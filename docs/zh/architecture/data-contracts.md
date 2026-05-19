@@ -58,33 +58,34 @@ evidence-pool.yaml
 ### Evidence -> Claim Bridge
 
 ```text
-selected evidence
+reviewed evidence graph
   -> claim candidates
   -> human selection
-  -> evidence-pool.yaml claims[]
+  -> claims.yaml
   -> Output Studio related_claims / provenance
 ```
 
-P2 不新增独立 `claims.yaml`。Web 中的 Claim 先作为 Evidence Review 和
-Output Studio 的桥接层：生成态候选只保存在会话预览中；只有用户点击应用后，
-才写入 `evidence-pool.yaml` 顶层 `claims` 列表，且状态固定为 `accepted`。
+Web 中的通用 Evidence Claim 使用 profile 级 `claims.yaml` 作为事实源。
+生成态候选只保存在会话预览中；只有用户点击应用后，才写入
+`claims.yaml`。旧 `evidence-pool.yaml.claims` 只作为迁移前兼容读取和显式
+迁移来源，新 claim 不再写回 evidence pool。
 
-`evidence-pool.yaml` 允许的最小形态：
+`claims.yaml` 允许的最小形态：
 
 ```yaml
-evidence_entries:
-  - id: ev_demo
-    title: Demo
-    summary: Built and shipped a demo.
-
+schema_version: "1.0"
+profile: alice
+updated: 2026-05-19
 claims:
   - id: claim:demo-shipped
     status: accepted
+    refresh_status: current
     type: achievement
     text: Built and shipped a robotics demo.
     evidence_refs: [ev_demo]
     skill_refs: [robotics]
     project_refs: []
+    goal_refs: []
     experience_refs: []
     source_refs: []
     output_refs: []
@@ -94,17 +95,25 @@ claims:
     warnings: []
     generated_by: rule:evidence_review
     created: 2026-05-13
+    updated: 2026-05-19
+    last_reviewed: 2026-05-19
+    supporting_evidence_signature: ""
+    stale_reason: ""
+    history: []
 ```
 
 不变量：
 
 - Claim `type` 只能是 `achievement`、`skill`、`impact`、`role`、`learning`、`project`。
-- 持久化 claim 只保存 `accepted`；不保存 rejected 候选，避免早期审阅队列膨胀。
+- Claim `status` 使用 `draft`、`accepted`、`deprecated`、`dismissed`；Output Studio 默认只消费 `accepted`。
+- Claim `refresh_status` 使用 `current`、`needs_refresh`；`accepted + needs_refresh` 可追溯，但生成输出时必须提示复核。
 - Claim 去重键是 `normalized(text) + evidence_refs + skill_refs`；重复应用时更新已有 claim metadata，不追加重复行。
-- Claim 可以引用多条 evidence；因此它放在 `evidence-pool.yaml.claims` 顶层，不嵌入单条 evidence row。
+- Claim 可以引用多条 evidence；因此它放在 `claims.yaml` 顶层，不嵌入单条 evidence row。
+- Claim 可以聚合 `project_refs` 与 `goal_refs`；`goal_refs` 可由 Project Case、Goal evidence refs 或 Research Source refs 派生，并允许人工修正。
+- Accepted claim 不会因为新 evidence 静默改写；signature 变化只标记 `needs_refresh` 或生成 refresh proposal。
 - 写入 claim 不自动修改 `skill-tree.yaml`，也不自动提升 skill status。
 - `evidence_refs` 必须存在；未知 evidence ref 不能静默写入。未知 skill ref 必须报 warning 或被拒绝 / 丢弃后提示。
-- Evidence pool 的编辑、压缩和保存路径必须保留未知顶层字段，尤其不能丢弃 `claims`。
+- Evidence pool 的编辑、压缩和保存路径必须兼容旧 `claims` 字段，迁移前不能意外丢弃；迁移后不再把新 claim 写回 evidence pool。
 
 ### Kanban Done -> Evidence
 
@@ -262,7 +271,7 @@ research/connectors.yaml
 
 - Research 默认 private。
 - Claim 必须引用 source/chunk，或标记为 human note。
-- `research/claims.yaml` 是 source-aware research claim store；`evidence-pool.yaml.claims` 仍是 accepted claim bridge，两者不合并。
+- `research/claims.yaml` 是 source-aware research claim store；profile 根目录 `claims.yaml` 是通用 Evidence Claim store，两者不合并。
 - Citation 必须绑定 claim，并至少引用 source 或 chunk；quote 不能泄露本地 profile 路径、secret、token、cookie 等敏感内容。
 - Research draft 可生成 blog candidate，但写入公开层仍是 draft；发布前必须检查 private source 和未 promoted research claim。
 - `research/connectors.yaml` 只保存 provider、query、cursor、last_run、rate_limit、status 和 sanitized options；token、cookie、API key 不得写入 profile。

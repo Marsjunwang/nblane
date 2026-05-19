@@ -24,7 +24,10 @@ from schemas.blocknote_doc import Document as BlockNoteDocument
 from schemas.blocknote_doc import coerce_blocks, document_to_dict
 from nblane.core import git_backup, llm, visual_generation
 from nblane.core.ai_blog_prompts import get_prompt
-from nblane.core.claims import accepted_claim_index, claim_index
+from nblane.core.claims import (
+    accepted_claim_index_for_profile,
+    claim_index_for_profile,
+)
 from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
@@ -2391,15 +2394,13 @@ def _evidence_index(name: str) -> dict[str, dict]:
 
 
 def _claim_index(name: str) -> dict[str, dict]:
-    """Return all claim id -> claim from evidence-pool.yaml."""
-    raw = _read_yaml_mapping(_profile_path(name) / "evidence-pool.yaml")
-    return claim_index(raw)
+    """Return all claim id -> claim from profile ``claims.yaml``."""
+    return claim_index_for_profile(_profile_path(name))
 
 
 def _accepted_claim_index(name: str) -> dict[str, dict]:
-    """Return accepted claim id -> claim from evidence-pool.yaml."""
-    raw = _read_yaml_mapping(_profile_path(name) / "evidence-pool.yaml")
-    return accepted_claim_index(raw)
+    """Return accepted claim id -> claim from profile ``claims.yaml``."""
+    return accepted_claim_index_for_profile(_profile_path(name))
 
 
 def _validate_claim_refs(
@@ -2417,6 +2418,8 @@ def _validate_claim_refs(
             continue
         if str(claim.get("status", "") or "") != "accepted":
             result.errors.append(f"{label}: claim ref '{ref}' is not accepted")
+        if str(claim.get("refresh_status", "") or "") == "needs_refresh":
+            result.warnings.append(f"{label}: claim ref '{ref}' needs refresh")
         for evidence_ref in _as_string_list(claim.get("evidence_refs")):
             if evidence_ref not in known_evidence_ids:
                 result.errors.append(
@@ -7471,6 +7474,16 @@ def blog_candidate_from_claims(
     warnings = [
         "Review claim wording, links, metrics, and private details before publishing.",
     ]
+    stale = [
+        str(claim.get("id", ""))
+        for claim in selected
+        if str(claim.get("refresh_status", "") or "") == "needs_refresh"
+    ]
+    if stale:
+        warnings.append(
+            "Some selected claims need refresh before publication: "
+            + ", ".join(stale)
+        )
     dangling = [
         evidence_id
         for evidence_id in related_evidence
@@ -7521,6 +7534,16 @@ def _accepted_claim_selection(
         if evidence_id in evidence
     ]
     warnings: list[str] = []
+    stale = [
+        str(claim.get("id", ""))
+        for claim in selected
+        if str(claim.get("refresh_status", "") or "") == "needs_refresh"
+    ]
+    if stale:
+        warnings.append(
+            "Some selected claims need refresh before publication: "
+            + ", ".join(stale)
+        )
     dangling = [
         evidence_id
         for evidence_id in related_evidence

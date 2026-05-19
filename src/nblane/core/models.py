@@ -24,7 +24,8 @@ CLAIM_TYPES = (
     "learning",
     "project",
 )
-CLAIM_STATUSES = ("accepted",)
+CLAIM_STATUSES = ("draft", "accepted", "deprecated", "dismissed")
+CLAIM_REFRESH_STATUSES = ("current", "needs_refresh")
 
 
 @dataclass

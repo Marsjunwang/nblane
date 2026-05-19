@@ -47,7 +47,7 @@ UI 应围绕成长闭环拆成以下功能域。每个功能域只负责自己�
 | Profile Context   | `SKILL.md`，读取 goal / skill-tree / kanban generated blocks                                  | 维护长期自我画像、North Star、研究品味和 Agent 可复用上下文                        | 首页高级区；未来 Profile Context 页       |
 | Capture Inbox     | `inbox.yaml`、`learning-log.yaml`、`activity-log.yaml`、Done tasks                            | 捕获链接、笔记、学习、打卡、项目进展，等待整理                                       | 全局入口 / 首页 / 看板；未来独立 Inbox        |
 | Execution         | `kanban.md`、规划中：`project-board.yaml`                                                       | 管理本周任务、子任务、阻塞、完成记录和 check-in；看板 AI 可在 LLM / Codex 间切换          | 看板                               |
-| Evidence          | `evidence-pool.yaml`、`skill-tree.yaml` 的 `evidence_refs`                                   | 审核 evidence、判断强弱、关联 skill、准备公开输出                              | 技能树；未来独立 Evidence 页              |
+| Evidence          | `evidence-pool.yaml`、`claims.yaml`、`skill-tree.yaml` 的 `evidence_refs`                    | 审核 evidence、判断强弱、生成/刷新 public claim、关联 skill、准备公开输出        | Evidence Review；技能树                 |
 | Skill Map         | `skill-tree.yaml`、`schemas/*.yaml`                                                         | 浏览和编辑能力状态、备注、证据引用                                             | 技能树                              |
 | Gap & Next Action | gap result、AI candidate，不直接作为事实源                                                           | 用目标/任务对照 skill tree，生成短板解释和下一步行动                              | 差距分析                             |
 | Agent Activity    | context preview、MCP 状态、agent runs、AI/Agent candidates、writeback queue      | 审阅 Codex / Claude Code / OpenCode 等 Agent 的远程执行、patch、写回和越权风险 | Agent Activity                   |
@@ -489,7 +489,7 @@ Goal
 原因很直接：
 
 - `Evidence` 是成长模型的核心沉淀层，应早于复杂 Research、Public Site 拆分或 Team 协作优化。
-- `Claim` 介于 Evidence 与 Skill / Output 之间，短期应先做成审阅流里的候选卡片，而不是急着做独立页面。
+- `Claim` 介于 Evidence 与 Skill / Output 之间，作为 Evidence Review 内的 Claim Studio 管理，不急着做顶层独立页面。
 - `Research`、`Agent Activity`、`Team View` 属于 source specialization 或 governance scale，应该复用前面已经打通的候选 / 预览 / 确认机制。
 
 ### 6.1 推荐阶段顺序
@@ -499,7 +499,7 @@ Goal
 | --- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | P0  | Goal + Dashboard + Capture + Execution | 增加 current goal 常驻入口；Goal 隐私展示；首页改成 Dashboard；全局 capture 入口；Done -> evidence 统一入口；统一页面顶部 profile / scope strip                                | 没有目标锚点、输入入口和执行闭环，后面的 evidence、gap 和 output 都会发散           |
 | P1  | Evidence Core                          | 独立 Pending Evidence / Evidence Review 入口；技能树页突出 evidence strength / missing evidence；统一 review preview / apply 流；最小 project / experience refs | `Evidence` 是成长模型中心层，必须先把证据变成一等对象，而不是继续藏在技能树细节里            |
-| P2  | Claim + Skill + Gap + Review           | 在 Evidence Review 中生成 claim candidates；差距分析支持从 goal / task 带入上下文；Review 候选入口与 Health 拆责；技能状态与 claim / evidence 更明确联动                          | `Claim` 把“发生了什么”翻译成“证明了什么”，它是 Skill 和 Output 可复用的桥        |
+| P2  | Claim + Skill + Gap + Review           | 在 Evidence Review 中提供 Claim Studio，按 project / goal / skill / all evidence / manual 范围生成和刷新 `claims.yaml`；差距分析支持从 goal / task 带入上下文；Review 候选入口与 Health 拆责；技能状态与 claim / evidence 更明确联动 | `Claim` 把“发生了什么”翻译成“证明了什么”，它是 Skill 和 Output 可复用的桥 |
 | P3  | Output Studio                          | Public Site 强化“从 evidence / claim 生成输出”；Resume / Blog / Project 草稿显式显示 provenance；Profile Context 保持高级区定位                                     | 公开输出应建立在可追溯 evidence / claim 上，而不是先做内容 CMS 再回头补来源         |
 | P4  | Research / Agent / Team / Connectors   | Research Source Inbox 与 Reading Room；Agent Activity / Writeback Review；Team View scope hardening；外部 connector 自动化；Output Studio 与 Build 拆分    | 这些能力要么是 source specialization，要么是治理与扩展层，应该建立在通用审阅框架已经稳定之后 |
 
@@ -520,7 +520,7 @@ Goal
 | P1   | 技能树页突出 evidence strength / missing evidence                    | 避免 status 变成主观自评                                                |
 | P1   | 最小 project / experience refs 编辑入口（已落地）                         | 为 Composite Evidence、Resume 和 Project Case 聚合打基础                |
 | P1   | Research Source Inbox 最小入口（已落地）                                | 让外部资料先进入 source inbox，不直接污染 evidence                            |
-| P2   | 在 Evidence Review / Output Studio 中生成 claim candidates         | 先让 claim 成为桥接层，而不是先做 claims 独立页面                                |
+| P2   | Evidence Review 内的 Claim Studio 与 `claims.yaml`                 | 让 claim 成为可复用、可追溯、可刷新但不独立占据顶层导航的 public assertion 层       |
 | P2   | 差距分析支持从 goal / kanban task 带入上下文                               | 减少重复输入，提高行动建议质量                                                 |
 | P2   | Review 候选生成入口，与 Profile Health 职责拆开                            | 让复盘成为 evidence / next action / public output 的来源                |
 | P2   | Agent Activity / Writeback Review 骨架                           | 让跨页面 Agent 候选、patch 和写回状态可审查                                    |
@@ -554,8 +554,8 @@ Goal
 
 以下 P2 已有最小可用实现：
 
-- Evidence Review 已新增 Claim Candidates tab：从已选 evidence 生成候选，人工应用后写入 `evidence-pool.yaml.claims`，不创建独立 Claims 页面，也不自动提升 skill status。
-- Evidence Review read model 已提供 accepted claims 的 evidence / skill / project / experience / source / output 反查索引，供页面和后续 Dashboard 使用。
+- Evidence Review 已将 Claim Candidates 升级为 Claim Studio：从 project / goal / skill / all evidence / manual 范围生成候选，人工应用后写入 profile 级 `claims.yaml`，不创建顶层 Claims 页面，也不自动提升 skill status。
+- Evidence Review read model 已提供 accepted claims 的 evidence / skill / project / goal / experience / source / output 反查索引，供页面、Dashboard 和 Output Studio 使用；旧 `evidence-pool.yaml.claims` 只作为迁移前兼容 fallback。
 - Gap Analysis 已支持从手动输入、privacy-safe current goal、Doing / Queue kanban task 选择上下文；Kanban inline Gap 也会带入允许进入 agent context 的 current goal。
 - Kanban 已支持 **看板 AI 引擎**选择：原有 Gap 节点路由、拆子任务、任务理解和 Done -> evidence 可在普通 LLM 与本地只读 Codex 间切换；Codex 不需要看板内额外配置，不直接改项目或创建 patch candidate，并使用当前 profile 专属 Web `CODEX_HOME`。
 - GapResult 已记录 source provenance 和 goal context 使用状态；展示和 CLI / LLM 格式化会显示来源，但不改变原有匹配结果结构。

@@ -12,10 +12,17 @@ import yaml
 from nblane.commands.evidence import cmd_evidence_pool_remove
 from nblane.core.claims import (
     accepted_claims,
+    accepted_claim_index_for_profile,
     apply_claim_candidates,
+    apply_claim_candidates_to_book,
     claim_index,
+    claim_index_for_profile,
     claim_usage_index,
+    generate_claim_candidates_for_scope,
     generate_claim_candidates,
+    load_claim_book,
+    migrate_legacy_claims,
+    supporting_evidence_signature,
 )
 
 
@@ -108,6 +115,138 @@ class TestClaims(unittest.TestCase):
                 usage["by_evidence"]["ev_1"][0]["id"],
                 accepted_claims(merged2)[0]["id"],
             )
+
+    def test_profile_claim_book_falls_back_to_legacy_and_migrates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            pool_path = profile / "evidence-pool.yaml"
+            pool = yaml.safe_load(pool_path.read_text(encoding="utf-8"))
+            pool["claims"] = [
+                {
+                    "id": "claim:legacy",
+                    "status": "accepted",
+                    "text": "Legacy claim.",
+                    "evidence_refs": ["ev_1"],
+                }
+            ]
+            _write_yaml(pool_path, pool)
+
+            fallback = load_claim_book(profile)
+            self.assertEqual(fallback["claims"][0]["id"], "claim:legacy")
+
+            moved = migrate_legacy_claims(profile)
+            after_pool = yaml.safe_load(pool_path.read_text(encoding="utf-8"))
+            after_book = yaml.safe_load(
+                (profile / "claims.yaml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(moved, 1)
+            self.assertNotIn("claims", after_pool)
+            self.assertEqual(after_book["claims"][0]["id"], "claim:legacy")
+
+    def test_apply_claim_candidates_to_book_writes_claims_yaml_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            candidates = generate_claim_candidates(profile, ["ev_1"])
+
+            _, applied, warnings = apply_claim_candidates_to_book(
+                profile,
+                candidates,
+                known_skill_ids={"ros2_basics"},
+            )
+
+            pool = yaml.safe_load(
+                (profile / "evidence-pool.yaml").read_text(encoding="utf-8")
+            )
+            book = yaml.safe_load(
+                (profile / "claims.yaml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(warnings, [])
+            self.assertEqual(len(applied), 1)
+            self.assertNotIn("claims", pool)
+            self.assertEqual(book["claims"][0]["evidence_refs"], ["ev_1"])
+            self.assertTrue(book["claims"][0]["supporting_evidence_signature"])
+            self.assertEqual(
+                list(accepted_claim_index_for_profile(profile)),
+                [book["claims"][0]["id"]],
+            )
+
+    def test_claim_scope_derives_project_and_goal_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            _write_yaml(
+                profile / "goals.yaml",
+                {
+                    "schema_version": "1.0",
+                    "profile": "alice",
+                    "current_goal_id": "goal:ship",
+                    "goals": [
+                        {
+                            "id": "goal:ship",
+                            "title": "Ship the system",
+                            "status": "active",
+                            "evidence_refs": ["ev_1"],
+                        }
+                    ],
+                },
+            )
+            _write_yaml(
+                profile / "project-board.yaml",
+                {
+                    "schema_version": "1.0",
+                    "profile": "alice",
+                    "project_cases": [
+                        {
+                            "id": "project:nblane",
+                            "title": "nblane",
+                            "status": "active",
+                            "goal_refs": ["goal:ship"],
+                            "evidence_refs": ["ev_1"],
+                        }
+                    ],
+                },
+            )
+
+            with patch("nblane.core.claims.llm.is_configured", return_value=False):
+                candidates = generate_claim_candidates_for_scope(
+                    profile,
+                    "project",
+                    scope_id="project:nblane",
+                )
+
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(candidates[0]["project_refs"], ["project:nblane"])
+            self.assertEqual(candidates[0]["goal_refs"], ["goal:ship"])
+            self.assertEqual(candidates[0]["evidence_refs"], ["ev_1"])
+
+    def test_supporting_evidence_signature_marks_refresh_needed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            signature = supporting_evidence_signature(profile, ["ev_1"])
+            _write_yaml(
+                profile / "claims.yaml",
+                {
+                    "schema_version": "1.0",
+                    "profile": "alice",
+                    "claims": [
+                        {
+                            "id": "claim:stale",
+                            "status": "accepted",
+                            "text": "Known claim.",
+                            "evidence_refs": ["ev_1"],
+                            "supporting_evidence_signature": signature,
+                        }
+                    ],
+                },
+            )
+            pool_path = profile / "evidence-pool.yaml"
+            pool = yaml.safe_load(pool_path.read_text(encoding="utf-8"))
+            pool["evidence_entries"][0]["summary"] = "Changed summary."
+            _write_yaml(pool_path, pool)
+
+            claim = claim_index_for_profile(profile)["claim:stale"]
+
+            self.assertEqual(claim["refresh_status"], "needs_refresh")
+            self.assertIn("Supporting evidence changed", claim["stale_reason"])
 
     def test_apply_skips_unknown_evidence_and_drops_unknown_skill(self) -> None:
         pool = {"profile": "t", "evidence_entries": [{"id": "ev_1", "title": "A"}]}

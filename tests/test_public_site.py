@@ -1685,6 +1685,46 @@ class TestPublicSite(unittest.TestCase):
             self.assertEqual(candidate.related_evidence, ["ev_public"])
             self.assertIn("Built a public demo", candidate.body)
 
+    def test_blog_candidate_from_claims_reads_claims_yaml(self) -> None:
+        """Profile-level claims.yaml is the primary accepted-claim store."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            pool = yaml.safe_load(
+                (profile / "evidence-pool.yaml").read_text(encoding="utf-8")
+            )
+            pool.pop("claims", None)
+            _write_yaml(profile / "evidence-pool.yaml", pool)
+            _write_yaml(
+                profile / "claims.yaml",
+                {
+                    "schema_version": "1.0",
+                    "profile": "alice",
+                    "claims": [
+                        {
+                            "id": "claim:public",
+                            "status": "accepted",
+                            "refresh_status": "current",
+                            "type": "achievement",
+                            "text": "Built a public demo from claims.yaml.",
+                            "evidence_refs": ["ev_public"],
+                        }
+                    ],
+                },
+            )
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.llm.is_configured", return_value=False),
+            ):
+                candidate = public_site.blog_candidate_from_claims(
+                    "alice",
+                    ["claim:public"],
+                )
+
+            self.assertEqual(candidate.related_claims, ["claim:public"])
+            self.assertIn("claims.yaml", candidate.body)
+
     def test_draft_blog_from_claims_writes_related_claims(self) -> None:
         """Accepted claims are stored in draft front matter."""
         with tempfile.TemporaryDirectory() as tmp:

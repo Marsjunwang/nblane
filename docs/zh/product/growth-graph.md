@@ -120,7 +120,7 @@ nblane 的数据应被理解为一张分层图谱。文件只是 owner，不是�
 | Activity | 我实际做了哪些事？ | kanban task、daily work、research activity、agent run、review、experiment | `kanban.md`、`learning-log.yaml`、`activity-log.yaml`、Agent logs |
 | Source | 有哪些原始材料或观察？ | commit、PR、doc、metric、screenshot、URL、meeting note、resume import、feedback | `inbox.yaml`、repo、research source、Profile ingest |
 | Evidence | 哪些事实已经可作为证明？ | atomic evidence、composite evidence、artifact ref、source refs、confidence、visibility | `evidence-pool.yaml` |
-| Claim | 这些证据证明了什么？ | achievement claim、skill claim、impact claim、project claim、resume claim | `evidence-pool.yaml` / derived index；未来 `claims.yaml` |
+| Claim | 这些证据支撑我对外说什么？ | achievement claim、skill claim、impact claim、role claim、learning claim、project claim | `claims.yaml`；legacy `evidence-pool.yaml.claims` 仅迁移兼容 |
 | Capability | 我具备哪些能力？ | skill node、status、evidence refs、claim refs、gap | `skill-tree.yaml`、`schemas/*.yaml` |
 | Output | 哪些证据和 claim 可以对外表达？ | blog、resume bullet、public project、output item、media | `blog/`、`resume-source.yaml`、`projects.yaml`、`outputs.yaml` |
 | Governance | 哪些内容需要审查？ | health issue、unsupported claim、privacy risk、drift、agent patch | derived / future review files |
@@ -478,12 +478,12 @@ visibility: private
 
 ### Claims
 
-Claim 是对 evidence 的解释。它介于 evidence 和 skill/output 之间。
+Claim 是对 evidence 的解释，也是面向外部表达前的 reusable public assertion。它介于 evidence 和 skill/output 之间，不是 Done task 的包装句，也不是最终博客/简历文案。
 
 为什么需要 Claim 层：
 
 - Evidence 说“发生了什么”。
-- Claim 说“这证明了什么”。
+- Claim 说“这些 evidence 支撑我对外主张什么”。
 - Skill status 说“这个能力状态如何”。
 - Resume bullet 说“如何面向某个招聘场景表达”。
 
@@ -514,6 +514,9 @@ Claim -> Goal progress
 - 一个 claim 可以有多个 evidence refs。
 - 一个 evidence 可以支撑多个 claim，但 claim 的语义要具体，避免“万能证据”。
 - Public claim 只能引用 visibility 允许公开的 evidence 或经过脱敏的 claim。
+- Claim 应关联 `project_refs` 和 `goal_refs`：`project_refs` 可由 evidence row、Project Case、milestone 聚合而来；`goal_refs` 可由 Project Case、Goal evidence refs、Research Source 派生，并可人工修正。
+- Accepted claim 不应因新 evidence 静默改写；新 evidence 只能触发 `needs_refresh` 或生成 refresh proposal，由用户确认后更新，同步保留 history。
+- `claims.yaml` 是通用 Evidence Claim 的事实源；`research/claims.yaml` 是 source-aware research claim store，两者不合并。
 
 ### Skill
 
@@ -671,12 +674,13 @@ Agent Run Result
 
 ```text
 Evidence Pool
-  -> claim_refs
-  -> achievement / skill / impact / role claim
+  -> Claim Studio
+  -> claims.yaml
+  -> achievement / skill / impact / role / learning / project claim
   -> unsupported claim check
 ```
 
-Evidence 不应该直接变成面向外部的表达。中间需要 Claim 层把“发生了什么”翻译成“证明了什么”。
+Evidence 不应该直接变成面向外部的表达。中间需要 Claim 层把“发生了什么”翻译成“这些事实支撑我对外说什么”。Claim Studio 应从全部 reviewed evidence graph 按 project / goal / skill / all evidence / manual 范围生成和滚动刷新 claim，而不是只把某个 Done 或某条 evidence 改写成一句话。
 
 ### Claim 支撑 Skill
 
@@ -876,7 +880,7 @@ Goal -> Project Case -> Queue / Doing / Done / Archive -> Evidence Candidate
 Source -> Evidence Candidate -> Atomic Evidence -> Composite Evidence -> Claim -> Skill / Output
 ```
 
-目标：审查证据、关联技能、标记强度、准备公开输出。
+目标：审查证据、关联技能、标记强度，并在 Claim Studio 中生成或刷新可复用的对外主张，再准备公开输出。
 
 ### Project Case View
 
