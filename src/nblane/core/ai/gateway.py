@@ -290,6 +290,34 @@ def generate_paper_source_guide(
     )
 
 
+def generate_paper_review_card(
+    profile: str,
+    source_id: str,
+    *,
+    source: dict[str, Any] | None = None,
+    segments: list[dict[str, Any]] | None = None,
+    chunks: list[dict[str, Any]] | None = None,
+    annotations: list[dict[str, Any]] | None = None,
+    context_refs: list[str] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_review_card``."""
+
+    return run_ai_action(
+        "research.paper_review_card",
+        {
+            "source_id": source_id,
+            "source": source or {},
+            "segments": segments or [],
+            "chunks": chunks or [],
+            "annotations": annotations or [],
+        },
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
 def answer_paper_question(
     profile: str,
     source_id: str,
@@ -525,6 +553,7 @@ __all__ = [
     "draft_resume_for_job",
     "explain_paper_selection",
     "extract_paper_claims",
+    "generate_paper_review_card",
     "generate_reading_draft",
     "generate_paper_source_guide",
     "recommend_research_sources",

@@ -43,12 +43,23 @@
       min-height: 0;
       padding: 2px 0 6px;
     }
+    .pr-shell.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      padding: 8px;
+      background: var(--paper);
+    }
+    .pr-shell:fullscreen {
+      padding: 8px;
+      background: var(--paper);
+    }
     .pr-toolbar {
       position: sticky;
       top: 0;
       z-index: 30;
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) auto minmax(160px, 240px) auto;
+      grid-template-columns: minmax(120px, 1fr) auto auto minmax(160px, 240px) auto;
       gap: 6px;
       align-items: center;
       padding: 6px;
@@ -65,7 +76,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .pr-controls, .pr-actions, .pr-search {
+    .pr-controls, .pr-actions, .pr-search, .pr-mode {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
@@ -73,6 +84,7 @@
       justify-content: flex-end;
     }
     .pr-search { flex-wrap: nowrap; justify-content: stretch; }
+    .pr-mode { justify-content: flex-start; }
     .pr-button, .pr-icon-button, .pr-input, .pr-select, .pr-textarea {
       min-height: 30px;
       border: 1px solid var(--line);
@@ -106,6 +118,11 @@
       background: var(--accent-strong);
       color: #fff;
     }
+    .pr-button.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
     .pr-input, .pr-select, .pr-textarea {
       width: 100%;
       padding: 5px 8px;
@@ -130,6 +147,19 @@
       overflow: hidden;
     }
     .pr-workspace.panel-collapsed { grid-template-columns: minmax(420px, 1fr) 44px; }
+    .pr-workspace.reader-mode-compare {
+      grid-template-columns: minmax(360px, 1fr) minmax(280px, 380px) minmax(260px, 340px);
+    }
+    .pr-workspace.reader-mode-compare.panel-collapsed {
+      grid-template-columns: minmax(360px, 1fr) minmax(280px, 380px) 44px;
+    }
+    .pr-workspace.reader-mode-translation {
+      grid-template-columns: minmax(420px, 1fr) minmax(260px, 340px);
+    }
+    .pr-workspace.reader-mode-translation.panel-collapsed {
+      grid-template-columns: minmax(420px, 1fr) 44px;
+    }
+    .pr-workspace.reader-mode-translation .pr-viewer { display: none; }
     .pr-viewer {
       position: relative;
       height: 100%;
@@ -234,6 +264,69 @@
       font-size: .8rem;
       line-height: 1.35;
     }
+    .pr-translation-reader {
+      display: none;
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+    .pr-workspace.reader-mode-compare .pr-translation-reader,
+    .pr-workspace.reader-mode-translation .pr-translation-reader {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .pr-translation-head {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: var(--soft);
+      font-size: .86rem;
+      font-weight: 850;
+    }
+    .pr-translation-body {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      padding: 10px;
+    }
+    .pr-translation-row {
+      display: grid;
+      gap: 5px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .pr-translation-source {
+      color: var(--muted);
+      font-size: .76rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .pr-translation-text {
+      color: var(--ink);
+      font-size: .86rem;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .pr-score-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .pr-score {
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      text-align: center;
+    }
+    .pr-score strong { display: block; font-size: .95rem; }
+    .pr-score span { color: var(--muted); font-size: .68rem; }
     .pr-dock {
       position: sticky;
       bottom: 10px;
@@ -415,8 +508,18 @@
     @media (max-width: 1080px) {
       .pr-toolbar { grid-template-columns: 1fr; }
       .pr-controls, .pr-actions { justify-content: flex-start; }
-      .pr-workspace, .pr-workspace.panel-collapsed { grid-template-columns: 1fr; overflow: auto; }
+      .pr-workspace,
+      .pr-workspace.panel-collapsed,
+      .pr-workspace.reader-mode-compare,
+      .pr-workspace.reader-mode-compare.panel-collapsed,
+      .pr-workspace.reader-mode-translation,
+      .pr-workspace.reader-mode-translation.panel-collapsed {
+        grid-template-columns: 1fr;
+        overflow: auto;
+      }
+      .pr-workspace.reader-mode-translation .pr-viewer { display: none; }
       .pr-viewer { min-height: 540px; }
+      .pr-translation-reader { min-height: 420px; }
       .pr-side, .pr-side.collapsed { height: auto; min-height: 0; overflow: visible; }
       .pr-side.collapsed .pr-panel { display: none; }
       .pr-side.collapsed .pr-side-rail { display: inline-flex; }
@@ -447,6 +550,13 @@
       translate_visible_pages: "Visible pages",
       explain_selection: "Explain",
       ask_paper: "Ask",
+      save_progress: "Save progress",
+      review_card: "Review",
+      fullscreen: "Fullscreen",
+      exit_fullscreen: "Exit fullscreen",
+      mode_pdf: "PDF",
+      mode_compare: "Compare",
+      mode_translation: "Translation only",
       search: "Search",
       page: "Page",
       pdf_loading: "Loading PDF...",
@@ -488,11 +598,16 @@
     let lastViewportSignature = "";
     let lastProgressPage = 0;
     let sidePanelCollapsed = true;
+    let readerMode = "pdf";
+    let fullscreenActive = false;
     let requestedPreviews = new Set();
     let resizeTimer = null;
     let viewportTimer = null;
+    let loadingWatchdogTimer = null;
     let dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
     let cacheDbPromise = null;
+    let loadSeq = 0;
+    let pdfDocumentLoading = false;
     const CACHE_DB = "nblane_pdf_reader_cache_v1";
     const CACHE_STORE = "pages";
 
@@ -691,7 +806,7 @@
     }
     function autoSaveProgress() {
       const value = settings().auto_save_progress;
-      return value !== false && value !== "false";
+      return value === true || value === "true";
     }
     function overscanPages() {
       const raw = Number(settings().overscan_pages);
@@ -764,7 +879,7 @@
       syncDockFromArgs();
       const dockVisible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
       document.getElementById("root").innerHTML = `
-        <section class="pr-shell">
+        <section class="pr-shell ${fullscreenActive ? "fullscreen" : ""}" id="readerShell">
           <header class="pr-toolbar">
             <div class="pr-title" title="${attr(title)}">${esc(title)}</div>
             <div class="pr-controls">
@@ -779,6 +894,11 @@
               <button class="pr-button" data-action="fitPage">${esc(label("fit_page"))}</button>
               <button class="pr-button" data-action="actualSize">${esc(label("actual_size"))}</button>
             </div>
+            <div class="pr-mode">
+              <button class="pr-button ${readerMode === "pdf" ? "active" : ""}" data-mode="pdf">${esc(label("mode_pdf"))}</button>
+              <button class="pr-button ${readerMode === "compare" ? "active" : ""}" data-mode="compare">${esc(label("mode_compare"))}</button>
+              <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation">${esc(label("mode_translation"))}</button>
+            </div>
             <div class="pr-search">
               <input class="pr-input" id="searchInput" placeholder="${attr(label("search"))}" />
               <button class="pr-button" data-action="search">${esc(label("search"))}</button>
@@ -786,15 +906,19 @@
             <div class="pr-actions">
               <button class="pr-button primary" data-action="translateFull">${esc(label("translate_full_paper"))}</button>
               <button class="pr-button" data-action="translateVisible">${esc(label("translate_visible_pages"))}</button>
+              <button class="pr-button" data-action="reviewCard">${esc(label("review_card"))}</button>
               <button class="pr-button" data-action="ask">${esc(label("ask_paper"))}</button>
+              <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
+              <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
               <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
             </div>
           </header>
-          <main class="pr-workspace ${sidePanelCollapsed ? "panel-collapsed" : ""}">
+          <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""}">
             <section class="pr-viewer" id="viewer">
               <div class="pr-continuous-document" id="continuousDocument"></div>
               <section class="pr-dock ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             </section>
+            <section class="pr-translation-reader" id="translationReader">${translationReaderHtml()}</section>
             <aside class="pr-side ${sidePanelCollapsed ? "collapsed" : ""}">
               <button class="pr-icon-button pr-side-rail" data-action="togglePanel" title="${attr(label("panel"))}">&lt;</button>
               <section class="pr-panel">
@@ -847,6 +971,100 @@
       if (text(row.status) === "stale" || text(row.source_hash) !== text(obj.text_hash)) return "stale";
       if (!text(row.translated_text)) return "missing";
       return "translated";
+    }
+    function translationRowsForPages(pages, limit = 160) {
+      const picked = new Set(asArr(pages).map((page) => Number(page || 0)).filter(Boolean));
+      const translations = translationBySegment();
+      return asArr(args.segments)
+        .map((row) => asObj(row))
+        .filter((row) => !picked.size || picked.has(Number(row.page || 0)))
+        .slice(0, limit)
+        .map((segment) => ({
+          segment,
+          translation: translations.get(text(segment.segment_id)),
+          state: translationStatus(segment, translations),
+        }));
+    }
+    function translationReaderHtml() {
+      const pages = readerMode === "translation"
+        ? Array.from({ length: knownPageCount(currentPage) }, (_, index) => index + 1)
+        : (visiblePages.length ? visiblePages : [currentPage]);
+      const rows = translationRowsForPages(pages, readerMode === "translation" ? 600 : 80);
+      const pageLabel = readerMode === "translation"
+        ? `${label("translation")} · ${knownPageCount(currentPage)} ${label("page")}`
+        : `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
+      const body = rows.length ? rows.map(({ segment, translation, state }) => {
+        const translated = text(translation && translation.translated_text);
+        return `
+          <article class="pr-translation-row">
+            <div class="pr-item-meta">${esc(segment.locator || (segment.page ? `p. ${segment.page}` : ""))} · ${esc(state)}</div>
+            <div class="pr-translation-text">${esc(translated || label(state) || state)}</div>
+            <div class="pr-translation-source">${esc(text(segment.text).slice(0, 420))}</div>
+          </article>
+        `;
+      }).join("") : `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      return `
+        <div class="pr-translation-head">${esc(pageLabel)}</div>
+        <div class="pr-translation-body">${body}</div>
+      `;
+    }
+    function refreshTranslationReader() {
+      const el = document.getElementById("translationReader");
+      if (el) el.innerHTML = translationReaderHtml();
+    }
+    function analysisObj() {
+      return asObj(args.analysis || args.review_card || args.paper_analysis);
+    }
+    function scoreHtml(scores) {
+      const obj = asObj(scores);
+      const keys = ["overall", "novelty", "technical_depth", "evidence_quality", "reproducibility", "relevance"];
+      const rows = keys.filter((key) => obj[key] != null && text(obj[key]) !== "").map((key) => `
+        <div class="pr-score"><strong>${esc(obj[key])}</strong><span>${esc(key.replaceAll("_", " "))}</span></div>
+      `);
+      return rows.length ? `<div class="pr-score-grid">${rows.join("")}</div>` : "";
+    }
+    function reviewItemText(value) {
+      if (value && typeof value === "object") {
+        const obj = asObj(value);
+        const body = text(obj.text || obj.summary || obj.reason || obj.title || obj.metric);
+        const refs = asArr(obj.refs || obj.cited_segment_refs || obj.cited_refs).map((row) => text(row)).filter(Boolean);
+        return refs.length ? `${body} (${refs.join(", ")})` : body;
+      }
+      return text(value);
+    }
+    function listHtml(values) {
+      const rows = asArr(values).map((value) => reviewItemText(value)).filter(Boolean);
+      return rows.length ? `<div class="pr-list">${rows.map((value) => `<div class="pr-item"><div class="pr-item-title">${esc(value)}</div></div>`).join("")}</div>` : "";
+    }
+    function analysisBodyHtml() {
+      const analysis = analysisObj();
+      const hasAnalysis = Object.keys(analysis).length > 0;
+      const latest = latestAiText();
+      if (!hasAnalysis && !latest) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      const chunks = [];
+      if (text(analysis.tldr || analysis.summary)) {
+        chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(text(analysis.tldr || analysis.summary))}</div></div>`);
+      }
+      const scores = scoreHtml(analysis.scores);
+      if (scores) chunks.push(scores);
+      for (const [title, values] of [
+        ["Key points", analysis.key_points],
+        ["Innovations", analysis.innovations || analysis.contributions],
+        ["Limitations", analysis.limitations],
+        ["Usefulness", analysis.usefulness],
+      ]) {
+        const body = Array.isArray(values) ? listHtml(values) : (text(values) ? `<div class="pr-item"><div class="pr-item-title">${esc(values)}</div></div>` : "");
+        if (body) chunks.push(`<div class="pr-panel-head">${esc(title)}</div>${body}`);
+      }
+      if (Array.isArray(analysis.score_rationale)) {
+        chunks.push(`<div class="pr-panel-head">Rationale</div>${listHtml(analysis.score_rationale)}`);
+      } else if (text(analysis.score_rationale)) {
+        chunks.push(`<div class="pr-item"><div class="pr-item-meta">Rationale</div><div class="pr-item-title">${esc(analysis.score_rationale)}</div></div>`);
+      }
+      if (latest && !hasAnalysis) {
+        chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(latest)}</div></div>`);
+      }
+      return chunks.join("") || `<div class="pr-empty">${esc(label("empty"))}</div>`;
     }
     function aiRows() {
       return asArr(args.ai_results || args.ai_responses || args.analysis || args.ai);
@@ -1021,6 +1239,9 @@
           `;
         }).join("")}</div>`;
       }
+      if (activeTab === "ai") {
+        return analysisBodyHtml();
+      }
       const rows = asArr(args.segments).filter((row) => Number(asObj(row).page || 0) === currentPage).slice(0, 16);
       if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
       return `<div class="pr-list">${rows.map((row) => {
@@ -1040,6 +1261,9 @@
           refreshSide();
         });
       });
+      document.querySelectorAll("[data-mode]").forEach((button) => {
+        button.addEventListener("click", () => setReaderMode(button.dataset.mode || "pdf"));
+      });
       document.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => handleAction(button.dataset.action));
       });
@@ -1053,11 +1277,30 @@
       }
       wireSide();
     }
+    function setReaderMode(mode) {
+      const next = ["pdf", "compare", "translation"].includes(mode) ? mode : "pdf";
+      if (readerMode === next) return;
+      readerMode = next;
+      const workspace = document.querySelector(".pr-workspace");
+      if (workspace) {
+        workspace.classList.toggle("reader-mode-pdf", readerMode === "pdf");
+        workspace.classList.toggle("reader-mode-compare", readerMode === "compare");
+        workspace.classList.toggle("reader-mode-translation", readerMode === "translation");
+      }
+      document.querySelectorAll("[data-mode]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.mode === readerMode);
+      });
+      refreshTranslationReader();
+      scheduleViewportUpdate();
+      window.setTimeout(() => renderAround(currentPage, { force: true }), 60);
+      setHeight();
+    }
     function refreshSide() {
       const side = document.getElementById("sideBody");
       if (side) side.innerHTML = sideBodyHtml();
       document.querySelectorAll(".pr-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === activeTab));
       wireSide();
+      refreshTranslationReader();
       setHeight();
     }
     function wireSide() {
@@ -1110,6 +1353,7 @@
         scaleMode = "actual-size";
         return rerenderForScale();
       }
+      if (action === "fullscreen") return toggleFullscreen();
       if (action === "togglePanel") {
         sidePanelCollapsed = !sidePanelCollapsed;
         document.querySelector(".pr-workspace")?.classList.toggle("panel-collapsed", sidePanelCollapsed);
@@ -1140,6 +1384,19 @@
       }
       if (action === "translateFull") {
         return emitAction("translate_full_paper", { target_lang: targetLang(), mode: "missing_or_stale" });
+      }
+      if (action === "saveProgress") {
+        return emitAction("save_progress", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+      }
+      if (action === "reviewCard") {
+        activeTab = "ai";
+        sidePanelCollapsed = false;
+        document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
+        document.querySelector(".pr-side")?.classList.remove("collapsed");
+        dockState = { mode: "ai", status: label("review_card"), selected_text: "", result: "", selection_hash: "" };
+        refreshSide();
+        refreshDock();
+        return emitAction("generate_review_card", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
       if (action === "translateVisible") {
         const pages = visiblePages.length ? visiblePages : [currentPage];
@@ -1261,14 +1518,40 @@
       }, { root: viewer, rootMargin: "720px 0px", threshold: [0, .01, .25, .5, .75, 1] });
       document.querySelectorAll(".pr-page-container").forEach((page) => observer.observe(page));
     }
-    function renderAround(pageNumber) {
+    function pageDomReady(pageNumber, statusName = "") {
+      const wrap = pageWrap(pageNumber);
+      const canvas = document.getElementById(`pdfCanvas-${pageNumber}`);
+      const preview = document.getElementById(`pagePreview-${pageNumber}`);
+      if (!wrap) return false;
+      const stillLoading = wrap.classList.contains("loading") || Boolean(wrap.querySelector(":scope > span"));
+      if (stillLoading) return false;
+      const hasPreview = preview && preview.classList.contains("visible") && text(preview.getAttribute("src"));
+      const hasCanvas = canvas && canvas.width > 8 && canvas.height > 8 && !canvas.classList.contains("pending-fallback");
+      if (statusName === "preview") return Boolean(hasPreview);
+      if (statusName === "rendered") return Boolean(hasCanvas);
+      return Boolean(hasCanvas || hasPreview);
+    }
+    function scheduleLoadingWatchdog() {
+      if (loadingWatchdogTimer) window.clearTimeout(loadingWatchdogTimer);
+      loadingWatchdogTimer = window.setTimeout(() => {
+        loadingWatchdogTimer = null;
+        const pages = visiblePages.length ? visiblePages : [currentPage];
+        const stuck = pages.some((page) => {
+          const wrap = pageWrap(page);
+          return wrap && (wrap.classList.contains("loading") || Boolean(wrap.querySelector(":scope > span")));
+        });
+        if (stuck) renderAround(currentPage, { force: true });
+      }, 1800);
+    }
+    function renderAround(pageNumber, options = {}) {
       const extra = overscanPages();
       const start = Math.max(1, pageNumber - extra);
       const end = Math.min(totalPages || knownPageCount(pageNumber), pageNumber + extra);
       for (let page = start; page <= end; page += 1) {
-        ensurePageRendered(page);
+        ensurePageRendered(page, options);
       }
       releaseFarPages(pageNumber);
+      scheduleLoadingWatchdog();
     }
     function releaseFarPages(primary) {
       const keep = overscanPages() + 4;
@@ -1291,17 +1574,28 @@
         pageRenderStates.delete(pageNumber);
       }
     }
-    async function ensurePageRendered(pageNumber) {
+    async function ensurePageRendered(pageNumber, options = {}) {
       if (pageNumber < 1 || pageNumber > (totalPages || knownPageCount(pageNumber))) return;
+      const force = Boolean(options.force);
       const viewportSize = pageViewportSize(pageNumber);
       const currentScale = viewportSize.scale;
       const state = pageRenderStates.get(pageNumber) || {};
-      if (state.rendering || Math.abs(Number(state.renderedScale || 0) - currentScale) < .001) return;
+      const sameRenderedScale = Math.abs(Number(state.renderedScale || 0) - currentScale) < .001;
+      const samePreviewScale = Math.abs(Number(state.previewScale || 0) - currentScale) < .001;
+      if (!force && state.rendering) return;
+      if (!force && state.status === "rendered" && sameRenderedScale && pageDomReady(pageNumber, "rendered")) return;
+      if (!force && state.status === "preview" && samePreviewScale && pageDomReady(pageNumber, "preview")) return;
+      if (force && state.renderTask) {
+        try { state.renderTask.cancel(); } catch {}
+        state.renderTask = null;
+        state.rendering = false;
+      }
       if (!pdfDoc) {
-        renderPreviewOnly(pageNumber);
+        renderPreviewOnly(pageNumber, state);
         return;
       }
       state.rendering = true;
+      state.status = "rendering";
       pageRenderStates.set(pageNumber, state);
       try {
         const page = await pdfDoc.getPage(pageNumber);
@@ -1335,14 +1629,23 @@
           await withTimeout(state.renderTask.promise, 3500, "PDF.js render timed out; using image preview fallback.");
           clearPagePreview(pageNumber);
           renderedOk = true;
+          state.status = "rendered";
+          state.renderedScale = pageScale;
+          state.previewScale = 0;
         } catch (error) {
-          if (!hasPreview) showPageError(pageNumber, error && error.message ? error.message : error);
+          if (hasPreview) {
+            state.status = "preview";
+            state.previewScale = pageScale;
+          } else {
+            state.status = "error";
+            state.error = error && error.message ? error.message : text(error);
+            showPageError(pageNumber, state.error);
+          }
           try { state.renderTask.cancel(); } catch {}
         }
         state.renderTask = null;
         const textBody = await renderTextLayer(pageNumber, page, viewport);
         renderHighlights(pageNumber);
-        state.renderedScale = pageScale;
         try {
           if (!renderedOk) return;
           writePageCache({
@@ -1357,7 +1660,14 @@
           });
         } catch {}
       } catch (error) {
-        if (!applyPagePreview(pageNumber, viewportSize)) showPageError(pageNumber, error && error.message ? error.message : error);
+        if (applyPagePreview(pageNumber, viewportSize)) {
+          state.status = "preview";
+          state.previewScale = currentScale;
+        } else {
+          state.status = "error";
+          state.error = error && error.message ? error.message : text(error);
+          showPageError(pageNumber, state.error);
+        }
       } finally {
         state.rendering = false;
         pageRenderStates.set(pageNumber, state);
@@ -1441,7 +1751,22 @@
         if (timer !== null) window.clearTimeout(timer);
       });
     }
-    function renderPreviewOnly(pageNumber) {
+    function waitForLayoutFrames(count = 2) {
+      return new Promise((resolve) => {
+        const step = (remaining) => {
+          if (remaining <= 0) return resolve();
+          window.requestAnimationFrame(() => step(remaining - 1));
+        };
+        step(count);
+      });
+    }
+    async function renderAfterLayout(pageNumber, options = {}) {
+      await waitForLayoutFrames(2);
+      scrollToPage(pageNumber);
+      renderAround(pageNumber, { force: Boolean(options.force) });
+      scheduleViewportUpdate();
+    }
+    function renderPreviewOnly(pageNumber, state = null) {
       const size = pageViewportSize(pageNumber);
       updatePageBox(pageNumber, size);
       const canvas = document.getElementById(`pdfCanvas-${pageNumber}`);
@@ -1450,9 +1775,15 @@
         canvas.height = Math.floor(size.height);
         canvas.classList.add("pending-fallback");
       }
-      if (!applyPagePreview(pageNumber, size) && !requestedPreviews.has(pageNumber)) {
+      if (!pdfDocumentLoading && !applyPagePreview(pageNumber, size) && !requestedPreviews.has(pageNumber)) {
         requestedPreviews.add(pageNumber);
         emitAction("request_page_preview", { page: pageNumber, locator: `p. ${pageNumber}` });
+      }
+      if (state) {
+        state.status = pageDomReady(pageNumber, "preview") ? "preview" : "preview_requested";
+        state.previewScale = size.scale;
+        state.rendering = false;
+        pageRenderStates.set(pageNumber, state);
       }
       const pageInput = document.getElementById("pageInput");
       if (pageInput) pageInput.value = String(currentPage);
@@ -1607,6 +1938,38 @@
       }
       status("No match");
     }
+    function shellEl() {
+      return document.getElementById("readerShell") || document.querySelector(".pr-shell");
+    }
+    async function toggleFullscreen() {
+      const shell = shellEl();
+      if (!shell) return;
+      try {
+        if (!document.fullscreenElement && shell.requestFullscreen) {
+          await shell.requestFullscreen();
+          fullscreenActive = true;
+        } else if (document.fullscreenElement && document.exitFullscreen) {
+          await document.exitFullscreen();
+          fullscreenActive = false;
+        } else {
+          fullscreenActive = !fullscreenActive;
+        }
+      } catch {
+        fullscreenActive = !fullscreenActive;
+      }
+      shell.classList.toggle("fullscreen", fullscreenActive);
+      const button = document.querySelector('[data-action="fullscreen"]');
+      if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
+      window.setTimeout(() => renderAround(currentPage, { force: true }), 120);
+      setHeight();
+    }
+    document.addEventListener("fullscreenchange", () => {
+      fullscreenActive = Boolean(document.fullscreenElement);
+      shellEl()?.classList.toggle("fullscreen", fullscreenActive);
+      const button = document.querySelector('[data-action="fullscreen"]');
+      if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
+      window.setTimeout(() => renderAround(currentPage, { force: true }), 120);
+    });
     async function pageText(pageNumber) {
       if (textCache.has(pageNumber)) return textCache.get(pageNumber);
       try {
@@ -1652,7 +2015,7 @@
       renderDocumentSkeleton();
       setupIntersectionObserver();
       scrollToPage(page);
-      renderAround(page);
+      renderAround(page, { force: true });
     }
     function scheduleViewportUpdate() {
       if (viewportTimer) window.clearTimeout(viewportTimer);
@@ -1684,6 +2047,7 @@
       currentPage = primary;
       updatePageUi();
       if (pageChanged || activeTab === "translation" || activeTab === "ai") refreshSide();
+      refreshTranslationReader();
       renderAround(primary);
       const signature = `${primary}:${pages.join(",")}`;
       if (signature !== lastViewportSignature && (emitPassiveEvents() || autoSaveProgress())) {
@@ -1701,10 +2065,14 @@
       status(statusText());
     }
     async function loadPdf() {
+      const seq = loadSeq + 1;
+      loadSeq = seq;
       const pdfBase64 = text(args.pdf_base64);
       const pdfUrl = text(args.pdf_url);
       scaleMode = text(settings().scale_mode || "fit-width") || "fit-width";
       sidePanelCollapsed = text(settings().side_panel_default || "collapsed") !== "open";
+      readerMode = text(settings().reader_mode || readerMode || "pdf") || "pdf";
+      if (!["pdf", "compare", "translation"].includes(readerMode)) readerMode = "pdf";
       requestedPreviews = new Set();
       currentSelection = null;
       dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
@@ -1712,21 +2080,23 @@
       pageBaseSizes = new Map();
       pageRenderStates = new Map();
       currentPage = initialPage();
+      pdfDoc = null;
+      totalPages = knownPageCount(currentPage);
+      pdfDocumentLoading = Boolean(pdfBase64 || pdfUrl);
+      renderShell("");
+      renderDocumentSkeleton();
+      setupIntersectionObserver();
+      await renderAfterLayout(currentPage, { force: true });
       if (!pdfBase64 && !pdfUrl) {
-        pdfDoc = null;
-        totalPages = knownPageCount(currentPage);
-        renderShell("");
-        renderDocumentSkeleton();
-        setupIntersectionObserver();
-        scrollToPage(currentPage);
         return;
       }
       if (!window.pdfjsLib) {
-        renderShell(label("pdf_error"));
+        pdfDocumentLoading = false;
         const viewer = document.querySelector(".pr-viewer");
         if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(label("pdf_error"))} PDF.js CDN failed to load.</div>`;
         return;
       }
+      let loadingTask = null;
       try {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = "./assets/pdf.worker.min.js";
         let source = { url: pdfUrl };
@@ -1736,7 +2106,11 @@
           for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
           source = { data: bytes };
         }
-        pdfDoc = await window.pdfjsLib.getDocument(source).promise;
+        loadingTask = window.pdfjsLib.getDocument(source);
+        const loadedDoc = await withTimeout(loadingTask.promise, Number(settings().pdf_load_timeout_ms || 9000), "PDF.js document load timed out; using page preview fallback.");
+        if (seq !== loadSeq) return;
+        pdfDocumentLoading = false;
+        pdfDoc = loadedDoc;
         totalPages = pdfDoc.numPages || 1;
         currentPage = Math.max(1, Math.min(initialPage(), totalPages));
         const firstPage = await pdfDoc.getPage(1);
@@ -1745,14 +2119,19 @@
         renderShell("");
         renderDocumentSkeleton();
         setupIntersectionObserver();
-        scrollToPage(currentPage);
+        await renderAfterLayout(currentPage, { force: true });
       } catch (error) {
+        if (seq !== loadSeq) return;
+        if (loadingTask && loadingTask.destroy) {
+          try { loadingTask.destroy(); } catch {}
+        }
+        pdfDocumentLoading = false;
         pdfDoc = null;
         totalPages = knownPageCount(currentPage);
-        renderShell(label("pdf_error"));
+        status(label("pdf_preview_mode"));
         renderDocumentSkeleton();
         setupIntersectionObserver();
-        scrollToPage(currentPage);
+        await renderAfterLayout(currentPage, { force: true });
         const viewer = document.querySelector(".pr-viewer");
         if (viewer) viewer.insertAdjacentHTML(
           "afterbegin",

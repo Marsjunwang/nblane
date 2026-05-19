@@ -415,6 +415,45 @@ def fallback_structured(
             },
             [warning],
         )
+    if action == "research.paper_review_card":
+        refs = _paper_refs(request, payload)
+        segments = _list_payload(payload, "segments", "chunks", "items")
+        tldr = _paper_summary(payload, segments)
+        warnings = [warning]
+        if not any(refs.values()):
+            warnings.append(
+                "No cited refs were provided; review card scores are conservative defaults."
+            )
+        return (
+            {
+                "tldr": tldr,
+                "key_points": [],
+                "innovations": [],
+                "method": [],
+                "experiments": [],
+                "limitations": [],
+                "usefulness": "",
+                "scores": _default_review_scores(),
+                "score_rationale": [
+                    {
+                        "metric": "overall",
+                        "reason": (
+                            "Fallback could not evaluate the paper beyond "
+                            "provided refs; human review is required."
+                        ),
+                        "refs": _merge_refs(
+                            refs["cited_segment_refs"],
+                            refs["cited_chunk_refs"],
+                            refs["cited_annotation_refs"],
+                        ),
+                    }
+                ],
+                **refs,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
     if action == "research.paper_qa":
         refs = _paper_refs(request, payload)
         warnings = [warning]
@@ -816,6 +855,17 @@ def _section_summaries(segments: list[Any]) -> list[dict[str, Any]]:
             }
         )
     return summaries
+
+
+def _default_review_scores() -> dict[str, float]:
+    return {
+        "novelty": 0,
+        "technical_depth": 0,
+        "evidence_quality": 0,
+        "reproducibility": 0,
+        "relevance": 0,
+        "overall": 0,
+    }
 
 
 def _reply_language(payload: dict[str, Any]) -> str:

@@ -14,6 +14,7 @@ from nblane.core.ai import (
     answer_paper_question,
     explain_paper_selection,
     extract_paper_claims,
+    generate_paper_review_card,
     generate_paper_source_guide,
     search_papers_codex,
     translate_paper_segments,
@@ -1569,7 +1570,13 @@ def _handle_reader_component_event(
         if action == "page_changed":
             page = _payload_int(payload, "page", 1)
             st.session_state[_reader_key(source_id, "page")] = max(1, page)
+            return True
+
+        if action == "save_progress":
+            page = _payload_int(payload, "page", _payload_int(payload, "primary_page", 1))
+            st.session_state[_reader_key(source_id, "page")] = max(1, page)
             _save_reader_progress(source_id, max(1, page))
+            st.success(ui["saved"])
             return True
 
         if action == "viewport_changed":
@@ -1586,6 +1593,28 @@ def _handle_reader_component_event(
         if action == "request_page_preview":
             page = _payload_int(payload, "page", 1)
             st.session_state[_reader_key(source_id, "preview_page")] = max(1, page)
+            return True
+
+        if action == "generate_review_card":
+            source = load_research_sources(selected).by_id().get(source_id)
+            result = generate_paper_review_card(
+                selected,
+                source_id,
+                source=source.to_dict() if source is not None else {"id": source_id},
+                segments=[row.to_dict() for row in segment_rows],
+                chunks=[row.to_dict() for row in chunk_rows],
+                annotations=[row.to_dict() for row in annotation_rows],
+                require_review=False,
+            )
+            _store_reader_ai_result(source_id, action, result)
+            if isinstance(result.structured, dict):
+                save_paper_analysis(_pdir, source_id, result.structured)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            for warning in result.warnings:
+                st.warning(str(warning))
             return True
 
         if action in {"annotation_create", "create_annotation"}:
@@ -2042,6 +2071,7 @@ def _render_paper_reader(inbox) -> None:
     annotation_rows_for_reader = load_paper_annotations(_pdir, source_id)
     translation_rows_for_reader = load_paper_translations(_pdir, source_id)
     chunk_rows_for_reader = load_chunks(_pdir, source_id)
+    analysis_for_reader = load_paper_analysis(_pdir, source_id)
     focus_annotation_id = st.session_state.get(_reader_key(source_id, "focus_annotation_id"), "")
     reader_page = int(st.session_state.get(_reader_key(source_id, "page"), source.metadata.get("last_read_page") or 1) or 1)
     if source.metadata.get("pdf_asset_ref"):
@@ -2058,6 +2088,7 @@ def _render_paper_reader(inbox) -> None:
             annotations=[ann.to_dict() for ann in annotation_rows_for_reader],
             translations=[row.to_dict() for row in translation_rows_for_reader],
             chunks=[chunk.to_dict() for chunk in chunk_rows_for_reader],
+            analysis=analysis_for_reader,
             ui={
                 "annotations": _l("annotations", "Annotations"),
                 "translation": _l("translation", "Translation"),
@@ -2072,6 +2103,13 @@ def _render_paper_reader(inbox) -> None:
                 "translate_visible_pages": _l("translate_visible_pages", "Visible pages"),
                 "explain_selection": _l("explain_selection", "Explain selection"),
                 "ask_paper": _l("ask_paper", "Ask paper"),
+                "save_progress": _l("save_progress", "Save progress"),
+                "review_card": _l("review_card", "Review"),
+                "fullscreen": _l("fullscreen", "Fullscreen"),
+                "exit_fullscreen": _l("exit_fullscreen", "Exit fullscreen"),
+                "mode_pdf": "PDF",
+                "mode_compare": _l("mode_compare", "Compare"),
+                "mode_translation": _l("mode_translation", "Translation only"),
                 "search": _l("search", "Search"),
                 "page": _l("page", "Page"),
                 "empty": ui["empty_status"],
@@ -2086,13 +2124,15 @@ def _render_paper_reader(inbox) -> None:
                 "view_mode": "continuous",
                 "scale_mode": "fit-width",
                 "overscan_pages": 2,
-                "auto_save_progress": True,
+                "auto_save_progress": False,
+                "emit_passive_events": False,
                 "side_panel_default": "collapsed",
                 "focus_annotation_id": focus_annotation_id,
                 "height_mode": "viewport",
                 "render_cache": True,
                 "render_cache_max_pages": 48,
                 "translation_dock_default": "bottom",
+                "pdf_load_timeout_ms": 9000,
             },
             key=f"paper_pdf_reader:{selected}:{source_id}",
             height=1040,

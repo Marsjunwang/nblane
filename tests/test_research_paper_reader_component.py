@@ -52,9 +52,19 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn('pdf_url=_reader_pdf_url(source_id)', page_source)
         self.assertIn('"view_mode": "continuous"', page_source)
         self.assertIn('"scale_mode": "fit-width"', page_source)
-        self.assertIn('"auto_save_progress": True', page_source)
+        self.assertIn('"auto_save_progress": False', page_source)
+        self.assertIn('"emit_passive_events": False', page_source)
         self.assertIn('"render_cache": True', page_source)
         self.assertIn('"translation_dock_default": "bottom"', page_source)
+        self.assertIn('"pdf_load_timeout_ms": 9000', page_source)
+        self.assertIn("loadingWatchdogTimer", html)
+        self.assertIn("pageDomReady", html)
+        self.assertIn("renderAfterLayout", html)
+        self.assertIn("requestFullscreen", html)
+        self.assertIn("reader-mode-compare", html)
+        self.assertIn("translationReaderHtml", html)
+        self.assertIn("generate_review_card", html)
+        self.assertIn("save_progress", html)
 
         actions = set(re.findall(r'emitAction\("([^"]+)"', html))
         self.assertGreaterEqual(
@@ -74,6 +84,8 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
                 "page_changed",
                 "viewport_changed",
                 "request_page_preview",
+                "save_progress",
+                "generate_review_card",
             },
         )
 
@@ -161,6 +173,7 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
                 annotations=[{"id": "ann-1"}],
                 translations=[{"id": "tr-1"}],
                 chunks=[{"id": "chunk-1"}],
+                analysis={"tldr": "Useful paper."},
                 ui={"page": "Page"},
                 settings={"view_mode": "continuous"},
                 height=900,
@@ -172,6 +185,7 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertEqual(captured["annotations"], [{"id": "ann-1"}])
         self.assertEqual(captured["translations"], [{"id": "tr-1"}])
         self.assertEqual(captured["chunks"], [{"id": "chunk-1"}])
+        self.assertEqual(captured["analysis"], {"tldr": "Useful paper."})
         self.assertEqual(captured["ui"], {"page": "Page"})
         self.assertEqual(captured["settings"], {"view_mode": "continuous"})
         self.assertEqual(captured["height"], 900)

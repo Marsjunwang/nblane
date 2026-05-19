@@ -158,6 +158,119 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             },
         ),
     ),
+    "research.paper_review_card": AIActionSpec(
+        name="research.paper_review_card",
+        owner="research",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="candidate",
+        schema=schema_for_keys(
+            [
+                "tldr",
+                "key_points",
+                "innovations",
+                "method",
+                "experiments",
+                "limitations",
+                "usefulness",
+                "scores",
+                "score_rationale",
+                "cited_segment_refs",
+                "cited_chunk_refs",
+                "cited_annotation_refs",
+                "warnings",
+                "ref",
+            ],
+            properties={
+                "key_points": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "refs": {"type": "array"},
+                        },
+                    },
+                },
+                "innovations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "refs": {"type": "array"},
+                        },
+                    },
+                },
+                "method": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "refs": {"type": "array"},
+                        },
+                    },
+                },
+                "experiments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "refs": {"type": "array"},
+                        },
+                    },
+                },
+                "limitations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "refs": {"type": "array"},
+                        },
+                    },
+                },
+                "score_rationale": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "metric": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "refs": {"type": "array"},
+                        },
+                    },
+                },
+                "scores": {
+                    "type": "object",
+                    "required": [
+                        "novelty",
+                        "technical_depth",
+                        "evidence_quality",
+                        "reproducibility",
+                        "relevance",
+                        "overall",
+                    ],
+                    "properties": {
+                        "novelty": {"type": "number"},
+                        "technical_depth": {"type": "number"},
+                        "evidence_quality": {"type": "number"},
+                        "reproducibility": {"type": "number"},
+                        "relevance": {"type": "number"},
+                        "overall": {"type": "number"},
+                    },
+                },
+                "cited_segment_refs": {"type": "array"},
+                "cited_chunk_refs": {"type": "array"},
+                "cited_annotation_refs": {"type": "array"},
+                "warnings": {"type": "array"},
+                "ref": {"type": "string"},
+            },
+        ),
+    ),
     "research.paper_qa": AIActionSpec(
         name="research.paper_qa",
         owner="research",

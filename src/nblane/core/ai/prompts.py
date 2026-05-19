@@ -47,6 +47,15 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Produce a source-scoped reading guide from supplied metadata, "
         "segments, chunks, and annotations. Do not invent paper facts."
     ),
+    "research.paper_review_card": (
+        "Generate a fixed paper review scorecard using only the supplied "
+        "source metadata, segments, chunks, and annotations. Cover key points, "
+        "innovations, method, experiments, limitations, usefulness, and 0-5 "
+        "scores. Every substantive claim and score rationale must cite "
+        "segment, chunk, or annotation refs from the input. Do not invent "
+        "claims, results, datasets, citations, or refs; add warnings when the "
+        "provided evidence is insufficient."
+    ),
     "research.paper_qa": (
         "Answer the question only from supplied paper refs. If no supporting "
         "refs are present, return a warning and do not guess."

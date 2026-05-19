@@ -22,6 +22,10 @@ _LAZY_EXPORTS = {
     "draft_resume_for_job": ("nblane.core.ai.gateway", "draft_resume_for_job"),
     "explain_paper_selection": ("nblane.core.ai.gateway", "explain_paper_selection"),
     "extract_paper_claims": ("nblane.core.ai.gateway", "extract_paper_claims"),
+    "generate_paper_review_card": (
+        "nblane.core.ai.gateway",
+        "generate_paper_review_card",
+    ),
     "generate_paper_source_guide": (
         "nblane.core.ai.gateway",
         "generate_paper_source_guide",
@@ -67,6 +71,7 @@ __all__ = [
     "draft_resume_for_job",
     "explain_paper_selection",
     "extract_paper_claims",
+    "generate_paper_review_card",
     "generate_paper_source_guide",
     "generate_reading_draft",
     "get_action_spec",
