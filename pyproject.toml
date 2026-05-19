@@ -58,6 +58,10 @@ include = ["nblane*", "schemas*"]
     "frontend/static/index.html",
     "frontend/static/assets/*",
 ]
+"nblane.research_paper_reader_component" = [
+    "frontend/static/index.html",
+    "frontend/static/assets/*",
+]
 
 [tool.streamlit.component]
 components = [

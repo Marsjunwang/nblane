@@ -122,10 +122,63 @@ PyMuPDF 采用 AGPL / commercial dual licensing；闭源或商业生产部署需
 结构化学术 PDF 抽取推荐部署 GROBID。GROBID 服务不可用时，上传和 metadata 导入仍会成功，
 页面会显示结构化抽取降级 warning，并退回 PyMuPDF / lightweight fallback。
 
+GROBID 是自托管 REST 服务，不是默认云服务；nblane 只需要能访问
+`/api/isalive` 和 `/api/processFulltextDocument`。生产部署建议把 GROBID 只绑定到
+本机回环地址，避免把未公开论文 PDF 发送到不可信服务。
+
+安装 Docker：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y docker.io
+sudo systemctl enable --now docker
+```
+
+国内环境如 Docker Hub 连接不稳定，可配置 registry mirror 后重启 Docker：
+
+```bash
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io",
+    "https://dockerproxy.com",
+    "https://docker.nju.edu.cn"
+  ]
+}
+JSON
+sudo systemctl restart docker
+```
+
 本机启动 GROBID 示例：
 
 ```bash
-docker run --rm -p 8070:8070 grobid/grobid:latest
+sudo docker run -d --name nblane-grobid --restart unless-stopped \
+  -p 127.0.0.1:8070:8070 \
+  grobid/grobid:0.9.0-crf
+```
+
+验证：
+
+```bash
+curl http://127.0.0.1:8070/api/isalive
+```
+
+返回 `true` 后，设置服务环境：
+
+```bash
+NBLANE_GROBID_URL=http://127.0.0.1:8070
+NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+```
+
+维护命令：
+
+```bash
+sudo docker ps --filter name=nblane-grobid
+sudo docker logs -f nblane-grobid
+sudo docker restart nblane-grobid
+sudo docker stop nblane-grobid
 ```
 
 如果不部署 GROBID，可暂时删除或留空 `NBLANE_GROBID_URL`；Reader 仍能使用已抽取的 page text、

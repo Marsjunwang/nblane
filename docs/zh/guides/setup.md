@@ -144,9 +144,42 @@ VISUAL_API_KEY=
 NBLANE_CODEX_BIN=codex
 NBLANE_CODEX_CLOUD_ENV_ID=
 NBLANE_CODEX_ATTEMPTS=1
+
+# 可选 Paper Reading 结构化抽取
+NBLANE_GROBID_URL=http://127.0.0.1:8070
+NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
 ```
 
 nblane 启动时会通过 `python-dotenv` 自动加载该文件。
+
+### Paper Reading 结构化抽取（可选）
+
+Paper Reading Studio 使用 PyMuPDF 作为默认本地 PDF 后端；如果需要章节、段落、
+references 和 TEI 等学术结构化结果，可额外启动自托管 GROBID REST 服务。
+GROBID 不是默认云 API，不需要 API key；nblane 只会访问你配置的
+`NBLANE_GROBID_URL`。
+
+推荐本机 Docker 启动：
+
+```bash
+sudo apt-get install -y docker.io
+sudo systemctl enable --now docker
+sudo docker run -d --name nblane-grobid --restart unless-stopped \
+  -p 127.0.0.1:8070:8070 \
+  grobid/grobid:0.9.0-crf
+curl http://127.0.0.1:8070/api/isalive
+```
+
+返回 `true` 后，在 `.env` 中配置：
+
+```bash
+NBLANE_GROBID_URL=http://127.0.0.1:8070
+NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+```
+
+然后重启 Streamlit。若不启动 GROBID，Reader 仍可使用 PDF 阅读、高亮、
+annotations、chunks、citations、翻译和导出；结构化抽取会回退到
+PyMuPDF/page-text fallback，并在页面显示 warning。
 
 ### 方式 B — Shell 环境变量
 

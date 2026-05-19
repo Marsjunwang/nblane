@@ -13,6 +13,7 @@ Workspace source/chunk/claim/citation layer:
 from __future__ import annotations
 
 import copy
+import base64
 import hashlib
 import json
 import os
@@ -68,6 +69,22 @@ PAPER_ANNOTATION_STATUSES = ("active", "deleted")
 PAPER_TRANSLATION_STATUSES = ("translated", "missing", "stale", "failed")
 PAPER_SEARCH_PROVIDERS = ("arxiv", "semantic_scholar")
 PDF_MAX_BYTES_DEFAULT = 75 * 1024 * 1024
+PAPER_DIAGNOSTIC_BADGES = {
+    "grobid_unavailable": "GROBID unavailable",
+    "needs_structured_extraction": "Needs structured extraction",
+    "stale_translation": "Stale translation",
+    "citation_broken": "Citation broken",
+    "private_source": "Private source",
+    "duplicate_risk": "Duplicate risk",
+}
+PAPER_DIAGNOSTIC_SEVERITIES = {
+    "grobid_unavailable": "warning",
+    "needs_structured_extraction": "warning",
+    "stale_translation": "warning",
+    "citation_broken": "error",
+    "private_source": "info",
+    "duplicate_risk": "warning",
+}
 
 
 def _now() -> str:
@@ -115,6 +132,34 @@ def _clean_mapping(value: object) -> dict[str, object]:
 def _choice(value: object, options: tuple[str, ...], default: str) -> str:
     clean = _clean_text(value)
     return clean if clean in options else default
+
+
+def _append_unique(values: list[str], value: str) -> None:
+    clean = _clean_text(value)
+    if clean and clean not in values:
+        values.append(clean)
+
+
+def _append_badge(
+    badges: list[str],
+    badge_details: list[dict[str, str]],
+    badge_id: str,
+    *,
+    detail: str = "",
+) -> None:
+    label = PAPER_DIAGNOSTIC_BADGES.get(badge_id, badge_id)
+    _append_unique(badges, label)
+    if any(row.get("id") == badge_id for row in badge_details):
+        return
+    row = {
+        "id": badge_id,
+        "label": label,
+        "severity": PAPER_DIAGNOSTIC_SEVERITIES.get(badge_id, "info"),
+    }
+    clean_detail = _clean_text(detail)
+    if clean_detail:
+        row["detail"] = clean_detail
+    badge_details.append(row)
 
 
 def _slug(value: object, *, fallback: str = "paper") -> str:
@@ -418,6 +463,59 @@ def load_paper_pdf_bytes(profile: str | Path, source_id: str) -> bytes:
     return path.read_bytes()
 
 
+def paper_pdf_asset_path(profile: str | Path, source_id: str) -> Path:
+    """Return the validated local PDF asset path for a paper source."""
+
+    _, source = _source_by_id(profile, source_id)
+    asset_ref = _clean_text((source.metadata or {}).get("pdf_asset_ref"))
+    path = _asset_path(profile, asset_ref)
+    if not path.exists():
+        raise FileNotFoundError(f"Paper PDF asset is missing: {asset_ref}")
+    return path
+
+
+def render_paper_page_preview(
+    profile: str | Path,
+    source_id: str,
+    page: int = 1,
+    *,
+    max_width: int = 1100,
+) -> dict[str, object]:
+    """Render one PDF page to a PNG data URL for Reader visual fallback."""
+
+    try:
+        page_number = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        page_number = 1
+    try:
+        width_limit = max(320, min(2200, int(max_width or 1100)))
+    except (TypeError, ValueError):
+        width_limit = 1100
+    pdf_bytes = load_paper_pdf_bytes(profile, source_id)
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except Exception as exc:
+        raise RuntimeError("PyMuPDF is required for PDF page preview fallback.") from exc
+
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if doc.page_count < 1:
+            raise ValueError("PDF has no pages.")
+        safe_page = max(1, min(page_number, int(doc.page_count)))
+        pdf_page = doc.load_page(safe_page - 1)
+        rect = pdf_page.rect
+        zoom = min(2.0, max(0.5, width_limit / max(1.0, float(rect.width))))
+        matrix = fitz.Matrix(zoom, zoom)
+        pixmap = pdf_page.get_pixmap(matrix=matrix, alpha=False)
+        png_bytes = pixmap.tobytes("png")
+    return {
+        "page": safe_page,
+        "width": int(pixmap.width),
+        "height": int(pixmap.height),
+        "mime": "image/png",
+        "data_url": "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii"),
+    }
+
+
 def pymupdf_available() -> bool:
     """Return True when PyMuPDF's ``fitz`` module can be imported."""
 
@@ -668,6 +766,7 @@ def extract_paper_pages(
     save_paper_pages(profile, source_id, pages)
     metadata = {
         "page_count": len(pages),
+        "text_extraction_backend": "pymupdf" if pages and pages[0].metadata.get("backend") == "pymupdf" else "fallback",
         "text_extracted_at": extracted_at,
         "local_pdf_backend": "pymupdf" if pages and pages[0].metadata.get("backend") == "pymupdf" else "fallback",
     }
@@ -686,10 +785,19 @@ def extract_paper_segments(
     """Extract stable reading/translation segments from pages or GROBID TEI."""
 
     clean_backend = _clean_text(backend).lower() or "auto"
-    if clean_backend in {"auto", "grobid"} and grobid_available():
+    if clean_backend in {"pymupdf", "heuristic"}:
+        clean_backend = "fallback"
+    if clean_backend not in {"auto", "grobid", "fallback"}:
+        raise ValueError(f"Unknown paper segment extraction backend: {backend}")
+    warnings: list[str] = []
+    grobid_status: dict[str, object] = {}
+    if clean_backend in {"auto", "grobid"}:
+        grobid_status = grobid_readiness()
+    if clean_backend in {"auto", "grobid"} and grobid_status.get("available"):
         try:
             doc = process_grobid_fulltext(profile, source_id)
             segments = grobid_tei_to_segments(source_id, doc.tei_xml)
+            references = grobid_tei_to_bibliography(source_id, doc.tei_xml)
             if segments:
                 save_paper_segments(profile, source_id, segments)
                 _update_source_metadata(
@@ -698,28 +806,39 @@ def extract_paper_segments(
                     {
                         "structure_backend": "grobid",
                         "structured_extracted_at": _now(),
+                        "structured_references": references,
+                        "structured_references_count": len(references),
+                        "structured_extraction_warnings": [],
+                        "grobid_status": "available",
+                        "grobid_available": True,
                     },
                 )
                 return segments
-        except Exception:
-            if clean_backend == "grobid":
-                raise
+            warnings.append("GROBID returned no usable segments; used page-text fallback.")
+        except Exception as exc:
+            warnings.append(f"GROBID extraction failed: {exc}")
+    elif clean_backend in {"auto", "grobid"}:
+        message = _clean_text(grobid_status.get("message")) or "GROBID unavailable; used page-text fallback."
+        warnings.append(message)
+    else:
+        warnings.append("Used page-text fallback for structured segments.")
     pages = load_paper_pages(profile, source_id)
     if not pages:
         pages = extract_paper_pages(profile, source_id, backend="auto")
     segments = _segments_from_page_text(source_id, pages)
     save_paper_segments(profile, source_id, segments)
-    _update_source_metadata(
-        profile,
-        source_id,
-        {
-            "structure_backend": "pymupdf_fallback" if pymupdf_available() else "fallback",
-            "structured_extracted_at": _now(),
-            "structured_extraction_warnings": [
-                "GROBID unavailable or returned no usable segments; used page-text fallback."
-            ],
-        },
-    )
+    metadata: dict[str, object] = {
+        "structure_backend": "pymupdf_fallback" if pymupdf_available() else "fallback",
+        "structured_extracted_at": _now(),
+        "structured_extraction_warnings": warnings
+        or ["GROBID unavailable or returned no usable segments; used page-text fallback."],
+    }
+    if grobid_status:
+        metadata["grobid_status"] = _clean_text(grobid_status.get("status")) or (
+            "available" if grobid_status.get("available") else "unavailable"
+        )
+        metadata["grobid_available"] = bool(grobid_status.get("available"))
+    _update_source_metadata(profile, source_id, metadata)
     return segments
 
 
@@ -730,16 +849,61 @@ class GrobidDocument:
     generated_at: str = ""
 
 
+def grobid_readiness(url: str | None = None) -> dict[str, object]:
+    """Return display-ready readiness information for a GROBID service."""
+
+    base = _clean_text(url or os.getenv("NBLANE_GROBID_URL")) or "http://127.0.0.1:8070"
+    endpoint = base.rstrip("/") + "/api/isalive"
+    badges: list[str] = []
+    badge_details: list[dict[str, str]] = []
+    try:
+        with urllib.request.urlopen(endpoint, timeout=2) as response:
+            status_code = int(getattr(response, "status", 200))
+            body = response.read(64).decode("utf-8", errors="ignore").strip().lower()
+    except Exception as exc:
+        message = f"GROBID unavailable: {exc}"
+        _append_badge(badges, badge_details, "grobid_unavailable", detail=message)
+        return {
+            "available": False,
+            "status": "unavailable",
+            "url": base,
+            "endpoint": endpoint,
+            "message": message,
+            "badges": badges,
+            "badge_details": badge_details,
+        }
+    alive = status_code < 500 and (not body or "true" in body or "alive" in body)
+    if not alive:
+        message = f"GROBID unavailable: isalive returned HTTP {status_code}"
+        if body:
+            message += f" with body {body[:80]}"
+        _append_badge(badges, badge_details, "grobid_unavailable", detail=message)
+        return {
+            "available": False,
+            "status": "unavailable",
+            "url": base,
+            "endpoint": endpoint,
+            "http_status": status_code,
+            "message": message,
+            "badges": badges,
+            "badge_details": badge_details,
+        }
+    return {
+        "available": True,
+        "status": "available",
+        "url": base,
+        "endpoint": endpoint,
+        "http_status": status_code,
+        "message": "GROBID available.",
+        "badges": badges,
+        "badge_details": badge_details,
+    }
+
+
 def grobid_available(url: str | None = None) -> bool:
     """Return True when a configured GROBID service responds."""
 
-    base = _clean_text(url or os.getenv("NBLANE_GROBID_URL")) or "http://127.0.0.1:8070"
-    try:
-        with urllib.request.urlopen(base.rstrip("/") + "/api/isalive", timeout=2) as response:
-            body = response.read(64).decode("utf-8", errors="ignore").strip().lower()
-    except Exception:
-        return False
-    return response.status < 500 and (not body or "true" in body or "alive" in body)
+    return bool(grobid_readiness(url).get("available"))
 
 
 def process_grobid_fulltext(profile: str | Path, source_id: str) -> GrobidDocument:
@@ -775,7 +939,9 @@ def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
         return []
     root = ET.fromstring(tei_xml)
     ns = {"tei": "http://www.tei-c.org/ns/1.0"}
-    body = root.find(".//tei:text/tei:body", ns) or root.find(".//text/body")
+    body = root.find(".//tei:text/tei:body", ns)
+    if body is None:
+        body = root.find(".//text/body")
     if body is None:
         return []
     segments: list[PaperSegment] = []
@@ -783,7 +949,9 @@ def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
     slug = source_slug(source_id)
     for div in body.findall(".//tei:div", ns) + body.findall(".//div"):
         section_path = []
-        head = div.find("tei:head", ns) or div.find("head")
+        head = div.find("tei:head", ns)
+        if head is None:
+            head = div.find("head")
         if head is not None:
             title = _tei_text(head)
             if title:
@@ -1961,12 +2129,249 @@ def import_paper_search_results(
                 continue
             pdf_url = _clean_text((source.metadata or {}).get("open_access_pdf_url"))
             if pdf_url:
+                if bool((source.metadata or {}).get("needs_link_check")):
+                    _update_source_metadata(
+                        profile,
+                        source_id,
+                        {
+                            "pdf_download_status": "skipped_needs_link_check",
+                            "pdf_download_attempted_at": _now(),
+                            "pdf_download_error": "PDF download skipped because the link still needs checking.",
+                        },
+                    )
+                    continue
                 try:
                     download_paper_pdf(profile, source_id, pdf_url)
-                except Exception:
-                    # Keep metadata import intact; UI can show retry/warning.
-                    pass
+                    _update_source_metadata(
+                        profile,
+                        source_id,
+                        {
+                            "pdf_download_status": "downloaded",
+                            "pdf_download_attempted_at": _now(),
+                        },
+                    )
+                except Exception as exc:
+                    _update_source_metadata(
+                        profile,
+                        source_id,
+                        {
+                            "pdf_download_status": "failed",
+                            "pdf_download_attempted_at": _now(),
+                            "pdf_download_error": f"PDF download failed during import: {exc}",
+                        },
+                    )
     return imported
+
+
+def _duplicate_risk_refs(inbox: ResearchSourceInbox) -> dict[str, list[str]]:
+    keys: dict[str, list[str]] = {}
+    for source in inbox.sources:
+        if source.kind != "paper":
+            continue
+        for key in _duplicate_keys_for_source(source):
+            keys.setdefault(key, []).append(source.id)
+    risks: dict[str, set[str]] = {}
+    for ids in keys.values():
+        unique = sorted(set(ids))
+        if len(unique) < 2:
+            continue
+        for source_id in unique:
+            risks.setdefault(source_id, set()).update(
+                other for other in unique if other != source_id
+            )
+    return {source_id: sorted(refs) for source_id, refs in risks.items()}
+
+
+def _normalized_quote_text(value: str) -> str:
+    return re.sub(r"\s+", " ", _clean_text(value)).casefold()
+
+
+def paper_citation_diagnostics(
+    profile: str | Path,
+    source_id: str = "",
+) -> list[str]:
+    """Return citation diagnostics that need paper-reading UI attention."""
+
+    chunks = {chunk.id: chunk for chunk in load_chunks(_profile_root(profile))}
+    diagnostics: list[str] = []
+    clean_source = _clean_text(source_id)
+    for citation in load_research_citations(_profile_root(profile)):
+        chunk = chunks.get(citation.chunk_id)
+        if clean_source and citation.source_id != clean_source and (
+            chunk is None or chunk.source_id != clean_source
+        ):
+            continue
+        if chunk is not None and citation.source_id and citation.source_id != chunk.source_id:
+            diagnostics.append(
+                f"{citation.id}: source {citation.source_id} does not match chunk source {chunk.source_id}"
+            )
+        if not citation.quote or chunk is None:
+            continue
+        quote = _normalized_quote_text(citation.quote)
+        chunk_text = _normalized_quote_text(chunk.text)
+        if quote and chunk_text and quote not in chunk_text:
+            diagnostics.append(
+                f"{citation.id}: quote does not match chunk {citation.chunk_id}"
+            )
+    return diagnostics
+
+
+def _needs_structured_extraction(source: ResearchSource, segments: list[PaperSegment]) -> bool:
+    metadata = source.metadata or {}
+    if source.kind != "paper" or not metadata.get("pdf_asset_ref"):
+        return False
+    backend = _clean_text(metadata.get("structure_backend"))
+    if backend == "grobid" and segments:
+        return False
+    return True
+
+
+def _metadata_has_grobid_unavailable(metadata: dict[str, object]) -> bool:
+    status = _clean_text(metadata.get("grobid_status")).lower()
+    if status == "unavailable" or metadata.get("grobid_available") is False:
+        return True
+    warnings = _clean_list(metadata.get("structured_extraction_warnings"))
+    return any("grobid unavailable" in warning.casefold() for warning in warnings)
+
+
+def paper_source_diagnostics(
+    profile: str | Path,
+    source_id: str,
+    *,
+    grobid_status: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Return display-ready diagnostics and badges for one paper source."""
+
+    inbox, source = _source_by_id(profile, source_id)
+    metadata = source.metadata or {}
+    segments = load_paper_segments(profile, source.id) if source.kind == "paper" else []
+    translations = load_paper_translations(profile, source.id) if source.kind == "paper" else []
+    stale_translations = [row for row in translations if row.status == "stale"]
+    workspace_diagnostics = [
+        item
+        for item in validate_research_workspace(_profile_root(profile))
+        if source.id in item
+    ]
+    library_diagnostics = [
+        item for item in validate_paper_library(profile) if source.id in item
+    ]
+    citation_diagnostics = [
+        *workspace_diagnostics,
+        *paper_citation_diagnostics(profile, source.id),
+    ]
+    duplicate_refs = _duplicate_risk_refs(inbox).get(source.id, [])
+    needs_structured = _needs_structured_extraction(source, segments)
+    badges: list[str] = []
+    badge_details: list[dict[str, str]] = []
+    warnings: list[str] = []
+
+    for warning in _clean_list(metadata.get("structured_extraction_warnings")):
+        _append_unique(warnings, warning)
+    for translation in stale_translations:
+        for warning in translation.warnings:
+            _append_unique(warnings, warning)
+    for diagnostic in [*citation_diagnostics, *library_diagnostics]:
+        _append_unique(warnings, diagnostic)
+
+    if needs_structured:
+        _append_badge(
+            badges,
+            badge_details,
+            "needs_structured_extraction",
+            detail="No GROBID structured segments are available for this PDF.",
+        )
+    if (
+        grobid_status is not None
+        and not bool(grobid_status.get("available"))
+        and needs_structured
+    ) or _metadata_has_grobid_unavailable(metadata):
+        detail = _clean_text((grobid_status or {}).get("message")) or "GROBID is not available for structured extraction."
+        _append_badge(badges, badge_details, "grobid_unavailable", detail=detail)
+    if stale_translations:
+        _append_badge(
+            badges,
+            badge_details,
+            "stale_translation",
+            detail=f"{len(stale_translations)} translation row(s) no longer match current segments.",
+        )
+    if citation_diagnostics or library_diagnostics:
+        _append_badge(
+            badges,
+            badge_details,
+            "citation_broken",
+            detail="Citation, chunk, quote, or library references need repair.",
+        )
+    if source.visibility == "private":
+        _append_badge(
+            badges,
+            badge_details,
+            "private_source",
+            detail="Private sources cannot be published directly.",
+        )
+    if duplicate_refs:
+        _append_badge(
+            badges,
+            badge_details,
+            "duplicate_risk",
+            detail="Potential duplicate paper source(s): " + ", ".join(duplicate_refs),
+        )
+
+    return {
+        "source_id": source.id,
+        "badges": badges,
+        "badge_details": badge_details,
+        "warnings": warnings,
+        "needs_structured_extraction": needs_structured,
+        "stale_translation_count": len(stale_translations),
+        "citation_diagnostics": citation_diagnostics,
+        "library_diagnostics": library_diagnostics,
+        "duplicate_source_refs": duplicate_refs,
+        "grobid": copy.deepcopy(grobid_status) if grobid_status is not None else {},
+    }
+
+
+def paper_source_badges(
+    profile: str | Path,
+    source_id: str,
+    *,
+    grobid_status: dict[str, object] | None = None,
+) -> list[str]:
+    """Return only the badge labels for one paper source."""
+
+    return list(
+        paper_source_diagnostics(
+            profile,
+            source_id,
+            grobid_status=grobid_status,
+        )["badges"]
+    )
+
+
+def paper_diagnostics(
+    profile: str | Path,
+    *,
+    include_grobid: bool = False,
+) -> dict[str, object]:
+    """Return profile-level Paper Reading diagnostics for UI surfaces."""
+
+    inbox = load_research_sources(_profile_root(profile))
+    grobid_status = grobid_readiness() if include_grobid else None
+    source_diagnostics = [
+        paper_source_diagnostics(profile, source.id, grobid_status=grobid_status)
+        for source in inbox.sources
+        if source.kind == "paper"
+    ]
+    badge_counts: dict[str, int] = {}
+    for diagnostic in source_diagnostics:
+        for badge in diagnostic.get("badges") or []:
+            label = _clean_text(badge)
+            if label:
+                badge_counts[label] = badge_counts.get(label, 0) + 1
+    return {
+        "grobid": copy.deepcopy(grobid_status) if grobid_status is not None else {},
+        "sources": source_diagnostics,
+        "badge_counts": badge_counts,
+    }
 
 
 def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> list[dict[str, object]]:
@@ -1997,6 +2402,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             continue
         annotations = load_paper_annotations(profile, source.id) if is_paper else []
         translations = load_paper_translations(profile, source.id) if is_paper else []
+        diagnostics = paper_source_diagnostics(profile, source.id) if is_paper else {"badges": []}
         stale = any(row.status == "stale" for row in translations)
         refs = list(source.library_node_refs)
         row = {
@@ -2012,6 +2418,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             "last_read": _clean_text((source.metadata or {}).get("last_read_at") or source.reading.updated_at),
             "visibility": source.visibility,
             "badges": [],
+            "diagnostics": diagnostics,
             "source": source,
         }
         badges: list[str] = row["badges"]  # type: ignore[assignment]
@@ -2023,8 +2430,17 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             badges.append("Stale translation")
         if source.visibility == "private":
             badges.append("Private source")
+        if _clean_text((source.metadata or {}).get("pdf_download_status")) in {
+            "failed",
+            "skipped_needs_link_check",
+        }:
+            badges.append("PDF download warning")
         if source.reading.claim_candidates or source.status == "candidate_ready":
             badges.append("AI candidates")
+        for badge in diagnostics.get("badges", []):  # type: ignore[union-attr]
+            label = _clean_text(badge)
+            if label and label not in badges:
+                badges.append(label)
         match = True
         if view == "unsorted":
             match = is_paper and not refs
@@ -2053,11 +2469,19 @@ def paper_overview(profile: str | Path) -> dict[str, object]:
         stale_translations += sum(1 for row in load_paper_translations(profile, source.id) if row.status == "stale")
     workspace_diagnostics = validate_research_workspace(_profile_root(profile))
     library_diagnostics = validate_paper_library(profile)
+    quote_diagnostics = paper_citation_diagnostics(_profile_root(profile))
     citation_broken = [
         item
         for item in [*workspace_diagnostics, *library_diagnostics]
         if "citation" in item or "chunk" in item or "source ref" in item or "library node" in item
-    ]
+    ] + quote_diagnostics
+    source_diagnostics = [paper_source_diagnostics(profile, source.id) for source in papers]
+    badge_counts: dict[str, int] = {}
+    for diagnostic in source_diagnostics:
+        for badge in diagnostic.get("badges") or []:
+            label = _clean_text(badge)
+            if label:
+                badge_counts[label] = badge_counts.get(label, 0) + 1
     private_publish_risk = [
         source.id
         for source in papers
@@ -2088,6 +2512,20 @@ def paper_overview(profile: str | Path) -> dict[str, object]:
         "private_publish_risk": len(private_publish_risk),
         "private_publish_risk_refs": private_publish_risk,
         "stale_translation_warning": stale_translations,
+        "needs_structured_extraction": badge_counts.get(
+            PAPER_DIAGNOSTIC_BADGES["needs_structured_extraction"],
+            0,
+        ),
+        "grobid_unavailable": badge_counts.get(
+            PAPER_DIAGNOSTIC_BADGES["grobid_unavailable"],
+            0,
+        ),
+        "duplicate_risk": badge_counts.get(
+            PAPER_DIAGNOSTIC_BADGES["duplicate_risk"],
+            0,
+        ),
+        "diagnostic_badge_counts": badge_counts,
+        "source_diagnostics": source_diagnostics,
         "recent_papers": recent,
     }
 
@@ -2312,6 +2750,7 @@ __all__ = [
     "extract_paper_segments",
     "format_research_citations",
     "grobid_available",
+    "grobid_readiness",
     "grobid_tei_to_bibliography",
     "grobid_tei_to_segments",
     "import_paper_pdf",
@@ -2326,13 +2765,19 @@ __all__ = [
     "load_paper_translations",
     "mark_imported_paper_results",
     "move_papers_to_node",
+    "paper_citation_diagnostics",
+    "paper_diagnostics",
     "paper_library_path",
     "paper_library_paths",
     "paper_overview",
+    "paper_pdf_asset_path",
     "paper_rows",
+    "paper_source_badges",
+    "paper_source_diagnostics",
     "process_grobid_fulltext",
     "pymupdf_available",
     "research_asset_root",
+    "render_paper_page_preview",
     "save_paper_analysis",
     "save_paper_annotations",
     "save_paper_library_tree",

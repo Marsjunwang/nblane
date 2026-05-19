@@ -1147,7 +1147,44 @@ NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
 推荐部署：
 
 ```bash
-docker run --rm -p 8070:8070 grobid/grobid:latest
+docker run -d --name nblane-grobid --restart unless-stopped \
+  -p 127.0.0.1:8070:8070 \
+  grobid/grobid:0.9.0-crf
+```
+
+启动后验证：
+
+```bash
+curl http://127.0.0.1:8070/api/isalive
+```
+
+返回 `true` 代表 nblane 可以使用该服务。生产或本机 `.env` 中应配置：
+
+```bash
+NBLANE_GROBID_URL=http://127.0.0.1:8070
+NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+```
+
+依赖和启动要求：
+
+- GROBID 本身不是云 API，而是自托管 REST 服务；nblane 只要求能访问
+  `GET /api/isalive` 和 `POST /api/processFulltextDocument`。
+- 推荐使用 Docker 镜像部署，避免手工处理 Java / Gradle / 模型依赖。
+- 本地源码方式也可行，但需要 Java 21，并按 GROBID 官方 Gradle 流程启动服务。
+- 为保护私有论文，默认建议只绑定 `127.0.0.1:8070`，不要直接暴露公网。
+- 国内环境拉 Docker Hub 可能失败，可先配置 Docker registry mirror，再拉
+  `grobid/grobid:0.9.0-crf`。
+- GROBID 服务不可用时，Reader 仍能工作，但结构化抽取会显示
+  `GROBID unavailable` / `Needs structured extraction`，并回退到 PyMuPDF page text /
+  heuristic segments。
+
+常用维护命令：
+
+```bash
+sudo docker ps --filter name=nblane-grobid
+sudo docker logs -f nblane-grobid
+sudo docker restart nblane-grobid
+sudo docker stop nblane-grobid
 ```
 
 实现优先级：
