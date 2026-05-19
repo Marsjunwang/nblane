@@ -12,8 +12,6 @@ from html import escape
 from urllib.parse import urlparse
 
 import streamlit as st
-import yaml
-
 from nblane.checkin_calendar_component import st_checkin_calendar
 from nblane.core import gap as gap_engine
 from nblane.core import llm as llm_client
@@ -73,26 +71,12 @@ from nblane.kanban_ui._helpers import (
     _clear_kanban_dirty,
     _kanban_is_dirty,
 )
-from nblane.core.profile_ingest import (
-    filter_ingest_patch,
-    ingest_preview_delta,
-    merge_ingest_patch,
-    parse_ingest_patch,
-    run_ingest_patch,
-    schema_node_labels,
-)
-from nblane.core.profile_ingest_llm import ingest_kanban_done_json
 from nblane.core.project_board import load_project_board
 from nblane.core.project_board_sync import (
-    add_project_refs_to_ingest_patch,
-    project_refs_for_tasks,
     sync_project_board_from_kanban,
 )
-from nblane.core.review_actions import record_writeback_activity
 from nblane.web_cache import (
     clear_web_cache,
-    load_evidence_pool_raw,
-    load_skill_tree_raw,
 )
 from nblane.core.web_preferences import (
     load_web_preferences,
@@ -108,13 +92,10 @@ from nblane.web_shared import (
     apply_ui_language_from_session,
     assert_files_current,
     current_goal_agent_context,
-    drop_streamlit_widget_keys,
     ensure_file_snapshot,
-    remember_allow_and_drop_yaml_preview_keys,
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
-    render_llm_unavailable,
     kanban_ai_backend,
     kanban_ai_suffix,
     select_profile,
@@ -135,50 +116,6 @@ def _load_into_state(profile: str) -> None:
     st.session_state[_state_key(profile)] = ensure_kanban_task_ids(
         parse_kanban(profile),
         profile,
-    )
-
-
-def _record_ingest_activity(
-    profile: str,
-    *,
-    title: str,
-    source_ids: set[str],
-    source_titles: set[str],
-    warnings: list[str] | None = None,
-    error: str = "",
-    status: str = "applied",
-) -> None:
-    """Record Done -> Evidence writeback in Agent Activity."""
-    pdir = profile_dir(profile)
-    record_writeback_activity(
-        profile,
-        source_page="Kanban",
-        target_owner="evidence_pool",
-        candidate_type="evidence",
-        source_ref="kanban:done_to_evidence",
-        title=title,
-        summary="Done -> Evidence writeback",
-        refs={
-            "task_refs": sorted(source_ids),
-            "task_titles": sorted(source_titles),
-            "files": [
-                str(pdir / "evidence-pool.yaml"),
-                str(pdir / "skill-tree.yaml"),
-                str(pdir / "kanban.md"),
-            ],
-        },
-        payload={"source": "kanban_done_to_evidence"},
-        warnings=list(warnings or []),
-        error=error,
-        changed_paths=[
-            pdir / "evidence-pool.yaml",
-            pdir / "skill-tree.yaml",
-            pdir / "SKILL.md",
-            pdir / "kanban.md",
-        ]
-        if status == "applied"
-        else [],
-        status=status,
     )
 
 
@@ -741,6 +678,12 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             ),
             "delete_short": ui.get("kb_delete_short", "x"),
             "delete_task": ui["kb_delete_card"],
+            "archive_done": ui.get("kb_archive_card", "Archive"),
+            "archive_short": ui.get("kb_archive_short", "Archive"),
+            "archive_confirm": ui.get(
+                "kb_archive_confirm",
+                "Archive this Done task?",
+            ),
             "delete_subtask": ui.get("kb_delete_subtask", "Delete subtask"),
             "details": ui["details"],
             "done_uncrystallized": ui.get(
@@ -1697,6 +1640,44 @@ def _handle_board_event(
         _auto_save(profile, sections)
         st.rerun()
 
+    if action == "archive_done_card":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        found, card_applied, ok = _apply_board_card_payload(
+            profile=profile,
+            card=payload.get("card"),
+            found=found,
+            sections=sections,
+            ui=ui,
+        )
+        if not ok or found is None:
+            return
+        section, idx, _task = found
+        if section != KANBAN_DONE:
+            if card_applied:
+                _auto_save(profile, sections)
+            st.warning(
+                ui.get(
+                    "kb_archive_done_only",
+                    "Only Done tasks can be archived from the board.",
+                )
+            )
+            return
+        pdir = profile_dir(profile)
+        kanban_path = pdir / "kanban.md"
+        archive_path = pdir / "kanban-archive.md"
+        project_path = pdir / "project-board.yaml"
+        assert_files_current([archive_path, kanban_path, project_path])
+        updated = archive_kanban_done_tasks(profile, sections, [idx])
+        sync_project_board_from_kanban(profile, updated)
+        refresh_file_snapshots([archive_path, kanban_path, project_path])
+        stash_git_backup_results()
+        clear_web_cache()
+        sections.clear()
+        sections.update(updated)
+        st.rerun()
+
     if action == "crystallize_card":
         if found is None:
             st.warning(ui["kb_drag_stale"])
@@ -2015,59 +1996,6 @@ def _handle_board_event(
         st.rerun()
         return
 
-    if action in ("request_done_ingest", "ai_done_ingest"):
-        if found is None:
-            st.warning(ui["kb_drag_stale"])
-            return
-        found, card_applied, ok = _apply_board_card_payload(
-            profile=profile,
-            card=payload.get("card"),
-            found=found,
-            sections=sections,
-            ui=ui,
-        )
-        if not ok or found is None:
-            return
-        if card_applied:
-            _auto_save(profile, sections)
-        _section, _idx, task = found
-        if ai_backend == "llm" and not llm_client.is_configured():
-            render_llm_unavailable(ui)
-            return
-        with st.spinner(ui["ingest_spinner"]):
-            patch, err = ingest_kanban_done_json(
-                profile,
-                [task],
-                goal_context=current_goal_agent_context(profile),
-                ai_backend=ai_backend,
-            )
-        if err is not None:
-            st.error(ui["ingest_err"].format(msg=err))
-            return
-        if patch is not None:
-            patch = add_project_refs_to_ingest_patch(
-                patch,
-                project_refs_for_tasks([task]),
-            )
-            drop_streamlit_widget_keys(
-                [
-                    f"pv_pool_{profile}",
-                    f"pv_tree_{profile}",
-                ]
-            )
-            st.session_state[f"kanban_ingest_source_done_{profile}"] = [
-                task.title
-            ]
-            st.session_state[f"kanban_ingest_source_done_ids_{profile}"] = [
-                task.id
-            ]
-            st.session_state[f"kanban_ingest_source_projects_{profile}"] = (
-                project_refs_for_tasks([task])
-            )
-            st.session_state[f"kanban_ingest_patch_{profile}"] = patch
-            st.rerun()
-
-
 # -- Page --------------------------------------------------------
 
 ui = kanban_ui()
@@ -2245,416 +2173,21 @@ else:
 
 st.divider()
 
-# -- Done bulk ---------------------------------------------------
-
-with st.expander(ui["done_bulk_title"], expanded=False):
-    done_tasks_bulk = sections.get(KANBAN_DONE) or []
-    if not done_tasks_bulk:
-        st.caption(ui["ingest_no_done"])
-    else:
-        pick_bulk = st.multiselect(
-            ui["done_bulk_pick"],
-            options=list(range(len(done_tasks_bulk))),
-            format_func=lambda i: done_tasks_bulk[i].title,
-            key=f"bulk_pick_{selected}",
+done_entry_l, done_entry_r = st.columns(
+    [4, 1],
+    gap="medium",
+    vertical_alignment="center",
+)
+with done_entry_l:
+    st.caption(
+        ui.get(
+            "kb_done_review_hint",
+            "Use Evidence Review for Done -> evidence drafts and batch cleanup.",
         )
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button(ui["archive_done"], key=f"arch_{selected}"):
-                if pick_bulk:
-                    assert_files_current(
-                        [_archive_path, _kanban_path, _project_path]
-                    )
-                    sections = archive_kanban_done_tasks(
-                        selected,
-                        sections,
-                        pick_bulk,
-                    )
-                    sync_project_board_from_kanban(selected, sections)
-                    refresh_file_snapshots(
-                        [_archive_path, _kanban_path, _project_path]
-                    )
-                    stash_git_backup_results()
-                    st.rerun()
-        with b2:
-            if st.button(ui["delete_done"], key=f"delbulk_{selected}"):
-                if pick_bulk:
-                    for j in sorted(pick_bulk, reverse=True):
-                        done_tasks_bulk.pop(j)
-                    sections[KANBAN_DONE] = done_tasks_bulk
-                    _auto_save(selected, sections)
-                    st.rerun()
-
-# -- Done → evidence (AI ingest) ---------------------------------
-
-st.divider()
-with st.expander(ui["ingest_expander"], expanded=False):
-    done_tasks = sections.get(KANBAN_DONE) or []
-    if not done_tasks:
-        st.caption(ui["ingest_no_done"])
-    else:
-        pick = st.multiselect(
-            ui["ingest_pick_done"],
-            options=list(range(len(done_tasks))),
-            format_func=lambda i: done_tasks[i].title,
-            key=f"ingest_done_pick_{selected}",
-        )
-        allow_st = st.checkbox(
-            ui["ingest_allow_status"],
-            value=False,
-            key=f"ingest_allow_{selected}",
-        )
-        st.caption(ui["ingest_allow_status_help"])
-        gen = st.button(
-            ui["ingest_generate"],
-            key=f"ingest_gen_{selected}",
-        )
-        if gen and pick:
-            chosen = [done_tasks[i] for i in pick]
-            if ai_backend == "llm" and not llm_client.is_configured():
-                render_llm_unavailable(ui)
-            else:
-                with st.spinner(ui["ingest_spinner"]):
-                    patch, err = ingest_kanban_done_json(
-                        selected,
-                        chosen,
-                        goal_context=current_goal_agent_context(selected),
-                        ai_backend=ai_backend,
-                    )
-                if err is not None:
-                    st.error(ui["ingest_err"].format(msg=err))
-                elif patch is not None:
-                    patch = add_project_refs_to_ingest_patch(
-                        patch,
-                        project_refs_for_tasks(chosen),
-                    )
-                    drop_streamlit_widget_keys(
-                        [
-                            f"pv_pool_{selected}",
-                            f"pv_tree_{selected}",
-                        ]
-                    )
-                    st.session_state[
-                        f"kanban_ingest_source_done_{selected}"
-                    ] = [t.title for t in chosen]
-                    st.session_state[
-                        f"kanban_ingest_source_done_ids_{selected}"
-                    ] = [t.id for t in chosen if t.id]
-                    st.session_state[
-                        f"kanban_ingest_source_projects_{selected}"
-                    ] = project_refs_for_tasks(chosen)
-                    st.session_state[
-                        f"kanban_ingest_patch_{selected}"
-                    ] = patch
-                    st.rerun()
-
-        patch_key = f"kanban_ingest_patch_{selected}"
-        if patch_key in st.session_state:
-            remember_allow_and_drop_yaml_preview_keys(
-                allow_st,
-                prev_state_key=f"_kanban_allow_prev_{selected}",
-                pool_key=f"pv_pool_{selected}",
-                tree_key=f"pv_tree_{selected}",
-            )
-            raw_patch = st.session_state[patch_key]
-            parsed = parse_ingest_patch(raw_patch)
-            ev_rows = parsed.evidence_entries
-            no_rows = parsed.node_updates
-
-            st.markdown(f"**{ui['ingest_select_rows']}**")
-            include_ev: list[bool] = []
-            for ei, er in enumerate(ev_rows):
-                title = str(er.get("title", "") or "")[:80]
-                ex = str(er.get("source_excerpt", "") or "")[:120]
-                c1, c2 = st.columns([1, 5])
-                with c1:
-                    include_ev.append(
-                        st.checkbox(
-                            ui["ingest_adopt_evidence"],
-                            value=True,
-                            key=f"k_ev_{selected}_{ei}",
-                        )
-                    )
-                with c2:
-                    st.caption(f"{title}")
-                    if ex:
-                        st.caption(
-                            f"{ui['ingest_excerpt']}: {ex}"
-                        )
-            include_no: list[bool] = []
-            for nj, nr in enumerate(no_rows):
-                nid = str(nr.get("id", "") or "")
-                rat = str(nr.get("rationale", "") or "")[:200]
-                c1, c2 = st.columns([1, 5])
-                with c1:
-                    include_no.append(
-                        st.checkbox(
-                            ui["ingest_adopt_node"],
-                            value=True,
-                            key=f"k_no_{selected}_{nj}",
-                        )
-                    )
-                with c2:
-                    st.caption(f"`{nid}`")
-                    if rat:
-                        st.caption(
-                            f"{ui['ingest_rationale']}: {rat}"
-                        )
-
-            filtered, fw = filter_ingest_patch(
-                raw_patch,
-                include_evidence=include_ev if ev_rows else None,
-                include_nodes=include_no if no_rows else None,
-            )
-            if fw:
-                st.caption(ui["ingest_filter_warn"])
-                for w in fw:
-                    st.caption(f"- {w}")
-
-            mark_cryst = st.checkbox(
-                ui["ingest_mark_crystallized"],
-                value=False,
-                key=f"ingest_cryst_{selected}",
-            )
-
-            pool_raw = load_evidence_pool_raw(selected)
-            tree_raw = load_skill_tree_raw(selected)
-            src_done = st.session_state.get(
-                f"kanban_ingest_source_done_{selected}"
-            )
-            src_done_ids = st.session_state.get(
-                f"kanban_ingest_source_done_ids_{selected}"
-            )
-            src_projects = st.session_state.get(
-                f"kanban_ingest_source_projects_{selected}"
-            )
-            if isinstance(src_done, list) and src_done:
-                st.caption(
-                    ui["ingest_preview_source_done"].format(
-                        sources="; ".join(str(x) for x in src_done),
-                    )
-                )
-            if isinstance(src_projects, list) and src_projects:
-                st.caption(
-                    ui.get("ingest_preview_projects", "Projects: {projects}").format(
-                        projects=", ".join(str(x) for x in src_projects),
-                    )
-                )
-            st.caption(
-                ui["merge_preview_llm_status_line"].format(
-                    mode=(
-                        ui["merge_llm_status_applied"]
-                        if allow_st
-                        else ui["merge_llm_status_ignored"]
-                    ),
-                )
-            )
-            merge = merge_ingest_patch(
-                selected,
-                pool_raw,
-                tree_raw,
-                filtered,
-                allow_status_change=allow_st,
-                bump_locked_with_evidence=True,
-            )
-            if merge.warnings:
-                st.caption(ui["ingest_warn"])
-                for w in merge.warnings:
-                    st.caption(f"- {w}")
-            if merge.ok and (
-                merge.merged_pool is not None
-                or merge.merged_tree is not None
-            ):
-                lab = schema_node_labels(tree_raw)
-                new_ev, tree_delta = ingest_preview_delta(
-                    pool_raw,
-                    tree_raw,
-                    merge.merged_pool,
-                    merge.merged_tree,
-                    lab,
-                )
-                with st.expander(
-                    ui["merge_preview_delta_title"],
-                    expanded=True,
-                ):
-                    if new_ev:
-                        st.markdown(
-                            f"**{ui['merge_preview_delta_new_evidence']}**"
-                        )
-                        for line in new_ev:
-                            st.markdown(f"- {line}")
-                    if tree_delta:
-                        st.markdown(
-                            f"**{ui['merge_preview_delta_tree']}**"
-                        )
-                        for line in tree_delta:
-                            st.markdown(f"- {line}")
-                    if not new_ev and not tree_delta:
-                        st.caption(ui["merge_preview_delta_none"])
-            if merge.ok and (
-                merge.merged_pool is not None
-                or merge.merged_tree is not None
-            ):
-                st.caption(ui["merge_preview_yaml_readonly_caption"])
-            if merge.ok and merge.merged_pool:
-                st.markdown(f"**{ui['ingest_preview_pool']}**")
-                st.code(
-                    yaml.dump(
-                        merge.merged_pool,
-                        allow_unicode=True,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    ),
-                    language="yaml",
-                )
-            if merge.ok and merge.merged_tree:
-                st.markdown(f"**{ui['ingest_preview_tree']}**")
-                st.code(
-                    yaml.dump(
-                        merge.merged_tree,
-                        allow_unicode=True,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    ),
-                    language="yaml",
-                )
-            if not merge.ok:
-                for e in merge.errors:
-                    st.error(e)
-            else:
-                ac1, ac2 = st.columns(2)
-                with ac1:
-                    apply_sel = st.button(
-                        ui["ingest_apply_selected"],
-                        key=f"ingest_apply_sel_{selected}",
-                        type="primary",
-                    )
-                with ac2:
-                    apply_all = st.button(
-                        ui["ingest_apply_all"],
-                        key=f"ingest_apply_all_{selected}",
-                    )
-                if apply_sel:
-                    assert_files_current(
-                        [_pool_path, _tree_path, _skill_path]
-                    )
-                    _, apply = run_ingest_patch(
-                        selected,
-                        filtered,
-                        allow_status_change=allow_st,
-                        bump_locked_with_evidence=True,
-                        dry_run=False,
-                    )
-                    source_titles = (
-                        {str(x) for x in src_done}
-                        if isinstance(src_done, list)
-                        else set()
-                    )
-                    source_ids = (
-                        {str(x) for x in src_done_ids}
-                        if isinstance(src_done_ids, list)
-                        else set()
-                    )
-                    if apply.ok:
-                        clear_web_cache()
-                        refresh_file_snapshots(
-                            [_pool_path, _tree_path, _skill_path]
-                        )
-                        _record_ingest_activity(
-                            selected,
-                            title="Applied selected Done -> Evidence candidates",
-                            source_ids=source_ids,
-                            source_titles=source_titles,
-                            warnings=apply.warnings,
-                        )
-                        stash_git_backup_results()
-                        st.success(ui["ingest_applied"])
-                        if mark_cryst and isinstance(src_done, list):
-                            secs = _get_sections(selected)
-                            _mark_done_crystallized(secs, source_ids, source_titles)
-                            _auto_save(selected, secs)
-                        del st.session_state[patch_key]
-                        for sk in (
-                            f"kanban_ingest_source_done_{selected}",
-                            f"kanban_ingest_source_done_ids_{selected}",
-                            f"kanban_ingest_source_projects_{selected}",
-                        ):
-                            if sk in st.session_state:
-                                del st.session_state[sk]
-                        st.rerun()
-                    else:
-                        _record_ingest_activity(
-                            selected,
-                            title="Failed selected Done -> Evidence candidates",
-                            source_ids=source_ids,
-                            source_titles=source_titles,
-                            warnings=apply.warnings,
-                            error="; ".join(apply.errors),
-                            status="failed",
-                        )
-                        for e in apply.errors:
-                            st.error(e)
-                        for w in apply.warnings:
-                            st.warning(w)
-                if apply_all:
-                    assert_files_current(
-                        [_pool_path, _tree_path, _skill_path]
-                    )
-                    _, apply = run_ingest_patch(
-                        selected,
-                        raw_patch,
-                        allow_status_change=allow_st,
-                        bump_locked_with_evidence=True,
-                        dry_run=False,
-                    )
-                    source_titles = (
-                        {str(x) for x in src_done}
-                        if isinstance(src_done, list)
-                        else set()
-                    )
-                    source_ids = (
-                        {str(x) for x in src_done_ids}
-                        if isinstance(src_done_ids, list)
-                        else set()
-                    )
-                    if apply.ok:
-                        clear_web_cache()
-                        refresh_file_snapshots(
-                            [_pool_path, _tree_path, _skill_path]
-                        )
-                        _record_ingest_activity(
-                            selected,
-                            title="Applied all Done -> Evidence candidates",
-                            source_ids=source_ids,
-                            source_titles=source_titles,
-                            warnings=apply.warnings,
-                        )
-                        stash_git_backup_results()
-                        st.success(ui["ingest_applied"])
-                        if mark_cryst and isinstance(src_done, list):
-                            secs = _get_sections(selected)
-                            _mark_done_crystallized(secs, source_ids, source_titles)
-                            _auto_save(selected, secs)
-                        del st.session_state[patch_key]
-                        for sk in (
-                            f"kanban_ingest_source_done_{selected}",
-                            f"kanban_ingest_source_done_ids_{selected}",
-                            f"kanban_ingest_source_projects_{selected}",
-                        ):
-                            if sk in st.session_state:
-                                del st.session_state[sk]
-                        st.rerun()
-                    else:
-                        _record_ingest_activity(
-                            selected,
-                            title="Failed all Done -> Evidence candidates",
-                            source_ids=source_ids,
-                            source_titles=source_titles,
-                            warnings=apply.warnings,
-                            error="; ".join(apply.errors),
-                            status="failed",
-                        )
-                        for e in apply.errors:
-                            st.error(e)
-                        for w in apply.warnings:
-                            st.warning(w)
+    )
+with done_entry_r:
+    st.page_link(
+        "pages/2_Evidence_Review.py",
+        label=ui.get("kb_open_evidence_review", "Open Evidence Review"),
+        use_container_width=True,
+    )

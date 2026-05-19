@@ -432,6 +432,9 @@
     const DEFAULT_ORDER = ["Doing", "Queue", "Done", "Someday / Maybe"];
     const DEFAULT_LABELS = {
       add: "Add",
+      archive_confirm: "Archive this Done task?",
+      archive_done: "Archive",
+      archive_short: "Archive",
       ai_done: "Done -> evidence",
       ai_done_short: "Evd",
       ai_gap: "Analyze gap",
@@ -1024,7 +1027,7 @@
     }
     function quickActionsHtml(task) {
       const doneActions = task.section === "Done" ? `
-        ${actionButton("ai_done", "ai_done_short", "ai_done")}
+        ${actionButton("archive_done", "archive_short", "archive_done")}
       ` : "";
       const crystallizeAction = task.section === "Done" && !task.crystallized
         ? actionButton("crystallize", "crystallize_short", "crystallize")
@@ -1548,8 +1551,9 @@
               emit("request_gap", withPendingEditCard(panel, { card_id: taskId }));
             } else if (action === "ai_subtasks") {
               emit("request_subtasks", withPendingEditCard(panel, { card_id: taskId }));
-            } else if (action === "ai_done") {
-              emit("request_done_ingest", withPendingEditCard(panel, { card_id: taskId }));
+            } else if (action === "archive_done") {
+              if (!window.confirm(label("archive_confirm"))) return;
+              emit("archive_done_card", withPendingEditCard(panel, { card_id: taskId }));
             } else if (action === "crystallize") {
               emit("crystallize_card", withPendingEditCard(panel, { card_id: taskId }));
             } else if (action === "move_to_section") {

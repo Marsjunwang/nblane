@@ -927,7 +927,7 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "metric_unlinked": "Unlinked evidence",
         "metric_needs_review": "Needs review",
         "metric_status_risk": "Status evidence risk",
-        "tab_queue": "Review Queue",
+        "tab_queue": "Done Queue / Housekeeping",
         "tab_claims": "Claim Candidates",
         "tab_pool": "Evidence Pool",
         "tab_links": "Skill Links",
@@ -950,6 +950,27 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "done_apply_selected": "Apply selected",
         "done_apply_all": "Apply all",
         "done_applied": "Applied evidence draft.",
+        "done_housekeeping_title": "Done housekeeping",
+        "done_housekeeping_caption": (
+            "Archive or delete Done tasks after their evidence review is handled."
+        ),
+        "done_housekeeping_pick": "Pick Done tasks",
+        "done_housekeeping_archive": "Archive selected Done tasks",
+        "done_housekeeping_delete": "Delete selected Done tasks",
+        "done_housekeeping_confirm_archive": "Confirm archive selected",
+        "done_housekeeping_confirm_delete": "Confirm delete selected",
+        "done_housekeeping_uncrystallized_warning": (
+            "Some selected tasks are not crystallized yet. Archive or delete only if "
+            "you are sure they do not need Done -> evidence review."
+        ),
+        "done_housekeeping_confirm_uncrystallized": (
+            "I understand the selected uncrystallized Done tasks may not have evidence yet"
+        ),
+        "done_housekeeping_archived": "Archived {n} Done task(s).",
+        "done_housekeeping_deleted": "Deleted {n} Done task(s).",
+        "done_housekeeping_empty": "No Done tasks to clean up.",
+        "done_crystallized_label": "crystallized",
+        "done_uncrystallized_label": "uncrystallized",
         "review_rows_title": "Pool rows needing review",
         "review_rows_empty": "No evidence rows need review.",
         "unlinked_rows_title": "Unlinked evidence",
@@ -1067,7 +1088,7 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "metric_unlinked": "未挂技能",
         "metric_needs_review": "待审阅",
         "metric_status_risk": "状态证据风险",
-        "tab_queue": "审阅队列",
+        "tab_queue": "Done 队列 / 整理",
         "tab_claims": "Claim 候选",
         "tab_pool": "Evidence Pool",
         "tab_links": "技能关联",
@@ -1089,6 +1110,27 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "done_apply_selected": "应用所选",
         "done_apply_all": "应用全部",
         "done_applied": "已应用 evidence 草案。",
+        "done_housekeeping_title": "Done 整理",
+        "done_housekeeping_caption": (
+            "在 evidence review 完成后，把 Done 任务批量归档或删除。"
+        ),
+        "done_housekeeping_pick": "选择 Done 任务",
+        "done_housekeeping_archive": "归档所选 Done 任务",
+        "done_housekeeping_delete": "删除所选 Done 任务",
+        "done_housekeeping_confirm_archive": "确认归档所选",
+        "done_housekeeping_confirm_delete": "确认删除所选",
+        "done_housekeeping_uncrystallized_warning": (
+            "所选任务中包含未结晶 Done。只有确认它们不需要 Done -> evidence "
+            "审阅时才建议归档或删除。"
+        ),
+        "done_housekeeping_confirm_uncrystallized": (
+            "我确认所选未结晶 Done 可能尚未生成 evidence"
+        ),
+        "done_housekeeping_archived": "已归档 {n} 个 Done 任务。",
+        "done_housekeeping_deleted": "已删除 {n} 个 Done 任务。",
+        "done_housekeeping_empty": "没有可整理的 Done 任务。",
+        "done_crystallized_label": "已结晶",
+        "done_uncrystallized_label": "未结晶",
         "review_rows_title": "需要审阅的池条目",
         "review_rows_empty": "没有需要审阅的 evidence 条目。",
         "unlinked_rows_title": "未挂技能的 evidence",
@@ -2310,6 +2352,15 @@ _KANBAN: dict[str, dict[str, str]] = {
         "subtasks_label": "Subtasks (checkbox)",
         "add_subtask": "+ Subtask",
         "crystallized": "Crystallized (ingested)",
+        "kb_open_evidence_review": "Open Evidence Review",
+        "kb_done_review_hint": (
+            "Use Evidence Review for Done -> evidence drafts and batch cleanup. "
+            "Done cards still support single-card archive or delete here."
+        ),
+        "kb_archive_card": "Archive",
+        "kb_archive_short": "Archive",
+        "kb_archive_confirm": "Archive this Done task?",
+        "kb_archive_done_only": "Only Done tasks can be archived from the board.",
         "done_bulk_title": "Done column housekeeping",
         "done_bulk_pick": "Select Done tasks",
         "archive_done": "Archive selected",
@@ -2704,6 +2755,15 @@ _KANBAN: dict[str, dict[str, str]] = {
         "subtasks_label": "子任务（可勾选）",
         "add_subtask": "+ 子任务",
         "crystallized": "已结晶（已摄入）",
+        "kb_open_evidence_review": "打开 Evidence Review",
+        "kb_done_review_hint": (
+            "Done -> evidence 草案与批量整理统一在 Evidence Review 处理；"
+            "看板 Done 卡片这里只保留单卡归档或删除。"
+        ),
+        "kb_archive_card": "归档",
+        "kb_archive_short": "归档",
+        "kb_archive_confirm": "归档这个 Done 任务？",
+        "kb_archive_done_only": "只有 Done 任务可以在看板中归档。",
         "done_bulk_title": "「已完成」列整理",
         "done_bulk_pick": "选择已完成任务",
         "archive_done": "归档所选",

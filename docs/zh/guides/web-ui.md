@@ -151,8 +151,8 @@ source_of_truth: true
 - 新建与编辑任务时，**按列只突出主字段**（如进行中：背景 + 开始日；队列：原因 + 阻塞；已完成：结果 + 背景）；其余在 **「更多字段」** 折叠中填写（详见 [看板使用手册 · §4](kanban.md)）。
 - 任务下可维护 **子任务（勾选）** 与自由备注。
 - **移动列** 用列名 **按钮**（非「完成状态」菜单）；可选 **自动填写开始/结束日期**（移入进行中/已完成时）。
-- **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [看板使用手册](kanban.md)。
-- **已完成 → 证据** 折叠区 — 多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
+- Done 卡片保留单卡 **归档**（写入 `kanban-archive.md` 后移出 Done）和 **删除**；批量 Done 整理已移到 **Evidence Review → Done 队列 / 整理**，说明见 [看板使用手册](kanban.md)。
+- **已完成 → 证据** 统一在 Evidence Review 处理：多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
 - 侧栏 **AI / LLM** 中的 **看板 AI 引擎** 可在普通 LLM 与本地 Codex 间切换；选择 Codex 时，Gap 节点路由、拆任务、任务理解和 Done → evidence 使用当前 profile 专属 `CODEX_HOME` 下的只读 `codex exec`，不需要看板内额外配置，也不会创建 patch handoff。
 - 看板拆子任务的粒度和风格提示会按 profile 记入 `web-preferences.yaml`；如果 Codex 配置错误导致生成失败，卡片上的错误可跳转到 Agent Activity 中对应的 failed 条目。
 - Kanban 卡片上的 **Gap** 预览会带入 privacy-safe current goal context，与

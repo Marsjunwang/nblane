@@ -26,7 +26,7 @@ function verifyHtml(html, label) {
     "Queue",
     "Done",
     "Someday / Maybe",
-    "request_done_ingest",
+    "archive_done_card",
     "confirm_subtask_alignment",
   ];
   for (const needle of required) {

@@ -240,6 +240,17 @@ class TestEvidenceReview(unittest.TestCase):
             "strong",
         )
 
+    def test_page_exposes_done_housekeeping_workbench(self) -> None:
+        """Evidence Review owns Done batch cleanup and writeback activity."""
+        source = Path("pages/2_Evidence_Review.py").read_text(encoding="utf-8")
+
+        self.assertIn("_render_done_housekeeping", source)
+        self.assertIn("archive_kanban_done_tasks", source)
+        self.assertIn("sync_project_board_from_kanban", source)
+        self.assertIn("done_housekeeping_confirm_delete", source)
+        self.assertIn("record_writeback_activity", source)
+        self.assertIn("kanban_ai_backend(selected)", source)
+
 
 if __name__ == "__main__":
     unittest.main()

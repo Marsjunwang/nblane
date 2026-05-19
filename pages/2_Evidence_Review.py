@@ -25,6 +25,7 @@ from nblane.core.experience import (
 from nblane.core.io import (
     EVIDENCE_POOL_FILENAME,
     KANBAN_DONE,
+    archive_kanban_done_tasks,
     parse_kanban,
     profile_dir,
     save_evidence_pool,
@@ -50,7 +51,9 @@ from nblane.core.profile_ingest_llm import ingest_kanban_done_json
 from nblane.core.project_board_sync import (
     add_project_refs_to_ingest_patch,
     project_refs_for_tasks,
+    sync_project_board_from_kanban,
 )
+from nblane.core.review_actions import record_writeback_activity
 from nblane.core.sync import write_generated_blocks
 from nblane.web_auth import require_login
 from nblane.web_cache import (
@@ -68,6 +71,7 @@ from nblane.web_shared import (
     render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
+    kanban_ai_backend,
     select_profile,
     stash_git_backup_results,
 )
@@ -85,6 +89,7 @@ _pool_path = _pdir / EVIDENCE_POOL_FILENAME
 _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
 _kanban_path = _pdir / "kanban.md"
+_archive_path = _pdir / "kanban-archive.md"
 _goals_path = _pdir / "goals.yaml"
 _project_path = _pdir / "project-board.yaml"
 _experience_path = _pdir / "experience.yaml"
@@ -94,6 +99,7 @@ for _path in (
     _tree_path,
     _skill_path,
     _kanban_path,
+    _archive_path,
     _goals_path,
     _project_path,
     _experience_path,
@@ -190,6 +196,48 @@ def _save_tree(tree: dict, message: str) -> None:
     st.success(message)
 
 
+def _record_done_ingest_activity(
+    *,
+    title: str,
+    source_ids: set[str],
+    source_titles: set[str],
+    warnings: list[str] | None = None,
+    error: str = "",
+    status: str = "applied",
+) -> None:
+    """Record Done -> Evidence writeback from Evidence Review."""
+    record_writeback_activity(
+        selected,
+        source_page="Evidence Review",
+        target_owner="evidence_pool",
+        candidate_type="evidence",
+        source_ref="kanban:done_to_evidence",
+        title=title,
+        summary="Done -> Evidence writeback",
+        refs={
+            "task_refs": sorted(source_ids),
+            "task_titles": sorted(source_titles),
+            "files": [
+                str(_pool_path),
+                str(_tree_path),
+                str(_kanban_path),
+            ],
+        },
+        payload={"source": "evidence_review_done_to_evidence"},
+        warnings=list(warnings or []),
+        error=error,
+        changed_paths=[
+            _pool_path,
+            _tree_path,
+            _skill_path,
+            _kanban_path,
+        ]
+        if status == "applied"
+        else [],
+        status=status,
+    )
+
+
 def _compact_row(row: dict) -> dict:
     """Drop empty optional fields before writing YAML."""
     out = {
@@ -256,6 +304,123 @@ def _mark_done_crystallized(
     clear_web_cache()
 
 
+def _done_housekeeping_label(task: object, index: int) -> str:
+    """Render a stable label for one Done housekeeping option."""
+    title = str(getattr(task, "title", "") or "").strip() or f"Done {index + 1}"
+    status = (
+        ui.get("done_crystallized_label", "crystallized")
+        if bool(getattr(task, "crystallized", False))
+        else ui.get("done_uncrystallized_label", "uncrystallized")
+    )
+    refs = [
+        str(getattr(task, "project_id", "") or "").strip(),
+        str(getattr(task, "milestone_id", "") or "").strip(),
+    ]
+    refs = [ref for ref in refs if ref]
+    suffix = f" - {' / '.join(refs)}" if refs else ""
+    return f"{index + 1}. {title} [{status}]{suffix}"
+
+
+def _render_done_housekeeping(sections: dict[str, list]) -> None:
+    """Archive or delete Done tasks from the Evidence Review workbench."""
+    st.subheader(ui["done_housekeeping_title"])
+    st.caption(ui["done_housekeeping_caption"])
+    done_tasks = list(sections.get(KANBAN_DONE) or [])
+    if not done_tasks:
+        st.caption(ui["done_housekeeping_empty"])
+        return
+
+    done_indexes = list(range(len(done_tasks)))
+    default_indexes = [
+        index
+        for index, task in enumerate(done_tasks)
+        if bool(getattr(task, "crystallized", False))
+    ]
+    picked = st.multiselect(
+        ui["done_housekeeping_pick"],
+        options=done_indexes,
+        default=default_indexes,
+        format_func=lambda index: _done_housekeeping_label(
+            done_tasks[index],
+            index,
+        ),
+        key=f"evidence_review_done_housekeeping_pick_{selected}",
+    )
+    picked = sorted(
+        {
+            int(index)
+            for index in picked
+            if 0 <= int(index) < len(done_tasks)
+        }
+    )
+    contains_uncrystallized = any(
+        not bool(getattr(done_tasks[index], "crystallized", False))
+        for index in picked
+    )
+    uncrystallized_confirmed = True
+    if contains_uncrystallized:
+        st.warning(ui["done_housekeeping_uncrystallized_warning"])
+        uncrystallized_confirmed = st.checkbox(
+            ui["done_housekeeping_confirm_uncrystallized"],
+            value=False,
+            key=f"evidence_review_done_housekeeping_uncrystallized_{selected}",
+        )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        confirm_archive = st.checkbox(
+            ui["done_housekeeping_confirm_archive"],
+            value=False,
+            key=f"evidence_review_done_housekeeping_confirm_archive_{selected}",
+        )
+        archive_clicked = st.button(
+            ui["done_housekeeping_archive"],
+            disabled=not picked or not confirm_archive or not uncrystallized_confirmed,
+            key=f"evidence_review_done_housekeeping_archive_{selected}",
+            use_container_width=True,
+        )
+    with c2:
+        confirm_delete = st.checkbox(
+            ui["done_housekeeping_confirm_delete"],
+            value=False,
+            key=f"evidence_review_done_housekeeping_confirm_delete_{selected}",
+        )
+        delete_clicked = st.button(
+            ui["done_housekeeping_delete"],
+            disabled=not picked or not confirm_delete or not uncrystallized_confirmed,
+            key=f"evidence_review_done_housekeeping_delete_{selected}",
+            use_container_width=True,
+        )
+
+    if archive_clicked:
+        assert_files_current([_archive_path, _kanban_path, _project_path])
+        updated = archive_kanban_done_tasks(selected, sections, picked)
+        sync_project_board_from_kanban(selected, updated)
+        refresh_file_snapshots([_archive_path, _kanban_path, _project_path])
+        stash_git_backup_results()
+        clear_web_cache()
+        st.success(ui["done_housekeeping_archived"].format(n=len(picked)))
+        st.rerun()
+
+    if delete_clicked:
+        assert_files_current([_kanban_path, _project_path])
+        updated = {
+            section: list(tasks)
+            for section, tasks in sections.items()
+        }
+        remaining_done = list(done_tasks)
+        for index in sorted(picked, reverse=True):
+            remaining_done.pop(index)
+        updated[KANBAN_DONE] = remaining_done
+        save_kanban(selected, updated)
+        sync_project_board_from_kanban(selected, updated)
+        refresh_file_snapshots([_kanban_path, _project_path])
+        stash_git_backup_results()
+        clear_web_cache()
+        st.success(ui["done_housekeeping_deleted"].format(n=len(picked)))
+        st.rerun()
+
+
 def _link_evidence_to_skills(evidence_id: str, skill_ids: list[str]) -> None:
     """Append an evidence ref to selected skill nodes."""
     tree = load_skill_tree_raw(selected)
@@ -303,56 +468,61 @@ def _render_done_ingest(review: dict) -> None:
         for task in (sections.get(KANBAN_DONE) or [])
         if not getattr(task, "crystallized", False)
     ]
+    allow_status_key = f"evidence_review_allow_status_{selected}"
+    allow_status = bool(st.session_state.get(allow_status_key, False))
     if not pending_done:
         st.caption(ui["done_queue_empty"])
-        return
-
-    pick = st.multiselect(
-        ui["done_pick"],
-        options=list(range(len(pending_done))),
-        format_func=lambda i: pending_done[i].title,
-        key=f"evidence_review_done_pick_{selected}",
-    )
-    allow_status = st.checkbox(
-        ui["done_allow_status"],
-        value=False,
-        key=f"evidence_review_allow_status_{selected}",
-    )
-    st.caption(ui["done_allow_status_help"])
-    if st.button(
-        ui["done_generate"],
-        key=f"evidence_review_done_generate_{selected}",
-    ) and pick:
-        chosen = [pending_done[i] for i in pick]
-        if not llm_client.is_configured():
-            render_llm_unavailable(ui)
-        else:
-            with st.spinner(ui["done_spinner"]):
-                patch, err = ingest_kanban_done_json(
-                    selected,
-                    chosen,
-                    goal_context=current_goal_agent_context(selected),
-                )
-            if err is not None:
-                st.error(err)
-            elif patch is not None:
-                source_projects = project_refs_for_tasks(chosen)
-                patch = add_project_refs_to_ingest_patch(patch, source_projects)
-                st.session_state[f"evidence_review_patch_{selected}"] = patch
-                st.session_state[f"evidence_review_done_titles_{selected}"] = [
-                    task.title for task in chosen
-                ]
-                st.session_state[f"evidence_review_done_ids_{selected}"] = [
-                    task.id for task in chosen if task.id
-                ]
-                st.session_state[f"evidence_review_done_projects_{selected}"] = (
-                    source_projects
-                )
-                st.rerun()
+    else:
+        pick = st.multiselect(
+            ui["done_pick"],
+            options=list(range(len(pending_done))),
+            format_func=lambda i: pending_done[i].title,
+            key=f"evidence_review_done_pick_{selected}",
+        )
+        allow_status = st.checkbox(
+            ui["done_allow_status"],
+            value=False,
+            key=allow_status_key,
+        )
+        st.caption(ui["done_allow_status_help"])
+        if st.button(
+            ui["done_generate"],
+            key=f"evidence_review_done_generate_{selected}",
+        ) and pick:
+            chosen = [pending_done[i] for i in pick]
+            ai_backend = kanban_ai_backend(selected)
+            if ai_backend == "llm" and not llm_client.is_configured():
+                render_llm_unavailable(ui)
+            else:
+                with st.spinner(ui["done_spinner"]):
+                    patch, err = ingest_kanban_done_json(
+                        selected,
+                        chosen,
+                        goal_context=current_goal_agent_context(selected),
+                        ai_backend=ai_backend,
+                    )
+                if err is not None:
+                    st.error(err)
+                elif patch is not None:
+                    source_projects = project_refs_for_tasks(chosen)
+                    patch = add_project_refs_to_ingest_patch(patch, source_projects)
+                    st.session_state[f"evidence_review_patch_{selected}"] = patch
+                    st.session_state[f"evidence_review_done_titles_{selected}"] = [
+                        task.title for task in chosen
+                    ]
+                    st.session_state[f"evidence_review_done_ids_{selected}"] = [
+                        task.id for task in chosen if task.id
+                    ]
+                    st.session_state[f"evidence_review_done_projects_{selected}"] = (
+                        source_projects
+                    )
+                    st.rerun()
 
     patch_key = f"evidence_review_patch_{selected}"
     if patch_key not in st.session_state:
         _render_review_lists(review)
+        st.divider()
+        _render_done_housekeeping(sections)
         return
 
     raw_patch = st.session_state[patch_key]
@@ -506,7 +676,29 @@ def _render_done_ingest(review: dict) -> None:
         bump_locked_with_evidence=True,
         dry_run=False,
     )
+    source_title_set = (
+        {str(item) for item in source_titles}
+        if isinstance(source_titles, list)
+        else set()
+    )
+    source_id_set = (
+        {str(item) for item in source_ids}
+        if isinstance(source_ids, list)
+        else set()
+    )
     if not applied.ok:
+        _record_done_ingest_activity(
+            title=(
+                "Failed selected Done -> Evidence candidates"
+                if apply_selected
+                else "Failed all Done -> Evidence candidates"
+            ),
+            source_ids=source_id_set,
+            source_titles=source_title_set,
+            warnings=list(applied.warnings),
+            error="; ".join(applied.errors),
+            status="failed",
+        )
         for error in applied.errors:
             st.error(error)
         for warning in applied.warnings:
@@ -514,12 +706,20 @@ def _render_done_ingest(review: dict) -> None:
         return
     if mark_crystallized and isinstance(source_titles, list):
         _mark_done_crystallized(
-            {str(item) for item in source_ids}
-            if isinstance(source_ids, list)
-            else set(),
-            {str(item) for item in source_titles},
+            source_id_set,
+            source_title_set,
         )
     refresh_file_snapshots([_pool_path, _tree_path, _skill_path])
+    _record_done_ingest_activity(
+        title=(
+            "Applied selected Done -> Evidence candidates"
+            if apply_selected
+            else "Applied all Done -> Evidence candidates"
+        ),
+        source_ids=source_id_set,
+        source_titles=source_title_set,
+        warnings=list(applied.warnings),
+    )
     stash_git_backup_results()
     clear_web_cache()
     st.success(ui["done_applied"])

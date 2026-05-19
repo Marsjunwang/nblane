@@ -795,6 +795,9 @@ nodes:
         """Switching reply language/backend hides stale Kanban AI drafts."""
         source = Path("pages/3_Kanban.py").read_text(encoding="utf-8")
         shared = Path("src/nblane/web_shared.py").read_text(encoding="utf-8")
+        frontend = Path(
+            "src/nblane/kanban_board_component/frontend/src/index.html"
+        ).read_text(encoding="utf-8")
 
         self.assertIn(
             "kanban_subtask_proposals_{profile}_{kanban_ai_suffix(profile)}",
@@ -808,6 +811,13 @@ nodes:
         self.assertIn("open_activity_item", source)
         self.assertIn("subtask_granularity", source)
         self.assertIn("subtask_style_hint", source)
+        self.assertIn("pages/2_Evidence_Review.py", source)
+        self.assertIn("archive_done_card", source)
+        self.assertNotIn('with st.expander(ui["done_bulk_title"]', source)
+        self.assertNotIn('with st.expander(ui["ingest_expander"]', source)
+        self.assertIn("archive_done_card", frontend)
+        self.assertIn("archive_confirm", frontend)
+        self.assertNotIn('emit("request_done_ingest"', frontend)
         self.assertIn("llm_client.reply_language()}_{kanban_ai_backend(profile)}", shared)
         self.assertIn("def kanban_ai_backend_key(profile: str)", shared)
 
