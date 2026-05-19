@@ -1,0 +1,165 @@
+"""Tests for profile-scoped Web UI preferences."""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from nblane.core.web_preferences import (
+    load_web_preferences,
+    normalize_web_preferences,
+    save_web_preferences,
+    update_web_preferences,
+    web_preferences_path,
+)
+
+
+class TestWebPreferences(unittest.TestCase):
+    """Web preferences persist UI habits without storing secrets."""
+
+    def test_missing_preferences_load_defaults(self) -> None:
+        """Old profiles without web-preferences.yaml remain compatible."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            prefs = load_web_preferences(profile)
+
+        self.assertEqual(prefs["profile"], "alice")
+        self.assertEqual(prefs["ai"]["kanban_backend"], "")
+        self.assertEqual(prefs["kanban"]["subtask_granularity"], "")
+
+    def test_save_and_load_profile_scoped_preferences(self) -> None:
+        """LLM and Kanban usage preferences are stored per profile."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def pdir(name: str) -> Path:
+                path = root / name
+                path.mkdir(exist_ok=True)
+                return path
+
+            with (
+                patch("nblane.core.web_preferences.profile_dir", pdir),
+                patch("nblane.core.web_preferences.git_backup.record_change"),
+            ):
+                save_web_preferences(
+                    "alice",
+                    {
+                        "ai": {
+                            "llm": {
+                                "provider": "OpenAI",
+                                "base_url": "https://api.openai.com/v1",
+                                "model": "gpt-4o",
+                                "custom_model": "gpt-4o",
+                                "ui_lang": "zh",
+                                "reply_lang": "en",
+                            },
+                            "kanban_backend": "codex",
+                        },
+                        "kanban": {
+                            "subtask_granularity": "checklist",
+                            "subtask_style_hint": "artifact-first",
+                        },
+                    },
+                )
+                update_web_preferences(
+                    "bob",
+                    {"ai": {"kanban_backend": "llm"}},
+                )
+                alice = load_web_preferences("alice")
+                bob = load_web_preferences("bob")
+
+        self.assertEqual(alice["ai"]["llm"]["provider"], "OpenAI")
+        self.assertEqual(alice["ai"]["kanban_backend"], "codex")
+        self.assertEqual(alice["kanban"]["subtask_granularity"], "checklist")
+        self.assertEqual(alice["kanban"]["subtask_style_hint"], "artifact-first")
+        self.assertEqual(bob["ai"]["kanban_backend"], "llm")
+        self.assertNotEqual(web_preferences_path(root / "alice"), web_preferences_path(root / "bob"))
+
+    def test_secret_like_fields_are_not_normalized_or_saved(self) -> None:
+        """API keys, tokens, auth, cookies, and config text are stripped."""
+
+        raw = {
+            "ai": {
+                "llm": {
+                    "provider": "OpenAI",
+                    "api_key": "sk-should-not-save",
+                    "token": "tok",
+                    "authorization": "Bearer nope",
+                },
+                "kanban_backend": "codex",
+                "secret": {"nested": "nope"},
+            },
+            "kanban": {
+                "subtask_granularity": "implementation",
+                "subtask_style_hint": "small patches",
+                "password": "nope",
+            },
+            "config_toml": "model = 'secret-adjacent'",
+            "auth_json": {"token": "nope"},
+        }
+
+        normalized = normalize_web_preferences(raw, profile="alice")
+        dumped = str(normalized)
+
+        self.assertEqual(normalized["ai"]["llm"]["provider"], "OpenAI")
+        self.assertEqual(normalized["ai"]["kanban_backend"], "codex")
+        self.assertNotIn("sk-should-not-save", dumped)
+        self.assertNotIn("authorization", dumped)
+        self.assertNotIn("password", dumped)
+        self.assertNotIn("config_toml", dumped)
+        self.assertNotIn("auth_json", dumped)
+
+    def test_profile_name_is_owned_by_target_profile(self) -> None:
+        """A patch cannot rewrite the owning profile name."""
+
+        normalized = normalize_web_preferences(
+            {"profile": "bob", "ai": {"kanban_backend": "codex"}},
+            profile="alice",
+        )
+
+        self.assertEqual(normalized["profile"], "alice")
+
+    def test_update_web_preferences_strips_secret_patch_fields(self) -> None:
+        """Partial updates cannot smuggle secret keys into the profile file."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def pdir(name: str) -> Path:
+                path = root / name
+                path.mkdir(exist_ok=True)
+                return path
+
+            with (
+                patch("nblane.core.web_preferences.profile_dir", pdir),
+                patch("nblane.core.web_preferences.git_backup.record_change"),
+            ):
+                update_web_preferences(
+                    "alice",
+                    {
+                        "ai": {
+                            "llm": {
+                                "provider": "Custom",
+                                "base_url": "http://localhost:11434/v1",
+                                "api_key": "sk-nope",
+                            },
+                            "kanban_backend": "codex",
+                        },
+                    },
+                )
+                text = web_preferences_path("alice").read_text(encoding="utf-8")
+                prefs = load_web_preferences("alice")
+
+        self.assertEqual(prefs["ai"]["llm"]["provider"], "Custom")
+        self.assertEqual(prefs["ai"]["kanban_backend"], "codex")
+        self.assertNotIn("sk-nope", text)
+        self.assertNotIn("api_key", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

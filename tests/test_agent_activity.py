@@ -102,6 +102,7 @@ class TestAgentActivity(unittest.TestCase):
                         "id": "act:applied",
                         "kind": "writeback",
                         "candidate_type": "blog_patch",
+                        "source_page": "Review",
                         "target_owner": "public_site",
                         "status": "applied",
                         "title": "Applied",
@@ -113,6 +114,7 @@ class TestAgentActivity(unittest.TestCase):
                         "id": "act:pending",
                         "kind": "candidate",
                         "candidate_type": "evidence",
+                        "source_page": "Kanban",
                         "target_owner": "evidence_pool",
                         "status": "pending",
                         "title": "Pending",
@@ -120,10 +122,25 @@ class TestAgentActivity(unittest.TestCase):
                 )
                 summary = activity_summary("alice")
                 rows = activity_items_for_page("alice", {"status": "pending"})
+                source_rows = activity_items_for_page(
+                    "alice",
+                    {"source_page": "Kanban"},
+                )
 
         self.assertEqual(summary["status"]["pending"], 1)
         self.assertEqual(summary["target_owner"]["public_site"], 1)
         self.assertEqual([row["id"] for row in rows], ["act:pending"])
+        self.assertEqual([row["id"] for row in source_rows], ["act:pending"])
+
+    def test_activity_page_supports_query_focus_and_source_grouping(self) -> None:
+        """The Streamlit page accepts activity_item/source_page query jumps."""
+
+        source = Path("pages/9_Agent_Activity.py").read_text(encoding="utf-8")
+
+        self.assertIn('_query_value("activity_item")', source)
+        self.assertIn('_query_value("source_page")', source)
+        self.assertIn("def _group_items_by_source", source)
+        self.assertIn("focused_item_highlight", source)
 
 
 if __name__ == "__main__":

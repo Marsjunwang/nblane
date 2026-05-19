@@ -27,6 +27,10 @@ from nblane.core.profile_context import (
     north_star_context_from_identity,
     parse_identity_fields,
 )
+from nblane.core.web_preferences import (
+    load_web_preferences,
+    update_web_preferences,
+)
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -89,6 +93,7 @@ _UI_LANG_KEY = "nblane_ui_lang"
 _UI_LANG_WIDGET_KEY = "_nblane_ui_lang"
 _LLM_REPLY_LANG_KEY = "nblane_llm_reply_lang"
 _LLM_REPLY_LANG_WIDGET_KEY = "_nblane_llm_reply_lang"
+_LLM_PREFS_PROFILE_KEY = "_nblane_llm_prefs_profile"
 _CODEX_BIN_KEY = "bin"
 _CODEX_CLOUD_ENV_KEY = "cloud_env"
 _CODEX_MODEL_KEY = "model"
@@ -218,11 +223,32 @@ def _llm_model_options(provider: str) -> list[str]:
     return [*models, _LLM_CUSTOM_MODEL_CHOICE]
 
 
-def _ensure_llm_session_defaults() -> None:
+def _ensure_llm_session_defaults(profile: str = "") -> None:
     """Seed sidebar LLM widgets from the current runtime config."""
+    if profile and st.session_state.get(_LLM_PREFS_PROFILE_KEY) != profile:
+        for key in (
+            _LLM_PROVIDER_KEY,
+            _LLM_LAST_PROVIDER_KEY,
+            _LLM_BASE_URL_KEY,
+            _LLM_MODEL_CHOICE_KEY,
+            _LLM_CUSTOM_MODEL_KEY,
+            _UI_LANG_KEY,
+            _UI_LANG_WIDGET_KEY,
+            _LLM_REPLY_LANG_KEY,
+            _LLM_REPLY_LANG_WIDGET_KEY,
+        ):
+            st.session_state.pop(key, None)
+        st.session_state[_LLM_PREFS_PROFILE_KEY] = profile
     cfg = llm_client.current_config(mask_key=False)
-    base_url = str(cfg.get("base_url") or "")
-    model = str(cfg.get("model") or "")
+    prefs = load_web_preferences(profile) if profile else {}
+    ai_prefs = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    llm_prefs = (
+        ai_prefs.get("llm")
+        if isinstance(ai_prefs.get("llm"), dict)
+        else {}
+    )
+    base_url = str(llm_prefs.get("base_url") or cfg.get("base_url") or "")
+    model = str(llm_prefs.get("model") or cfg.get("model") or "")
     ui_lang = _session_or_env_language(
         _UI_LANG_KEY,
         _UI_LANG_WIDGET_KEY,
@@ -233,13 +259,22 @@ def _ensure_llm_session_defaults() -> None:
         _LLM_REPLY_LANG_WIDGET_KEY,
         "LLM_REPLY_LANG",
     )
-    provider = _llm_provider_for(base_url)
+    provider = str(llm_prefs.get("provider") or "").strip() or _llm_provider_for(
+        base_url
+    )
+    if provider not in _LLM_PROVIDER_PRESETS:
+        provider = _llm_provider_for(base_url)
+    ui_lang = str(llm_prefs.get("ui_lang") or "").strip() or ui_lang
+    reply_lang = str(llm_prefs.get("reply_lang") or "").strip() or reply_lang
     model_options = _llm_model_options(provider)
 
     st.session_state.setdefault(_LLM_PROVIDER_KEY, provider)
     st.session_state.setdefault(_LLM_LAST_PROVIDER_KEY, provider)
     st.session_state.setdefault(_LLM_BASE_URL_KEY, base_url)
-    st.session_state.setdefault(_LLM_CUSTOM_MODEL_KEY, model)
+    st.session_state.setdefault(
+        _LLM_CUSTOM_MODEL_KEY,
+        str(llm_prefs.get("custom_model") or model),
+    )
     st.session_state.setdefault(
         _LLM_MODEL_CHOICE_KEY,
         model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE,
@@ -302,6 +337,35 @@ def _apply_llm_sidebar_config(
     )
 
 
+def _persist_llm_preferences(
+    *,
+    profile: str,
+    provider: str,
+    base_url: str,
+    model: str,
+    custom_model: str,
+    ui_lang: str,
+    reply_lang: str,
+) -> None:
+    """Persist non-secret sidebar LLM preferences for one profile."""
+
+    update_web_preferences(
+        profile,
+        {
+            "ai": {
+                "llm": {
+                    "provider": provider,
+                    "base_url": base_url,
+                    "model": model,
+                    "custom_model": custom_model,
+                    "ui_lang": ui_lang,
+                    "reply_lang": reply_lang,
+                }
+            }
+        },
+    )
+
+
 def apply_ui_language_from_session() -> None:
     """Sync runtime UI language from session state before page UI is built."""
     ui_lang = _session_or_env_language(
@@ -319,7 +383,7 @@ def apply_ui_language_from_session() -> None:
 
 def render_llm_settings(profile: str = "") -> None:
     """Render app-wide LLM settings in the Streamlit sidebar."""
-    _ensure_llm_session_defaults()
+    _ensure_llm_session_defaults(profile)
     u = common_ui()
 
     with st.expander(u["llm_settings_title"]):
@@ -416,6 +480,16 @@ def render_llm_settings(profile: str = "") -> None:
             ui_lang=ui_lang,
             reply_lang=reply_lang,
         )
+        if profile:
+            _persist_llm_preferences(
+                profile=profile,
+                provider=provider,
+                base_url=base_url,
+                model=model,
+                custom_model=str(st.session_state.get(_LLM_CUSTOM_MODEL_KEY) or ""),
+                ui_lang=ui_lang,
+                reply_lang=reply_lang,
+            )
 
         if llm_client.is_configured():
             st.caption(
@@ -514,8 +588,8 @@ def _codex_notice_key(profile: str, name: str) -> str:
     return _codex_widget_key(profile, f"notice_{name}")
 
 
-def _codex_cli_config_editor_key(name: str) -> str:
-    return _codex_widget_key("global", name)
+def _codex_cli_config_editor_key(profile: str, name: str) -> str:
+    return _codex_widget_key(profile or "global", f"cli_{name}")
 
 
 def _profile_codex_config_editor_key(profile: str, name: str) -> str:
@@ -529,14 +603,22 @@ def _codex_profile_config_editor_text(profile: str) -> str:
     return codex_adapter.profile_config_template(profile)
 
 
-def _ensure_codex_cli_config_editor_state() -> None:
-    path = codex_adapter.codex_cli_config_path()
-    text_key = _codex_cli_config_editor_key(_CODEX_CLI_CONFIG_TEXT_KEY)
-    path_key = _codex_cli_config_editor_key(_CODEX_CLI_CONFIG_PATH_KEY)
+def _ensure_codex_cli_config_editor_state(profile: str) -> None:
+    path = codex_adapter.codex_cli_config_path(profile=profile or None)
+    text_key = _codex_cli_config_editor_key(
+        profile,
+        _CODEX_CLI_CONFIG_TEXT_KEY,
+    )
+    path_key = _codex_cli_config_editor_key(
+        profile,
+        _CODEX_CLI_CONFIG_PATH_KEY,
+    )
     if st.session_state.get(path_key) == str(path) and text_key in st.session_state:
         return
     st.session_state[path_key] = str(path)
-    st.session_state[text_key] = codex_adapter.load_codex_cli_config_text()
+    st.session_state[text_key] = codex_adapter.load_codex_cli_config_text(
+        profile=profile or None
+    )
 
 
 def _ensure_profile_codex_config_editor_state(profile: str) -> None:
@@ -562,10 +644,17 @@ def _codex_status(profile: str) -> codex_adapter.CodexStatus:
 
 
 def _render_kanban_ai_backend_selector(profile: str, u: dict[str, str]) -> None:
+    key = kanban_ai_backend_key(profile)
+    if key not in st.session_state:
+        prefs = load_web_preferences(profile)
+        ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+        backend = str(ai.get("kanban_backend") or "").strip()
+        if backend in _KANBAN_AI_BACKENDS:
+            st.session_state[key] = backend
     st.selectbox(
         u.get("kb_ai_backend", "Kanban AI Engine"),
         list(_KANBAN_AI_BACKENDS),
-        key=kanban_ai_backend_key(profile),
+        key=key,
         format_func=lambda value: u.get(
             f"kb_ai_backend_{value}",
             str(value).upper(),
@@ -574,6 +663,10 @@ def _render_kanban_ai_backend_selector(profile: str, u: dict[str, str]) -> None:
             "kb_ai_backend_help",
             "Choose the engine used by Kanban AI actions.",
         ),
+    )
+    update_web_preferences(
+        profile,
+        {"ai": {"kanban_backend": kanban_ai_backend(profile)}},
     )
 
 
@@ -631,8 +724,13 @@ def _render_codex_sidebar_entry(profile: str, u: dict[str, str]) -> None:
         else u.get("codex_not_logged_in", "Codex login is not ready.")
     )
     st.caption(
+        u.get("codex_web_home", "Web Codex home: `{path}`").format(
+            path=codex_adapter.profile_codex_home(profile)
+        )
+    )
+    st.caption(
         u.get("codex_cli_config_path", "CLI config: `{path}`").format(
-            path=codex_adapter.codex_cli_config_path()
+            path=codex_adapter.codex_cli_config_path(profile=profile)
         )
     )
     st.caption(
@@ -684,7 +782,7 @@ def _render_codex_config_dialog_body(profile: str, u: dict[str, str]) -> None:
     with tabs[1]:
         _render_codex_api_key_tab(profile, u)
     with tabs[2]:
-        _render_codex_cli_config_tab(u)
+        _render_codex_cli_config_tab(profile, u)
     with tabs[3]:
         _render_codex_profile_config_tab(profile, u)
 
@@ -699,18 +797,35 @@ def _render_codex_config_dialog_body(profile: str, u: dict[str, str]) -> None:
 def _render_codex_status_tab(profile: str, u: dict[str, str]) -> None:
     status = _codex_status(profile)
     st.caption(
+        u.get("codex_current_profile", "Current profile: `{profile}`").format(
+            profile=profile
+        )
+    )
+    st.caption(
         u.get("codex_profile_config", "Profile Codex config for {profile}: `{path}`")
         .format(profile=profile, path=codex_adapter.profile_config_path(profile))
     )
     st.caption(
+        u.get("codex_web_home", "Web Codex home: `{path}`").format(
+            path=codex_adapter.profile_codex_home(profile)
+        )
+    )
+    st.caption(
         u.get("codex_cli_config_path", "CLI config: `{path}`").format(
-            path=codex_adapter.codex_cli_config_path()
+            path=codex_adapter.codex_cli_config_path(profile=profile)
         )
     )
     st.caption(
         u.get("codex_auth_path", "Auth file: `{path}`").format(
-            path=codex_adapter.codex_auth_path()
+            path=codex_adapter.codex_auth_path(profile=profile)
         )
+    )
+    st.caption(
+        u.get(
+            "codex_terminal_hint",
+            "Terminal `codex` still uses default `~/.codex`; to reuse this profile, "
+            "run with `CODEX_HOME={path}`.",
+        ).format(path=codex_adapter.profile_codex_home(profile))
     )
     if status.installed:
         st.success(
@@ -745,7 +860,14 @@ def _render_codex_api_key_tab(profile: str, u: dict[str, str]) -> None:
         u.get(
             "codex_auth_managed",
             "Codex auth is managed by Codex CLI at `{path}`.",
-        ).format(path=codex_adapter.codex_auth_path())
+        ).format(path=codex_adapter.codex_auth_path(profile=profile))
+    )
+    st.caption(
+        u.get(
+            "codex_profile_isolated_note",
+            "This logs in only the current profile's Web Codex home and does not "
+            "modify your terminal default ~/.codex.",
+        )
     )
     key = _codex_api_key_input_key(profile)
     api_key = st.text_input(
@@ -782,13 +904,22 @@ def _render_codex_api_key_tab(profile: str, u: dict[str, str]) -> None:
         st.rerun()
 
 
-def _render_codex_cli_config_tab(u: dict[str, str]) -> None:
-    path = codex_adapter.codex_cli_config_path()
+def _render_codex_cli_config_tab(profile: str, u: dict[str, str]) -> None:
+    path = codex_adapter.codex_cli_config_path(profile=profile or None)
     ensure_file_snapshot(path)
-    _ensure_codex_cli_config_editor_state()
-    text_key = _codex_cli_config_editor_key(_CODEX_CLI_CONFIG_TEXT_KEY)
+    _ensure_codex_cli_config_editor_state(profile)
+    text_key = _codex_cli_config_editor_key(
+        profile,
+        _CODEX_CLI_CONFIG_TEXT_KEY,
+    )
     st.caption(
         u.get("codex_cli_config_path", "CLI config: `{path}`").format(path=path)
+    )
+    st.caption(
+        u.get(
+            "codex_cli_profile_scope_note",
+            "This config.toml belongs to the current profile's Web Codex home.",
+        )
     )
     if not path.exists():
         st.caption(
@@ -801,10 +932,12 @@ def _render_codex_cli_config_tab(u: dict[str, str]) -> None:
     with reload_col:
         if st.button(
             u.get("codex_config_reload", "Reload from disk"),
-            key=_codex_cli_config_editor_key("reload"),
+            key=_codex_cli_config_editor_key(profile, "reload"),
         ):
             refresh_file_snapshots([path])
-            st.session_state[text_key] = codex_adapter.load_codex_cli_config_text()
+            st.session_state[text_key] = codex_adapter.load_codex_cli_config_text(
+                profile=profile or None
+            )
             st.success(u.get("codex_config_reloaded", "Codex config reloaded."))
     edited_text = st.text_area(
         u.get("codex_cli_config_editor", "Edit config.toml"),
@@ -815,11 +948,14 @@ def _render_codex_cli_config_tab(u: dict[str, str]) -> None:
         if st.button(
             u.get("codex_save_cli_config", "Save config.toml"),
             type="primary",
-            key=_codex_cli_config_editor_key("save"),
+            key=_codex_cli_config_editor_key(profile, "save"),
         ):
             try:
                 assert_files_current([path])
-                saved = codex_adapter.save_codex_cli_config_text(edited_text)
+                saved = codex_adapter.save_codex_cli_config_text(
+                    edited_text,
+                    profile=profile or None,
+                )
                 refresh_file_snapshots([path])
                 st.success(
                     u.get(

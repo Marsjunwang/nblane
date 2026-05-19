@@ -326,6 +326,61 @@ nodes:
         self.assertIn("do not generate patches", prompt)
         self.assertIn("优先搜 memory module 设计", prompt)
 
+    def test_codex_kanban_failure_records_activity_item(self) -> None:
+        """Failed Codex Kanban drafting links the card error to Agent Activity."""
+
+        sections = {
+            "Doing": [
+                KanbanTask(
+                    title="VLA memory模块",
+                    id="task-1",
+                    context="OpenPI / Piper robot work",
+                )
+            ]
+        }
+        readonly = SimpleNamespace(
+            ok=False,
+            output="invalid config",
+            warnings=[],
+            command="codex exec --sandbox read-only -",
+            error="config parse failed",
+            stdout="",
+            stderr="invalid config",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with (
+                patch("nblane.core.agent_activity.profile_dir", lambda _name: profile),
+                patch(
+                    "nblane.core.codex_adapter.run_readonly_codex_prompt",
+                    return_value=readonly,
+                ),
+            ):
+                result = generate_kanban_subtask_proposals_detailed(
+                    "alice",
+                    sections,
+                    "task-1",
+                    ai_backend="codex",
+                    alignment_context="Goal: produce a plan",
+                )
+                from nblane.core.agent_activity import activity_items_for_page
+
+                activity = activity_items_for_page(
+                    "alice",
+                    {"source_page": "Kanban"},
+                )
+
+        self.assertEqual(result.error_key, "llm_error")
+        self.assertTrue(result.activity_item_id.startswith("act:"))
+        self.assertEqual(len(activity), 1)
+        self.assertEqual(activity[0]["id"], result.activity_item_id)
+        self.assertEqual(activity[0]["status"], "failed")
+        self.assertEqual(activity[0]["source_page"], "Kanban")
+        self.assertEqual(activity[0]["source_ref"], "kanban:task-1")
+        self.assertEqual(activity[0]["target_owner"], "kanban")
+        self.assertEqual(activity[0]["candidate_type"], "kanban_subtasks")
+
     @patch("nblane.core.kanban_ai.llm.chat")
     def test_generate_alignment_options_does_not_mutate_board(
         self, mock_chat
@@ -737,6 +792,10 @@ nodes:
             "kanban_subtask_alignments_{profile}_{kanban_ai_suffix(profile)}",
             source,
         )
+        self.assertIn("activity_item_id", source)
+        self.assertIn("open_activity_item", source)
+        self.assertIn("subtask_granularity", source)
+        self.assertIn("subtask_style_hint", source)
         self.assertIn("llm_client.reply_language()}_{kanban_ai_backend(profile)}", shared)
         self.assertIn("def kanban_ai_backend_key(profile: str)", shared)
 

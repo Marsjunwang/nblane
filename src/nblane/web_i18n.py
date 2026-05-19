@@ -142,16 +142,29 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_cli_config_tab": "CLI Config",
         "codex_profile_config_tab": "Profile Config",
         "codex_dialog_close": "Close",
+        "codex_current_profile": "Current profile: `{profile}`",
+        "codex_web_home": "Web Codex home: `{path}`",
         "codex_cli_config_path": "CLI config: `{path}`",
         "codex_auth_path": "Auth file: `{path}`",
         "codex_auth_managed": (
-            "Codex auth is managed by Codex CLI at `{path}`. "
+            "Codex auth for this profile is managed by Codex CLI at `{path}`. "
             "nblane does not display raw auth.json."
+        ),
+        "codex_profile_isolated_note": (
+            "Saving here logs in only this profile's Web Codex home; it does not "
+            "write to nblane profile files or modify your terminal default ~/.codex."
+        ),
+        "codex_cli_profile_scope_note": (
+            "This config.toml belongs to the current profile's Web Codex home."
+        ),
+        "codex_terminal_hint": (
+            "Terminal `codex` still uses default `~/.codex`; to reuse this profile, "
+            "run with `CODEX_HOME={path}`."
         ),
         "codex_api_key": "Codex API key",
         "codex_api_key_help": (
-            "Saved through `codex login --with-api-key`; the key is sent "
-            "through stdin and not stored by nblane."
+            "Saved through `codex login --with-api-key` with this profile's "
+            "Web CODEX_HOME; the key is sent through stdin and not stored by nblane."
         ),
         "codex_save_api_key": "Save API Key",
         "codex_api_key_saved": "Codex API key saved.",
@@ -311,16 +324,29 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_cli_config_tab": "CLI 配置",
         "codex_profile_config_tab": "Profile 配置",
         "codex_dialog_close": "关闭",
+        "codex_current_profile": "当前 profile：`{profile}`",
+        "codex_web_home": "Web Codex home：`{path}`",
         "codex_cli_config_path": "CLI 配置：`{path}`",
         "codex_auth_path": "认证文件：`{path}`",
         "codex_auth_managed": (
-            "Codex 认证由 Codex CLI 管理，文件位于 `{path}`。"
+            "当前 profile 的 Codex 认证由 Codex CLI 管理，文件位于 `{path}`。"
             "nblane 不展示 auth.json 原文。"
+        ),
+        "codex_profile_isolated_note": (
+            "这里保存后只会登录当前 profile 的 Web Codex home；不会写入 nblane "
+            "profile 文件，也不会修改终端默认的 ~/.codex。"
+        ),
+        "codex_cli_profile_scope_note": (
+            "这个 config.toml 属于当前 profile 的 Web Codex home。"
+        ),
+        "codex_terminal_hint": (
+            "终端里的 `codex` 仍使用默认 `~/.codex`；如需复用当前 profile，"
+            "请临时设置 `CODEX_HOME={path}`。"
         ),
         "codex_api_key": "Codex API key",
         "codex_api_key_help": (
-            "通过 `codex login --with-api-key` 保存；key 通过 stdin 传入，"
-            "不会由 nblane 存储。"
+            "通过当前 profile 的 Web CODEX_HOME 调用 `codex login --with-api-key` "
+            "保存；key 通过 stdin 传入，不会由 nblane 存储。"
         ),
         "codex_save_api_key": "保存 API Key",
         "codex_api_key_saved": "Codex API key 已保存。",
@@ -2945,6 +2971,9 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "superseded": "Superseded",
         "items": "Items",
         "no_items": "No Activity items match the current filters.",
+        "source_group": "Source",
+        "focused_item_notice": "Focused Activity item: {id}",
+        "focused_item_highlight": "Opened from {source}.",
         "payload": "Payload",
         "preview": "Preview",
         "refs": "Refs",
@@ -2993,6 +3022,9 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "superseded": "已替代",
         "items": "条目",
         "no_items": "当前过滤条件下没有 Activity 条目。",
+        "source_group": "来源",
+        "focused_item_notice": "已定位 Activity 条目：{id}",
+        "focused_item_highlight": "从 {source} 跳转而来。",
         "payload": "Payload",
         "preview": "预览",
         "refs": "Refs",

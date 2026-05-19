@@ -45,6 +45,17 @@ def _session_key(name: str) -> str:
     return f"agent_activity:{selected}:{name}"
 
 
+def _query_value(name: str) -> str:
+    """Return a single query parameter value."""
+    try:
+        raw = st.query_params.get(name)
+    except Exception:
+        return ""
+    if isinstance(raw, list):
+        raw = raw[-1] if raw else ""
+    return str(raw or "").strip()
+
+
 def _option_values(values: list[str] | tuple[str, ...]) -> list[str]:
     return ["all", *list(values)]
 
@@ -223,6 +234,19 @@ def _can_apply_here(item: dict) -> bool:
     )
 
 
+def _group_items_by_source(items: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Group filtered activity items by source page, preserving item order."""
+    groups: list[tuple[str, list[dict]]] = []
+    index: dict[str, int] = {}
+    for item in items:
+        source = str(item.get("source_page") or "").strip() or "Unknown"
+        if source not in index:
+            index[source] = len(groups)
+            groups.append((source, []))
+        groups[index[source]][1].append(item)
+    return groups
+
+
 _head_l, _head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")
 with _head_l:
     st.title(ui["title"])
@@ -236,6 +260,20 @@ c1.metric(ui["pending"], summary["status"].get("pending", 0))
 c2.metric(ui["applied"], summary["status"].get("applied", 0))
 c3.metric(ui["failed"], summary["status"].get("failed", 0))
 c4.metric(ui["items"], sum(summary["status"].values()))
+
+target_activity_item = _query_value("activity_item")
+target_source_page = _query_value("source_page")
+if target_activity_item:
+    for key_name in (
+        "status",
+        "kind",
+        "candidate_type",
+        "target_owner",
+        "agent_harness_filter",
+    ):
+        st.session_state[_session_key(key_name)] = "all"
+if target_source_page:
+    st.session_state[_session_key("source_page")] = target_source_page
 
 f1, f2, f3, f4, f5 = st.columns(5)
 with f1:
@@ -266,6 +304,8 @@ source_pages = sorted(
     key for key in {item.get("source_page", "") for item in activity_items_for_page(selected)}
     if key
 )
+if target_source_page and target_source_page not in source_pages:
+    source_pages.append(target_source_page)
 with f4:
     source_filter = st.selectbox(
         ui["source_page"],
@@ -300,146 +340,169 @@ items = activity_items_for_page(
     },
 )
 items = [item for item in items if _agent_harness_matches(item, agent_filter)]
+if target_activity_item:
+    items = sorted(
+        items,
+        key=lambda item: 0 if str(item.get("id") or "") == target_activity_item else 1,
+    )
 
 st.subheader(ui["items"])
 if not items:
     st.caption(ui["no_items"])
     st.stop()
 
-for item in items:
-    title = str(item.get("title", "") or item.get("id", ""))
-    status = str(item.get("status", "") or "")
-    candidate_type = str(item.get("candidate_type", "") or "")
-    owner = str(item.get("target_owner", "") or "")
-    with st.container(border=True):
-        h1, h2, h3 = st.columns([5, 2, 2])
-        with h1:
-            st.markdown(f"**{title}**")
-            st.caption(str(item.get("summary", "") or item.get("source_ref", "") or ""))
-        with h2:
-            st.caption(ui["status"])
-            st.write(_label(status))
-        with h3:
-            st.caption(ui["target_owner"])
-            st.write(owner)
-        meta = {
-            "id": item.get("id"),
-            "kind": item.get("kind"),
-            "candidate_type": candidate_type,
-            "source_page": item.get("source_page"),
-            "source_ref": item.get("source_ref"),
-            "created": item.get("created"),
-            "updated": item.get("updated"),
-            "applied_at": item.get("applied_at"),
-            "error": item.get("error"),
-        }
-        meta.update(_agent_task_meta(item))
-        st.code(
-            yaml.dump(meta, allow_unicode=True, default_flow_style=False, sort_keys=False),
-            language="yaml",
+if target_activity_item:
+    st.info(
+        ui.get("focused_item_notice", "Focused Activity item: {id}").format(
+            id=target_activity_item
         )
-        agent_result = _agent_task_result(item)
-        tab_labels = [ui["preview"], ui["payload"], ui["refs"], ui["changed_paths"]]
-        if agent_result:
-            tab_labels.append(ui.get("agent_task_result", "Agent task result"))
-        tabs = st.tabs(tab_labels)
-        d1, d2, d3, d4 = tabs[:4]
-        d5 = tabs[4] if len(tabs) > 4 else None
-        with d1:
-            st.code(str(item.get("preview", "") or "-"), language="yaml")
-        with d2:
+    )
+
+for source_page, source_items in _group_items_by_source(items):
+    st.markdown(
+        f"**{ui.get('source_group', 'Source')}: {source_page}**"
+    )
+    for item in source_items:
+        title = str(item.get("title", "") or item.get("id", ""))
+        status = str(item.get("status", "") or "")
+        candidate_type = str(item.get("candidate_type", "") or "")
+        owner = str(item.get("target_owner", "") or "")
+        is_target = str(item.get("id") or "") == target_activity_item
+        with st.container(border=True):
+            if is_target:
+                st.success(
+                    ui.get("focused_item_highlight", "Opened from {source}.").format(
+                        source=target_source_page or source_page
+                    )
+                )
+            h1, h2, h3 = st.columns([5, 2, 2])
+            with h1:
+                st.markdown(f"**{title}**")
+                st.caption(str(item.get("summary", "") or item.get("source_ref", "") or ""))
+            with h2:
+                st.caption(ui["status"])
+                st.write(_label(status))
+            with h3:
+                st.caption(ui["target_owner"])
+                st.write(owner)
+            meta = {
+                "id": item.get("id"),
+                "kind": item.get("kind"),
+                "candidate_type": candidate_type,
+                "source_page": item.get("source_page"),
+                "source_ref": item.get("source_ref"),
+                "created": item.get("created"),
+                "updated": item.get("updated"),
+                "applied_at": item.get("applied_at"),
+                "error": item.get("error"),
+            }
+            meta.update(_agent_task_meta(item))
             st.code(
-                yaml.dump(
-                    item.get("payload") or {},
-                    allow_unicode=True,
-                    default_flow_style=False,
-                    sort_keys=False,
-                ),
+                yaml.dump(meta, allow_unicode=True, default_flow_style=False, sort_keys=False),
                 language="yaml",
             )
-        with d3:
-            st.code(
-                yaml.dump(
-                    item.get("refs") or {},
-                    allow_unicode=True,
-                    default_flow_style=False,
-                    sort_keys=False,
-                ),
-                language="yaml",
-            )
-        with d4:
-            st.write(item.get("changed_paths") or [])
-        if d5 is not None:
-            with d5:
+            agent_result = _agent_task_result(item)
+            tab_labels = [ui["preview"], ui["payload"], ui["refs"], ui["changed_paths"]]
+            if agent_result:
+                tab_labels.append(ui.get("agent_task_result", "Agent task result"))
+            tabs = st.tabs(tab_labels)
+            d1, d2, d3, d4 = tabs[:4]
+            d5 = tabs[4] if len(tabs) > 4 else None
+            with d1:
+                st.code(str(item.get("preview", "") or "-"), language="yaml")
+            with d2:
                 st.code(
                     yaml.dump(
-                        agent_result,
+                        item.get("payload") or {},
                         allow_unicode=True,
                         default_flow_style=False,
                         sort_keys=False,
                     ),
                     language="yaml",
                 )
-                _render_codex_cloud_controls(item, agent_result)
-        warnings = item.get("warnings") if isinstance(item.get("warnings"), list) else []
-        for warning in warnings:
-            st.warning(str(warning))
-        a1, a2, a3, a4 = st.columns(4)
-        with a1:
-            if st.button(
-                ui["apply"],
-                key=f"activity_apply:{item.get('id')}",
-                disabled=not _can_apply_here(item),
-                type="primary",
-            ):
-                try:
-                    target_files = [
-                        PROFILES_DIR / selected / "agent-activity.yaml",
-                    ]
-                    if owner == "evidence_pool":
-                        target_files.extend(
-                            [
-                                PROFILES_DIR / selected / "evidence-pool.yaml",
-                                PROFILES_DIR / selected / "kanban.md",
-                            ]
-                        )
-                    elif owner == "kanban":
-                        target_files.append(PROFILES_DIR / selected / "kanban.md")
-                    assert_files_current(target_files)
-                    result = apply_review_activity_item(selected, str(item.get("id")))
-                    if result.ok:
-                        refresh_file_snapshots(target_files)
-                        stash_git_backup_results()
-                        clear_web_cache()
-                        st.success(ui["applied_message"])
-                        st.rerun()
-                    for error in result.errors:
-                        st.error(error)
-                    for warning in result.warnings:
-                        st.warning(warning)
-                except Exception as exc:
-                    st.error(str(exc))
-        with a2:
-            if status != "dismissed" and st.button(
-                ui["dismiss"],
-                key=f"activity_dismiss:{item.get('id')}",
-            ):
-                update_activity_status(selected, str(item.get("id")), "dismissed")
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-        with a3:
-            if status in {"dismissed", "failed"} and st.button(
-                ui["reopen"],
-                key=f"activity_reopen:{item.get('id')}",
-            ):
-                update_activity_status(selected, str(item.get("id")), "pending")
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-        with a4:
-            _safe_page_link(_owner_page(owner), ui["open_owner"])
-        if not _can_apply_here(item):
-            st.caption(ui["apply_unavailable"])
+            with d3:
+                st.code(
+                    yaml.dump(
+                        item.get("refs") or {},
+                        allow_unicode=True,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                    language="yaml",
+                )
+            with d4:
+                st.write(item.get("changed_paths") or [])
+            if d5 is not None:
+                with d5:
+                    st.code(
+                        yaml.dump(
+                            agent_result,
+                            allow_unicode=True,
+                            default_flow_style=False,
+                            sort_keys=False,
+                        ),
+                        language="yaml",
+                    )
+                    _render_codex_cloud_controls(item, agent_result)
+            warnings = item.get("warnings") if isinstance(item.get("warnings"), list) else []
+            for warning in warnings:
+                st.warning(str(warning))
+            a1, a2, a3, a4 = st.columns(4)
+            with a1:
+                if st.button(
+                    ui["apply"],
+                    key=f"activity_apply:{item.get('id')}",
+                    disabled=not _can_apply_here(item),
+                    type="primary",
+                ):
+                    try:
+                        target_files = [
+                            PROFILES_DIR / selected / "agent-activity.yaml",
+                        ]
+                        if owner == "evidence_pool":
+                            target_files.extend(
+                                [
+                                    PROFILES_DIR / selected / "evidence-pool.yaml",
+                                    PROFILES_DIR / selected / "kanban.md",
+                                ]
+                            )
+                        elif owner == "kanban":
+                            target_files.append(PROFILES_DIR / selected / "kanban.md")
+                        assert_files_current(target_files)
+                        result = apply_review_activity_item(selected, str(item.get("id")))
+                        if result.ok:
+                            refresh_file_snapshots(target_files)
+                            stash_git_backup_results()
+                            clear_web_cache()
+                            st.success(ui["applied_message"])
+                            st.rerun()
+                        for error in result.errors:
+                            st.error(error)
+                        for warning in result.warnings:
+                            st.warning(warning)
+                    except Exception as exc:
+                        st.error(str(exc))
+            with a2:
+                if status != "dismissed" and st.button(
+                    ui["dismiss"],
+                    key=f"activity_dismiss:{item.get('id')}",
+                ):
+                    update_activity_status(selected, str(item.get("id")), "dismissed")
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+            with a3:
+                if status in {"dismissed", "failed"} and st.button(
+                    ui["reopen"],
+                    key=f"activity_reopen:{item.get('id')}",
+                ):
+                    update_activity_status(selected, str(item.get("id")), "pending")
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+            with a4:
+                _safe_page_link(_owner_page(owner), ui["open_owner"])
+            if not _can_apply_here(item):
+                st.caption(ui["apply_unavailable"])

@@ -207,6 +207,13 @@ def _kanban_subtasks_prompt(
             "Confirmed task understanding:\n"
             f"{alignment_context}\n\n"
         )
+    style_hint = _clean_text(payload.get("subtask_style_hint"))
+    style_block = ""
+    if style_hint:
+        style_block = (
+            "Preferred subtask style from this profile:\n"
+            f"{style_hint}\n\n"
+        )
     ai_context = _clean_text(payload.get("ai_context"))
     prior_block = ""
     if ai_context:
@@ -245,6 +252,7 @@ def _kanban_subtasks_prompt(
         f"{task_text}\n\n"
         f"{prior_block}"
         f"{alignment_block}"
+        f"{style_block}"
         "Existing subtasks:\n"
         f"{existing}\n\n"
         "Gap analysis:\n"

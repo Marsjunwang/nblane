@@ -191,6 +191,37 @@ items:
 - `payload` 保存结构化候选或 patch，`preview` 保存短 YAML / diff / Markdown 摘要；不保存完整私密文件快照。
 - `applied` 必须记录 `changed_paths` 和 `applied_at`；`failed` 必须记录 `error`。
 - 第一版只有 Review 来源且 owner 为 evidence / kanban / public site 的 pending item 可在 Activity 页直接应用；其他 patch 只审查和跳转 owner 页面。
+- 看板内 Codex 只读 AI backend 失败时，`source_page` 为 `Kanban`、`source_ref`
+  为 `kanban:<task_id>`，并返回 `activity_item_id` 给看板错误卡片用于跳转。
+
+### Web Preferences and Profile Codex Home
+
+`profiles/<name>/web-preferences.yaml` 只保存非密钥使用习惯：
+
+```yaml
+schema_version: "1.0"
+profile: 王军
+updated: "2026-05-19T00:00:00+00:00"
+ai:
+  llm:
+    provider: OpenAI
+    base_url: https://api.openai.com/v1
+    model: gpt-4o
+    custom_model: ""
+    ui_lang: zh
+    reply_lang: en
+  kanban_backend: codex
+kanban:
+  subtask_granularity: milestone
+  subtask_style_hint: 带验证点的里程碑
+```
+
+不变量：
+
+- `web-preferences.yaml` 不保存 API key、token、secret、password、authorization、cookie、`auth.json` 内容或 `config.toml` 原文。
+- `profiles/<name>/codex.yaml` 只保存 nblane 的非密钥 Codex 参数，例如 `bin_path`、`cloud_env_id`、`model`、`attempts`、`branch`、`timeout_seconds`。
+- Web 页面中的 Codex 使用 profile 专属 `CODEX_HOME`，默认根目录为 `~/.nblane/codex/profiles/`，目录名为 `<safe-profile>-<sha12>`；可用 `NBLANE_CODEX_HOME_ROOT` 覆盖根目录。
+- Web Codex 的 `auth.json` 和 `config.toml` 位于该 profile 专属 `CODEX_HOME` 下，不放入 `profiles/<name>/`，不会影响终端默认 `~/.codex`。
 
 ## 新增 / 规划中的契约
 

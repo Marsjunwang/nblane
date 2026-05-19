@@ -52,12 +52,17 @@ source_of_truth: true
 ### 3.1 侧栏 AI / LLM
 
 - **看板 AI 引擎** — 按当前档案选择看板 AI 动作使用普通 LLM 还是本地只读
-  Codex。第一版只影响看板的 gap、拆子任务、任务理解和 Done -> evidence。
-- **LLM 设置** — provider、base URL、模型、API key、界面语言和模型回复语言仍按
-  当前会话生效，不写入磁盘。
+  Codex。选择会写入当前 profile 的 `web-preferences.yaml`，影响看板的 gap、
+  拆子任务、任务理解和 Done -> evidence。
+- **LLM 设置** — provider、base URL、模型、界面语言和模型回复语言会按当前
+  profile 写入 `web-preferences.yaml`；API key 仍只在当前会话中使用，不写入磁盘。
 - **Codex 状态与配置** — 侧栏显示安装 / 登录状态和配置文件路径；点击
-  **配置 Codex** 打开大弹窗，编辑 `~/.codex/config.toml`、通过 Codex CLI 写入
-  API key/auth，并编辑当前 profile 的 `profiles/<name>/codex.yaml`。
+  **配置 Codex** 打开大弹窗。Web 会为每个 profile 使用专属
+  `CODEX_HOME`（默认在 `~/.nblane/codex/profiles/<safe-profile>-<sha12>/`），
+  在其中编辑 `config.toml`、通过 `codex login --with-api-key` 写入该 profile
+  的 `auth.json`，并编辑当前 profile 的 `profiles/<name>/codex.yaml`。
+  直接在终端运行 `codex` 仍使用默认 `~/.codex`；如需复用 Web 的某个 profile
+  Codex，可手动设置页面显示的 `CODEX_HOME` 后再运行终端命令。
 
 ---
 
@@ -148,7 +153,8 @@ source_of_truth: true
 - **移动列** 用列名 **按钮**（非「完成状态」菜单）；可选 **自动填写开始/结束日期**（移入进行中/已完成时）。
 - **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [看板使用手册](kanban.md)。
 - **已完成 → 证据** 折叠区 — 多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
-- 侧栏 **AI / LLM** 中的 **看板 AI 引擎** 可在普通 LLM 与本地 Codex 间切换；选择 Codex 时，Gap 节点路由、拆任务、任务理解和 Done → evidence 使用只读 `codex exec`，不需要看板内额外配置，也不会创建 patch handoff。
+- 侧栏 **AI / LLM** 中的 **看板 AI 引擎** 可在普通 LLM 与本地 Codex 间切换；选择 Codex 时，Gap 节点路由、拆任务、任务理解和 Done → evidence 使用当前 profile 专属 `CODEX_HOME` 下的只读 `codex exec`，不需要看板内额外配置，也不会创建 patch handoff。
+- 看板拆子任务的粒度和风格提示会按 profile 记入 `web-preferences.yaml`；如果 Codex 配置错误导致生成失败，卡片上的错误可跳转到 Agent Activity 中对应的 failed 条目。
 - Kanban 卡片上的 **Gap** 预览会带入 privacy-safe current goal context，与
   差距分析页选择 Kanban task 时的上下文一致；不会自动写回 goal、kanban 或
   skill-tree。
@@ -183,6 +189,8 @@ source_of_truth: true
 
 - 读取 `agent-activity.yaml`，按 status、kind、candidate type、source page 和 owner
   过滤跨页面候选、patch 和写回结果。
+- 页面按 `source_page` 分组展示。看板错误卡片跳入时会携带
+  `activity_item` 与 `source_page=Kanban` 查询参数，并高亮对应条目。
 - pending Review 候选可以在 Activity 页应用；其他来源的 patch 第一版只审查并跳转
   owner 页面。
 - `dismissed` / `failed` 条目可以 reopen，便于重新审阅。

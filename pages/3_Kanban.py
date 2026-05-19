@@ -94,6 +94,10 @@ from nblane.web_cache import (
     load_evidence_pool_raw,
     load_skill_tree_raw,
 )
+from nblane.core.web_preferences import (
+    load_web_preferences,
+    update_web_preferences,
+)
 from nblane.web_i18n import (
     kanban_section_label,
     kanban_ui,
@@ -385,6 +389,60 @@ def _subtask_errors_key(profile: str) -> str:
     return f"kanban_subtask_errors_{profile}_{kanban_ai_suffix(profile)}"
 
 
+def _kanban_preferences(profile: str) -> dict:
+    """Return normalized Kanban Web preferences."""
+    prefs = load_web_preferences(profile)
+    kanban = prefs.get("kanban") if isinstance(prefs.get("kanban"), dict) else {}
+    return kanban if isinstance(kanban, dict) else {}
+
+
+def _kanban_subtask_granularity(profile: str) -> str:
+    """Return the remembered subtask draft granularity for this profile."""
+    value = str(
+        _kanban_preferences(profile).get("subtask_granularity") or "milestone"
+    ).strip()
+    return value if value in {"milestone", "checklist", "implementation"} else "milestone"
+
+
+def _kanban_subtask_style_hint(profile: str) -> str:
+    """Return the remembered subtask style hint for this profile."""
+    return str(_kanban_preferences(profile).get("subtask_style_hint") or "").strip()
+
+
+def _persist_kanban_subtask_preferences(
+    profile: str,
+    *,
+    granularity: str,
+    style_hint: str,
+) -> None:
+    """Persist non-secret Kanban AI drafting preferences."""
+    update_web_preferences(
+        profile,
+        {
+            "kanban": {
+                "subtask_granularity": granularity,
+                "subtask_style_hint": style_hint,
+            }
+        },
+    )
+
+
+def _style_hint_from_alignment_payload(payload: dict) -> str:
+    """Extract a compact reusable style hint from an alignment event."""
+    hints: list[str] = []
+    for item in payload.get("selected_alignments") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("subtask_style", "goal"):
+            value = str(item.get(key) or "").strip()
+            if value and value not in hints:
+                hints.append(value)
+    custom = str(payload.get("custom_context") or "").strip()
+    if custom and custom not in hints:
+        hints.append(custom)
+    return "\n".join(hints)[:1000]
+
+
 def _task_text_fields(task: KanbanTask) -> list[str]:
     """Text fields used to extract task links."""
     fields = [
@@ -482,6 +540,7 @@ def _subtask_error_payload(
         "raw_count": result.raw_count,
         "accepted_count": result.accepted_count,
         "filtered_count": result.filtered_count,
+        "activity_item_id": result.activity_item_id,
     }
 
 
@@ -705,6 +764,10 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             "no_selected_drafts": ui.get(
                 "kb_no_selected_drafts",
                 "Select at least one draft to apply.",
+            ),
+            "open_activity": ui.get(
+                "kb_open_activity_detail",
+                "Open Activity details",
             ),
             "draft_status": ui.get("kb_draft_status", "{count} drafts"),
             "alignment_status": ui.get(
@@ -1503,6 +1566,18 @@ def _handle_board_event(
     task_id = _event_task_id(event, payload)
     found = _find_task_ref(sections, task_id)
 
+    if action == "open_activity_item":
+        activity_item_id = str(payload.get("activity_item_id") or "").strip()
+        if not activity_item_id:
+            return
+        st.query_params["activity_item"] = activity_item_id
+        st.query_params["source_page"] = "Kanban"
+        try:
+            st.switch_page("pages/9_Agent_Activity.py")
+        except Exception:
+            st.info(ui.get("kb_open_activity_detail", "Open Activity details"))
+        return
+
     if action in ("move_card", "reorder"):
         found, card_applied, ok = _apply_board_card_payload(
             profile=profile,
@@ -1755,6 +1830,20 @@ def _handle_board_event(
             )
             return
         with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
+            granularity = str(
+                payload.get("granularity")
+                or _kanban_subtask_granularity(profile)
+            ).strip()
+            if granularity not in {"milestone", "checklist", "implementation"}:
+                granularity = "milestone"
+            style_hint = _style_hint_from_alignment_payload(payload)
+            if not style_hint:
+                style_hint = _kanban_subtask_style_hint(profile)
+            _persist_kanban_subtask_preferences(
+                profile,
+                granularity=granularity,
+                style_hint=style_hint,
+            )
             result = generate_kanban_subtask_proposals_detailed(
                 profile,
                 sections,
@@ -1765,10 +1854,11 @@ def _handle_board_event(
                 ),
                 persist_router_keywords=False,
                 alignment_context=alignment_context,
-                granularity=str(payload.get("granularity") or "milestone"),
+                granularity=granularity,
                 record_activity=ai_backend == "llm",
                 ai_backend=ai_backend,
                 goal_context=current_goal_agent_context(profile),
+                subtask_style_hint=style_hint,
             )
         if not result.proposals:
             state = st.session_state.setdefault(_subtask_errors_key(profile), {})
@@ -2122,6 +2212,8 @@ board_event = st_kanban_board(
         "focus_mode": focus_mode,
         "lang": llm_client.ui_language(),
         "project_options": _project_options_payload(selected),
+        "subtask_granularity": _kanban_subtask_granularity(selected),
+        "subtask_style_hint": _kanban_subtask_style_hint(selected),
     },
     ai_state=_board_ai_state(selected, ui),
     key=f"kanban_board_{selected}",

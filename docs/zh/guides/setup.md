@@ -109,11 +109,14 @@ nblane 读取以下环境变量：
 | `NBLANE_CODEX_ATTEMPTS` | `1` | Codex Cloud `--attempts`。 |
 | `NBLANE_CODEX_BRANCH` | *(空)* | Codex Cloud `--branch`；为空时使用当前/默认分支。 |
 | `NBLANE_CODEX_TIMEOUT_SECONDS` | `180` | nblane 等待 Codex CLI 命令的超时时间。 |
+| `NBLANE_CODEX_HOME_ROOT` | `~/.nblane/codex/profiles` | Web 中 profile 专属 Codex home 的根目录；每个 profile 会得到 `<safe-profile>-<sha12>` 子目录。 |
 
 这些 `NBLANE_CODEX_*` 是全局默认值。每个 profile 也可以有自己的
 `profiles/<name>/codex.yaml`。Web 中可在侧边栏 **AI / LLM** 展开
-**配置 Codex** 大弹窗，编辑全局 Codex CLI 的 `~/.codex/config.toml`、通过
-Codex CLI 写入 API key/auth，并编辑当前 profile 的 `codex.yaml`。读取优先级为：
+**配置 Codex** 大弹窗，编辑当前 profile 专属 Web Codex home 下的
+`config.toml`、通过 `codex login --with-api-key` 写入该 home 下的
+`auth.json`，并编辑当前 profile 的 `codex.yaml`。直接在终端运行 `codex`
+仍使用默认 `~/.codex`；Web 保存 API key 不会改写终端默认 Codex。读取优先级为：
 
 ```text
 默认值 / .env -> profiles/<name>/codex.yaml -> 当前进程 runtime override

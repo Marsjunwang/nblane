@@ -49,6 +49,7 @@ class KanbanSubtaskGenerationResult:
     raw_count: int = 0
     accepted_count: int = 0
     filtered_count: int = 0
+    activity_item_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class CodexKanbanDraft:
     raw_text: str = ""
     command: str = ""
     error: str = ""
+    activity_item_id: str = ""
 
     @property
     def ok(self) -> bool:
@@ -1081,6 +1083,7 @@ def generate_kanban_subtask_proposals(
     granularity: str = "milestone",
     ai_backend: str = "llm",
     goal_context: str = "",
+    subtask_style_hint: str = "",
 ) -> list[KanbanSubtaskProposal]:
     """Generate draft subtasks for a kanban task without mutating board."""
     return generate_kanban_subtask_proposals_detailed(
@@ -1095,6 +1098,7 @@ def generate_kanban_subtask_proposals(
         granularity=granularity,
         ai_backend=ai_backend,
         goal_context=goal_context,
+        subtask_style_hint=subtask_style_hint,
     ).proposals
 
 
@@ -1112,6 +1116,7 @@ def generate_kanban_subtask_proposals_detailed(
     record_activity: bool = False,
     ai_backend: str = "llm",
     goal_context: str = "",
+    subtask_style_hint: str = "",
 ) -> KanbanSubtaskGenerationResult:
     """Generate draft subtasks with diagnostic detail."""
     found = _find_task_by_id(sections, task_id)
@@ -1129,6 +1134,7 @@ def generate_kanban_subtask_proposals_detailed(
             goal_context=goal_context,
             alignment_context=alignment_context,
             granularity=granularity,
+            subtask_style_hint=subtask_style_hint,
         )
         if draft.proposals:
             return KanbanSubtaskGenerationResult(
@@ -1142,6 +1148,7 @@ def generate_kanban_subtask_proposals_detailed(
             message=draft.error
             or "; ".join(draft.warnings)
             or _generation_message("parse_empty"),
+            activity_item_id=draft.activity_item_id,
         )
     analysis = analyze_kanban_task_gap(
         profile_name,
@@ -1183,6 +1190,7 @@ def generate_kanban_subtask_proposals_detailed(
         alignment_context=alignment_context,
         ai_context=ai_context,
         granularity=granularity,
+        subtask_style_hint=subtask_style_hint,
         reply_language=llm.reply_language(),
         context_refs=[f"kanban:{task_id}"],
         require_review=record_activity,
@@ -1192,22 +1200,28 @@ def generate_kanban_subtask_proposals_detailed(
             return KanbanSubtaskGenerationResult(
                 error_key="parse_empty",
                 message=_generation_message("parse_empty"),
+                activity_item_id=result.activity_item_id,
             )
         return KanbanSubtaskGenerationResult(
             error_key="llm_error",
             message=_generation_message("llm_error"),
+            activity_item_id=result.activity_item_id,
         )
     if not isinstance(result.structured, dict):
         return KanbanSubtaskGenerationResult(
             error_key="parse_empty",
             message=_generation_message("parse_empty"),
+            activity_item_id=result.activity_item_id,
         )
-    return _parse_proposals_detailed(
+    parsed = _parse_proposals_detailed(
         json.dumps(result.structured, ensure_ascii=False),
         task_id=task_id,
         allowed_gap_ids=allowed_gap_ids,
         existing_titles=[subtask.title for subtask in task.subtasks],
     )
+    if parsed.error_key and result.activity_item_id:
+        return replace(parsed, activity_item_id=result.activity_item_id)
+    return parsed
 
 
 def generate_codex_kanban_planning_draft(
@@ -1219,6 +1233,7 @@ def generate_codex_kanban_planning_draft(
     user_instruction: str = "",
     alignment_context: str = "",
     granularity: str = "milestone",
+    subtask_style_hint: str = "",
 ) -> CodexKanbanDraft:
     """Use local Codex as a read-only research/planning LLM for one card."""
 
@@ -1237,6 +1252,7 @@ def generate_codex_kanban_planning_draft(
         user_instruction=user_instruction,
         alignment_context=alignment_context,
         granularity=granularity,
+        subtask_style_hint=subtask_style_hint,
     )
     from nblane.core import codex_adapter
 
@@ -1244,12 +1260,19 @@ def generate_codex_kanban_planning_draft(
     raw_text = result.output
     warnings = list(getattr(result, "warnings", []) or [])
     if not result.ok:
+        activity_item_id = _record_codex_kanban_failure(
+            profile_name,
+            task,
+            result,
+            raw_text=raw_text,
+        )
         return CodexKanbanDraft(
             task_id=task_id,
             warnings=warnings,
             raw_text=raw_text,
             command=result.command,
             error=result.error or raw_text or "codex_readonly_failed",
+            activity_item_id=activity_item_id,
         )
 
     data = extract_json_object(raw_text)
@@ -1368,6 +1391,7 @@ def _codex_planner_prompt(
     user_instruction: str = "",
     alignment_context: str = "",
     granularity: str = "milestone",
+    subtask_style_hint: str = "",
 ) -> str:
     """Build the read-only Codex prompt used by Kanban."""
 
@@ -1386,6 +1410,13 @@ def _codex_planner_prompt(
         alignment_block = (
             "Confirmed task understanding:\n"
             + _clean_text(alignment_context)
+            + "\n\n"
+        )
+    style_block = ""
+    if _clean_text(subtask_style_hint):
+        style_block = (
+            "Preferred subtask style from this profile:\n"
+            + _clean_text(subtask_style_hint)
             + "\n\n"
         )
     prior_block = ""
@@ -1425,9 +1456,65 @@ def _codex_planner_prompt(
         f"{prior_block}"
         f"{user_block}"
         f"{alignment_block}"
+        f"{style_block}"
         "Kanban task:\n"
         f"{format_kanban_task_for_ai(task)}\n"
     )
+
+
+def _record_codex_kanban_failure(
+    profile_name: str,
+    task: KanbanTask,
+    result: object,
+    *,
+    raw_text: str = "",
+) -> str:
+    """Write a failed Kanban Codex run to Agent Activity and return its id."""
+
+    profile = _clean_text(profile_name)
+    task_id = _clean_text(task.id)
+    if not profile or not task_id:
+        return ""
+    error = _shorten(
+        getattr(result, "error", "") or raw_text or "codex_readonly_failed",
+        500,
+    )
+    payload = {
+        "provider": "local_codex_readonly",
+        "task_id": task_id,
+        "task_title": _clean_text(task.title),
+        "command": _shorten(getattr(result, "command", ""), 1200),
+        "stdout": _shorten(getattr(result, "stdout", ""), 2000),
+        "stderr": _shorten(getattr(result, "stderr", ""), 2000),
+        "raw_text": _shorten(raw_text, 4000),
+    }
+    try:
+        from nblane.core.agent_activity import append_activity_item
+
+        item = append_activity_item(
+            profile,
+            {
+                "kind": "candidate",
+                "candidate_type": "kanban_subtasks",
+                "source_page": "Kanban",
+                "source_ref": f"kanban:{task_id}",
+                "target_owner": "kanban",
+                "status": "failed",
+                "title": f"Codex failed for Kanban task: {_clean_text(task.title) or task_id}",
+                "summary": error,
+                "preview": error,
+                "refs": {"input": [f"kanban:{task_id}"]},
+                "payload": payload,
+                "warnings": list(getattr(result, "warnings", []) or []),
+                "error": error,
+                "backend": "local_codex",
+                "action_name": "kanban.subtasks",
+                "input_refs": [f"kanban:{task_id}"],
+            },
+        )
+    except Exception:
+        return ""
+    return _clean_text(item.get("id"))
 
 
 def _use_codex_backend(value: object) -> bool:

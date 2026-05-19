@@ -493,6 +493,7 @@
       granularity_implementation: "Implementation",
       granularity_milestone: "Milestone",
       ai_error_status: "AI error",
+      open_activity: "Open Activity",
       quick_add: "Quick add",
       save: "Save",
       save_short: "Save",
@@ -552,6 +553,10 @@
 	    function settings() {
 	      return asObj(args.settings || asObj(args.payload).settings);
 	    }
+    function subtaskGranularityDefault() {
+      const value = text(settings().subtask_granularity || "milestone");
+      return ["milestone", "checklist", "implementation"].includes(value) ? value : "milestone";
+    }
 	    function projectOptions() {
 	      return asArr(settings().project_options || settings().projects)
 	        .map((item) => {
@@ -909,10 +914,16 @@
       const counts = [];
       if (Number(error.raw_count || 0) > 0) counts.push(`raw ${Number(error.raw_count)}`);
       if (Number(error.filtered_count || 0) > 0) counts.push(`filtered ${Number(error.filtered_count)}`);
+      const activityItemId = text(error.activity_item_id || "");
       return `
         <div class="kb-alert">
           <strong>${esc(label("error"))}</strong> ${esc(error.message || error.error_key || "")}
           ${counts.length ? `<span class="kb-status"> ${esc(counts.join(" / "))}</span>` : ""}
+          ${activityItemId ? `
+            <div class="kb-actions">
+              <button type="button" class="kb-button" data-action="open_activity_item" data-activity-item-id="${attr(activityItemId)}" aria-label="${attr(label("open_activity"))}">${esc(label("open_activity"))}</button>
+            </div>
+          ` : ""}
         </div>
       `;
     }
@@ -943,9 +954,9 @@
           <label class="kb-field">
             <span>${esc(label("granularity"))}</span>
             <select data-alignment-granularity aria-label="${attr(label("granularity"))}">
-              <option value="milestone" selected>${esc(label("granularity_milestone"))}</option>
-              <option value="checklist">${esc(label("granularity_checklist"))}</option>
-              <option value="implementation">${esc(label("granularity_implementation"))}</option>
+              <option value="milestone" ${subtaskGranularityDefault() === "milestone" ? "selected" : ""}>${esc(label("granularity_milestone"))}</option>
+              <option value="checklist" ${subtaskGranularityDefault() === "checklist" ? "selected" : ""}>${esc(label("granularity_checklist"))}</option>
+              <option value="implementation" ${subtaskGranularityDefault() === "implementation" ? "selected" : ""}>${esc(label("granularity_implementation"))}</option>
             </select>
           </label>
           <textarea data-alignment-custom placeholder="${attr(label("alignment_custom"))}" aria-label="${attr(label("alignment_custom"))}"></textarea>
@@ -1466,6 +1477,11 @@
             } else if (action === "discard_subtask_draft") {
               const index = Number(button.dataset.proposalIndex);
               emit("discard_subtask_draft", { card_id: taskId, index });
+            } else if (action === "open_activity_item") {
+              emit("open_activity_item", {
+                card_id: taskId,
+                activity_item_id: text(button.dataset.activityItemId || ""),
+              });
             } else if (action === "discard_subtask_drafts") {
               emit("discard_subtask_drafts", { card_id: taskId });
             } else if (action === "apply_subtasks") {

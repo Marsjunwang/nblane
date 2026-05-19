@@ -8,6 +8,7 @@ Codex Cloud diffs locally.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shlex
@@ -49,6 +50,7 @@ _DEFAULT_ATTEMPTS = 1
 _DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_LOCAL_SANDBOX = "workspace-write"
 _DEFAULT_LOCAL_WORKTREE_ROOT = Path("/tmp/nblane-codex-runs")
+_DEFAULT_PROFILE_CODEX_HOME_ROOT = "~/.nblane/codex/profiles"
 _READONLY_SANDBOX = "read-only"
 _MAX_LOCAL_OUTPUT_CHARS = 50_000
 _MAX_LOCAL_DIFF_CHARS = 200_000
@@ -85,6 +87,7 @@ class CodexConfig:
     attempts: int = _DEFAULT_ATTEMPTS
     branch: str = ""
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
+    codex_home: str = ""
 
 
 @dataclass
@@ -226,6 +229,7 @@ def configure(
     attempts: int | str | None = None,
     branch: str | None = None,
     timeout_seconds: float | str | None = None,
+    codex_home: str | None = None,
 ) -> None:
     """Override Codex settings for the current Python process."""
 
@@ -249,6 +253,8 @@ def configure(
             _DEFAULT_TIMEOUT_SECONDS,
             minimum=5.0,
         )
+    if codex_home is not None:
+        _RUNTIME_OVERRIDES["codex_home"] = str(codex_home).strip()
 
 
 def current_config(
@@ -259,6 +265,13 @@ def current_config(
     """Return Codex config from runtime overrides, environment, and defaults."""
 
     profile_values = _profile_config_values(profile)
+    runtime_home = (
+        str(_RUNTIME_OVERRIDES.get("codex_home") or "").strip()
+        if include_runtime
+        else ""
+    )
+    profile_home = str(profile_codex_home(profile)).strip() if profile else ""
+    default_home = runtime_home or profile_home
     return CodexConfig(
         bin_path=str(
             _codex_value(
@@ -319,6 +332,7 @@ def current_config(
             _DEFAULT_TIMEOUT_SECONDS,
             minimum=5.0,
         ),
+        codex_home=default_home,
     )
 
 
@@ -337,6 +351,7 @@ def current_config_dict(
         "attempts": cfg.attempts,
         "branch": cfg.branch,
         "timeout_seconds": cfg.timeout_seconds,
+        "codex_home": cfg.codex_home,
     }
 
 
@@ -354,20 +369,55 @@ def codex_home() -> Path:
     return Path(raw).expanduser()
 
 
-def codex_auth_path() -> Path:
+def profile_codex_home(profile: str | None) -> Path:
+    """Return the profile-isolated Codex home used by the Web UI."""
+
+    clean_profile = str(profile or "").strip()
+    root = Path(
+        os.getenv("NBLANE_CODEX_HOME_ROOT") or _DEFAULT_PROFILE_CODEX_HOME_ROOT
+    ).expanduser()
+    if not clean_profile:
+        return root / "profile-empty"
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", clean_profile).strip("-").lower()
+    safe = safe[:48] or "profile"
+    digest = hashlib.sha1(clean_profile.encode("utf-8")).hexdigest()[:12]
+    return root / f"{safe}-{digest}"
+
+
+def _codex_home_from_config(
+    *,
+    profile: str | None = None,
+    config: CodexConfig | None = None,
+) -> Path:
+    if config is not None and str(config.codex_home or "").strip():
+        return Path(str(config.codex_home)).expanduser()
+    if profile:
+        return profile_codex_home(profile)
+    return codex_home()
+
+
+def codex_auth_path(
+    profile: str | None = None,
+    *,
+    config: CodexConfig | None = None,
+) -> Path:
     """Return the Codex CLI auth file path.
 
     The auth document is owned by Codex CLI. nblane may write to it only by
     delegating to ``codex login --with-api-key``; it does not display raw auth.
     """
 
-    return codex_home() / CODEX_AUTH_FILENAME
+    return _codex_home_from_config(profile=profile, config=config) / CODEX_AUTH_FILENAME
 
 
-def codex_cli_config_path() -> Path:
+def codex_cli_config_path(
+    profile: str | None = None,
+    *,
+    config: CodexConfig | None = None,
+) -> Path:
     """Return the Codex CLI ``config.toml`` path."""
 
-    return codex_home() / CODEX_CLI_CONFIG_FILENAME
+    return _codex_home_from_config(profile=profile, config=config) / CODEX_CLI_CONFIG_FILENAME
 
 
 def codex_cli_config_template() -> str:
@@ -380,10 +430,14 @@ def codex_cli_config_template() -> str:
     )
 
 
-def load_codex_cli_config_text() -> str:
+def load_codex_cli_config_text(
+    profile: str | None = None,
+    *,
+    config: CodexConfig | None = None,
+) -> str:
     """Load editable Codex CLI ``config.toml`` text or a template."""
 
-    path = codex_cli_config_path()
+    path = codex_cli_config_path(profile=profile, config=config)
     if path.exists():
         return path.read_text(encoding="utf-8")
     return codex_cli_config_template()
@@ -399,11 +453,16 @@ def validate_codex_cli_config_text(text: str) -> dict[str, Any]:
         raise ValueError(f"Invalid TOML: {exc}") from exc
 
 
-def save_codex_cli_config_text(text: str) -> Path:
+def save_codex_cli_config_text(
+    text: str,
+    profile: str | None = None,
+    *,
+    config: CodexConfig | None = None,
+) -> Path:
     """Persist raw editable Codex CLI config without git backup."""
 
     validate_codex_cli_config_text(text)
-    path = codex_cli_config_path()
+    path = codex_cli_config_path(profile=profile, config=config)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_name(f"{path.name}.nblane.bak")
@@ -581,6 +640,7 @@ def login_with_api_key(
         [binary, "login", "--with-api-key"],
         timeout=cfg.timeout_seconds,
         stdin=f"{key}\n",
+        env=_codex_command_env(cfg),
     )
 
 
@@ -602,10 +662,16 @@ def codex_status(config: CodexConfig | None = None) -> CodexStatus:
             error="codex_not_found",
         )
 
-    version = _run([resolved, "--version"], timeout=cfg.timeout_seconds)
+    codex_env = _codex_command_env(cfg)
+    version = _run(
+        [resolved, "--version"],
+        timeout=cfg.timeout_seconds,
+        env=codex_env,
+    )
     login = _run(
         [resolved, "login", "status"],
         timeout=cfg.timeout_seconds,
+        env=codex_env,
     )
     login_text = login.output
     return CodexStatus(
@@ -713,7 +779,7 @@ def submit_codex_cloud_task(
     if cfg.branch:
         args.extend(["--branch", cfg.branch])
     args.append(prompt)
-    result = _run(args, timeout=cfg.timeout_seconds)
+    result = _run(args, timeout=cfg.timeout_seconds, env=_codex_command_env(cfg))
     if not result.ok:
         return CodexCloudResult(
             ok=False,
@@ -803,6 +869,7 @@ def refresh_codex_cloud_task(
     status_result = _run(
         [binary, "cloud", "status", *_codex_config_args(cfg), cloud_task_id],
         timeout=cfg.timeout_seconds,
+        env=_codex_command_env(cfg),
     )
     if not status_result.ok:
         return CodexCloudResult(
@@ -847,6 +914,7 @@ def refresh_codex_cloud_task(
     diff_result = _run(
         [binary, "cloud", "diff", *_codex_config_args(cfg), cloud_task_id],
         timeout=cfg.timeout_seconds,
+        env=_codex_command_env(cfg),
     )
     if not diff_result.ok:
         return CodexCloudResult(
@@ -950,6 +1018,7 @@ def run_readonly_codex_prompt(
             args,
             timeout=timeout_seconds or cfg.timeout_seconds,
             stdin=str(prompt or ""),
+            env=_codex_command_env(cfg),
         )
         warnings: list[str] = []
         stdout, stdout_truncated = _truncate_text(
@@ -1082,7 +1151,12 @@ def run_local_codex_task(
             str(last_message_path),
             "-",
         ]
-        run_result = _run(args, timeout=cfg.timeout_seconds, stdin=prompt)
+        run_result = _run(
+            args,
+            timeout=cfg.timeout_seconds,
+            stdin=prompt,
+            env=_codex_command_env(cfg),
+        )
         command = run_result.command
         last_message = _read_optional_text(last_message_path)
         diff_stat = _git_diff_stat(git, worktree_path)
@@ -1230,12 +1304,14 @@ def _run(
     timeout: float,
     cwd: Path | None = None,
     stdin: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> CodexCommandResult:
     command = _display_command(args)
     try:
         completed = subprocess.run(
             args,
             cwd=cwd or REPO_ROOT,
+            env=env,
             input=stdin,
             text=True,
             stdout=subprocess.PIPE,
@@ -1277,6 +1353,14 @@ def _run(
         stderr=stderr,
         error=error,
     )
+
+
+def _codex_command_env(config: CodexConfig) -> dict[str, str]:
+    env = os.environ.copy()
+    home = _codex_home_from_config(config=config)
+    home.mkdir(parents=True, exist_ok=True)
+    env["CODEX_HOME"] = str(home)
+    return env
 
 
 def _main_worktree_dirty(git: str) -> bool:
@@ -1687,6 +1771,7 @@ __all__ = [
     "login_with_api_key",
     "parse_cloud_task_id",
     "parse_diff_changed_paths",
+    "profile_codex_home",
     "profile_config_template",
     "profile_config_path",
     "refresh_codex_cloud_task",
