@@ -72,10 +72,9 @@ Home
   - Profile Context
 
 Work
-  - Kanban
-  - Inbox / Check-in
   - Project Board
-  - Agent Runs
+  - Kanban
+  - Evidence Review
 
 Growth
   - Skill Tree

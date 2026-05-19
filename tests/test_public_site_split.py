@@ -60,6 +60,12 @@ class TestPublicSiteSplit(unittest.TestCase):
             nav_text.index('"pages/9_Agent_Activity.py"'),
         ]
         self.assertEqual(growth_order, sorted(growth_order))
+        work_order = [
+            nav_text.index('"pages/11_Project_Board.py"'),
+            nav_text.index('"pages/3_Kanban.py"'),
+            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+        ]
+        self.assertEqual(work_order, sorted(work_order))
 
     def test_validate_public_layer_blocks_private_research_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

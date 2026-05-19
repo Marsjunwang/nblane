@@ -1845,14 +1845,14 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
         ],
         ui["sidebar_nav_work_group"]: [
             st.Page(
-                "pages/3_Kanban.py",
-                title=ui["sidebar_nav_kanban"],
-                icon=":material/view_kanban:",
-            ),
-            st.Page(
                 "pages/11_Project_Board.py",
                 title=ui["sidebar_nav_project_board"],
                 icon=":material/account_tree:",
+            ),
+            st.Page(
+                "pages/3_Kanban.py",
+                title=ui["sidebar_nav_kanban"],
+                icon=":material/view_kanban:",
             ),
             st.Page(
                 EVIDENCE_REVIEW_PAGE,
