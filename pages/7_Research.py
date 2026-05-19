@@ -26,6 +26,7 @@ from nblane.core.research_papers import (
     create_chunk_from_annotation,
     create_paper_annotation,
     create_reading_note_markdown,
+    ensure_paper_reading_artifacts,
     extract_paper_pages,
     extract_paper_segments,
     format_research_citations,
@@ -54,6 +55,7 @@ from nblane.core.research_papers import (
     save_research_export,
     search_papers,
     text_hash,
+    translate_full_paper,
     translation_rows_for_segments,
     upsert_paper_library_node,
     upsert_paper_translations,
@@ -1271,11 +1273,16 @@ def _reader_page_preview(profile_path: str, source_id: str, page: int = 1) -> di
 
 
 def _reader_page_previews(source_id: str, current_page: int = 1) -> list[dict[str, object]]:
+    requested = int(st.session_state.get(_reader_key(source_id, "preview_page"), current_page) or current_page)
+    pages = sorted({max(1, int(current_page or 1)), max(1, requested), max(1, int(current_page or 1) - 1), max(1, int(current_page or 1) + 1)})
+    previews: list[dict[str, object]] = []
     try:
-        return [_reader_page_preview(str(_pdir), source_id, current_page)]
+        for page in pages:
+            previews.append(_reader_page_preview(str(_pdir), source_id, page))
+        return previews
     except Exception as exc:
         st.caption(_l("pdf_preview_unavailable", "PDF image preview unavailable: {error}").format(error=exc))
-        return []
+        return previews
 
 
 def _reader_event_identity(event: dict) -> str:
@@ -1285,6 +1292,50 @@ def _reader_event_identity(event: dict) -> str:
     if explicit:
         return str(explicit)
     return yaml.dump(event, allow_unicode=True, sort_keys=True)
+
+
+def _save_reader_progress(source_id: str, page: int) -> None:
+    page = max(1, int(page or 1))
+    saved_key = _reader_key(source_id, "saved_progress_page")
+    if st.session_state.get(saved_key) == page:
+        return
+    current = load_research_sources(selected)
+    src = current.by_id().get(source_id)
+    if src is None:
+        return
+    metadata = dict(src.metadata or {})
+    metadata["last_read_page"] = page
+    metadata["last_read_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    assert_files_current([_sources_path])
+    update_research_source(current, source_id, metadata=metadata, status="reading")
+    save_research_sources(selected, current)
+    refresh_file_snapshots([_sources_path])
+    stash_git_backup_results()
+    clear_web_cache()
+    st.session_state[saved_key] = page
+
+
+def _translation_counts_for_segments(source_id: str, target_lang: str = "zh") -> dict[str, int]:
+    segments = load_paper_segments(_pdir, source_id)
+    translations = {
+        row.segment_id: row
+        for row in load_paper_translations(_pdir, source_id)
+        if row.segment_id and row.target_lang == target_lang
+    }
+    counts = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
+    for segment in segments:
+        row = translations.get(segment.segment_id)
+        if row is None:
+            counts["missing"] += 1
+        elif row.status == "failed":
+            counts["failed"] += 1
+        elif row.status == "stale" or row.source_hash != segment.text_hash:
+            counts["stale"] += 1
+        elif row.translated_text:
+            counts["translated"] += 1
+        else:
+            counts["missing"] += 1
+    return counts
 
 
 def _selection_segments(payload: dict, segment_rows) -> list[dict[str, object]]:
@@ -1449,6 +1500,21 @@ def _render_reader_ai_result(source_id: str) -> None:
         )
 
 
+def _render_reader_translation_summary(source_id: str) -> None:
+    summary = st.session_state.get(_reader_key(source_id, "translation_summary"))
+    if not isinstance(summary, dict):
+        return
+    with st.expander(_l("translation_summary", "Translation summary"), expanded=True):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(_l("translated", "Translated"), summary.get("translated", 0))
+        c2.metric(_l("missing", "Missing"), summary.get("missing", 0))
+        c3.metric(_l("stale", "Stale"), summary.get("stale", 0))
+        c4.metric(_l("failed", "Failed"), summary.get("failed", 0))
+        if summary.get("warnings"):
+            for warning in summary.get("warnings") or []:
+                st.warning(str(warning))
+
+
 def _handle_reader_component_event(
     source_id: str,
     event: object,
@@ -1482,6 +1548,23 @@ def _handle_reader_component_event(
         if action == "page_changed":
             page = _payload_int(payload, "page", 1)
             st.session_state[_reader_key(source_id, "page")] = max(1, page)
+            _save_reader_progress(source_id, max(1, page))
+            return True
+
+        if action == "viewport_changed":
+            page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 1))
+            visible = [
+                int(item)
+                for item in payload.get("visible_pages", [])
+                if str(item).strip().isdigit()
+            ] if isinstance(payload.get("visible_pages"), list) else []
+            st.session_state[_reader_key(source_id, "page")] = max(1, page)
+            st.session_state[_reader_key(source_id, "visible_pages")] = visible
+            return True
+
+        if action == "request_page_preview":
+            page = _payload_int(payload, "page", 1)
+            st.session_state[_reader_key(source_id, "preview_page")] = max(1, page)
             return True
 
         if action in {"annotation_create", "create_annotation"}:
@@ -1540,6 +1623,71 @@ def _handle_reader_component_event(
             clear_web_cache()
             st.success(ui["created"].format(id=chunk.id))
             st.rerun()
+
+        if action == "translate_full_paper":
+            summary = translate_full_paper(
+                _pdir,
+                source_id,
+                target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+                mode=_payload_text(payload, "mode") or "missing_or_stale",
+                ai_profile=selected,
+                require_review=False,
+            )
+            st.session_state[_reader_key(source_id, "translation_summary")] = summary
+            stash_git_backup_results()
+            clear_web_cache()
+            st.success(
+                _l("translation_full_saved", "Full-paper translation updated: {count} row(s).").format(
+                    count=summary.get("updated", 0)
+                )
+            )
+            st.rerun()
+
+        if action == "translate_visible_pages":
+            refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
+            visible_pages = {
+                int(item)
+                for item in payload.get("visible_pages", [])
+                if str(item).strip().isdigit()
+            } if isinstance(payload.get("visible_pages"), list) else set()
+            segments = [
+                segment
+                for segment in segment_rows
+                if (refs and segment.segment_id in refs)
+                or (visible_pages and segment.page in visible_pages)
+            ]
+            if not segments:
+                raise ValueError("Reader visible-page translation needs visible pages or segment refs.")
+            result = translate_paper_segments(
+                selected,
+                source_id,
+                [segment.to_dict() for segment in segments],
+                target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+                require_review=False,
+            )
+            _store_reader_ai_result(source_id, action, result)
+            translations = []
+            if isinstance(result.structured, dict):
+                translations = [
+                    row
+                    for row in result.structured.get("translations", [])
+                    if isinstance(row, dict)
+                ]
+            segment_ids = {segment.segment_id for segment in segments}
+            savable = [
+                row
+                for row in translations
+                if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
+            ]
+            if savable:
+                upsert_paper_translations(_pdir, source_id, savable)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            for warning in result.warnings:
+                st.warning(str(warning))
+            return True
 
         if action in {"translate_selection", "translate_segment"}:
             segments = _selection_segments(payload, segment_rows)
@@ -1703,6 +1851,16 @@ def _render_paper_reader(inbox) -> None:
     source = inbox.by_id().get(source_id)
     if source is None:
         return
+    artifact_status: dict[str, object] = {}
+    if source.metadata.get("pdf_asset_ref"):
+        try:
+            artifact_status = ensure_paper_reading_artifacts(_pdir, source_id)
+            inbox = load_research_sources(selected)
+            source = inbox.by_id().get(source_id) or source
+            stash_git_backup_results()
+            clear_web_cache()
+        except Exception as exc:
+            st.warning(_l("reading_artifacts_failed", "Reading artifacts could not be prepared: {error}").format(error=exc))
     st.markdown(f"**{source.title}**")
     st.caption(
         _l(
@@ -1716,69 +1874,70 @@ def _render_paper_reader(inbox) -> None:
     m3.metric(_l("annotations", "Annotations"), len(load_paper_annotations(_pdir, source_id)))
     m4.metric(_l("segments", "Segments"), len(load_paper_segments(_pdir, source_id)))
     m5.metric(
-        _l("structure_backend", "Structure"),
-        source.metadata.get("structure_backend", "") or _l("missing", "missing"),
+        _l("structured_extraction", "Structure"),
+        source.metadata.get("reading_artifacts_status")
+        or source.metadata.get("structure_backend", "")
+        or _l("missing", "missing"),
     )
-    _render_grobid_status_block(source)
+    if artifact_status.get("warnings"):
+        with st.expander(_l("reader_artifact_warnings", "Reader preparation warnings"), expanded=False):
+            for warning in artifact_status.get("warnings") or []:
+                st.warning(str(warning))
 
-    actions = st.columns(5)
-    with actions[0]:
-        if st.button(_l("extract_pages", "Extract pages"), disabled=not source.metadata.get("pdf_asset_ref")):
-            try:
-                extract_paper_pages(_pdir, source_id)
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-    with actions[1]:
-        if st.button(_l("extract_segments", "Extract segments"), disabled=not source.metadata.get("pdf_asset_ref")):
-            try:
-                extract_paper_segments(_pdir, source_id)
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-    with actions[2]:
-        if st.button(
-            _l("run_structured_extraction", "Run structured extraction"),
-            disabled=not source.metadata.get("pdf_asset_ref"),
-        ):
-            try:
-                extract_paper_segments(_pdir, source_id, backend="grobid")
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-    with actions[3]:
-        if st.button(_l("auto_chunk", "Auto chunk")):
-            try:
-                chunks = auto_chunk_paper(_pdir, source_id)
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(_l("created_chunks", "Created chunks: {count}").format(count=len(chunks)))
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-    with actions[4]:
-        if st.button(_l("save_last_read", "Save last read")):
-            try:
-                current = load_research_sources(selected)
-                src = current.by_id().get(source_id)
-                if src is None:
-                    raise ValueError(source_id)
-                metadata = dict(src.metadata)
-                metadata["last_read_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-                update_research_source(current, source_id, metadata=metadata, status="reading")
-                _save_sources(current, ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+    with st.expander(_l("reader_diagnostics", "Reader diagnostics"), expanded=False):
+        _render_grobid_status_block(source)
+        actions = st.columns(5)
+        with actions[0]:
+            if st.button(_l("extract_pages", "Extract pages"), disabled=not source.metadata.get("pdf_asset_ref")):
+                try:
+                    extract_paper_pages(_pdir, source_id)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with actions[1]:
+            if st.button(_l("extract_segments", "Extract segments"), disabled=not source.metadata.get("pdf_asset_ref")):
+                try:
+                    extract_paper_segments(_pdir, source_id)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with actions[2]:
+            if st.button(
+                _l("run_structured_extraction", "Run structured extraction"),
+                disabled=not source.metadata.get("pdf_asset_ref"),
+            ):
+                try:
+                    extract_paper_segments(_pdir, source_id, backend="grobid")
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with actions[3]:
+            if st.button(_l("auto_chunk", "Auto chunk")):
+                try:
+                    chunks = auto_chunk_paper(_pdir, source_id)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(_l("created_chunks", "Created chunks: {count}").format(count=len(chunks)))
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with actions[4]:
+            if st.button(_l("save_last_read", "Save last read")):
+                try:
+                    _save_reader_progress(source_id, int(st.session_state.get(_reader_key(source_id, "page"), source.metadata.get("last_read_page") or 1) or 1))
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
 
     page_rows = load_paper_pages(_pdir, source_id)
     segment_rows_for_reader = load_paper_segments(_pdir, source_id)
@@ -1810,14 +1969,26 @@ def _render_paper_reader(inbox) -> None:
                 "create_chunk": ui["create_chunk"],
                 "create_citation": ui["create_citation"],
                 "translate_selection": _l("translate_selection", "Translate selection"),
+                "translate_full_paper": _l("translate_full_paper", "Full translation"),
+                "translate_visible_pages": _l("translate_visible_pages", "Visible pages"),
                 "explain_selection": _l("explain_selection", "Explain selection"),
                 "ask_paper": _l("ask_paper", "Ask paper"),
                 "search": _l("search", "Search"),
                 "page": _l("page", "Page"),
                 "empty": ui["empty_status"],
+                "fit_width": _l("fit_width", "Fit width"),
+                "fit_page": _l("fit_page", "Fit page"),
+                "actual_size": _l("actual_size", "1:1"),
+                "panel": _l("panel", "Panel"),
             },
             settings={
                 "page": reader_page,
+                "initial_page": reader_page,
+                "view_mode": "continuous",
+                "scale_mode": "fit-width",
+                "overscan_pages": 2,
+                "auto_save_progress": True,
+                "side_panel_default": "collapsed",
                 "focus_annotation_id": focus_annotation_id,
             },
             key=f"paper_pdf_reader:{selected}:{source_id}",
@@ -1831,6 +2002,7 @@ def _render_paper_reader(inbox) -> None:
             chunk_rows=chunk_rows_for_reader,
         )
         _render_reader_ai_result(source_id)
+        _render_reader_translation_summary(source_id)
     else:
         st.info(_l("pdf_missing", "No PDF asset is attached; using text-mode Reader."))
 
@@ -1918,6 +2090,36 @@ def _render_paper_reader(inbox) -> None:
     with translations_tab:
         segment_rows = load_paper_segments(_pdir, source_id)
         segment_ids = [segment.segment_id for segment in segment_rows]
+        counts = _translation_counts_for_segments(source_id)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(_l("translated", "Translated"), counts["translated"])
+        c2.metric(_l("missing", "Missing"), counts["missing"])
+        c3.metric(_l("stale", "Stale"), counts["stale"])
+        c4.metric(_l("failed", "Failed"), counts["failed"])
+        if st.button(
+            _l("translate_missing_stale", "Translate missing/stale"),
+            disabled=not segment_rows or (counts["missing"] + counts["stale"] == 0),
+        ):
+            try:
+                summary = translate_full_paper(
+                    _pdir,
+                    source_id,
+                    target_lang="zh",
+                    mode="missing_or_stale",
+                    ai_profile=selected,
+                    require_review=False,
+                )
+                st.session_state[_reader_key(source_id, "translation_summary")] = summary
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(
+                    _l("translation_full_saved", "Full-paper translation updated: {count} row(s).").format(
+                        count=summary.get("updated", 0)
+                    )
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
         picked = st.multiselect(_l("translate_segments", "Translate segments"), segment_ids[:100])
         if st.button(_l("generate_translation_candidate", "Generate translation candidate"), disabled=not picked):
             result = translate_paper_segments(

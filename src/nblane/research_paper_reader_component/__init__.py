@@ -57,8 +57,6 @@ def st_research_paper_reader(
     in component arguments.
     """
 
-    import streamlit as st
-
     labels = ui or {}
     source_payload = dict(source or {})
     default = {
@@ -91,6 +89,11 @@ def st_research_paper_reader(
             if not merged.get("action"):
                 return None
             return merged
+        return None
+
+    try:
+        import streamlit as st
+    except Exception:  # pragma: no cover - optional web dependency
         return None
 
     st.info(

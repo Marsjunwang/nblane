@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
@@ -14,6 +15,7 @@ from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
     create_reading_note_markdown,
+    ensure_paper_reading_artifacts,
     create_paper_annotation,
     extract_paper_segments,
     format_research_citations,
@@ -29,6 +31,7 @@ from nblane.core.research_papers import (
     paper_overview,
     paper_pdf_asset_path,
     paper_rows,
+    pymupdf_available,
     paper_citation_diagnostics,
     paper_source_diagnostics,
     research_asset_root,
@@ -36,6 +39,7 @@ from nblane.core.research_papers import (
     save_paper_pages,
     save_paper_segments,
     text_hash,
+    translate_full_paper,
     upsert_paper_library_node,
     upsert_paper_translations,
 )
@@ -229,6 +233,223 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(translations[0].status, "stale")
         self.assertIn("Source hash", " ".join(translations[0].warnings))
 
+    def test_ensure_paper_reading_artifacts_prepares_missing_pages_and_segments_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={"pdf_asset_ref": "papers/demo.pdf", "pdf_sha256": "abc123"},
+            )
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                save_research_sources(profile, inbox)
+
+            def fake_pages(profile_arg, source_id_arg, *, backend="auto"):
+                pages = [PaperPage(source_id=source_id_arg, page=1, text="Page text.")]
+                save_paper_pages(profile_arg, source_id_arg, pages)
+                return pages
+
+            def fake_segments(profile_arg, source_id_arg, *, backend="auto"):
+                segments = [
+                    PaperSegment(
+                        segment_id="seg:source-paper-grounded:00001",
+                        source_id=source_id_arg,
+                        page=1,
+                        order=1,
+                        text="Page text.",
+                        text_hash=text_hash("Page text."),
+                    )
+                ]
+                save_paper_segments(profile_arg, source_id_arg, segments)
+                return segments
+
+            with (
+                patch("nblane.core.research_papers.extract_paper_pages", side_effect=fake_pages) as pages_mock,
+                patch("nblane.core.research_papers.extract_paper_segments", side_effect=fake_segments) as segments_mock,
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                first = ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=False)
+                second = ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=False)
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertTrue(first["ready"])
+        self.assertEqual(first["pages"], 1)
+        self.assertEqual(first["segments"], 1)
+        self.assertEqual(second["pages"], 1)
+        self.assertEqual(pages_mock.call_count, 1)
+        self.assertEqual(segments_mock.call_count, 1)
+        self.assertEqual(source.metadata["reading_artifacts_pdf_sha256"], "abc123")
+        self.assertEqual(source.metadata["reading_artifacts_page_count"], 1)
+
+    def test_ensure_paper_reading_artifacts_missing_pdf_does_not_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            before = sorted(path.relative_to(profile) for path in profile.rglob("*"))
+            result = ensure_paper_reading_artifacts(profile, "source:paper:grounded")
+            after = sorted(path.relative_to(profile) for path in profile.rglob("*"))
+
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["status"], "missing_pdf")
+        self.assertEqual(after, before)
+
+    def test_translate_full_paper_translates_only_missing_and_stale_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segments = [
+                PaperSegment(
+                    segment_id="seg:source-paper-grounded:00001",
+                    source_id=source_id,
+                    page=1,
+                    order=1,
+                    text="Already translated.",
+                    text_hash=text_hash("Already translated."),
+                ),
+                PaperSegment(
+                    segment_id="seg:source-paper-grounded:00002",
+                    source_id=source_id,
+                    page=1,
+                    order=2,
+                    text="Changed segment.",
+                    text_hash=text_hash("Changed segment."),
+                ),
+                PaperSegment(
+                    segment_id="seg:source-paper-grounded:00003",
+                    source_id=source_id,
+                    page=2,
+                    order=3,
+                    text="Missing segment.",
+                    text_hash=text_hash("Missing segment."),
+                ),
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, segments)
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segments[0].segment_id,
+                            "source_hash": segments[0].text_hash,
+                            "source_text": segments[0].text,
+                            "target_lang": "zh",
+                            "translated_text": "已经翻译。",
+                        },
+                        {
+                            "segment_id": segments[1].segment_id,
+                            "source_hash": text_hash("Old segment."),
+                            "source_text": "Old segment.",
+                            "target_lang": "zh",
+                            "translated_text": "旧译文。",
+                        },
+                    ],
+                )
+
+            def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+                return SimpleNamespace(
+                    warnings=[],
+                    error="",
+                    structured={
+                        "translations": [
+                            {
+                                "segment_id": row["segment_id"],
+                                "source_hash": row["text_hash"],
+                                "source_text": row["text"],
+                                "target_lang": target_lang,
+                                "translated_text": f"zh:{row['segment_id']}",
+                            }
+                            for row in batch
+                        ]
+                    },
+                )
+
+            with (
+                patch("nblane.core.ai.gateway.translate_paper_segments", side_effect=fake_translate) as translate_mock,
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                summary = translate_full_paper(
+                    profile,
+                    source_id,
+                    target_lang="zh",
+                    mode="missing_or_stale",
+                    batch_size=20,
+                    ai_profile="",
+                    require_review=False,
+                )
+            call_batch = translate_mock.call_args.args[2]
+            translations = load_paper_translations(profile, source_id)
+            by_segment = {row.segment_id: row for row in translations}
+
+        self.assertEqual([row["segment_id"] for row in call_batch], [segments[1].segment_id, segments[2].segment_id])
+        self.assertEqual(summary["segments_selected"], 2)
+        self.assertEqual(summary["translated"], 3)
+        self.assertEqual(by_segment[segments[0].segment_id].translated_text, "已经翻译。")
+        self.assertEqual(by_segment[segments[1].segment_id].source_hash, segments[1].text_hash)
+        self.assertEqual(by_segment[segments[2].segment_id].translated_text, f"zh:{segments[2].segment_id}")
+
+    def test_translate_full_paper_rejects_hash_mismatch_without_overwriting_current_translation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segment = PaperSegment(
+                segment_id="seg:source-paper-grounded:00001",
+                source_id=source_id,
+                page=1,
+                order=1,
+                text="Stable segment.",
+                text_hash=text_hash("Stable segment."),
+            )
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, [segment])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segment.segment_id,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": "稳定译文。",
+                        }
+                    ],
+                )
+            result = SimpleNamespace(
+                warnings=[],
+                error="",
+                structured={
+                    "translations": [
+                        {
+                            "segment_id": segment.segment_id,
+                            "source_hash": text_hash("wrong"),
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": "bad overwrite",
+                        }
+                    ]
+                },
+            )
+            with (
+                patch("nblane.core.ai.gateway.translate_paper_segments", return_value=result),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                summary = translate_full_paper(
+                    profile,
+                    source_id,
+                    target_lang="zh",
+                    mode="all",
+                    ai_profile="",
+                    require_review=False,
+                )
+            translations = load_paper_translations(profile, source_id)
+
+        self.assertIn("source_hash mismatch", " ".join(summary["warnings"]))
+        self.assertEqual(len(translations), 1)
+        self.assertEqual(translations[0].translated_text, "稳定译文。")
+
     def test_import_selected_search_results_dedupes_and_defaults_private(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
@@ -348,7 +569,10 @@ class TestResearchPapers(unittest.TestCase):
             )
 
         self.assertEqual(segments[0].text, "Fallback paragraph.")
-        self.assertEqual(source.metadata["structure_backend"], "pymupdf_fallback")
+        self.assertEqual(
+            source.metadata["structure_backend"],
+            "pymupdf_fallback" if pymupdf_available() else "fallback",
+        )
         self.assertIn("GROBID unavailable", " ".join(source.metadata["structured_extraction_warnings"]))
         self.assertIn("GROBID unavailable", diagnostics["badges"])
 

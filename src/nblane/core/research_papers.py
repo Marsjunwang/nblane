@@ -319,6 +319,29 @@ def _update_source_metadata(
     return inbox.by_id()[source.id]
 
 
+def _update_source_metadata_if_changed(
+    profile: str | Path,
+    source_id: str,
+    metadata: dict[str, object],
+    *,
+    status: str = "",
+) -> ResearchSource:
+    inbox, source = _source_by_id(profile, source_id)
+    merged = dict(source.metadata or {})
+    clean = _clean_mapping(metadata)
+    next_metadata = dict(merged)
+    next_metadata.update(clean)
+    status_changed = bool(status) and source.status != status
+    if next_metadata == merged and not status_changed:
+        return source
+    fields: dict[str, object] = {"metadata": next_metadata, "kind": "paper"}
+    if status:
+        fields["status"] = status
+    update_research_source(inbox, source.id, **fields)
+    save_research_sources(_profile_root(profile), inbox)
+    return inbox.by_id()[source.id]
+
+
 def _asset_profile_segment(profile: str | Path) -> str:
     name = _profile_name(profile)
     try:
@@ -840,6 +863,109 @@ def extract_paper_segments(
         metadata["grobid_available"] = bool(grobid_status.get("available"))
     _update_source_metadata(profile, source_id, metadata)
     return segments
+
+
+def _paper_has_pdf(source: ResearchSource) -> bool:
+    return bool(_clean_text((source.metadata or {}).get("pdf_asset_ref")))
+
+
+def _paper_pdf_fingerprint(source: ResearchSource) -> str:
+    metadata = source.metadata or {}
+    return (
+        _clean_text(metadata.get("pdf_sha256"))
+        or _clean_text(metadata.get("pdf_asset_ref"))
+    )
+
+
+def ensure_paper_reading_artifacts(
+    profile: str | Path,
+    source_id: str,
+    *,
+    prefer_grobid: bool = True,
+) -> dict[str, object]:
+    """Ensure page text and reading segments exist for the PDF reader.
+
+    The helper is intentionally idempotent: when pages, segments, and ready
+    metadata already match the current PDF fingerprint, it returns without
+    touching profile files. GROBID is treated as an enhancement; if it is not
+    configured or fails, the reader keeps working through page-text fallback.
+    """
+
+    _, source = _source_by_id(profile, source_id)
+    source_metadata = dict(source.metadata or {})
+    pdf_fingerprint = _paper_pdf_fingerprint(source)
+    if not _paper_has_pdf(source):
+        return {
+            "source_id": source_id,
+            "ready": False,
+            "status": "missing_pdf",
+            "pages": 0,
+            "segments": 0,
+            "structure_backend": _clean_text(source_metadata.get("structure_backend")),
+            "warnings": ["No PDF asset is attached."],
+        }
+
+    pages = load_paper_pages(profile, source_id)
+    segments = load_paper_segments(profile, source_id)
+    marker = _clean_text(source_metadata.get("reading_artifacts_pdf_sha256"))
+    pdf_changed = bool(marker and pdf_fingerprint and marker != pdf_fingerprint)
+    needs_pages = not pages or pdf_changed
+    needs_segments = not segments or pdf_changed
+    warnings: list[str] = []
+
+    if needs_pages:
+        try:
+            pages = extract_paper_pages(profile, source_id, backend="auto")
+        except Exception as exc:
+            warnings.append(f"Page extraction failed: {exc}")
+
+    _, source = _source_by_id(profile, source_id)
+    source_metadata = dict(source.metadata or {})
+    if needs_segments:
+        configured_grobid = bool(_clean_text(os.getenv("NBLANE_GROBID_URL")))
+        segment_backend = "grobid" if prefer_grobid and configured_grobid else "fallback"
+        try:
+            segments = extract_paper_segments(profile, source_id, backend=segment_backend)
+        except Exception as exc:
+            warnings.append(f"Structured extraction failed: {exc}")
+            if not segments:
+                try:
+                    segments = extract_paper_segments(profile, source_id, backend="fallback")
+                except Exception as fallback_exc:
+                    warnings.append(f"Page-text fallback failed: {fallback_exc}")
+
+    _, source = _source_by_id(profile, source_id)
+    metadata = dict(source.metadata or {})
+    structure_backend = _clean_text(metadata.get("structure_backend"))
+    structured_warnings = _clean_list(metadata.get("structured_extraction_warnings"))
+    status = "ready"
+    if structure_backend and structure_backend != "grobid":
+        status = "fallback"
+    if warnings:
+        status = "failed" if not pages else "fallback"
+    ready_metadata: dict[str, object] = {
+        "reading_artifacts_status": status,
+        "reading_artifacts_pdf_sha256": pdf_fingerprint,
+        "reading_artifacts_page_count": len(pages),
+        "reading_artifacts_segment_count": len(segments),
+    }
+    if not _clean_text(metadata.get("reading_artifacts_ready_at")) or needs_pages or needs_segments or warnings:
+        ready_metadata["reading_artifacts_ready_at"] = _now()
+    if warnings:
+        ready_metadata["reading_artifacts_warnings"] = warnings
+    elif metadata.get("reading_artifacts_warnings"):
+        ready_metadata["reading_artifacts_warnings"] = []
+    _update_source_metadata_if_changed(profile, source_id, ready_metadata)
+
+    return {
+        "source_id": source_id,
+        "ready": bool(pages) or bool(segments),
+        "status": status,
+        "pages": len(pages),
+        "segments": len(segments),
+        "structure_backend": structure_backend,
+        "warnings": warnings + structured_warnings,
+    }
 
 
 @dataclass
@@ -1463,6 +1589,199 @@ def translation_rows_for_segments(
             )
         )
     return rows
+
+
+def _translation_is_current(
+    translation: PaperTranslation | None,
+    segment: PaperSegment,
+    target_lang: str,
+) -> bool:
+    if translation is None:
+        return False
+    if translation.target_lang != target_lang:
+        return False
+    if translation.status != "translated":
+        return False
+    if not _clean_text(translation.translated_text):
+        return False
+    return translation.source_hash == segment.text_hash
+
+
+def _translation_status_counts(
+    segments: list[PaperSegment],
+    translations: list[PaperTranslation],
+    *,
+    target_lang: str,
+) -> dict[str, int]:
+    by_segment = {
+        row.segment_id: row
+        for row in translations
+        if row.segment_id and row.target_lang == target_lang
+    }
+    counts = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
+    for segment in segments:
+        row = by_segment.get(segment.segment_id)
+        if row is None:
+            counts["missing"] += 1
+        elif row.status == "failed":
+            counts["failed"] += 1
+        elif not _translation_is_current(row, segment, target_lang):
+            counts["stale"] += 1
+        else:
+            counts["translated"] += 1
+    return counts
+
+
+def translate_full_paper(
+    profile: str | Path,
+    source_id: str,
+    target_lang: str = "zh",
+    mode: str = "missing_or_stale",
+    batch_size: int = 20,
+    *,
+    ai_profile: str | None = None,
+    require_review: bool = True,
+) -> dict[str, object]:
+    """Translate a paper at segment granularity and persist valid rows.
+
+    Existing translations whose ``source_hash`` still matches the current
+    segment are skipped in the default mode. Incoming AI rows without a known
+    segment id, with a mismatched hash, or with blank translated text are kept
+    from overwriting valid translations and surfaced as warnings.
+    """
+
+    clean_lang = _clean_text(target_lang) or "zh"
+    clean_mode = _clean_text(mode).lower() or "missing_or_stale"
+    if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
+        raise ValueError(f"Unknown full-paper translation mode: {mode}")
+    try:
+        clean_batch_size = max(1, min(50, int(batch_size or 20)))
+    except (TypeError, ValueError):
+        clean_batch_size = 20
+
+    segments = load_paper_segments(profile, source_id)
+    if not segments:
+        ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
+        segments = load_paper_segments(profile, source_id)
+    translations = load_paper_translations(profile, source_id)
+    existing_by_segment = {
+        row.segment_id: row
+        for row in translations
+        if row.segment_id and row.target_lang == clean_lang
+    }
+    selected_segments: list[PaperSegment] = []
+    for segment in segments:
+        existing = existing_by_segment.get(segment.segment_id)
+        is_current = _translation_is_current(existing, segment, clean_lang)
+        is_stale = existing is not None and not is_current
+        if clean_mode == "all":
+            selected_segments.append(segment)
+        elif clean_mode == "missing" and existing is None:
+            selected_segments.append(segment)
+        elif clean_mode == "stale" and is_stale:
+            selected_segments.append(segment)
+        elif clean_mode == "missing_or_stale" and (existing is None or is_stale):
+            selected_segments.append(segment)
+
+    warnings: list[str] = []
+    accepted_rows: list[dict[str, object]] = []
+    segment_map = {segment.segment_id: segment for segment in selected_segments}
+    batches = [
+        selected_segments[index : index + clean_batch_size]
+        for index in range(0, len(selected_segments), clean_batch_size)
+    ]
+    if batches:
+        from nblane.core.ai.gateway import translate_paper_segments
+
+        for batch in batches:
+            try:
+                result = translate_paper_segments(
+                    ai_profile if ai_profile is not None else _profile_name(profile),
+                    source_id,
+                    [segment.to_dict() for segment in batch],
+                    target_lang=clean_lang,
+                    require_review=require_review,
+                )
+            except Exception as exc:
+                warnings.append(f"Translation batch failed: {exc}")
+                continue
+            warnings.extend(str(warning) for warning in result.warnings)
+            if result.error:
+                warnings.append(result.error)
+            structured = result.structured if isinstance(result.structured, dict) else {}
+            for raw in structured.get("translations") or []:
+                if not isinstance(raw, dict):
+                    continue
+                segment_id = _clean_text(raw.get("segment_id") or raw.get("scope_ref"))
+                if not segment_id or segment_id not in segment_map:
+                    warnings.append("Skipped translation row without a known segment_id.")
+                    continue
+                segment = segment_map[segment_id]
+                source_hash = _clean_text(
+                    raw.get("source_hash")
+                    or raw.get("text_hash")
+                    or raw.get("source_text_hash")
+                )
+                if source_hash != segment.text_hash:
+                    warnings.append(f"Skipped translation for {segment_id}: source_hash mismatch.")
+                    continue
+                translated_text = _clean_text(raw.get("translated_text"))
+                if not translated_text:
+                    warnings.append(f"Skipped translation for {segment_id}: translated_text is blank.")
+                    existing = existing_by_segment.get(segment_id)
+                    if not _translation_is_current(existing, segment, clean_lang):
+                        accepted_rows.append(
+                            {
+                                **copy.deepcopy(raw),
+                                "source_id": source_id,
+                                "scope_type": "segment",
+                                "scope_ref": segment.segment_id,
+                                "segment_id": segment.segment_id,
+                                "page": segment.page,
+                                "source_hash": segment.text_hash,
+                                "source_text": segment.text,
+                                "target_lang": clean_lang,
+                                "translated_text": "",
+                                "status": "failed",
+                                "warnings": _clean_list(raw.get("warnings"))
+                                + ["translated_text is blank."],
+                            }
+                        )
+                    continue
+                accepted_rows.append(
+                    {
+                        **copy.deepcopy(raw),
+                        "source_id": source_id,
+                        "scope_type": "segment",
+                        "scope_ref": segment.segment_id,
+                        "segment_id": segment.segment_id,
+                        "page": segment.page,
+                        "source_hash": segment.text_hash,
+                        "source_text": segment.text,
+                        "target_lang": clean_lang,
+                        "translated_text": translated_text,
+                        "status": _choice(raw.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
+                    }
+                )
+
+    if accepted_rows:
+        upsert_paper_translations(profile, source_id, accepted_rows)
+    final_translations = load_paper_translations(profile, source_id)
+    counts = _translation_status_counts(segments, final_translations, target_lang=clean_lang)
+    return {
+        "source_id": source_id,
+        "target_lang": clean_lang,
+        "mode": clean_mode,
+        "segments_total": len(segments),
+        "segments_selected": len(selected_segments),
+        "batches": len(batches),
+        "updated": len(accepted_rows),
+        "translated": counts["translated"],
+        "missing": counts["missing"],
+        "stale": counts["stale"],
+        "failed": counts["failed"],
+        "warnings": warnings,
+    }
 
 
 @dataclass
@@ -2746,6 +3065,7 @@ __all__ = [
     "create_paper_annotation",
     "create_reading_note_markdown",
     "download_paper_pdf",
+    "ensure_paper_reading_artifacts",
     "extract_paper_pages",
     "extract_paper_segments",
     "format_research_citations",
@@ -2789,6 +3109,7 @@ __all__ = [
     "search_papers",
     "search_papers_with_codex",
     "text_hash",
+    "translate_full_paper",
     "translation_rows_for_segments",
     "upsert_paper_library_node",
     "upsert_paper_translations",
