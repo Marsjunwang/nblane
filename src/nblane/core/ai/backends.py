@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -296,6 +297,203 @@ def fallback_structured(
             },
             [warning],
         )
+    if action == "research.paper_search_codex":
+        query = _clean_text(payload.get("query") or payload.get("goal"))
+        manual_results = _list_payload(payload, "results", "items", "sources")
+        results = []
+        for item in manual_results[:10]:
+            if not isinstance(item, dict):
+                continue
+            url = _clean_text(item.get("url") or item.get("pdf_url"))
+            doi = _clean_text(item.get("doi"))
+            ref = _clean_text(item.get("id") or item.get("ref") or doi or url)
+            title = _clean_text(item.get("title") or ref)
+            if not (title or url or doi):
+                continue
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "doi": doi,
+                    "provider_refs": _merge_refs(item.get("provider_refs"), ref),
+                    "reason": "Provided search candidate; verify URL/DOI before import.",
+                }
+            )
+        warnings = [warning]
+        if not results:
+            warnings.append(
+                "No provider-backed paper search was executed; supply verified URL/DOI refs before import."
+            )
+        return (
+            {
+                "query": query,
+                "results": results,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
+    if action == "research.paper_translate":
+        segments = _list_payload(payload, "segments", "chunks", "items")
+        target_lang = _clean_text(payload.get("target_lang")) or _reply_language(payload)
+        translations = []
+        warnings = [warning]
+        for index, segment in enumerate(segments[:50], start=1):
+            if not isinstance(segment, dict):
+                continue
+            text = _clean_text(segment.get("text") or segment.get("source_text"))
+            segment_id = _clean_text(
+                segment.get("segment_id")
+                or segment.get("id")
+                or segment.get("ref")
+                or f"segment:{index:04d}"
+            )
+            source_hash = _clean_text(
+                segment.get("source_hash")
+                or segment.get("text_hash")
+                or _hash_text(text)
+            )
+            translations.append(
+                {
+                    "segment_id": segment_id,
+                    "source_hash": source_hash,
+                    "source_text": text,
+                    "target_lang": target_lang,
+                    "translated_text": "",
+                    "glossary": {},
+                    "cited_segment_refs": [segment_id] if segment_id else [],
+                    "generated_by": "rule_fallback",
+                }
+            )
+        if not translations:
+            warnings.append("No segments were provided for translation.")
+        return (
+            {
+                "translations": translations,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
+    if action == "research.paper_explain_selection":
+        refs = _paper_refs(request, payload)
+        selected = _clean_text(
+            payload.get("selected_text")
+            or payload.get("selection")
+            or payload.get("excerpt")
+        )
+        warnings = [warning]
+        if not any(refs.values()):
+            warnings.append("No cited refs were provided; explanation is limited to the selected text.")
+        return (
+            {
+                "explanation": _first_sentence(selected),
+                **refs,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
+    if action == "research.paper_source_guide":
+        refs = _paper_refs(request, payload)
+        segments = _list_payload(payload, "segments", "chunks", "items")
+        tldr = _paper_summary(payload, segments)
+        return (
+            {
+                "tldr": tldr,
+                "contributions": [],
+                "methods": [],
+                "datasets": [],
+                "results": [],
+                "limitations": [],
+                "open_questions": [],
+                "key_terms": [],
+                "section_summaries": _section_summaries(segments),
+                **refs,
+                "warnings": [warning],
+                "ref": _paper_ref(request, payload),
+            },
+            [warning],
+        )
+    if action == "research.paper_qa":
+        refs = _paper_refs(request, payload)
+        warnings = [warning]
+        if not any(refs.values()):
+            warnings.append(
+                "No input refs were provided; fallback cannot answer without paper evidence."
+            )
+        question = _clean_text(payload.get("question") or payload.get("query"))
+        answer = "" if not any(refs.values()) else _paper_summary(payload, [])
+        return (
+            {
+                "question": question,
+                "answer": answer,
+                **refs,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
+    if action == "research.paper_claim_extract":
+        refs = _paper_refs(request, payload)
+        claims = []
+        for item in _list_payload(payload, "claim_candidates", "claims")[:20]:
+            if not isinstance(item, dict):
+                continue
+            text = _clean_text(item.get("text") or item.get("claim") or item.get("summary"))
+            if not text:
+                continue
+            claims.append(
+                {
+                    "text": text,
+                    "status": "candidate",
+                    "cited_segment_refs": refs["cited_segment_refs"],
+                    "cited_chunk_refs": refs["cited_chunk_refs"],
+                    "cited_annotation_refs": refs["cited_annotation_refs"],
+                }
+            )
+        return (
+            {
+                "claim_candidates": claims,
+                **refs,
+                "warnings": [warning],
+                "ref": _paper_ref(request, payload),
+            },
+            [warning],
+        )
+    if action == "research.paper_deep_read_codex":
+        refs = _paper_refs(request, payload)
+        warnings = [warning]
+        if not any(refs.values()):
+            warnings.append("No cited refs were provided for deep reading.")
+        return (
+            {
+                "reading_plan": [
+                    "Review supplied metadata, segments, chunks, and annotations.",
+                    "Extract candidate findings with cited refs only.",
+                    "Return uncertainties and follow-up questions for human review.",
+                ],
+                "findings": [],
+                **refs,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
+    if action == "research.paper_compare_codex":
+        refs = _paper_refs(request, payload)
+        warnings = [warning]
+        if not any(refs.values()):
+            warnings.append("No cited refs were provided for paper comparison.")
+        return (
+            {
+                "comparisons": [],
+                **refs,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
     if action == "resume.bullets_from_claims":
         claims = _list_payload(payload, "claims", "claim_candidates")
         bullets = []
@@ -516,6 +714,108 @@ def fallback_structured(
 
 def _clean_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _hash_text(value: str) -> str:
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
+def _first_sentence(value: str) -> str:
+    text = " ".join(value.split())
+    if not text:
+        return ""
+    for marker in (". ", "? ", "! ", "。", "？", "！"):
+        pos = text.find(marker)
+        if pos >= 0:
+            return text[: pos + len(marker)].strip()
+    return text[:240].strip()
+
+
+def _paper_ref(request: AIActionRequest, payload: dict[str, Any]) -> str:
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    refs = _merge_refs(
+        payload.get("ref"),
+        payload.get("source_id"),
+        source.get("id"),
+        source.get("ref"),
+        request.context_refs,
+    )
+    return refs[0] if refs else ""
+
+
+def _paper_refs(
+    request: AIActionRequest,
+    payload: dict[str, Any],
+) -> dict[str, list[str]]:
+    segment_refs = _merge_refs(
+        payload.get("cited_segment_refs"),
+        payload.get("segment_refs"),
+        payload.get("segment_id"),
+    )
+    chunk_refs = _merge_refs(payload.get("cited_chunk_refs"), payload.get("chunk_refs"))
+    annotation_refs = _merge_refs(
+        payload.get("cited_annotation_refs"),
+        payload.get("annotation_refs"),
+        payload.get("annotation_id"),
+    )
+    for item in _list_payload(payload, "segments"):
+        if isinstance(item, dict):
+            segment_refs = _merge_refs(
+                segment_refs,
+                item.get("segment_id"),
+                item.get("id"),
+                item.get("ref"),
+            )
+    for item in _list_payload(payload, "chunks"):
+        if isinstance(item, dict):
+            chunk_refs = _merge_refs(chunk_refs, item.get("chunk_id"), item.get("id"), item.get("ref"))
+    return {
+        "cited_segment_refs": segment_refs,
+        "cited_chunk_refs": chunk_refs,
+        "cited_annotation_refs": annotation_refs,
+    }
+
+
+def _paper_summary(payload: dict[str, Any], segments: list[Any]) -> str:
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    text = (
+        _clean_text(payload.get("summary"))
+        or _clean_text(source.get("summary"))
+        or _clean_text(payload.get("abstract"))
+        or _clean_text(source.get("abstract"))
+    )
+    if not text:
+        for segment in segments:
+            if isinstance(segment, dict):
+                text = _clean_text(segment.get("text"))
+                if text:
+                    break
+    return " ".join(text.split()[:80]).strip()
+
+
+def _section_summaries(segments: list[Any]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for segment in segments[:8]:
+        if not isinstance(segment, dict):
+            continue
+        text = _clean_text(segment.get("text"))
+        if not text:
+            continue
+        segment_id = _clean_text(segment.get("segment_id") or segment.get("id") or segment.get("ref"))
+        section_path = segment.get("section_path")
+        if isinstance(section_path, list):
+            section = " / ".join(_clean_text(item) for item in section_path if _clean_text(item))
+        else:
+            section = _clean_text(section_path or segment.get("section") or segment.get("locator"))
+        summaries.append(
+            {
+                "section": section,
+                "summary": " ".join(text.split()[:40]).strip(),
+                "cited_segment_refs": [segment_id] if segment_id else [],
+            }
+        )
+    return summaries
 
 
 def _reply_language(payload: dict[str, Any]) -> str:

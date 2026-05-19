@@ -1,11 +1,53 @@
-"""Research Source Inbox -- capture and triage external sources."""
+"""Paper Reading Studio -- search, read, annotate, and cite papers."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import streamlit as st
 import yaml
 
+from nblane.core.ai import (
+    answer_paper_question,
+    extract_paper_claims,
+    generate_paper_source_guide,
+    search_papers_codex,
+    translate_paper_segments,
+)
 from nblane.core.io import profile_dir
+from nblane.core.research_papers import (
+    PAPER_SEARCH_PROVIDERS,
+    PaperSearchResult,
+    auto_chunk_paper,
+    create_chunk_from_annotation,
+    create_paper_annotation,
+    create_reading_note_markdown,
+    extract_paper_pages,
+    extract_paper_segments,
+    format_research_citations,
+    import_paper_pdf,
+    import_paper_search_results,
+    import_paper_url,
+    load_paper_analysis,
+    load_paper_annotations,
+    load_paper_library_tree,
+    load_paper_pages,
+    load_paper_segments,
+    load_paper_translations,
+    mark_imported_paper_results,
+    move_papers_to_node,
+    paper_library_paths,
+    paper_overview,
+    paper_rows,
+    save_paper_analysis,
+    save_paper_note,
+    save_research_export,
+    search_papers,
+    translation_rows_for_segments,
+    upsert_paper_library_node,
+    upsert_paper_translations,
+    validate_paper_library,
+)
 from nblane.core.research_sources import (
     SOURCE_KINDS,
     SOURCE_STATUSES,
@@ -88,6 +130,10 @@ def _tags(value: str) -> list[str]:
         for item in value.replace("\n", ",").split(",")
         if item.strip()
     ]
+
+
+def _l(key: str, default: str) -> str:
+    return ui.get(key, default)
 
 
 def _status_label(status: str) -> str:
@@ -179,6 +225,11 @@ def _render_source_form(inbox, *, source=None, prefix: str) -> None:
                 value=_lines_text(getattr(existing, "experience_refs", [])),
                 height=70,
             )
+        library_node_refs = st.text_area(
+            _l("library_node_refs", "Library node refs"),
+            value=_lines_text(getattr(existing, "library_node_refs", [])),
+            height=70,
+        )
         summary = st.text_area(
             ui["summary"],
             value=getattr(existing, "summary", ""),
@@ -210,6 +261,7 @@ def _render_source_form(inbox, *, source=None, prefix: str) -> None:
                 goal_refs=_text_lines(goal_refs),
                 project_refs=_text_lines(project_refs),
                 experience_refs=_text_lines(experience_refs),
+                library_node_refs=_text_lines(library_node_refs),
                 summary=summary,
                 notes=notes,
                 visibility=visibility,
@@ -230,6 +282,7 @@ def _render_source_form(inbox, *, source=None, prefix: str) -> None:
                 goal_refs=_text_lines(goal_refs),
                 project_refs=_text_lines(project_refs),
                 experience_refs=_text_lines(experience_refs),
+                library_node_refs=_text_lines(library_node_refs),
                 summary=summary,
                 notes=notes,
                 visibility=visibility,
@@ -307,42 +360,800 @@ def _render_candidate_preview(inbox) -> None:
 
 
 def _render_workspace_overview(inbox) -> None:
-    claim_rows = load_research_claims(_pdir)
-    draft_rows = load_research_drafts(_pdir)
+    overview = paper_overview(_pdir)
     connector_rows = list(load_connectors(_pdir).get("connectors") or [])
-    private_sources = [
-        source for source in inbox.sources if source.visibility == "private"
-    ]
-    public_sources = [
-        source for source in inbox.sources if source.visibility == "public"
-    ]
-    ready_claims = [
-        claim for claim in claim_rows if claim.status in {"ready", "promoted"}
-    ]
-    enabled_connectors = [
-        row for row in connector_rows if bool(row.get("enabled", True))
-    ]
+    enabled_connectors = [row for row in connector_rows if bool(row.get("enabled", True))]
 
-    st.subheader(ui["workspace_overview"])
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric(ui["sources_total"], len(inbox.sources))
-    m2.metric(ui["sources_private"], len(private_sources))
-    m3.metric(ui["sources_public"], len(public_sources))
-    m4.metric(ui["ready_claims"], len(ready_claims))
-    m5.metric(ui["drafts_total"], len(draft_rows))
-    m6.metric(ui["connectors_enabled"], len(enabled_connectors))
+    st.subheader(_l("paper_reading_pipeline", "Reading Pipeline"))
+    p1, p2, p3, p4, p5, p6 = st.columns(6)
+    p1.metric(_l("papers_total", "Papers total"), overview["papers_total"])
+    p2.metric(_l("papers_reading", "Reading"), overview["reading"])
+    p3.metric(_l("papers_annotated", "Annotated"), overview["annotated"])
+    p4.metric(_l("papers_candidate_ready", "Candidate ready"), overview["candidate_ready"])
+    p5.metric(_l("papers_archived", "Archived"), overview["archived"])
+    p6.metric(ui["connectors_enabled"], len(enabled_connectors))
 
-    st.caption(ui["reading_flow_hint"])
+    st.subheader(_l("review_queue", "Review Queue"))
+    r1, r2, r3 = st.columns(3)
+    r1.metric(_l("ready_research_claims", "Ready research claims"), overview["ready_research_claims"])
+    r2.metric(_l("promoted_research_claims", "Promoted research claims"), overview["promoted_research_claims"])
+    r3.metric(_l("ai_candidates", "AI candidates"), overview["ai_candidates"])
+
+    st.subheader(_l("integrity_publish_safety", "Integrity & Publish Safety"))
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric(_l("private_public_sources", "Private / public"), f"{overview['private_sources']} / {overview['public_sources']}")
+    s2.metric(_l("citation_broken", "Citation broken"), overview["citation_broken"])
+    s3.metric(_l("private_publish_risk", "Private publish risk"), overview["private_publish_risk"])
+    s4.metric(_l("stale_translation_warning", "Stale translations"), overview["stale_translation_warning"])
+
+    st.caption(
+        _l(
+            "paper_evidence_boundary",
+            "Paper-reading evidence proves reading, quoting, and understanding; project or goal claims still need real project evidence before public use.",
+        )
+    )
     st.caption(ui["claim_boundary_hint"])
 
+    recent = overview.get("recent_papers") or []
+    if recent:
+        st.markdown(f"**{_l('recent_papers', 'Recent papers')}**")
+        st.dataframe(
+            [
+                {
+                    "title": row.get("title"),
+                    "status": row.get("status"),
+                    "tree_path": row.get("tree_path"),
+                    "last_read": row.get("last_read"),
+                }
+                for row in recent
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    diagnostics = []
+    diagnostics.extend(overview.get("citation_diagnostics") or [])
+    diagnostics.extend(overview.get("private_publish_risk_refs") or [])
+    if diagnostics:
+        with st.expander(_l("integrity_details", "Integrity details")):
+            for item in diagnostics:
+                st.warning(str(item))
+
     st.markdown(f"**{ui['research_primary_actions']}**")
-    a1, a2, a3 = st.columns(3)
+    a1, a2, a3, a4, a5 = st.columns(5)
     with a1:
-        st.page_link("pages/7_Research.py", label=ui["action_add_source"])
+        st.page_link("pages/7_Research.py", label=_l("search_papers", "Search papers"))
     with a2:
-        st.page_link("pages/7_Research.py", label=ui["action_open_reading"])
+        st.page_link("pages/7_Research.py", label=_l("open_library", "Open Library"))
     with a3:
-        st.page_link("pages/7_Research.py", label=ui["action_create_synthesis"])
+        st.page_link("pages/7_Research.py", label=_l("continue_reading", "Continue reading"))
+    with a4:
+        st.page_link("pages/7_Research.py", label=_l("review_claims", "Review claims"))
+    with a5:
+        st.page_link("pages/7_Research.py", label=_l("export_citations", "Export citations"))
+
+
+def _paper_sources(inbox) -> list:
+    return [source for source in inbox.sources if source.kind == "paper"]
+
+
+def _source_label(inbox, source_id: str) -> str:
+    return next(
+        (source.title or source.id for source in inbox.sources if source.id == source_id),
+        source_id,
+    )
+
+
+def _node_options() -> dict[str, str]:
+    paths = paper_library_paths(_pdir)
+    return {"": _l("unsorted_inbox", "Unsorted Inbox"), **paths}
+
+
+def _result_rows(results: list[dict]) -> list[dict[str, object]]:
+    marked = mark_imported_paper_results(_pdir, results)
+    return [
+        {
+            "select_id": row.candidate_id,
+            "title": row.title,
+            "year": row.year,
+            "venue": row.venue,
+            "authors": ", ".join(row.authors[:3]),
+            "provider": ", ".join(row.provider_refs),
+            "citations": row.citation_count if row.citation_count is not None else "",
+            "oa_pdf": bool(row.open_access_pdf),
+            "link": (row.link_check or {}).get("status", "needs check"),
+            "imported": row.imported_source_id,
+            "relevance": row.why_relevant,
+            "tags": ", ".join(row.tags),
+        }
+        for row in marked
+    ]
+
+
+def _search_state_key(name: str) -> str:
+    return f"paper_search:{selected}:{name}"
+
+
+def _render_paper_search(inbox) -> None:
+    st.subheader(_l("paper_search", "Paper Search"))
+    st.caption(
+        _l(
+            "paper_search_caption",
+            "Search and import candidates. Results stay preview-only until you confirm import.",
+        )
+    )
+    mode = st.radio(
+        _l("search_mode", "Search mode"),
+        [
+            "Codex Search",
+            "Provider Search",
+            "Manual URL",
+            "Upload PDF",
+        ],
+        horizontal=True,
+        key=f"paper_search_mode:{selected}",
+    )
+
+    if mode in {"Codex Search", "Provider Search"}:
+        with st.form(f"paper_search_form:{selected}"):
+            query = st.text_input(_l("query", "Query"), placeholder="VLA memory")
+            providers = st.multiselect(
+                _l("providers", "Providers"),
+                options=list(PAPER_SEARCH_PROVIDERS),
+                default=list(PAPER_SEARCH_PROVIDERS),
+            )
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                limit = st.number_input(_l("limit", "Limit"), min_value=1, max_value=50, value=10)
+            with c2:
+                year_from = st.text_input(_l("year_from", "Year from"))
+            with c3:
+                year_to = st.text_input(_l("year_to", "Year to"))
+            only_pdf = st.checkbox(_l("has_open_access_pdf", "Has open-access PDF"), value=False)
+            exclude_imported = st.checkbox(_l("exclude_imported", "Exclude already imported"), value=True)
+            project_refs = st.text_area(ui["project_refs"], height=68)
+            goal_refs = st.text_area(ui["goal_refs"], height=68)
+            submitted = st.form_submit_button(_l("search_papers", "Search papers"), type="primary")
+        if submitted:
+            filters = {
+                "providers": providers,
+                "limit": limit,
+                "year_from": year_from,
+                "year_to": year_to,
+                "has_open_access_pdf": only_pdf,
+            }
+            if mode == "Codex Search":
+                result = search_papers_codex(
+                    selected,
+                    query,
+                    payload={"filters": filters, "project_refs": _text_lines(project_refs), "goal_refs": _text_lines(goal_refs)},
+                )
+                raw = result.structured if isinstance(result.structured, dict) else {}
+                candidates = [
+                    item.to_dict()
+                    for item in (
+                        PaperSearchResult.from_dict(row)
+                        for row in raw.get("results", [])
+                    )
+                    if item is not None
+                ]
+                if not candidates:
+                    st.warning(
+                        _l(
+                            "codex_search_fallback",
+                            "Codex returned no structured papers; using provider search fallback.",
+                        )
+                    )
+                    candidates = [row.to_dict() for row in search_papers(query, tuple(providers), int(limit), filters)]
+                for warning in result.warnings:
+                    st.warning(str(warning))
+            else:
+                candidates = [row.to_dict() for row in search_papers(query, tuple(providers), int(limit), filters)]
+            if exclude_imported:
+                candidates = [
+                    row.to_dict()
+                    for row in mark_imported_paper_results(_pdir, candidates)
+                    if not row.imported_source_id
+                ]
+            st.session_state[_search_state_key("results")] = candidates
+            st.rerun()
+
+        results = list(st.session_state.get(_search_state_key("results"), []) or [])
+        if results:
+            st.dataframe(_result_rows(results), use_container_width=True, hide_index=True)
+            selected_ids = st.multiselect(
+                _l("select_to_import", "Select to import"),
+                options=[str(row.get("candidate_id")) for row in results],
+                format_func=lambda cid: next(
+                    (str(row.get("title") or cid) for row in results if str(row.get("candidate_id")) == cid),
+                    cid,
+                ),
+            )
+            with st.expander(_l("selected_yaml_preview", "Selected YAML preview"), expanded=bool(selected_ids)):
+                st.code(
+                    yaml.dump(
+                        [row for row in results if str(row.get("candidate_id")) in set(selected_ids)],
+                        allow_unicode=True,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                    language="yaml",
+                )
+            with st.form(f"paper_import_options:{selected}"):
+                node_options = _node_options()
+                node_ref = st.selectbox(
+                    _l("library_location", "Library location"),
+                    options=list(node_options),
+                    format_func=lambda ref: node_options.get(ref, ref),
+                )
+                tags = st.text_input(ui["tags"])
+                visibility = st.selectbox(ui["visibility"], ["private", "public"])
+                status = st.selectbox(ui["status"], SOURCE_STATUSES, index=SOURCE_STATUSES.index("inbox"))
+                download_pdf = st.checkbox(_l("download_open_access_pdf", "Download open-access PDF"), value=False)
+                confirmed = st.form_submit_button(_l("import_selected", "Import selected"), type="primary")
+            if confirmed:
+                try:
+                    assert_files_current([_sources_path])
+                    imported = import_paper_search_results(
+                        _pdir,
+                        results,
+                        selected_ids,
+                        {
+                            "library_node_refs": [node_ref] if node_ref else [],
+                            "tags": _tags(tags),
+                            "visibility": visibility,
+                            "status": status,
+                            "goal_refs": _text_lines(goal_refs),
+                            "project_refs": _text_lines(project_refs),
+                            "download_pdf": download_pdf,
+                        },
+                    )
+                    refresh_file_snapshots([_sources_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(_l("imported_papers", "Imported papers: {ids}").format(ids=", ".join(imported) or "0"))
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        else:
+            st.caption(_l("search_results_empty", "No paper candidates yet."))
+
+    elif mode == "Manual URL":
+        with st.form(f"paper_manual_url:{selected}"):
+            url = st.text_input(_l("url_or_doi", "URL / DOI / arXiv / PDF URL"))
+            title_hint = st.text_input(_l("title_hint", "Title hint"))
+            node_options = _node_options()
+            node_ref = st.selectbox(
+                _l("library_location", "Library location"),
+                options=list(node_options),
+                format_func=lambda ref: node_options.get(ref, ref),
+            )
+            tags = st.text_input(ui["tags"])
+            visibility = st.selectbox(ui["visibility"], ["private", "public"])
+            status = st.selectbox(ui["status"], SOURCE_STATUSES, index=SOURCE_STATUSES.index("inbox"))
+            submitted = st.form_submit_button(_l("import_url", "Import URL"), type="primary")
+        if submitted:
+            try:
+                assert_files_current([_sources_path])
+                source_id = import_paper_url(
+                    _pdir,
+                    url,
+                    {
+                        "title": title_hint,
+                        "library_node_refs": [node_ref] if node_ref else [],
+                        "tags": _tags(tags),
+                        "visibility": visibility,
+                        "status": status,
+                    },
+                )
+                refresh_file_snapshots([_sources_path])
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["created"].format(id=source_id))
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+    else:
+        st.caption(_l("upload_pdf_caption", "Upload a local PDF and bind it to a private paper source."))
+        with st.form(f"paper_upload:{selected}"):
+            title = st.text_input(ui["title_label"])
+            uploaded = st.file_uploader("PDF", type=["pdf"])
+            node_options = _node_options()
+            node_ref = st.selectbox(
+                _l("library_location", "Library location"),
+                options=list(node_options),
+                format_func=lambda ref: node_options.get(ref, ref),
+            )
+            tags = st.text_input(ui["tags"])
+            visibility = st.selectbox(ui["visibility"], ["private", "public"])
+            submitted = st.form_submit_button(_l("upload_pdf", "Upload PDF"), type="primary")
+        if submitted:
+            try:
+                if uploaded is None:
+                    raise ValueError("Select a PDF first.")
+                assert_files_current([_sources_path])
+                inbox = load_research_sources(selected)
+                source = add_research_source(
+                    inbox,
+                    title or uploaded.name,
+                    kind="paper",
+                    status="reading",
+                    tags=_tags(tags),
+                    visibility=visibility,
+                    origin="manual",
+                    library_node_refs=[node_ref] if node_ref else [],
+                )
+                save_research_sources(selected, inbox)
+                import_paper_pdf(_pdir, source.id, uploaded.getvalue(), uploaded.name)
+                refresh_file_snapshots([_sources_path])
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["created"].format(id=source.id))
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+
+def _render_paper_library(inbox) -> None:
+    st.subheader(_l("paper_library", "Paper Library"))
+    st.caption(
+        _l(
+            "paper_library_caption",
+            "Tree nodes describe where papers belong; status, tags, PDF assets, and reading artifacts are paper properties.",
+        )
+    )
+    with st.expander(_l("library_tree", "Library Tree"), expanded=False):
+        tree = load_paper_library_tree(_pdir)
+        if tree.nodes:
+            st.dataframe(
+                [
+                    {
+                        "id": node.id,
+                        "title": node.title,
+                        "parent_id": node.parent_id,
+                        "description": node.description,
+                        "status": node.status,
+                    }
+                    for node in tree.nodes
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption(_l("tree_empty", "No library nodes yet."))
+        with st.form(f"paper_library_node:{selected}"):
+            node_options = _node_options()
+            title = st.text_input(_l("node_title", "Node title"))
+            node_id = st.text_input(_l("node_id", "Node id"))
+            parent_id = st.selectbox(
+                _l("parent_node", "Parent node"),
+                options=list(node_options),
+                format_func=lambda ref: node_options.get(ref, ref),
+            )
+            description = st.text_area(ui["notes"], height=80)
+            submitted = st.form_submit_button(_l("save_node", "Save node"), type="primary")
+        if submitted:
+            try:
+                upsert_paper_library_node(
+                    _pdir,
+                    title,
+                    node_id=node_id,
+                    parent_id=parent_id,
+                    description=description,
+                )
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+        diagnostics = validate_paper_library(_pdir)
+        for item in diagnostics:
+            st.warning(str(item))
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        view = st.selectbox(
+            _l("smart_view", "Smart View"),
+            [
+                "all",
+                "unsorted",
+                "reading",
+                "annotated",
+                "candidate_ready",
+                "archived",
+                "discarded",
+                "other",
+            ],
+            format_func=lambda item: {
+                "all": "All Papers",
+                "unsorted": "Unsorted Inbox",
+                "reading": "Reading",
+                "annotated": "Annotated",
+                "candidate_ready": "Candidate Ready",
+                "archived": "Archived",
+                "discarded": "Discarded",
+                "other": "Other Sources",
+            }.get(item, item),
+        )
+    with c2:
+        node_options = _node_options()
+        node_filter = st.selectbox(
+            _l("tree_filter", "Tree filter"),
+            options=list(node_options),
+            format_func=lambda ref: node_options.get(ref, ref),
+        )
+    rows = paper_rows(_pdir, view=view, node_id=node_filter)
+    display_rows = [
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"source"}
+        }
+        for row in rows
+    ]
+    if display_rows:
+        st.dataframe(display_rows, use_container_width=True, hide_index=True)
+    else:
+        st.caption(_l("library_empty", "No papers match this view."))
+
+    paper_ids = [str(row.get("id")) for row in rows]
+    selected_rows = st.multiselect(
+        _l("select_papers", "Select papers"),
+        options=paper_ids,
+        format_func=lambda sid: _source_label(inbox, sid),
+    )
+    with st.expander(_l("bulk_actions", "Bulk actions"), expanded=bool(selected_rows)):
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            bulk_node = st.selectbox(
+                _l("move_to_node", "Move to node"),
+                options=list(node_options),
+                format_func=lambda ref: node_options.get(ref, ref),
+                key=f"bulk_node:{selected}",
+            )
+            if st.button(_l("move_to_node", "Move to node"), disabled=not selected_rows):
+                try:
+                    assert_files_current([_sources_path])
+                    move_papers_to_node(_pdir, selected_rows, bulk_node)
+                    refresh_file_snapshots([_sources_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with b2:
+            bulk_status = st.selectbox(
+                _l("set_status", "Set status"),
+                SOURCE_STATUSES,
+                key=f"bulk_status:{selected}",
+            )
+            if st.button(_l("set_status", "Set status"), disabled=not selected_rows):
+                try:
+                    assert_files_current([_sources_path])
+                    current = load_research_sources(selected)
+                    for source_id in selected_rows:
+                        update_research_source(current, source_id, status=bulk_status)
+                    _save_sources(current, ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with b3:
+            tag_text = st.text_input(_l("add_tags", "Add tags"), key=f"bulk_tags:{selected}")
+            if st.button(_l("add_tags", "Add tags"), disabled=not selected_rows):
+                try:
+                    assert_files_current([_sources_path])
+                    current = load_research_sources(selected)
+                    by_id = current.by_id()
+                    for source_id in selected_rows:
+                        source = by_id.get(source_id)
+                        if source is not None:
+                            update_research_source(current, source_id, tags=[*source.tags, *_tags(tag_text)])
+                    _save_sources(current, ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+    if paper_ids:
+        detail_id = st.selectbox(
+            _l("detail_paper", "Detail paper"),
+            options=paper_ids,
+            format_func=lambda sid: _source_label(inbox, sid),
+            key=f"paper_library_detail:{selected}",
+        )
+        source = inbox.by_id().get(detail_id)
+        if source is not None:
+            with st.expander(_l("detail_drawer", "Detail drawer"), expanded=True):
+                left, right = st.columns(2)
+                with left:
+                    st.markdown(f"**{source.title}**")
+                    st.caption(source.id)
+                    st.code(
+                        yaml.dump(
+                            {
+                                "metadata": source.metadata,
+                                "library_node_refs": source.library_node_refs,
+                                "tags": source.tags,
+                                "project_refs": source.project_refs,
+                                "goal_refs": source.goal_refs,
+                            },
+                            allow_unicode=True,
+                            default_flow_style=False,
+                            sort_keys=False,
+                        ),
+                        language="yaml",
+                    )
+                with right:
+                    annotations = load_paper_annotations(_pdir, source.id)
+                    translations = load_paper_translations(_pdir, source.id)
+                    st.metric(_l("annotations", "Annotations"), len(annotations))
+                    st.metric(_l("translations", "Translations"), len(translations))
+                    if st.button(ui["archive"], key=f"archive:{source.id}"):
+                        try:
+                            assert_files_current([_sources_path])
+                            current = load_research_sources(selected)
+                            update_research_source(current, source.id, status="archived")
+                            _save_sources(current, ui["saved"])
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+                    if st.button(ui["discard"], key=f"discard:{source.id}"):
+                        try:
+                            assert_files_current([_sources_path])
+                            current = load_research_sources(selected)
+                            update_research_source(current, source.id, status="discarded")
+                            _save_sources(current, ui["saved"])
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+
+def _segment_dicts(source_id: str, limit: int = 20) -> list[dict[str, object]]:
+    return [segment.to_dict() for segment in load_paper_segments(_pdir, source_id)[:limit]]
+
+
+def _render_paper_reader(inbox) -> None:
+    st.subheader(_l("reader", "Reader"))
+    papers = _paper_sources(inbox)
+    if not papers:
+        st.caption(_l("no_papers", "No paper sources yet."))
+        return
+    source_id = st.selectbox(
+        ui["source_id"],
+        options=[source.id for source in papers],
+        format_func=lambda sid: _source_label(inbox, sid),
+        key=f"paper_reader_source:{selected}",
+    )
+    source = inbox.by_id().get(source_id)
+    if source is None:
+        return
+    st.markdown(f"**{source.title}**")
+    st.caption(
+        _l(
+            "reader_fallback_caption",
+            "Text-mode Reader fallback: PDF.js can replace this surface later, but annotations, chunks, translations, and citations already persist.",
+        )
+    )
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("PDF", "yes" if source.metadata.get("pdf_asset_ref") else "missing")
+    m2.metric(_l("pages", "Pages"), source.metadata.get("page_count", ""))
+    m3.metric(_l("annotations", "Annotations"), len(load_paper_annotations(_pdir, source_id)))
+    m4.metric(_l("segments", "Segments"), len(load_paper_segments(_pdir, source_id)))
+
+    actions = st.columns(4)
+    with actions[0]:
+        if st.button(_l("extract_pages", "Extract pages"), disabled=not source.metadata.get("pdf_asset_ref")):
+            try:
+                extract_paper_pages(_pdir, source_id)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with actions[1]:
+        if st.button(_l("extract_segments", "Extract segments")):
+            try:
+                extract_paper_segments(_pdir, source_id)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with actions[2]:
+        if st.button(_l("auto_chunk", "Auto chunk")):
+            try:
+                chunks = auto_chunk_paper(_pdir, source_id)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(_l("created_chunks", "Created chunks: {count}").format(count=len(chunks)))
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with actions[3]:
+        if st.button(_l("save_last_read", "Save last read")):
+            try:
+                current = load_research_sources(selected)
+                src = current.by_id().get(source_id)
+                if src is None:
+                    raise ValueError(source_id)
+                metadata = dict(src.metadata)
+                metadata["last_read_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+                update_research_source(current, source_id, metadata=metadata, status="reading")
+                _save_sources(current, ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+    pages, segments, annotations, translations_tab, ai_tab, claims_tab = st.tabs(
+        [
+            _l("pages", "Pages"),
+            _l("segments", "Segments"),
+            _l("annotations", "Annotations"),
+            _l("translation", "Translation"),
+            "AI",
+            ui["claims_citations"],
+        ]
+    )
+    with pages:
+        rows = load_paper_pages(_pdir, source_id)
+        if rows:
+            for page in rows[:20]:
+                with st.expander(f"p. {page.page} · {page.char_count} chars"):
+                    st.text(page.text or _l("page_text_empty", "No extracted text for this page."))
+        else:
+            st.caption(_l("pages_empty", "No extracted pages yet."))
+    with segments:
+        segment_rows = load_paper_segments(_pdir, source_id)
+        if segment_rows:
+            st.dataframe(
+                [
+                    {
+                        "segment_id": segment.segment_id,
+                        "page": segment.page,
+                        "locator": segment.locator,
+                        "text": segment.text[:260],
+                        "text_hash": segment.text_hash,
+                    }
+                    for segment in segment_rows
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption(_l("segments_empty", "No paper segments yet."))
+    with annotations:
+        segment_ids = [segment.segment_id for segment in load_paper_segments(_pdir, source_id)]
+        with st.form(f"paper_annotation:{selected}:{source_id}"):
+            page = st.number_input(_l("page", "Page"), min_value=0, value=0)
+            selected_text = st.text_area(_l("selected_text", "Selected text"), height=110)
+            note = st.text_area(ui["notes"], height=80)
+            picked_segments = st.multiselect(_l("segment_refs", "Segment refs"), segment_ids)
+            tags = st.text_input(ui["tags"])
+            submitted = st.form_submit_button(_l("create_annotation", "Create annotation"), type="primary")
+        if submitted:
+            try:
+                ann = create_paper_annotation(
+                    _pdir,
+                    source_id,
+                    selected_text,
+                    page=int(page),
+                    note=note,
+                    tags=_tags(tags),
+                    segment_refs=picked_segments,
+                )
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["created"].format(id=ann.id))
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+        anns = load_paper_annotations(_pdir, source_id)
+        if anns:
+            st.dataframe([ann.to_dict() for ann in anns], use_container_width=True, hide_index=True)
+            ann_id = st.selectbox(
+                _l("annotation_to_chunk", "Annotation to chunk"),
+                options=[ann.id for ann in anns],
+            )
+            if st.button(_l("create_chunk_from_annotation", "Create chunk from annotation")):
+                try:
+                    chunk = create_chunk_from_annotation(_pdir, ann_id)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["created"].format(id=chunk.id))
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        else:
+            st.caption(_l("annotations_empty", "No annotations yet."))
+    with translations_tab:
+        segment_rows = load_paper_segments(_pdir, source_id)
+        segment_ids = [segment.segment_id for segment in segment_rows]
+        picked = st.multiselect(_l("translate_segments", "Translate segments"), segment_ids[:100])
+        if st.button(_l("generate_translation_candidate", "Generate translation candidate"), disabled=not picked):
+            result = translate_paper_segments(
+                selected,
+                source_id,
+                [segment.to_dict() for segment in segment_rows if segment.segment_id in set(picked)],
+            )
+            st.session_state[f"paper_translation_candidate:{selected}:{source_id}"] = result.structured or {}
+            for warning in result.warnings:
+                st.warning(str(warning))
+        candidate = st.session_state.get(f"paper_translation_candidate:{selected}:{source_id}", {})
+        if isinstance(candidate, dict) and candidate.get("translations"):
+            st.code(yaml.dump(candidate, allow_unicode=True, sort_keys=False), language="yaml")
+            if st.button(_l("accept_translation_candidate", "Accept translation candidate")):
+                try:
+                    upsert_paper_translations(_pdir, source_id, list(candidate.get("translations") or []))
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        translations = load_paper_translations(_pdir, source_id)
+        if translations:
+            st.dataframe([row.to_dict() for row in translations], use_container_width=True, hide_index=True)
+        else:
+            st.caption(_l("translations_empty", "No translations yet."))
+    with ai_tab:
+        segment_payload = _segment_dicts(source_id, limit=30)
+        if st.button(_l("run_source_guide", "Run Source Guide")):
+            result = generate_paper_source_guide(
+                selected,
+                source_id,
+                source=source.to_dict(),
+                segments=segment_payload,
+            )
+            st.session_state[f"paper_guide:{selected}:{source_id}"] = result.structured or {}
+            for warning in result.warnings:
+                st.warning(str(warning))
+        guide = st.session_state.get(f"paper_guide:{selected}:{source_id}", {})
+        if guide:
+            st.code(yaml.dump(guide, allow_unicode=True, sort_keys=False), language="yaml")
+            if st.button(_l("accept_as_analysis", "Accept as analysis")):
+                try:
+                    save_paper_analysis(_pdir, source_id, guide)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                except Exception as exc:
+                    st.error(str(exc))
+        question = st.text_input(_l("ask_paper", "Ask paper"))
+        if st.button(_l("ask_paper", "Ask paper"), disabled=not question):
+            result = answer_paper_question(
+                selected,
+                source_id,
+                question,
+                payload={"segments": segment_payload},
+            )
+            st.code(yaml.dump(result.structured or {}, allow_unicode=True, sort_keys=False), language="yaml")
+            for warning in result.warnings:
+                st.warning(str(warning))
+        if st.button(_l("extract_claim_candidates", "Extract claim candidates")):
+            result = extract_paper_claims(selected, source_id, segments=segment_payload)
+            st.code(yaml.dump(result.structured or {}, allow_unicode=True, sort_keys=False), language="yaml")
+            for warning in result.warnings:
+                st.warning(str(warning))
+        analysis = load_paper_analysis(_pdir, source_id)
+        if analysis:
+            with st.expander(_l("saved_analysis", "Saved analysis")):
+                st.code(yaml.dump(analysis, allow_unicode=True, sort_keys=False), language="yaml")
+    with claims_tab:
+        st.caption(_l("reader_claims_hint", "Use the Claims & Citations tab for durable claim/citation editing."))
+        source_chunks = load_chunks(_pdir, source_id)
+        st.dataframe(
+            [
+                {"id": chunk.id, "locator": chunk.locator, "text": chunk.text[:220]}
+                for chunk in source_chunks
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def _reading_key(name: str) -> str:
@@ -790,6 +1601,117 @@ def _render_claims_citations(inbox) -> None:
 
 
 def _render_synthesis_drafts() -> None:
+    st.subheader(_l("synthesis_export", "Synthesis / Export"))
+    citation_rows = load_research_citations(_pdir)
+    chunk_rows = load_chunks(_pdir)
+    claim_rows_all = load_research_claims(_pdir)
+    paper_ids = [source.id for source in _paper_sources(load_research_sources(selected))]
+    with st.expander(_l("export_citations", "Export citations"), expanded=False):
+        citation_refs = st.multiselect(
+            ui["research_citations"],
+            options=[citation.id for citation in citation_rows],
+            format_func=lambda cid: next(
+                (
+                    f"{cid} · {citation.locator or citation.source_id}"
+                    for citation in citation_rows
+                    if citation.id == cid
+                ),
+                cid,
+            ),
+        )
+        export_format = st.radio("Format", ["markdown", "bibtex"], horizontal=True)
+        try:
+            export_body = format_research_citations(
+                _pdir,
+                citation_refs,
+                format=export_format,
+            )
+        except Exception as exc:
+            export_body = ""
+            st.warning(str(exc))
+        if export_body:
+            st.text_area(
+                _l("export_preview", "Export preview"),
+                value=export_body,
+                height=220,
+                key=f"export_preview:{selected}:{export_format}",
+            )
+            st.download_button(
+                _l("download_export", "Download export"),
+                data=export_body,
+                file_name=f"research-citations.{ 'bib' if export_format == 'bibtex' else 'md' }",
+            )
+            if st.button(_l("save_export", "Save export")):
+                try:
+                    path = save_research_export(_pdir, export_body, format=export_format)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(str(path))
+                except Exception as exc:
+                    st.error(str(exc))
+
+    with st.expander(_l("reading_note_export", "Reading note export"), expanded=False):
+        note_source = st.selectbox(
+            ui["source_id"],
+            options=paper_ids,
+            format_func=lambda sid: _source_label(load_research_sources(selected), sid),
+            key=f"reading_note_source:{selected}",
+        ) if paper_ids else ""
+        note_claims = st.multiselect(
+            ui["research_claims"],
+            options=[claim.id for claim in claim_rows_all],
+            key=f"reading_note_claims:{selected}",
+        )
+        note_chunks = st.multiselect(
+            ui["chunk_refs"],
+            options=[chunk.id for chunk in chunk_rows if not note_source or chunk.source_id == note_source],
+            key=f"reading_note_chunks:{selected}",
+        )
+        note_citations = st.multiselect(
+            ui["citations"],
+            options=[citation.id for citation in citation_rows if not note_source or citation.source_id == note_source],
+            key=f"reading_note_citations:{selected}",
+        )
+        if note_source:
+            note_body = create_reading_note_markdown(
+                _pdir,
+                note_source,
+                claim_refs=note_claims,
+                chunk_refs=note_chunks,
+                citation_refs=note_citations,
+            )
+            st.text_area(
+                ui["body"],
+                value=note_body,
+                height=240,
+                key=f"reading_note_body:{selected}:{note_source}",
+            )
+            n1, n2 = st.columns(2)
+            with n1:
+                st.download_button(
+                    _l("download_note", "Download note"),
+                    data=note_body,
+                    file_name=f"{note_source.replace(':', '-')}-reading-note.md",
+                )
+            with n2:
+                if st.button(_l("save_note", "Save note")):
+                    try:
+                        path = save_paper_note(
+                            _pdir,
+                            note_source,
+                            note_body,
+                            metadata={
+                                "claim_refs": note_claims,
+                                "chunk_refs": note_chunks,
+                                "citation_refs": note_citations,
+                            },
+                        )
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.success(str(path))
+                    except Exception as exc:
+                        st.error(str(exc))
+
     st.subheader(ui["synthesis_drafts"])
     claim_rows = load_research_claims(_pdir)
     claim_ids = [claim.id for claim in claim_rows]
@@ -804,7 +1726,11 @@ def _render_synthesis_drafts() -> None:
                     cid,
                 ),
             )
-            body = st.text_area(ui["body"], height=180)
+            body = st.text_area(
+                ui["body"],
+                height=180,
+                key=f"research_synthesis_body:{selected}",
+            )
             submitted = st.form_submit_button(ui["create"], type="primary")
         if submitted:
             try:
@@ -857,7 +1783,13 @@ def _render_synthesis_drafts() -> None:
             ),
             language="yaml",
         )
-        st.text_area(ui["body"], value=str(candidate.get("body") or ""), height=240, disabled=True)
+        st.text_area(
+            ui["body"],
+            value=str(candidate.get("body") or ""),
+            height=240,
+            disabled=True,
+            key=f"blog_candidate_body:{selected}:{draft_id}",
+        )
     except Exception as exc:
         candidate = None
         st.warning(str(exc))
@@ -969,20 +1901,38 @@ with _head_goal:
 
 inbox = load_research_sources(selected)
 
-_render_workspace_overview(inbox)
-st.divider()
-
-tab_inbox, tab_reading, tab_claims, tab_drafts, tab_connectors = st.tabs(
+tab_overview, tab_search, tab_library, tab_reader, tab_claims, tab_export, tab_advanced = st.tabs(
     [
-        ui["source_inbox"],
-        ui["reading_room"],
+        _l("overview", "Overview"),
+        _l("paper_search", "Paper Search"),
+        _l("paper_library", "Paper Library"),
+        _l("reader", "Reader"),
         ui["claims_citations"],
-        ui["synthesis_drafts"],
-        ui["connectors"],
+        _l("synthesis_export", "Synthesis / Export"),
+        _l("advanced_connectors", "Advanced Connectors"),
     ]
 )
 
-with tab_inbox:
+with tab_overview:
+    _render_workspace_overview(inbox)
+
+with tab_search:
+    _render_paper_search(inbox)
+
+with tab_library:
+    _render_paper_library(inbox)
+
+with tab_reader:
+    _render_paper_reader(inbox)
+
+with tab_claims:
+    _render_claims_citations(inbox)
+
+with tab_export:
+    _render_synthesis_drafts()
+
+with tab_advanced:
+    st.subheader(ui["source_inbox"])
     _render_source_queue(inbox)
     st.divider()
     with st.expander(ui["add_source"], expanded=not inbox.sources):
@@ -992,15 +1942,8 @@ with tab_inbox:
         )
     st.divider()
     _render_candidate_preview(inbox)
-
-with tab_reading:
+    st.divider()
+    st.subheader(ui["reading_room"])
     _render_reading_room(inbox)
-
-with tab_claims:
-    _render_claims_citations(inbox)
-
-with tab_drafts:
-    _render_synthesis_drafts()
-
-with tab_connectors:
+    st.divider()
     _render_connectors()

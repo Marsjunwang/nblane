@@ -274,7 +274,10 @@ class SemanticScholarAdapter(ConnectorAdapter):
         if not query:
             return []
         limit = max(1, min(int(config.get("limit") or 10), 50))
-        fields = "title,url,abstract,authors,year,externalIds,publicationDate"
+        fields = (
+            "title,url,abstract,authors,year,externalIds,publicationDate,"
+            "citationCount,venue,fieldsOfStudy,openAccessPdf"
+        )
         if config.get("paper_id"):
             url = (
                 "https://api.semanticscholar.org/graph/v1/paper/"
@@ -378,14 +381,28 @@ def parse_arxiv_feed(payload: bytes | str) -> list[ConnectorItem]:
     """Normalize an arXiv Atom feed payload."""
     text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
     root = ET.fromstring(text)
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
     items: list[ConnectorItem] = []
     for entry in root.findall("atom:entry", ns):
         title = " ".join((entry.findtext("atom:title", default="", namespaces=ns) or "").split())
         if not title:
             continue
         external_id = _clean_text(entry.findtext("atom:id", default="", namespaces=ns))
+        arxiv_id = external_id.rsplit("/", 1)[-1] if external_id else ""
         url = external_id
+        pdf_url = ""
+        doi = _clean_text(entry.findtext("arxiv:doi", default="", namespaces=ns))
+        for link in entry.findall("atom:link", ns):
+            href = _clean_text(link.attrib.get("href"))
+            rel = _clean_text(link.attrib.get("rel"))
+            link_type = _clean_text(link.attrib.get("type"))
+            title_attr = _clean_text(link.attrib.get("title")).lower()
+            if href and rel == "alternate" and not url:
+                url = href
+            if href and (title_attr == "pdf" or link_type == "application/pdf"):
+                pdf_url = href
+        if not pdf_url and arxiv_id:
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
         authors = [
             _clean_text(author.findtext("atom:name", default="", namespaces=ns))
             for author in entry.findall("atom:author", ns)
@@ -397,6 +414,7 @@ def parse_arxiv_feed(payload: bytes | str) -> list[ConnectorItem]:
             _clean_text(category.attrib.get("term"))
             for category in entry.findall("atom:category", ns)
         ]
+        categories = [tag for tag in tags if tag]
         items.append(
             ConnectorItem(
                 provider="arxiv",
@@ -407,8 +425,15 @@ def parse_arxiv_feed(payload: bytes | str) -> list[ConnectorItem]:
                 authors=authors,
                 published=published,
                 summary=summary,
-                tags=[tag for tag in tags if tag],
-                metadata={"source_surface": "arxiv"},
+                tags=categories,
+                metadata={
+                    "source_surface": "arxiv",
+                    "arxiv_id": arxiv_id,
+                    "pdf_url": pdf_url,
+                    "open_access_pdf_url": pdf_url,
+                    "categories": categories,
+                    "doi": doi,
+                },
             )
         )
     return items
@@ -427,12 +452,18 @@ def parse_semantic_scholar_payload(payload: dict[str, Any]) -> list[ConnectorIte
         paper_id = _clean_text(item.get("paperId"))
         external_ids = item.get("externalIds") if isinstance(item.get("externalIds"), dict) else {}
         url = _clean_text(item.get("url"))
+        arxiv_id = _clean_text(external_ids.get("ArXiv") or external_ids.get("arXiv"))
+        doi = _clean_text(external_ids.get("DOI") or external_ids.get("doi"))
+        open_access_pdf = item.get("openAccessPdf") if isinstance(item.get("openAccessPdf"), dict) else {}
+        open_access_pdf = _sanitize_mapping(open_access_pdf)
+        open_access_pdf_url = _clean_text(open_access_pdf.get("url"))
         authors = [
             _clean_text(author.get("name"))
             for author in item.get("authors") or []
             if isinstance(author, dict)
         ]
         published = _clean_text(item.get("publicationDate")) or _clean_text(item.get("year"))
+        fields_of_study = _clean_list(item.get("fieldsOfStudy"))
         items.append(
             ConnectorItem(
                 provider="semantic_scholar",
@@ -446,7 +477,15 @@ def parse_semantic_scholar_payload(payload: dict[str, Any]) -> list[ConnectorIte
                 tags=["semantic-scholar"],
                 metadata={
                     "source_surface": "semantic_scholar",
+                    "semantic_scholar_id": paper_id,
                     "paper_id": paper_id,
+                    "arxiv_id": arxiv_id,
+                    "doi": doi,
+                    "citation_count": item.get("citationCount"),
+                    "venue": _clean_text(item.get("venue")),
+                    "fields_of_study": fields_of_study,
+                    "open_access_pdf": open_access_pdf,
+                    "open_access_pdf_url": open_access_pdf_url,
                     "external_ids": _sanitize_mapping(external_ids),
                 },
             )

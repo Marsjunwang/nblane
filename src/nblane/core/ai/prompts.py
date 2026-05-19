@@ -29,6 +29,40 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Recommend which research inbox sources are worth reading or saving. "
         "Rank by relevance to the goal and explain uncertainty."
     ),
+    "research.paper_search_codex": (
+        "Find paper candidates for import. Return only candidates with "
+        "checkable URL, DOI, or provider refs, and include warnings for "
+        "anything unverified."
+    ),
+    "research.paper_translate": (
+        "Translate only the supplied paper segments. Preserve segment_id and "
+        "source_hash for every translation row so stale cached translations "
+        "can be rejected."
+    ),
+    "research.paper_explain_selection": (
+        "Explain only the supplied selection and cited paper context. Keep the "
+        "answer source-scoped and cite segment, chunk, or annotation refs."
+    ),
+    "research.paper_source_guide": (
+        "Produce a source-scoped reading guide from supplied metadata, "
+        "segments, chunks, and annotations. Do not invent paper facts."
+    ),
+    "research.paper_qa": (
+        "Answer the question only from supplied paper refs. If no supporting "
+        "refs are present, return a warning and do not guess."
+    ),
+    "research.paper_claim_extract": (
+        "Extract claim candidates only from supplied paper context. Every "
+        "candidate should remain review-first and carry cited refs."
+    ),
+    "research.paper_deep_read_codex": (
+        "Prepare a deep-reading candidate from supplied paper material. Keep "
+        "full text out of metadata and cite segment, chunk, or annotation refs."
+    ),
+    "research.paper_compare_codex": (
+        "Compare supplied papers or paper contexts as a candidate analysis. "
+        "Use cited refs and warnings instead of unsupported conclusions."
+    ),
     "resume.bullets_from_claims": (
         "Draft resume bullets only from provided claims, evidence, projects, "
         "skills, and outputs. Keep unsupported material out."

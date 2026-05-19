@@ -46,6 +46,7 @@ class TestResearchSources(unittest.TestCase):
                     kind="paper",
                     captured_at="2026-05-13T12:00:00+00:00",
                     project_refs=["project:nblane"],
+                    library_node_refs=["paper-node:vla-memory"],
                 )
                 second = add_research_source(
                     inbox,
@@ -72,6 +73,7 @@ class TestResearchSources(unittest.TestCase):
 
         self.assertEqual(saved["updated"], "2026-05-13")
         self.assertEqual(loaded.sources[0].status, "reading")
+        self.assertEqual(loaded.sources[0].library_node_refs, ["paper-node:vla-memory"])
         self.assertEqual(loaded.sources[1].status, "archived")
         self.assertFalse((profile / "evidence-pool.yaml").exists())
 

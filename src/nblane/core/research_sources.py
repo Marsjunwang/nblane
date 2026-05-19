@@ -274,6 +274,7 @@ class ResearchSource:
     goal_refs: list[str] = field(default_factory=list)
     project_refs: list[str] = field(default_factory=list)
     experience_refs: list[str] = field(default_factory=list)
+    library_node_refs: list[str] = field(default_factory=list)
     summary: str = ""
     notes: str = ""
     visibility: str = "private"
@@ -300,6 +301,7 @@ class ResearchSource:
             goal_refs=_clean_list(data.get("goal_refs")),
             project_refs=_clean_list(data.get("project_refs")),
             experience_refs=_clean_list(data.get("experience_refs")),
+            library_node_refs=_clean_list(data.get("library_node_refs")),
             summary=_clean_text(data.get("summary")),
             notes=_clean_text(data.get("notes")),
             visibility=_clean_choice(
@@ -333,6 +335,7 @@ class ResearchSource:
             "goal_refs",
             "project_refs",
             "experience_refs",
+            "library_node_refs",
         ):
             values = getattr(self, key)
             if values:
@@ -420,6 +423,7 @@ def add_research_source(
     goal_refs: object = None,
     project_refs: object = None,
     experience_refs: object = None,
+    library_node_refs: object = None,
     summary: str = "",
     notes: str = "",
     visibility: str = "private",
@@ -446,6 +450,7 @@ def add_research_source(
         goal_refs=_clean_list(goal_refs),
         project_refs=_clean_list(project_refs),
         experience_refs=_clean_list(experience_refs),
+        library_node_refs=_clean_list(library_node_refs),
         summary=_clean_text(summary),
         notes=_clean_text(notes),
         visibility=_clean_choice(visibility, SOURCE_VISIBILITIES, "private"),
@@ -479,7 +484,14 @@ def update_research_source(
     for key in ("url", "captured_at", "published", "summary", "notes"):
         if key in fields:
             setattr(source, key, _clean_text(fields[key]))
-    for key in ("authors", "tags", "goal_refs", "project_refs", "experience_refs"):
+    for key in (
+        "authors",
+        "tags",
+        "goal_refs",
+        "project_refs",
+        "experience_refs",
+        "library_node_refs",
+    ):
         if key in fields:
             setattr(source, key, _clean_list(fields[key]))
     if "evidence_refs" in fields:

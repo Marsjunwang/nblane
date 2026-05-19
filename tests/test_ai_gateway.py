@@ -29,6 +29,14 @@ class TestAIGateway(unittest.TestCase):
             {
                 "research.reading_draft",
                 "research.recommend_sources",
+                "research.paper_search_codex",
+                "research.paper_translate",
+                "research.paper_explain_selection",
+                "research.paper_source_guide",
+                "research.paper_qa",
+                "research.paper_claim_extract",
+                "research.paper_deep_read_codex",
+                "research.paper_compare_codex",
                 "resume.bullets_from_claims",
                 "resume.target_for_job",
                 "output.blog_candidate",
@@ -79,6 +87,90 @@ class TestAIGateway(unittest.TestCase):
             result.structured["recommendations"][0]["source_ref"],  # type: ignore[index]
             "src_a",
         )
+
+    def test_paper_fallback_actions_are_candidate_first_with_refs(self) -> None:
+        """Paper Reading Studio fallback outputs stay reviewable and traceable."""
+
+        paper_actions = [
+            "research.paper_search_codex",
+            "research.paper_translate",
+            "research.paper_explain_selection",
+            "research.paper_source_guide",
+            "research.paper_qa",
+            "research.paper_claim_extract",
+            "research.paper_deep_read_codex",
+            "research.paper_compare_codex",
+        ]
+        for action in paper_actions:
+            spec = get_action_spec(action)
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec.activity_policy, "candidate")  # type: ignore[union-attr]
+            request = AIActionRequest(
+                action=action,
+                profile="alice",
+                payload={
+                    "source_id": "source:paper:1",
+                    "segments": [
+                        {
+                            "segment_id": "seg:paper:1:0001",
+                            "text_hash": "sha256:abc",
+                            "text": "The method uses a memory encoder.",
+                        }
+                    ],
+                },
+                context_refs=["source:paper:1"],
+            )
+            result = RuleFallbackBackend().run(request, spec)  # type: ignore[arg-type]
+
+            self.assertTrue(result.ok)
+            self.assertIsInstance(result.structured, dict)
+            self.assertIn("warnings", result.structured)  # type: ignore[operator]
+            self.assertIn("ref", result.structured)  # type: ignore[operator]
+            self.assertEqual(result.structured["ref"], "source:paper:1")  # type: ignore[index]
+            self.assertTrue(result.structured["warnings"])  # type: ignore[index]
+
+    def test_paper_translation_fallback_preserves_segment_hash(self) -> None:
+        """Translation candidates include stable alignment keys for cache safety."""
+
+        spec = get_action_spec("research.paper_translate")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="research.paper_translate",
+            profile="alice",
+            payload={
+                "source_id": "source:paper:1",
+                "target_lang": "zh",
+                "segments": [
+                    {
+                        "segment_id": "seg:paper:1:0001",
+                        "source_hash": "sha256:known",
+                        "text": "The memory encoder stores observations.",
+                    }
+                ],
+            },
+        )
+        result = RuleFallbackBackend().run(request, spec)  # type: ignore[arg-type]
+
+        row = result.structured["translations"][0]  # type: ignore[index]
+        self.assertEqual(row["segment_id"], "seg:paper:1:0001")
+        self.assertEqual(row["source_hash"], "sha256:known")
+        self.assertEqual(row["target_lang"], "zh")
+
+    def test_paper_qa_without_input_refs_warns_and_does_not_guess(self) -> None:
+        """Paper QA fallback refuses unsupported answers."""
+
+        spec = get_action_spec("research.paper_qa")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="research.paper_qa",
+            profile="alice",
+            payload={"question": "What is the main result?"},
+            context_refs=[],
+        )
+        result = RuleFallbackBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertEqual(result.structured["answer"], "")  # type: ignore[index]
+        self.assertIn("No input refs were provided", " ".join(result.warnings))
 
     def test_gateway_uses_action_default_backend(self) -> None:
         """run_ai_action routes through the action spec backend."""

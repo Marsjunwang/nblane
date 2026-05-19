@@ -10,13 +10,22 @@ from nblane.core.ai.actions import (
 )
 
 _LAZY_EXPORTS = {
+    "answer_paper_question": ("nblane.core.ai.gateway", "answer_paper_question"),
+    "compare_papers_codex": ("nblane.core.ai.gateway", "compare_papers_codex"),
     "create_remote_dev_task": ("nblane.core.ai.gateway", "create_remote_dev_task"),
+    "deep_read_paper_codex": ("nblane.core.ai.gateway", "deep_read_paper_codex"),
     "draft_kanban_subtasks": ("nblane.core.ai.gateway", "draft_kanban_subtasks"),
     "draft_kanban_task_alignment": (
         "nblane.core.ai.gateway",
         "draft_kanban_task_alignment",
     ),
     "draft_resume_for_job": ("nblane.core.ai.gateway", "draft_resume_for_job"),
+    "explain_paper_selection": ("nblane.core.ai.gateway", "explain_paper_selection"),
+    "extract_paper_claims": ("nblane.core.ai.gateway", "extract_paper_claims"),
+    "generate_paper_source_guide": (
+        "nblane.core.ai.gateway",
+        "generate_paper_source_guide",
+    ),
     "generate_reading_draft": ("nblane.core.ai.gateway", "generate_reading_draft"),
     "get_action_spec": ("nblane.core.ai.router", "get_action_spec"),
     "recommend_research_sources": (
@@ -27,6 +36,8 @@ _LAZY_EXPORTS = {
     "run_ai_action": ("nblane.core.ai.gateway", "run_ai_action"),
     "run_json": ("nblane.core.ai.gateway", "run_json"),
     "run_text": ("nblane.core.ai.gateway", "run_text"),
+    "search_papers_codex": ("nblane.core.ai.gateway", "search_papers_codex"),
+    "translate_paper_segments": ("nblane.core.ai.gateway", "translate_paper_segments"),
 }
 
 
@@ -47,10 +58,16 @@ __all__ = [
     "AIActionResult",
     "AIActionSpec",
     "AIBackend",
+    "answer_paper_question",
+    "compare_papers_codex",
     "create_remote_dev_task",
+    "deep_read_paper_codex",
     "draft_kanban_subtasks",
     "draft_kanban_task_alignment",
     "draft_resume_for_job",
+    "explain_paper_selection",
+    "extract_paper_claims",
+    "generate_paper_source_guide",
     "generate_reading_draft",
     "get_action_spec",
     "recommend_research_sources",
@@ -58,4 +75,6 @@ __all__ = [
     "run_ai_action",
     "run_json",
     "run_text",
+    "search_papers_codex",
+    "translate_paper_segments",
 ]

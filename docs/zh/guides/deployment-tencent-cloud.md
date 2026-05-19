@@ -16,6 +16,7 @@ source_of_truth: true
 ```text
 /srv/nblane-app       # 本仓库代码，运行 Streamlit
 /srv/nblane-data      # 私有数据仓库，含 profiles/ schemas/ teams/ auth/
+/srv/nblane-assets    # 大文件资产，不进 Git，含 Research PDF
 ```
 
 `/srv/nblane-data` 中至少包含：
@@ -26,6 +27,25 @@ schemas/
 teams/
 auth/users.yaml
 ```
+
+Paper Reading Studio 的 PDF 原件不会写进 `profiles/` Git 仓库。生产部署建议额外创建资产目录：
+
+```bash
+sudo mkdir -p /srv/nblane-assets/research
+sudo chown -R nblane:nblane /srv/nblane-assets
+```
+
+并在服务环境中设置：
+
+```bash
+NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+NBLANE_RESEARCH_PDF_BACKEND=pymupdf
+NBLANE_GROBID_URL=http://127.0.0.1:8070
+NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+```
+
+迁移服务器时需要同步 `/srv/nblane-data` 和 `/srv/nblane-assets`；profile 文件中只保存
+`papers/<sha>-name.pdf` 这样的相对 asset ref，不保存绝对路径。
 
 `auth/users.yaml` 可参考仓库内的 `auth/users.example.yaml`。密码哈希用：
 
@@ -58,6 +78,9 @@ Environment=UI_LANG=zh
 Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
 Environment=NBLANE_DATA_GIT_AUTOPUSH=1
+Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+Environment=NBLANE_RESEARCH_PDF_BACKEND=pymupdf
+Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
 EnvironmentFile=-/srv/nblane-data/.env
 ExecStart=/srv/nblane-app/.venv/bin/streamlit run app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true
 Restart=always
@@ -89,6 +112,24 @@ your-domain.com {
 ```
 
 Streamlit 只监听 `127.0.0.1:8501`，不要在腾讯云安全组开放 `8501`。
+
+## Paper Reading PDF 后端
+
+Paper Reading Studio 默认使用 PyMuPDF 做本地 PDF 读取、页数统计、文本抽取和坐标 fallback。
+PyMuPDF 采用 AGPL / commercial dual licensing；闭源或商业生产部署需要确认 AGPL 义务，
+或使用其 commercial license。这个依赖不应被当作“无许可成本”的普通库处理。
+
+结构化学术 PDF 抽取推荐部署 GROBID。GROBID 服务不可用时，上传和 metadata 导入仍会成功，
+页面会显示结构化抽取降级 warning，并退回 PyMuPDF / lightweight fallback。
+
+本机启动 GROBID 示例：
+
+```bash
+docker run --rm -p 8070:8070 grobid/grobid:latest
+```
+
+如果不部署 GROBID，可暂时删除或留空 `NBLANE_GROBID_URL`；Reader 仍能使用已抽取的 page text、
+手工 annotations、chunks、claims、citations 和导出功能。
 
 ## 腾讯云安全组与备案
 
@@ -125,4 +166,6 @@ nblane 会自动 `git add`、`git commit`，并尝试 `git push`。如果 push �
 - 未登录访问 Home 或任意 `pages/*.py` 都会被登录页拦住。
 - member 账号只能看到自己的 profile；admin 可看到全部 profile。
 - 修改 `kanban.md` 或 `skill-tree.yaml` 后，`/srv/nblane-data` 产生 Git commit。
+- 上传论文 PDF 后，`/srv/nblane-assets/research/profiles/<profile>/papers/` 出现 PDF，
+  而 `/srv/nblane-data/profiles/<profile>/research/sources.yaml` 只记录 asset ref / hash / 页数。
 - 两个浏览器同时编辑同一文件时，后保存的一方会收到刷新提示，不会静默覆盖。

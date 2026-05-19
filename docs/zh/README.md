@@ -30,6 +30,7 @@ source_of_truth: true
 | [growth-graph.md](product/growth-graph.md) | 成长关系图谱：事实沉淀为 evidence，evidence 支撑 skill，skill 构成 North Star 的能力地基 |
 | [roadmap.md](product/roadmap.md) | 当前统一路线图，替代旧 `product.md` / `design.md` 中分散的 Demo Phase |
 | [web-experience.md](product/web-experience.md) | Streamlit Web 体验设计和 backlog |
+| [paper_reading.md](product/paper_reading.md) | Research 论文阅读工作台开发文档：搜索、导入、PDF 高亮、翻译、AI 深读、GROBID 增强与引用导出 |
 
 ### Project
 

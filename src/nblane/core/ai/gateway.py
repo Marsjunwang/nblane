@@ -195,6 +195,185 @@ def generate_reading_draft(
     )
 
 
+def search_papers_codex(
+    profile: str,
+    query: str,
+    *,
+    context_refs: list[str] | None = None,
+    require_review: bool = True,
+    payload: dict[str, Any] | None = None,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_search_codex``."""
+
+    body = dict(payload or {})
+    body["query"] = query
+    return run_ai_action(
+        "research.paper_search_codex",
+        body,
+        profile=profile,
+        context_refs=context_refs or [],
+        require_review=require_review,
+    )
+
+
+def translate_paper_segments(
+    profile: str,
+    source_id: str,
+    segments: list[dict[str, Any]],
+    *,
+    target_lang: str = "zh",
+    context_refs: list[str] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_translate``."""
+
+    return run_ai_action(
+        "research.paper_translate",
+        {
+            "source_id": source_id,
+            "segments": segments,
+            "target_lang": target_lang,
+        },
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
+def explain_paper_selection(
+    profile: str,
+    source_id: str,
+    selected_text: str,
+    *,
+    context_refs: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_explain_selection``."""
+
+    body = dict(payload or {})
+    body.update({"source_id": source_id, "selected_text": selected_text})
+    return run_ai_action(
+        "research.paper_explain_selection",
+        body,
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
+def generate_paper_source_guide(
+    profile: str,
+    source_id: str,
+    *,
+    segments: list[dict[str, Any]] | None = None,
+    chunks: list[dict[str, Any]] | None = None,
+    annotations: list[dict[str, Any]] | None = None,
+    source: dict[str, Any] | None = None,
+    context_refs: list[str] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_source_guide``."""
+
+    return run_ai_action(
+        "research.paper_source_guide",
+        {
+            "source_id": source_id,
+            "source": source or {},
+            "segments": segments or [],
+            "chunks": chunks or [],
+            "annotations": annotations or [],
+        },
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
+def answer_paper_question(
+    profile: str,
+    source_id: str,
+    question: str,
+    *,
+    context_refs: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_qa``."""
+
+    body = dict(payload or {})
+    body.update({"source_id": source_id, "question": question})
+    return run_ai_action(
+        "research.paper_qa",
+        body,
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
+def extract_paper_claims(
+    profile: str,
+    source_id: str,
+    *,
+    segments: list[dict[str, Any]] | None = None,
+    chunks: list[dict[str, Any]] | None = None,
+    context_refs: list[str] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_claim_extract``."""
+
+    return run_ai_action(
+        "research.paper_claim_extract",
+        {"source_id": source_id, "segments": segments or [], "chunks": chunks or []},
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
+def deep_read_paper_codex(
+    profile: str,
+    source_id: str,
+    *,
+    context_refs: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_deep_read_codex``."""
+
+    body = dict(payload or {})
+    body["source_id"] = source_id
+    return run_ai_action(
+        "research.paper_deep_read_codex",
+        body,
+        profile=profile,
+        context_refs=context_refs or [source_id],
+        require_review=require_review,
+    )
+
+
+def compare_papers_codex(
+    profile: str,
+    source_ids: list[str],
+    *,
+    context_refs: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
+    require_review: bool = True,
+) -> AIActionResult:
+    """Typed helper for ``research.paper_compare_codex``."""
+
+    body = dict(payload or {})
+    body["source_ids"] = source_ids
+    return run_ai_action(
+        "research.paper_compare_codex",
+        body,
+        profile=profile,
+        context_refs=context_refs or source_ids,
+        require_review=require_review,
+    )
+
+
 def draft_kanban_task_alignment(
     profile: str,
     *,
@@ -337,13 +516,21 @@ def _record_if_profile(
 
 
 __all__ = [
+    "answer_paper_question",
+    "compare_papers_codex",
     "create_remote_dev_task",
+    "deep_read_paper_codex",
     "draft_kanban_subtasks",
     "draft_kanban_task_alignment",
     "draft_resume_for_job",
+    "explain_paper_selection",
+    "extract_paper_claims",
     "generate_reading_draft",
+    "generate_paper_source_guide",
     "recommend_research_sources",
     "run_ai_action",
     "run_json",
     "run_text",
+    "search_papers_codex",
+    "translate_paper_segments",
 ]

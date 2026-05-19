@@ -42,7 +42,8 @@ class TestResearchConnectors(unittest.TestCase):
     def test_provider_fixtures_normalize(self) -> None:
         arxiv = parse_arxiv_feed(
             b"""<?xml version='1.0' encoding='UTF-8'?>
-            <feed xmlns='http://www.w3.org/2005/Atom'>
+            <feed xmlns='http://www.w3.org/2005/Atom'
+                  xmlns:arxiv='http://arxiv.org/schemas/atom'>
               <entry>
                 <id>https://arxiv.org/abs/2605.00001</id>
                 <title> Source Aware Writing </title>
@@ -50,6 +51,8 @@ class TestResearchConnectors(unittest.TestCase):
                 <published>2026-05-13T00:00:00Z</published>
                 <author><name>Alice</name></author>
                 <category term='cs.CL'/>
+                <arxiv:doi>10.48550/arXiv.2605.00001</arxiv:doi>
+                <link title='pdf' href='https://arxiv.org/pdf/2605.00001' type='application/pdf'/>
               </entry>
             </feed>"""
         )
@@ -63,7 +66,14 @@ class TestResearchConnectors(unittest.TestCase):
                         "abstract": "Abstract",
                         "authors": [{"name": "Bob"}],
                         "year": 2026,
-                        "externalIds": {"ArXiv": "2605.00001"},
+                        "externalIds": {"ArXiv": "2605.00001", "DOI": "10.48550/arXiv.2605.00001"},
+                        "citationCount": 42,
+                        "venue": "ACL",
+                        "fieldsOfStudy": ["Computer Science"],
+                        "openAccessPdf": {
+                            "url": "https://arxiv.org/pdf/2605.00001",
+                            "status": "GREEN",
+                        },
                     }
                 ]
             }
@@ -86,7 +96,26 @@ class TestResearchConnectors(unittest.TestCase):
 
         self.assertEqual(arxiv[0].kind, "paper")
         self.assertEqual(arxiv[0].authors, ["Alice"])
+        self.assertEqual(arxiv[0].metadata["arxiv_id"], "2605.00001")
+        self.assertEqual(arxiv[0].metadata["pdf_url"], "https://arxiv.org/pdf/2605.00001")
+        self.assertEqual(arxiv[0].metadata["open_access_pdf_url"], "https://arxiv.org/pdf/2605.00001")
+        self.assertEqual(arxiv[0].metadata["categories"], ["cs.CL"])
+        self.assertEqual(arxiv[0].metadata["doi"], "10.48550/arXiv.2605.00001")
         self.assertEqual(semantic[0].metadata["paper_id"], "S2-1")
+        self.assertEqual(semantic[0].metadata["semantic_scholar_id"], "S2-1")
+        self.assertEqual(semantic[0].metadata["arxiv_id"], "2605.00001")
+        self.assertEqual(semantic[0].metadata["doi"], "10.48550/arXiv.2605.00001")
+        self.assertEqual(semantic[0].metadata["citation_count"], 42)
+        self.assertEqual(semantic[0].metadata["venue"], "ACL")
+        self.assertEqual(semantic[0].metadata["fields_of_study"], ["Computer Science"])
+        self.assertEqual(
+            semantic[0].metadata["open_access_pdf_url"],
+            "https://arxiv.org/pdf/2605.00001",
+        )
+        self.assertEqual(
+            semantic[0].metadata["open_access_pdf"],
+            {"url": "https://arxiv.org/pdf/2605.00001", "status": "GREEN"},
+        )
         self.assertEqual(github[0].kind, "repo")
         self.assertIn("Python", github[0].tags)
 
