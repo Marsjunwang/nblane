@@ -90,7 +90,18 @@ nblane public init yourname
 nblane public validate yourname
 nblane public blog new yourname --title "My post"
 nblane public build yourname --out dist/public/yourname --base-url https://www.example.com
+
+# Optional Codex helpers
+nblane codex status
+nblane codex install --print-command
+nblane codex local run <agent_task_id> --profile yourname
+nblane codex cloud submit <agent_task_id> --profile yourname
+nblane codex cloud refresh <agent_task_id> --profile yourname --diff
 ```
+
+Kanban can use local Codex as a read-only AI backend for its existing task
+understanding, subtask drafting, and Done-to-evidence actions. Patch-producing
+Codex handoff remains an explicit CLI / Agent Activity review workflow.
 
 ### MCP (Cursor)
 

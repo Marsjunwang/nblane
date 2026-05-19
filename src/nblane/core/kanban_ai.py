@@ -51,6 +51,26 @@ class KanbanSubtaskGenerationResult:
     filtered_count: int = 0
 
 
+@dataclass(frozen=True)
+class CodexKanbanDraft:
+    """Read-only Codex draft for evidence summary and task planning."""
+
+    task_id: str
+    evidence_summary: list[str] = field(default_factory=list)
+    external_notes: list[dict[str, str]] = field(default_factory=list)
+    proposals: list[KanbanSubtaskProposal] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    raw_text: str = ""
+    command: str = ""
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        """Return True when Codex produced a usable response."""
+
+        return not self.error
+
+
 _VAGUE_SUBTASK_TERMS = {
     "learn",
     "learning",
@@ -556,6 +576,7 @@ def analyze_kanban_task_gap(
     *,
     use_rule_match: bool = True,
     use_llm_router: bool = False,
+    ai_backend: str = "llm",
     persist_router_keywords: bool = False,
     goal_context: str = "",
 ) -> GapResult:
@@ -573,6 +594,7 @@ def analyze_kanban_task_gap(
         explicit_node,
         use_rule_match=use_rule_match,
         use_llm_router=use_llm_router,
+        router_backend="codex" if _use_codex_backend(ai_backend) else "llm",
         persist_router_keywords=persist_router_keywords,
         goal_context=goal_context,
         source_kind="kanban_task",
@@ -820,12 +842,21 @@ def generate_kanban_task_alignment_options(
     *,
     profile_name: str = "",
     record_activity: bool = False,
+    ai_backend: str = "llm",
+    goal_context: str = "",
 ) -> list[KanbanTaskAlignment]:
     """Generate candidate task understandings without mutating the board."""
     found = _find_task_by_id(sections, task_id)
     if found is None:
         return []
     _, _, task = found
+    if _use_codex_backend(ai_backend):
+        return generate_codex_kanban_task_alignment_options(
+            profile_name,
+            sections,
+            task_id,
+            goal_context=goal_context,
+        )
     ai_context = build_kanban_ai_context(
         profile_name,
         sections,
@@ -1048,6 +1079,8 @@ def generate_kanban_subtask_proposals(
     persist_router_keywords: bool = False,
     alignment_context: str = "",
     granularity: str = "milestone",
+    ai_backend: str = "llm",
+    goal_context: str = "",
 ) -> list[KanbanSubtaskProposal]:
     """Generate draft subtasks for a kanban task without mutating board."""
     return generate_kanban_subtask_proposals_detailed(
@@ -1060,6 +1093,8 @@ def generate_kanban_subtask_proposals(
         persist_router_keywords=persist_router_keywords,
         alignment_context=alignment_context,
         granularity=granularity,
+        ai_backend=ai_backend,
+        goal_context=goal_context,
     ).proposals
 
 
@@ -1075,6 +1110,8 @@ def generate_kanban_subtask_proposals_detailed(
     alignment_context: str = "",
     granularity: str = "milestone",
     record_activity: bool = False,
+    ai_backend: str = "llm",
+    goal_context: str = "",
 ) -> KanbanSubtaskGenerationResult:
     """Generate draft subtasks with diagnostic detail."""
     found = _find_task_by_id(sections, task_id)
@@ -1084,6 +1121,28 @@ def generate_kanban_subtask_proposals_detailed(
             message=_generation_message("task_not_found"),
         )
     _, _, task = found
+    if _use_codex_backend(ai_backend):
+        draft = generate_codex_kanban_planning_draft(
+            profile_name,
+            sections,
+            task_id,
+            goal_context=goal_context,
+            alignment_context=alignment_context,
+            granularity=granularity,
+        )
+        if draft.proposals:
+            return KanbanSubtaskGenerationResult(
+                proposals=draft.proposals,
+                raw_count=len(draft.proposals),
+                accepted_count=len(draft.proposals),
+                filtered_count=0,
+            )
+        return KanbanSubtaskGenerationResult(
+            error_key="llm_error" if draft.error else "parse_empty",
+            message=draft.error
+            or "; ".join(draft.warnings)
+            or _generation_message("parse_empty"),
+        )
     analysis = analyze_kanban_task_gap(
         profile_name,
         sections,
@@ -1149,6 +1208,289 @@ def generate_kanban_subtask_proposals_detailed(
         allowed_gap_ids=allowed_gap_ids,
         existing_titles=[subtask.title for subtask in task.subtasks],
     )
+
+
+def generate_codex_kanban_planning_draft(
+    profile_name: str,
+    sections: dict[str, list[KanbanTask]],
+    task_id: str,
+    *,
+    goal_context: str = "",
+    user_instruction: str = "",
+    alignment_context: str = "",
+    granularity: str = "milestone",
+) -> CodexKanbanDraft:
+    """Use local Codex as a read-only research/planning LLM for one card."""
+
+    found = _find_task_by_id(sections, task_id)
+    if found is None:
+        return CodexKanbanDraft(
+            task_id=task_id,
+            error=f"Kanban task not found: {task_id}",
+        )
+    _section, _index, task = found
+    prompt = _codex_planner_prompt(
+        profile_name,
+        task,
+        build_kanban_ai_context(profile_name, sections, task_id),
+        goal_context=goal_context,
+        user_instruction=user_instruction,
+        alignment_context=alignment_context,
+        granularity=granularity,
+    )
+    from nblane.core import codex_adapter
+
+    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    raw_text = result.output
+    warnings = list(getattr(result, "warnings", []) or [])
+    if not result.ok:
+        return CodexKanbanDraft(
+            task_id=task_id,
+            warnings=warnings,
+            raw_text=raw_text,
+            command=result.command,
+            error=result.error or raw_text or "codex_readonly_failed",
+        )
+
+    data = extract_json_object(raw_text)
+    if not isinstance(data, dict):
+        warnings.append(
+            "Codex did not return structured JSON; raw output is shown only."
+        )
+        return CodexKanbanDraft(
+            task_id=task_id,
+            warnings=warnings,
+            raw_text=raw_text,
+            command=result.command,
+        )
+
+    proposal_result = _parse_proposals_detailed(
+        json.dumps(
+            {"subtasks": data.get("subtasks") or data.get("proposals") or []},
+            ensure_ascii=False,
+        ),
+        task_id=task_id,
+        allowed_gap_ids=set(),
+        existing_titles=[subtask.title for subtask in task.subtasks],
+    )
+    if proposal_result.error_key:
+        warnings.append(proposal_result.message)
+    warnings.extend(_string_list(data.get("warnings")))
+    return CodexKanbanDraft(
+        task_id=task_id,
+        evidence_summary=_string_list(
+            data.get("evidence_summary") or data.get("evidence")
+        ),
+        external_notes=_external_notes_list(
+            data.get("external_notes") or data.get("sources")
+        ),
+        proposals=proposal_result.proposals,
+        warnings=_dedupe_strings(warnings),
+        raw_text=raw_text,
+        command=result.command,
+    )
+
+
+def generate_codex_kanban_task_alignment_options(
+    profile_name: str,
+    sections: dict[str, list[KanbanTask]],
+    task_id: str,
+    *,
+    goal_context: str = "",
+) -> list[KanbanTaskAlignment]:
+    """Use local read-only Codex for task-understanding choices."""
+
+    found = _find_task_by_id(sections, task_id)
+    if found is None:
+        return []
+    _section, _index, task = found
+    prompt = _codex_alignment_prompt(
+        profile_name,
+        task,
+        build_kanban_ai_context(profile_name, sections, task_id),
+        goal_context=goal_context,
+    )
+    from nblane.core import codex_adapter
+
+    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    if not result.ok:
+        return _fallback_alignments(task)
+    parsed = _parse_alignments(result.output, task_id=task_id)
+    return parsed or _fallback_alignments(task)
+
+
+def _codex_alignment_prompt(
+    profile_name: str,
+    task: KanbanTask,
+    ai_context: str,
+    *,
+    goal_context: str = "",
+) -> str:
+    """Build a read-only Codex prompt for alignment options."""
+
+    goal_block = ""
+    if _clean_text(goal_context):
+        goal_block = "Current goal context:\n" + _clean_text(goal_context) + "\n\n"
+    prior_block = ""
+    if _clean_text(ai_context):
+        prior_block = "Profile grounding prior:\n" + _clean_text(ai_context) + "\n\n"
+    language = "Chinese" if llm.reply_language() == "zh" else "English"
+    return (
+        "You are Codex used inside nblane Kanban as a read-only advanced LLM. "
+        "Generate task-understanding options only. Do not edit files, do not "
+        "generate patches, do not write profile facts, and do not submit "
+        "agent-task candidates.\n\n"
+        "Return ONE JSON object only, no markdown, in "
+        f"{language}. Schema:\n"
+        "{\n"
+        '  "alignments": [\n'
+        '    {"label": "...", "goal": "...", '
+        '"assumptions": ["..."], "subtask_style": "..."}\n'
+        "  ]\n"
+        "}\n\n"
+        "Return 2 or 3 distinct, plausible understandings. The first option "
+        "should usually be milestone-level. Keep them grounded in the task, "
+        "profile context, and current goal; avoid unrelated domains.\n\n"
+        f"Profile: {_clean_text(profile_name)}\n\n"
+        f"{goal_block}"
+        f"{prior_block}"
+        "Kanban task:\n"
+        f"{format_kanban_task_for_ai(task)}\n"
+    )
+
+
+def _codex_planner_prompt(
+    profile_name: str,
+    task: KanbanTask,
+    ai_context: str,
+    *,
+    goal_context: str = "",
+    user_instruction: str = "",
+    alignment_context: str = "",
+    granularity: str = "milestone",
+) -> str:
+    """Build the read-only Codex prompt used by Kanban."""
+
+    goal_block = ""
+    if _clean_text(goal_context):
+        goal_block = "Current goal context:\n" + _clean_text(goal_context) + "\n\n"
+    user_block = ""
+    if _clean_text(user_instruction):
+        user_block = (
+            "Human focus / search instruction:\n"
+            + _clean_text(user_instruction)
+            + "\n\n"
+        )
+    alignment_block = ""
+    if _clean_text(alignment_context):
+        alignment_block = (
+            "Confirmed task understanding:\n"
+            + _clean_text(alignment_context)
+            + "\n\n"
+        )
+    prior_block = ""
+    if _clean_text(ai_context):
+        prior_block = "Profile grounding prior:\n" + _clean_text(ai_context) + "\n\n"
+    language = "Chinese" if llm.reply_language() == "zh" else "English"
+    return (
+        "You are Codex used inside nblane Kanban as a read-only advanced LLM. "
+        "Your job is evidence summarization and task planning, not project "
+        "execution. Do not edit files, do not generate patches, do not run "
+        "code-changing commands, do not write profile facts, and do not submit "
+        "agent-task candidates. If web/search tools or network access are "
+        "available, use them for high-signal external material; if they are "
+        "not available, say so in warnings. Combine external material with the "
+        "profile-specific context below, and keep the output tailored to the "
+        "human's actual current work.\n\n"
+        "Return ONE JSON object only, no markdown, in "
+        f"{language}. Schema:\n"
+        "{\n"
+        '  "evidence_summary": ["1-4 concise bullets grounded in the task/profile"],\n'
+        '  "external_notes": [\n'
+        '    {"title": "...", "url": "...", "summary": "...", "relevance": "..."}\n'
+        "  ],\n"
+        '  "subtasks": [\n'
+        '    {"title": "...", "reason": "...", "artifact": "...", "verification": "..."}\n'
+        "  ],\n"
+        '  "warnings": ["limitations, uncertainty, or missing context"]\n'
+        "}\n\n"
+        "Subtasks must be reviewable work slices for the kanban card, not code "
+        "patches. Prefer 3-5 subtasks with concrete artifact/verification. "
+        f"Use {(_clean_text(granularity) or 'milestone')} granularity. "
+        "Avoid vague titles such as learn, study, research, improve, 学习, 研究, "
+        "提升, or 了解 unless the title names a concrete artifact such as a "
+        "comparison table, evaluation protocol, or evidence note.\n\n"
+        f"Profile: {_clean_text(profile_name)}\n\n"
+        f"{goal_block}"
+        f"{prior_block}"
+        f"{user_block}"
+        f"{alignment_block}"
+        "Kanban task:\n"
+        f"{format_kanban_task_for_ai(task)}\n"
+    )
+
+
+def _use_codex_backend(value: object) -> bool:
+    """Return True when a Kanban AI call should use local read-only Codex."""
+
+    return str(value or "").strip().casefold() == "codex"
+
+
+def _string_list(value: object, *, limit: int = 8) -> list[str]:
+    """Normalize a model field into a compact string list."""
+
+    raw_items = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for item in raw_items:
+        text = _clean_text(item)
+        if text:
+            out.append(_shorten(text, 500))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _external_notes_list(value: object, *, limit: int = 6) -> list[dict[str, str]]:
+    """Normalize source/external note objects for UI display."""
+
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in value:
+        if isinstance(item, dict):
+            note = {
+                "title": _clean_text(item.get("title")),
+                "url": _clean_text(item.get("url")),
+                "summary": _clean_text(item.get("summary")),
+                "relevance": _clean_text(item.get("relevance")),
+            }
+        else:
+            note = {
+                "title": _clean_text(item),
+                "url": "",
+                "summary": "",
+                "relevance": "",
+            }
+        if any(note.values()):
+            out.append({key: _shorten(val, 500) for key, val in note.items()})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _dedupe_strings(values: Iterable[str]) -> list[str]:
+    """Return non-empty strings preserving first occurrence."""
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _clean_text(value)
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
 
 
 def apply_kanban_subtask_proposals(

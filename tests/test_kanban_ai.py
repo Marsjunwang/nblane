@@ -6,6 +6,7 @@ import unittest
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from nblane.core.kanban_ai import (
@@ -17,6 +18,7 @@ from nblane.core.kanban_ai import (
     apply_kanban_subtask_proposals,
     build_kanban_ai_context,
     format_kanban_task_for_ai,
+    generate_codex_kanban_planning_draft,
     generate_kanban_task_alignment_options,
     generate_kanban_subtask_proposals,
     generate_kanban_subtask_proposals_detailed,
@@ -249,6 +251,80 @@ nodes:
             ("The task is about one paper",),
         )
         self.assertEqual(alignments[0].task_id, "task-1")
+
+    def test_codex_kanban_planning_draft_parses_readonly_result(self) -> None:
+        """Codex planner stays draft-only and parses evidence/subtasks."""
+
+        reply = """
+{
+  "evidence_summary": [
+    "当前任务应围绕 VLA memory 在 OpenPI/Piper 链路中的可验证收益。"
+  ],
+  "external_notes": [
+    {
+      "title": "Memory in embodied agents",
+      "url": "https://example.com/memory",
+      "summary": "比较 episodic memory 与 retrieval-augmented policy。",
+      "relevance": "用于限定模块设计候选。"
+    }
+  ],
+  "subtasks": [
+    {
+      "title": "整理 VLA memory 方案对比表",
+      "reason": "先收敛可落地模块边界。",
+      "artifact": "一页对比表",
+      "verification": "覆盖至少 3 类 memory 方案和取舍"
+    },
+    {
+      "title": "定义记忆模块评估协议",
+      "reason": "避免只做抽象设计。",
+      "artifact": "评估协议草稿",
+      "verification": "包含任务、指标和失败样例"
+    }
+  ],
+  "warnings": ["外部资料需要人工复核。"]
+}
+"""
+        sections = {
+            "Doing": [
+                KanbanTask(
+                    title="VLA memory模块",
+                    id="task-1",
+                    context="OpenPI / Piper robot work",
+                )
+            ]
+        }
+        result = SimpleNamespace(
+            ok=True,
+            output=reply,
+            warnings=["Codex read-only output was truncated."],
+            command="codex exec --sandbox read-only",
+            error="",
+        )
+        with patch(
+            "nblane.core.codex_adapter.run_readonly_codex_prompt",
+            return_value=result,
+        ) as run:
+            draft = generate_codex_kanban_planning_draft(
+                "王军",
+                sections,
+                "task-1",
+                goal_context="做可展示的机器人 VLA 项目",
+                user_instruction="优先搜 memory module 设计",
+            )
+
+        self.assertTrue(draft.ok)
+        self.assertEqual(len(draft.evidence_summary), 1)
+        self.assertEqual(draft.external_notes[0]["url"], "https://example.com/memory")
+        self.assertEqual(
+            [item.title for item in draft.proposals],
+            ["整理 VLA memory 方案对比表", "定义记忆模块评估协议"],
+        )
+        self.assertIn("外部资料需要人工复核。", draft.warnings)
+        prompt = run.call_args.args[1]
+        self.assertIn("read-only advanced LLM", prompt)
+        self.assertIn("do not generate patches", prompt)
+        self.assertIn("优先搜 memory module 设计", prompt)
 
     @patch("nblane.core.kanban_ai.llm.chat")
     def test_generate_alignment_options_does_not_mutate_board(
@@ -649,17 +725,20 @@ nodes:
         self.assertIn("JSON keys", system_prompt)
 
     def test_subtask_session_keys_include_reply_language(self) -> None:
-        """Switching reply language hides stale Kanban AI drafts."""
+        """Switching reply language/backend hides stale Kanban AI drafts."""
         source = Path("pages/3_Kanban.py").read_text(encoding="utf-8")
+        shared = Path("src/nblane/web_shared.py").read_text(encoding="utf-8")
 
         self.assertIn(
-            "kanban_subtask_proposals_{profile}_{llm_client.reply_language()}",
+            "kanban_subtask_proposals_{profile}_{kanban_ai_suffix(profile)}",
             source,
         )
         self.assertIn(
-            "kanban_subtask_alignments_{profile}_{llm_client.reply_language()}",
+            "kanban_subtask_alignments_{profile}_{kanban_ai_suffix(profile)}",
             source,
         )
+        self.assertIn("llm_client.reply_language()}_{kanban_ai_backend(profile)}", shared)
+        self.assertIn("def kanban_ai_backend_key(profile: str)", shared)
 
     def test_parse_filters_existing_vague_and_duplicate_subtasks(
         self,

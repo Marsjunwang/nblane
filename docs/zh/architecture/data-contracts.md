@@ -110,7 +110,7 @@ claims:
 
 ```text
 kanban Done task
-  -> LLM JSON patch
+  -> AI JSON patch (LLM or read-only Codex from Kanban)
   -> human selection
   -> evidence-pool.yaml
   -> skill-tree.yaml

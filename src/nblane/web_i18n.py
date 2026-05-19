@@ -102,6 +102,79 @@ _COMMON: dict[str, dict[str, str]] = {
             "These settings apply to this app session and are not "
             "written to disk."
         ),
+        "codex_settings_title": "Codex",
+        "codex_bin": "Codex binary",
+        "codex_cloud_env_id": "Codex Cloud env id",
+        "codex_model": "Codex model override",
+        "codex_attempts": "Cloud attempts",
+        "codex_branch": "Cloud branch",
+        "codex_timeout": "Timeout seconds",
+        "codex_profile_config": "Profile Codex config for {profile}: `{path}`",
+        "codex_installed": "Codex installed: {version}",
+        "codex_missing": "Codex CLI is not installed or not on PATH.",
+        "codex_logged_in": "Codex login: ready.",
+        "codex_not_logged_in": "Codex login is not ready.",
+        "codex_cloud_configured": "Codex Cloud env configured.",
+        "codex_cloud_missing": "Set a Codex Cloud env id to submit tasks from Web.",
+        "codex_install": "Install",
+        "codex_upgrade": "Upgrade",
+        "codex_save_env": "Save Codex settings to .env",
+        "codex_save_profile": "Save for this profile",
+        "codex_saved_env": "Codex settings saved to .env.",
+        "codex_saved_profile": "Profile Codex settings saved.",
+        "codex_install_done": "Codex install command completed.",
+        "codex_install_failed": "Codex install command failed.",
+        "codex_session_only": (
+            "Auth stays in Codex CLI; nblane only stores non-secret NBLANE_CODEX_* settings."
+        ),
+        "kb_ai_backend": "Kanban AI Engine",
+        "kb_ai_backend_help": (
+            "Choose the engine used by Kanban AI actions. Codex uses the "
+            "local Codex CLI in read-only mode."
+        ),
+        "kb_ai_backend_llm": "LLM",
+        "kb_ai_backend_codex": "Codex",
+        "kb_ai_backend_codex_status": "Codex: read-only local",
+        "codex_configure": "Configure Codex",
+        "codex_config_dialog_title": "Codex Configuration",
+        "codex_status_tab": "Status",
+        "codex_api_key_tab": "API Key",
+        "codex_cli_config_tab": "CLI Config",
+        "codex_profile_config_tab": "Profile Config",
+        "codex_dialog_close": "Close",
+        "codex_cli_config_path": "CLI config: `{path}`",
+        "codex_auth_path": "Auth file: `{path}`",
+        "codex_auth_managed": (
+            "Codex auth is managed by Codex CLI at `{path}`. "
+            "nblane does not display raw auth.json."
+        ),
+        "codex_api_key": "Codex API key",
+        "codex_api_key_help": (
+            "Saved through `codex login --with-api-key`; the key is sent "
+            "through stdin and not stored by nblane."
+        ),
+        "codex_save_api_key": "Save API Key",
+        "codex_api_key_saved": "Codex API key saved.",
+        "codex_api_key_failed": "Codex API key was not saved: {error}",
+        "codex_cli_config_editor": "Edit config.toml",
+        "codex_save_cli_config": "Save config.toml",
+        "codex_cli_config_saved": (
+            "Saved config.toml. Previous file backup: {backup}"
+        ),
+        "codex_cli_config_invalid": "config.toml was not saved: {error}",
+        "codex_cli_config_template_note": (
+            "config.toml does not exist yet. The editor is showing a template."
+        ),
+        "codex_config_path": "Codex profile config: `{path}`",
+        "codex_config_editor": "Edit codex.yaml",
+        "codex_config_reload": "Reload from disk",
+        "codex_config_save": "Save Codex config",
+        "codex_config_reloaded": "Codex config reloaded from disk.",
+        "codex_config_saved": "Codex config saved.",
+        "codex_config_invalid": "Codex config was not saved: {error}",
+        "codex_config_template_note": (
+            "codex.yaml does not exist yet. The editor is showing a template."
+        ),
         "merge_llm_status_applied": "applied",
         "merge_llm_status_ignored": "ignored",
         "merge_preview_llm_status_line": (
@@ -199,6 +272,78 @@ _COMMON: dict[str, dict[str, str]] = {
         "llm_configured": "AI 已启用：{label}",
         "llm_not_configured": "尚未设置 API key。",
         "llm_session_only": "这些设置只应用到当前页面会话，不会写入磁盘。",
+        "codex_settings_title": "Codex",
+        "codex_bin": "Codex binary",
+        "codex_cloud_env_id": "Codex Cloud env id",
+        "codex_model": "Codex 模型覆盖",
+        "codex_attempts": "Cloud attempts",
+        "codex_branch": "Cloud 分支",
+        "codex_timeout": "超时时间（秒）",
+        "codex_profile_config": "{profile} 的 Codex 配置文件：`{path}`",
+        "codex_installed": "已安装 Codex：{version}",
+        "codex_missing": "未安装 Codex CLI，或不在 PATH 中。",
+        "codex_logged_in": "Codex 登录：可用。",
+        "codex_not_logged_in": "Codex 尚未登录或登录状态不可用。",
+        "codex_cloud_configured": "已配置 Codex Cloud env。",
+        "codex_cloud_missing": "填写 Codex Cloud env id 后，Web 才能提交任务。",
+        "codex_install": "安装",
+        "codex_upgrade": "升级",
+        "codex_save_env": "保存 Codex 设置到 .env",
+        "codex_save_profile": "保存到当前 profile",
+        "codex_saved_env": "Codex 设置已保存到 .env。",
+        "codex_saved_profile": "当前 profile 的 Codex 设置已保存。",
+        "codex_install_done": "Codex 安装命令已完成。",
+        "codex_install_failed": "Codex 安装命令失败。",
+        "codex_session_only": (
+            "认证仍由 Codex CLI 管理；nblane 只保存非密钥的 NBLANE_CODEX_* 设置。"
+        ),
+        "kb_ai_backend": "看板 AI 引擎",
+        "kb_ai_backend_help": (
+            "选择看板 AI 动作使用的引擎。Codex 使用本地 Codex CLI 的只读模式。"
+        ),
+        "kb_ai_backend_llm": "LLM",
+        "kb_ai_backend_codex": "Codex",
+        "kb_ai_backend_codex_status": "Codex：本地只读",
+        "codex_configure": "配置 Codex",
+        "codex_config_dialog_title": "Codex 配置",
+        "codex_status_tab": "状态",
+        "codex_api_key_tab": "API Key",
+        "codex_cli_config_tab": "CLI 配置",
+        "codex_profile_config_tab": "Profile 配置",
+        "codex_dialog_close": "关闭",
+        "codex_cli_config_path": "CLI 配置：`{path}`",
+        "codex_auth_path": "认证文件：`{path}`",
+        "codex_auth_managed": (
+            "Codex 认证由 Codex CLI 管理，文件位于 `{path}`。"
+            "nblane 不展示 auth.json 原文。"
+        ),
+        "codex_api_key": "Codex API key",
+        "codex_api_key_help": (
+            "通过 `codex login --with-api-key` 保存；key 通过 stdin 传入，"
+            "不会由 nblane 存储。"
+        ),
+        "codex_save_api_key": "保存 API Key",
+        "codex_api_key_saved": "Codex API key 已保存。",
+        "codex_api_key_failed": "Codex API key 未保存：{error}",
+        "codex_cli_config_editor": "编辑 config.toml",
+        "codex_save_cli_config": "保存 config.toml",
+        "codex_cli_config_saved": (
+            "config.toml 已保存。上一个文件备份：{backup}"
+        ),
+        "codex_cli_config_invalid": "config.toml 未保存：{error}",
+        "codex_cli_config_template_note": (
+            "config.toml 还不存在，编辑器当前显示的是新建模板。"
+        ),
+        "codex_config_path": "Codex profile 配置：`{path}`",
+        "codex_config_editor": "编辑 codex.yaml",
+        "codex_config_reload": "从磁盘重载",
+        "codex_config_save": "保存 Codex 配置",
+        "codex_config_reloaded": "已从磁盘重载 Codex 配置。",
+        "codex_config_saved": "Codex 配置已保存。",
+        "codex_config_invalid": "Codex 配置未保存：{error}",
+        "codex_config_template_note": (
+            "codex.yaml 还不存在，编辑器当前显示的是新建模板。"
+        ),
         "merge_llm_status_applied": "已应用",
         "merge_llm_status_ignored": "已忽略",
         "merge_preview_llm_status_line": (
@@ -2056,18 +2201,15 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_subtasks": "Draft subtasks",
         "kb_ai_subtasks_short": "Sub",
         "kb_ai_done_short": "Evd",
-        "kb_agent_handoff_title": "Agent handoff",
-        "kb_agent_handoff_help": (
-            "Create a reviewable Codex/OpenCode task from a kanban card. "
-            "The external agent result returns to Agent Activity first."
+        "kb_ai_backend": "Kanban AI",
+        "kb_ai_backend_help": (
+            "Choose the engine used by Kanban AI actions. Codex uses the "
+            "local Codex CLI in read-only mode and needs no Kanban-specific "
+            "configuration."
         ),
-        "kb_agent_handoff_empty": "No kanban task is available for handoff.",
-        "kb_agent_handoff_task": "Task",
-        "kb_agent_handoff_target": "Target harness",
-        "kb_agent_handoff_create": "Create agent handoff",
-        "kb_agent_handoff_created": "Agent handoff task created.",
-        "kb_agent_handoff_command": "Handoff command",
-        "kb_agent_handoff_activity": "Activity item",
+        "kb_ai_backend_llm": "LLM",
+        "kb_ai_backend_codex": "Codex",
+        "kb_ai_backend_codex_status": "Codex: read-only local",
         "kb_mark_crystallized": "Mark crystallized",
         "kb_crystallize_short": "Cry",
         "kb_crystallize_done_only": "Only Done tasks can be crystallized.",
@@ -2462,18 +2604,14 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_subtasks": "拆任务",
         "kb_ai_subtasks_short": "拆",
         "kb_ai_done_short": "证",
-        "kb_agent_handoff_title": "Agent 任务交接",
-        "kb_agent_handoff_help": (
-            "从看板卡片创建可审阅的 Codex/OpenCode 任务。"
-            "外部 agent 的结果会先回到 Agent Activity。"
+        "kb_ai_backend": "看板 AI",
+        "kb_ai_backend_help": (
+            "选择看板 AI 动作使用的引擎。Codex 使用本地 Codex CLI 的只读模式，"
+            "不需要看板内额外配置。"
         ),
-        "kb_agent_handoff_empty": "当前没有可交接的看板任务。",
-        "kb_agent_handoff_task": "任务",
-        "kb_agent_handoff_target": "目标 harness",
-        "kb_agent_handoff_create": "创建 agent handoff",
-        "kb_agent_handoff_created": "已创建 agent handoff 任务。",
-        "kb_agent_handoff_command": "交接命令",
-        "kb_agent_handoff_activity": "Activity 条目",
+        "kb_ai_backend_llm": "LLM",
+        "kb_ai_backend_codex": "Codex",
+        "kb_ai_backend_codex_status": "Codex：本地只读",
         "kb_mark_crystallized": "标记已结晶",
         "kb_crystallize_short": "晶",
         "kb_crystallize_done_only": "只有「已完成」任务可以标记为已结晶。",
@@ -2813,6 +2951,21 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "warnings": "Warnings",
         "changed_paths": "Changed paths",
         "agent_task_result": "Agent task result",
+        "agent_harness_filter": "Harness result",
+        "agent_harness_filter_all": "All",
+        "agent_harness_filter_agent_tasks": "Agent tasks only",
+        "agent_harness_filter_codex": "Codex",
+        "agent_harness_filter_local_codex": "Local Codex",
+        "agent_harness_filter_codex_cloud": "Codex Cloud",
+        "agent_harness_filter_opencode": "OpenCode",
+        "codex_cloud_title": "Codex Cloud",
+        "codex_cloud_task": "Cloud task",
+        "codex_cloud_refresh": "Refresh status",
+        "codex_cloud_diff": "Pull diff candidate",
+        "codex_cloud_refreshing": "Refreshing Codex Cloud...",
+        "codex_cloud_diffing": "Pulling Codex Cloud diff...",
+        "codex_cloud_refreshed": "Codex Cloud status refreshed.",
+        "codex_cloud_diff_ready": "Codex Cloud diff is ready for review.",
         "apply": "Apply",
         "dismiss": "Dismiss",
         "reopen": "Reopen",
@@ -2846,6 +2999,21 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "warnings": "警告",
         "changed_paths": "变更文件",
         "agent_task_result": "Agent task 结果",
+        "agent_harness_filter": "Harness 结果",
+        "agent_harness_filter_all": "全部",
+        "agent_harness_filter_agent_tasks": "仅 Agent tasks",
+        "agent_harness_filter_codex": "Codex",
+        "agent_harness_filter_local_codex": "本地 Codex",
+        "agent_harness_filter_codex_cloud": "Codex Cloud",
+        "agent_harness_filter_opencode": "OpenCode",
+        "codex_cloud_title": "Codex Cloud",
+        "codex_cloud_task": "Cloud 任务",
+        "codex_cloud_refresh": "刷新状态",
+        "codex_cloud_diff": "拉取 diff 候选",
+        "codex_cloud_refreshing": "正在刷新 Codex Cloud...",
+        "codex_cloud_diffing": "正在拉取 Codex Cloud diff...",
+        "codex_cloud_refreshed": "Codex Cloud 状态已刷新。",
+        "codex_cloud_diff_ready": "Codex Cloud diff 已进入审阅。",
         "apply": "应用",
         "dismiss": "丢弃",
         "reopen": "重新打开",

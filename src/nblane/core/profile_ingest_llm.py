@@ -457,11 +457,13 @@ def ingest_kanban_done_json(
     profile_name: str,
     done_tasks: list[KanbanTask],
     goal_context: str = "",
+    ai_backend: str = "llm",
 ) -> tuple[dict | None, str | None]:
-    """Call LLM to produce ingest JSON from Done-column tasks."""
+    """Produce ingest JSON from Done-column tasks."""
     if not done_tasks:
         return None, "no Done tasks selected"
-    if not llm_client.is_configured():
+    use_codex = _use_codex_backend(ai_backend)
+    if not use_codex and not llm_client.is_configured():
         return None, "LLM not configured"
 
     loaded = _load_schema_index_for_profile(profile_name)
@@ -492,6 +494,8 @@ def ingest_kanban_done_json(
             goal_context=goal_context,
         )
     )
+    if use_codex:
+        return _codex_ingest_json(profile_name, system, user)
     reply = llm_client.chat(system, user, temperature=0.2)
     if reply.startswith("LLM error:") or reply.startswith(
         "AI features not configured"
@@ -502,3 +506,37 @@ def ingest_kanban_done_json(
     if data is None:
         return None, "Could not parse ingest JSON from LLM."
     return data, None
+
+
+def _codex_ingest_json(
+    profile_name: str,
+    system: str,
+    user: str,
+) -> tuple[dict | None, str | None]:
+    """Run the kanban ingest prompt through local read-only Codex."""
+
+    from nblane.core import codex_adapter
+
+    prompt = (
+        "You are Codex used by nblane Kanban as a read-only AI backend. "
+        "Do not edit files, do not generate patches, do not write profile "
+        "facts, and do not submit agent-task candidates. Return only the JSON "
+        "object requested by the system prompt.\n\n"
+        "System instructions:\n"
+        f"{system.strip()}\n\n"
+        "User message:\n"
+        f"{user.strip()}\n"
+    )
+    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    if not result.ok:
+        return None, result.error or result.output or "Codex ingest failed."
+    data = extract_json_object(result.output)
+    if data is None:
+        return None, "Could not parse ingest JSON from Codex."
+    return data, None
+
+
+def _use_codex_backend(value: object) -> bool:
+    """Return True when kanban ingest should use local read-only Codex."""
+
+    return str(value or "").strip().casefold() == "codex"

@@ -101,6 +101,27 @@ class TestGapAnalyze(unittest.TestCase):
         call_kw = mock_merge.call_args[0][1]
         self.assertIn("linux_basics", call_kw)
 
+    @patch("nblane.core.gap_llm_router.route_task_to_nodes_codex")
+    def test_codex_router_backend_replaces_llm_router(self, mock_route) -> None:
+        """Codex router backend is used when requested."""
+        mock_route.return_value = RouterOutcome(
+            ok=True,
+            node_ids=["linux_basics"],
+            keywords={},
+        )
+
+        result = analyze(
+            "template",
+            "custom router task",
+            use_rule_match=False,
+            use_llm_router=True,
+            router_backend="codex",
+        )
+
+        self.assertIsNone(result.error)
+        self.assertIn("linux_basics", result.roots_from_llm)
+        mock_route.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

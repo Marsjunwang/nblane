@@ -349,6 +349,52 @@ def update_agent_task_status(
     return task
 
 
+def update_agent_task_remote(
+    profile: str,
+    task_id: str,
+    remote_patch: dict[str, Any],
+    *,
+    status: str | None = None,
+    error: str = "",
+    warnings: list[str] | tuple[str, ...] | str | None = None,
+    changed_paths: list[str] | tuple[str, ...] | str | None = None,
+    result_summary: str = "",
+    sync_activity: bool = True,
+) -> dict[str, Any] | None:
+    """Merge remote harness metadata onto one agent task."""
+
+    clean_status = _clean_text(status).lower() if status is not None else ""
+    if clean_status and clean_status not in AGENT_TASK_STATUSES:
+        raise ValueError(f"Unknown agent task status: {status}")
+
+    patch = copy.deepcopy(remote_patch) if isinstance(remote_patch, dict) else {}
+
+    def _mutate(task: dict[str, Any], current: str) -> None:
+        remote = (
+            copy.deepcopy(task.get("remote"))
+            if isinstance(task.get("remote"), dict)
+            else {}
+        )
+        remote.update(patch)
+        task["remote"] = remote
+        task["updated"] = current
+        if clean_status:
+            task["status"] = clean_status
+        if error or clean_status == "failed":
+            task["error"] = _clean_text(error)
+        if warnings is not None:
+            task["warnings"] = _clean_string_list(warnings)
+        if changed_paths is not None:
+            task["changed_paths"] = _clean_string_list(changed_paths)
+        if result_summary:
+            task["result_summary"] = _clean_text(result_summary)
+
+    task = _update_agent_task(profile, task_id, _mutate)
+    if task is not None and sync_activity:
+        _sync_activity_for_task(profile, task)
+    return task
+
+
 def submit_agent_task_candidate(
     profile: str,
     task_id: str,
@@ -446,6 +492,11 @@ def _sync_activity_for_task(profile: str, task: dict[str, Any]) -> None:
         "result_payload": (
             copy.deepcopy(task.get("result_payload"))
             if isinstance(task.get("result_payload"), dict)
+            else {}
+        ),
+        "remote": (
+            copy.deepcopy(task.get("remote"))
+            if isinstance(task.get("remote"), dict)
             else {}
         ),
     }
@@ -623,5 +674,6 @@ __all__ = [
     "save_agent_tasks",
     "submit_agent_task_candidate",
     "sync_agent_harness_snippet",
+    "update_agent_task_remote",
     "update_agent_task_status",
 ]

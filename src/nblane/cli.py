@@ -37,6 +37,14 @@ Commands:
                                     Print external harness config snippet
     nblane agent handoff <task_id> --target codex|opencode [--profile name]
                                     Print external agent handoff instructions
+    nblane codex status             Show optional Codex CLI / Cloud readiness
+    nblane codex install            Install optional Codex CLI via npm
+    nblane codex local run <task_id> --profile name
+                                    Run an agent task with local Codex CLI
+    nblane codex cloud submit <task_id> --profile name
+                                    Submit an agent task to Codex Cloud
+    nblane codex cloud refresh <task_id> --profile name [--diff]
+                                    Refresh Codex Cloud status / diff candidate
     nblane auth hash-password       Generate a password hash for Web auth
 
 Examples:
@@ -69,6 +77,13 @@ from nblane.core.auth import DEFAULT_ITERATIONS, hash_password
 from nblane.commands.agent import (
     cmd_agent_handoff,
     cmd_sync_agent_harness,
+)
+from nblane.commands.codex import (
+    cmd_codex_cloud_refresh,
+    cmd_codex_cloud_submit,
+    cmd_codex_install,
+    cmd_codex_local_run,
+    cmd_codex_status,
 )
 from nblane.commands.evidence import cmd_evidence_dispatch
 from nblane.commands.gap import cmd_gap
@@ -396,6 +411,94 @@ def main() -> None:
         "--profile",
         default=None,
         help="Optional profile name; omitted scans all profiles",
+    )
+
+    p_codex = sub.add_parser(
+        "codex",
+        help="Optional Codex CLI / Codex Cloud helpers",
+    )
+    codex_sub = p_codex.add_subparsers(
+        dest="codex_command",
+        required=True,
+    )
+    p_codex_status = codex_sub.add_parser(
+        "status",
+        help="Show Codex CLI install/login/cloud readiness",
+    )
+    p_codex_status.add_argument(
+        "--profile",
+        default=None,
+        help="Optional profile name; includes profiles/<name>/codex.yaml overrides",
+    )
+    p_codex_install = codex_sub.add_parser(
+        "install",
+        help="Install optional Codex CLI through npm",
+    )
+    p_codex_install.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Install @openai/codex@latest",
+    )
+    p_codex_install.add_argument(
+        "--print-command",
+        action="store_true",
+        help="Print the npm command without running it",
+    )
+    p_codex_local = codex_sub.add_parser(
+        "local",
+        help="Local Codex task helpers",
+    )
+    codex_local_sub = p_codex_local.add_subparsers(
+        dest="codex_local_command",
+        required=True,
+    )
+    p_codex_local_run = codex_local_sub.add_parser(
+        "run",
+        help="Run an agent task with local Codex",
+    )
+    p_codex_local_run.add_argument("task_id", help="Agent task id")
+    p_codex_local_run.add_argument(
+        "--profile",
+        required=True,
+        help="Profile name that owns the agent task",
+    )
+    p_codex_local_run.add_argument(
+        "--keep-worktree",
+        action="store_true",
+        help="Keep the temporary worktree for debugging",
+    )
+    p_codex_cloud = codex_sub.add_parser(
+        "cloud",
+        help="Codex Cloud task helpers",
+    )
+    codex_cloud_sub = p_codex_cloud.add_subparsers(
+        dest="codex_cloud_command",
+        required=True,
+    )
+    p_codex_submit = codex_cloud_sub.add_parser(
+        "submit",
+        help="Submit an agent task to Codex Cloud",
+    )
+    p_codex_submit.add_argument("task_id", help="Agent task id")
+    p_codex_submit.add_argument(
+        "--profile",
+        required=True,
+        help="Profile name that owns the agent task",
+    )
+    p_codex_refresh = codex_cloud_sub.add_parser(
+        "refresh",
+        help="Refresh Codex Cloud status and optionally diff",
+    )
+    p_codex_refresh.add_argument("task_id", help="Agent task id")
+    p_codex_refresh.add_argument(
+        "--profile",
+        required=True,
+        help="Profile name that owns the agent task",
+    )
+    p_codex_refresh.add_argument(
+        "--diff",
+        action="store_true",
+        help="Also pull the remote diff into Agent Activity as a candidate",
     )
 
     p_public = sub.add_parser(
@@ -897,6 +1000,33 @@ def main() -> None:
                 target=args.target,
                 profile=args.profile,
             )
+    elif args.command == "codex":
+        if args.codex_command == "status":
+            cmd_codex_status(profile=args.profile)
+        elif args.codex_command == "install":
+            cmd_codex_install(
+                upgrade=args.upgrade,
+                print_command=args.print_command,
+            )
+        elif args.codex_command == "local":
+            if args.codex_local_command == "run":
+                cmd_codex_local_run(
+                    args.task_id,
+                    profile=args.profile,
+                    keep_worktree=args.keep_worktree,
+                )
+        elif args.codex_command == "cloud":
+            if args.codex_cloud_command == "submit":
+                cmd_codex_cloud_submit(
+                    args.task_id,
+                    profile=args.profile,
+                )
+            elif args.codex_cloud_command == "refresh":
+                cmd_codex_cloud_refresh(
+                    args.task_id,
+                    profile=args.profile,
+                    include_diff=args.diff,
+                )
     elif args.command == "public":
         from nblane.commands.public import (
             cmd_public_build,

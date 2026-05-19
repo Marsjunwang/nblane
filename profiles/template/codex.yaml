@@ -1,0 +1,14 @@
+# Optional profile-scoped Codex settings.
+# Auth stays in Codex CLI (`codex login`); do not store tokens here.
+
+schema_version: "1.0"
+profile: "{Name}"
+updated: ""
+
+codex:
+  bin_path: codex
+  cloud_env_id: ""
+  model: ""
+  attempts: 1
+  branch: ""
+  timeout_seconds: 180

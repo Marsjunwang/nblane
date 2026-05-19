@@ -9,6 +9,7 @@ from pathlib import Path
 import streamlit as st
 
 from nblane.core import git_backup
+from nblane.core import codex_adapter
 from nblane.core import llm as llm_client
 from nblane.core.file_state import (
     FileConflictError,
@@ -88,6 +89,18 @@ _UI_LANG_KEY = "nblane_ui_lang"
 _UI_LANG_WIDGET_KEY = "_nblane_ui_lang"
 _LLM_REPLY_LANG_KEY = "nblane_llm_reply_lang"
 _LLM_REPLY_LANG_WIDGET_KEY = "_nblane_llm_reply_lang"
+_CODEX_BIN_KEY = "bin"
+_CODEX_CLOUD_ENV_KEY = "cloud_env"
+_CODEX_MODEL_KEY = "model"
+_CODEX_ATTEMPTS_KEY = "attempts"
+_CODEX_BRANCH_KEY = "branch"
+_CODEX_TIMEOUT_KEY = "timeout"
+_KANBAN_AI_BACKENDS = ("llm", "codex")
+_CODEX_API_KEY_EPOCH_KEY = "api_key_epoch"
+_CODEX_CLI_CONFIG_TEXT_KEY = "cli_config_text"
+_CODEX_CLI_CONFIG_PATH_KEY = "cli_config_path"
+_CODEX_PROFILE_CONFIG_TEXT_KEY = "profile_config_text"
+_CODEX_PROFILE_CONFIG_PATH_KEY = "profile_config_path"
 
 _LLM_PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
     "OpenAI": (
@@ -156,6 +169,25 @@ def _prepare_language_widget(
     st.session_state[session_key] = value
     st.session_state[widget_key] = value
     return value
+
+
+def kanban_ai_backend_key(profile: str) -> str:
+    """Session key for the profile-scoped Kanban AI backend selector."""
+
+    return f"kanban_ai_backend_{profile}"
+
+
+def kanban_ai_backend(profile: str) -> str:
+    """Return the selected Kanban AI backend."""
+
+    value = str(st.session_state.get(kanban_ai_backend_key(profile)) or "llm")
+    return value if value in _KANBAN_AI_BACKENDS else "llm"
+
+
+def kanban_ai_suffix(profile: str) -> str:
+    """Return the language/backend suffix for Kanban AI draft caches."""
+
+    return f"{llm_client.reply_language()}_{kanban_ai_backend(profile)}"
 
 
 def _sync_to_persistent() -> None:
@@ -285,12 +317,17 @@ def apply_ui_language_from_session() -> None:
         llm_client.configure(ui_lang=ui_lang)
 
 
-def render_llm_settings() -> None:
+def render_llm_settings(profile: str = "") -> None:
     """Render app-wide LLM settings in the Streamlit sidebar."""
     _ensure_llm_session_defaults()
     u = common_ui()
 
     with st.expander(u["llm_settings_title"]):
+        if profile:
+            _render_kanban_ai_backend_selector(profile, u)
+            _render_codex_sidebar_entry(profile, u)
+            st.divider()
+
         provider_names = list(_LLM_PROVIDER_PRESETS)
         provider = st.selectbox(
             u["llm_provider"],
@@ -391,6 +428,587 @@ def render_llm_settings() -> None:
         st.caption(u["llm_session_only"])
 
 
+def _codex_widget_key(profile: str, name: str) -> str:
+    safe_profile = re.sub(r"[^a-zA-Z0-9_-]+", "_", profile).strip("_")
+    return f"_nblane_codex_{safe_profile or 'global'}_{name}"
+
+
+def _ensure_codex_session_defaults(profile: str = "") -> None:
+    """Seed sidebar Codex widgets from env/runtime config."""
+
+    cfg = codex_adapter.current_config_dict(
+        profile=profile or None,
+        include_runtime=False,
+    )
+    st.session_state.setdefault(
+        _codex_widget_key(profile, _CODEX_BIN_KEY),
+        str(cfg["bin_path"]),
+    )
+    st.session_state.setdefault(
+        _codex_widget_key(profile, _CODEX_CLOUD_ENV_KEY),
+        str(cfg["cloud_env_id"]),
+    )
+    st.session_state.setdefault(
+        _codex_widget_key(profile, _CODEX_MODEL_KEY),
+        str(cfg["model"]),
+    )
+    st.session_state.setdefault(
+        _codex_widget_key(profile, _CODEX_ATTEMPTS_KEY),
+        int(cfg["attempts"]),
+    )
+    st.session_state.setdefault(
+        _codex_widget_key(profile, _CODEX_BRANCH_KEY),
+        str(cfg["branch"]),
+    )
+    st.session_state.setdefault(
+        _codex_widget_key(profile, _CODEX_TIMEOUT_KEY),
+        float(cfg["timeout_seconds"]),
+    )
+
+
+def _apply_codex_sidebar_config(profile: str = "") -> None:
+    """Apply sidebar Codex values to process runtime config."""
+
+    codex_adapter.configure(
+        bin_path=str(
+            st.session_state.get(_codex_widget_key(profile, _CODEX_BIN_KEY), "")
+        ).strip(),
+        cloud_env_id=str(
+            st.session_state.get(
+                _codex_widget_key(profile, _CODEX_CLOUD_ENV_KEY),
+                "",
+            )
+        ).strip(),
+        model=str(
+            st.session_state.get(_codex_widget_key(profile, _CODEX_MODEL_KEY), "")
+        ).strip(),
+        attempts=st.session_state.get(
+            _codex_widget_key(profile, _CODEX_ATTEMPTS_KEY),
+            1,
+        ),
+        branch=str(
+            st.session_state.get(_codex_widget_key(profile, _CODEX_BRANCH_KEY), "")
+        ).strip(),
+        timeout_seconds=st.session_state.get(
+            _codex_widget_key(profile, _CODEX_TIMEOUT_KEY),
+            180.0,
+        ),
+    )
+
+
+def _codex_dialog_open_key(profile: str) -> str:
+    return _codex_widget_key(profile, "dialog_open")
+
+
+def _codex_api_key_epoch_key(profile: str) -> str:
+    return _codex_widget_key(profile, _CODEX_API_KEY_EPOCH_KEY)
+
+
+def _codex_api_key_input_key(profile: str) -> str:
+    epoch_key = _codex_api_key_epoch_key(profile)
+    epoch = int(st.session_state.setdefault(epoch_key, 0) or 0)
+    return _codex_widget_key(profile, f"api_key_input_{epoch}")
+
+
+def _codex_notice_key(profile: str, name: str) -> str:
+    return _codex_widget_key(profile, f"notice_{name}")
+
+
+def _codex_cli_config_editor_key(name: str) -> str:
+    return _codex_widget_key("global", name)
+
+
+def _profile_codex_config_editor_key(profile: str, name: str) -> str:
+    return _codex_widget_key(profile, name)
+
+
+def _codex_profile_config_editor_text(profile: str) -> str:
+    path = codex_adapter.profile_config_path(profile)
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return codex_adapter.profile_config_template(profile)
+
+
+def _ensure_codex_cli_config_editor_state() -> None:
+    path = codex_adapter.codex_cli_config_path()
+    text_key = _codex_cli_config_editor_key(_CODEX_CLI_CONFIG_TEXT_KEY)
+    path_key = _codex_cli_config_editor_key(_CODEX_CLI_CONFIG_PATH_KEY)
+    if st.session_state.get(path_key) == str(path) and text_key in st.session_state:
+        return
+    st.session_state[path_key] = str(path)
+    st.session_state[text_key] = codex_adapter.load_codex_cli_config_text()
+
+
+def _ensure_profile_codex_config_editor_state(profile: str) -> None:
+    path = codex_adapter.profile_config_path(profile)
+    text_key = _profile_codex_config_editor_key(
+        profile,
+        _CODEX_PROFILE_CONFIG_TEXT_KEY,
+    )
+    path_key = _profile_codex_config_editor_key(
+        profile,
+        _CODEX_PROFILE_CONFIG_PATH_KEY,
+    )
+    if st.session_state.get(path_key) == str(path) and text_key in st.session_state:
+        return
+    st.session_state[path_key] = str(path)
+    st.session_state[text_key] = _codex_profile_config_editor_text(profile)
+
+
+def _codex_status(profile: str) -> codex_adapter.CodexStatus:
+    return codex_adapter.codex_status(
+        codex_adapter.current_config(profile=profile or None)
+    )
+
+
+def _render_kanban_ai_backend_selector(profile: str, u: dict[str, str]) -> None:
+    st.selectbox(
+        u.get("kb_ai_backend", "Kanban AI Engine"),
+        list(_KANBAN_AI_BACKENDS),
+        key=kanban_ai_backend_key(profile),
+        format_func=lambda value: u.get(
+            f"kb_ai_backend_{value}",
+            str(value).upper(),
+        ),
+        help=u.get(
+            "kb_ai_backend_help",
+            "Choose the engine used by Kanban AI actions.",
+        ),
+    )
+
+
+def _render_codex_install_buttons(
+    profile: str,
+    u: dict[str, str],
+    *,
+    key_prefix: str,
+) -> None:
+    install_col, upgrade_col = st.columns(2)
+    with install_col:
+        if st.button(
+            u.get("codex_install", "Install"),
+            key=_codex_widget_key(profile, f"{key_prefix}_install"),
+            use_container_width=True,
+        ):
+            with st.spinner(u.get("codex_install", "Install")):
+                result = codex_adapter.install_codex(upgrade=False)
+            if result.ok:
+                st.success(u.get("codex_install_done", "Codex install completed."))
+            else:
+                st.error(u.get("codex_install_failed", "Codex install failed."))
+                st.code(result.output or result.error, language="text")
+                st.code(codex_adapter.install_command(), language="bash")
+    with upgrade_col:
+        if st.button(
+            u.get("codex_upgrade", "Upgrade"),
+            key=_codex_widget_key(profile, f"{key_prefix}_upgrade"),
+            use_container_width=True,
+        ):
+            with st.spinner(u.get("codex_upgrade", "Upgrade")):
+                result = codex_adapter.install_codex(upgrade=True)
+            if result.ok:
+                st.success(u.get("codex_install_done", "Codex install completed."))
+            else:
+                st.error(u.get("codex_install_failed", "Codex install failed."))
+                st.code(result.output or result.error, language="text")
+                st.code(codex_adapter.install_command(upgrade=True), language="bash")
+
+
+def _render_codex_sidebar_entry(profile: str, u: dict[str, str]) -> None:
+    st.markdown(f"**{u.get('codex_settings_title', 'Codex')}**")
+    status = _codex_status(profile)
+    if status.installed:
+        st.caption(
+            u.get("codex_installed", "Codex installed: {version}").format(
+                version=status.version or status.resolved_path
+            )
+        )
+    else:
+        st.caption(u.get("codex_missing", "Codex CLI is not installed."))
+    st.caption(
+        u.get("codex_logged_in", "Codex login: ready.")
+        if status.logged_in
+        else u.get("codex_not_logged_in", "Codex login is not ready.")
+    )
+    st.caption(
+        u.get("codex_cli_config_path", "CLI config: `{path}`").format(
+            path=codex_adapter.codex_cli_config_path()
+        )
+    )
+    st.caption(
+        u.get("codex_profile_config", "Profile Codex config for {profile}: `{path}`")
+        .format(profile=profile, path=codex_adapter.profile_config_path(profile))
+    )
+    _render_codex_install_buttons(profile, u, key_prefix="sidebar")
+    if st.button(
+        u.get("codex_configure", "Configure Codex"),
+        key=_codex_widget_key(profile, "configure_dialog"),
+        use_container_width=True,
+    ):
+        st.session_state[_codex_dialog_open_key(profile)] = True
+
+
+def render_codex_config_dialog_if_open(profile: str) -> None:
+    """Render the Codex configuration dialog outside the sidebar when open."""
+
+    if not profile or not st.session_state.get(_codex_dialog_open_key(profile)):
+        return
+    u = common_ui()
+    dialog_key = _codex_dialog_open_key(profile)
+
+    def _close_dialog() -> None:
+        st.session_state[dialog_key] = False
+
+    @st.dialog(
+        u.get("codex_config_dialog_title", "Codex Configuration"),
+        width="large",
+        on_dismiss=_close_dialog,
+    )
+    def _dialog() -> None:
+        _render_codex_config_dialog_body(profile, u)
+
+    _dialog()
+
+
+def _render_codex_config_dialog_body(profile: str, u: dict[str, str]) -> None:
+    tabs = st.tabs(
+        [
+            u.get("codex_status_tab", "Status"),
+            u.get("codex_api_key_tab", "API Key"),
+            u.get("codex_cli_config_tab", "CLI Config"),
+            u.get("codex_profile_config_tab", "Profile Config"),
+        ]
+    )
+    with tabs[0]:
+        _render_codex_status_tab(profile, u)
+    with tabs[1]:
+        _render_codex_api_key_tab(profile, u)
+    with tabs[2]:
+        _render_codex_cli_config_tab(u)
+    with tabs[3]:
+        _render_codex_profile_config_tab(profile, u)
+
+    if st.button(
+        u.get("codex_dialog_close", "Close"),
+        key=_codex_widget_key(profile, "dialog_close"),
+    ):
+        st.session_state[_codex_dialog_open_key(profile)] = False
+        st.rerun()
+
+
+def _render_codex_status_tab(profile: str, u: dict[str, str]) -> None:
+    status = _codex_status(profile)
+    st.caption(
+        u.get("codex_profile_config", "Profile Codex config for {profile}: `{path}`")
+        .format(profile=profile, path=codex_adapter.profile_config_path(profile))
+    )
+    st.caption(
+        u.get("codex_cli_config_path", "CLI config: `{path}`").format(
+            path=codex_adapter.codex_cli_config_path()
+        )
+    )
+    st.caption(
+        u.get("codex_auth_path", "Auth file: `{path}`").format(
+            path=codex_adapter.codex_auth_path()
+        )
+    )
+    if status.installed:
+        st.success(
+            u.get("codex_installed", "Codex installed: {version}").format(
+                version=status.version or status.resolved_path
+            )
+        )
+        if status.resolved_path:
+            st.code(status.resolved_path, language="text")
+    else:
+        st.warning(u.get("codex_missing", "Codex CLI is not installed."))
+        st.code(status.install_command, language="bash")
+    if status.logged_in:
+        st.success(u.get("codex_logged_in", "Codex login: ready."))
+    else:
+        st.warning(u.get("codex_not_logged_in", "Codex login is not ready."))
+        if status.login_status:
+            st.code(status.login_status, language="text")
+    _render_codex_install_buttons(profile, u, key_prefix="dialog")
+
+
+def _render_codex_api_key_tab(profile: str, u: dict[str, str]) -> None:
+    notice_key = _codex_notice_key(profile, "api_key")
+    notice = st.session_state.pop(notice_key, None)
+    if isinstance(notice, tuple) and len(notice) == 2:
+        level, message = notice
+        if level == "success":
+            st.success(str(message))
+        else:
+            st.error(str(message))
+    st.caption(
+        u.get(
+            "codex_auth_managed",
+            "Codex auth is managed by Codex CLI at `{path}`.",
+        ).format(path=codex_adapter.codex_auth_path())
+    )
+    key = _codex_api_key_input_key(profile)
+    api_key = st.text_input(
+        u.get("codex_api_key", "Codex API key"),
+        type="password",
+        key=key,
+        help=u.get(
+            "codex_api_key_help",
+            "Saved through `codex login --with-api-key`; nblane does not display auth.json.",
+        ),
+    )
+    if st.button(
+        u.get("codex_save_api_key", "Save API Key"),
+        type="primary",
+        key=_codex_widget_key(profile, "save_api_key"),
+    ):
+        result = codex_adapter.login_with_api_key(
+            api_key,
+            config=codex_adapter.current_config(profile=profile or None),
+        )
+        epoch_key = _codex_api_key_epoch_key(profile)
+        st.session_state[epoch_key] = int(st.session_state.get(epoch_key, 0) or 0) + 1
+        if result.ok:
+            st.session_state[notice_key] = (
+                "success",
+                u.get("codex_api_key_saved", "Codex API key saved."),
+            )
+        else:
+            st.session_state[notice_key] = (
+                "error",
+                u.get("codex_api_key_failed", "Codex API key was not saved: {error}")
+                .format(error=result.error or result.output),
+            )
+        st.rerun()
+
+
+def _render_codex_cli_config_tab(u: dict[str, str]) -> None:
+    path = codex_adapter.codex_cli_config_path()
+    ensure_file_snapshot(path)
+    _ensure_codex_cli_config_editor_state()
+    text_key = _codex_cli_config_editor_key(_CODEX_CLI_CONFIG_TEXT_KEY)
+    st.caption(
+        u.get("codex_cli_config_path", "CLI config: `{path}`").format(path=path)
+    )
+    if not path.exists():
+        st.caption(
+            u.get(
+                "codex_cli_config_template_note",
+                "config.toml does not exist yet. The editor is showing a template.",
+            )
+        )
+    reload_col, save_col = st.columns(2)
+    with reload_col:
+        if st.button(
+            u.get("codex_config_reload", "Reload from disk"),
+            key=_codex_cli_config_editor_key("reload"),
+        ):
+            refresh_file_snapshots([path])
+            st.session_state[text_key] = codex_adapter.load_codex_cli_config_text()
+            st.success(u.get("codex_config_reloaded", "Codex config reloaded."))
+    edited_text = st.text_area(
+        u.get("codex_cli_config_editor", "Edit config.toml"),
+        key=text_key,
+        height=520,
+    )
+    with save_col:
+        if st.button(
+            u.get("codex_save_cli_config", "Save config.toml"),
+            type="primary",
+            key=_codex_cli_config_editor_key("save"),
+        ):
+            try:
+                assert_files_current([path])
+                saved = codex_adapter.save_codex_cli_config_text(edited_text)
+                refresh_file_snapshots([path])
+                st.success(
+                    u.get(
+                        "codex_cli_config_saved",
+                        "Saved config.toml. Previous file backup: {backup}",
+                    ).format(
+                        backup=path.with_name(f"{path.name}.nblane.bak")
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    u.get(
+                        "codex_cli_config_invalid",
+                        "config.toml was not saved: {error}",
+                    ).format(error=exc)
+                )
+
+
+def _render_codex_profile_config_tab(profile: str, u: dict[str, str]) -> None:
+    path = codex_adapter.profile_config_path(profile)
+    ensure_file_snapshot(path)
+    _ensure_profile_codex_config_editor_state(profile)
+    text_key = _profile_codex_config_editor_key(
+        profile,
+        _CODEX_PROFILE_CONFIG_TEXT_KEY,
+    )
+    st.caption(
+        u.get("codex_profile_config", "Profile Codex config for {profile}: `{path}`")
+        .format(profile=profile, path=path)
+    )
+    if not path.exists():
+        st.caption(
+            u.get(
+                "codex_config_template_note",
+                "codex.yaml does not exist yet. The editor is showing a template.",
+            )
+        )
+    reload_col, save_col = st.columns(2)
+    with reload_col:
+        if st.button(
+            u.get("codex_config_reload", "Reload from disk"),
+            key=_profile_codex_config_editor_key(profile, "profile_reload"),
+        ):
+            refresh_file_snapshots([path])
+            st.session_state[text_key] = _codex_profile_config_editor_text(profile)
+            st.success(u.get("codex_config_reloaded", "Codex config reloaded."))
+    edited_text = st.text_area(
+        u.get("codex_config_editor", "Edit codex.yaml"),
+        key=text_key,
+        height=520,
+    )
+    with save_col:
+        if st.button(
+            u.get("codex_config_save", "Save Codex config"),
+            type="primary",
+            key=_profile_codex_config_editor_key(profile, "profile_save"),
+        ):
+            try:
+                assert_files_current([path])
+                codex_adapter.save_profile_config_text(profile, edited_text)
+                refresh_file_snapshots([path])
+                stash_git_backup_results()
+                st.success(u.get("codex_config_saved", "Codex config saved."))
+            except Exception as exc:
+                st.error(
+                    u.get(
+                        "codex_config_invalid",
+                        "Codex config was not saved: {error}",
+                    ).format(error=exc)
+                )
+
+
+def render_codex_settings(profile: str = "") -> None:
+    """Render optional Codex CLI / Codex Cloud settings."""
+
+    _ensure_codex_session_defaults(profile)
+    u = common_ui()
+
+    with st.expander(u["codex_settings_title"]):
+        if profile:
+            path = codex_adapter.profile_config_path(profile)
+            st.caption(
+                u["codex_profile_config"].format(
+                    profile=profile,
+                    path=path,
+                )
+            )
+        st.text_input(
+            u["codex_bin"],
+            key=_codex_widget_key(profile, _CODEX_BIN_KEY),
+        )
+        st.text_input(
+            u["codex_cloud_env_id"],
+            key=_codex_widget_key(profile, _CODEX_CLOUD_ENV_KEY),
+        )
+        st.text_input(
+            u["codex_model"],
+            key=_codex_widget_key(profile, _CODEX_MODEL_KEY),
+        )
+        st.number_input(
+            u["codex_attempts"],
+            min_value=1,
+            max_value=8,
+            step=1,
+            key=_codex_widget_key(profile, _CODEX_ATTEMPTS_KEY),
+        )
+        st.text_input(
+            u["codex_branch"],
+            key=_codex_widget_key(profile, _CODEX_BRANCH_KEY),
+        )
+        st.number_input(
+            u["codex_timeout"],
+            min_value=5.0,
+            max_value=1800.0,
+            step=5.0,
+            key=_codex_widget_key(profile, _CODEX_TIMEOUT_KEY),
+        )
+        _apply_codex_sidebar_config(profile)
+        status = codex_adapter.codex_status(
+            codex_adapter.current_config(profile=profile or None)
+        )
+        if status.installed:
+            st.caption(
+                u["codex_installed"].format(
+                    version=status.version or status.resolved_path
+                )
+            )
+        else:
+            st.caption(u["codex_missing"])
+            st.code(status.install_command, language="bash")
+        st.caption(
+            u["codex_logged_in"] if status.logged_in else u["codex_not_logged_in"]
+        )
+        st.caption(
+            u["codex_cloud_configured"]
+            if status.cloud_env_configured
+            else u["codex_cloud_missing"]
+        )
+        if status.login_status and not status.logged_in:
+            st.code(status.login_status, language="text")
+        install_col, upgrade_col = st.columns(2)
+        with install_col:
+            if st.button(u["codex_install"], key="_nblane_codex_install"):
+                with st.spinner(u["codex_install"]):
+                    result = codex_adapter.install_codex(upgrade=False)
+                if result.ok:
+                    st.success(u["codex_install_done"])
+                else:
+                    st.error(u["codex_install_failed"])
+                    st.code(result.output or result.error, language="text")
+                    st.code(codex_adapter.install_command(), language="bash")
+        with upgrade_col:
+            if st.button(u["codex_upgrade"], key="_nblane_codex_upgrade"):
+                with st.spinner(u["codex_upgrade"]):
+                    result = codex_adapter.install_codex(upgrade=True)
+                if result.ok:
+                    st.success(u["codex_install_done"])
+                else:
+                    st.error(u["codex_install_failed"])
+                    st.code(result.output or result.error, language="text")
+                    st.code(codex_adapter.install_command(upgrade=True), language="bash")
+        save_cols = st.columns(2) if profile else [st.container()]
+        if profile:
+            with save_cols[0]:
+                if st.button(
+                    u["codex_save_profile"],
+                    key=f"_nblane_codex_save_profile_{profile}",
+                ):
+                    try:
+                        path = codex_adapter.save_profile_config(profile)
+                        stash_git_backup_results()
+                        st.success(f"{u['codex_saved_profile']} ({path})")
+                    except Exception as exc:
+                        st.error(str(exc))
+        save_container = save_cols[1] if profile else save_cols[0]
+        with save_container:
+            save_env_clicked = st.button(
+                u["codex_save_env"],
+                key=f"_nblane_codex_save_env_{profile or 'global'}",
+            )
+        if save_env_clicked:
+            try:
+                path = codex_adapter.save_config_to_env()
+                st.success(f"{u['codex_saved_env']} ({path})")
+            except Exception as exc:
+                st.error(str(exc))
+        st.caption(u["codex_session_only"])
+
+
 def ui_emoji_enabled() -> bool:
     """Return False when ``NBLANE_UI_EMOJI`` disables emoji prefixes."""
     raw = os.environ.get("NBLANE_UI_EMOJI", "1").strip().lower()
@@ -476,6 +1094,21 @@ def render_workspace_navigation() -> None:
             st.caption(group)
             for path, label in links:
                 _safe_page_link(path, label)
+
+
+def _hide_streamlit_builtin_pages_nav() -> None:
+    """Hide Streamlit's flat auto-pages nav when using our grouped fallback."""
+
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebarNav"] {
+            display: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _safe_page_link(path: str, label: str) -> None:
@@ -574,8 +1207,13 @@ def select_profile() -> str:
                         except Exception as exc:
                             st.error(str(exc))
 
-        render_llm_settings()
+        selected_profile = st.session_state.get(
+            _PERSIST_KEY,
+            profiles[0] if profiles else "",
+        )
+        render_llm_settings(selected_profile)
         if not st.session_state.get("_nblane_native_navigation", False):
+            _hide_streamlit_builtin_pages_nav()
             render_workspace_navigation()
 
     if (
@@ -585,10 +1223,12 @@ def select_profile() -> str:
         st.warning(u["no_profiles_main"])
         st.stop()
 
-    return st.session_state.get(
+    selected_profile = st.session_state.get(
         _PERSIST_KEY,
         profiles[0] if profiles else "",
     )
+    render_codex_config_dialog_if_open(selected_profile)
+    return selected_profile
 
 
 def _current_goal_for_web(profile: str) -> Goal | None:

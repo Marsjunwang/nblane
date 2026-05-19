@@ -316,6 +316,7 @@ def analyze(
     *,
     use_rule_match: bool = True,
     use_llm_router: bool = False,
+    router_backend: str = "llm",
     persist_router_keywords: bool = True,
     goal_context: str = "",
     source_kind: str = "",
@@ -418,13 +419,25 @@ def analyze(
 
         roots_llm: list[str] = []
         if use_llm_router:
-            from nblane.core.gap_llm_router import (
-                route_task_to_nodes,
-            )
+            if str(router_backend or "").strip().casefold() == "codex":
+                from nblane.core.gap_llm_router import (
+                    route_task_to_nodes_codex,
+                )
 
-            outcome = route_task_to_nodes(
-                match_text, str(schema_name), index
-            )
+                outcome = route_task_to_nodes_codex(
+                    profile_name,
+                    match_text,
+                    str(schema_name),
+                    index,
+                )
+            else:
+                from nblane.core.gap_llm_router import (
+                    route_task_to_nodes,
+                )
+
+                outcome = route_task_to_nodes(
+                    match_text, str(schema_name), index
+                )
             if outcome.ok:
                 roots_llm = [
                     nid for nid in outcome.node_ids if nid in index

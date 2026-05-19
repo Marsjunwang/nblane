@@ -47,7 +47,6 @@ from nblane.core.kanban_ai import (
     generate_kanban_task_alignment_options,
     generate_kanban_subtask_proposals_detailed,
 )
-from nblane.core.ai.gateway import create_remote_dev_task
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -112,6 +111,8 @@ from nblane.web_shared import (
     render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
+    kanban_ai_backend,
+    kanban_ai_suffix,
     select_profile,
     stash_git_backup_results,
     ui_emoji_enabled,
@@ -371,17 +372,17 @@ def _gap_results_key(profile: str) -> str:
 
 def _subtask_proposals_key(profile: str) -> str:
     """Session key for per-task AI subtask proposals."""
-    return f"kanban_subtask_proposals_{profile}_{llm_client.reply_language()}"
+    return f"kanban_subtask_proposals_{profile}_{kanban_ai_suffix(profile)}"
 
 
 def _subtask_alignments_key(profile: str) -> str:
     """Session key for per-task task-understanding alignment options."""
-    return f"kanban_subtask_alignments_{profile}_{llm_client.reply_language()}"
+    return f"kanban_subtask_alignments_{profile}_{kanban_ai_suffix(profile)}"
 
 
 def _subtask_errors_key(profile: str) -> str:
     """Session key for per-task AI subtask generation diagnostics."""
-    return f"kanban_subtask_errors_{profile}_{llm_client.reply_language()}"
+    return f"kanban_subtask_errors_{profile}_{kanban_ai_suffix(profile)}"
 
 
 def _task_text_fields(task: KanbanTask) -> list[str]:
@@ -524,12 +525,17 @@ def _board_ai_state(profile: str, ui: dict[str, str]) -> dict:
     alignments = st.session_state.get(_subtask_alignments_key(profile), {})
     errors = st.session_state.get(_subtask_errors_key(profile), {})
     gaps = st.session_state.get(_gap_results_key(profile), {})
-    return {
-        "status": (
+    ai_backend = kanban_ai_backend(profile)
+    if ai_backend == "codex":
+        status = ui.get("kb_ai_backend_codex_status", "Codex: read-only local")
+    else:
+        status = (
             ui["llm_configured"].format(label=llm_client.model_label())
             if llm_client.is_configured()
             else ui["ai_not_configured"]
-        ),
+        )
+    return {
+        "status": status,
         "proposals_by_task": {
             task_id: [
                 _proposal_payload(proposal)
@@ -932,161 +938,6 @@ def _render_subtask_proposals(
                 _auto_save(profile, sections)
                 proposals_by_task.pop(task_id, None)
                 st.rerun()
-
-
-def _agent_handoff_task_options(
-    sections: dict[str, list[KanbanTask]],
-) -> list[dict]:
-    """Return selectable kanban tasks for external-agent handoff."""
-
-    options: list[dict] = []
-    for section in KANBAN_BOARD_SECTIONS:
-        for task in sections.get(section) or []:
-            task_id = str(task.id or "").strip()
-            title = str(task.title or "").strip()
-            if not task_id or not title:
-                continue
-            options.append(
-                {
-                    "id": task_id,
-                    "section": section,
-                    "label": f"{kanban_section_label(section)} · {title}",
-                    "task": task,
-                }
-            )
-    return options
-
-
-def _render_agent_handoff_panel(
-    profile: str,
-    sections: dict[str, list[KanbanTask]],
-    ui: dict[str, str],
-    *,
-    agent_tasks_path,
-    agent_activity_path,
-    ai_runs_path,
-) -> None:
-    """Create Codex/OpenCode handoff tasks from kanban cards."""
-
-    options = _agent_handoff_task_options(sections)
-    with st.expander(
-        ui.get("kb_agent_handoff_title", "Agent handoff"),
-        expanded=False,
-    ):
-        st.caption(
-            ui.get(
-                "kb_agent_handoff_help",
-                "Create a reviewable Codex/OpenCode task from a kanban card.",
-            )
-        )
-        if not options:
-            st.caption(
-                ui.get(
-                    "kb_agent_handoff_empty",
-                    "No kanban task is available for handoff.",
-                )
-            )
-            return
-        selected_index = st.selectbox(
-            ui.get("kb_agent_handoff_task", "Task"),
-            list(range(len(options))),
-            format_func=lambda idx: options[idx]["label"],
-            key=f"kb_agent_handoff_task_{profile}",
-        )
-        target = st.selectbox(
-            ui.get("kb_agent_handoff_target", "Target harness"),
-            ["codex", "opencode"],
-            key=f"kb_agent_handoff_target_{profile}",
-        )
-        picked = options[int(selected_index)]
-        task: KanbanTask = picked["task"]
-        goal_context = current_goal_agent_context(profile)
-        input_refs = [
-            f"kanban:{task.id}",
-            "profile://context",
-            "profile://kanban",
-        ]
-        if goal_context:
-            input_refs.append("goal:current")
-        related = {
-            "kanban_task_id": task.id,
-            "kanban_section": picked["section"],
-        }
-        if task.project_id:
-            related["project_id"] = task.project_id
-        if task.milestone_id:
-            related["milestone_id"] = task.milestone_id
-        if st.button(
-            ui.get("kb_agent_handoff_create", "Create agent handoff"),
-            type="primary",
-            key=f"kb_agent_handoff_create_{profile}",
-        ):
-            try:
-                assert_files_current(
-                    [agent_tasks_path, agent_activity_path, ai_runs_path]
-                )
-                result = create_remote_dev_task(
-                    profile,
-                    task.title,
-                    target_harness=target,
-                    input_refs=input_refs,
-                    expected_outputs=[
-                        "patch_review",
-                        "test_summary",
-                        "changed_paths",
-                    ],
-                    related=related,
-                    payload={
-                        "role": "remote_dev",
-                        "kanban_task_id": task.id,
-                        "kanban_task_title": task.title,
-                        "kanban_section": picked["section"],
-                        "task": _task_payload(task),
-                        "goal_context": goal_context,
-                    },
-                )
-            except Exception as exc:
-                st.error(str(exc))
-                return
-            refresh_file_snapshots(
-                [agent_tasks_path, agent_activity_path, ai_runs_path]
-            )
-            stash_git_backup_results()
-            clear_web_cache()
-            if not result.ok or not isinstance(result.structured, dict):
-                st.error(result.error or result.content)
-                return
-            task_id = str(result.structured.get("task_id") or "")
-            command = (
-                "nblane agent handoff "
-                f"{task_id} --target {target} --profile {profile}"
-            )
-            st.session_state[f"kb_agent_handoff_last_{profile}"] = {
-                "task_id": task_id,
-                "target": target,
-                "command": command,
-                "activity_item_id": result.activity_item_id,
-                "warnings": list(result.warnings),
-            }
-            st.success(
-                ui.get(
-                    "kb_agent_handoff_created",
-                    "Agent handoff task created.",
-                )
-            )
-        last = st.session_state.get(f"kb_agent_handoff_last_{profile}")
-        if isinstance(last, dict):
-            st.markdown(
-                f"**{ui.get('kb_agent_handoff_command', 'Handoff command')}**"
-            )
-            st.code(str(last.get("command") or ""), language="bash")
-            if last.get("activity_item_id"):
-                st.caption(
-                    f"{ui.get('kb_agent_handoff_activity', 'Activity item')}: "
-                    f"{last.get('activity_item_id')}"
-                )
-            for warning in last.get("warnings") or []:
-                st.warning(str(warning))
 
 
 def _checkin_lines(value: object) -> list[str]:
@@ -1630,6 +1481,7 @@ def _handle_board_event(
     profile: str,
     sections: dict[str, list[KanbanTask]],
     auto_dates: bool,
+    ai_backend: str,
     ui: dict[str, str],
 ) -> None:
     """Apply one event emitted by the unified board component."""
@@ -1819,7 +1671,11 @@ def _handle_board_event(
                 sections,
                 task_id,
                 use_rule_match=True,
-                use_llm_router=llm_client.is_configured(),
+                use_llm_router=(
+                    ai_backend == "codex"
+                    or (ai_backend == "llm" and llm_client.is_configured())
+                ),
+                ai_backend=ai_backend,
                 persist_router_keywords=False,
                 goal_context=current_goal_agent_context(profile),
             )
@@ -1849,6 +1705,8 @@ def _handle_board_event(
                 task_id,
                 profile_name=profile,
                 record_activity=True,
+                ai_backend=ai_backend,
+                goal_context=current_goal_agent_context(profile),
             )
         if not alignments:
             st.warning(
@@ -1902,11 +1760,15 @@ def _handle_board_event(
                 sections,
                 task_id,
                 use_rule_match=True,
-                use_llm_router=True,
+                use_llm_router=(
+                    ai_backend == "llm" and llm_client.is_configured()
+                ),
                 persist_router_keywords=False,
                 alignment_context=alignment_context,
                 granularity=str(payload.get("granularity") or "milestone"),
-                record_activity=True,
+                record_activity=ai_backend == "llm",
+                ai_backend=ai_backend,
+                goal_context=current_goal_agent_context(profile),
             )
         if not result.proposals:
             state = st.session_state.setdefault(_subtask_errors_key(profile), {})
@@ -2079,7 +1941,7 @@ def _handle_board_event(
         if card_applied:
             _auto_save(profile, sections)
         _section, _idx, task = found
-        if not llm_client.is_configured():
+        if ai_backend == "llm" and not llm_client.is_configured():
             render_llm_unavailable(ui)
             return
         with st.spinner(ui["ingest_spinner"]):
@@ -2087,6 +1949,7 @@ def _handle_board_event(
                 profile,
                 [task],
                 goal_context=current_goal_agent_context(profile),
+                ai_backend=ai_backend,
             )
         if err is not None:
             st.error(ui["ingest_err"].format(msg=err))
@@ -2130,7 +1993,6 @@ _tree_path = _pdir / "skill-tree.yaml"
 _skill_path = _pdir / "SKILL.md"
 _activity_path = _pdir / "activity-log.yaml"
 _agent_activity_path = _pdir / "agent-activity.yaml"
-_agent_tasks_path = _pdir / "agent-tasks.yaml"
 _ai_runs_path = _pdir / "ai-runs.yaml"
 _goals_path = _pdir / "goals.yaml"
 _project_path = _pdir / "project-board.yaml"
@@ -2142,12 +2004,13 @@ for _path in (
     _skill_path,
     _activity_path,
     _agent_activity_path,
-    _agent_tasks_path,
     _ai_runs_path,
     _goals_path,
     _project_path,
 ):
     ensure_file_snapshot(_path)
+
+ai_backend = kanban_ai_backend(selected)
 
 # -- Header / Toolbar -------------------------------------------
 
@@ -2210,7 +2073,6 @@ with header_left:
                             _kanban_path,
                             _activity_path,
                             _agent_activity_path,
-                            _agent_tasks_path,
                             _ai_runs_path,
                         ]
                     )
@@ -2285,17 +2147,9 @@ else:
         profile=selected,
         sections=sections,
         auto_dates=auto_dates,
+        ai_backend=ai_backend,
         ui=ui,
     )
-
-_render_agent_handoff_panel(
-    selected,
-    sections,
-    ui,
-    agent_tasks_path=_agent_tasks_path,
-    agent_activity_path=_agent_activity_path,
-    ai_runs_path=_ai_runs_path,
-)
 
 st.divider()
 
@@ -2365,7 +2219,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
         )
         if gen and pick:
             chosen = [done_tasks[i] for i in pick]
-            if not llm_client.is_configured():
+            if ai_backend == "llm" and not llm_client.is_configured():
                 render_llm_unavailable(ui)
             else:
                 with st.spinner(ui["ingest_spinner"]):
@@ -2373,6 +2227,7 @@ with st.expander(ui["ingest_expander"], expanded=False):
                         selected,
                         chosen,
                         goal_context=current_goal_agent_context(selected),
+                        ai_backend=ai_backend,
                     )
                 if err is not None:
                     st.error(ui["ingest_err"].format(msg=err))

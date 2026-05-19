@@ -157,3 +157,80 @@ def route_task_to_nodes(
         node_ids=node_ids,
         keywords=keywords,
     )
+
+
+def route_task_to_nodes_codex(
+    profile_name: str,
+    task: str,
+    schema_name: str,
+    index: dict[str, dict],
+) -> RouterOutcome:
+    """Ask local read-only Codex for node ids and optional keywords."""
+
+    if not task.strip():
+        return RouterOutcome(ok=False, error="empty task")
+    system = (
+        _system_prompt_zh()
+        if llm_client.reply_language() == "zh"
+        else _system_prompt_en()
+    )
+    user = (
+        f"Schema file: {schema_name}\n\n"
+        f"Task:\n{task.strip()}\n\n"
+        "Allowed nodes (id: label):\n"
+        f"{_catalog_lines(index)}\n"
+    )
+    prompt = (
+        "You are Codex used by nblane Kanban as a read-only AI backend. "
+        "Route the task to skill-tree node ids only. Do not edit files, do not "
+        "generate patches, do not write profile facts, and do not submit "
+        "agent-task candidates. Return only the JSON object requested by the "
+        "system prompt.\n\n"
+        "System instructions:\n"
+        f"{system}\n\n"
+        "User message:\n"
+        f"{user}"
+    )
+    from nblane.core import codex_adapter
+
+    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    if not result.ok:
+        return RouterOutcome(
+            ok=False,
+            error=result.error or result.output or "Codex routing failed.",
+        )
+    data = extract_json_object(result.output)
+    if data is None:
+        return RouterOutcome(
+            ok=False,
+            error="Could not parse routing JSON from Codex.",
+        )
+
+    raw_ids = data.get("node_ids")
+    if not isinstance(raw_ids, list):
+        return RouterOutcome(
+            ok=False,
+            error="Invalid node_ids in routing JSON.",
+        )
+    node_ids = [
+        str(x).strip()
+        for x in raw_ids
+        if isinstance(x, (str, int)) and str(x).strip()
+    ]
+    node_ids = [nid for nid in node_ids if nid in index]
+
+    raw_kw = data.get("keywords")
+    keywords: dict[str, list[str]] = {}
+    if isinstance(raw_kw, dict):
+        for k, v in raw_kw.items():
+            nid = str(k).strip()
+            if nid not in index or not isinstance(v, list):
+                continue
+            phrases = [
+                str(p).strip()
+                for p in v
+                if isinstance(p, (str, int)) and str(p).strip()
+            ]
+            if phrases:
+                keywords[nid] = phrases
+    return RouterOutcome(ok=True, node_ids=node_ids, keywords=keywords)

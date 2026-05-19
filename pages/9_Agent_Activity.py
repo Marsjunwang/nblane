@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 import yaml
 
+from nblane.core import codex_adapter
 from nblane.core.agent_activity import (
     ACTIVITY_KINDS,
     ACTIVITY_STATUSES,
@@ -100,6 +101,120 @@ def _agent_task_result(item: dict) -> dict:
     return result if isinstance(result, dict) else {}
 
 
+def _agent_harness_value(item: dict) -> str:
+    """Return the best filter value for an external-agent result."""
+
+    agent_result = _agent_task_result(item)
+    if not agent_result:
+        return ""
+    result_payload = (
+        agent_result.get("result_payload")
+        if isinstance(agent_result.get("result_payload"), dict)
+        else {}
+    )
+    remote = (
+        agent_result.get("remote")
+        if isinstance(agent_result.get("remote"), dict)
+        else {}
+    )
+    provider = str(result_payload.get("provider") or remote.get("provider") or "").strip()
+    if provider:
+        return provider
+    return str(agent_result.get("target_harness") or "").strip()
+
+
+def _agent_harness_matches(item: dict, value: str) -> bool:
+    clean = str(value or "").strip()
+    if not clean or clean == "all":
+        return True
+    agent_result = _agent_task_result(item)
+    if clean == "agent_tasks":
+        return bool(agent_result)
+    harness = str(agent_result.get("target_harness") or "").strip()
+    provider = _agent_harness_value(item)
+    if clean == "codex":
+        return harness == "codex" or provider in {"local_codex", "codex_cloud"}
+    return harness == clean or provider == clean
+
+
+def _codex_cloud_remote(agent_result: dict) -> dict:
+    """Return Codex Cloud remote metadata from an agent task result."""
+
+    remote = agent_result.get("remote")
+    if not isinstance(remote, dict):
+        return {}
+    if str(remote.get("provider") or "") != "codex_cloud":
+        return {}
+    return remote
+
+
+def _render_codex_cloud_controls(item: dict, agent_result: dict) -> None:
+    """Render Codex Cloud status/diff controls for a remote task."""
+
+    remote = _codex_cloud_remote(agent_result)
+    cloud_task_id = str(remote.get("cloud_task_id") or "").strip()
+    task_id = str(agent_result.get("task_id") or "").strip()
+    if not cloud_task_id or not task_id:
+        return
+    st.markdown(f"**{ui.get('codex_cloud_title', 'Codex Cloud')}**")
+    st.caption(
+        f"{ui.get('codex_cloud_task', 'Cloud task')}: {cloud_task_id}"
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(
+            ui.get("codex_cloud_refresh", "Refresh status"),
+            key=f"codex_cloud_refresh:{item.get('id')}",
+        ):
+            _run_codex_cloud_refresh(task_id, include_diff=False)
+    with c2:
+        if st.button(
+            ui.get("codex_cloud_diff", "Pull diff candidate"),
+            key=f"codex_cloud_diff:{item.get('id')}",
+        ):
+            _run_codex_cloud_refresh(task_id, include_diff=True)
+
+
+def _run_codex_cloud_refresh(task_id: str, *, include_diff: bool) -> None:
+    """Refresh one Codex Cloud task and rerun the page on success."""
+
+    try:
+        target_files = [
+            PROFILES_DIR / selected / "agent-tasks.yaml",
+            PROFILES_DIR / selected / "agent-activity.yaml",
+        ]
+        assert_files_current(target_files)
+        with st.spinner(
+            ui.get(
+                "codex_cloud_diffing" if include_diff else "codex_cloud_refreshing",
+                "Refreshing Codex Cloud...",
+            )
+        ):
+            result = codex_adapter.refresh_codex_cloud_task(
+                selected,
+                task_id,
+                include_diff=include_diff,
+            )
+    except Exception as exc:
+        st.error(str(exc))
+        return
+    if not result.ok:
+        st.error(result.error)
+        if result.output:
+            st.code(result.output, language="text")
+        return
+    refresh_file_snapshots(target_files)
+    stash_git_backup_results()
+    clear_web_cache()
+    st.success(
+        ui.get(
+            "codex_cloud_diff_ready" if include_diff else "codex_cloud_refreshed",
+            "Codex Cloud updated.",
+        )
+    )
+    st.rerun()
+
+
 def _can_apply_here(item: dict) -> bool:
     return (
         item.get("status") == "pending"
@@ -166,6 +281,14 @@ with f5:
         key=_session_key("target_owner"),
     )
 
+agent_filter_options = ["all", "agent_tasks", "codex", "local_codex", "codex_cloud", "opencode"]
+agent_filter = st.selectbox(
+    ui.get("agent_harness_filter", "Harness result"),
+    agent_filter_options,
+    format_func=lambda value: ui.get(f"agent_harness_filter_{value}", value),
+    key=_session_key("agent_harness_filter"),
+)
+
 items = activity_items_for_page(
     selected,
     {
@@ -176,6 +299,7 @@ items = activity_items_for_page(
         "target_owner": owner_filter,
     },
 )
+items = [item for item in items if _agent_harness_matches(item, agent_filter)]
 
 st.subheader(ui["items"])
 if not items:
@@ -256,6 +380,7 @@ for item in items:
                     ),
                     language="yaml",
                 )
+                _render_codex_cloud_controls(item, agent_result)
         warnings = item.get("warnings") if isinstance(item.get("warnings"), list) else []
         for warning in warnings:
             st.warning(str(warning))

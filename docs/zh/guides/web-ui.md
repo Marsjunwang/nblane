@@ -22,7 +22,7 @@ source_of_truth: true
 
 1. 安装：`pip install -e .`（见 [安装与 LLM 配置](setup.md)）。
 2. 至少一个 `profiles/` 下的档案（`nblane init <名称>`）。
-3. 可选 **LLM**：在 `.env` 配置 `LLM_API_KEY` 等，以使用差距页 AI 教练、首页简历摄入、看板「已完成→证据」。未配置时仍可使用规则差距分析与全部非 AI 编辑。
+3. 可选 **LLM**：在 `.env` 配置 `LLM_API_KEY` 等，以使用差距页 AI 教练、首页简历摄入、看板「已完成→证据」。看板页也可选择本地 **Codex** 作为只读 AI backend，替代看板内的 LLM 动作。未配置时仍可使用规则差距分析与全部非 AI 编辑。
 
 ---
 
@@ -48,6 +48,16 @@ source_of_truth: true
 
 在 **团队视图** 中，读写始终针对 **`teams/`**。页面说明侧栏档案用于首页、
 技能树、差距、看板；**团队数据不按档案过滤**。
+
+### 3.1 侧栏 AI / LLM
+
+- **看板 AI 引擎** — 按当前档案选择看板 AI 动作使用普通 LLM 还是本地只读
+  Codex。第一版只影响看板的 gap、拆子任务、任务理解和 Done -> evidence。
+- **LLM 设置** — provider、base URL、模型、API key、界面语言和模型回复语言仍按
+  当前会话生效，不写入磁盘。
+- **Codex 状态与配置** — 侧栏显示安装 / 登录状态和配置文件路径；点击
+  **配置 Codex** 打开大弹窗，编辑 `~/.codex/config.toml`、通过 Codex CLI 写入
+  API key/auth，并编辑当前 profile 的 `profiles/<name>/codex.yaml`。
 
 ---
 
@@ -138,6 +148,7 @@ source_of_truth: true
 - **移动列** 用列名 **按钮**（非「完成状态」菜单）；可选 **自动填写开始/结束日期**（移入进行中/已完成时）。
 - **「已完成」列整理** — 多选后 **归档所选**（写入 `kanban-archive.md`）或 **删除所选**；说明见 [看板使用手册](kanban.md)。
 - **已完成 → 证据** 折叠区 — 多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
+- 侧栏 **AI / LLM** 中的 **看板 AI 引擎** 可在普通 LLM 与本地 Codex 间切换；选择 Codex 时，Gap 节点路由、拆任务、任务理解和 Done → evidence 使用只读 `codex exec`，不需要看板内额外配置，也不会创建 patch handoff。
 - Kanban 卡片上的 **Gap** 预览会带入 privacy-safe current goal context，与
   差距分析页选择 Kanban task 时的上下文一致；不会自动写回 goal、kanban 或
   skill-tree。
@@ -175,6 +186,7 @@ source_of_truth: true
 - pending Review 候选可以在 Activity 页应用；其他来源的 patch 第一版只审查并跳转
   owner 页面。
 - `dismissed` / `failed` 条目可以 reopen，便于重新审阅。
+- Codex 配置不在本页编辑；统一使用侧栏 **AI / LLM -> 配置 Codex**。
 
 ### 5.10 Research Workspace（`pages/7_Research.py`）
 

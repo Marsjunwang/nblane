@@ -12,7 +12,7 @@ source_of_truth: true
 - Python >= 3.11
 - Git
 - Node.js >= 18 与 npm >= 9 仅在重新构建内置 Streamlit 前端组件时需要，
-  例如 Kanban 看板组件。
+  例如 Kanban 看板组件；如果要通过 nblane 安装 Codex CLI，也需要 npm。
 
 ## 安装
 
@@ -56,6 +56,31 @@ npm install
 npm run build
 ```
 
+### 可选：安装 Codex CLI
+
+Codex 是外部高级执行器，不是 nblane 的 Python 依赖。未安装 Codex 时，
+nblane 的 CLI、Web、LLM 和规则功能都可正常使用。
+
+检查当前环境：
+
+```bash
+nblane codex status
+```
+
+安装或升级 Codex CLI：
+
+```bash
+nblane codex install --print-command  # 只打印 npm 命令
+nblane codex install                  # 执行 npm i -g @openai/codex
+nblane codex install --upgrade        # 执行 npm i -g @openai/codex@latest
+```
+
+首次使用 Codex 仍需按 Codex CLI 的方式登录：
+
+```bash
+codex login
+```
+
 ## LLM 配置
 
 AI 功能（Web UI 中 Gap Analysis 的 AI 模式）是**可选的**。CLI 和所有基于规则的功能无需任何 API Key 即可正常使用。
@@ -78,6 +103,21 @@ nblane 读取以下环境变量：
 | `NBLANE_AUTH_FILE` | *(空)* | Streamlit Web 登录用户配置。为空时保持本地开发模式；公网部署时应指向私有数据仓库中的 `auth/users.yaml`。 |
 | `NBLANE_DATA_GIT_AUTOCOMMIT` | *(空)* | 设为 `1` 时，写入数据文件后自动生成 Git commit。 |
 | `NBLANE_DATA_GIT_AUTOPUSH` | *(空)* | 设为 `1` 时，自动 commit 后继续尝试 `git push`。 |
+| `NBLANE_CODEX_BIN` | `codex` | 可选 Codex CLI binary 路径或命令名。 |
+| `NBLANE_CODEX_CLOUD_ENV_ID` | *(空)* | 可选 Codex Cloud environment id；配置后 Web/CLI 可提交 agent task 到 Codex Cloud。 |
+| `NBLANE_CODEX_MODEL` | *(空)* | 可选 Codex CLI `-c model=...` 覆盖；为空时使用 Codex 自己的默认配置。 |
+| `NBLANE_CODEX_ATTEMPTS` | `1` | Codex Cloud `--attempts`。 |
+| `NBLANE_CODEX_BRANCH` | *(空)* | Codex Cloud `--branch`；为空时使用当前/默认分支。 |
+| `NBLANE_CODEX_TIMEOUT_SECONDS` | `180` | nblane 等待 Codex CLI 命令的超时时间。 |
+
+这些 `NBLANE_CODEX_*` 是全局默认值。每个 profile 也可以有自己的
+`profiles/<name>/codex.yaml`。Web 中可在侧边栏 **AI / LLM** 展开
+**配置 Codex** 大弹窗，编辑全局 Codex CLI 的 `~/.codex/config.toml`、通过
+Codex CLI 写入 API key/auth，并编辑当前 profile 的 `codex.yaml`。读取优先级为：
+
+```text
+默认值 / .env -> profiles/<name>/codex.yaml -> 当前进程 runtime override
+```
 
 `UI_LANG` 影响 **Streamlit 各页面**（含首页 `app.py`、侧边栏 Profile、Skill Tree、Gap Analysis、Kanban、Team View 等）的界面文案；`LLM_REPLY_LANG` 只影响模型输出和 AI prompt 语言，因此界面语言与模型回复语言可以独立配置。
 
@@ -96,6 +136,11 @@ LLM_REPLY_LANG=en
 VISUAL_IMAGE_MODEL=wan2.7-image-pro
 VISUAL_VIDEO_MODEL=wan2.7-videoedit
 VISUAL_API_KEY=
+
+# 可选 Codex Cloud 集成（不存认证信息）
+NBLANE_CODEX_BIN=codex
+NBLANE_CODEX_CLOUD_ENV_ID=
+NBLANE_CODEX_ATTEMPTS=1
 ```
 
 nblane 启动时会通过 `python-dotenv` 自动加载该文件。
@@ -141,6 +186,39 @@ LLM_MODEL=llama3
 ### 验证配置是否生效
 
 配置完成后，Gap Analysis 页面的侧边栏会显示当前使用的模型名称。若 `LLM_API_KEY` 未设置，AI 模式会被禁用并显示提示——基于规则的 Gap 分析仍可正常使用。
+
+### 验证 Codex 配置是否生效
+
+如果本机已安装并登录 Codex，可在 Web 侧栏 **AI / LLM** 中将
+**看板 AI 引擎** 切到 `Codex`，看板的 Gap、拆子任务、任务理解和 Done ->
+evidence 会使用只读 `codex exec`。外部 agent patch/handoff 仍通过 CLI 在隔离
+git worktree 中运行：
+
+```bash
+nblane codex local run <agent_task_id> --profile <profile>
+```
+
+本地 runner 会收集 diff 并写入 Agent Activity 候选，不会直接修改主工作树。
+
+配置 `NBLANE_CODEX_CLOUD_ENV_ID` 后，也可以把同一个 handoff 提交到 Codex
+Cloud；Agent Activity 页可以刷新状态并拉取 diff 候选。nblane 不会执行
+`codex cloud apply`，也不会自动修改本地工作树。
+
+如果使用 per-profile 配置，先检查当前 profile 的 Codex 状态：
+
+```bash
+nblane codex status --profile <profile>
+```
+
+CLI 等价流程：
+
+```bash
+nblane codex status
+nblane agent handoff <agent_task_id> --target codex --profile <profile>
+nblane codex local run <agent_task_id> --profile <profile>
+nblane codex cloud submit <agent_task_id> --profile <profile>
+nblane codex cloud refresh <agent_task_id> --profile <profile> --diff
+```
 
 ## Web 登录与小团队部署
 

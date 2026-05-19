@@ -46,11 +46,11 @@ UI 应围绕成长闭环拆成以下功能域。每个功能域只负责自己�
 | Goal & Plan       | 规划中：`goals.yaml` 或 project refs                                                            | 设定 4-8 周阶段目标、目标技能、目标输出和验收证据                                   | 新 Goal 页；短期可放首页                  |
 | Profile Context   | `SKILL.md`，读取 goal / skill-tree / kanban generated blocks                                  | 维护长期自我画像、North Star、研究品味和 Agent 可复用上下文                        | 首页高级区；未来 Profile Context 页       |
 | Capture Inbox     | `inbox.yaml`、`learning-log.yaml`、`activity-log.yaml`、Done tasks                            | 捕获链接、笔记、学习、打卡、项目进展，等待整理                                       | 全局入口 / 首页 / 看板；未来独立 Inbox        |
-| Execution         | `kanban.md`、规划中：`project-board.yaml`                                                       | 管理本周任务、子任务、阻塞、完成记录和 check-in                                  | 看板                               |
+| Execution         | `kanban.md`、规划中：`project-board.yaml`                                                       | 管理本周任务、子任务、阻塞、完成记录和 check-in；看板 AI 可在 LLM / Codex 间切换          | 看板                               |
 | Evidence          | `evidence-pool.yaml`、`skill-tree.yaml` 的 `evidence_refs`                                   | 审核 evidence、判断强弱、关联 skill、准备公开输出                              | 技能树；未来独立 Evidence 页              |
 | Skill Map         | `skill-tree.yaml`、`schemas/*.yaml`                                                         | 浏览和编辑能力状态、备注、证据引用                                             | 技能树                              |
 | Gap & Next Action | gap result、AI candidate，不直接作为事实源                                                           | 用目标/任务对照 skill tree，生成短板解释和下一步行动                              | 差距分析                             |
-| Agent Activity    | context preview、MCP 状态、agent runs、AI/Agent candidates、writeback queue                      | 审阅 Codex / Claude Code / OpenCode 等 Agent 的远程执行、patch、写回和越权风险 | 未来 Agent Activity；短期分散在各页面审阅区    |
+| Agent Activity    | context preview、MCP 状态、agent runs、AI/Agent candidates、writeback queue      | 审阅 Codex / Claude Code / OpenCode 等 Agent 的远程执行、patch、写回和越权风险 | Agent Activity                   |
 | Research          | 规划中：`research/sources.yaml`、chunks、claims、drafts、connectors                                | 搜集外部资料、收藏、最新论文、repo，支持阅读、翻译、claim/citation/synthesis          | 未来 Research 页                    |
 | Output Studio     | `public-profile.yaml`、`resume-source.yaml`、`blog/`、`projects.yaml`、`outputs.yaml`、`media/` | 从 evidence 生成博客、简历、项目页、公开站                                    | Public Site                      |
 | Team Pool         | `teams/<id>/team.yaml`、`product-pool.yaml`                                                 | 团队共享问题、项目、证据、方法、决策                                            | 团队视图                             |
@@ -116,7 +116,7 @@ Team
 - **全局 Capture 入口**：捕获一条链接、笔记、学习记录或想法不应要求用户先找到正确页面；短期可从首页轻量 capture bar 起步，长期应成为全局入口。
 - **外部信息默认进入 Research / Capture**：小红书、X/Twitter 收藏、arXiv、Semantic Scholar、GitHub、网页、RSS 等外部资料先进入 Source Inbox 或 Capture Inbox；收藏、翻译和摘要不直接写 skill status、evidence 或 public output。
 - **Agent 写回审阅入口**：跨页面 AI/Agent 生成的候选、patch、状态更新和写回结果应有统一可审查入口，避免用户只能在各页面分散追踪。
-- **远程 Agent 执行默认进入审阅队列**：Codex、Claude Code、OpenCode、Cursor 等外部 Agent 可以协助完善项目，但其运行记录、触达文件、diff、候选写回必须进入 Agent Activity / Writeback Review；不能静默改事实源或公开层。
+- **远程 Agent 执行默认进入审阅队列**：Codex、Claude Code、OpenCode、Cursor 等外部 Agent 可以协助完善项目，但其运行记录、触达文件、diff、候选写回必须进入 Agent Activity / Writeback Review；不能静默改事实源或公开层。Kanban 内的 Codex 例外地只作为可选只读 AI backend，替代原有看板 LLM 动作，不创建 patch handoff。
 - **Team scope 硬提示**：Team View 的写入目标必须以 scope strip、色带或写入路径提示明确标出；个人 profile 只能作为 view-as / filter 上下文，不能被误解为团队数据 owner。
 
 ### 4.1 首页：Daily Dashboard
@@ -287,7 +287,7 @@ Agent Activity 是 Agent OS 的透明度和审阅入口，不是新的泛聊天�
 - 汇总看板、差距分析、技能树、Public Site 等页面产生的 AI/Agent candidates。
 - 审阅 Codex / Claude Code / OpenCode / Cursor 等外部 Agent 的 run：任务、状态、触达文件、diff、日志摘要、关联 goal / kanban task。
 - 审阅最近的 AI patch、候选写回、失败写回和审批队列。
-- 支持远程完善项目的最小闭环：从 Project Board / Kanban 领取任务，Agent 执行，用户审阅 patch，合并后回到 Done -> evidence。
+- 支持远程完善项目的最小闭环：从 Project Board / CLI handoff 领取任务，Agent 执行，用户审阅 patch，合并后回到 Done -> evidence；Kanban 页面本身不再直接启动改项目的 Codex/OpenCode handoff。
 - 帮助用户判断 Agent 最近做了什么、准备写什么、是否越权。
 
 边界：
@@ -558,10 +558,11 @@ Goal
 - Evidence Review 已新增 Claim Candidates tab：从已选 evidence 生成候选，人工应用后写入 `evidence-pool.yaml.claims`，不创建独立 Claims 页面，也不自动提升 skill status。
 - Evidence Review read model 已提供 accepted claims 的 evidence / skill / project / experience / source / output 反查索引，供页面和后续 Dashboard 使用。
 - Gap Analysis 已支持从手动输入、privacy-safe current goal、Doing / Queue kanban task 选择上下文；Kanban inline Gap 也会带入允许进入 agent context 的 current goal。
+- Kanban 已支持 **看板 AI 引擎**选择：原有 Gap 节点路由、拆子任务、任务理解和 Done -> evidence 可在普通 LLM 与本地只读 Codex 间切换；Codex 不需要看板内额外配置，不直接改项目或创建 patch candidate。
 - GapResult 已记录 source provenance 和 goal context 使用状态；展示和 CLI / LLM 格式化会显示来源，但不改变原有匹配结果结构。
 - Public Site / Output Studio 的 Blog front matter 已支持 `related_claims`；可从 accepted claims 生成 Blog 候选/草稿、project update 草稿和 resume bullet 候选，并在发布校验中检查 claim id、accepted 状态和 supporting evidence refs。
 - Review 已拆为独立页面：基于周 / 阶段窗口生成 evidence、next action、public draft 候选；Health 保持只读体检。
-- Agent Activity / Writeback Review 已有骨架：`agent-activity.yaml` 记录跨页面 candidate / patch / writeback 的 pending、applied、failed、dismissed 状态，Review 来源的 pending 候选可在 Activity 页应用。
+- Agent Activity / Writeback Review 已有骨架：`agent-activity.yaml` 记录跨页面 candidate / patch / writeback 的 pending、applied、failed、dismissed 状态，Review 来源的 pending 候选可在 Activity 页应用；Codex 配置入口统一迁移到侧边栏 **AI / LLM -> 配置 Codex** 大弹窗，可编辑 `~/.codex/config.toml` 与当前 profile 的 `codex.yaml`。
 
 ### 6.6 P4 当前落地状态
 
@@ -590,7 +591,7 @@ Goal
 | 外部研究资料入口缺失                       | Research Workspace v1 已补 source / chunk / claim / citation / synthesis；后续可增强批量阅读与复现记录                    | 已有实现 / 后续增强 |
 | 论文阅读与翻译链路缺失                      | Reading Room 已承载翻译、摘要、claim 提取和 citation；后续可增强 PDF 抽取、图表 chunk 和术语表                                      | 已有实现 / 后续增强 |
 | Agent 写回审阅分散                     | 已有 Agent Activity 骨架；仍需接入更多 owner 页面和远程 Agent run 记录                                                     | 已有骨架 / 后续增强 |
-| 远程 Agent 执行缺少项目闭环                | Codex / Claude Code 等远程改项目应关联 Project Board / Kanban task，并进入 patch 审阅                                   | 需设计 / 需改代码  |
+| 远程 Agent 执行缺少项目闭环                | Kanban 已降级为可选只读 Codex AI 引擎；真正改项目的 Codex / Claude Code / OpenCode handoff 后续应从 Project Board / CLI 进入 patch 审阅 | 部分优化 / 后续设计 |
 | 外部 connector 隐私和授权边界             | arXiv / Semantic Scholar / GitHub 已有官方 API 导入；X/Twitter、小红书保留手动导入 fallback，cookie / token 不得明文写入 profile | 已有实现 / 后续增强 |
 | Team View + Profile              | `select_profile()` 已显示但团队数据写入 `teams/`，需用硬性 scope 标识区分 view-as 与写入 owner                                 | 需改代码        |
 | `st.title` / `select_profile` 顺序 | 页面顺序不一致，影响「当前是谁的上下文」认知                                                                                   | 需改代码        |
@@ -611,4 +612,3 @@ Goal
 - [当前状态](../project/status.md) — 已实现能力和主要缺口
 - [Web 使用手册](../guides/web-ui.md) — 运行方式、页面操作和 CLI 对照
 - [公开站点指南](../guides/public-site.md) — Public Surface 细节
-

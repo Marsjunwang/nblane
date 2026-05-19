@@ -88,14 +88,26 @@ nblane-mcp
 nblane sync-cursor <profile>
 ```
 
-规划中的 harness 命令：
+Harness / Codex 命令：
 
 ```bash
 nblane sync-agent-harness --target codex
 nblane sync-agent-harness --target opencode
-nblane agent create --role researcher --title "..."
-nblane agent handoff <agent_task_id> --target opencode
-nblane agent status
+nblane agent handoff <agent_task_id> --target codex --profile <profile>
+nblane agent handoff <agent_task_id> --target opencode --profile <profile>
+
+nblane codex status
+nblane codex status --profile <profile>
+nblane codex install --print-command
+nblane codex install
+nblane codex install --upgrade
+nblane codex local run <agent_task_id> --profile <profile>
+nblane codex cloud submit <agent_task_id> --profile <profile>
+nblane codex cloud refresh <agent_task_id> --profile <profile>
+nblane codex cloud refresh <agent_task_id> --profile <profile> --diff
 ```
+
+`nblane codex local run` 是显式 CLI patch runner，不由 Kanban 页面触发；Kanban
+内的 Codex 只作为可选只读 AI backend，替代原有看板 LLM 动作。
 
 当前 MCP 说明见 [MCP 参考](mcp.md)，规划见 [Agent Harness](agent-harness.md)。
