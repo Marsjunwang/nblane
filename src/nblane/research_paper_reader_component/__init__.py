@@ -80,6 +80,7 @@ def st_research_paper_reader(
             analysis=dict(analysis or {}),
             ui=dict(labels),
             settings=dict(settings or {}),
+            events_contract_version=1,
             height=height,
             key=key,
             default=default,

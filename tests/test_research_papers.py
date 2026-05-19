@@ -14,11 +14,13 @@ import yaml
 from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
+    build_reader_payload,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
     extract_paper_segments,
     format_research_citations,
+    get_stable_pdf_url,
     grobid_tei_to_bibliography,
     grobid_tei_to_segments,
     import_paper_pdf,
@@ -288,6 +290,123 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(by_scope[("selection", first_hash)].translated_text, "第一句更新译文。")
         self.assertEqual(by_scope[("selection", second_hash)].translated_text, "第二句译文。")
         self.assertEqual(by_scope[("selection", first_hash)].status, "translated")
+
+    def test_translation_upsert_dedupes_by_scope_ref_and_target_lang(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            scope_ref = text_hash("A reusable selection.")
+
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "id": "tr:first",
+                            "scope_type": "selection",
+                            "scope_ref": scope_ref,
+                            "source_hash": scope_ref,
+                            "source_text": "A reusable selection.",
+                            "target_lang": "zh",
+                            "translated_text": "旧译文。",
+                        }
+                    ],
+                )
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "id": "tr:second",
+                            "scope_type": "selection",
+                            "scope_ref": scope_ref,
+                            "source_hash": scope_ref,
+                            "source_text": "A reusable selection.",
+                            "target_lang": "zh",
+                            "translated_text": "新译文。",
+                        }
+                    ],
+                )
+
+            translations = load_paper_translations(profile, source_id)
+
+        self.assertEqual(len(translations), 1)
+        self.assertEqual(translations[0].id, "tr:first")
+        self.assertEqual(translations[0].translated_text, "新译文。")
+
+    def test_build_reader_payload_limits_context_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            pages = [
+                PaperPage(source_id=source_id, page=index, text=f"Page {index}", text_hash=text_hash(f"Page {index}"))
+                for index in range(1, 13)
+            ]
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:{index}",
+                    source_id=source_id,
+                    page=index,
+                    order=index,
+                    text=f"Segment {index}",
+                    text_hash=text_hash(f"Segment {index}"),
+                )
+                for index in range(1, 13)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, pages)
+                save_paper_segments(profile, source_id, segments)
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segment.segment_id,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": f"zh {segment.page}",
+                        }
+                        for segment in segments
+                    ],
+                )
+
+            with (
+                patch("nblane.core.research_papers.render_paper_page_preview", return_value={"page": 1, "data_url": "data:image/png;base64,x"}),
+                patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"),
+            ):
+                payload = build_reader_payload(
+                    profile,
+                    source_id,
+                    page=10,
+                    requested_pages={5},
+                    target_lang="zh",
+                )
+
+        segment_pages = {row["page"] for row in payload["segments"]}
+        translation_pages = {row["page"] for row in payload["translations"]}
+
+        self.assertEqual(segment_pages, {5, 9, 10, 11})
+        self.assertEqual(translation_pages, {5, 9, 10, 11})
+        self.assertEqual(payload["context_window"]["pages"], [5, 9, 10, 11])
+
+    def test_get_stable_pdf_url_uses_fingerprint_cache_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch.dict(os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")}):
+                import_paper_pdf(profile, source_id, PDF_BYTES, "paper.pdf")
+
+                with patch("nblane.core.research_papers._stable_pdf_url_cached") as cached:
+                    cached.return_value = "/media/stable.pdf"
+                    first = get_stable_pdf_url(profile, source_id)
+                    second = get_stable_pdf_url(profile, source_id)
+
+        self.assertEqual(first, "/media/stable.pdf")
+        self.assertEqual(second, "/media/stable.pdf")
+        self.assertEqual(cached.call_count, 2)
+        self.assertEqual(cached.call_args.args[1], source_id)
 
     def test_ensure_paper_reading_artifacts_prepares_missing_pages_and_segments_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

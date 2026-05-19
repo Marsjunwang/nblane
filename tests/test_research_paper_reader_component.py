@@ -35,8 +35,8 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("pr-dock", html)
         self.assertIn("selectionDock", html)
         self.assertIn("data-delete-annotation", html)
-        self.assertNotIn('data-action="chunk"', html)
-        self.assertNotIn('data-action="cite"', html)
+        self.assertIn('data-action="chunk"', html)
+        self.assertIn('data-action="cite"', html)
         self.assertIn("continuousDocument", html)
         self.assertIn("IntersectionObserver", html)
         self.assertIn("nblane_pdf_reader_cache_v1", html)
@@ -49,9 +49,9 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("overscan_pages", html)
         self.assertIn("NBLANE_READER_SEND_FULL_PDF", page_source)
         self.assertIn('pdf_base64=_reader_pdf_base64(source_id)', page_source)
-        self.assertIn('pdf_url=_reader_pdf_url(source_id)', page_source)
+        self.assertIn('pdf_url=str(reader_payload.get("pdf_url") or _reader_pdf_url(source_id))', page_source)
         self.assertIn('"view_mode": "continuous"', page_source)
-        self.assertIn('"scale_mode": "fit-width"', page_source)
+        self.assertIn('"scale_mode": reader_state.get("scale_mode") or "fit-width"', page_source)
         self.assertIn('"auto_save_progress": False', page_source)
         self.assertIn('"emit_passive_events": False', page_source)
         self.assertIn('"render_cache": True', page_source)
@@ -65,6 +65,12 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("translationReaderHtml", html)
         self.assertIn("generate_review_card", html)
         self.assertIn("save_progress", html)
+        self.assertIn("reader_state_changed", html)
+        self.assertIn("request_reader_context", html)
+        self.assertIn("request_page_previews", html)
+        self.assertIn("retry_translation_scope", html)
+        self.assertIn("debugState", html)
+        self.assertIn("pr-page-spacer", html)
 
         actions = set(re.findall(r'emitAction\("([^"]+)"', html))
         self.assertGreaterEqual(
@@ -80,14 +86,25 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
                 "translate_visible_pages",
                 "explain_selection",
                 "ask_paper",
-                "jump_to_annotation",
                 "page_changed",
                 "viewport_changed",
-                "request_page_preview",
+                "request_page_previews",
+                "request_reader_context",
+                "reader_state_changed",
+                "retry_translation_scope",
                 "save_progress",
                 "generate_review_card",
             },
         )
+
+    def test_event_contract_exports_reader_event_names(self) -> None:
+        from nblane.research_paper_reader_component import events
+
+        self.assertIn("request_reader_context", events.EVENT_NAMES)
+        self.assertIn("request_page_previews", events.EVENT_NAMES)
+        self.assertIn("reader_state_changed", events.EVENT_NAMES)
+        self.assertIn("retry_translation_scope", events.EVENT_NAMES)
+        self.assertEqual(events.clean_page_list([1, "2", 2, 0, "bad", 3]), [1, 2, 3])
 
     def test_wrapper_returns_none_for_empty_component_event(self) -> None:
         def fake_component(**kwargs):

@@ -55,6 +55,11 @@ from nblane.core.research_workspace import (
 )
 from nblane.core.yaml_io import _load_yaml_dict
 
+try:
+    import streamlit as st
+except Exception:  # pragma: no cover - Streamlit is optional for core imports.
+    st = None
+
 LIBRARY_TREE_FILENAME = "library-tree.yaml"
 PAPER_PAGES_DIRNAME = "paper-pages"
 PAPER_SEGMENTS_DIRNAME = "paper-segments"
@@ -495,6 +500,58 @@ def paper_pdf_asset_path(profile: str | Path, source_id: str) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"Paper PDF asset is missing: {asset_ref}")
     return path
+
+
+if st is not None:
+    _pdf_url_cache = st.cache_resource(show_spinner=False, max_entries=128)
+else:
+    from functools import lru_cache
+
+    def _pdf_url_cache(func):
+        return lru_cache(maxsize=128)(func)
+
+
+@_pdf_url_cache
+def _stable_pdf_url_cached(
+    profile_name: str,
+    source_id: str,
+    pdf_asset_ref: str,
+    pdf_sha256: str,
+    path_text: str,
+) -> str:
+    try:
+        from streamlit import runtime
+    except Exception:
+        return ""
+    try:
+        if not runtime.exists():
+            return ""
+        path = Path(path_text)
+        return runtime.get_instance().media_file_mgr.add(
+            str(path),
+            "application/pdf",
+            f"paper-reader-pdf:{profile_name}:{source_id}:{pdf_asset_ref}:{pdf_sha256}",
+            file_name=path.name,
+        )
+    except Exception:
+        return ""
+
+
+def get_stable_pdf_url(profile: str | Path, source_id: str) -> str:
+    """Return a Streamlit media URL that only changes when the PDF fingerprint changes."""
+
+    _, source = _source_by_id(profile, source_id)
+    metadata = dict(source.metadata or {})
+    pdf_asset_ref = _clean_text(metadata.get("pdf_asset_ref"))
+    pdf_sha256 = _clean_text(metadata.get("pdf_sha256")) or pdf_asset_ref
+    path = paper_pdf_asset_path(profile, source_id)
+    return _stable_pdf_url_cached(
+        _profile_name(profile),
+        source_id,
+        pdf_asset_ref,
+        pdf_sha256,
+        str(path),
+    )
 
 
 def render_paper_page_preview(
@@ -1577,6 +1634,140 @@ def upsert_paper_translations(
                 break
     save_paper_translations(profile, source_id, merged)
     return merged
+
+
+def _reader_page_set(
+    *,
+    page: int,
+    requested_pages: set[int],
+    total_pages: int,
+) -> set[int]:
+    current = max(1, int(page or 1))
+    pages = {current, max(1, current - 1), current + 1}
+    for item in requested_pages:
+        try:
+            requested = int(item)
+        except (TypeError, ValueError):
+            continue
+        if requested > 0:
+            pages.add(requested)
+    if total_pages:
+        pages = {item for item in pages if item <= total_pages}
+    return pages
+
+
+def _reader_state_from_metadata(metadata: dict[str, object], *, page: int, target_lang: str) -> dict[str, object]:
+    return {
+        "reader_mode": _clean_text(metadata.get("reader_mode")) or "pdf",
+        "scale_mode": _clean_text(metadata.get("scale_mode")) or "fit-width",
+        "active_tab": _clean_text(metadata.get("active_tab")) or "translation",
+        "target_lang": _clean_text(metadata.get("target_lang")) or target_lang or "zh",
+        "side_panel_collapsed": bool(metadata.get("side_panel_collapsed", True)),
+        "focused_annotation_id": _clean_text(metadata.get("focused_annotation_id")),
+        "focused_chunk_id": _clean_text(metadata.get("focused_chunk_id")),
+        "last_visible_pages": [
+            int(item)
+            for item in metadata.get("last_visible_pages", [])
+            if str(item).strip().isdigit()
+        ] if isinstance(metadata.get("last_visible_pages"), list) else [],
+        "last_read_page": max(1, int(metadata.get("last_read_page") or page or 1)),
+        "last_read_at": _clean_text(metadata.get("last_read_at")),
+    }
+
+
+def build_reader_payload(
+    profile: str | Path,
+    source_id: str,
+    *,
+    page: int,
+    requested_pages: set[int],
+    target_lang: str,
+) -> dict[str, object]:
+    """Build a bounded reader payload without extracting, translating, or calling AI."""
+
+    _, source = _source_by_id(profile, source_id)
+    metadata = dict(source.metadata or {})
+    all_pages = load_paper_pages(profile, source_id)
+    page_numbers = [page_row.page for page_row in all_pages]
+    total_pages = max(
+        [
+            int(metadata.get("page_count") or 0),
+            int(metadata.get("reading_artifacts_page_count") or 0),
+            *page_numbers,
+            1,
+        ]
+    )
+    context_pages = sorted(_reader_page_set(page=page, requested_pages=requested_pages, total_pages=total_pages))
+    context_page_set = set(context_pages)
+    preview_rows: list[dict[str, object]] = []
+    for page_number in context_pages:
+        try:
+            preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
+        except Exception:
+            continue
+    segments = [
+        segment.to_dict()
+        for segment in load_paper_segments(profile, source_id)
+        if segment.page in context_page_set
+    ]
+    segment_ids = {str(row.get("segment_id") or "") for row in segments}
+    segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
+    translations = [
+        {
+            **row.to_dict(),
+            "page": int(row.page or segment_pages.get(row.segment_id, 0)),
+        }
+        for row in load_paper_translations(profile, source_id)
+        if row.target_lang == target_lang
+        and (
+            row.page in context_page_set
+            or (row.segment_id and row.segment_id in segment_ids)
+            or (
+                row.scope_type == "page"
+                and any(str(row.scope_ref).startswith(f"page:{page_number}:") for page_number in context_pages)
+            )
+        )
+    ]
+    annotations = [
+        ann.to_dict()
+        for ann in load_paper_annotations(profile, source_id)
+        if ann.status != "deleted" or ann.page in context_page_set
+    ]
+    chunks = [
+        {
+            "id": chunk.id,
+            "source_id": chunk.source_id,
+            "kind": chunk.kind,
+            "title": chunk.title,
+            "text": chunk.text[:420],
+            "locator": chunk.locator,
+            "metadata": {
+                key: value
+                for key, value in dict(chunk.metadata or {}).items()
+                if key in {"page", "segment_id", "selected_text_hash", "annotation_id"}
+            },
+        }
+        for chunk in load_chunks(_profile_root(profile), source_id)
+    ]
+    pdf_url = get_stable_pdf_url(profile, source_id) if _clean_text(metadata.get("pdf_asset_ref")) else ""
+    return {
+        "source": source.to_dict(),
+        "pdf_url": pdf_url,
+        "page_previews": preview_rows,
+        "pages": [page_row.to_dict() for page_row in all_pages if page_row.page in context_page_set],
+        "segments": segments,
+        "translations": translations,
+        "annotations": annotations,
+        "chunks": chunks,
+        "analysis": load_paper_analysis(profile, source_id),
+        "reader_state": _reader_state_from_metadata(metadata, page=page, target_lang=target_lang),
+        "context_window": {
+            "pages": context_pages,
+            "has_more_before": bool(context_pages and min(context_pages) > 1),
+            "has_more_after": bool(context_pages and max(context_pages) < total_pages),
+            "total_pages": total_pages,
+        },
+    }
 
 
 def translation_rows_for_segments(
@@ -3085,6 +3276,7 @@ __all__ = [
     "PaperSegment",
     "PaperTranslation",
     "auto_chunk_paper",
+    "build_reader_payload",
     "check_paper_links",
     "create_chunk_from_annotation",
     "create_paper_annotation",
@@ -3098,6 +3290,7 @@ __all__ = [
     "grobid_readiness",
     "grobid_tei_to_bibliography",
     "grobid_tei_to_segments",
+    "get_stable_pdf_url",
     "import_paper_pdf",
     "import_paper_search_results",
     "import_paper_url",

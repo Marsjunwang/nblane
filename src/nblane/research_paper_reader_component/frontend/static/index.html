@@ -186,6 +186,11 @@
       min-height: 320px;
       scroll-margin-top: 14px;
     }
+    .pr-page-spacer {
+      width: 1px;
+      min-height: 1px;
+      pointer-events: none;
+    }
     .pr-page-label {
       justify-self: center;
       padding: 2px 8px;
@@ -249,6 +254,10 @@
     .pr-highlight.focus {
       background: rgba(33, 104, 91, .20);
       outline-color: rgba(33, 104, 91, .55);
+    }
+    .pr-highlight.pending {
+      background: rgba(33, 104, 91, .16);
+      outline: 1px dashed rgba(33, 104, 91, .55);
     }
     .pr-page-error {
       position: absolute;
@@ -362,6 +371,19 @@
       font-size: .74rem;
       font-weight: 760;
     }
+    .pr-dock-status.pending::before {
+      content: "";
+      display: inline-block;
+      width: .72em;
+      height: .72em;
+      margin-right: 5px;
+      border: 2px solid rgba(33, 104, 91, .25);
+      border-top-color: var(--accent);
+      border-radius: 999px;
+      vertical-align: -.1em;
+      animation: pr-spin .8s linear infinite;
+    }
+    @keyframes pr-spin { to { transform: rotate(360deg); } }
     .pr-dock-text, .pr-dock-result {
       min-width: 0;
       overflow: hidden;
@@ -383,6 +405,12 @@
       gap: 6px;
       align-content: start;
       justify-content: flex-end;
+    }
+    .pr-debug-line {
+      color: var(--muted);
+      font-size: .7rem;
+      line-height: 1.35;
+      word-break: break-word;
     }
     .pr-side {
       display: grid;
@@ -577,6 +605,10 @@
       missing: "Missing",
       stale: "Stale",
       failed: "Failed",
+      saved_pending: "Saved (pending sync)",
+      saved: "Saved",
+      ask_selection: "Ask about this",
+      retry: "Retry",
       selection_single_page: "Multi-page selection is captured from the first page for now.",
     };
     let args = {};
@@ -601,10 +633,17 @@
     let readerMode = "pdf";
     let fullscreenActive = false;
     let requestedPreviews = new Set();
+    let requestedContextPages = new Set();
     let resizeTimer = null;
     let viewportTimer = null;
+    let readerStateTimer = null;
+    let lastReaderStateEmit = 0;
+    let selectingText = false;
+    let lastSelectionEndedAt = 0;
     let loadingWatchdogTimer = null;
-    let dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+    let dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
+    let optimisticAnnotations = [];
+    let debugState = { lastNeedsLoadReason: "", lastSourceSignature: "", lastLoadMs: 0, fallbackHits: 0, events: [] };
     let cacheDbPromise = null;
     let loadSeq = 0;
     let pdfDocumentLoading = false;
@@ -672,7 +711,7 @@
       const source = asObj(args.source);
       const meta = sourceMetadata();
       const fromDoc = pdfDoc && pdfDoc.fingerprints && pdfDoc.fingerprints.length ? pdfDoc.fingerprints.join(":") : "";
-      return text(source.fingerprint || source.pdf_fingerprint || source.pdf_sha256 || meta.pdf_sha256 || meta.pdf_asset_ref || fromDoc);
+      return text(source.fingerprint || source.pdf_fingerprint || source.pdf_sha256 || meta.pdf_sha256 || fromDoc || meta.pdf_asset_ref);
     }
     function pdfSourceSignature() {
       const pdfBase64 = text(args.pdf_base64);
@@ -680,7 +719,7 @@
       const source = asObj(args.source);
       const sourceKey = text(source.id || source.source_id || source.url || "");
       const fingerprint = pdfFingerprint();
-      const pdfKey = pdfUrl || (pdfBase64 ? `base64:${pdfBase64.length}:${pdfBase64.slice(0, 80)}:${pdfBase64.slice(-80)}` : "");
+      const pdfKey = fingerprint || pdfUrl || (pdfBase64 ? `base64:${pdfBase64.length}:${pdfBase64.slice(0, 80)}:${pdfBase64.slice(-80)}` : "");
       return `${sourceKey}\n${fingerprint}\n${pdfKey}`;
     }
     function pdfCacheIdentity() {
@@ -745,7 +784,7 @@
     }
     function renderCacheMaxPages() {
       const raw = Number(settings().render_cache_max_pages);
-      return Number.isFinite(raw) ? Math.max(8, Math.min(120, raw)) : 48;
+      return Number.isFinite(raw) ? Math.max(8, Math.min(120, raw)) : 24;
     }
     async function prunePageCache(pdfIdentity) {
       try {
@@ -795,6 +834,8 @@
     }
     function emitAction(action, payload = {}) {
       const cleanPayload = basePayload({ ...payload, event_id: payload.event_id || eventId(action) });
+      debugState.events.unshift({ action, event_id: cleanPayload.event_id });
+      debugState.events = debugState.events.slice(0, 5);
       emit({ action, event_id: cleanPayload.event_id, payload: cleanPayload });
     }
     function settings() {
@@ -814,6 +855,54 @@
     }
     function targetLang() {
       return text(settings().target_lang || "zh") || "zh";
+    }
+    function contextWindow() {
+      return asObj(settings().context_window);
+    }
+    function contextPages() {
+      const pages = asArr(contextWindow().pages).map((page) => Number(page || 0)).filter(Boolean);
+      return pages.length ? pages : [currentPage];
+    }
+    function selectionIsActive() {
+      return selectingText || (Date.now() - lastSelectionEndedAt < 800);
+    }
+    function scheduleReaderStateChanged(force = false) {
+      if (readerStateTimer) window.clearTimeout(readerStateTimer);
+      const now = Date.now();
+      const wait = force || now - lastReaderStateEmit > 10000 ? 0 : 10000 - (now - lastReaderStateEmit);
+      readerStateTimer = window.setTimeout(() => {
+        readerStateTimer = null;
+        lastReaderStateEmit = Date.now();
+        emitAction("reader_state_changed", {
+          page: currentPage,
+          primary_page: currentPage,
+          visible_pages: visiblePages.slice(),
+          last_visible_pages: visiblePages.slice(),
+          reader_mode: readerMode,
+          scale_mode: scaleMode,
+          active_tab: activeTab,
+          target_lang: targetLang(),
+          side_panel_collapsed: sidePanelCollapsed,
+          focused_annotation_id: focusedAnnotationId,
+        });
+      }, wait);
+    }
+    function requestReaderContext(pages) {
+      if (selectionIsActive()) return;
+      const clean = Array.from(new Set(asArr(pages).map((page) => Number(page || 0)).filter((page) => page > 0))).slice(0, 20);
+      const alreadyInPayload = new Set(contextPages());
+      const missing = clean.filter((page) => !requestedContextPages.has(page) && !alreadyInPayload.has(page));
+      if (!missing.length) return;
+      missing.forEach((page) => requestedContextPages.add(page));
+      emitAction("request_reader_context", { pages: missing, visible_pages: visiblePages.slice(), primary_page: currentPage });
+    }
+    function requestPagePreviews(pages) {
+      if (selectionIsActive()) return;
+      const clean = Array.from(new Set(asArr(pages).map((page) => Number(page || 0)).filter((page) => page > 0))).slice(0, 20);
+      const missing = clean.filter((page) => !requestedPreviews.has(page) && !previewForPage(page));
+      if (!missing.length) return;
+      missing.forEach((page) => requestedPreviews.add(page));
+      emitAction("request_page_previews", { pages: missing, visible_pages: visiblePages.slice(), primary_page: currentPage });
     }
     function status(message) {
       const el = document.querySelector(".pr-status-main");
@@ -987,16 +1076,16 @@
     }
     function translationReaderHtml() {
       const pages = readerMode === "translation"
-        ? Array.from({ length: knownPageCount(currentPage) }, (_, index) => index + 1)
+        ? contextPages()
         : (visiblePages.length ? visiblePages : [currentPage]);
       const rows = translationRowsForPages(pages, readerMode === "translation" ? 600 : 80);
       const pageLabel = readerMode === "translation"
-        ? `${label("translation")} · ${knownPageCount(currentPage)} ${label("page")}`
+        ? `${label("translation")} · ${label("page")} ${pages.join(", ")}`
         : `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
       const body = rows.length ? rows.map(({ segment, translation, state }) => {
         const translated = text(translation && translation.translated_text);
         return `
-          <article class="pr-translation-row">
+          <article class="pr-translation-row" data-page="${Number(segment.page || 0)}">
             <div class="pr-item-meta">${esc(segment.locator || (segment.page ? `p. ${segment.page}` : ""))} · ${esc(state)}</div>
             <div class="pr-translation-text">${esc(translated || label(state) || state)}</div>
             <div class="pr-translation-source">${esc(text(segment.text).slice(0, 420))}</div>
@@ -1113,6 +1202,7 @@
             status: label("translated"),
             selected_text: currentSelection.selected_text,
             result: text(hit.translated_text),
+            pending: false,
             selection_hash: text(currentSelection.selected_text_hash),
           };
         } else if (dockState.selection_hash !== text(currentSelection.selected_text_hash)) {
@@ -1121,6 +1211,7 @@
             status: label("selected_text"),
             selected_text: currentSelection.selected_text,
             result: "",
+            pending: false,
             selection_hash: text(currentSelection.selected_text_hash),
           };
         }
@@ -1128,9 +1219,9 @@
       }
       const aiText = latestAiText();
       if (aiText) {
-        dockState = { mode: "ai", status: label("ai"), selected_text: "", result: aiText, selection_hash: "" };
+        dockState = { mode: "ai", status: label("ai"), selected_text: "", result: aiText, pending: false, selection_hash: "" };
       } else if (!dockState.result && !dockState.selected_text) {
-        dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+        dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
       }
     }
     function dockHtml() {
@@ -1143,15 +1234,19 @@
         <div class="pr-dock-main">
           <div class="pr-dock-head">
             <span>${esc(title)}</span>
-            <span class="pr-dock-status">${esc(dockState.status || "")}</span>
+            <span class="pr-dock-status ${dockState.pending ? "pending" : ""}">${esc(dockState.status || "")}</span>
           </div>
           <div class="pr-dock-text">${esc(dockState.selected_text || (hasSelection ? currentSelection.selected_text : ""))}</div>
           ${dockState.result ? `<div class="pr-dock-result">${esc(dockState.result)}</div>` : ""}
         </div>
         <div class="pr-dock-actions">
           <button class="pr-button primary" data-action="annotate" ${hasSelection ? "" : "disabled"}>${esc(label("create_annotation"))}</button>
+          <button class="pr-button" data-action="chunk" ${hasSelection ? "" : "disabled"}>${esc(label("create_chunk"))}</button>
+          <button class="pr-button" data-action="cite" ${hasSelection ? "" : "disabled"}>${esc(label("create_citation"))}</button>
           <button class="pr-button" data-action="translate" ${hasSelection ? "" : "disabled"}>${esc(label("translate_selection"))}</button>
           <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
+          <button class="pr-button" data-action="askSelection" ${hasSelection ? "" : "disabled"}>${esc(label("ask_selection"))}</button>
+          ${dockState.mode === "translation" && dockState.failed ? `<button class="pr-button" data-action="retryTranslation">${esc(label("retry"))}</button>` : ""}
         </div>
       `;
     }
@@ -1240,7 +1335,7 @@
         }).join("")}</div>`;
       }
       if (activeTab === "ai") {
-        return analysisBodyHtml();
+        return `${analysisBodyHtml()}<div class="pr-panel-head">Debug</div>${debugPanelHtml()}`;
       }
       const rows = asArr(args.segments).filter((row) => Number(asObj(row).page || 0) === currentPage).slice(0, 16);
       if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
@@ -1254,11 +1349,24 @@
         `;
       }).join("")}</div>`;
     }
+    function debugPanelHtml() {
+      const events = debugState.events.length
+        ? debugState.events.map((row) => `<div class="pr-debug-line">${esc(row.action)} · ${esc(row.event_id)}</div>`).join("")
+        : `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      return `
+        <div class="pr-debug-line">needsLoad: ${esc(debugState.lastNeedsLoadReason || "none")}</div>
+        <div class="pr-debug-line">source: ${esc(debugState.lastSourceSignature || "")}</div>
+        <div class="pr-debug-line">load: ${Math.round(Number(debugState.lastLoadMs || 0))}ms</div>
+        <div class="pr-debug-line">fallback previews: ${Number(debugState.fallbackHits || 0)}</div>
+        ${events}
+      `;
+    }
     function wireShell() {
       document.querySelectorAll("[data-tab]").forEach((button) => {
         button.addEventListener("click", () => {
           activeTab = button.dataset.tab;
           refreshSide();
+          scheduleReaderStateChanged(true);
         });
       });
       document.querySelectorAll("[data-mode]").forEach((button) => {
@@ -1292,6 +1400,7 @@
       });
       refreshTranslationReader();
       scheduleViewportUpdate();
+      scheduleReaderStateChanged(true);
       window.setTimeout(() => renderAround(currentPage, { force: true }), 60);
       setHeight();
     }
@@ -1310,7 +1419,7 @@
           const page = Number(button.dataset.page || 0);
           focusedAnnotationId = id;
           if (page) scrollToPage(page);
-          emitAction("jump_to_annotation", { annotation_id: id, id, page: page || currentPage, locator: page ? `p. ${page}` : "" });
+          scheduleReaderStateChanged(true);
         });
       });
       document.querySelectorAll("[data-delete-annotation]").forEach((button) => {
@@ -1334,23 +1443,28 @@
       if (action === "zoomIn") {
         customScale = Math.min(3, Math.round((scaleForPage(currentPage) + .15) * 100) / 100);
         scaleMode = "custom";
+        scheduleReaderStateChanged(true);
         return rerenderForScale();
       }
       if (action === "zoomOut") {
         customScale = Math.max(.45, Math.round((scaleForPage(currentPage) - .15) * 100) / 100);
         scaleMode = "custom";
+        scheduleReaderStateChanged(true);
         return rerenderForScale();
       }
       if (action === "fitWidth") {
         scaleMode = "fit-width";
+        scheduleReaderStateChanged(true);
         return rerenderForScale();
       }
       if (action === "fitPage") {
         scaleMode = "fit-page";
+        scheduleReaderStateChanged(true);
         return rerenderForScale();
       }
       if (action === "actualSize") {
         scaleMode = "actual-size";
+        scheduleReaderStateChanged(true);
         return rerenderForScale();
       }
       if (action === "fullscreen") return toggleFullscreen();
@@ -1361,13 +1475,14 @@
         refreshSide();
         refreshDock();
         scheduleViewportUpdate();
+        scheduleReaderStateChanged(true);
         return;
       }
       if (action === "search") return runSearch();
       if (action === "ask") {
         sidePanelCollapsed = false;
         activeTab = "ai";
-        dockState = { mode: "ai", status: label("ask_paper"), selected_text: "", result: latestAiText(), selection_hash: "" };
+        dockState = { mode: "ai", status: label("ask_paper"), selected_text: "", result: latestAiText(), pending: false, selection_hash: "" };
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
         refreshSide();
@@ -1378,7 +1493,7 @@
       if (action === "askQuestion") {
         const question = text(document.getElementById("questionInput")?.value).trim();
         if (!question) return;
-        dockState = { mode: "ai", status: label("ask_paper"), selected_text: question, result: "", selection_hash: "" };
+        dockState = { mode: "ai", status: label("ask_paper"), selected_text: question, result: "", pending: true, selection_hash: "" };
         refreshDock();
         return emitAction("ask_paper", { question, page: currentPage, locator: `p. ${currentPage}` });
       }
@@ -1393,7 +1508,7 @@
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
-        dockState = { mode: "ai", status: label("review_card"), selected_text: "", result: "", selection_hash: "" };
+        dockState = { mode: "ai", status: label("review_card"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
         return emitAction("generate_review_card", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
@@ -1409,9 +1524,30 @@
       }
       const selection = currentSelection || {};
       if (!selection.selected_text) return;
-      if (action === "annotate") return emitAction("annotation_create", { ...selection, note: "" });
-      if (action === "chunk") return emitAction("create_chunk_from_selection", selection);
-      if (action === "cite") return emitAction("create_citation", selection);
+      if (action === "annotate") {
+        optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind: "highlight", status: "pending" });
+        renderHighlights(selection.page || currentPage);
+        dockState = {
+          mode: "selection",
+          status: label("saved_pending"),
+          selected_text: text(selection.selected_text),
+          result: "",
+          pending: true,
+          selection_hash: text(selection.selected_text_hash),
+        };
+        refreshDock();
+        return emitAction("annotation_create", { ...selection, note: "" });
+      }
+      if (action === "chunk") {
+        dockState = { mode: "selection", status: label("saved_pending"), selected_text: text(selection.selected_text), result: "", pending: true, selection_hash: text(selection.selected_text_hash) };
+        refreshDock();
+        return emitAction("create_chunk_from_selection", selection);
+      }
+      if (action === "cite") {
+        dockState = { mode: "selection", status: label("saved_pending"), selected_text: text(selection.selected_text), result: "", pending: true, selection_hash: text(selection.selected_text_hash) };
+        refreshDock();
+        return emitAction("create_citation", selection);
+      }
       if (action === "translate") {
         const hit = findSelectionTranslation(selection);
         dockState = {
@@ -1419,11 +1555,17 @@
           status: hit && text(hit.translated_text) ? label("translated") : label("translating"),
           selected_text: text(selection.selected_text),
           result: hit && text(hit.translated_text) ? text(hit.translated_text) : "",
+          pending: !(hit && text(hit.translated_text)),
           selection_hash: text(selection.selected_text_hash),
         };
         refreshDock();
         if (hit && text(hit.translated_text)) return;
         return emitAction("translate_selection", { ...selection, target_lang: targetLang() });
+      }
+      if (action === "retryTranslation") {
+        dockState = { ...dockState, status: label("translating"), failed: false, pending: true };
+        refreshDock();
+        return emitAction("retry_translation_scope", { ...selection, target_lang: targetLang(), visible_pages: [selection.page || currentPage] });
       }
       if (action === "explain") {
         dockState = {
@@ -1431,10 +1573,23 @@
           status: label("explain_selection"),
           selected_text: text(selection.selected_text),
           result: "",
+          pending: true,
           selection_hash: text(selection.selected_text_hash),
         };
         refreshDock();
         return emitAction("explain_selection", selection);
+      }
+      if (action === "askSelection") {
+        dockState = {
+          mode: "ai",
+          status: label("ask_paper"),
+          selected_text: text(selection.selected_text),
+          result: "",
+          pending: true,
+          selection_hash: text(selection.selected_text_hash),
+        };
+        refreshDock();
+        return emitAction("ask_paper", { ...selection, question: text(selection.selected_text) });
       }
     }
     function statusText() {
@@ -1444,8 +1599,13 @@
       const doc = document.getElementById("continuousDocument");
       if (!doc) return;
       const count = Math.max(1, totalPages || knownPageCount(currentPage));
+      const extra = overscanPages();
+      const start = Math.max(1, currentPage - extra);
+      const end = Math.min(count, currentPage + extra);
       const rows = [];
-      for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
+      const beforeHeight = estimateSpacerHeight(1, start - 1);
+      if (beforeHeight > 0) rows.push(`<div class="pr-page-spacer" data-spacer="before" style="height:${beforeHeight}px"></div>`);
+      for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
         const size = pageViewportSize(pageNumber);
         rows.push(`
           <article class="pr-page-container" id="pageContainer-${pageNumber}" data-page="${pageNumber}">
@@ -1460,18 +1620,36 @@
           </article>
         `);
       }
+      const afterHeight = estimateSpacerHeight(end + 1, count);
+      if (afterHeight > 0) rows.push(`<div class="pr-page-spacer" data-spacer="after" style="height:${afterHeight}px"></div>`);
       doc.innerHTML = rows.join("");
       document.querySelectorAll(".pr-text-layer").forEach((layer) => {
+        layer.addEventListener("mousedown", () => { selectingText = true; });
+        layer.addEventListener("pointerdown", () => { selectingText = true; });
         layer.addEventListener("mouseup", handleSelection);
         layer.addEventListener("keyup", handleSelection);
       });
       applyAllKnownHighlights();
+    }
+    function estimateSpacerHeight(start, end) {
+      if (end < start) return 0;
+      const size = pageViewportSize(currentPage || 1);
+      const rowHeight = Math.max(340, size.height + 42);
+      return (end - start + 1) * rowHeight;
+    }
+    function estimatedPageFromScroll(viewer) {
+      const count = Math.max(1, totalPages || knownPageCount(currentPage));
+      const size = pageViewportSize(currentPage || 1);
+      const rowHeight = Math.max(340, size.height + 42);
+      return Math.max(1, Math.min(count, Math.floor(Number(viewer.scrollTop || 0) / rowHeight) + 1));
     }
     function skeletonPageCount() {
       return document.querySelectorAll(".pr-page-container").length;
     }
     function refreshForArgsUpdate() {
       focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
+      const serverHashes = new Set(asArr(args.annotations).map((row) => text(asObj(row).selected_text_hash)).filter(Boolean));
+      optimisticAnnotations = optimisticAnnotations.filter((row) => !serverHashes.has(text(row.selected_text_hash)));
       syncDockFromArgs();
       refreshSide();
       refreshDock();
@@ -1544,6 +1722,11 @@
       }, 1800);
     }
     function renderAround(pageNumber, options = {}) {
+      if (!pageElement(pageNumber)) {
+        currentPage = Math.max(1, Number(pageNumber || currentPage || 1));
+        renderDocumentSkeleton();
+        setupIntersectionObserver();
+      }
       const extra = overscanPages();
       const start = Math.max(1, pageNumber - extra);
       const end = Math.min(totalPages || knownPageCount(pageNumber), pageNumber + extra);
@@ -1724,6 +1907,7 @@
         canvas.classList.remove("pending-fallback");
         return false;
       }
+      debugState.fallbackHits += 1;
       img.src = text(preview.data_url);
       img.style.width = `${viewport.width}px`;
       img.style.height = `${viewport.height}px`;
@@ -1738,9 +1922,7 @@
       if (canvas) canvas.classList.remove("pending-fallback");
     }
     function showPageError(pageNumber, message) {
-      const wrap = pageWrap(pageNumber);
-      if (!wrap || wrap.querySelector(".pr-page-error")) return;
-      wrap.insertAdjacentHTML("afterbegin", `<div class="pr-page-error">${esc(message)}</div>`);
+      status(`${label("pdf_error")} ${message || ""}`.trim());
     }
     function withTimeout(promise, ms, message) {
       let timer = null;
@@ -1777,7 +1959,7 @@
       }
       if (!pdfDocumentLoading && !applyPagePreview(pageNumber, size) && !requestedPreviews.has(pageNumber)) {
         requestedPreviews.add(pageNumber);
-        emitAction("request_page_preview", { page: pageNumber, locator: `p. ${pageNumber}` });
+        emitAction("request_page_previews", { pages: [pageNumber], page: pageNumber, locator: `p. ${pageNumber}` });
       }
       if (state) {
         state.status = pageDomReady(pageNumber, "preview") ? "preview" : "preview_requested";
@@ -1819,8 +2001,28 @@
           layer.appendChild(div);
         });
       });
+      optimisticAnnotations.forEach((obj) => {
+        if (Number(obj.page || 0) !== pageNumber) return;
+        asArr(obj.rects).forEach((rect) => {
+          const r = asObj(rect);
+          const pctReady = r.x_pct != null || r.y_pct != null || r.w_pct != null || r.h_pct != null;
+          const x = pctReady ? Number(r.x_pct || 0) * layer.clientWidth : Number(r.x || 0);
+          const y = pctReady ? Number(r.y_pct || 0) * layer.clientHeight : Number(r.y || 0);
+          const w = pctReady ? Number(r.w_pct || 0) * layer.clientWidth : Number(r.w || 0);
+          const h = pctReady ? Number(r.h_pct || 0) * layer.clientHeight : Number(r.h || 0);
+          const div = document.createElement("div");
+          div.className = "pr-highlight pending";
+          div.style.left = `${x}px`;
+          div.style.top = `${y}px`;
+          div.style.width = `${Math.max(2, w)}px`;
+          div.style.height = `${Math.max(2, h)}px`;
+          layer.appendChild(div);
+        });
+      });
     }
     async function handleSelection() {
+      selectingText = false;
+      lastSelectionEndedAt = Date.now();
       const sel = window.getSelection();
       const selectedRaw = text(sel ? sel.toString() : "").trim();
       if (!selectedRaw || !sel || sel.rangeCount === 0) return;
@@ -1873,6 +2075,7 @@
         status: label("selected_text"),
         selected_text: selectedText,
         result: "",
+        pending: false,
         selection_hash: text(currentSelection.selected_text_hash),
       };
       renderSelectionBar();
@@ -1899,7 +2102,7 @@
     }
     function renderSelectionBar() {
       const hasSelection = currentSelection && currentSelection.selected_text;
-      if (!hasSelection && dockState.mode === "selection") dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+      if (!hasSelection && dockState.mode === "selection") dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
       refreshDock();
     }
     function segmentRefsForSelection(selectedText, pageNumber) {
@@ -1970,6 +2173,13 @@
       if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
       window.setTimeout(() => renderAround(currentPage, { force: true }), 120);
     });
+    document.addEventListener("mouseup", () => {
+      if (!selectingText) return;
+      window.setTimeout(() => {
+        selectingText = false;
+        lastSelectionEndedAt = Date.now();
+      }, 0);
+    });
     async function pageText(pageNumber) {
       if (textCache.has(pageNumber)) return textCache.get(pageNumber);
       try {
@@ -1997,12 +2207,25 @@
       const next = Math.max(1, Math.min(count || 1, Number(pageNumber || 1)));
       currentPage = next;
       currentSelection = null;
+      const previousScrollBehavior = document.querySelector(".pr-viewer")?.style.scrollBehavior || "";
+      if (!pageElement(next)) {
+        const viewer = document.querySelector(".pr-viewer");
+        if (viewer) viewer.style.scrollBehavior = "auto";
+        renderDocumentSkeleton();
+        setupIntersectionObserver();
+        if (viewer) {
+          const spacer = document.querySelector('[data-spacer="before"]');
+          viewer.scrollTop = spacer ? Number.parseFloat(spacer.style.height || "0") : viewer.scrollTop;
+          window.setTimeout(() => { viewer.style.scrollBehavior = previousScrollBehavior; }, 30);
+        }
+      }
       const page = pageElement(next);
       if (page) page.scrollIntoView({ block: "start", behavior: "smooth" });
       renderAround(next);
       renderSelectionBar();
       updatePageUi();
       scheduleViewportUpdate();
+      requestReaderContext([next - 1, next, next + 1]);
     }
     async function rerenderForScale() {
       const page = currentPage;
@@ -2041,7 +2264,10 @@
           }
         }
       });
-      if (!pages.length) pages.push(currentPage);
+      if (!pages.length) {
+        primary = estimatedPageFromScroll(viewer);
+        pages.push(primary);
+      }
       visiblePages = pages;
       const pageChanged = primary !== currentPage;
       currentPage = primary;
@@ -2050,9 +2276,16 @@
       refreshTranslationReader();
       renderAround(primary);
       const signature = `${primary}:${pages.join(",")}`;
-      if (signature !== lastViewportSignature && (emitPassiveEvents() || autoSaveProgress())) {
+      const changedSignature = signature !== lastViewportSignature;
+      if (changedSignature) {
         lastViewportSignature = signature;
+      }
+      if (changedSignature && (emitPassiveEvents() || autoSaveProgress())) {
         emitAction("viewport_changed", { visible_pages: pages, primary_page: primary, page: primary, locator: `p. ${primary}` });
+      }
+      if (changedSignature) {
+        requestReaderContext(pages);
+        if (!selectionIsActive()) scheduleReaderStateChanged(false);
       }
       if (pageChanged && primary !== lastProgressPage && (emitPassiveEvents() || autoSaveProgress())) {
         lastProgressPage = primary;
@@ -2066,6 +2299,7 @@
     }
     async function loadPdf() {
       const seq = loadSeq + 1;
+      const startedAt = performance.now();
       loadSeq = seq;
       const pdfBase64 = text(args.pdf_base64);
       const pdfUrl = text(args.pdf_url);
@@ -2075,11 +2309,12 @@
       if (!["pdf", "compare", "translation"].includes(readerMode)) readerMode = "pdf";
       requestedPreviews = new Set();
       currentSelection = null;
-      dockState = { mode: "idle", status: "", selected_text: "", result: "", selection_hash: "" };
+      dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
       textCache = new Map();
       pageBaseSizes = new Map();
       pageRenderStates = new Map();
       currentPage = initialPage();
+      activeTab = text(settings().active_tab || activeTab || "translation") || "translation";
       pdfDoc = null;
       totalPages = knownPageCount(currentPage);
       pdfDocumentLoading = Boolean(pdfBase64 || pdfUrl);
@@ -2120,6 +2355,7 @@
         renderDocumentSkeleton();
         setupIntersectionObserver();
         await renderAfterLayout(currentPage, { force: true });
+        debugState.lastLoadMs = performance.now() - startedAt;
       } catch (error) {
         if (seq !== loadSeq) return;
         if (loadingTask && loadingTask.destroy) {
@@ -2129,14 +2365,11 @@
         pdfDoc = null;
         totalPages = knownPageCount(currentPage);
         status(label("pdf_preview_mode"));
+        debugState.lastLoadMs = performance.now() - startedAt;
         renderDocumentSkeleton();
         setupIntersectionObserver();
         await renderAfterLayout(currentPage, { force: true });
-        const viewer = document.querySelector(".pr-viewer");
-        if (viewer) viewer.insertAdjacentHTML(
-          "afterbegin",
-          `<div class="pr-error">${esc(label("pdf_error"))}<br>${esc(error && error.message ? error.message : error)}</div>`
-        );
+        status(`${label("pdf_preview_mode")} · ${error && error.message ? error.message : error}`);
       }
     }
     async function onRender(event) {
@@ -2144,10 +2377,17 @@
         args = asObj(event.data.args);
         focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
         const sourceSignature = pdfSourceSignature();
+        debugState.lastSourceSignature = sourceSignature;
         const expectedPages = Math.max(1, totalPages || knownPageCount(currentPage));
-        const skeletonMismatch = skeletonPageCount() > 0 && skeletonPageCount() !== expectedPages;
+        const realPageNodes = skeletonPageCount();
+        const virtualized = realPageNodes > 0 && realPageNodes <= (overscanPages() * 2 + 1);
+        const skeletonMismatch = realPageNodes > 0 && !virtualized && realPageNodes !== expectedPages;
         const hasShell = Boolean(document.getElementById("continuousDocument"));
         const needsLoad = !hasShell || sourceSignature !== text(onRender.lastSignature) || skeletonMismatch;
+        debugState.lastNeedsLoadReason = !needsLoad ? "none"
+          : !hasShell ? "missing_shell"
+          : sourceSignature !== text(onRender.lastSignature) ? "source_changed"
+          : "skeleton_mismatch";
         if (needsLoad) {
           onRender.lastSignature = sourceSignature;
           await loadPdf();

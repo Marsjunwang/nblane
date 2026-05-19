@@ -24,6 +24,7 @@ from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperSearchResult,
     auto_chunk_paper,
+    build_reader_payload,
     create_chunk_from_annotation,
     create_paper_annotation,
     create_reading_note_markdown,
@@ -31,6 +32,7 @@ from nblane.core.research_papers import (
     extract_paper_pages,
     extract_paper_segments,
     format_research_citations,
+    get_stable_pdf_url,
     grobid_readiness,
     import_paper_pdf,
     import_paper_search_results,
@@ -46,7 +48,6 @@ from nblane.core.research_papers import (
     move_papers_to_node,
     paper_library_paths,
     paper_citation_diagnostics,
-    paper_pdf_asset_path,
     paper_overview,
     paper_rows,
     render_paper_page_preview,
@@ -61,6 +62,25 @@ from nblane.core.research_papers import (
     upsert_paper_library_node,
     upsert_paper_translations,
     validate_paper_library,
+)
+from nblane.research_paper_reader_component.events import (
+    ANNOTATION_CREATE,
+    ANNOTATION_DELETE,
+    ANNOTATION_UPDATE,
+    ASK_PAPER,
+    CREATE_CHUNK_FROM_SELECTION,
+    CREATE_CITATION,
+    EXPLAIN_SELECTION,
+    READER_STATE_CHANGED,
+    REQUEST_PAGE_PREVIEW,
+    REQUEST_PAGE_PREVIEWS,
+    REQUEST_READER_CONTEXT,
+    RETRY_TRANSLATION_SCOPE,
+    SAVE_PROGRESS,
+    TRANSLATE_FULL_PAPER,
+    TRANSLATE_SELECTION,
+    TRANSLATE_VISIBLE_PAGES,
+    clean_page_list,
 )
 from nblane.core.research_sources import (
     SOURCE_KINDS,
@@ -1264,20 +1284,10 @@ def _reader_pdf_base64(source_id: str) -> str:
 
 
 def _reader_pdf_url(source_id: str) -> str:
-    """Register the PDF with Streamlit's media server and return a fetch URL."""
+    """Return the stable Streamlit media URL for the paper PDF."""
 
     try:
-        from streamlit import runtime
-
-        if not runtime.exists():
-            return ""
-        path = paper_pdf_asset_path(_pdir, source_id)
-        return runtime.get_instance().media_file_mgr.add(
-            str(path),
-            "application/pdf",
-            f"paper-reader-pdf:{selected}:{source_id}",
-            file_name=path.name,
-        )
+        return get_stable_pdf_url(_pdir, source_id)
     except Exception as exc:
         st.warning(str(exc))
         return ""
@@ -1299,6 +1309,22 @@ def _reader_page_previews(source_id: str, current_page: int = 1) -> list[dict[st
     except Exception as exc:
         st.caption(_l("pdf_preview_unavailable", "PDF image preview unavailable: {error}").format(error=exc))
         return previews
+
+
+def _reader_requested_pages(source_id: str) -> set[int]:
+    store = st.session_state.setdefault("reader_requested_pages", {})
+    if not isinstance(store, dict):
+        store = {}
+        st.session_state["reader_requested_pages"] = store
+    values = store.setdefault(source_id, set())
+    if isinstance(values, set):
+        return values
+    if isinstance(values, list):
+        cleaned = {int(item) for item in values if str(item).strip().isdigit()}
+        store[source_id] = cleaned
+        return cleaned
+    store[source_id] = set()
+    return store[source_id]
 
 
 def _reader_event_identity(event: dict) -> str:
@@ -1329,6 +1355,34 @@ def _save_reader_progress(source_id: str, page: int) -> None:
     stash_git_backup_results()
     clear_web_cache()
     st.session_state[saved_key] = page
+
+
+def _save_reader_state(source_id: str, payload: dict) -> None:
+    page = max(1, _payload_int(payload, "page", _payload_int(payload, "primary_page", 1)))
+    visible_pages = clean_page_list(
+        payload.get("visible_pages") if isinstance(payload.get("visible_pages"), list) else payload.get("last_visible_pages")
+    )
+    metadata: dict[str, object] = {
+        "last_read_page": page,
+        "last_read_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    for key in ("reader_mode", "scale_mode", "active_tab", "target_lang", "focused_annotation_id", "focused_chunk_id"):
+        value = _payload_text(payload, key)
+        if value:
+            metadata[key] = value
+    if "side_panel_collapsed" in payload:
+        metadata["side_panel_collapsed"] = bool(payload.get("side_panel_collapsed"))
+    if visible_pages:
+        metadata["last_visible_pages"] = visible_pages
+    current = load_research_sources(selected)
+    if current.by_id().get(source_id) is None:
+        return
+    assert_files_current([_sources_path])
+    update_research_source(current, source_id, metadata={**dict(current.by_id()[source_id].metadata or {}), **metadata}, status="reading")
+    save_research_sources(selected, current)
+    refresh_file_snapshots([_sources_path])
+    stash_git_backup_results()
+    clear_web_cache()
 
 
 def _translation_counts_for_segments(source_id: str, target_lang: str = "zh") -> dict[str, int]:
@@ -1572,27 +1626,42 @@ def _handle_reader_component_event(
             st.session_state[_reader_key(source_id, "page")] = max(1, page)
             return True
 
-        if action == "save_progress":
+        if action == SAVE_PROGRESS:
             page = _payload_int(payload, "page", _payload_int(payload, "primary_page", 1))
             st.session_state[_reader_key(source_id, "page")] = max(1, page)
             _save_reader_progress(source_id, max(1, page))
             st.success(ui["saved"])
             return True
 
+        if action == READER_STATE_CHANGED:
+            page = _payload_int(payload, "page", _payload_int(payload, "primary_page", 1))
+            visible = clean_page_list(payload.get("visible_pages"))
+            st.session_state[_reader_key(source_id, "page")] = max(1, page)
+            st.session_state[_reader_key(source_id, "visible_pages")] = visible
+            _reader_requested_pages(source_id).update(visible or [max(1, page)])
+            _save_reader_state(source_id, payload)
+            return True
+
         if action == "viewport_changed":
             page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 1))
-            visible = [
-                int(item)
-                for item in payload.get("visible_pages", [])
-                if str(item).strip().isdigit()
-            ] if isinstance(payload.get("visible_pages"), list) else []
+            visible = clean_page_list(payload.get("visible_pages"))
             st.session_state[_reader_key(source_id, "page")] = max(1, page)
             st.session_state[_reader_key(source_id, "visible_pages")] = visible
             return True
 
-        if action == "request_page_preview":
+        if action in {REQUEST_READER_CONTEXT, REQUEST_PAGE_PREVIEWS}:
+            pages = clean_page_list(payload.get("pages") or payload.get("visible_pages"))
+            if not pages:
+                page = _payload_int(payload, "page", 1)
+                pages = [max(1, page)]
+            _reader_requested_pages(source_id).update(pages)
+            st.session_state[_reader_key(source_id, "preview_page")] = pages[0]
+            return True
+
+        if action == REQUEST_PAGE_PREVIEW:
             page = _payload_int(payload, "page", 1)
             st.session_state[_reader_key(source_id, "preview_page")] = max(1, page)
+            _reader_requested_pages(source_id).add(max(1, page))
             return True
 
         if action == "generate_review_card":
@@ -1612,12 +1681,11 @@ def _handle_reader_component_event(
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(ui["saved"])
-                st.rerun()
             for warning in result.warnings:
                 st.warning(str(warning))
             return True
 
-        if action in {"annotation_create", "create_annotation"}:
+        if action in {ANNOTATION_CREATE, "create_annotation"}:
             ann = create_paper_annotation(
                 _pdir,
                 source_id,
@@ -1634,25 +1702,26 @@ def _handle_reader_component_event(
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["created"].format(id=ann.id))
-            st.rerun()
+            st.session_state[_reader_key(source_id, "focus_annotation_id")] = ann.id
+            return True
 
-        if action == "annotation_update":
+        if action == ANNOTATION_UPDATE:
             annotation_id = _update_or_delete_paper_annotation(source_id, payload)
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["saved"])
             st.session_state[_reader_key(source_id, "focus_annotation_id")] = annotation_id
-            st.rerun()
+            return True
 
-        if action == "annotation_delete":
+        if action == ANNOTATION_DELETE:
             annotation_id = _update_or_delete_paper_annotation(source_id, payload, delete=True)
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["saved"])
             st.session_state[_reader_key(source_id, "focus_annotation_id")] = annotation_id
-            st.rerun()
+            return True
 
-        if action in {"create_chunk_from_selection", "create_chunk"}:
+        if action in {CREATE_CHUNK_FROM_SELECTION, "create_chunk"}:
             text = _selection_text(payload, segment_rows)
             chunk = create_chunk(
                 _pdir,
@@ -1672,9 +1741,10 @@ def _handle_reader_component_event(
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["created"].format(id=chunk.id))
-            st.rerun()
+            st.session_state[_reader_key(source_id, "focus_chunk_id")] = chunk.id
+            return True
 
-        if action == "translate_full_paper":
+        if action == TRANSLATE_FULL_PAPER:
             summary = translate_full_paper(
                 _pdir,
                 source_id,
@@ -1691,9 +1761,9 @@ def _handle_reader_component_event(
                     count=summary.get("updated", 0)
                 )
             )
-            st.rerun()
+            return True
 
-        if action == "translate_visible_pages":
+        if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
             refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
             visible_pages = {
                 int(item)
@@ -1784,12 +1854,11 @@ def _handle_reader_component_event(
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(ui["saved"])
-                st.rerun()
             for warning in result.warnings:
                 st.warning(str(warning))
             return True
 
-        if action in {"translate_selection", "translate_segment"}:
+        if action in {TRANSLATE_SELECTION, "translate_segment"}:
             selected_text = _selection_text(payload, segment_rows)
             target_lang = _payload_text(payload, "target_lang", "language") or "zh"
             translation_payload = dict(payload)
@@ -1856,12 +1925,11 @@ def _handle_reader_component_event(
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(ui["saved"])
-                st.rerun()
             for warning in result.warnings:
                 st.warning(str(warning))
             return True
 
-        if action == "create_citation":
+        if action == CREATE_CITATION:
             selected_text = _selection_text(payload, segment_rows)
             chunk_id = _payload_text(payload, "chunk_id", "chunk_ref")
             if not chunk_id and selected_text:
@@ -1910,9 +1978,9 @@ def _handle_reader_component_event(
             stash_git_backup_results()
             clear_web_cache()
             st.success(ui["created"].format(id=citation.id))
-            st.rerun()
+            return True
 
-        if action == "explain_selection":
+        if action == EXPLAIN_SELECTION:
             selected_text = _selection_text(payload, segment_rows)
             if not selected_text:
                 raise ValueError("Reader explanation needs selected text or segment refs.")
@@ -1932,7 +2000,7 @@ def _handle_reader_component_event(
                 st.warning(str(warning))
             return True
 
-        if action == "ask_paper":
+        if action == ASK_PAPER:
             question = _payload_text(payload, "question", "prompt", "text")
             if not question:
                 raise ValueError("Reader question cannot be blank.")
@@ -1956,16 +2024,14 @@ def _handle_reader_component_event(
             if not annotation_id:
                 raise ValueError("Reader jump needs annotation_id.")
             st.session_state[_reader_key(source_id, "focus_annotation_id")] = annotation_id
-            st.success(_l("reader_jump_saved", "Reader jump target saved."))
-            st.rerun()
+            return True
 
         if action == "jump_to_chunk":
             chunk_id = _payload_text(payload, "chunk_id", "id")
             if not chunk_id:
                 raise ValueError("Reader jump needs chunk_id.")
             st.session_state[_reader_key(source_id, "focus_chunk_id")] = chunk_id
-            st.success(_l("reader_jump_saved", "Reader jump target saved."))
-            st.rerun()
+            return True
 
         st.warning(f"Unsupported reader action: {action or event}")
         return True
@@ -1990,15 +2056,33 @@ def _render_paper_reader(inbox) -> None:
     if source is None:
         return
     artifact_status: dict[str, object] = {}
-    if source.metadata.get("pdf_asset_ref"):
-        try:
-            artifact_status = ensure_paper_reading_artifacts(_pdir, source_id)
-            inbox = load_research_sources(selected)
-            source = inbox.by_id().get(source_id) or source
-            stash_git_backup_results()
-            clear_web_cache()
-        except Exception as exc:
-            st.warning(_l("reading_artifacts_failed", "Reading artifacts could not be prepared: {error}").format(error=exc))
+    existing_pages = load_paper_pages(_pdir, source_id)
+    existing_segments = load_paper_segments(_pdir, source_id)
+    if source.metadata.get("pdf_asset_ref") and (not existing_pages or not existing_segments):
+        st.info(
+            _l(
+                "reader_artifacts_missing",
+                "Reader text artifacts are not extracted yet. The PDF can open now; extract when you need search, translation, and segment-aware notes.",
+            )
+        )
+        if st.button(_l("extract_reader_artifacts", "Extract reader text"), type="primary"):
+            try:
+                artifact_status = ensure_paper_reading_artifacts(_pdir, source_id)
+                inbox = load_research_sources(selected)
+                source = inbox.by_id().get(source_id) or source
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.warning(_l("reading_artifacts_failed", "Reading artifacts could not be prepared: {error}").format(error=exc))
+        if not existing_pages:
+            artifact_status = {
+                "ready": False,
+                "status": "missing",
+                "pages": 0,
+                "segments": len(existing_segments),
+            }
     status_bits = [
         f"PDF: {'yes' if source.metadata.get('pdf_asset_ref') else 'missing'}",
         f"{_l('pages', 'Pages')}: {source.metadata.get('page_count', '') or '?'}",
@@ -2075,20 +2159,29 @@ def _render_paper_reader(inbox) -> None:
     focus_annotation_id = st.session_state.get(_reader_key(source_id, "focus_annotation_id"), "")
     reader_page = int(st.session_state.get(_reader_key(source_id, "page"), source.metadata.get("last_read_page") or 1) or 1)
     if source.metadata.get("pdf_asset_ref"):
-        page_previews = _reader_page_previews(source_id, reader_page)
-        if not page_previews:
-            st.warning(_l("pdf_preview_unavailable_short", "PDF page preview is unavailable; text-mode panels remain below."))
+        requested_pages = _reader_requested_pages(source_id)
+        visible_pages = st.session_state.get(_reader_key(source_id, "visible_pages"), [])
+        requested_pages.update(clean_page_list(visible_pages))
+        reader_payload = build_reader_payload(
+            _pdir,
+            source_id,
+            page=reader_page,
+            requested_pages=requested_pages,
+            target_lang=str(source.metadata.get("target_lang") or "zh"),
+        )
+        reader_state = reader_payload.get("reader_state") if isinstance(reader_payload.get("reader_state"), dict) else {}
+        context_window = reader_payload.get("context_window") if isinstance(reader_payload.get("context_window"), dict) else {}
         event = st_research_paper_reader(
-            source=source.to_dict(),
-            pdf_url=_reader_pdf_url(source_id),
+            source=reader_payload["source"],
+            pdf_url=str(reader_payload.get("pdf_url") or _reader_pdf_url(source_id)),
             pdf_base64=_reader_pdf_base64(source_id),
-            page_previews=page_previews,
-            pages=[page.to_dict() for page in page_rows],
-            segments=[segment.to_dict() for segment in segment_rows_for_reader],
-            annotations=[ann.to_dict() for ann in annotation_rows_for_reader],
-            translations=[row.to_dict() for row in translation_rows_for_reader],
-            chunks=[chunk.to_dict() for chunk in chunk_rows_for_reader],
-            analysis=analysis_for_reader,
+            page_previews=reader_payload["page_previews"],
+            pages=reader_payload["pages"],
+            segments=reader_payload["segments"],
+            annotations=reader_payload["annotations"],
+            translations=reader_payload["translations"],
+            chunks=reader_payload["chunks"],
+            analysis=reader_payload["analysis"],
             ui={
                 "annotations": _l("annotations", "Annotations"),
                 "translation": _l("translation", "Translation"),
@@ -2119,18 +2212,25 @@ def _render_paper_reader(inbox) -> None:
                 "panel": _l("panel", "Panel"),
             },
             settings={
-                "page": reader_page,
-                "initial_page": reader_page,
+                "page": reader_state.get("last_read_page") or reader_page,
+                "initial_page": reader_state.get("last_read_page") or reader_page,
+                "page_count": context_window.get("total_pages") or source.metadata.get("page_count") or 1,
+                "context_window": context_window,
                 "view_mode": "continuous",
-                "scale_mode": "fit-width",
+                "reader_mode": reader_state.get("reader_mode") or "pdf",
+                "scale_mode": reader_state.get("scale_mode") or "fit-width",
+                "active_tab": reader_state.get("active_tab") or "translation",
+                "target_lang": reader_state.get("target_lang") or "zh",
                 "overscan_pages": 2,
                 "auto_save_progress": False,
                 "emit_passive_events": False,
-                "side_panel_default": "collapsed",
+                "side_panel_default": "collapsed" if reader_state.get("side_panel_collapsed", True) else "open",
+                "side_panel_collapsed": reader_state.get("side_panel_collapsed", True),
                 "focus_annotation_id": focus_annotation_id,
+                "focus_chunk_id": st.session_state.get(_reader_key(source_id, "focus_chunk_id"), reader_state.get("focused_chunk_id") or ""),
                 "height_mode": "viewport",
                 "render_cache": True,
-                "render_cache_max_pages": 48,
+                "render_cache_max_pages": 24,
                 "translation_dock_default": "bottom",
                 "pdf_load_timeout_ms": 9000,
             },
