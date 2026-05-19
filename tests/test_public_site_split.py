@@ -45,27 +45,37 @@ class TestPublicSiteSplit(unittest.TestCase):
         self.assertNotIn("import *", build_text)
         self.assertNotIn("with tab_build", output_module.read_text(encoding="utf-8"))
 
-    def test_app_navigation_uses_split_output_and_growth_order(self) -> None:
+    def test_app_navigation_uses_split_output_and_workbench_order(self) -> None:
         root = Path(__file__).resolve().parents[1]
         app_text = (root / "app.py").read_text(encoding="utf-8")
+        shared_text = (root / "src/nblane/web_shared.py").read_text(encoding="utf-8")
         self.assertIn('"pages/6_Output_Studio.py"', app_text)
         self.assertIn('"pages/10_Public_Build.py"', app_text)
         nav_text = app_text.split("def _navigation_pages", 1)[1]
-        growth_order = [
-            nav_text.index('"pages/1_Skill_Tree.py"'),
+        work_order = [
+            nav_text.index('"pages/11_Project_Board.py"'),
+            nav_text.index('"pages/3_Kanban.py"'),
             nav_text.index('"pages/2_Gap_Analysis.py"'),
             nav_text.index('"pages/7_Research.py"'),
+            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+        ]
+        self.assertEqual(work_order, sorted(work_order))
+        growth_order = [
+            nav_text.index('"pages/1_Skill_Tree.py"'),
             nav_text.index('"pages/8_Review.py"'),
             nav_text.index('"pages/5_Profile_Health.py"'),
             nav_text.index('"pages/9_Agent_Activity.py"'),
         ]
         self.assertEqual(growth_order, sorted(growth_order))
-        work_order = [
-            nav_text.index('"pages/11_Project_Board.py"'),
-            nav_text.index('"pages/3_Kanban.py"'),
-            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+        fallback_nav = shared_text.split("def render_workspace_navigation", 1)[1]
+        fallback_work_order = [
+            fallback_nav.index('"pages/11_Project_Board.py"'),
+            fallback_nav.index('"pages/3_Kanban.py"'),
+            fallback_nav.index('"pages/2_Gap_Analysis.py"'),
+            fallback_nav.index('"pages/7_Research.py"'),
+            fallback_nav.index('"pages/2_Evidence_Review.py"'),
         ]
-        self.assertEqual(work_order, sorted(work_order))
+        self.assertEqual(fallback_work_order, sorted(fallback_work_order))
 
     def test_validate_public_layer_blocks_private_research_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

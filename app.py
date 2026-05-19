@@ -1855,6 +1855,16 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 icon=":material/view_kanban:",
             ),
             st.Page(
+                "pages/2_Gap_Analysis.py",
+                title=ui["sidebar_nav_gap"],
+                icon=":material/troubleshoot:",
+            ),
+            st.Page(
+                "pages/7_Research.py",
+                title=ui["sidebar_nav_research"],
+                icon=":material/travel_explore:",
+            ),
+            st.Page(
                 EVIDENCE_REVIEW_PAGE,
                 title=ui["sidebar_nav_evidence_review"],
                 icon=":material/fact_check:",
@@ -1865,16 +1875,6 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 "pages/1_Skill_Tree.py",
                 title=ui["sidebar_nav_skill_map"],
                 icon=":material/account_tree:",
-            ),
-            st.Page(
-                "pages/2_Gap_Analysis.py",
-                title=ui["sidebar_nav_gap"],
-                icon=":material/troubleshoot:",
-            ),
-            st.Page(
-                "pages/7_Research.py",
-                title=ui["sidebar_nav_research"],
-                icon=":material/travel_explore:",
             ),
             st.Page(
                 "pages/8_Review.py",

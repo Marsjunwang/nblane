@@ -1199,6 +1199,8 @@ def render_workspace_navigation() -> None:
             [
                 ("pages/11_Project_Board.py", u["sidebar_nav_project_board"]),
                 ("pages/3_Kanban.py", u["sidebar_nav_kanban"]),
+                ("pages/2_Gap_Analysis.py", u["sidebar_nav_gap"]),
+                ("pages/7_Research.py", u["sidebar_nav_research"]),
                 ("pages/2_Evidence_Review.py", u["sidebar_nav_evidence_review"]),
             ],
         ),
@@ -1206,8 +1208,6 @@ def render_workspace_navigation() -> None:
             u["sidebar_nav_growth_group"],
             [
                 ("pages/1_Skill_Tree.py", u["sidebar_nav_skill_map"]),
-                ("pages/2_Gap_Analysis.py", u["sidebar_nav_gap"]),
-                ("pages/7_Research.py", u["sidebar_nav_research"]),
                 ("pages/8_Review.py", u["sidebar_nav_review"]),
                 ("pages/5_Profile_Health.py", u["sidebar_nav_health"]),
                 ("pages/9_Agent_Activity.py", u["sidebar_nav_agent_activity"]),

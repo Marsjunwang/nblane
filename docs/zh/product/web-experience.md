@@ -74,13 +74,14 @@ Home
 Work
   - Project Board
   - Kanban
+  - Gap Analysis
+  - Research Workspace
   - Evidence Review
 
 Growth
   - Skill Tree
-  - Gap Analysis
-  - Research Workspace
-  - Review / Health
+  - Review
+  - Profile Health
   - Agent Activity
 
 Output
@@ -91,15 +92,15 @@ Team
   - Team Pool
 ```
 
-当前 Web 已使用 `st.navigation` 支持 Home / Work / Growth / Output / Team 分组。中文界面采用“双语标签”策略：中文任务名为主，保留简短英文别名，例如「研究工作台 Research」「输出工作台 Studio」，避免用户在产品概念和代码/文档名之间来回翻译。
+当前 Web 已使用 `st.navigation` 支持 Home / Work / Growth / Output / Team 分组。Work 是当前目标和项目推进的现场，包含 Project Board、Kanban、Gap Analysis、Research Workspace 和 Evidence Review；Growth 收敛为长期能力状态、复盘、体检和 Agent 治理。中文界面采用“双语标签”策略：中文任务名为主，保留简短英文别名，例如「研究工作台 Research」「输出工作台 Studio」，避免用户在产品概念和代码/文档名之间来回翻译。
 
 短期导航顺序应逐步从“文件模型顺序”调整为“成长闭环顺序”：
 
 ```text
-首页 -> 看板 / Capture -> 待整理证据 -> 技能树 -> 差距分析 -> Research -> Review / Health / Agent Activity -> Output Studio -> Public Build -> Team
+首页 -> Project Board -> Kanban -> Gap Analysis / Research -> Evidence Review -> Skill Tree -> Review / Health / Agent Activity -> Output Studio -> Public Build -> Team
 ```
 
-原因：多数日常会话先判断当前目标，再进入执行、捕获、证据整理、能力判断和公开输出。技能树是能力事实源，不应成为所有新用户的唯一入口；`Claim` 也不应过早独立成页面，而应先内嵌在 Evidence Review 和 Output Studio 中。
+原因：多数日常会话先判断当前目标，再进入项目拆解、执行、差距判断、资料研究、证据整理、能力判断和公开输出。Gap Analysis 与 Research 是当前 work 的推进工具，不应藏在长期 Growth 组里；技能树是能力事实源，不应成为所有新用户的唯一入口。`Claim` 也不应过早独立成页面，而应先内嵌在 Evidence Review 和 Output Studio 中。
 
 `Current Goal` 不应只是 Home 下的普通 tab。它是全局上下文，应在 Dashboard、Kanban、Skill Tree、Gap Analysis、Evidence、Output 等主要工作流中可见；短期可在侧栏 profile 选择器附近或页面顶部 status strip 展示当前 goal 摘要。Goal 常驻指上下文常驻，不等于目标标题和细节必须明文常驻。
 
@@ -574,7 +575,7 @@ Goal
 - Connector 第一版支持 arXiv、Semantic Scholar、GitHub 自动导入；X/Twitter 与小红书保留手动导入 / 官方授权边界。`research/connectors.yaml` 不保存 token、cookie 或 API key，CLI 提供 `nblane research connector sync`。
 - Output Studio 与 Public Build 已拆成 `pages/6_Output_Studio.py` 和 `pages/10_Public_Build.py`；旧 `pages/6_Public_Site.py` 保留为兼容跳转页。
 - Home 首屏已改为原生 Streamlit 摘要先渲染：Scope strip、当前目标、本周执行、待整理证据和主操作先出现，React Context Canvas 下移到后续区域加载。
-- 中文导航已采用中文主标签 + 英文别名；Growth 顺序调整为 Skill Map -> Gap Analysis -> Research -> Review -> Health -> Agent Activity。
+- 中文导航已采用中文主标签 + 英文别名；Work 顺序调整为 Project Board -> Kanban -> Gap Analysis -> Research -> Evidence Review，Growth 顺序收敛为 Skill Map -> Review -> Health -> Agent Activity。
 
 ## 7. 已知摩擦与 backlog
 

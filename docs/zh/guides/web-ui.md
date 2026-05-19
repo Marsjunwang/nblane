@@ -69,18 +69,20 @@ source_of_truth: true
 ## 4. 推荐动线（首次）
 
 1. 侧栏选定档案。
-2. 打开 **技能树** — 看状态、备注、内联证据、证据池与引用；点 **保存**
+2. 打开 **Project Board** — 先看当前项目、milestone 和目标关联，决定本轮推进对象。
+3. 打开 **Kanban** — 管理日常推进；Done 卡片可单卡归档/删除，批量整理转到 Evidence Review。
+4. 大任务前打开 **Gap Analysis** — 手动输入，或直接选择 current goal / Kanban task 作为上下文；若已配置 LLM 可开 AI 教练。
+5. 资料阅读和研究写作用 **Research Workspace** — 先沉淀 source、chunk、research claim 和 citation，再按需转成 evidence 候选。
+6. 打开 **Evidence Review** — 审阅 Done 任务摄入、编辑证据引用，并从已确认 evidence 生成 / 刷新 Claim Studio 中的 claim candidates。
+7. 打开 **Skill Map** — 看长期能力状态、备注、内联证据、证据池与引用；点 **保存**
    写入 `skill-tree.yaml`、`evidence-pool.yaml` 并尽量同步 SKILL.md 生成块。
-3. 打开 **Evidence Review** — 审阅 Done 任务摄入、编辑证据引用，并从已确认 evidence 生成 claim candidates。
-4. 大任务前打开 **差距分析** — 手动输入，或直接选择 current goal / Kanban task 作为上下文；若已配置 LLM 可开 AI 教练。
-5. **看板** 管理日常推进；**已完成** 任务可通过折叠区 **摄入为证据**。
-6. 协作编辑共享池时用 **团队视图**。
-7. 导出上下文前或阶段复盘时打开 **Profile Health**。
-8. 资料阅读和研究写作用 **Research Workspace**；整理公开资料、博客、简历、项目/成果草稿时打开 **Output Studio**，校验和构建静态站时打开 **Public Build**。
+8. 阶段复盘用 **Review**，导出上下文前或阶段体检用 **Profile Health**，跨页面 Agent 候选和失败记录在 **Agent Activity** 管理。
+9. 整理公开资料、博客、简历、项目/成果草稿时打开 **Output Studio**，校验和构建静态站时打开 **Public Build**；协作编辑共享池时用 **Team View**。
 
 中文界面的侧栏采用双语标签：中文任务名在前，英文对象名在后，例如
 **研究工作台 Research**、**输出工作台 Studio**、**公开构建 Build**。
 英文别名用于对照文档、文件名和 CLI，不代表需要在中文界面里用英文理解页面职责。
+侧栏按产品心智分组：**工作 Work** 放 Project Board、Kanban、Gap Analysis、Research 和 Evidence Review；**成长 Growth** 放 Skill Map、Review、Profile Health 和 Agent Activity；**输出 Output** 放 Output Studio 和 Public Build。
 
 产品层地图见 [Web 体验设计](../product/web-experience.md)。
 
