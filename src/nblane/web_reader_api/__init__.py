@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from nblane.core import auth as auth_core
 from nblane.core.profile_io import profile_dir
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
+from nblane.core import reader_tasks
 from nblane.core.research_papers import (
     build_reader_payload,
     load_paper_pages,
@@ -74,7 +75,13 @@ def _claims_from_token(token: str, source_id: str) -> auth_core.ReaderTokenClaim
 
 
 def _request_context(request: Request, source_id: str) -> ReaderActionContext:
-    claims = _claims_from_token(request.cookies.get(COOKIE_NAME, ""), source_id)
+    token = (
+        request.cookies.get(COOKIE_NAME, "")
+        or request.headers.get("x-reader-token", "")
+        or request.query_params.get("reader_token", "")
+        or request.query_params.get("token", "")
+    )
+    claims = _claims_from_token(token, source_id)
     profile_path = profile_dir(claims.profile)
     return ReaderActionContext(
         profile_name=claims.profile,
@@ -282,9 +289,14 @@ def _range_response(path: Path, range_header: str | None) -> Response:
 async def reader_view(request: Request, source_id: str, token: str = ""):
     if token:
         claims = _claims_from_token(token, source_id)
-        response = RedirectResponse(
-            url=f"{READER_PREFIX}/view/{quote(source_id, safe='')}",
-            status_code=303,
+        response = TEMPLATES.TemplateResponse(
+            request,
+            "index.html",
+            {
+                "source_id_json": json.dumps(source_id, ensure_ascii=False),
+                "reader_prefix_json": json.dumps(READER_PREFIX),
+                "reader_token_json": json.dumps(token),
+            },
         )
         response.set_cookie(
             COOKIE_NAME,
@@ -303,6 +315,7 @@ async def reader_view(request: Request, source_id: str, token: str = ""):
         {
             "source_id_json": json.dumps(source_id, ensure_ascii=False),
             "reader_prefix_json": json.dumps(READER_PREFIX),
+            "reader_token_json": json.dumps(""),
         },
     )
 
@@ -377,6 +390,131 @@ async def _run_action_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(result.to_dict())
+
+
+def _validate_reader_task_body(ctx: ReaderActionContext, body: dict[str, object]) -> None:
+    payload_obj = body.get("payload")
+    payload = payload_obj if isinstance(payload_obj, dict) else {}
+    payload_source = str(body.get("source_id") or "").strip()
+    nested_source = str(payload.get("source_id") or "").strip()
+    if payload_source and payload_source != ctx.source_id:
+        raise HTTPException(status_code=400, detail="reader task source mismatch")
+    if nested_source and nested_source != ctx.source_id:
+        raise HTTPException(status_code=400, detail="reader task source mismatch")
+    payload_profile = str(body.get("profile") or body.get("profile_name") or "").strip()
+    nested_profile = str(payload.get("profile") or payload.get("profile_name") or "").strip()
+    if payload_profile and payload_profile != ctx.profile_name:
+        raise HTTPException(status_code=403, detail="reader task profile mismatch")
+    if nested_profile and nested_profile != ctx.profile_name:
+        raise HTTPException(status_code=403, detail="reader task profile mismatch")
+    payload_user = str(body.get("user_id") or "").strip()
+    nested_user = str(payload.get("user_id") or "").strip()
+    if payload_user and payload_user != ctx.user_id:
+        raise HTTPException(status_code=403, detail="reader task user mismatch")
+    if nested_user and nested_user != ctx.user_id:
+        raise HTTPException(status_code=403, detail="reader task user mismatch")
+
+
+def _reader_task_snapshot(task_id: str, ctx: ReaderActionContext) -> dict[str, object]:
+    try:
+        return reader_tasks.snapshot(task_id, ctx=ctx)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+def _reader_task_cancel(task_id: str, ctx: ReaderActionContext) -> dict[str, object]:
+    try:
+        return reader_tasks.cancel(task_id, ctx=ctx)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+def _reader_task_sse(task_id: str, ctx: ReaderActionContext) -> Iterator[str]:
+    try:
+        for snap in reader_tasks.iter_snapshots(task_id, ctx=ctx):
+            yield f"event: snapshot\ndata: {json.dumps(snap, ensure_ascii=False)}\n\n"
+    except PermissionError as exc:
+        payload = {
+            "task_id": task_id,
+            "action": "",
+            "event_id": "",
+            "status": "failed",
+            "source_id": ctx.source_id,
+            "profile": ctx.profile_name,
+            "user_id": ctx.user_id,
+            "result": {},
+            "error": str(exc),
+            "message": "",
+            "warnings": [],
+            "changed_ids": {},
+            "progress": {
+                "phase": "failed",
+                "label": str(exc),
+                "current": 0,
+                "total": 0,
+                "saved": 0,
+            },
+            "refresh": {"payload": False, "pages": [], "target_lang": ""},
+            "started_at": 0.0,
+            "updated_at": time.time(),
+            "finished_at": time.time(),
+        }
+        yield f"event: snapshot\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@app.post(f"{READER_PREFIX}/api/{{source_id}}/tasks")
+async def reader_task_start(request: Request, source_id: str):
+    _same_origin_mutation(request)
+    ctx = _request_context(request, source_id)
+    body = await _json_body(request)
+    _validate_reader_task_body(ctx, body)
+    action = str(body.get("action") or "").strip()
+    payload_obj = body.get("payload")
+    if isinstance(payload_obj, dict):
+        payload = dict(payload_obj)
+    else:
+        payload = {
+            key: value
+            for key, value in body.items()
+            if key not in {"action", "task_id", "profile", "profile_name", "user_id"}
+        }
+    payload.setdefault("source_id", source_id)
+    try:
+        snap = reader_tasks.start(
+            ctx,
+            action,
+            payload,
+            task_id=str(body.get("task_id") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "task": snap}, status_code=202)
+
+
+@app.get(f"{READER_PREFIX}/api/{{source_id}}/tasks/{{task_id}}")
+async def reader_task_get(request: Request, source_id: str, task_id: str):
+    ctx = _request_context(request, source_id)
+    return JSONResponse(_reader_task_snapshot(task_id, ctx))
+
+
+@app.get(f"{READER_PREFIX}/api/{{source_id}}/tasks/{{task_id}}/events")
+async def reader_task_events(request: Request, source_id: str, task_id: str):
+    ctx = _request_context(request, source_id)
+    return StreamingResponse(
+        _reader_task_sse(task_id, ctx),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.delete(f"{READER_PREFIX}/api/{{source_id}}/tasks/{{task_id}}")
+async def reader_task_delete(request: Request, source_id: str, task_id: str):
+    _same_origin_mutation(request)
+    ctx = _request_context(request, source_id)
+    return JSONResponse({"ok": True, "task": _reader_task_cancel(task_id, ctx)})
 
 
 @app.post(f"{READER_PREFIX}/api/{{source_id}}/annotation")

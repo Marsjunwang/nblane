@@ -71,6 +71,10 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("retry_translation_scope", html)
         self.assertIn("debugState", html)
         self.assertIn("pr-page-spacer", html)
+        self.assertIn("pr-action-status", html)
+        self.assertIn("actionState", html)
+        self.assertIn("setActionState", html)
+        self.assertIn("syncActionStatusFromSettings", html)
 
         actions = set(re.findall(r'emitAction\("([^"]+)"', html))
         self.assertGreaterEqual(

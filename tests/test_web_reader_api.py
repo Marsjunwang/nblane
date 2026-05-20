@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from urllib.parse import quote
 from fastapi.testclient import TestClient
 
 from nblane.core.auth import mint_reader_token
+from nblane.core.reader_actions import ReaderActionResult
 from nblane.core.research_papers import (
     PaperPage,
     import_paper_pdf,
@@ -96,13 +98,36 @@ class TestWebReaderApi(unittest.TestCase):
             )
             payload = client.get(f"/reader/api/{quote(source_id, safe='')}/payload")
 
-        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.status_code, 200)
         self.assertIn("nblane_reader_session", response.headers.get("set-cookie", ""))
+        self.assertIn("readerToken", response.text)
+        self.assertIn("X-Reader-Token", response.text)
         self.assertEqual(payload.status_code, 200)
         self.assertEqual(payload.json()["page_previews"], [])
         self.assertEqual(payload.json()["pdf_url"], f"/reader/api/{quote(source_id, safe='')}/pdf")
         self.assertEqual(payload.json()["settings"]["overscan_pages"], 3)
         self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], 36)
+
+    def test_payload_accepts_reader_token_query_fallback(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            token = mint_reader_token("local", "alice", source_id)
+
+            payload = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?reader_token={quote(token, safe='')}"
+            )
+
+        self.assertEqual(payload.status_code, 200)
+        self.assertEqual(payload.json()["source"]["id"], source_id)
 
     def test_view_without_token_or_cookie_is_401(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
@@ -142,6 +167,11 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("source:paper:grounded", response.text)
         self.assertIn("for (let pageNumber = 1; pageNumber <= count", response.text)
         self.assertIn("window.pdfjsLib.renderTextLayer", response.text)
+        self.assertIn("pr-action-status", response.text)
+        self.assertIn("actionState", response.text)
+        self.assertIn("setActionState", response.text)
+        self.assertIn("startReaderTask", response.text)
+        self.assertIn("watchReaderTask", response.text)
         self.assertNotIn("streamlit:setComponentValue", response.text)
 
     def test_pdf_range_and_page_preview(self) -> None:
@@ -206,6 +236,176 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(rejected.status_code, 403)
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(source.metadata["last_read_page"], 2)
+
+    def test_reader_task_endpoints_run_snapshot_and_sse(self) -> None:
+        source_id = "source:paper:grounded"
+        task_id = "reader-task-api-progress"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            token = mint_reader_token("local", "alice", source_id)
+            client.cookies.set("nblane_reader_session", token)
+
+            with patch(
+                "nblane.core.reader_tasks.handle_reader_action",
+                return_value=ReaderActionResult(
+                    data={"answer": "Because."},
+                    message="Answered.",
+                    changed_ids={"note": "x"},
+                ),
+            ):
+                started = client.post(
+                    f"/reader/api/{quote(source_id, safe='')}/tasks",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "task_id": task_id,
+                        "action": "ask_paper",
+                        "payload": {"question": "Why?", "event_id": "evt-task-api"},
+                    },
+                )
+                snap = {}
+                for _ in range(20):
+                    status = client.get(f"/reader/api/{quote(source_id, safe='')}/tasks/{task_id}")
+                    snap = status.json()
+                    if snap.get("status") in {"done", "failed", "cancelled"}:
+                        break
+                    time.sleep(0.02)
+                events = client.get(f"/reader/api/{quote(source_id, safe='')}/tasks/{task_id}/events")
+
+        self.assertEqual(started.status_code, 202)
+        self.assertTrue(started.json()["ok"])
+        self.assertEqual(started.json()["task"]["task_id"], task_id)
+        self.assertEqual(started.json()["task"]["event_id"], "evt-task-api")
+        self.assertEqual(snap["status"], "done")
+        self.assertTrue(snap["refresh"]["payload"])
+        self.assertEqual(snap["result"]["data"], {"answer": "Because."})
+        self.assertEqual(snap["changed_ids"], {"note": "x"})
+        self.assertEqual(events.status_code, 200)
+        self.assertIn("text/event-stream", events.headers["content-type"])
+        self.assertIn("event: snapshot", events.text)
+        self.assertIn('"status": "done"', events.text)
+
+    def test_reader_task_unknown_returns_lost_snapshot(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            response = client.get(f"/reader/api/{quote(source_id, safe='')}/tasks/missing-task")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "failed")
+        self.assertIn("lost", response.json()["error"])
+
+    def test_reader_task_start_validates_action_and_identity(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            denied_action = client.post(
+                f"/reader/api/{quote(source_id, safe='')}/tasks",
+                headers={"Origin": "http://testserver"},
+                json={"action": "page_changed", "payload": {"page": 2}},
+            )
+            denied_source = client.post(
+                f"/reader/api/{quote(source_id, safe='')}/tasks",
+                headers={"Origin": "http://testserver"},
+                json={"action": "ask_paper", "payload": {"source_id": "source:paper:other", "question": "Why?"}},
+            )
+
+        self.assertEqual(denied_action.status_code, 400)
+        self.assertEqual(denied_source.status_code, 400)
+
+    def test_reader_task_mutations_require_session_and_same_origin(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            no_cookie = client.post(
+                f"/reader/api/{quote(source_id, safe='')}/tasks",
+                headers={"Origin": "http://testserver"},
+                json={"action": "ask_paper", "payload": {"question": "Why?"}},
+            )
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+            rejected_post = client.post(
+                f"/reader/api/{quote(source_id, safe='')}/tasks",
+                headers={"Origin": "http://evil.example"},
+                json={"action": "ask_paper", "payload": {"question": "Why?"}},
+            )
+            rejected_delete = client.delete(
+                f"/reader/api/{quote(source_id, safe='')}/tasks/not-here",
+                headers={"Origin": "http://evil.example"},
+            )
+
+        self.assertEqual(no_cookie.status_code, 401)
+        self.assertEqual(rejected_post.status_code, 403)
+        self.assertEqual(rejected_delete.status_code, 403)
+
+    def test_reader_task_delete_cancels_unknown_as_lost_snapshot(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            response = client.delete(
+                f"/reader/api/{quote(source_id, safe='')}/tasks/not-here",
+                headers={"Origin": "http://testserver"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["task"]["status"], "failed")
 
 
 if __name__ == "__main__":

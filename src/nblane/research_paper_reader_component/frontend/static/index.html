@@ -123,6 +123,36 @@
       background: var(--accent-soft);
       color: var(--accent-strong);
     }
+    .pr-button.busy {
+      border-color: rgba(33, 104, 91, .55);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .pr-action-status {
+      display: none;
+      max-width: 360px;
+      min-height: 30px;
+      align-items: center;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 720;
+      line-height: 1.25;
+    }
+    .pr-action-status.visible { display: inline-flex; }
+    .pr-action-status.pending {
+      border-color: rgba(33, 104, 91, .35);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .pr-action-status.error {
+      border-color: rgba(159, 29, 29, .28);
+      background: #fff3f3;
+      color: var(--danger);
+    }
     .pr-input, .pr-select, .pr-textarea {
       width: 100%;
       padding: 5px 8px;
@@ -602,6 +632,11 @@
       panel: "Panel",
       translated: "Translated",
       translating: "Translating...",
+      translating_visible_pages: "Translating visible pages...",
+      translating_full_paper: "Translating paper...",
+      reviewing_paper: "Reviewing paper...",
+      answering: "Answering...",
+      answered: "Answered.",
       missing: "Missing",
       stale: "Stale",
       failed: "Failed",
@@ -642,6 +677,7 @@
     let lastSelectionEndedAt = 0;
     let loadingWatchdogTimer = null;
     let dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
+    let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
     let optimisticAnnotations = [];
     let debugState = { lastNeedsLoadReason: "", lastSourceSignature: "", lastLoadMs: 0, fallbackHits: 0, events: [] };
     let cacheDbPromise = null;
@@ -838,6 +874,54 @@
       debugState.events = debugState.events.slice(0, 5);
       emit({ action, event_id: cleanPayload.event_id, payload: cleanPayload });
     }
+    function actionButtonSelector(action) {
+      if (action === "translate_full_paper") return '[data-action="translateFull"]';
+      if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
+      if (action === "generate_review_card") return '[data-action="reviewCard"]';
+      if (action === "ask_paper") return '[data-action="askQuestion"]';
+      return "";
+    }
+    function setActionState(action, phase, message = "", extra = {}) {
+      actionState = {
+        action: text(action),
+        phase: text(phase || "idle"),
+        message: text(message),
+        task_id: text(extra.task_id || actionState.task_id),
+        event_id: text(extra.event_id || actionState.event_id),
+        progress: asObj(extra.progress || actionState.progress),
+      };
+      refreshActionStatus();
+    }
+    function refreshActionStatus() {
+      const el = document.querySelector(".pr-action-status");
+      if (el) {
+        const phase = text(actionState.phase || "idle");
+        el.classList.toggle("visible", phase !== "idle" && Boolean(actionState.message));
+        el.classList.toggle("pending", phase === "pending");
+        el.classList.toggle("error", phase === "error");
+        el.textContent = actionState.message || "";
+      }
+      document.querySelectorAll("[data-action]").forEach((button) => {
+        const selector = actionButtonSelector(actionState.action);
+        const busy = Boolean(selector) && button.matches(selector) && actionState.phase === "pending";
+        button.classList.toggle("busy", busy);
+        if (busy) {
+          button.setAttribute("aria-busy", "true");
+        } else if (button.getAttribute("aria-busy") === "true") {
+          button.removeAttribute("aria-busy");
+        }
+      });
+    }
+    function syncActionStatusFromSettings() {
+      const row = asObj(settings().reader_action_status);
+      const action = text(row.action);
+      if (!action) return;
+      setActionState(action, text(row.phase || "done"), text(row.message || ""), {
+        event_id: text(row.event_id || ""),
+        task_id: text(row.task_id || ""),
+        progress: asObj(row.progress),
+      });
+    }
     function settings() {
       return asObj(args.settings);
     }
@@ -1000,6 +1084,7 @@
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
               <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
+              <span class="pr-action-status" aria-live="polite"></span>
             </div>
           </header>
           <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""}">
@@ -1031,6 +1116,7 @@
         </section>
       `;
       wireShell();
+      refreshActionStatus();
       setHeight();
     }
     function tabButton(tab, title) {
@@ -1494,10 +1580,12 @@
         const question = text(document.getElementById("questionInput")?.value).trim();
         if (!question) return;
         dockState = { mode: "ai", status: label("ask_paper"), selected_text: question, result: "", pending: true, selection_hash: "" };
+        setActionState("ask_paper", "pending", label("answering"));
         refreshDock();
         return emitAction("ask_paper", { question, page: currentPage, locator: `p. ${currentPage}` });
       }
       if (action === "translateFull") {
+        setActionState("translate_full_paper", "pending", label("translating_full_paper"));
         return emitAction("translate_full_paper", { target_lang: targetLang(), mode: "missing_or_stale" });
       }
       if (action === "saveProgress") {
@@ -1509,12 +1597,19 @@
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
         dockState = { mode: "ai", status: label("review_card"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        setActionState("generate_review_card", "pending", label("reviewing_paper"));
         refreshSide();
         refreshDock();
         return emitAction("generate_review_card", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
       if (action === "translateVisible") {
         const pages = visiblePages.length ? visiblePages : [currentPage];
+        activeTab = "translation";
+        sidePanelCollapsed = false;
+        document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
+        document.querySelector(".pr-side")?.classList.remove("collapsed");
+        setActionState("translate_visible_pages", "pending", label("translating_visible_pages"));
+        refreshSide();
         return emitAction("translate_visible_pages", {
           target_lang: targetLang(),
           visible_pages: pages,
@@ -2375,6 +2470,7 @@
     async function onRender(event) {
       try {
         args = asObj(event.data.args);
+        syncActionStatusFromSettings();
         focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
         const sourceSignature = pdfSourceSignature();
         debugState.lastSourceSignature = sourceSignature;

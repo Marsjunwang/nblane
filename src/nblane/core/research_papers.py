@@ -1864,6 +1864,7 @@ def translate_full_paper(
     *,
     ai_profile: str | None = None,
     require_review: bool = True,
+    progress_callback: Any | None = None,
 ) -> dict[str, object]:
     """Translate a paper at segment granularity and persist valid rows.
 
@@ -1913,6 +1914,8 @@ def translate_full_paper(
         selected_segments[index : index + clean_batch_size]
         for index in range(0, len(selected_segments), clean_batch_size)
     ]
+    batches_completed = 0
+    segments_processed = 0
     if batches:
         from nblane.core.ai.gateway import translate_paper_segments
 
@@ -1927,6 +1930,25 @@ def translate_full_paper(
                 )
             except Exception as exc:
                 warnings.append(f"Translation batch failed: {exc}")
+                batches_completed += 1
+                segments_processed += len(batch)
+                if progress_callback is not None:
+                    try:
+                        progress_callback(
+                            {
+                                "source_id": source_id,
+                                "target_lang": clean_lang,
+                                "mode": clean_mode,
+                                "batches": len(batches),
+                                "batches_completed": batches_completed,
+                                "segments_selected": len(selected_segments),
+                                "segments_processed": segments_processed,
+                                "updated": len(accepted_rows),
+                                "warnings": len(warnings),
+                            }
+                        )
+                    except Exception as callback_exc:
+                        warnings.append(f"Progress callback failed: {callback_exc}")
                 continue
             warnings.extend(str(warning) for warning in result.warnings)
             if result.error:
@@ -1986,6 +2008,25 @@ def translate_full_paper(
                         "status": _choice(raw.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
                     }
                 )
+            batches_completed += 1
+            segments_processed += len(batch)
+            if progress_callback is not None:
+                try:
+                    progress_callback(
+                        {
+                            "source_id": source_id,
+                            "target_lang": clean_lang,
+                            "mode": clean_mode,
+                            "batches": len(batches),
+                            "batches_completed": batches_completed,
+                            "segments_selected": len(selected_segments),
+                            "segments_processed": segments_processed,
+                            "updated": len(accepted_rows),
+                            "warnings": len(warnings),
+                        }
+                    )
+                except Exception as exc:
+                    warnings.append(f"Progress callback failed: {exc}")
 
     if accepted_rows:
         upsert_paper_translations(profile, source_id, accepted_rows)

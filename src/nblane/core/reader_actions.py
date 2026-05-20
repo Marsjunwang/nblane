@@ -190,6 +190,39 @@ def _selection_text(payload: dict[str, Any], segment_rows) -> str:
     return "\n\n".join(segment.text for segment in segment_rows if segment.segment_id in refs)
 
 
+def _translation_row_current(row: Any, source_hash: str, target_lang: str) -> bool:
+    return bool(
+        row is not None
+        and getattr(row, "target_lang", "") == target_lang
+        and getattr(row, "source_hash", "") == source_hash
+        and getattr(row, "status", "") == "translated"
+        and str(getattr(row, "translated_text", "") or "").strip()
+    )
+
+
+def _visible_translation_summary(
+    *,
+    scope: str,
+    requested_pages: list[int],
+    segments_selected: int,
+    ai_rows: int,
+    saved: int,
+    failed: int,
+    skipped: int,
+    target_lang: str,
+) -> dict[str, Any]:
+    return {
+        "scope": scope,
+        "requested_pages": requested_pages,
+        "segments_selected": segments_selected,
+        "ai_rows": ai_rows,
+        "saved": saved,
+        "failed": failed,
+        "skipped": skipped,
+        "target_lang": target_lang,
+    }
+
+
 def _update_or_delete_paper_annotation(
     profile_path: Path,
     source_id: str,
@@ -261,6 +294,8 @@ def handle_reader_action(
     ctx: ReaderActionContext,
     action: str,
     payload: dict[str, Any] | None = None,
+    *,
+    progress_callback: Any | None = None,
 ) -> ReaderActionResult:
     """Run one Reader action and return a JSON-friendly result."""
 
@@ -273,7 +308,7 @@ def handle_reader_action(
         raise ValueError(f"Reader action source mismatch: {payload_source}")
 
     git_backup.start_operation(ctx.user_id or "reader")
-    result = _handle_reader_action_inner(ctx, clean_action, data)
+    result = _handle_reader_action_inner(ctx, clean_action, data, progress_callback=progress_callback)
     result.warnings.extend(_backup_warnings())
     return result
 
@@ -282,6 +317,8 @@ def _handle_reader_action_inner(
     ctx: ReaderActionContext,
     action: str,
     payload: dict[str, Any],
+    *,
+    progress_callback: Any | None = None,
 ) -> ReaderActionResult:
     profile = ctx.profile_path
     source_id = ctx.source_id
@@ -403,6 +440,7 @@ def _handle_reader_action_inner(
             mode=_payload_text(payload, "mode") or "missing_or_stale",
             ai_profile=ctx.profile_name,
             require_review=False,
+            progress_callback=progress_callback,
         )
         return ReaderActionResult(
             data={"summary": summary},
@@ -410,6 +448,7 @@ def _handle_reader_action_inner(
         )
 
     if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
+        target_lang = _payload_text(payload, "target_lang", "language") or "zh"
         refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
         visible_pages = {
             int(item)
@@ -419,6 +458,7 @@ def _handle_reader_action_inner(
         primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
         if not visible_pages and primary_page:
             visible_pages = {primary_page}
+        requested_pages = sorted(visible_pages)
         segments = [
             segment
             for segment in segment_rows
@@ -448,26 +488,87 @@ def _handle_reader_action_inner(
                 }
             segment_payloads = list(page_scope_rows.values())
         if not segment_payloads:
+            summary = _visible_translation_summary(
+                scope="page" if visible_pages else "segment",
+                requested_pages=requested_pages,
+                segments_selected=0,
+                ai_rows=0,
+                saved=0,
+                failed=0,
+                skipped=0,
+                target_lang=target_lang,
+            )
             return ReaderActionResult(
                 ok=False,
+                data={"summary": summary},
                 message="No extracted text is available for the visible page yet.",
             )
         ai_result = translate_paper_segments(
             ctx.profile_name,
             source_id,
             segment_payloads,
-            target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+            target_lang=target_lang,
             require_review=False,
         )
         translations = []
         if isinstance(ai_result.structured, dict):
             translations = [row for row in ai_result.structured.get("translations", []) if isinstance(row, dict)]
+        warnings = list(ai_result.warnings)
+        savable: list[dict[str, Any]] = []
+        saved = 0
+        failed = 0
+        skipped = 0
+        current_translations = load_paper_translations(profile, source_id)
         if page_scope_rows:
-            savable = []
+            scope = "page"
+            page_index: dict[str, dict[str, Any]] = {}
+            for page_row in page_scope_rows.values():
+                page_index[str(page_row["segment_id"])] = page_row
+                page_index[str(page_row["scope_ref"])] = page_row
+            existing_by_scope = {
+                row.scope_ref: row
+                for row in current_translations
+                if row.scope_type == "page" and row.target_lang == target_lang
+            }
             for row in translations:
                 row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
-                page_row = page_scope_rows.get(row_ref)
+                if not row_ref:
+                    warnings.append("Skipped translation row without segment_id or scope_ref.")
+                    skipped += 1
+                    continue
+                page_row = page_index.get(row_ref)
                 if page_row is None:
+                    warnings.append(f"Skipped translation row for unknown page scope: {row_ref}.")
+                    skipped += 1
+                    continue
+                source_hash = str(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash") or "").strip()
+                if source_hash != page_row["text_hash"]:
+                    warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
+                    skipped += 1
+                    continue
+                translated_text = str(row.get("translated_text") or "").strip()
+                if not translated_text:
+                    warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
+                    existing = existing_by_scope.get(str(page_row["scope_ref"]))
+                    if not _translation_row_current(existing, str(page_row["text_hash"]), target_lang):
+                        savable.append(
+                            {
+                                **row,
+                                "scope_type": "page",
+                                "scope_ref": page_row["scope_ref"],
+                                "segment_id": "",
+                                "page": page_row["page"],
+                                "source_hash": page_row["text_hash"],
+                                "source_text": page_row["text"],
+                                "target_lang": target_lang,
+                                "translated_text": "",
+                                "status": "failed",
+                                "warnings": _payload_list(row, "warnings") + ["translated_text is blank."],
+                            }
+                        )
+                        failed += 1
+                    else:
+                        skipped += 1
                     continue
                 savable.append(
                     {
@@ -478,21 +579,98 @@ def _handle_reader_action_inner(
                         "page": page_row["page"],
                         "source_hash": page_row["text_hash"],
                         "source_text": page_row["text"],
+                        "target_lang": target_lang,
+                        "translated_text": translated_text,
                     }
                 )
+                saved += 1
         else:
+            scope = "segment"
             segment_ids = {segment.segment_id for segment in segments}
-            savable = [
-                row
-                for row in translations
-                if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
-            ]
+            segment_by_id = {segment.segment_id: segment for segment in segments}
+            existing_by_segment = {
+                row.segment_id: row
+                for row in current_translations
+                if row.segment_id and row.target_lang == target_lang
+            }
+            for row in translations:
+                row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
+                if not row_ref:
+                    warnings.append("Skipped translation row without segment_id or scope_ref.")
+                    skipped += 1
+                    continue
+                if row_ref not in segment_ids:
+                    warnings.append(f"Skipped translation row for unknown segment: {row_ref}.")
+                    skipped += 1
+                    continue
+                segment = segment_by_id[row_ref]
+                source_hash = str(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash") or "").strip()
+                if source_hash != segment.text_hash:
+                    warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
+                    skipped += 1
+                    continue
+                translated_text = str(row.get("translated_text") or "").strip()
+                if not translated_text:
+                    warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
+                    existing = existing_by_segment.get(row_ref)
+                    if not _translation_row_current(existing, segment.text_hash, target_lang):
+                        savable.append(
+                            {
+                                **row,
+                                "source_id": source_id,
+                                "scope_type": "segment",
+                                "scope_ref": segment.segment_id,
+                                "segment_id": segment.segment_id,
+                                "page": segment.page,
+                                "source_hash": segment.text_hash,
+                                "source_text": segment.text,
+                                "target_lang": target_lang,
+                                "translated_text": "",
+                                "status": "failed",
+                                "warnings": _payload_list(row, "warnings") + ["translated_text is blank."],
+                            }
+                        )
+                        failed += 1
+                    else:
+                        skipped += 1
+                    continue
+                savable.append(
+                    {
+                        **row,
+                        "source_id": source_id,
+                        "scope_type": "segment",
+                        "scope_ref": segment.segment_id,
+                        "segment_id": segment.segment_id,
+                        "page": segment.page,
+                        "source_hash": segment.text_hash,
+                        "source_text": segment.text,
+                        "target_lang": target_lang,
+                        "translated_text": translated_text,
+                    }
+                )
+                saved += 1
         if savable:
             upsert_paper_translations(profile, source_id, savable)
+        summary = _visible_translation_summary(
+            scope=scope,
+            requested_pages=requested_pages,
+            segments_selected=len(segment_payloads),
+            ai_rows=len(translations),
+            saved=saved,
+            failed=failed,
+            skipped=skipped,
+            target_lang=target_lang,
+        )
+        if saved:
+            message = f"Saved {saved} translation row(s)."
+        elif failed:
+            message = f"Saved {failed} failed translation row(s)."
+        else:
+            message = "No translation rows were saved."
         return ReaderActionResult(
-            data={"structured": ai_result.structured or {}, "saved": len(savable)},
-            warnings=list(ai_result.warnings),
-            message="Saved" if savable else "",
+            data={"structured": ai_result.structured or {}, "summary": summary, "saved": saved},
+            warnings=warnings,
+            message=message,
         )
 
     if action in {TRANSLATE_SELECTION, "translate_segment"}:

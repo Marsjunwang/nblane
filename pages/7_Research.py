@@ -1239,6 +1239,14 @@ def _reader_key(source_id: str, name: str) -> str:
     return f"paper_reader:{selected}:{source_id}:{name}"
 
 
+def _set_reader_action_status(source_id: str, action: str, phase: str, message: str) -> None:
+    st.session_state[_reader_key(source_id, "last_action_status")] = {
+        "action": action,
+        "phase": phase,
+        "message": message,
+    }
+
+
 def _payload_text(payload: dict, *keys: str) -> str:
     for key in keys:
         value = payload.get(key)
@@ -1683,8 +1691,11 @@ def _handle_reader_component_event(
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(ui["saved"])
+                _set_reader_action_status(source_id, action, "done", ui["saved"])
             for warning in result.warnings:
                 st.warning(str(warning))
+            if result.warnings and not isinstance(result.structured, dict):
+                _set_reader_action_status(source_id, action, "error", str(result.warnings[0]))
             return True
 
         if action in {ANNOTATION_CREATE, "create_annotation"}:
@@ -1763,6 +1774,16 @@ def _handle_reader_component_event(
                     count=summary.get("updated", 0)
                 )
             )
+            _set_reader_action_status(
+                source_id,
+                action,
+                "done",
+                _l("translation_full_saved", "Full-paper translation updated: {count} row(s).").format(
+                    count=summary.get("updated", 0)
+                ),
+            )
+            for warning in summary.get("warnings") or []:
+                st.warning(str(warning))
             return True
 
         if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
@@ -1804,12 +1825,12 @@ def _handle_reader_component_event(
                     }
                 segment_payloads = list(page_scope_rows.values())
             if not segment_payloads:
-                st.warning(
-                    _l(
-                        "visible_page_translation_no_text",
-                        "No extracted text is available for the visible page yet. Try Extract pages in Reader diagnostics.",
-                    )
+                message = _l(
+                    "visible_page_translation_no_text",
+                    "No extracted text is available for the visible page yet. Try Extract pages in Reader diagnostics.",
                 )
+                st.warning(message)
+                _set_reader_action_status(source_id, action, "error", message)
                 return True
             result = translate_paper_segments(
                 selected,
@@ -1855,7 +1876,28 @@ def _handle_reader_component_event(
                 upsert_paper_translations(_pdir, source_id, savable)
                 stash_git_backup_results()
                 clear_web_cache()
-                st.success(ui["saved"])
+                message = _l("visible_pages_translation_saved", "Visible pages translated: saved {count} row(s).").format(
+                    count=len(savable)
+                )
+                st.success(message)
+                _set_reader_action_status(source_id, action, "done", message)
+            else:
+                message = _l(
+                    "visible_pages_translation_saved_none",
+                    "No visible-page translations were saved. AI returned {count} valid row(s).",
+                ).format(count=len(translations))
+                st.info(message)
+                _set_reader_action_status(source_id, action, "done", message)
+            st.caption(
+                " · ".join(
+                    [
+                        f"pages={','.join(str(page) for page in sorted(visible_pages)) or '-'}",
+                        f"segments={len(segment_payloads)}",
+                        f"ai_rows={len(translations)}",
+                        f"saved={len(savable)}",
+                    ]
+                )
+            )
             for warning in result.warnings:
                 st.warning(str(warning))
             return True
@@ -2247,6 +2289,7 @@ def _render_paper_reader(inbox) -> None:
                 "render_cache_max_pages": 24,
                 "translation_dock_default": "bottom",
                 "pdf_load_timeout_ms": 9000,
+                "reader_action_status": st.session_state.get(_reader_key(source_id, "last_action_status"), {}),
             },
             key=f"paper_pdf_reader:{selected}:{source_id}",
             height=1040,
