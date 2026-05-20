@@ -15,6 +15,7 @@ ASK_PAPER = "ask_paper"
 CREATE_CHUNK_FROM_SELECTION = "create_chunk_from_selection"
 CREATE_CITATION = "create_citation"
 SAVE_PROGRESS = "save_progress"
+CODEX_DEEP_READ = "codex_deep_read"
 READER_STATE_CHANGED = "reader_state_changed"
 REQUEST_READER_CONTEXT = "request_reader_context"
 REQUEST_PAGE_PREVIEWS = "request_page_previews"
@@ -33,6 +34,7 @@ ReaderEventName = Literal[
     "create_chunk_from_selection",
     "create_citation",
     "save_progress",
+    "codex_deep_read",
     "reader_state_changed",
     "request_reader_context",
     "request_page_previews",
@@ -52,6 +54,7 @@ EVENT_NAMES: tuple[str, ...] = (
     CREATE_CHUNK_FROM_SELECTION,
     CREATE_CITATION,
     SAVE_PROGRESS,
+    CODEX_DEEP_READ,
     READER_STATE_CHANGED,
     REQUEST_READER_CONTEXT,
     REQUEST_PAGE_PREVIEWS,
@@ -95,6 +98,8 @@ class ReaderStatePayload(ReaderBasePayload, total=False):
     focused_annotation_id: str
     focused_chunk_id: str
     last_visible_pages: list[int]
+    compare_split_ratio: int
+    panel_width: int
 
 
 class ReaderEvent(TypedDict):

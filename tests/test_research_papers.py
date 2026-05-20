@@ -508,6 +508,16 @@ class TestResearchPapers(unittest.TestCase):
             "第一页译文。",
             [row["translated_text"] for row in payload["translations"]],
         )
+        self.assertIn("translation_units", payload)
+        self.assertIn("translation_summary", payload)
+        self.assertIn("translation_revision", payload)
+        self.assertEqual(payload["compare_split_ratio"], 50)
+        self.assertEqual(payload["panel_width"], 340)
+        units_by_scope = {row["scope_ref"]: row for row in payload["translation_units"]}
+        self.assertEqual(units_by_scope[f"page:1:{pages[0].text_hash}"]["translated_text"], "第一页译文。")
+        self.assertEqual(units_by_scope["seg:unpaged:00001"]["translated_text"], "无页码结构化段落译文。")
+        self.assertEqual(payload["translation_summary"]["translated"], 2)
+        self.assertGreaterEqual(payload["translation_summary"]["missing"], 1)
 
     def test_get_stable_pdf_url_uses_fingerprint_cache_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -782,6 +792,67 @@ class TestResearchPapers(unittest.TestCase):
         self.assertIn("source_hash mismatch", " ".join(summary["warnings"]))
         self.assertEqual(len(translations), 1)
         self.assertEqual(translations[0].translated_text, "稳定译文。")
+
+    def test_translate_full_paper_uses_page_fallback_for_unpaged_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            page = PaperPage(
+                source_id=source_id,
+                page=1,
+                text="Whole PDF page text.",
+                text_hash=text_hash("Whole PDF page text."),
+            )
+            segment = PaperSegment(
+                segment_id="seg:unpaged",
+                source_id=source_id,
+                page=0,
+                order=1,
+                text="Structured text without page.",
+                text_hash=text_hash("Structured text without page."),
+            )
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, [page])
+                save_paper_segments(profile, source_id, [segment])
+
+            def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+                return SimpleNamespace(
+                    warnings=[],
+                    error="",
+                    structured={
+                        "translations": [
+                            {
+                                "segment_id": row["segment_id"],
+                                "source_hash": row["text_hash"],
+                                "text": f"zh page {row['page']}",
+                            }
+                            for row in batch
+                        ]
+                    },
+                )
+
+            with (
+                patch("nblane.core.ai.gateway.translate_paper_segments", side_effect=fake_translate),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                summary = translate_full_paper(
+                    profile,
+                    source_id,
+                    target_lang="zh",
+                    mode="all",
+                    scope_strategy="auto",
+                    ai_profile="",
+                    require_review=False,
+                )
+            translations = load_paper_translations(profile, source_id)
+
+        self.assertEqual(summary["scope"], "page")
+        self.assertEqual(summary["segments_selected"], 1)
+        self.assertEqual(summary["updated"], 1)
+        self.assertEqual(translations[0].scope_type, "page")
+        self.assertEqual(translations[0].segment_id, "")
+        self.assertEqual(translations[0].page, 1)
+        self.assertEqual(translations[0].translated_text, "zh page 1")
 
     def test_import_selected_search_results_dedupes_and_defaults_private(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

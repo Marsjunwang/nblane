@@ -113,11 +113,35 @@ Ingest and full evidence editing remain **CLI / Web**.
 
 ### Web UI
 
+Run the Web UI from the repo root. The Research PDF Reader has two local-dev
+options:
+
+**Recommended for Reader development: Streamlit + FastAPI sidecar.** Start the
+Reader API first, then start Streamlit with a browser-reachable
+`NBLANE_READER_API_BASE`:
+
 ```bash
-NBLANE_READER_API_BASE=http://localhost:8502 streamlit run app.py
-# Optional sidecar used by Research PDF Reader in local dev without Caddy:
-uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --reload
+# Terminal 1
+PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
+  --host 127.0.0.1 --port 8502 --reload
+
+# Terminal 2
+NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
+PYTHONPATH=src .venv/bin/streamlit run app.py \
+  --server.address=127.0.0.1 --server.port=8503 --server.headless=true
 ```
+
+When you view Streamlit through SSH / IDE port forwarding, forward both `8503`
+and `8502`, and set `NBLANE_READER_API_BASE` to the URL your browser can reach
+for port `8502`. If this variable is omitted without a reverse proxy, the
+iframe uses `/reader/view/...`; plain Streamlit will serve its own shell at that
+path, which looks like a blank Reader.
+
+**One-process fallback:** set `NBLANE_READER_USE_STREAMLIT_COMPONENT=1` to use
+the static Streamlit component instead of the FastAPI iframe Reader.
+
+In production behind Caddy, leave `NBLANE_READER_API_BASE` unset and route
+`/reader/*` to the FastAPI sidecar.
 
 Core surfaces include **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**,
 **Research Workspace**, **Output Studio**, **Public Build**, **Team View**,

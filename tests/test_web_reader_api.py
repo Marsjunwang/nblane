@@ -172,6 +172,14 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("setActionState", response.text)
         self.assertIn("startReaderTask", response.text)
         self.assertIn("watchReaderTask", response.text)
+        self.assertIn("translation_units", response.text)
+        self.assertIn("renderTranslationPage", response.text)
+        self.assertIn("syncCompareScroll", response.text)
+        self.assertIn("annotationPopover", response.text)
+        self.assertIn("panelResize", response.text)
+        self.assertIn("compare_split_ratio", response.text)
+        self.assertIn("Deep Read", response.text)
+        self.assertNotIn('tabButton("translation"', response.text)
         self.assertNotIn("streamlit:setComponentValue", response.text)
 
     def test_pdf_range_and_page_preview(self) -> None:

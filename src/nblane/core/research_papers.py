@@ -1417,13 +1417,18 @@ class PaperTranslation:
     scope_ref: str = ""
     segment_id: str = ""
     page: int = 0
+    order: int = 0
+    anchor_id: str = ""
+    locator: str = ""
     source_hash: str = ""
     source_text: str = ""
     target_lang: str = "zh"
     translated_text: str = ""
+    rects: list[dict[str, object]] = field(default_factory=list)
     glossary: dict[str, object] = field(default_factory=dict)
     generated_by: str = ""
     status: str = "translated"
+    status_reason: str = ""
     warnings: list[str] = field(default_factory=list)
     created: str = ""
 
@@ -1439,6 +1444,10 @@ class PaperTranslation:
             page = int(data.get("page") or 0)
         except (TypeError, ValueError):
             page = 0
+        try:
+            order = int(data.get("order") or 0)
+        except (TypeError, ValueError):
+            order = 0
         return cls(
             id=tr_id,
             source_id=source_id,
@@ -1446,13 +1455,18 @@ class PaperTranslation:
             scope_ref=_clean_text(data.get("scope_ref")),
             segment_id=_clean_text(data.get("segment_id")),
             page=page,
+            order=order,
+            anchor_id=_clean_text(data.get("anchor_id")),
+            locator=_clean_text(data.get("locator")),
             source_hash=_clean_text(data.get("source_hash")),
             source_text=_clean_text(data.get("source_text")),
             target_lang=_clean_text(data.get("target_lang")) or "zh",
             translated_text=translation_text_from_row(data),
+            rects=[copy.deepcopy(row) for row in data.get("rects") or [] if isinstance(row, dict)],
             glossary=_clean_mapping(data.get("glossary")),
             generated_by=_clean_text(data.get("generated_by")),
             status=_choice(data.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
+            status_reason=_clean_text(data.get("status_reason")),
             warnings=_clean_list(data.get("warnings")),
             created=_clean_text(data.get("created")),
         )
@@ -1465,13 +1479,18 @@ class PaperTranslation:
             "scope_ref": self.scope_ref,
             "segment_id": self.segment_id,
             "page": int(self.page),
+            "order": int(self.order),
+            "anchor_id": self.anchor_id,
+            "locator": self.locator,
             "source_hash": self.source_hash,
             "source_text": self.source_text,
             "target_lang": self.target_lang or "zh",
             "translated_text": self.translated_text,
+            "rects": copy.deepcopy(self.rects),
             "glossary": copy.deepcopy(self.glossary),
             "generated_by": self.generated_by,
             "status": self.status or "translated",
+            "status_reason": self.status_reason,
             "warnings": list(self.warnings),
             "created": self.created or _now(),
         }
@@ -1696,13 +1715,27 @@ def _reader_page_set(
     return pages
 
 
+def _metadata_int(metadata: dict[str, object], key: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(metadata.get(key) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
 def _reader_state_from_metadata(metadata: dict[str, object], *, page: int, target_lang: str) -> dict[str, object]:
+    try:
+        last_read_page = int(metadata.get("last_read_page") or page or 1)
+    except (TypeError, ValueError):
+        last_read_page = page or 1
     return {
         "reader_mode": _clean_text(metadata.get("reader_mode")) or "pdf",
         "scale_mode": _clean_text(metadata.get("scale_mode")) or "fit-width",
-        "active_tab": _clean_text(metadata.get("active_tab")) or "translation",
+        "active_tab": _clean_text(metadata.get("active_tab")) or "notes",
         "target_lang": _clean_text(metadata.get("target_lang")) or target_lang or "zh",
         "side_panel_collapsed": bool(metadata.get("side_panel_collapsed", True)),
+        "compare_split_ratio": _metadata_int(metadata, "compare_split_ratio", 50, minimum=20, maximum=80),
+        "panel_width": _metadata_int(metadata, "panel_width", 340, minimum=280, maximum=560),
         "focused_annotation_id": _clean_text(metadata.get("focused_annotation_id")),
         "focused_chunk_id": _clean_text(metadata.get("focused_chunk_id")),
         "last_visible_pages": [
@@ -1710,9 +1743,138 @@ def _reader_state_from_metadata(metadata: dict[str, object], *, page: int, targe
             for item in metadata.get("last_visible_pages", [])
             if str(item).strip().isdigit()
         ] if isinstance(metadata.get("last_visible_pages"), list) else [],
-        "last_read_page": max(1, int(metadata.get("last_read_page") or page or 1)),
+        "last_read_page": max(1, last_read_page),
         "last_read_at": _clean_text(metadata.get("last_read_at")),
     }
+
+
+def _translation_revision(profile: str | Path, source_id: str, target_lang: str) -> str:
+    parts = [source_id, target_lang]
+    for dirname in (PAPER_PAGES_DIRNAME, PAPER_SEGMENTS_DIRNAME, PAPER_TRANSLATIONS_DIRNAME):
+        path = _jsonl_path(profile, dirname, source_id)
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            parts.append(f"{dirname}:missing")
+            continue
+        parts.append(f"{dirname}:{stat.st_mtime_ns}:{stat.st_size}")
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _translation_unit_status(row: dict[str, object] | None, source_hash: str) -> str:
+    if row is None:
+        return "missing"
+    status = _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated")
+    if status == "failed":
+        return "failed"
+    if status == "stale":
+        return "stale"
+    if _clean_text(row.get("source_hash")) and _clean_text(row.get("source_hash")) != source_hash:
+        return "stale"
+    if not translation_text_from_row(row):
+        return "missing"
+    return "translated"
+
+
+def build_translation_units(
+    *,
+    pages: list[PaperPage],
+    segments: list[dict[str, object]],
+    translations: list[dict[str, object]],
+    target_lang: str,
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    """Return ordered translation reading units for Reader visual modes."""
+
+    units: list[dict[str, object]] = []
+    summary = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
+    page_rows = sorted(pages, key=lambda row: row.page)
+    page_translations: dict[int, dict[str, object]] = {}
+    segment_translations: dict[str, dict[str, object]] = {}
+    for row in translations:
+        if _clean_text(row.get("target_lang") or "zh") != target_lang:
+            continue
+        scope_type = _clean_text(row.get("scope_type")) or "segment"
+        if scope_type == "page":
+            try:
+                page_number = int(row.get("page") or 0)
+            except (TypeError, ValueError):
+                page_number = 0
+            if page_number > 0:
+                page_translations[page_number] = row
+        elif scope_type == "segment":
+            segment_id = _clean_text(row.get("segment_id") or row.get("scope_ref"))
+            if segment_id:
+                segment_translations[segment_id] = row
+
+    for index, page_row in enumerate(page_rows, start=1):
+        source_text = _clean_text(page_row.text)
+        if not source_text:
+            continue
+        page_hash = page_row.text_hash or text_hash(source_text)
+        translation = page_translations.get(page_row.page)
+        translated_text = translation_text_from_row(translation or {})
+        status = _translation_unit_status(translation, page_hash)
+        summary[status] = summary.get(status, 0) + 1
+        scope_ref = f"page:{page_row.page}:{page_hash}"
+        units.append(
+            {
+                "unit_id": scope_ref,
+                "anchor_id": scope_ref,
+                "scope_type": "page",
+                "scope_ref": scope_ref,
+                "segment_id": "",
+                "page": page_row.page,
+                "order": index * 100000,
+                "locator": f"p. {page_row.page}",
+                "source_hash": page_hash,
+                "source_text": source_text,
+                "target_lang": target_lang,
+                "translated_text": translated_text,
+                "status": status,
+                "status_reason": _clean_text((translation or {}).get("status_reason")),
+                "rects": [],
+            }
+        )
+
+    for raw_segment in sorted(segments, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("segment_id")))):
+        segment_id = _clean_text(raw_segment.get("segment_id"))
+        source_text = _clean_text(raw_segment.get("text"))
+        if not segment_id or not source_text:
+            continue
+        source_hash = _clean_text(raw_segment.get("text_hash")) or text_hash(source_text)
+        translation = segment_translations.get(segment_id)
+        translated_text = translation_text_from_row(translation or {})
+        status = _translation_unit_status(translation, source_hash)
+        summary[status] = summary.get(status, 0) + 1
+        try:
+            page_number = int(raw_segment.get("page") or 0)
+        except (TypeError, ValueError):
+            page_number = 0
+        try:
+            order = int(raw_segment.get("order") or 0)
+        except (TypeError, ValueError):
+            order = 0
+        units.append(
+            {
+                "unit_id": f"segment:{segment_id}",
+                "anchor_id": f"segment:{segment_id}",
+                "scope_type": "segment",
+                "scope_ref": segment_id,
+                "segment_id": segment_id,
+                "page": page_number,
+                "order": order,
+                "locator": _clean_text(raw_segment.get("locator")) or (f"p. {page_number}" if page_number else ""),
+                "source_hash": source_hash,
+                "source_text": source_text,
+                "target_lang": target_lang,
+                "translated_text": translated_text,
+                "status": status,
+                "status_reason": _clean_text((translation or {}).get("status_reason")),
+                "rects": copy.deepcopy(raw_segment.get("rects") or []),
+            }
+        )
+    units.sort(key=lambda row: (int(row.get("page") or 0) if int(row.get("page") or 0) > 0 else 10**9, int(row.get("order") or 0), _clean_text(row.get("unit_id"))))
+    return units, summary
 
 
 def build_reader_payload(
@@ -1774,6 +1936,13 @@ def build_reader_payload(
             )
         )
     ]
+    page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
+    translation_units, translation_summary = build_translation_units(
+        pages=page_context_rows,
+        segments=segments,
+        translations=translations,
+        target_lang=target_lang,
+    )
     annotations = [
         ann.to_dict()
         for ann in load_paper_annotations(profile, source_id)
@@ -1804,9 +1973,14 @@ def build_reader_payload(
         "source": source.to_dict(),
         "pdf_url": pdf_url,
         "page_previews": preview_rows,
-        "pages": [page_row.to_dict() for page_row in all_pages if page_row.page in context_page_set],
+        "pages": [page_row.to_dict() for page_row in page_context_rows],
         "segments": segments,
         "translations": translations,
+        "translation_units": translation_units,
+        "translation_summary": translation_summary,
+        "translation_revision": _translation_revision(profile, source_id, target_lang),
+        "compare_split_ratio": _metadata_int(metadata, "compare_split_ratio", 50, minimum=20, maximum=80),
+        "panel_width": _metadata_int(metadata, "panel_width", 340, minimum=280, maximum=560),
         "annotations": annotations,
         "chunks": chunks,
         "analysis": load_paper_analysis(profile, source_id),
@@ -1898,6 +2072,50 @@ def _translation_status_counts(
     return counts
 
 
+def _page_translation_is_current(
+    translation: PaperTranslation | None,
+    page: PaperPage,
+    target_lang: str,
+) -> bool:
+    if translation is None:
+        return False
+    if translation.target_lang != target_lang:
+        return False
+    if translation.status != "translated":
+        return False
+    if not _clean_text(translation.translated_text):
+        return False
+    return translation.source_hash == (page.text_hash or text_hash(page.text))
+
+
+def _page_translation_status_counts(
+    pages: list[PaperPage],
+    translations: list[PaperTranslation],
+    *,
+    target_lang: str,
+) -> dict[str, int]:
+    by_scope = {
+        row.scope_ref: row
+        for row in translations
+        if row.scope_type == "page" and row.target_lang == target_lang
+    }
+    counts = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
+    for page in pages:
+        if not _clean_text(page.text):
+            continue
+        page_hash = page.text_hash or text_hash(page.text)
+        row = by_scope.get(f"page:{page.page}:{page_hash}")
+        if row is None:
+            counts["missing"] += 1
+        elif row.status == "failed":
+            counts["failed"] += 1
+        elif not _page_translation_is_current(row, page, target_lang):
+            counts["stale"] += 1
+        else:
+            counts["translated"] += 1
+    return counts
+
+
 def translate_full_paper(
     profile: str | Path,
     source_id: str,
@@ -1905,6 +2123,7 @@ def translate_full_paper(
     mode: str = "missing_or_stale",
     batch_size: int = 20,
     *,
+    scope_strategy: str = "auto",
     ai_profile: str | None = None,
     require_review: bool = True,
     progress_callback: Any | None = None,
@@ -1919,6 +2138,9 @@ def translate_full_paper(
 
     clean_lang = _clean_text(target_lang) or "zh"
     clean_mode = _clean_text(mode).lower() or "missing_or_stale"
+    clean_scope_strategy = _clean_text(scope_strategy).lower() or "auto"
+    if clean_scope_strategy not in {"auto", "segment", "page"}:
+        clean_scope_strategy = "auto"
     if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
         raise ValueError(f"Unknown full-paper translation mode: {mode}")
     try:
@@ -1930,6 +2152,180 @@ def translate_full_paper(
     if not segments:
         ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
         segments = load_paper_segments(profile, source_id)
+    pages = load_paper_pages(profile, source_id)
+    use_page_scope = bool(pages) and (
+        clean_scope_strategy == "page"
+        or (clean_scope_strategy == "auto" and segments and not any(segment.page > 0 for segment in segments))
+        or (clean_scope_strategy == "auto" and not segments)
+    )
+    if use_page_scope:
+        translations = load_paper_translations(profile, source_id)
+        existing_by_scope = {
+            row.scope_ref: row
+            for row in translations
+            if row.scope_type == "page" and row.target_lang == clean_lang
+        }
+        selected_pages: list[PaperPage] = []
+        for page_row in pages:
+            if not _clean_text(page_row.text):
+                continue
+            page_hash = page_row.text_hash or text_hash(page_row.text)
+            existing = existing_by_scope.get(f"page:{page_row.page}:{page_hash}")
+            is_current = _page_translation_is_current(existing, page_row, clean_lang)
+            is_stale = existing is not None and not is_current
+            if clean_mode == "all":
+                selected_pages.append(page_row)
+            elif clean_mode == "missing" and existing is None:
+                selected_pages.append(page_row)
+            elif clean_mode == "stale" and is_stale:
+                selected_pages.append(page_row)
+            elif clean_mode == "missing_or_stale" and (existing is None or is_stale):
+                selected_pages.append(page_row)
+
+        warnings: list[str] = []
+        accepted_rows: list[dict[str, object]] = []
+        page_map: dict[str, PaperPage] = {}
+        page_payloads: list[dict[str, object]] = []
+        for page_row in selected_pages:
+            page_hash = page_row.text_hash or text_hash(page_row.text)
+            synthetic_id = f"page:{page_row.page}"
+            payload = {
+                "segment_id": synthetic_id,
+                "source_id": source_id,
+                "scope_type": "page",
+                "scope_ref": f"page:{page_row.page}:{page_hash}",
+                "page": page_row.page,
+                "order": page_row.page,
+                "section_path": [],
+                "kind": "page",
+                "text": page_row.text,
+                "text_hash": page_hash,
+                "locator": f"p. {page_row.page}",
+            }
+            page_map[synthetic_id] = page_row
+            page_map[payload["scope_ref"]] = page_row
+            page_payloads.append(payload)
+        batches = [
+            page_payloads[index : index + clean_batch_size]
+            for index in range(0, len(page_payloads), clean_batch_size)
+        ]
+        batches_completed = 0
+        pages_processed = 0
+        if batches:
+            from nblane.core.ai.gateway import translate_paper_segments
+
+            for batch in batches:
+                try:
+                    result = translate_paper_segments(
+                        ai_profile if ai_profile is not None else _profile_name(profile),
+                        source_id,
+                        batch,
+                        target_lang=clean_lang,
+                        require_review=require_review,
+                    )
+                except Exception as exc:
+                    warnings.append(f"Translation batch failed: {exc}")
+                    batches_completed += 1
+                    pages_processed += len(batch)
+                    continue
+                warnings.extend(str(warning) for warning in result.warnings)
+                if result.error:
+                    warnings.append(result.error)
+                structured = result.structured if isinstance(result.structured, dict) else {}
+                for raw in structured.get("translations") or []:
+                    if not isinstance(raw, dict):
+                        continue
+                    row = normalize_translation_row(raw, source_id=source_id, target_lang=clean_lang)
+                    row_ref = _clean_text(row.get("segment_id") or row.get("scope_ref"))
+                    page_row = page_map.get(row_ref)
+                    if page_row is None:
+                        warnings.append("Skipped translation row without a known page scope.")
+                        continue
+                    page_hash = page_row.text_hash or text_hash(page_row.text)
+                    source_hash = _clean_text(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash"))
+                    if source_hash != page_hash:
+                        warnings.append(f"Skipped translation for page {page_row.page}: source_hash mismatch.")
+                        continue
+                    translated_text = translation_text_from_row(row)
+                    if not translated_text:
+                        warnings.append(f"Skipped translation for page {page_row.page}: translated_text is blank.")
+                        existing = existing_by_scope.get(f"page:{page_row.page}:{page_hash}")
+                        if not _page_translation_is_current(existing, page_row, clean_lang):
+                            accepted_rows.append(
+                                {
+                                    **copy.deepcopy(row),
+                                    "source_id": source_id,
+                                    "scope_type": "page",
+                                    "scope_ref": f"page:{page_row.page}:{page_hash}",
+                                    "segment_id": "",
+                                    "page": page_row.page,
+                                    "order": page_row.page,
+                                    "locator": f"p. {page_row.page}",
+                                    "source_hash": page_hash,
+                                    "source_text": page_row.text,
+                                    "target_lang": clean_lang,
+                                    "translated_text": "",
+                                    "status": "failed",
+                                    "warnings": _clean_list(row.get("warnings")) + ["translated_text is blank."],
+                                }
+                            )
+                        continue
+                    accepted_rows.append(
+                        {
+                            **copy.deepcopy(row),
+                            "source_id": source_id,
+                            "scope_type": "page",
+                            "scope_ref": f"page:{page_row.page}:{page_hash}",
+                            "segment_id": "",
+                            "page": page_row.page,
+                            "order": page_row.page,
+                            "locator": f"p. {page_row.page}",
+                            "source_hash": page_hash,
+                            "source_text": page_row.text,
+                            "target_lang": clean_lang,
+                            "translated_text": translated_text,
+                            "status": _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
+                        }
+                    )
+                batches_completed += 1
+                pages_processed += len(batch)
+                if progress_callback is not None:
+                    try:
+                        progress_callback(
+                            {
+                                "source_id": source_id,
+                                "target_lang": clean_lang,
+                                "mode": clean_mode,
+                                "scope": "page",
+                                "batches": len(batches),
+                                "batches_completed": batches_completed,
+                                "segments_selected": len(selected_pages),
+                                "segments_processed": pages_processed,
+                                "updated": len(accepted_rows),
+                                "warnings": len(warnings),
+                            }
+                        )
+                    except Exception as exc:
+                        warnings.append(f"Progress callback failed: {exc}")
+        if accepted_rows:
+            upsert_paper_translations(profile, source_id, accepted_rows)
+        final_translations = load_paper_translations(profile, source_id)
+        counts = _page_translation_status_counts(pages, final_translations, target_lang=clean_lang)
+        return {
+            "source_id": source_id,
+            "target_lang": clean_lang,
+            "mode": clean_mode,
+            "scope": "page",
+            "segments_total": len(pages),
+            "segments_selected": len(selected_pages),
+            "batches": len(batches),
+            "updated": len(accepted_rows),
+            "translated": counts["translated"],
+            "missing": counts["missing"],
+            "stale": counts["stale"],
+            "failed": counts["failed"],
+            "warnings": warnings,
+        }
     translations = load_paper_translations(profile, source_id)
     existing_by_segment = {
         row.segment_id: row
@@ -3462,6 +3858,7 @@ __all__ = [
     "PaperTranslation",
     "auto_chunk_paper",
     "build_reader_payload",
+    "build_translation_units",
     "check_paper_links",
     "create_chunk_from_annotation",
     "create_paper_annotation",

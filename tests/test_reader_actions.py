@@ -93,13 +93,18 @@ class TestReaderActions(unittest.TestCase):
                 )
                 handle_reader_action(
                     ctx,
+                    "annotation_update",
+                    {"annotation_id": annotation_id, "note": ""},
+                )
+                handle_reader_action(
+                    ctx,
                     "annotation_delete",
                     {"annotation_id": annotation_id},
                 )
             annotations = load_paper_annotations(profile, ctx.source_id)
 
         self.assertEqual(len(annotations), 1)
-        self.assertEqual(annotations[0].note, "updated")
+        self.assertEqual(annotations[0].note, "")
         self.assertEqual(annotations[0].status, "deleted")
 
     def test_translate_selection_saves_translation(self) -> None:

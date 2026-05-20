@@ -22,6 +22,7 @@ from nblane.core.ai import (
     translate_paper_segments,
 )
 from nblane.core.io import profile_dir
+from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperSearchResult,
@@ -75,6 +76,7 @@ from nblane.research_paper_reader_component.events import (
     ANNOTATION_DELETE,
     ANNOTATION_UPDATE,
     ASK_PAPER,
+    CODEX_DEEP_READ,
     CREATE_CHUNK_FROM_SELECTION,
     CREATE_CITATION,
     EXPLAIN_SELECTION,
@@ -1396,6 +1398,9 @@ def _save_reader_state(source_id: str, payload: dict) -> None:
         value = _payload_text(payload, key)
         if value:
             metadata[key] = value
+    for key in ("compare_split_ratio", "panel_width"):
+        if key in payload:
+            metadata[key] = _payload_int(payload, key, int(metadata.get(key) or (50 if key == "compare_split_ratio" else 340)))
     if "side_panel_collapsed" in payload:
         metadata["side_panel_collapsed"] = bool(payload.get("side_panel_collapsed"))
     if visible_pages:
@@ -1510,9 +1515,8 @@ def _update_or_delete_paper_annotation(source_id: str, payload: dict, *, delete:
             if selected_text:
                 ann.selected_text = selected_text
                 ann.selected_text_hash = _payload_text(payload, "selected_text_hash") or text_hash(selected_text)
-            note = _payload_text(payload, "note")
-            if note:
-                ann.note = note
+            if "note" in payload:
+                ann.note = str(payload.get("note") or "").strip()
             color = _payload_text(payload, "color")
             if color:
                 ann.color = color
@@ -1712,6 +1716,31 @@ def _handle_reader_component_event(
                 st.warning(str(warning))
             if result.warnings and not isinstance(result.structured, dict):
                 _set_reader_action_status(source_id, action, "error", str(result.warnings[0]))
+            return True
+
+        if action == CODEX_DEEP_READ:
+            ctx = ReaderActionContext(
+                profile_name=selected,
+                profile_path=_pdir,
+                user_id=getattr(user, "id", "local"),
+                source_id=source_id,
+            )
+            result = handle_reader_action(ctx, action, payload)
+            st.session_state[_reader_key(source_id, "ai_result")] = {
+                "action": action,
+                "structured": result.data.get("structured") if isinstance(result.data, dict) else {},
+                "warnings": list(result.warnings),
+            }
+            if result.ok:
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(result.message or ui["saved"])
+                _set_reader_action_status(source_id, action, "done", result.message or ui["saved"])
+            else:
+                st.warning(result.message or "Deep read did not return a candidate.")
+                _set_reader_action_status(source_id, action, "error", result.message or "Deep read failed")
+            for warning in result.warnings:
+                st.warning(str(warning))
             return True
 
         if action in {ANNOTATION_CREATE, "create_annotation"}:
@@ -2260,12 +2289,18 @@ def _render_paper_reader(inbox) -> None:
             segments=reader_payload["segments"],
             annotations=reader_payload["annotations"],
             translations=reader_payload["translations"],
+            translation_units=reader_payload.get("translation_units", []),
+            translation_summary=reader_payload.get("translation_summary", {}),
+            translation_revision=str(reader_payload.get("translation_revision") or ""),
+            compare_split_ratio=reader_payload.get("compare_split_ratio") or 50,
+            panel_width=reader_payload.get("panel_width") or 340,
             chunks=reader_payload["chunks"],
             analysis=reader_payload["analysis"],
             ui={
                 "annotations": _l("annotations", "Annotations"),
                 "translation": _l("translation", "Translation"),
-                "ai": "AI",
+                "ai": "Deep Read",
+                "deep_read": "Deep Read",
                 "claims": ui["claims_citations"],
                 "create_annotation": _l("highlight", "Highlight"),
                 "delete_annotation": _l("delete_annotation", "Delete annotation"),
@@ -2299,8 +2334,10 @@ def _render_paper_reader(inbox) -> None:
                 "view_mode": "continuous",
                 "reader_mode": reader_state.get("reader_mode") or "pdf",
                 "scale_mode": reader_state.get("scale_mode") or "fit-width",
-                "active_tab": reader_state.get("active_tab") or "translation",
+                "active_tab": reader_state.get("active_tab") or "notes",
                 "target_lang": reader_state.get("target_lang") or "zh",
+                "compare_split_ratio": reader_state.get("compare_split_ratio") or reader_payload.get("compare_split_ratio") or 50,
+                "panel_width": reader_state.get("panel_width") or reader_payload.get("panel_width") or 340,
                 "overscan_pages": 2,
                 "auto_save_progress": False,
                 "emit_passive_events": False,

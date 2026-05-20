@@ -13,7 +13,7 @@ source_of_truth: true
 
 | 项目 | 说明 |
 |------|------|
-| 入口 | 在仓库根目录执行 `streamlit run app.py` |
+| 入口 | 在仓库根目录启动 Streamlit；Research PDF Reader 默认还需要 FastAPI sidecar |
 | 范围 | `app.py` + `pages/*.py`；这是文件驱动的私有工作台。Public Site 页面会构建静态公开产物，但 Streamlit 应用本身**不是**托管公开站点 |
 
 ---
@@ -23,6 +23,41 @@ source_of_truth: true
 1. 安装：`pip install -e .`（见 [安装与 LLM 配置](setup.md)）。
 2. 至少一个 `profiles/` 下的档案（`nblane init <名称>`）。
 3. 可选 **LLM**：在 `.env` 配置 `LLM_API_KEY` 等，以使用差距页 AI 教练、首页简历摄入、看板「已完成→证据」。看板页也可选择本地 **Codex** 作为只读 AI backend，替代看板内的 LLM 动作。未配置时仍可使用规则差距分析与全部非 AI 编辑。
+
+### 1.1 本地启动 Research PDF Reader
+
+Reader 的 PDF 阅读器默认是 **Streamlit 主应用 + FastAPI Reader sidecar** 两个进程。
+本地开发没有 Caddy 反向代理时，需要先启动 sidecar，并让 Streamlit iframe 指向浏览器能访问的
+Reader API 地址：
+
+```bash
+# Terminal 1: Reader API
+PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
+  --host 127.0.0.1 --port 8502 --reload
+
+# Terminal 2: Streamlit UI
+NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
+PYTHONPATH=src .venv/bin/streamlit run app.py \
+  --server.address=127.0.0.1 --server.port=8503 --server.headless=true
+```
+
+如果通过 SSH / IDE port forwarding 在浏览器访问，请同时转发 `8503` 和 `8502`，并把
+`NBLANE_READER_API_BASE` 设成浏览器能打开的 `8502` URL。
+
+白屏常见原因是只启动了 Streamlit，或者没有设置 `NBLANE_READER_API_BASE`。这时 iframe
+会请求相对路径 `/reader/view/...`；没有 Caddy 时这个路径会被 Streamlit 自己接住，
+iframe 里加载的是另一个 Streamlit shell，而不是 Reader API，所以看起来是空白。
+
+只想单进程临时阅读时，可以用静态组件 fallback：
+
+```bash
+NBLANE_READER_USE_STREAMLIT_COMPONENT=1 \
+PYTHONPATH=src .venv/bin/streamlit run app.py \
+  --server.address=127.0.0.1 --server.port=8503 --server.headless=true
+```
+
+生产部署如果已经用 Caddy 将 `/reader/*` 反代到 `127.0.0.1:8502`，则不要设置
+`NBLANE_READER_API_BASE`，保持同源路径即可。
 
 ---
 

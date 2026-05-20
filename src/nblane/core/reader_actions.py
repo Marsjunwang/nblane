@@ -365,9 +365,8 @@ def _update_or_delete_paper_annotation(
             if selected_text:
                 ann.selected_text = selected_text
                 ann.selected_text_hash = _payload_text(payload, "selected_text_hash") or text_hash(selected_text)
-            note = _payload_text(payload, "note")
-            if note:
-                ann.note = note
+            if "note" in payload:
+                ann.note = str(payload.get("note") or "").strip()
             color = _payload_text(payload, "color")
             if color:
                 ann.color = color
@@ -558,6 +557,7 @@ def _handle_reader_action_inner(
             source_id,
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             mode=_payload_text(payload, "mode") or "missing_or_stale",
+            scope_strategy=_payload_text(payload, "scope_strategy") or "auto",
             ai_profile=ctx.profile_name,
             require_review=False,
             progress_callback=progress_callback,
@@ -569,6 +569,9 @@ def _handle_reader_action_inner(
 
     if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
         target_lang = _payload_text(payload, "target_lang", "language") or "zh"
+        scope_strategy = _payload_text(payload, "scope_strategy") or "auto"
+        if scope_strategy not in {"auto", "segment", "page"}:
+            scope_strategy = "auto"
         refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
         visible_pages = {
             int(item)
@@ -587,7 +590,16 @@ def _handle_reader_action_inner(
         ]
         segment_payloads = [segment.to_dict() for segment in segments]
         page_scope_rows: dict[str, dict[str, Any]] = {}
-        if not segment_payloads and visible_pages:
+        use_page_scope = bool(visible_pages) and (
+            scope_strategy == "page"
+            or (
+                scope_strategy == "auto"
+                and not refs
+                and (not segment_payloads or not any(segment.page > 0 for segment in segments))
+            )
+        )
+        if use_page_scope:
+            segment_payloads = []
             for page in load_paper_pages(profile, source_id):
                 if page.page not in visible_pages or not str(page.text or "").strip():
                     continue

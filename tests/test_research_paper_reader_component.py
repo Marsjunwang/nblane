@@ -37,6 +37,15 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("selectionDock", html)
         self.assertIn("placeSelectionDock", html)
         self.assertIn("translatedTextFromRow", html)
+        self.assertIn("translation_units", html)
+        self.assertIn("renderTranslationPage", html)
+        self.assertIn("syncCompareScroll", html)
+        self.assertIn("annotationPopover", html)
+        self.assertIn("panelResize", html)
+        self.assertIn("compare_split_ratio", html)
+        self.assertIn("panel_width", html)
+        self.assertIn("Deep Read", html)
+        self.assertNotIn('tabButton("translation"', html)
         self.assertIn("segmentRowsForPages", html)
         self.assertIn("pageTranslationRowsForPages", html)
         self.assertIn("data-delete-annotation", html)
@@ -61,6 +70,8 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn('"emit_passive_events": False', page_source)
         self.assertIn('"render_cache": True', page_source)
         self.assertIn('"translation_dock_default": "selection"', page_source)
+        self.assertIn('"compare_split_ratio": reader_state.get("compare_split_ratio")', page_source)
+        self.assertIn('"panel_width": reader_state.get("panel_width")', page_source)
         self.assertIn('"pdf_load_timeout_ms": 9000', page_source)
         self.assertIn("loadingWatchdogTimer", html)
         self.assertIn("pageDomReady", html)
@@ -103,6 +114,7 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
                 "retry_translation_scope",
                 "save_progress",
                 "generate_review_card",
+                "codex_deep_read",
             },
         )
 
@@ -198,6 +210,11 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
                 segments=[{"segment_id": "seg-1"}],
                 annotations=[{"id": "ann-1"}],
                 translations=[{"id": "tr-1"}],
+                translation_units=[{"unit_id": "unit-1"}],
+                translation_summary={"translated": 1},
+                translation_revision="rev-1",
+                compare_split_ratio=62,
+                panel_width=420,
                 chunks=[{"id": "chunk-1"}],
                 analysis={"tldr": "Useful paper."},
                 ui={"page": "Page"},
@@ -210,6 +227,11 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertEqual(captured["segments"], [{"segment_id": "seg-1"}])
         self.assertEqual(captured["annotations"], [{"id": "ann-1"}])
         self.assertEqual(captured["translations"], [{"id": "tr-1"}])
+        self.assertEqual(captured["translation_units"], [{"unit_id": "unit-1"}])
+        self.assertEqual(captured["translation_summary"], {"translated": 1})
+        self.assertEqual(captured["translation_revision"], "rev-1")
+        self.assertEqual(captured["compare_split_ratio"], 62)
+        self.assertEqual(captured["panel_width"], 420)
         self.assertEqual(captured["chunks"], [{"id": "chunk-1"}])
         self.assertEqual(captured["analysis"], {"tldr": "Useful paper."})
         self.assertEqual(captured["ui"], {"page": "Page"})

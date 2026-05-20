@@ -171,25 +171,35 @@
     }
     .pr-workspace {
       display: grid;
-      grid-template-columns: minmax(420px, 1fr) minmax(260px, 340px);
+      --pr-compare-left: 50%;
+      --pr-panel-width: 340px;
+      grid-template-columns: minmax(420px, 1fr) minmax(280px, var(--pr-panel-width));
       gap: 10px;
       min-height: 0;
       overflow: hidden;
     }
     .pr-workspace.panel-collapsed { grid-template-columns: minmax(420px, 1fr) 44px; }
     .pr-workspace.reader-mode-compare {
-      grid-template-columns: minmax(360px, 1fr) minmax(280px, 380px) minmax(260px, 340px);
+      grid-template-columns: minmax(320px, var(--pr-compare-left)) 8px minmax(320px, 1fr) minmax(280px, var(--pr-panel-width));
     }
     .pr-workspace.reader-mode-compare.panel-collapsed {
-      grid-template-columns: minmax(360px, 1fr) minmax(280px, 380px) 44px;
+      grid-template-columns: minmax(320px, var(--pr-compare-left)) 8px minmax(320px, 1fr) 44px;
     }
     .pr-workspace.reader-mode-translation {
-      grid-template-columns: minmax(420px, 1fr) minmax(260px, 340px);
+      grid-template-columns: minmax(420px, 1fr) minmax(280px, var(--pr-panel-width));
     }
     .pr-workspace.reader-mode-translation.panel-collapsed {
       grid-template-columns: minmax(420px, 1fr) 44px;
     }
     .pr-workspace.reader-mode-translation .pr-viewer { display: none; }
+    .pr-workspace.reader-mode-pdf .pr-translation-reader,
+    .pr-workspace.reader-mode-pdf .pr-compare-divider,
+    .pr-workspace.reader-mode-translation .pr-compare-divider { display: none; }
+    .pr-compare-divider {
+      cursor: col-resize;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent 2px, rgba(33, 104, 91, .28) 2px, rgba(33, 104, 91, .28) 6px, transparent 6px);
+    }
     .pr-viewer {
       position: relative;
       height: 100%;
@@ -243,11 +253,16 @@
       color: var(--muted);
       font-size: .82rem;
     }
-    .pr-canvas { display: block; }
+    .pr-canvas {
+      position: relative;
+      z-index: 0;
+      display: block;
+    }
     .pr-canvas.pending-fallback { opacity: 0; }
     .pr-page-preview {
       position: absolute;
       inset: 0;
+      z-index: 1;
       display: none;
       width: 100%;
       height: 100%;
@@ -262,6 +277,7 @@
       pointer-events: none;
     }
     .pr-text-layer {
+      z-index: 2;
       color: transparent;
       user-select: text;
       -webkit-user-select: text;
@@ -275,12 +291,20 @@
       cursor: text;
     }
     .pr-highlight-layer { pointer-events: none; }
+    .pr-highlight-layer { z-index: 3; }
+    .pr-text-layer ::selection {
+      background: rgba(33, 104, 91, .22);
+      color: transparent;
+    }
     .pr-highlight {
       position: absolute;
       border-radius: 3px;
       background: var(--mark);
       outline: 1px solid rgba(138, 91, 18, .18);
+      pointer-events: auto;
+      cursor: pointer;
     }
+    .pr-highlight.has-note { outline: 2px solid rgba(33, 104, 91, .62); }
     .pr-highlight.focus {
       background: rgba(33, 104, 91, .20);
       outline-color: rgba(33, 104, 91, .55);
@@ -331,6 +355,70 @@
       gap: 10px;
       align-content: start;
       padding: 10px;
+    }
+    .pr-translation-pages {
+      display: grid;
+      gap: 18px;
+      justify-items: center;
+      min-height: 100%;
+    }
+    .pr-translation-page {
+      position: relative;
+      width: var(--pr-page-width, 760px);
+      min-height: var(--pr-page-height, 980px);
+      padding: clamp(28px, 5%, 58px);
+      overflow: hidden;
+      border: 1px solid rgba(23, 33, 31, .12);
+      background: #fff;
+      box-shadow: 0 4px 20px rgba(23, 33, 31, .10);
+    }
+    .pr-translation-page-preview {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      opacity: .98;
+      pointer-events: none;
+      user-select: none;
+    }
+    .pr-translation-page-label {
+      position: absolute;
+      right: 12px;
+      top: 10px;
+      z-index: 2;
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 780;
+    }
+    .pr-translation-block {
+      position: relative;
+      z-index: 1;
+      margin: 18px 0;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, .94);
+      color: var(--ink);
+      font-size: .94rem;
+      line-height: 1.68;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .pr-translation-block.missing {
+      color: var(--muted);
+      background: rgba(247, 249, 246, .94);
+    }
+    .pr-translation-block.active {
+      outline: 2px solid rgba(33, 104, 91, .32);
+      background: rgba(235, 247, 242, .96);
+    }
+    .pr-translation-block.placed {
+      position: absolute;
+      margin: 0;
+      overflow: hidden;
+      font-size: clamp(.72rem, var(--pr-translation-font, .9rem), 1rem);
+      line-height: 1.35;
     }
     .pr-translation-row {
       display: grid;
@@ -442,7 +530,11 @@
     }
     .pr-dock-result {
       color: var(--ink);
-      -webkit-line-clamp: 3;
+      display: block;
+      max-height: min(58vh, 520px);
+      overflow: auto;
+      white-space: pre-wrap;
+      -webkit-line-clamp: unset;
     }
     .pr-dock-actions {
       display: flex;
@@ -457,6 +549,35 @@
       line-height: 1.35;
       word-break: break-word;
     }
+    .pr-annotation-popover {
+      position: fixed;
+      left: var(--pr-annotation-left, 16px);
+      top: var(--pr-annotation-top, 16px);
+      z-index: 95;
+      width: min(360px, calc(100vw - 24px));
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid rgba(33, 104, 91, .24);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .98);
+      box-shadow: 0 14px 34px rgba(23, 33, 31, .18);
+    }
+    .pr-annotation-popover .pr-textarea { min-height: 86px; }
+    .pr-annotation-popover-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--accent-strong);
+      font-size: .82rem;
+      font-weight: 850;
+    }
+    .pr-annotation-popover-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
     .pr-side {
       display: grid;
       gap: 10px;
@@ -464,6 +585,7 @@
       height: 100%;
       min-height: 0;
       overflow: auto;
+      position: relative;
     }
     .pr-side.collapsed {
       display: flex;
@@ -492,7 +614,16 @@
       font-weight: 850;
     }
     .pr-panel-body { display: grid; gap: 8px; padding: 10px; }
-    .pr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+    .pr-panel-resize {
+      position: absolute;
+      left: -6px;
+      top: 0;
+      bottom: 0;
+      width: 10px;
+      cursor: col-resize;
+      z-index: 4;
+    }
+    .pr-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
     .pr-tab {
       min-height: 34px;
       border: 0;
@@ -612,7 +743,7 @@
     const DEFAULT_UI = {
       annotations: "Annotations",
       translation: "Translation",
-      ai: "AI",
+      ai: "Deep Read",
       claims: "Claims",
       create_annotation: "Highlight",
       create_chunk: "Chunk",
@@ -625,6 +756,7 @@
       ask_paper: "Ask",
       save_progress: "Save progress",
       review_card: "Review",
+      deep_read: "Deep Read",
       fullscreen: "Fullscreen",
       exit_fullscreen: "Exit fullscreen",
       mode_pdf: "PDF",
@@ -650,6 +782,7 @@
       translating_visible_pages: "Translating visible pages...",
       translating_full_paper: "Translating paper...",
       reviewing_paper: "Reviewing paper...",
+      deep_reading: "Running Codex deep read...",
       answering: "Answering...",
       answered: "Answered.",
       missing: "Missing",
@@ -672,7 +805,7 @@
     let pageRenderStates = new Map();
     let observer = null;
     let currentSelection = null;
-    let activeTab = "translation";
+    let activeTab = "notes";
     let focusedAnnotationId = "";
     let eventSeq = 0;
     let lastFrameHeight = 0;
@@ -680,6 +813,11 @@
     let lastViewportSignature = "";
     let lastProgressPage = 0;
     let sidePanelCollapsed = true;
+    let compareSplitRatio = 50;
+    let panelWidth = 340;
+    let syncLock = false;
+    let activeTranslationAnchor = "";
+    let annotationPopover = { open: false, annotation: null, pending: false, x: 16, y: 16 };
     let readerMode = "pdf";
     let fullscreenActive = false;
     let requestedPreviews = new Set();
@@ -893,6 +1031,7 @@
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
       if (action === "generate_review_card") return '[data-action="reviewCard"]';
+      if (action === "codex_deep_read") return '[data-action="deepRead"]';
       if (action === "ask_paper") return '[data-action="askQuestion"]';
       return "";
     }
@@ -982,6 +1121,8 @@
           active_tab: activeTab,
           target_lang: targetLang(),
           side_panel_collapsed: sidePanelCollapsed,
+          compare_split_ratio: compareSplitRatio,
+          panel_width: panelWidth,
           focused_annotation_id: focusedAnnotationId,
         });
       }, wait);
@@ -1064,8 +1205,10 @@
     function renderShell(message = "") {
       const source = asObj(args.source);
       const title = text(source.title || source.id || "Paper");
+      if (activeTab === "translation") activeTab = "notes";
       syncDockFromArgs();
       const dockVisible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
+      const workspaceStyle = `--pr-compare-left:${Math.max(20, Math.min(80, compareSplitRatio))}%;--pr-panel-width:${Math.max(280, Math.min(560, panelWidth))}px;`;
       document.getElementById("root").innerHTML = `
         <section class="pr-shell ${fullscreenActive ? "fullscreen" : ""}" id="readerShell">
           <header class="pr-toolbar">
@@ -1095,6 +1238,7 @@
               <button class="pr-button primary" data-action="translateFull">${esc(label("translate_full_paper"))}</button>
               <button class="pr-button" data-action="translateVisible">${esc(label("translate_visible_pages"))}</button>
               <button class="pr-button" data-action="reviewCard">${esc(label("review_card"))}</button>
+              <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
               <button class="pr-button" data-action="ask">${esc(label("ask_paper"))}</button>
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
@@ -1102,19 +1246,20 @@
               <span class="pr-action-status" aria-live="polite"></span>
             </div>
           </header>
-          <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""}">
+          <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""}" style="${attr(workspaceStyle)}">
             <section class="pr-viewer" id="viewer">
               <div class="pr-continuous-document" id="continuousDocument"></div>
               <section class="pr-dock pr-selection-popover ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             </section>
+            <div class="pr-compare-divider" id="compareDivider" data-resize="compare" title="Resize compare panes"></div>
             <section class="pr-translation-reader" id="translationReader">${translationReaderHtml()}</section>
             <aside class="pr-side ${sidePanelCollapsed ? "collapsed" : ""}">
+              <div class="pr-panel-resize" id="panelResize" data-resize="panel" title="${attr(label("panel"))}"></div>
               <button class="pr-icon-button pr-side-rail" data-action="togglePanel" title="${attr(label("panel"))}">&lt;</button>
               <section class="pr-panel">
                 <div class="pr-tabs">
                   ${tabButton("notes", label("annotations"))}
-                  ${tabButton("translation", label("translation"))}
-                  ${tabButton("ai", label("ai"))}
+                  ${tabButton("ai", label("deep_read"))}
                   ${tabButton("claims", label("claims"))}
                 </div>
                 <div class="pr-panel-body" id="sideBody">${sideBodyHtml()}</div>
@@ -1128,6 +1273,7 @@
               </section>
             </aside>
           </main>
+          <section id="annotationPopoverMount">${annotationPopoverHtml()}</section>
         </section>
       `;
       wireShell();
@@ -1225,32 +1371,113 @@
         }));
       return [...pageRows, ...segmentRows].slice(0, limit);
     }
-    function translationReaderHtml() {
-      const pages = readerMode === "translation"
-        ? contextPages()
-        : (visiblePages.length ? visiblePages : [currentPage]);
-      const rows = translationRowsForPages(pages, readerMode === "translation" ? 600 : 80);
-      const pageLabel = readerMode === "translation"
-        ? `${label("translation")} · ${label("page")} ${pages.join(", ")}`
-        : `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
-      const body = rows.length ? rows.map(({ segment, translation, state }) => {
-        const translated = translatedTextFromRow(translation);
+    function translationUnits() {
+      const units = asArr(args.translation_units).map((row) => asObj(row));
+      if (units.length) return units;
+      return translationRowsForPages(contextPages(), 800).map(({ segment, translation, state }) => {
+        const obj = asObj(segment);
+        return {
+          unit_id: text(obj.segment_id || obj.scope_ref || `${obj.page || 0}:${text(obj.text).slice(0, 16)}`),
+          anchor_id: text(obj.segment_id || obj.scope_ref || `${obj.page || 0}:${text(obj.text).slice(0, 16)}`),
+          scope_type: text(asObj(translation).scope_type || "segment"),
+          scope_ref: text(obj.segment_id || obj.scope_ref),
+          segment_id: text(obj.segment_id),
+          page: Number(obj.page || 0),
+          order: Number(obj.order || 0),
+          locator: text(obj.locator),
+          source_text: text(obj.text),
+          translated_text: translatedTextFromRow(translation),
+          status: state,
+          rects: asArr(obj.rects),
+        };
+      });
+    }
+    function translationPages() {
+      const unitPages = translationUnits().map((row) => Number(row.page || 0)).filter(Boolean);
+      const pages = readerMode === "translation" ? contextPages() : (visiblePages.length ? visiblePages : [currentPage]);
+      const merged = [...new Set([...pages, ...unitPages])].filter(Boolean).sort((a, b) => a - b);
+      return merged.length ? merged : [currentPage || 1];
+    }
+    function unitsForPage(pageNumber) {
+      const units = translationUnits();
+      const paged = units.filter((row) => Number(row.page || 0) === Number(pageNumber));
+      if (paged.length) return paged;
+      return units.filter((row) => !Number(row.page || 0)).slice(0, 12);
+    }
+    function unitDisplayText(unit) {
+      const obj = asObj(unit);
+      const translated = text(obj.translated_text).trim();
+      if (translated && text(obj.status || "translated") !== "failed") return translated;
+      return text(obj.source_text);
+    }
+    function translationBlockPlacement(unit, size) {
+      const rects = asArr(asObj(unit).rects).map((row) => asObj(row)).filter((row) => (
+        Number(row.w || row.w_pct || 0) > 0 && Number(row.h || row.h_pct || 0) > 0
+      ));
+      if (!rects.length) return { className: "", style: "" };
+      let left = Infinity;
+      let top = Infinity;
+      let right = -Infinity;
+      let bottom = -Infinity;
+      rects.forEach((rect) => {
+        const hasPct = rect.x_pct != null && rect.y_pct != null;
+        const x = hasPct ? Number(rect.x_pct || 0) * size.width : Number(rect.x || 0) * Number(size.scale || 1);
+        const y = hasPct ? Number(rect.y_pct || 0) * size.height : Number(rect.y || 0) * Number(size.scale || 1);
+        const w = hasPct ? Number(rect.w_pct || 0) * size.width : Number(rect.w || 0) * Number(size.scale || 1);
+        const h = hasPct ? Number(rect.h_pct || 0) * size.height : Number(rect.h || 0) * Number(size.scale || 1);
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x + w);
+        bottom = Math.max(bottom, y + h);
+      });
+      if (!Number.isFinite(left) || !Number.isFinite(top)) return { className: "", style: "" };
+      const width = Math.max(24, right - left);
+      const height = Math.max(16, bottom - top);
+      const fontSize = Math.max(10, Math.min(18, height * .72));
+      return {
+        className: "placed",
+        style: `left:${Math.round(left)}px;top:${Math.round(top)}px;width:${Math.round(width)}px;min-height:${Math.round(height)}px;--pr-translation-font:${fontSize}px;`,
+      };
+    }
+    function renderTranslationPage(pageNumber) {
+      const size = pageViewportSize(pageNumber || currentPage || 1);
+      const preview = previewForPage(pageNumber);
+      const previewHtml = preview ? `<img class="pr-translation-page-preview" alt="" src="${attr(preview.data_url)}" />` : "";
+      const units = unitsForPage(pageNumber);
+      const body = units.length ? units.map((unit) => {
+        const obj = asObj(unit);
+        const display = unitDisplayText(obj);
+        const statusName = text(obj.status || (text(obj.translated_text) ? "translated" : "missing"));
+        const active = text(obj.anchor_id || obj.unit_id) === activeTranslationAnchor;
+        const placement = translationBlockPlacement(obj, size);
         return `
-          <article class="pr-translation-row" data-page="${Number(segment.page || 0)}">
-            <div class="pr-item-meta">${esc(segment.locator || (segment.page ? `p. ${segment.page}` : ""))} · ${esc(state)}</div>
-            <div class="pr-translation-text">${esc(translated || label(state) || state)}</div>
-            <div class="pr-translation-source">${esc(text(segment.text).slice(0, 420))}</div>
+          <article class="pr-translation-block ${attr(statusName)} ${active ? "active" : ""} ${attr(placement.className)}" style="${attr(placement.style)}" data-anchor-id="${attr(obj.anchor_id || obj.unit_id)}" data-page="${Number(obj.page || pageNumber || 0)}">
+            ${esc(display || label(statusName) || statusName)}
           </article>
         `;
-      }).join("") : `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      }).join("") : `<article class="pr-translation-block missing">${esc(label("empty"))}</article>`;
+      return `
+        <section class="pr-translation-page" data-page="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
+          ${previewHtml}
+          <div class="pr-translation-page-label">${esc(label("page"))} ${Number(pageNumber || 0)}</div>
+          ${body}
+        </section>
+      `;
+    }
+    function translationReaderHtml() {
+      const pages = translationPages();
+      const pageLabel = `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
+      const body = pages.map((pageNumber) => renderTranslationPage(pageNumber)).join("");
       return `
         <div class="pr-translation-head">${esc(pageLabel)}</div>
-        <div class="pr-translation-body">${body}</div>
+        <div class="pr-translation-body pr-translation-pages">${body}</div>
       `;
     }
     function refreshTranslationReader() {
       const el = document.getElementById("translationReader");
+      if (el && readerMode !== "pdf") requestPagePreviews(translationPages());
       if (el) el.innerHTML = translationReaderHtml();
+      wireTranslationRows();
     }
     function analysisObj() {
       return asObj(args.analysis || args.review_card || args.paper_analysis);
@@ -1402,6 +1629,77 @@
         </div>
       `;
     }
+    function annotationPopoverHtml() {
+      if (!annotationPopover.open) return "";
+      const ann = asObj(annotationPopover.annotation);
+      const id = text(ann.id);
+      const title = id ? label("annotations") : label("create_annotation");
+      const note = text(ann.note);
+      const selected = text(ann.selected_text || currentSelection?.selected_text || "").slice(0, 240);
+      return `
+        <div class="pr-annotation-popover" style="--pr-annotation-left:${Number(annotationPopover.x || 16)}px;--pr-annotation-top:${Number(annotationPopover.y || 16)}px">
+          <div class="pr-annotation-popover-head">
+            <span>${esc(title)}</span>
+            ${id ? `<button class="pr-danger-button" data-annotation-popover-delete="${attr(id)}" title="${attr(label("delete_annotation"))}">x</button>` : ""}
+          </div>
+          ${selected ? `<div class="pr-item-meta">${esc(selected)}</div>` : ""}
+          <textarea class="pr-textarea" id="annotationNoteInput" placeholder="${attr(label("note"))}">${esc(note)}</textarea>
+          <div class="pr-annotation-popover-actions">
+            <button class="pr-button" data-annotation-popover-cancel>Cancel</button>
+            <button class="pr-button primary" data-annotation-popover-save>${esc(label("saved"))}</button>
+          </div>
+        </div>
+      `;
+    }
+    function refreshAnnotationPopover() {
+      const mount = document.getElementById("annotationPopoverMount");
+      if (!mount) return;
+      mount.innerHTML = annotationPopoverHtml();
+      mount.querySelector("[data-annotation-popover-cancel]")?.addEventListener("click", closeAnnotationPopover);
+      mount.querySelector("[data-annotation-popover-save]")?.addEventListener("click", saveAnnotationPopover);
+      mount.querySelector("[data-annotation-popover-delete]")?.addEventListener("click", (event) => {
+        const id = event.currentTarget.dataset.annotationPopoverDelete || "";
+        if (!id) return;
+        closeAnnotationPopover();
+        emitAction("annotation_delete", { annotation_id: id, id, page: currentPage, locator: `p. ${currentPage}` });
+      });
+      window.setTimeout(() => document.getElementById("annotationNoteInput")?.focus(), 20);
+    }
+    function annotationAnchorFromRect(rect) {
+      const margin = 10;
+      const left = Math.max(8, Math.min(window.innerWidth - 376, Number(rect.left || 16)));
+      const below = Number(rect.bottom || 16) + margin;
+      const top = below + 220 < window.innerHeight ? below : Math.max(8, Number(rect.top || 16) - 230);
+      return { x: left, y: top };
+    }
+    function openAnnotationPopover(annotation, rect = null) {
+      const anchor = annotationAnchorFromRect(rect || { left: window.innerWidth / 2 - 160, top: 80, bottom: 120 });
+      annotationPopover = { open: true, annotation: asObj(annotation), pending: !text(asObj(annotation).id), x: anchor.x, y: anchor.y };
+      refreshAnnotationPopover();
+    }
+    function closeAnnotationPopover() {
+      annotationPopover = { open: false, annotation: null, pending: false, x: 16, y: 16 };
+      refreshAnnotationPopover();
+    }
+    function saveAnnotationPopover() {
+      const ann = asObj(annotationPopover.annotation);
+      const note = text(document.getElementById("annotationNoteInput")?.value);
+      if (ann.id) {
+        closeAnnotationPopover();
+        return emitAction("annotation_update", { annotation_id: ann.id, id: ann.id, note, page: Number(ann.page || currentPage), locator: ann.locator || `p. ${ann.page || currentPage}` });
+      }
+      const selection = currentSelection || {};
+      if (!selection.selected_text) return closeAnnotationPopover();
+      optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind: "highlight", status: "pending", note });
+      renderHighlights(selection.page || currentPage);
+      closeAnnotationPopover();
+      return emitAction("annotation_create", { ...selection, note });
+    }
+    function closeSelectionDock() {
+      currentSelection = null;
+      dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
+      refreshDock();
+    }
     function dockPlacementDefault() {
       return text(settings().translation_dock_default || "selection") || "selection";
     }
@@ -1522,30 +1820,6 @@
           `;
         }).join("")}</div>`;
       }
-      if (activeTab === "translation") {
-        const counts = translationCounts();
-        const pages = visiblePages.length ? visiblePages : [currentPage];
-        const rows = translationRowsForPages(pages, 24);
-        const summary = `
-          <div class="pr-summary">
-            <div class="pr-chip"><strong>${counts.translated}</strong><span>${esc(label("translated"))}</span></div>
-            <div class="pr-chip"><strong>${counts.missing}</strong><span>${esc(label("missing"))}</span></div>
-            <div class="pr-chip"><strong>${counts.stale}</strong><span>${esc(label("stale"))}</span></div>
-            <div class="pr-chip"><strong>${counts.failed}</strong><span>${esc(label("failed"))}</span></div>
-          </div>
-        `;
-        if (!rows.length) return `${summary}<div class="pr-empty">${esc(label("empty"))}</div>`;
-        return `${summary}<div class="pr-list">${rows.map(({ segment, translation, state }) => {
-          const obj = asObj(segment);
-          const title = translatedTextFromRow(translation) || text(obj.text);
-          return `
-            <button class="pr-item" data-page="${Number(obj.page || 0)}">
-              <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
-              <div class="pr-item-meta">${esc(obj.segment_id || "")} - ${esc(state)} - ${esc(obj.locator || "")}</div>
-            </button>
-          `;
-        }).join("")}</div>`;
-      }
       if (activeTab === "claims") {
         const rows = asArr(args.chunks);
         if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
@@ -1608,9 +1882,17 @@
       if (viewer) {
         viewer.addEventListener("scroll", () => {
           scheduleViewportUpdate();
+          syncCompareScroll("pdf");
           placeSelectionDock();
         }, { passive: true });
       }
+      const translationReader = document.getElementById("translationReader");
+      if (translationReader) {
+        translationReader.addEventListener("scroll", () => syncCompareScroll("translation"), { passive: true });
+      }
+      wireResizeHandles();
+      wireTranslationRows();
+      refreshAnnotationPopover();
       wireSide();
     }
     function setReaderMode(mode) {
@@ -1642,6 +1924,90 @@
       wireSide();
       refreshTranslationReader();
       setHeight();
+    }
+    function updateWorkspaceSizing() {
+      const workspace = document.querySelector(".pr-workspace");
+      if (!workspace) return;
+      workspace.style.setProperty("--pr-compare-left", `${Math.max(20, Math.min(80, compareSplitRatio))}%`);
+      workspace.style.setProperty("--pr-panel-width", `${Math.max(280, Math.min(560, panelWidth))}px`);
+    }
+    function wireResizeHandles() {
+      const workspace = document.querySelector(".pr-workspace");
+      const compareHandle = document.getElementById("compareDivider");
+      if (workspace && compareHandle) {
+        compareHandle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          const startX = event.clientX;
+          const start = compareSplitRatio;
+          const box = workspace.getBoundingClientRect();
+          const onMove = (moveEvent) => {
+            const delta = ((moveEvent.clientX - startX) / Math.max(1, box.width)) * 100;
+            compareSplitRatio = Math.max(25, Math.min(75, Math.round(start + delta)));
+            updateWorkspaceSizing();
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            scheduleReaderStateChanged(true);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp, { once: true });
+        });
+      }
+      const panelHandle = document.getElementById("panelResize");
+      if (workspace && panelHandle) {
+        panelHandle.addEventListener("pointerdown", (event) => {
+          if (sidePanelCollapsed) return;
+          event.preventDefault();
+          const startX = event.clientX;
+          const start = panelWidth;
+          const onMove = (moveEvent) => {
+            panelWidth = Math.max(280, Math.min(560, Math.round(start - (moveEvent.clientX - startX))));
+            updateWorkspaceSizing();
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            scheduleReaderStateChanged(true);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp, { once: true });
+        });
+      }
+    }
+    function translationPageElement(pageNumber) {
+      return document.querySelector(`.pr-translation-page[data-page="${Number(pageNumber || 0)}"]`);
+    }
+    function syncCompareScroll(source) {
+      if (readerMode !== "compare" || syncLock) return;
+      const viewer = document.getElementById("viewer");
+      const translationReader = document.getElementById("translationReader");
+      if (!viewer || !translationReader) return;
+      syncLock = true;
+      window.setTimeout(() => { syncLock = false; }, 180);
+      if (source === "pdf") {
+        const pageEl = translationPageElement(currentPage);
+        if (pageEl) pageEl.scrollIntoView({ block: "start" });
+        return;
+      }
+      const box = translationReader.getBoundingClientRect();
+      const pages = [...translationReader.querySelectorAll(".pr-translation-page")];
+      const picked = pages.find((page) => {
+        const rect = page.getBoundingClientRect();
+        return rect.bottom > box.top + 40 && rect.top < box.bottom - 40;
+      });
+      const page = Number(picked?.dataset.page || 0);
+      if (page && page !== currentPage) scrollToPage(page);
+    }
+    function wireTranslationRows() {
+      document.querySelectorAll(".pr-translation-block[data-anchor-id]").forEach((row) => {
+        row.addEventListener("click", () => {
+          activeTranslationAnchor = row.dataset.anchorId || "";
+          const page = Number(row.dataset.page || 0);
+          if (page) scrollToPage(page);
+          refreshTranslationReader();
+        });
+      });
     }
     function wireSide() {
       document.querySelectorAll("[data-jump-annotation]").forEach((button) => {
@@ -1730,8 +2096,9 @@
         return emitAction("ask_paper", { question, page: currentPage, locator: `p. ${currentPage}` });
       }
       if (action === "translateFull") {
+        setReaderMode("translation");
         setActionState("translate_full_paper", "pending", label("translating_full_paper"));
-        return emitAction("translate_full_paper", { target_lang: targetLang(), mode: "missing_or_stale" });
+        return emitAction("translate_full_paper", { target_lang: targetLang(), mode: "missing_or_stale", scope_strategy: "auto" });
       }
       if (action === "saveProgress") {
         return emitAction("save_progress", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
@@ -1747,36 +2114,33 @@
         refreshDock();
         return emitAction("generate_review_card", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
-      if (action === "translateVisible") {
-        const pages = visiblePages.length ? visiblePages : [currentPage];
-        activeTab = "translation";
+      if (action === "deepRead") {
+        activeTab = "ai";
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
-        setActionState("translate_visible_pages", "pending", label("translating_visible_pages"));
+        dockState = { mode: "ai", status: label("deep_reading"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        setActionState("codex_deep_read", "pending", label("deep_reading"));
         refreshSide();
+        refreshDock();
+        return emitAction("codex_deep_read", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+      }
+      if (action === "translateVisible") {
+        const pages = visiblePages.length ? visiblePages : [currentPage];
+        setReaderMode("translation");
+        setActionState("translate_visible_pages", "pending", label("translating_visible_pages"));
+        refreshTranslationReader();
         return emitAction("translate_visible_pages", {
           target_lang: targetLang(),
           visible_pages: pages,
           primary_page: currentPage,
-          segment_refs: segmentRefsForPages(pages),
+          scope_strategy: "auto",
         });
       }
       const selection = currentSelection || {};
       if (!selection.selected_text) return;
       if (action === "annotate") {
-        optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind: "highlight", status: "pending" });
-        renderHighlights(selection.page || currentPage);
-        dockState = {
-          mode: "selection",
-          status: label("saved_pending"),
-          selected_text: text(selection.selected_text),
-          result: "",
-          pending: true,
-          selection_hash: text(selection.selected_text_hash),
-        };
-        refreshDock();
-        return emitAction("annotation_create", { ...selection, note: "" });
+        return openAnnotationPopover({ ...selection, note: "" }, selectionAnchorRect(selection));
       }
       if (action === "chunk") {
         dockState = { mode: "selection", status: label("saved_pending"), selected_text: text(selection.selected_text), result: "", pending: true, selection_hash: text(selection.selected_text_hash) };
@@ -2235,11 +2599,19 @@
           const w = pctReady ? Number(r.w_pct || 0) * layer.clientWidth : Number(r.w || 0);
           const h = pctReady ? Number(r.h_pct || 0) * layer.clientHeight : Number(r.h || 0);
           const div = document.createElement("div");
-          div.className = `pr-highlight ${text(obj.id) === focusedAnnotationId ? "focus" : ""}`;
+          div.className = `pr-highlight ${text(obj.id) === focusedAnnotationId ? "focus" : ""} ${text(obj.note) ? "has-note" : ""}`;
+          div.dataset.annotationId = text(obj.id);
           div.style.left = `${x}px`;
           div.style.top = `${y}px`;
           div.style.width = `${Math.max(2, w)}px`;
           div.style.height = `${Math.max(2, h)}px`;
+          div.addEventListener("click", (event) => {
+            event.stopPropagation();
+            focusedAnnotationId = text(obj.id);
+            openAnnotationPopover(obj, div.getBoundingClientRect());
+            refreshSide();
+            scheduleReaderStateChanged(true);
+          });
           layer.appendChild(div);
         });
       });
@@ -2556,15 +2928,19 @@
       scaleMode = text(settings().scale_mode || "fit-width") || "fit-width";
       sidePanelCollapsed = text(settings().side_panel_default || "collapsed") !== "open";
       readerMode = text(settings().reader_mode || readerMode || "pdf") || "pdf";
+      activeTab = text(settings().active_tab || activeTab || "notes") || "notes";
+      if (activeTab === "translation") activeTab = "notes";
+      compareSplitRatio = Math.max(25, Math.min(75, Number(args.compare_split_ratio || settings().compare_split_ratio || 50)));
+      panelWidth = Math.max(280, Math.min(560, Number(args.panel_width || settings().panel_width || 340)));
       if (!["pdf", "compare", "translation"].includes(readerMode)) readerMode = "pdf";
       requestedPreviews = new Set();
       currentSelection = null;
+      annotationPopover = { open: false, annotation: null, pending: false, x: 16, y: 16 };
       dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
       textCache = new Map();
       pageBaseSizes = new Map();
       pageRenderStates = new Map();
       currentPage = initialPage();
-      activeTab = text(settings().active_tab || activeTab || "translation") || "translation";
       pdfDoc = null;
       totalPages = knownPageCount(currentPage);
       pdfDocumentLoading = Boolean(pdfBase64 || pdfUrl);
@@ -2658,8 +3034,28 @@
       if (resizeTimer) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
         rerenderForScale();
+        refreshTranslationReader();
         placeSelectionDock();
       }, 180);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest("#selectionDock")
+        || target.closest(".pr-text-layer")
+        || target.closest(".pr-annotation-popover")
+        || target.closest(".pr-highlight")
+      ) {
+        return;
+      }
+      if (currentSelection && !selectionIsActive()) closeSelectionDock();
+      if (annotationPopover.open) closeAnnotationPopover();
+    }, true);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (currentSelection) closeSelectionDock();
+      if (annotationPopover.open) closeAnnotationPopover();
     });
     send(READY, { apiVersion: 1 });
     send(SET_HEIGHT, { height: 820 });
