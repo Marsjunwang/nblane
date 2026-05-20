@@ -111,6 +111,8 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("reader_preparation", payload.json())
         self.assertEqual(payload.json()["settings"]["overscan_pages"], 3)
         self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], 36)
+        self.assertEqual(payload.json()["settings"]["translation_layout"], "overlay")
+        self.assertEqual(payload.json()["settings"]["translation_overflow_policy"], "fixed-expand")
 
     def test_payload_uses_current_page_window_for_reader_context(self) -> None:
         source_id = "source:paper:grounded"
@@ -247,6 +249,15 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("buildAnchorIndex", response.text)
         self.assertIn("setActiveAnchor", response.text)
         self.assertIn("renderTranslationPage", response.text)
+        self.assertIn("translationOverflowPolicy", response.text)
+        self.assertIn("fitTranslationBlocks", response.text)
+        self.assertIn("showTranslationUnitDock", response.text)
+        self.assertIn('data-scope-type', response.text)
+        self.assertIn('scope_strategy: "layout"', response.text)
+        self.assertIn('if (text(obj.scope_type) === "layout") return "";', response.text)
+        self.assertIn("pr-translation-block.layout.empty", response.text)
+        self.assertIn("pollReaderTask(taskId, action), 2500", response.text)
+        self.assertIn("scope_refs: scopeType === \"layout\"", response.text)
         self.assertIn("syncCompareScroll", response.text)
         self.assertIn("annotationPopover", response.text)
         self.assertIn('mode: "read"', response.text)

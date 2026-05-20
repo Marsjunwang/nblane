@@ -19,6 +19,7 @@ from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core import reader_tasks
 from nblane.core.research_papers import (
     build_reader_payload,
+    extract_paper_page_text_layer,
     load_paper_pages,
     paper_pdf_asset_path,
     render_paper_page_preview,
@@ -142,6 +143,8 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "height_mode": "viewport",
         "render_cache": True,
         "render_cache_max_pages": 36,
+        "translation_layout": "overlay",
+        "translation_overflow_policy": "fixed-expand",
         "translation_dock_default": "selection",
         "pdf_load_timeout_ms": 30000,
         "pdf_page_render_timeout_ms": 12000,
@@ -186,51 +189,13 @@ def _payload_for_context(ctx: ReaderActionContext, page: int | None = None) -> d
 
 def _paper_page_text_layer(profile_path: Path, source_id: str, page: int) -> dict[str, object]:
     try:
-        import fitz  # type: ignore
-    except Exception as exc:  # pragma: no cover - optional dependency guard
-        raise HTTPException(status_code=503, detail="PyMuPDF is not available") from exc
-
-    try:
-        pdf_path = paper_pdf_asset_path(profile_path, source_id)
+        return extract_paper_page_text_layer(profile_path, source_id, page)
+    except RuntimeError as exc:  # pragma: no cover - optional dependency guard
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    try:
-        with fitz.open(str(pdf_path)) as doc:
-            if page < 1 or page > doc.page_count:
-                raise HTTPException(status_code=404, detail="page not found")
-            pdf_page = doc[page - 1]
-            rect = pdf_page.rect
-            data = pdf_page.get_text("dict")
-            spans: list[dict[str, object]] = []
-            for block in data.get("blocks", []):
-                if block.get("type") != 0:
-                    continue
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        body = str(span.get("text") or "")
-                        if not body.strip():
-                            continue
-                        x0, y0, x1, y1 = [float(value) for value in span.get("bbox", (0, 0, 0, 0))]
-                        if x1 <= x0 or y1 <= y0:
-                            continue
-                        spans.append(
-                            {
-                                "text": body,
-                                "x": x0,
-                                "y": y0,
-                                "w": x1 - x0,
-                                "h": y1 - y0,
-                                "font_size": float(span.get("size") or max(1.0, y1 - y0)),
-                            }
-                        )
-            return {
-                "page": page,
-                "width": float(rect.width),
-                "height": float(rect.height),
-                "spans": spans[:4000],
-            }
-    except HTTPException:
-        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"failed to extract page text layer: {exc}") from exc
 

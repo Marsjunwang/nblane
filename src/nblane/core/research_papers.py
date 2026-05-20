@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import copy
 import base64
+import contextlib
 import hashlib
+import io
 import json
+import math
 import os
 import re
 import tempfile
@@ -72,7 +75,9 @@ PAPER_EXPORTS_DIRNAME = "exports"
 PAPER_ANNOTATION_KINDS = ("highlight", "note", "question")
 PAPER_ANNOTATION_STATUSES = ("active", "deleted")
 PAPER_TRANSLATION_STATUSES = ("translated", "missing", "stale", "failed")
+PAPER_TRANSLATION_SCOPES = ("segment", "page", "selection", "layout")
 PAPER_SEARCH_PROVIDERS = ("arxiv", "semantic_scholar")
+NO_LLM_TRANSLATION_WARNING = "No LLM translation backend produced text."
 PDF_MAX_BYTES_DEFAULT = 75 * 1024 * 1024
 PAPER_DIAGNOSTIC_BADGES = {
     "grobid_unavailable": "GROBID unavailable",
@@ -1869,17 +1874,616 @@ def _translation_unit_status(row: dict[str, object] | None, source_hash: str) ->
     return "translated"
 
 
+def _rect_payload(
+    bbox: object,
+    *,
+    page_width: float,
+    page_height: float,
+) -> dict[str, object] | None:
+    if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+        return None
+    try:
+        x0, y0, x1, y1 = [float(value) for value in bbox[:4]]
+    except (TypeError, ValueError):
+        return None
+    if x1 <= x0 or y1 <= y0 or page_width <= 0 or page_height <= 0:
+        return None
+    width = x1 - x0
+    height = y1 - y0
+    return {
+        "x": x0,
+        "y": y0,
+        "w": width,
+        "h": height,
+        "x_pct": x0 / page_width,
+        "y_pct": y0 / page_height,
+        "w_pct": width / page_width,
+        "h_pct": height / page_height,
+        "page_width": page_width,
+        "page_height": page_height,
+    }
+
+
+def _rect_area(rect: dict[str, object]) -> float:
+    try:
+        return max(0.0, float(rect.get("w") or 0)) * max(0.0, float(rect.get("h") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _rect_overlap_ratio(rect: dict[str, object], other: dict[str, object]) -> float:
+    try:
+        ax0 = float(rect.get("x") or 0)
+        ay0 = float(rect.get("y") or 0)
+        ax1 = ax0 + float(rect.get("w") or 0)
+        ay1 = ay0 + float(rect.get("h") or 0)
+        bx0 = float(other.get("x") or 0)
+        by0 = float(other.get("y") or 0)
+        bx1 = bx0 + float(other.get("w") or 0)
+        by1 = by0 + float(other.get("h") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    overlap_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    overlap_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+    area = _rect_area(rect)
+    return (overlap_w * overlap_h / area) if area else 0.0
+
+
+def _bbox_values(bbox: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+        return None
+    try:
+        x0, y0, x1, y1 = [float(value) for value in bbox[:4]]
+    except (TypeError, ValueError):
+        return None
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
+
+
+def _bbox_union(values: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float] | None:
+    if not values:
+        return None
+    return (
+        min(row[0] for row in values),
+        min(row[1] for row in values),
+        max(row[2] for row in values),
+        max(row[3] for row in values),
+    )
+
+
+def _line_direction(line: dict[str, object]) -> tuple[list[float], float]:
+    raw = line.get("dir")
+    if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+        return [1.0, 0.0], 0.0
+    try:
+        dx = float(raw[0])
+        dy = float(raw[1])
+    except (TypeError, ValueError):
+        return [1.0, 0.0], 0.0
+    rotation = math.degrees(math.atan2(dy, dx))
+    if abs(rotation) < 0.25:
+        rotation = 0.0
+    return [round(dx, 4), round(dy, 4)], round(rotation, 2)
+
+
+def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str, object]:
+    """Return the PyMuPDF text layer used by both Reader selection fallback and layout units."""
+
+    rect = getattr(pdf_page, "rect")
+    page_width = float(getattr(rect, "width", 0.0) or 0.0)
+    page_height = float(getattr(rect, "height", 0.0) or 0.0)
+    data = pdf_page.get_text("dict")
+    spans: list[dict[str, object]] = []
+    lines: list[dict[str, object]] = []
+    for block_index, block in enumerate(data.get("blocks", []) if isinstance(data, dict) else []):
+        if not isinstance(block, dict) or block.get("type") != 0:
+            continue
+        for line_index, line in enumerate(block.get("lines", []) or []):
+            if not isinstance(line, dict):
+                continue
+            direction, rotation = _line_direction(line)
+            line_parts: list[str] = []
+            line_bboxes: list[tuple[float, float, float, float]] = []
+            max_font_size = 0.0
+            span_indexes: list[int] = []
+            for span in line.get("spans", []) or []:
+                if not isinstance(span, dict):
+                    continue
+                body = str(span.get("text") or "")
+                if not body.strip():
+                    continue
+                span_bbox = _bbox_values(span.get("bbox", ()))
+                if span_bbox is None:
+                    continue
+                x0, y0, x1, y1 = span_bbox
+                font_size = float(span.get("size") or max(1.0, y1 - y0))
+                span_indexes.append(len(spans))
+                spans.append(
+                    {
+                        "text": body,
+                        "x": x0,
+                        "y": y0,
+                        "w": x1 - x0,
+                        "h": y1 - y0,
+                        "font_size": font_size,
+                        "block": block_index,
+                        "line": line_index,
+                        "dir": direction,
+                        "rotation": rotation,
+                    }
+                )
+                line_parts.append(body)
+                line_bboxes.append(span_bbox)
+                max_font_size = max(max_font_size, font_size)
+            text = "".join(line_parts).strip()
+            if not text:
+                continue
+            line_bbox = _bbox_values(line.get("bbox", ())) or _bbox_union(line_bboxes)
+            if line_bbox is None:
+                continue
+            line_rect = _rect_payload(line_bbox, page_width=page_width, page_height=page_height)
+            if line_rect is None:
+                continue
+            lines.append(
+                {
+                    "text": text,
+                    "x": line_rect["x"],
+                    "y": line_rect["y"],
+                    "w": line_rect["w"],
+                    "h": line_rect["h"],
+                    "font_size": max_font_size or float(line_rect["h"] or 0),
+                    "block": block_index,
+                    "line": line_index,
+                    "span_indexes": span_indexes,
+                    "dir": direction,
+                    "rotation": rotation,
+                    "rect": line_rect,
+                }
+            )
+    return {
+        "page": int(page_number),
+        "width": page_width,
+        "height": page_height,
+        "spans": spans[:4000],
+        "lines": lines[:4000],
+    }
+
+
+def extract_paper_page_text_layer(profile: str | Path, source_id: str, page: int) -> dict[str, object]:
+    """Extract the Reader text layer for one PDF page with PyMuPDF span and line coordinates."""
+
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except Exception as exc:  # pragma: no cover - optional dependency guard
+        raise RuntimeError("PyMuPDF is not available.") from exc
+    pdf_path = paper_pdf_asset_path(profile, source_id)
+    try:
+        page_number = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        page_number = 1
+    with fitz.open(str(pdf_path)) as doc:
+        if page_number > int(doc.page_count):
+            raise ValueError("page not found")
+        return _pdf_page_text_layer_payload(doc[page_number - 1], page_number)
+
+
+def _layout_text_lines(block: dict[str, object]) -> tuple[str, float]:
+    lines: list[str] = []
+    max_font = 0.0
+    for raw_line in block.get("lines") or []:
+        if not isinstance(raw_line, dict):
+            continue
+        parts: list[str] = []
+        for raw_span in raw_line.get("spans") or []:
+            if not isinstance(raw_span, dict):
+                continue
+            parts.append(str(raw_span.get("text") or ""))
+            try:
+                max_font = max(max_font, float(raw_span.get("size") or 0))
+            except (TypeError, ValueError):
+                pass
+        line = "".join(parts).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines).strip(), max_font
+
+
+def _layout_text_is_translatable(value: str) -> bool:
+    clean = re.sub(r"\s+", "", value or "")
+    if not clean:
+        return False
+    if re.fullmatch(r"https?://\S+|www\.\S+|\S+@\S+", clean, flags=re.IGNORECASE):
+        return False
+    if clean.isdigit() and len(clean) <= 4:
+        return False
+    if not re.search(r"[A-Za-z0-9\u4e00-\u9fff]", clean):
+        return False
+    if len(clean) <= 2:
+        return False
+    return True
+
+
+def _layout_kind(text: str, font_size: float, *, table: bool = False, symbol: bool = False) -> str:
+    clean = _clean_text(text)
+    if table:
+        return "table_cell"
+    if symbol:
+        return "symbol"
+    if re.match(r"^(figure|fig\.|table)\s+\d+", clean, flags=re.IGNORECASE):
+        return "caption"
+    if font_size >= 15:
+        return "title"
+    return "paragraph"
+
+
+def _layout_scope_ref(page: int, order: int, source_hash: str) -> str:
+    short_hash = _clean_text(source_hash).removeprefix("sha256:")[:12] or f"{order:05d}"
+    return f"layout:v2:{int(page)}:{int(order):05d}:{short_hash}"
+
+
+def _layout_unit_from_candidate(candidate: dict[str, object], order: int) -> dict[str, object] | None:
+    source_text = _clean_text(candidate.get("source_text"))
+    if not source_text:
+        return None
+    try:
+        page = int(candidate.get("page") or 0)
+    except (TypeError, ValueError):
+        page = 0
+    if page < 1:
+        return None
+    source_hash = text_hash(source_text)
+    scope_ref = _layout_scope_ref(page, order, source_hash)
+    translatable = bool(candidate.get("translatable", True))
+    preserve_source = bool(candidate.get("preserve_source", not translatable))
+    unit: dict[str, object] = {
+        "unit_id": scope_ref,
+        "anchor_id": scope_ref,
+        "scope_type": "layout",
+        "scope_ref": scope_ref,
+        "segment_id": "",
+        "page": page,
+        "order": order,
+        "section_path": [],
+        "kind": _clean_text(candidate.get("kind")) or "paragraph",
+        "locator": f"p. {page}",
+        "source_hash": source_hash,
+        "source_text": source_text,
+        "target_lang": "",
+        "translated_text": source_text if not translatable and preserve_source else "",
+        "status": "translated" if not translatable else "missing",
+        "status_reason": "",
+        "rects": copy.deepcopy(candidate.get("rects") or []),
+        "translatable": translatable,
+        "display_source": preserve_source,
+    }
+    for key in ("table_id", "row", "col", "row_span", "col_span", "rotation", "dir"):
+        if key in candidate:
+            unit[key] = candidate[key]
+    return unit
+
+
+def _rect_from_layer_line(line: dict[str, object]) -> dict[str, object] | None:
+    rect = line.get("rect")
+    if isinstance(rect, dict):
+        return copy.deepcopy(rect)
+    try:
+        page_width = float(line.get("page_width") or 0)
+        page_height = float(line.get("page_height") or 0)
+        x0 = float(line.get("x") or 0)
+        y0 = float(line.get("y") or 0)
+        width = float(line.get("w") or 0)
+        height = float(line.get("h") or 0)
+    except (TypeError, ValueError):
+        return None
+    return _rect_payload((x0, y0, x0 + width, y0 + height), page_width=page_width, page_height=page_height)
+
+
+def _layout_skip_text_layer_line(text: str, line: dict[str, object], rect: dict[str, object]) -> bool:
+    clean = _clean_text(text)
+    if not clean:
+        return True
+    try:
+        rotation = abs(float(line.get("rotation") or 0.0))
+    except (TypeError, ValueError):
+        rotation = 0.0
+    if rotation > 2.0 and abs(rotation - 180.0) > 2.0:
+        return True
+    try:
+        font_size = float(line.get("font_size") or 0.0)
+    except (TypeError, ValueError):
+        font_size = 0.0
+    if font_size and font_size < 5.5:
+        return True
+    if _rect_area(rect) < 18:
+        return True
+    compact = re.sub(r"\s+", "", clean)
+    if re.fullmatch(r"https?://\S+|www\.\S+|\S+@\S+", compact, flags=re.IGNORECASE):
+        return True
+    if re.fullmatch(r"(arxiv|doi|issn|isbn)[:\w./-]+", compact, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def _line_group_rect(lines: list[dict[str, object]]) -> dict[str, object] | None:
+    rects = [
+        rect
+        for line in lines
+        if isinstance(line, dict) and isinstance(rect := _rect_from_layer_line(line), dict)
+    ]
+    if not rects:
+        return None
+    try:
+        page_width = float(rects[0].get("page_width") or 0)
+        page_height = float(rects[0].get("page_height") or 0)
+        x0 = min(float(rect.get("x") or 0) for rect in rects)
+        y0 = min(float(rect.get("y") or 0) for rect in rects)
+        x1 = max(float(rect.get("x") or 0) + float(rect.get("w") or 0) for rect in rects)
+        y1 = max(float(rect.get("y") or 0) + float(rect.get("h") or 0) for rect in rects)
+    except (TypeError, ValueError):
+        return None
+    return _rect_payload((x0, y0, x1, y1), page_width=page_width, page_height=page_height)
+
+
+def _same_layout_paragraph(previous: dict[str, object], current: dict[str, object]) -> bool:
+    prev_rect = _rect_from_layer_line(previous)
+    cur_rect = _rect_from_layer_line(current)
+    if prev_rect is None or cur_rect is None:
+        return False
+    prev_text = _clean_text(previous.get("text"))
+    cur_text = _clean_text(current.get("text"))
+    if not prev_text or not cur_text:
+        return False
+    prev_kind = _layout_kind(prev_text, float(previous.get("font_size") or 0))
+    cur_kind = _layout_kind(cur_text, float(current.get("font_size") or 0))
+    if prev_kind in {"title", "caption"} or cur_kind in {"title", "caption"}:
+        return False
+    try:
+        prev_x = float(prev_rect.get("x") or 0)
+        prev_y = float(prev_rect.get("y") or 0)
+        prev_w = float(prev_rect.get("w") or 0)
+        prev_h = float(prev_rect.get("h") or 0)
+        cur_x = float(cur_rect.get("x") or 0)
+        cur_y = float(cur_rect.get("y") or 0)
+        cur_w = float(cur_rect.get("w") or 0)
+        font_size = max(float(previous.get("font_size") or 0), float(current.get("font_size") or 0), 8.0)
+    except (TypeError, ValueError):
+        return False
+    vertical_gap = cur_y - (prev_y + prev_h)
+    if vertical_gap < -2 or vertical_gap > max(12.0, font_size * 1.3):
+        return False
+    if abs(cur_x - prev_x) > max(9.0, font_size * 1.1):
+        return False
+    if min(prev_w, cur_w) > 24 and max(prev_w, cur_w) / max(1.0, min(prev_w, cur_w)) > 2.8:
+        return False
+    return True
+
+
+def _layout_candidates_from_text_layer(
+    *,
+    page: int,
+    layer: dict[str, object],
+    accepted_table_rects: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    lines_by_block: dict[int, list[dict[str, object]]] = {}
+    for raw_line in layer.get("lines") or []:
+        if not isinstance(raw_line, dict):
+            continue
+        text = _clean_text(raw_line.get("text"))
+        rect = _rect_from_layer_line(raw_line)
+        if rect is None or _layout_skip_text_layer_line(text, raw_line, rect):
+            continue
+        if any(_rect_overlap_ratio(rect, table_rect) > 0.45 for table_rect in accepted_table_rects):
+            continue
+        try:
+            block_index = int(raw_line.get("block") or 0)
+        except (TypeError, ValueError):
+            block_index = 0
+        lines_by_block.setdefault(block_index, []).append(raw_line)
+
+    candidates: list[dict[str, object]] = []
+    for _, block_lines in sorted(lines_by_block.items()):
+        sorted_lines = sorted(block_lines, key=lambda row: (float(row.get("y") or 0), float(row.get("x") or 0), int(row.get("line") or 0)))
+        groups: list[list[dict[str, object]]] = []
+        for line in sorted_lines:
+            if not groups or not _same_layout_paragraph(groups[-1][-1], line):
+                groups.append([line])
+            else:
+                groups[-1].append(line)
+        for group in groups:
+            rect = _line_group_rect(group)
+            if rect is None:
+                continue
+            text = "\n".join(_clean_text(row.get("text")) for row in group if _clean_text(row.get("text"))).strip()
+            if not text:
+                continue
+            font_size = max((float(row.get("font_size") or 0) for row in group), default=0.0)
+            translatable = _layout_text_is_translatable(text)
+            if not translatable and re.search(r"[A-Za-z\u4e00-\u9fff]", text):
+                continue
+            candidates.append(
+                {
+                    "page": page,
+                    "source_text": text,
+                    "kind": _layout_kind(text, font_size, symbol=not translatable),
+                    "rects": [rect],
+                    "translatable": translatable,
+                    "preserve_source": not translatable,
+                    "sort_y": rect["y"],
+                    "sort_x": rect["x"],
+                    "rotation": group[0].get("rotation", 0),
+                    "dir": copy.deepcopy(group[0].get("dir") or [1.0, 0.0]),
+                }
+            )
+    return candidates
+
+
+def build_paper_layout_units(
+    profile: str | Path,
+    source_id: str,
+    *,
+    pages: set[int] | list[int] | tuple[int, ...] | None = None,
+) -> list[dict[str, object]]:
+    """Extract positioned translation units from the original PDF page layout."""
+
+    try:
+        pdf_path = paper_pdf_asset_path(profile, source_id)
+    except (FileNotFoundError, ValueError):
+        return []
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except Exception:
+        return []
+
+    requested_pages = {
+        int(item)
+        for item in (pages or [])
+        if str(item).strip().isdigit() and int(item) > 0
+    }
+    units: list[dict[str, object]] = []
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            for index, pdf_page in enumerate(doc, start=1):
+                if requested_pages and index not in requested_pages:
+                    continue
+                page_rect = pdf_page.rect
+                page_width = float(page_rect.width)
+                page_height = float(page_rect.height)
+                candidates: list[dict[str, object]] = []
+                accepted_table_rects: list[dict[str, object]] = []
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        tables = list(getattr(pdf_page.find_tables(), "tables", []) or [])
+                except Exception:
+                    tables = []
+                for table_index, table in enumerate(tables, start=1):
+                    try:
+                        row_count = int(getattr(table, "row_count", 0) or 0)
+                        col_count = int(getattr(table, "col_count", 0) or 0)
+                        cell_texts = table.extract()
+                        cells = list(getattr(table, "cells", []) or [])
+                    except Exception:
+                        continue
+                    flat_texts = [
+                        _clean_text(cell)
+                        for row in cell_texts
+                        for cell in (row if isinstance(row, list) else [])
+                    ]
+                    if row_count < 2 and len([cell for cell in flat_texts if cell]) < 3:
+                        continue
+                    table_rect = _rect_payload(
+                        getattr(table, "bbox", ()),
+                        page_width=page_width,
+                        page_height=page_height,
+                    )
+                    if table_rect is not None:
+                        accepted_table_rects.append(table_rect)
+                    for row_index in range(row_count):
+                        row_values = cell_texts[row_index] if row_index < len(cell_texts) and isinstance(cell_texts[row_index], list) else []
+                        for col_index in range(col_count):
+                            text = _clean_text(row_values[col_index] if col_index < len(row_values) else "")
+                            if not text:
+                                continue
+                            cell_offset = row_index * col_count + col_index
+                            rect = _rect_payload(
+                                cells[cell_offset] if cell_offset < len(cells) else (),
+                                page_width=page_width,
+                                page_height=page_height,
+                            )
+                            if rect is None:
+                                continue
+                            translatable = _layout_text_is_translatable(text)
+                            candidates.append(
+                                {
+                                    "page": index,
+                                    "source_text": text,
+                                    "kind": _layout_kind(text, 0, table=True, symbol=not translatable),
+                                    "rects": [rect],
+                                    "translatable": translatable,
+                                    "sort_y": rect["y"],
+                                    "sort_x": rect["x"],
+                                    "table_id": f"table:{index}:{table_index}",
+                                    "row": row_index,
+                                    "col": col_index,
+                                    "row_span": 1,
+                                    "col_span": 1,
+                                }
+                            )
+                try:
+                    layer = _pdf_page_text_layer_payload(pdf_page, index)
+                except Exception:
+                    layer = {}
+                candidates.extend(
+                    _layout_candidates_from_text_layer(
+                        page=index,
+                        layer=layer,
+                        accepted_table_rects=accepted_table_rects,
+                    )
+                )
+                candidates.sort(key=lambda row: (float(row.get("sort_y") or 0), float(row.get("sort_x") or 0)))
+                for order, candidate in enumerate(candidates, start=1):
+                    unit = _layout_unit_from_candidate(candidate, order)
+                    if unit is not None:
+                        units.append(unit)
+    except Exception:
+        return []
+    return units
+
+
 def build_translation_units(
     *,
     pages: list[PaperPage],
     segments: list[dict[str, object]],
     translations: list[dict[str, object]],
     target_lang: str,
+    layout_units: list[dict[str, object]] | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, int]]:
     """Return ordered translation reading units for Reader visual modes."""
 
     units: list[dict[str, object]] = []
     summary = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
+    layout_rows = [copy.deepcopy(row) for row in (layout_units or []) if isinstance(row, dict)]
+    if layout_rows:
+        layout_translations = {
+            _clean_text(row.get("scope_ref") or row.get("segment_id")): row
+            for row in translations
+            if _clean_text(row.get("scope_type")) == "layout" and _clean_text(row.get("target_lang") or "zh") == target_lang
+        }
+        for raw_unit in sorted(layout_rows, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id")))):
+            scope_ref = _clean_text(raw_unit.get("scope_ref") or raw_unit.get("unit_id"))
+            source_text = _clean_text(raw_unit.get("source_text") or raw_unit.get("text"))
+            if not scope_ref or not source_text:
+                continue
+            source_hash = _clean_text(raw_unit.get("source_hash")) or text_hash(source_text)
+            translation = layout_translations.get(scope_ref)
+            translatable = bool(raw_unit.get("translatable", True))
+            display_source = bool(raw_unit.get("display_source", not translatable))
+            translated_text = translation_text_from_row(translation or {})
+            status = _translation_unit_status(translation, source_hash) if translatable else "translated"
+            if not translatable and not translated_text and display_source:
+                translated_text = source_text
+            if translatable:
+                summary[status] = summary.get(status, 0) + 1
+            unit = {
+                **raw_unit,
+                "unit_id": scope_ref,
+                "anchor_id": _clean_text(raw_unit.get("anchor_id")) or scope_ref,
+                "scope_type": "layout",
+                "scope_ref": scope_ref,
+                "segment_id": "",
+                "source_hash": source_hash,
+                "source_text": source_text,
+                "target_lang": target_lang,
+                "translated_text": translated_text,
+                "status": status,
+                "status_reason": _clean_text((translation or {}).get("status_reason")),
+                "rects": copy.deepcopy(raw_unit.get("rects") or []),
+                "translatable": translatable,
+                "display_source": display_source,
+            }
+            units.append(unit)
+        return units, summary
+
     page_rows = sorted(pages, key=lambda row: row.page)
     page_translations: dict[int, dict[str, object]] = {}
     segment_translations: dict[str, dict[str, object]] = {}
@@ -2007,6 +2611,12 @@ def build_reader_payload(
                 preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
             except Exception:
                 continue
+    layout_units = build_paper_layout_units(profile, source_id, pages=context_pages)
+    layout_scope_refs = {
+        _clean_text(row.get("scope_ref") or row.get("unit_id"))
+        for row in layout_units
+        if isinstance(row, dict)
+    }
     all_segments = load_paper_segments(profile, source_id)
     reader_preparation = _reader_preparation_summary(source, all_pages, all_segments)
     has_paged_segments = any(segment.page > 0 for segment in all_segments)
@@ -2018,28 +2628,30 @@ def build_reader_payload(
     ]
     segment_ids = {str(row.get("segment_id") or "") for row in segments}
     segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
-    translations = [
-        {
-            **row.to_dict(),
-            "page": int(row.page or segment_pages.get(row.segment_id, 0)),
-        }
-        for row in load_paper_translations(profile, source_id)
-        if row.target_lang == target_lang
-        and (
-            row.page in context_page_set
-            or (row.segment_id and row.segment_id in segment_ids)
-            or (
-                row.scope_type == "page"
-                and any(str(row.scope_ref).startswith(f"page:{page_number}:") for page_number in context_pages)
-            )
-        )
-    ]
+    translations: list[dict[str, object]] = []
+    for row in load_paper_translations(profile, source_id):
+        if row.target_lang != target_lang:
+            continue
+        scope_type = _clean_text(row.scope_type) or "segment"
+        row_page = int(row.page or segment_pages.get(row.segment_id, 0))
+        include_row = False
+        if scope_type == "layout":
+            include_row = row.scope_ref in layout_scope_refs
+        elif row_page in context_page_set:
+            include_row = True
+        elif row.segment_id and row.segment_id in segment_ids:
+            include_row = True
+        elif scope_type == "page" and any(str(row.scope_ref).startswith(f"page:{page_number}:") for page_number in context_pages):
+            include_row = True
+        if include_row:
+            translations.append({**row.to_dict(), "page": row_page})
     page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
     translation_units, translation_summary = build_translation_units(
         pages=page_context_rows,
         segments=segments,
         translations=translations,
         target_lang=target_lang,
+        layout_units=layout_units,
     )
     annotations = [
         ann.to_dict()
@@ -2231,6 +2843,96 @@ def _page_translation_status_counts(
     return counts
 
 
+def _layout_translation_is_current(
+    translation: PaperTranslation | None,
+    unit: dict[str, object],
+    target_lang: str,
+) -> bool:
+    if translation is None:
+        return False
+    if translation.target_lang != target_lang:
+        return False
+    if translation.status != "translated":
+        return False
+    if not _clean_text(translation.translated_text):
+        return False
+    return translation.source_hash == _clean_text(unit.get("source_hash"))
+
+
+def _layout_translation_status_counts(
+    layout_units: list[dict[str, object]],
+    translations: list[PaperTranslation],
+    *,
+    target_lang: str,
+) -> dict[str, int]:
+    by_scope = {
+        row.scope_ref: row
+        for row in translations
+        if row.scope_type == "layout" and row.target_lang == target_lang
+    }
+    counts = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
+    for unit in layout_units:
+        if not bool(unit.get("translatable", True)):
+            continue
+        scope_ref = _clean_text(unit.get("scope_ref") or unit.get("unit_id"))
+        if not scope_ref:
+            continue
+        row = by_scope.get(scope_ref)
+        if row is None:
+            counts["missing"] += 1
+        elif row.status == "failed":
+            counts["failed"] += 1
+        elif not _layout_translation_is_current(row, unit, target_lang):
+            counts["stale"] += 1
+        else:
+            counts["translated"] += 1
+    return counts
+
+
+def _layout_unit_translation_payload(unit: dict[str, object], *, source_id: str) -> dict[str, object]:
+    source_text = _clean_text(unit.get("source_text") or unit.get("text"))
+    source_hash = _clean_text(unit.get("source_hash")) or text_hash(source_text)
+    scope_ref = _clean_text(unit.get("scope_ref") or unit.get("unit_id"))
+    return {
+        "segment_id": scope_ref,
+        "source_id": source_id,
+        "scope_type": "layout",
+        "scope_ref": scope_ref,
+        "page": int(unit.get("page") or 0),
+        "order": int(unit.get("order") or 0),
+        "section_path": copy.deepcopy(unit.get("section_path") or []),
+        "kind": _clean_text(unit.get("kind")) or "paragraph",
+        "text": source_text,
+        "source_text": source_text,
+        "text_hash": source_hash,
+        "source_hash": source_hash,
+        "locator": _clean_text(unit.get("locator")) or (f"p. {int(unit.get('page') or 0)}" if int(unit.get("page") or 0) else ""),
+        "rects": copy.deepcopy(unit.get("rects") or []),
+        "table_id": _clean_text(unit.get("table_id")),
+        "row": unit.get("row"),
+        "col": unit.get("col"),
+        "row_span": unit.get("row_span"),
+        "col_span": unit.get("col_span"),
+    }
+
+
+def _blank_translation_backend_warning(ai_result: object, translations: list[dict[str, object]]) -> str:
+    if not translations or any(translation_text_from_row(row) for row in translations):
+        return ""
+    backend = _clean_text(getattr(ai_result, "backend", ""))
+    generated_by = {
+        _clean_text(row.get("generated_by"))
+        for row in translations
+        if isinstance(row, dict) and _clean_text(row.get("generated_by"))
+    }
+    warnings = " ".join(str(item) for item in getattr(ai_result, "warnings", []) or [])
+    error = _clean_text(getattr(ai_result, "error", ""))
+    marker = f"{backend} {' '.join(generated_by)} {warnings} {error}".lower()
+    if "rule_fallback" in marker or "llm_api_key" in marker or "ai_not_configured" in marker:
+        return NO_LLM_TRANSLATION_WARNING
+    return ""
+
+
 def translate_full_paper(
     profile: str | Path,
     source_id: str,
@@ -2254,7 +2956,7 @@ def translate_full_paper(
     clean_lang = _clean_text(target_lang) or "zh"
     clean_mode = _clean_text(mode).lower() or "missing_or_stale"
     clean_scope_strategy = _clean_text(scope_strategy).lower() or "auto"
-    if clean_scope_strategy not in {"auto", "segment", "page"}:
+    if clean_scope_strategy not in {"auto", "segment", "page", "layout"}:
         clean_scope_strategy = "auto"
     if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
         raise ValueError(f"Unknown full-paper translation mode: {mode}")
@@ -2268,6 +2970,150 @@ def translate_full_paper(
         ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
         segments = load_paper_segments(profile, source_id)
     pages = load_paper_pages(profile, source_id)
+    layout_units = build_paper_layout_units(profile, source_id) if clean_scope_strategy == "layout" else []
+    if layout_units:
+        translations = load_paper_translations(profile, source_id)
+        existing_by_scope = {
+            row.scope_ref: row
+            for row in translations
+            if row.scope_type == "layout" and row.target_lang == clean_lang
+        }
+        selected_units: list[dict[str, object]] = []
+        for unit in layout_units:
+            if not bool(unit.get("translatable", True)):
+                continue
+            scope_ref = _clean_text(unit.get("scope_ref") or unit.get("unit_id"))
+            if not scope_ref:
+                continue
+            existing = existing_by_scope.get(scope_ref)
+            is_current = _layout_translation_is_current(existing, unit, clean_lang)
+            is_stale = existing is not None and not is_current
+            if clean_mode == "all":
+                selected_units.append(unit)
+            elif clean_mode == "missing" and existing is None:
+                selected_units.append(unit)
+            elif clean_mode == "stale" and is_stale:
+                selected_units.append(unit)
+            elif clean_mode == "missing_or_stale" and (existing is None or is_stale):
+                selected_units.append(unit)
+
+        warnings: list[str] = []
+        accepted_rows: list[dict[str, object]] = []
+        unit_payloads = [_layout_unit_translation_payload(unit, source_id=source_id) for unit in selected_units]
+        unit_map: dict[str, dict[str, object]] = {}
+        for unit, payload in zip(selected_units, unit_payloads, strict=False):
+            unit_map[_clean_text(payload.get("segment_id"))] = unit
+            unit_map[_clean_text(payload.get("scope_ref"))] = unit
+        batches = [
+            unit_payloads[index : index + clean_batch_size]
+            for index in range(0, len(unit_payloads), clean_batch_size)
+        ]
+        batches_completed = 0
+        units_processed = 0
+        if batches:
+            from nblane.core.ai.gateway import translate_paper_segments
+
+            for batch in batches:
+                try:
+                    result = translate_paper_segments(
+                        ai_profile if ai_profile is not None else _profile_name(profile),
+                        source_id,
+                        batch,
+                        target_lang=clean_lang,
+                        require_review=require_review,
+                    )
+                except Exception as exc:
+                    warnings.append(f"Translation batch failed: {exc}")
+                    batches_completed += 1
+                    units_processed += len(batch)
+                    continue
+                warnings.extend(str(warning) for warning in result.warnings)
+                if result.error:
+                    warnings.append(result.error)
+                structured = result.structured if isinstance(result.structured, dict) else {}
+                normalized_rows: list[dict[str, object]] = [
+                    normalize_translation_row(raw, source_id=source_id, target_lang=clean_lang)
+                    for raw in structured.get("translations") or []
+                    if isinstance(raw, dict)
+                ]
+                backend_warning = _blank_translation_backend_warning(result, normalized_rows)
+                if backend_warning and backend_warning not in warnings:
+                    warnings.append(backend_warning)
+                for row in normalized_rows:
+                    row_ref = _clean_text(row.get("segment_id") or row.get("scope_ref"))
+                    unit = unit_map.get(row_ref)
+                    if unit is None:
+                        warnings.append("Skipped translation row without a known layout scope.")
+                        continue
+                    source_hash = _clean_text(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash"))
+                    unit_hash = _clean_text(unit.get("source_hash"))
+                    if source_hash != unit_hash:
+                        warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
+                        continue
+                    translated_text = translation_text_from_row(row)
+                    page_number = int(unit.get("page") or 0)
+                    scope_ref = _clean_text(unit.get("scope_ref") or unit.get("unit_id"))
+                    if not translated_text:
+                        if not backend_warning:
+                            warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
+                        continue
+                    accepted_rows.append(
+                        {
+                            **copy.deepcopy(row),
+                            "source_id": source_id,
+                            "scope_type": "layout",
+                            "scope_ref": scope_ref,
+                            "segment_id": "",
+                            "page": page_number,
+                            "order": int(unit.get("order") or 0),
+                            "locator": _clean_text(unit.get("locator")) or f"p. {page_number}",
+                            "source_hash": unit_hash,
+                            "source_text": _clean_text(unit.get("source_text")),
+                            "target_lang": clean_lang,
+                            "translated_text": translated_text,
+                            "rects": copy.deepcopy(unit.get("rects") or []),
+                            "status": _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
+                        }
+                    )
+                batches_completed += 1
+                units_processed += len(batch)
+                if progress_callback is not None:
+                    try:
+                        progress_callback(
+                            {
+                                "source_id": source_id,
+                                "target_lang": clean_lang,
+                                "mode": clean_mode,
+                                "scope": "layout",
+                                "batches": len(batches),
+                                "batches_completed": batches_completed,
+                                "segments_selected": len(selected_units),
+                                "segments_processed": units_processed,
+                                "updated": len(accepted_rows),
+                                "warnings": len(warnings),
+                            }
+                        )
+                    except Exception as exc:
+                        warnings.append(f"Progress callback failed: {exc}")
+        if accepted_rows:
+            upsert_paper_translations(profile, source_id, accepted_rows)
+        final_translations = load_paper_translations(profile, source_id)
+        counts = _layout_translation_status_counts(layout_units, final_translations, target_lang=clean_lang)
+        return {
+            "source_id": source_id,
+            "target_lang": clean_lang,
+            "mode": clean_mode,
+            "scope": "layout",
+            "segments_total": len([unit for unit in layout_units if bool(unit.get("translatable", True))]),
+            "segments_selected": len(selected_units),
+            "batches": len(batches),
+            "updated": len(accepted_rows),
+            "translated": counts["translated"],
+            "missing": counts["missing"],
+            "stale": counts["stale"],
+            "failed": counts["failed"],
+            "warnings": warnings,
+        }
     use_page_scope = bool(pages) and (
         clean_scope_strategy == "page"
         or (clean_scope_strategy == "auto" and segments and not any(segment.page > 0 for segment in segments))
@@ -3958,6 +4804,7 @@ def auto_chunk_paper(
 
 __all__ = [
     "LIBRARY_TREE_FILENAME",
+    "NO_LLM_TRANSLATION_WARNING",
     "PAPER_ANNOTATIONS_DIRNAME",
     "PAPER_EXPORTS_DIRNAME",
     "PAPER_PAGES_DIRNAME",
@@ -3972,6 +4819,7 @@ __all__ = [
     "PaperSegment",
     "PaperTranslation",
     "auto_chunk_paper",
+    "build_paper_layout_units",
     "build_reader_payload",
     "build_translation_units",
     "check_paper_links",
@@ -3980,6 +4828,7 @@ __all__ = [
     "create_reading_note_markdown",
     "download_paper_pdf",
     "ensure_paper_reading_artifacts",
+    "extract_paper_page_text_layer",
     "extract_paper_pages",
     "extract_paper_segments",
     "format_research_citations",

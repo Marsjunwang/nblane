@@ -291,6 +291,21 @@ def _progress_callback(task_id: str, action: str):
                     "batches": batches,
                     "batches_completed": batches_completed,
                 }
+            elif action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
+                total = int(raw.get("total") or raw.get("segments_selected") or 0)
+                current = int(raw.get("current") or 0)
+                saved = int(raw.get("saved") or 0)
+                label = str(raw.get("label") or "Translating visible pages...")
+                task["progress"] = {
+                    "phase": str(raw.get("phase") or "running"),
+                    "label": label,
+                    "current": min(current, total) if total > 0 else current,
+                    "total": total,
+                    "saved": saved,
+                    "requested_pages": list(raw.get("requested_pages") or []),
+                    "target_lang": str(raw.get("target_lang") or ""),
+                    "scope": str(raw.get("scope") or ""),
+                }
             elif action == PREPARE_READER_ARTIFACTS:
                 task["progress"] = {
                     "phase": str(raw.get("phase") or "running"),

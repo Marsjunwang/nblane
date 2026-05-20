@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core.research_papers import (
+    NO_LLM_TRANSLATION_WARNING,
     PaperPage,
     PaperSegment,
     load_paper_annotations,
@@ -287,6 +288,212 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(result.message, "Saved 1 translation row(s).")
         self.assertEqual(translations[0].scope_type, "page")
         self.assertEqual(translations[0].translated_text, "整页译文。")
+
+    def test_translate_visible_pages_supports_layout_scope(self) -> None:
+        layout_hash = text_hash("Visible positioned text.")
+        layout_scope = "layout:v2:1:00001:abc123"
+        layout_units = [
+            {
+                "unit_id": layout_scope,
+                "anchor_id": layout_scope,
+                "scope_type": "layout",
+                "scope_ref": layout_scope,
+                "page": 1,
+                "order": 1,
+                "kind": "paragraph",
+                "locator": "p. 1",
+                "source_text": "Visible positioned text.",
+                "source_hash": layout_hash,
+                "translatable": True,
+                "rects": [{"x": 10, "y": 20, "w": 80, "h": 24, "page_width": 200, "page_height": 200}],
+            }
+        ]
+
+        def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+            return SimpleNamespace(
+                structured={
+                    "translations": [
+                        {
+                            "segment_id": row["segment_id"],
+                            "source_hash": row["source_hash"],
+                            "translated_text": "可见布局译文。",
+                        }
+                        for row in batch
+                    ]
+                },
+                warnings=[],
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.reader_actions.build_paper_layout_units", return_value=layout_units),
+                patch("nblane.core.reader_actions.translate_paper_segments", side_effect=fake_translate),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_visible_pages",
+                    {"visible_pages": [1], "target_lang": "zh", "scope_strategy": "layout"},
+                )
+            translations = load_paper_translations(profile, ctx.source_id)
+
+        summary = result.data["summary"]
+        self.assertTrue(result.ok)
+        self.assertEqual(summary["scope"], "layout")
+        self.assertEqual(summary["requested_pages"], [1])
+        self.assertEqual(summary["segments_selected"], 1)
+        self.assertEqual(summary["saved"], 1)
+        self.assertEqual(summary["failed"], 0)
+        self.assertEqual(summary["skipped"], 0)
+        self.assertEqual(translations[0].scope_type, "layout")
+        self.assertEqual(translations[0].scope_ref, layout_scope)
+        self.assertEqual(translations[0].segment_id, "")
+        self.assertEqual(translations[0].rects[0]["w"], 80)
+        self.assertEqual(translations[0].translated_text, "可见布局译文。")
+
+    def test_translate_visible_pages_skips_blank_layout_fallback(self) -> None:
+        layout_hash = text_hash("Visible positioned text.")
+        layout_scope = "layout:v2:1:00001:abc123"
+        layout_units = [
+            {
+                "unit_id": layout_scope,
+                "anchor_id": layout_scope,
+                "scope_type": "layout",
+                "scope_ref": layout_scope,
+                "page": 1,
+                "order": 1,
+                "kind": "paragraph",
+                "locator": "p. 1",
+                "source_text": "Visible positioned text.",
+                "source_hash": layout_hash,
+                "translatable": True,
+                "rects": [{"x": 10, "y": 20, "w": 80, "h": 24, "page_width": 200, "page_height": 200}],
+            }
+        ]
+
+        def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+            return SimpleNamespace(
+                backend="rule_fallback",
+                structured={
+                    "translations": [
+                        {
+                            "segment_id": row["segment_id"],
+                            "source_hash": row["source_hash"],
+                            "translated_text": "",
+                            "generated_by": "rule_fallback",
+                        }
+                        for row in batch
+                    ]
+                },
+                warnings=["Deterministic fallback used."],
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.reader_actions.build_paper_layout_units", return_value=layout_units),
+                patch("nblane.core.reader_actions.translate_paper_segments", side_effect=fake_translate),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_visible_pages",
+                    {"visible_pages": [1], "target_lang": "zh", "scope_strategy": "layout"},
+                )
+            translations = load_paper_translations(profile, ctx.source_id)
+
+        summary = result.data["summary"]
+        self.assertTrue(result.ok)
+        self.assertEqual(summary["scope"], "layout")
+        self.assertEqual(summary["saved"], 0)
+        self.assertEqual(summary["failed"], 0)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(translations, [])
+        self.assertIn(NO_LLM_TRANSLATION_WARNING, result.warnings)
+
+    def test_retry_layout_scope_translates_only_requested_scope_ref(self) -> None:
+        first_hash = text_hash("First positioned text.")
+        second_hash = text_hash("Second positioned text.")
+        first_scope = "layout:v2:1:00001:first"
+        second_scope = "layout:v2:1:00002:second"
+        layout_units = [
+            {
+                "unit_id": first_scope,
+                "anchor_id": first_scope,
+                "scope_type": "layout",
+                "scope_ref": first_scope,
+                "page": 1,
+                "order": 1,
+                "kind": "paragraph",
+                "locator": "p. 1",
+                "source_text": "First positioned text.",
+                "source_hash": first_hash,
+                "translatable": True,
+                "rects": [{"x": 10, "y": 20, "w": 80, "h": 24, "page_width": 200, "page_height": 200}],
+            },
+            {
+                "unit_id": second_scope,
+                "anchor_id": second_scope,
+                "scope_type": "layout",
+                "scope_ref": second_scope,
+                "page": 1,
+                "order": 2,
+                "kind": "paragraph",
+                "locator": "p. 1",
+                "source_text": "Second positioned text.",
+                "source_hash": second_hash,
+                "translatable": True,
+                "rects": [{"x": 10, "y": 50, "w": 80, "h": 24, "page_width": 200, "page_height": 200}],
+            },
+        ]
+        batches: list[list[str]] = []
+        progress: list[dict] = []
+
+        def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+            batches.append([row["scope_ref"] for row in batch])
+            return SimpleNamespace(
+                structured={
+                    "translations": [
+                        {
+                            "segment_id": row["segment_id"],
+                            "source_hash": row["source_hash"],
+                            "translated_text": "第二段译文。",
+                        }
+                        for row in batch
+                    ]
+                },
+                warnings=[],
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.reader_actions.build_paper_layout_units", return_value=layout_units),
+                patch("nblane.core.reader_actions.translate_paper_segments", side_effect=fake_translate),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "retry_translation_scope",
+                    {
+                        "visible_pages": [1],
+                        "target_lang": "zh",
+                        "scope_strategy": "layout",
+                        "scope_refs": [second_scope],
+                    },
+                    progress_callback=progress.append,
+                )
+            translations = load_paper_translations(profile, ctx.source_id)
+
+        summary = result.data["summary"]
+        self.assertTrue(result.ok)
+        self.assertEqual(summary["segments_selected"], 1)
+        self.assertEqual(batches, [[second_scope]])
+        self.assertEqual([row.scope_ref for row in translations], [second_scope])
+        self.assertEqual(translations[0].translated_text, "第二段译文。")
+        self.assertIn("extracting_layout", [row["phase"] for row in progress])
+        self.assertIn("translating", [row["phase"] for row in progress])
 
     def test_translate_full_paper_reports_batch_progress(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

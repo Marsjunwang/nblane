@@ -1818,6 +1818,7 @@ def _handle_reader_component_event(
                 source_id,
                 target_lang=_payload_text(payload, "target_lang", "language") or "zh",
                 mode=_payload_text(payload, "mode") or "missing_or_stale",
+                scope_strategy=_payload_text(payload, "scope_strategy") or "auto",
                 ai_profile=selected,
                 require_review=False,
             )
@@ -1842,122 +1843,48 @@ def _handle_reader_component_event(
             return True
 
         if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
-            refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
-            visible_pages = {
-                int(item)
-                for item in payload.get("visible_pages", [])
-                if str(item).strip().isdigit()
-            } if isinstance(payload.get("visible_pages"), list) else set()
-            primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
-            if not visible_pages and primary_page:
-                visible_pages = {primary_page}
-            segments = [
-                segment
-                for segment in segment_rows
-                if (refs and segment.segment_id in refs)
-                or (visible_pages and segment.page in visible_pages)
-            ]
-            segment_payloads = [segment.to_dict() for segment in segments]
-            page_scope_rows: dict[str, dict[str, object]] = {}
-            if not segment_payloads and visible_pages:
-                for page in load_paper_pages(_pdir, source_id):
-                    if page.page not in visible_pages or not str(page.text or "").strip():
-                        continue
-                    page_hash = page.text_hash or text_hash(page.text)
-                    synthetic_id = f"page:{page.page}"
-                    page_scope_rows[synthetic_id] = {
-                        "segment_id": synthetic_id,
-                        "source_id": source_id,
-                        "scope_type": "page",
-                        "scope_ref": f"page:{page.page}:{page_hash}",
-                        "page": page.page,
-                        "order": 0,
-                        "section_path": [],
-                        "kind": "page",
-                        "text": page.text,
-                        "text_hash": page_hash,
-                        "locator": f"p. {page.page}",
-                    }
-                segment_payloads = list(page_scope_rows.values())
-            if not segment_payloads:
-                message = _l(
+            ctx = ReaderActionContext(
+                profile_name=selected,
+                profile_path=_pdir,
+                user_id=getattr(user, "id", "local"),
+                source_id=source_id,
+            )
+            result = handle_reader_action(ctx, action, payload)
+            summary = result.data.get("summary") if isinstance(result.data, dict) else {}
+            if not isinstance(summary, dict):
+                summary = {}
+            saved = int(summary.get("saved") or 0)
+            if result.ok and saved:
+                stash_git_backup_results()
+                clear_web_cache()
+                message = _l("visible_pages_translation_saved", "Visible pages translated: saved {count} row(s).").format(
+                    count=saved
+                )
+                st.success(message)
+                _set_reader_action_status(source_id, action, "done", message)
+            elif result.ok:
+                message = result.message or _l(
+                    "visible_pages_translation_saved_none",
+                    "No visible-page translations were saved. AI returned {count} valid row(s).",
+                ).format(count=summary.get("ai_rows", 0))
+                st.info(message)
+                _set_reader_action_status(source_id, action, "done", message)
+            else:
+                message = result.message or _l(
                     "visible_page_translation_no_text",
                     "No extracted text is available for the visible page yet. Try Extract pages in Reader diagnostics.",
                 )
                 st.warning(message)
                 _set_reader_action_status(source_id, action, "error", message)
-                return True
-            result = translate_paper_segments(
-                selected,
-                source_id,
-                segment_payloads,
-                target_lang=_payload_text(payload, "target_lang", "language") or "zh",
-                require_review=False,
-            )
-            _store_reader_ai_result(source_id, action, result)
-            translations = []
-            if isinstance(result.structured, dict):
-                translations = [
-                    normalize_translation_row(
-                        row,
-                        source_id=source_id,
-                        target_lang=_payload_text(payload, "target_lang", "language") or "zh",
-                    )
-                    for row in result.structured.get("translations", [])
-                    if isinstance(row, dict)
-                ]
-            if page_scope_rows:
-                savable = []
-                for row in translations:
-                    row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
-                    page_row = page_scope_rows.get(row_ref)
-                    if page_row is None:
-                        continue
-                    savable.append(
-                        {
-                            **row,
-                            "scope_type": "page",
-                            "scope_ref": page_row["scope_ref"],
-                            "segment_id": "",
-                            "page": page_row["page"],
-                            "source_hash": page_row["text_hash"],
-                            "source_text": page_row["text"],
-                        }
-                    )
-            else:
-                segment_ids = {segment.segment_id for segment in segments}
-                savable = [
-                    {
-                        **row,
-                        "source_id": source_id,
-                        "translated_text": translation_text_from_row(row),
-                    }
-                    for row in translations
-                    if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
-                ]
-            if savable:
-                upsert_paper_translations(_pdir, source_id, savable)
-                stash_git_backup_results()
-                clear_web_cache()
-                message = _l("visible_pages_translation_saved", "Visible pages translated: saved {count} row(s).").format(
-                    count=len(savable)
-                )
-                st.success(message)
-                _set_reader_action_status(source_id, action, "done", message)
-            else:
-                message = _l(
-                    "visible_pages_translation_saved_none",
-                    "No visible-page translations were saved. AI returned {count} valid row(s).",
-                ).format(count=len(translations))
-                st.info(message)
-                _set_reader_action_status(source_id, action, "done", message)
             st.caption(
                 " · ".join(
                     [
-                        f"pages={','.join(str(page) for page in sorted(visible_pages)) or '-'}",
-                        f"segments={len(segment_payloads)}",
-                        f"ai_rows={len(translations)}",
-                        f"saved={len(savable)}",
+                        f"pages={','.join(str(page) for page in summary.get('requested_pages', []) or []) or '-'}",
+                        f"scope={summary.get('scope') or '-'}",
+                        f"segments={summary.get('segments_selected', 0)}",
+                        f"ai_rows={summary.get('ai_rows', 0)}",
+                        f"saved={summary.get('saved', 0)}",
+                        f"skipped={summary.get('skipped', 0)}",
                     ]
                 )
             )
@@ -2358,6 +2285,8 @@ def _render_paper_reader(inbox) -> None:
                 "height_mode": "viewport",
                 "render_cache": True,
                 "render_cache_max_pages": 24,
+                "translation_layout": "overlay",
+                "translation_overflow_policy": "fixed-expand",
                 "translation_dock_default": "selection",
                 "pdf_load_timeout_ms": 9000,
                 "reader_action_status": st.session_state.get(_reader_key(source_id, "last_action_status"), {}),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,8 @@ from nblane.core.ai import (
     translate_paper_segments,
 )
 from nblane.core.research_papers import (
+    NO_LLM_TRANSLATION_WARNING,
+    build_paper_layout_units,
     create_paper_annotation,
     ensure_paper_reading_artifacts,
     load_paper_analysis,
@@ -451,6 +454,64 @@ def _visible_translation_summary(
     }
 
 
+def _layout_translation_payload(unit: dict[str, Any], source_id: str) -> dict[str, Any]:
+    source_text = _payload_text(unit, "source_text", "text")
+    source_hash = _payload_text(unit, "source_hash") or text_hash(source_text)
+    scope_ref = _payload_text(unit, "scope_ref", "unit_id")
+    page = _payload_int(unit, "page")
+    return {
+        "segment_id": scope_ref,
+        "source_id": source_id,
+        "scope_type": "layout",
+        "scope_ref": scope_ref,
+        "page": page,
+        "order": _payload_int(unit, "order"),
+        "section_path": unit.get("section_path") if isinstance(unit.get("section_path"), list) else [],
+        "kind": _payload_text(unit, "kind") or "paragraph",
+        "text": source_text,
+        "source_text": source_text,
+        "text_hash": source_hash,
+        "source_hash": source_hash,
+        "locator": _payload_text(unit, "locator") or (f"p. {page}" if page else ""),
+        "rects": unit.get("rects") if isinstance(unit.get("rects"), list) else [],
+        "table_id": _payload_text(unit, "table_id"),
+        "row": unit.get("row"),
+        "col": unit.get("col"),
+        "row_span": unit.get("row_span"),
+        "col_span": unit.get("col_span"),
+    }
+
+
+def _blank_translation_backend_warning(ai_result: Any, translations: list[dict[str, Any]]) -> str:
+    if not translations or any(translation_text_from_row(row) for row in translations):
+        return ""
+    generated_by = {
+        _payload_text(row, "generated_by")
+        for row in translations
+        if isinstance(row, dict) and _payload_text(row, "generated_by")
+    }
+    marker = " ".join(
+        [
+            str(getattr(ai_result, "backend", "") or ""),
+            " ".join(generated_by),
+            " ".join(str(item) for item in getattr(ai_result, "warnings", []) or []),
+            str(getattr(ai_result, "error", "") or ""),
+        ]
+    ).lower()
+    if "rule_fallback" in marker or "llm_api_key" in marker or "ai_not_configured" in marker:
+        return NO_LLM_TRANSLATION_WARNING
+    return ""
+
+
+def _visible_translation_batch_size(scope: str) -> int:
+    default = 6 if scope == "layout" else 12
+    try:
+        value = int(os.getenv("NBLANE_READER_VISIBLE_TRANSLATION_BATCH_SIZE", str(default)) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(20, value))
+
+
 def _update_or_delete_paper_annotation(
     profile_path: Path,
     source_id: str,
@@ -704,9 +765,10 @@ def _handle_reader_action_inner(
     if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
         target_lang = _payload_text(payload, "target_lang", "language") or "zh"
         scope_strategy = _payload_text(payload, "scope_strategy") or "auto"
-        if scope_strategy not in {"auto", "segment", "page"}:
+        if scope_strategy not in {"auto", "segment", "page", "layout"}:
             scope_strategy = "auto"
         refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
+        scope_refs = set(_payload_list(payload, "scope_refs", "scope_ref"))
         visible_pages = {
             int(item)
             for item in payload.get("visible_pages", [])
@@ -716,19 +778,64 @@ def _handle_reader_action_inner(
         if not visible_pages and primary_page:
             visible_pages = {primary_page}
         requested_pages = sorted(visible_pages)
+        current_translations = load_paper_translations(profile, source_id)
+        def emit_translation_progress(phase: str, label: str, *, current: int = 0, total: int = 0, saved_count: int = 0) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(
+                    {
+                        "phase": phase,
+                        "label": label,
+                        "current": current,
+                        "total": total,
+                        "saved": saved_count,
+                        "segments_selected": total,
+                        "requested_pages": requested_pages,
+                        "target_lang": target_lang,
+                        "scope": scope_strategy,
+                    }
+                )
+            except Exception:
+                return
+
+        layout_scope_rows: dict[str, dict[str, Any]] = {}
+        if visible_pages and scope_strategy in {"layout", "auto"} and (not refs or scope_refs):
+            emit_translation_progress("extracting_layout", "Extracting page layout...")
+            layout_units = [
+                unit
+                for unit in build_paper_layout_units(profile, source_id, pages=visible_pages)
+                if bool(unit.get("translatable", True))
+            ]
+            existing_layout_by_scope = {
+                row.scope_ref: row
+                for row in current_translations
+                if row.scope_type == "layout" and row.target_lang == target_lang
+            }
+            for unit in layout_units:
+                payload_row = _layout_translation_payload(unit, source_id)
+                scope_ref = _payload_text(payload_row, "scope_ref", "segment_id")
+                if not scope_ref or not _payload_text(payload_row, "text", "source_text"):
+                    continue
+                if scope_refs and scope_ref not in scope_refs:
+                    continue
+                if not scope_refs and _translation_row_current(existing_layout_by_scope.get(scope_ref), _payload_text(payload_row, "source_hash"), target_lang):
+                    continue
+                layout_scope_rows[scope_ref] = payload_row
         segments = [
             segment
             for segment in segment_rows
             if (refs and segment.segment_id in refs)
             or (visible_pages and segment.page in visible_pages)
         ]
-        segment_payloads = [segment.to_dict() for segment in segments]
+        segment_payloads = list(layout_scope_rows.values()) if layout_scope_rows else [segment.to_dict() for segment in segments]
         page_scope_rows: dict[str, dict[str, Any]] = {}
-        use_page_scope = bool(visible_pages) and (
+        use_page_scope = bool(visible_pages) and not layout_scope_rows and (
             scope_strategy == "page"
             or (
                 scope_strategy == "auto"
                 and not refs
+                and not scope_refs
                 and (not segment_payloads or not any(segment.page > 0 for segment in segments))
             )
         )
@@ -769,27 +876,116 @@ def _handle_reader_action_inner(
                 data={"summary": summary},
                 message="No extracted text is available for the visible page yet.",
             )
-        ai_result = translate_paper_segments(
-            ctx.profile_name,
-            source_id,
-            segment_payloads,
-            target_lang=target_lang,
-            require_review=False,
+        batch_scope = "layout" if layout_scope_rows else "page" if page_scope_rows else "segment"
+        batch_size = _visible_translation_batch_size(batch_scope)
+        batches = [
+            segment_payloads[index : index + batch_size]
+            for index in range(0, len(segment_payloads), batch_size)
+        ]
+        translations: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        combined_structured: dict[str, Any] = {"translations": [], "warnings": []}
+        layout_backend_warning = ""
+        processed = 0
+        for batch_index, batch in enumerate(batches, start=1):
+            emit_translation_progress(
+                "translating",
+                f"Translating visible pages... {processed}/{len(segment_payloads)}",
+                current=processed,
+                total=len(segment_payloads),
+            )
+            ai_result = translate_paper_segments(
+                ctx.profile_name,
+                source_id,
+                batch,
+                target_lang=target_lang,
+                require_review=False,
+            )
+            batch_warnings = [str(item) for item in ai_result.warnings]
+            warnings.extend(batch_warnings)
+            if getattr(ai_result, "error", ""):
+                warnings.append(str(ai_result.error))
+            batch_rows: list[dict[str, Any]] = []
+            structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+            for raw in structured.get("translations") or []:
+                if not isinstance(raw, dict):
+                    continue
+                row = normalize_translation_row(raw, source_id=source_id, target_lang=target_lang)
+                batch_rows.append(row)
+            translations.extend(batch_rows)
+            combined_structured["translations"].extend(batch_rows)
+            if batch_warnings:
+                combined_structured["warnings"].extend(batch_warnings)
+            if layout_scope_rows:
+                warning = _blank_translation_backend_warning(ai_result, batch_rows)
+                if warning:
+                    layout_backend_warning = warning
+            processed += len(batch)
+            emit_translation_progress(
+                "translating",
+                f"Translating visible pages... {processed}/{len(segment_payloads)}",
+                current=processed,
+                total=len(segment_payloads),
+            )
+        emit_translation_progress(
+            "saving",
+            "Saving translations...",
+            current=len(segment_payloads),
+            total=len(segment_payloads),
         )
-        translations = []
-        if isinstance(ai_result.structured, dict):
-            translations = [
-                normalize_translation_row(row, source_id=source_id, target_lang=target_lang)
-                for row in ai_result.structured.get("translations", [])
-                if isinstance(row, dict)
-            ]
-        warnings = list(ai_result.warnings)
         savable: list[dict[str, Any]] = []
         saved = 0
         failed = 0
         skipped = 0
-        current_translations = load_paper_translations(profile, source_id)
-        if page_scope_rows:
+        if layout_scope_rows:
+            scope = "layout"
+            backend_warning = layout_backend_warning
+            if backend_warning and backend_warning not in warnings:
+                warnings.append(backend_warning)
+            layout_index: dict[str, dict[str, Any]] = {}
+            for layout_row in layout_scope_rows.values():
+                layout_index[str(layout_row["segment_id"])] = layout_row
+                layout_index[str(layout_row["scope_ref"])] = layout_row
+            for row in translations:
+                row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
+                if not row_ref:
+                    warnings.append("Skipped translation row without segment_id or scope_ref.")
+                    skipped += 1
+                    continue
+                layout_row = layout_index.get(row_ref)
+                if layout_row is None:
+                    warnings.append(f"Skipped translation row for unknown layout scope: {row_ref}.")
+                    skipped += 1
+                    continue
+                source_hash = str(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash") or "").strip()
+                if source_hash != layout_row["source_hash"]:
+                    warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
+                    skipped += 1
+                    continue
+                translated_text = translation_text_from_row(row)
+                if not translated_text:
+                    if not backend_warning:
+                        warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
+                    skipped += 1
+                    continue
+                savable.append(
+                    {
+                        **row,
+                        "scope_type": "layout",
+                        "scope_ref": layout_row["scope_ref"],
+                        "segment_id": "",
+                        "page": layout_row["page"],
+                        "order": layout_row["order"],
+                        "locator": layout_row["locator"],
+                        "source_hash": layout_row["source_hash"],
+                        "source_text": layout_row["source_text"],
+                        "target_lang": target_lang,
+                        "translated_text": translated_text,
+                        "rects": layout_row.get("rects", []),
+                    }
+                )
+                saved += 1
+        elif page_scope_rows:
             scope = "page"
             page_index: dict[str, dict[str, Any]] = {}
             for page_row in page_scope_rows.values():
@@ -931,6 +1127,13 @@ def _handle_reader_action_inner(
             skipped=skipped,
             target_lang=target_lang,
         )
+        emit_translation_progress(
+            "done",
+            "Visible-page translation finished.",
+            current=len(segment_payloads),
+            total=len(segment_payloads),
+            saved_count=saved,
+        )
         if saved:
             message = f"Saved {saved} translation row(s)."
         elif failed:
@@ -939,7 +1142,7 @@ def _handle_reader_action_inner(
             message = "No translation rows were saved."
         return ReaderActionResult(
             data={
-                "structured": ai_result.structured or {},
+                "structured": combined_structured,
                 "translations": savable,
                 "summary": summary,
                 "saved": saved,
