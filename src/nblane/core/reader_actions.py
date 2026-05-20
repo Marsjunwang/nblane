@@ -22,10 +22,12 @@ from nblane.core.research_papers import (
     load_paper_pages,
     load_paper_segments,
     load_paper_translations,
+    normalize_translation_row,
     save_paper_analysis,
     save_paper_annotations,
     text_hash,
     translate_full_paper,
+    translation_text_from_row,
     upsert_paper_translations,
 )
 from nblane.core.research_sources import (
@@ -630,7 +632,11 @@ def _handle_reader_action_inner(
         )
         translations = []
         if isinstance(ai_result.structured, dict):
-            translations = [row for row in ai_result.structured.get("translations", []) if isinstance(row, dict)]
+            translations = [
+                normalize_translation_row(row, source_id=source_id, target_lang=target_lang)
+                for row in ai_result.structured.get("translations", [])
+                if isinstance(row, dict)
+            ]
         warnings = list(ai_result.warnings)
         savable: list[dict[str, Any]] = []
         saved = 0
@@ -664,7 +670,7 @@ def _handle_reader_action_inner(
                     warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
                     skipped += 1
                     continue
-                translated_text = str(row.get("translated_text") or "").strip()
+                translated_text = translation_text_from_row(row)
                 if not translated_text:
                     warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
                     existing = existing_by_scope.get(str(page_row["scope_ref"]))
@@ -727,7 +733,7 @@ def _handle_reader_action_inner(
                     warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
                     skipped += 1
                     continue
-                translated_text = str(row.get("translated_text") or "").strip()
+                translated_text = translation_text_from_row(row)
                 if not translated_text:
                     warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
                     existing = existing_by_segment.get(row_ref)
@@ -786,7 +792,12 @@ def _handle_reader_action_inner(
         else:
             message = "No translation rows were saved."
         return ReaderActionResult(
-            data={"structured": ai_result.structured or {}, "summary": summary, "saved": saved},
+            data={
+                "structured": ai_result.structured or {},
+                "translations": savable,
+                "summary": summary,
+                "saved": saved,
+            },
             warnings=warnings,
             message=message,
         )
@@ -811,7 +822,11 @@ def _handle_reader_action_inner(
         )
         translations = []
         if isinstance(ai_result.structured, dict):
-            translations = [row for row in ai_result.structured.get("translations", []) if isinstance(row, dict)]
+            translations = [
+                normalize_translation_row(row, source_id=source_id, target_lang=target_lang)
+                for row in ai_result.structured.get("translations", [])
+                if isinstance(row, dict)
+            ]
         if segment_refs:
             segment_ids = {segment.segment_id for segment in segment_rows}
             savable = [
@@ -850,8 +865,17 @@ def _handle_reader_action_inner(
                 )
         if savable:
             upsert_paper_translations(profile, source_id, savable)
+        translation_text = next(
+            (translation_text_from_row(row) for row in savable if translation_text_from_row(row)),
+            "",
+        )
         return ReaderActionResult(
-            data={"structured": ai_result.structured or {}, "saved": len(savable)},
+            data={
+                "structured": ai_result.structured or {},
+                "translations": savable,
+                "translation_text": translation_text,
+                "saved": len(savable),
+            },
             warnings=list(ai_result.warnings),
             message="Saved" if savable else "",
         )

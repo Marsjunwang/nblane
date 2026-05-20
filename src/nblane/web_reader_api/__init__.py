@@ -140,7 +140,7 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "height_mode": "viewport",
         "render_cache": True,
         "render_cache_max_pages": 36,
-        "translation_dock_default": "bottom",
+        "translation_dock_default": "selection",
         "pdf_load_timeout_ms": 30000,
         "pdf_page_render_timeout_ms": 12000,
         "pdf_text_layer_timeout_ms": 12000,

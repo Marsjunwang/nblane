@@ -1449,7 +1449,7 @@ class PaperTranslation:
             source_hash=_clean_text(data.get("source_hash")),
             source_text=_clean_text(data.get("source_text")),
             target_lang=_clean_text(data.get("target_lang")) or "zh",
-            translated_text=_clean_text(data.get("translated_text")),
+            translated_text=translation_text_from_row(data),
             glossary=_clean_mapping(data.get("glossary")),
             generated_by=_clean_text(data.get("generated_by")),
             status=_choice(data.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
@@ -1478,6 +1478,51 @@ class PaperTranslation:
         return data
 
 
+TRANSLATION_TEXT_KEYS = ("translated_text", "translation", "target_text", "target", "text")
+
+
+def translation_text_from_row(data: object) -> str:
+    """Return translated text from standard or provider-drifted translation rows."""
+
+    if isinstance(data, PaperTranslation):
+        return _clean_text(data.translated_text)
+    if not isinstance(data, dict):
+        return ""
+    for key in TRANSLATION_TEXT_KEYS:
+        clean = _clean_text(data.get(key))
+        if clean:
+            return clean
+    return ""
+
+
+def normalize_translation_row(
+    data: object,
+    *,
+    source_id: str = "",
+    target_lang: str = "",
+) -> dict[str, Any]:
+    """Normalize accepted AI translation rows before validation or storage."""
+
+    raw = data.to_dict() if isinstance(data, PaperTranslation) else copy.deepcopy(data)
+    if not isinstance(raw, dict):
+        return {}
+    translated_text = translation_text_from_row(raw)
+    if translated_text:
+        raw["translated_text"] = translated_text
+    raw["source_hash"] = (
+        _clean_text(raw.get("source_hash"))
+        or _clean_text(raw.get("text_hash"))
+        or _clean_text(raw.get("source_text_hash"))
+    )
+    clean_source_id = _clean_text(source_id)
+    if clean_source_id and not _clean_text(raw.get("source_id")):
+        raw["source_id"] = clean_source_id
+    clean_lang = _clean_text(target_lang)
+    if clean_lang and not _clean_text(raw.get("target_lang")):
+        raw["target_lang"] = clean_lang
+    return raw
+
+
 def _translation_from_input(
     data: object,
     *,
@@ -1490,14 +1535,9 @@ def _translation_from_input(
         return data
     if not isinstance(data, dict):
         return None
-    raw = dict(data)
+    raw = normalize_translation_row(data, source_id=source_id)
     raw["id"] = _clean_text(raw.get("id")) or fallback_id or "pending"
     raw["source_id"] = _clean_text(raw.get("source_id")) or source_id
-    raw["source_hash"] = (
-        _clean_text(raw.get("source_hash"))
-        or _clean_text(raw.get("text_hash"))
-        or _clean_text(raw.get("source_text_hash"))
-    )
     return PaperTranslation.from_dict(raw)
 
 
@@ -1708,10 +1748,13 @@ def build_reader_payload(
                 preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
             except Exception:
                 continue
+    all_segments = load_paper_segments(profile, source_id)
+    has_paged_segments = any(segment.page > 0 for segment in all_segments)
     segments = [
         segment.to_dict()
-        for segment in load_paper_segments(profile, source_id)
+        for segment in all_segments
         if segment.page in context_page_set
+        or (not has_paged_segments and segment.page <= 0)
     ]
     segment_ids = {str(row.get("segment_id") or "") for row in segments}
     segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
@@ -1957,27 +2000,28 @@ def translate_full_paper(
             for raw in structured.get("translations") or []:
                 if not isinstance(raw, dict):
                     continue
-                segment_id = _clean_text(raw.get("segment_id") or raw.get("scope_ref"))
+                row = normalize_translation_row(raw, source_id=source_id, target_lang=clean_lang)
+                segment_id = _clean_text(row.get("segment_id") or row.get("scope_ref"))
                 if not segment_id or segment_id not in segment_map:
                     warnings.append("Skipped translation row without a known segment_id.")
                     continue
                 segment = segment_map[segment_id]
                 source_hash = _clean_text(
-                    raw.get("source_hash")
-                    or raw.get("text_hash")
-                    or raw.get("source_text_hash")
+                    row.get("source_hash")
+                    or row.get("text_hash")
+                    or row.get("source_text_hash")
                 )
                 if source_hash != segment.text_hash:
                     warnings.append(f"Skipped translation for {segment_id}: source_hash mismatch.")
                     continue
-                translated_text = _clean_text(raw.get("translated_text"))
+                translated_text = translation_text_from_row(row)
                 if not translated_text:
                     warnings.append(f"Skipped translation for {segment_id}: translated_text is blank.")
                     existing = existing_by_segment.get(segment_id)
                     if not _translation_is_current(existing, segment, clean_lang):
                         accepted_rows.append(
                             {
-                                **copy.deepcopy(raw),
+                                **copy.deepcopy(row),
                                 "source_id": source_id,
                                 "scope_type": "segment",
                                 "scope_ref": segment.segment_id,
@@ -1988,14 +2032,14 @@ def translate_full_paper(
                                 "target_lang": clean_lang,
                                 "translated_text": "",
                                 "status": "failed",
-                                "warnings": _clean_list(raw.get("warnings"))
+                                "warnings": _clean_list(row.get("warnings"))
                                 + ["translated_text is blank."],
                             }
                         )
                     continue
                 accepted_rows.append(
                     {
-                        **copy.deepcopy(raw),
+                        **copy.deepcopy(row),
                         "source_id": source_id,
                         "scope_type": "segment",
                         "scope_ref": segment.segment_id,
@@ -2005,7 +2049,7 @@ def translate_full_paper(
                         "source_text": segment.text,
                         "target_lang": clean_lang,
                         "translated_text": translated_text,
-                        "status": _choice(raw.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
+                        "status": _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
                     }
                 )
             batches_completed += 1
@@ -3444,6 +3488,7 @@ __all__ = [
     "load_paper_translations",
     "mark_imported_paper_results",
     "move_papers_to_node",
+    "normalize_translation_row",
     "paper_citation_diagnostics",
     "paper_diagnostics",
     "paper_library_path",
@@ -3469,6 +3514,7 @@ __all__ = [
     "search_papers_with_codex",
     "text_hash",
     "translate_full_paper",
+    "translation_text_from_row",
     "translation_rows_for_segments",
     "upsert_paper_library_node",
     "upsert_paper_translations",

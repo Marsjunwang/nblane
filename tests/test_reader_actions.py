@@ -137,6 +137,41 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(translations[0].scope_type, "selection")
         self.assertEqual(translations[0].translated_text, "重要段落")
 
+    def test_translate_selection_accepts_provider_text_alias(self) -> None:
+        ai_result = SimpleNamespace(
+            structured={
+                "translations": [
+                    {
+                        "segment_id": "selection:abc",
+                        "text": "重要段落",
+                    }
+                ]
+            },
+            warnings=[],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.reader_actions.translate_paper_segments", return_value=ai_result),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {
+                        "selected_text": "Important passage",
+                        "selected_text_hash": "hash:abc",
+                        "page": 1,
+                        "target_lang": "zh",
+                    },
+                )
+            translations = load_paper_translations(profile, ctx.source_id)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["saved"], 1)
+        self.assertEqual(result.data["translation_text"], "重要段落")
+        self.assertEqual(translations[0].translated_text, "重要段落")
+
     def test_translate_visible_pages_returns_summary_and_warns_for_unsavable_rows(self) -> None:
         wrong_hash = text_hash("Wrong passage")
         ai_result = SimpleNamespace(

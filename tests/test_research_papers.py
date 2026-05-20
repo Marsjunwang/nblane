@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -337,6 +338,58 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(translations[0].id, "tr:first")
         self.assertEqual(translations[0].translated_text, "新译文。")
 
+    def test_translation_rows_accept_provider_text_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            first_hash = text_hash("Alias one.")
+            second_hash = text_hash("Alias two.")
+
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "scope_type": "selection",
+                            "scope_ref": first_hash,
+                            "source_hash": first_hash,
+                            "source_text": "Alias one.",
+                            "target_lang": "zh",
+                            "text": "第一条别名译文。",
+                        },
+                        {
+                            "scope_type": "selection",
+                            "scope_ref": second_hash,
+                            "source_hash": second_hash,
+                            "source_text": "Alias two.",
+                            "target_lang": "zh",
+                            "translation": "第二条别名译文。",
+                        },
+                    ],
+                )
+
+            path = profile / "research" / "translations" / "source-paper-grounded.jsonl"
+            legacy_row = {
+                "id": "tr:legacy",
+                "source_id": source_id,
+                "scope_type": "selection",
+                "scope_ref": "legacy",
+                "source_hash": "legacy",
+                "source_text": "Legacy row.",
+                "target_lang": "zh",
+                "target_text": "旧行译文。",
+            }
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(legacy_row, ensure_ascii=False) + "\n")
+
+            translations = load_paper_translations(profile, source_id)
+            by_scope = {row.scope_ref: row.translated_text for row in translations}
+
+        self.assertEqual(by_scope[first_hash], "第一条别名译文。")
+        self.assertEqual(by_scope[second_hash], "第二条别名译文。")
+        self.assertEqual(by_scope["legacy"], "旧行译文。")
+
     def test_build_reader_payload_limits_context_pages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
@@ -392,6 +445,69 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(segment_pages, {5, 9, 10, 11})
         self.assertEqual(translation_pages, {5, 9, 10, 11})
         self.assertEqual(payload["context_window"]["pages"], [5, 9, 10, 11])
+
+    def test_build_reader_payload_keeps_unpaged_structured_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            pages = [
+                PaperPage(source_id=source_id, page=1, text="Page 1", text_hash=text_hash("Page 1")),
+                PaperPage(source_id=source_id, page=2, text="Page 2", text_hash=text_hash("Page 2")),
+            ]
+            segments = [
+                PaperSegment(
+                    segment_id="seg:unpaged:00001",
+                    source_id=source_id,
+                    page=0,
+                    order=1,
+                    text="Structured segment without PDF page.",
+                    text_hash=text_hash("Structured segment without PDF page."),
+                )
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, pages)
+                save_paper_segments(profile, source_id, segments)
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segments[0].segment_id,
+                            "source_hash": segments[0].text_hash,
+                            "source_text": segments[0].text,
+                            "target_lang": "zh",
+                            "translated_text": "无页码结构化段落译文。",
+                        },
+                        {
+                            "scope_type": "page",
+                            "scope_ref": f"page:1:{pages[0].text_hash}",
+                            "page": 1,
+                            "source_hash": pages[0].text_hash,
+                            "source_text": pages[0].text,
+                            "target_lang": "zh",
+                            "translated_text": "第一页译文。",
+                        },
+                    ],
+                )
+
+            payload = build_reader_payload(
+                profile,
+                source_id,
+                page=1,
+                requested_pages={1, 2},
+                target_lang="zh",
+                include_page_previews=False,
+            )
+
+        self.assertEqual([row["segment_id"] for row in payload["segments"]], ["seg:unpaged:00001"])
+        self.assertIn(
+            "无页码结构化段落译文。",
+            [row["translated_text"] for row in payload["translations"]],
+        )
+        self.assertIn(
+            "第一页译文。",
+            [row["translated_text"] for row in payload["translations"]],
+        )
 
     def test_get_stable_pdf_url_uses_fingerprint_cache_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -576,7 +692,7 @@ class TestResearchPapers(unittest.TestCase):
                                 "source_hash": row["text_hash"],
                                 "source_text": row["text"],
                                 "target_lang": target_lang,
-                                "translated_text": f"zh:{row['segment_id']}",
+                                "text": f"zh:{row['segment_id']}",
                             }
                             for row in batch
                         ]

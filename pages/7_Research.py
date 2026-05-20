@@ -51,6 +51,7 @@ from nblane.core.research_papers import (
     load_paper_translations,
     mark_imported_paper_results,
     move_papers_to_node,
+    normalize_translation_row,
     paper_library_paths,
     paper_citation_diagnostics,
     paper_overview,
@@ -63,6 +64,7 @@ from nblane.core.research_papers import (
     search_papers,
     text_hash,
     translate_full_paper,
+    translation_text_from_row,
     translation_rows_for_segments,
     upsert_paper_library_node,
     upsert_paper_translations,
@@ -1857,7 +1859,11 @@ def _handle_reader_component_event(
             translations = []
             if isinstance(result.structured, dict):
                 translations = [
-                    row
+                    normalize_translation_row(
+                        row,
+                        source_id=source_id,
+                        target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+                    )
                     for row in result.structured.get("translations", [])
                     if isinstance(row, dict)
                 ]
@@ -1882,7 +1888,11 @@ def _handle_reader_component_event(
             else:
                 segment_ids = {segment.segment_id for segment in segments}
                 savable = [
-                    row
+                    {
+                        **row,
+                        "source_id": source_id,
+                        "translated_text": translation_text_from_row(row),
+                    }
                     for row in translations
                     if str(row.get("segment_id") or row.get("scope_ref") or "") in segment_ids
                 ]
@@ -1938,7 +1948,7 @@ def _handle_reader_component_event(
             translations = []
             if isinstance(result.structured, dict):
                 translations = [
-                    row
+                    normalize_translation_row(row, source_id=source_id, target_lang=target_lang)
                     for row in result.structured.get("translations", [])
                     if isinstance(row, dict)
                 ]
@@ -2301,7 +2311,7 @@ def _render_paper_reader(inbox) -> None:
                 "height_mode": "viewport",
                 "render_cache": True,
                 "render_cache_max_pages": 24,
-                "translation_dock_default": "bottom",
+                "translation_dock_default": "selection",
                 "pdf_load_timeout_ms": 9000,
                 "reader_action_status": st.session_state.get(_reader_key(source_id, "last_action_status"), {}),
             },
@@ -2450,7 +2460,15 @@ def _render_paper_reader(inbox) -> None:
             st.code(yaml.dump(candidate, allow_unicode=True, sort_keys=False), language="yaml")
             if st.button(_l("accept_translation_candidate", "Accept translation candidate")):
                 try:
-                    upsert_paper_translations(_pdir, source_id, list(candidate.get("translations") or []))
+                    upsert_paper_translations(
+                        _pdir,
+                        source_id,
+                        [
+                            normalize_translation_row(row, source_id=source_id, target_lang="zh")
+                            for row in list(candidate.get("translations") or [])
+                            if isinstance(row, dict)
+                        ],
+                    )
                     stash_git_backup_results()
                     clear_web_cache()
                     st.success(ui["saved"])

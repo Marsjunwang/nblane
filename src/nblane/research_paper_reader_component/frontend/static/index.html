@@ -367,21 +367,36 @@
     .pr-score strong { display: block; font-size: .95rem; }
     .pr-score span { color: var(--muted); font-size: .68rem; }
     .pr-dock {
-      position: sticky;
-      bottom: 10px;
-      z-index: 24;
+      position: fixed;
+      left: var(--pr-dock-left, 12px);
+      top: var(--pr-dock-top, 12px);
+      z-index: 80;
       display: grid;
       gap: 6px;
-      grid-template-columns: minmax(0, 1fr) auto;
-      margin: 12px auto 0;
-      width: min(100%, 900px);
+      grid-template-columns: minmax(0, 1fr);
+      width: min(520px, calc(100vw - 24px));
+      max-height: min(360px, calc(100vh - 24px));
+      overflow: auto;
+      margin: 0;
       padding: 8px;
       border: 1px solid rgba(33, 104, 91, .26);
       border-radius: 8px;
       background: rgba(255, 255, 255, .97);
-      box-shadow: 0 8px 24px rgba(23, 33, 31, .10);
+      box-shadow: 0 12px 30px rgba(23, 33, 31, .16);
     }
     .pr-dock.idle { display: none; }
+    .pr-dock.offscreen {
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .pr-dock.bottom-sheet {
+      left: 12px;
+      right: 12px;
+      top: auto;
+      bottom: 12px;
+      width: auto;
+      max-height: 42vh;
+    }
     .pr-dock-main {
       display: grid;
       gap: 4px;
@@ -434,7 +449,7 @@
       flex-wrap: wrap;
       gap: 6px;
       align-content: start;
-      justify-content: flex-end;
+      justify-content: flex-start;
     }
     .pr-debug-line {
       color: var(--muted);
@@ -1090,7 +1105,7 @@
           <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""}">
             <section class="pr-viewer" id="viewer">
               <div class="pr-continuous-document" id="continuousDocument"></div>
-              <section class="pr-dock ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
+              <section class="pr-dock pr-selection-popover ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             </section>
             <section class="pr-translation-reader" id="translationReader">${translationReaderHtml()}</section>
             <aside class="pr-side ${sidePanelCollapsed ? "collapsed" : ""}">
@@ -1117,6 +1132,7 @@
       `;
       wireShell();
       refreshActionStatus();
+      placeSelectionDock();
       setHeight();
     }
     function tabButton(tab, title) {
@@ -1129,6 +1145,28 @@
       }
       return "";
     }
+    function translatedTextFromRow(row) {
+      const obj = asObj(row);
+      for (const key of ["translated_text", "translation", "target_text", "target", "text"]) {
+        const value = text(obj[key]).trim();
+        if (value) return value;
+      }
+      return "";
+    }
+    function translationTextFromResult(result) {
+      const data = asObj(result && result.data);
+      const direct = text(data.translation_text).trim();
+      if (direct) return direct;
+      const rows = [
+        ...asArr(data.translations),
+        ...asArr(asObj(data.structured).translations),
+      ];
+      for (const row of rows) {
+        const translated = translatedTextFromRow(row);
+        if (translated) return translated;
+      }
+      return "";
+    }
     function translationBySegment() {
       const out = new Map();
       for (const row of asArr(args.translations)) {
@@ -1138,27 +1176,54 @@
       }
       return out;
     }
+    function pageTranslationRowsForPages(pages) {
+      const picked = new Set(asArr(pages).map((page) => Number(page || 0)).filter(Boolean));
+      return asArr(args.translations)
+        .map((row) => asObj(row))
+        .filter((row) => (
+          text(row.scope_type) === "page"
+          && text(row.target_lang || "zh") === targetLang()
+          && (!picked.size || picked.has(Number(row.page || 0)))
+        ));
+    }
+    function segmentRowsForPages(pages, limit = 160) {
+      const picked = new Set(asArr(pages).map((page) => Number(page || 0)).filter(Boolean));
+      const segments = asArr(args.segments).map((row) => asObj(row));
+      const paged = segments.filter((row) => Number(row.page || 0) > 0);
+      const rows = paged.length
+        ? segments.filter((row) => !picked.size || picked.has(Number(row.page || 0)))
+        : segments;
+      return rows.slice(0, limit);
+    }
     function translationStatus(segment, translations) {
       const obj = asObj(segment);
       const row = translations.get(text(obj.segment_id));
       if (!row) return "missing";
       if (text(row.status) === "failed") return "failed";
       if (text(row.status) === "stale" || text(row.source_hash) !== text(obj.text_hash)) return "stale";
-      if (!text(row.translated_text)) return "missing";
+      if (!translatedTextFromRow(row)) return "missing";
       return "translated";
     }
     function translationRowsForPages(pages, limit = 160) {
-      const picked = new Set(asArr(pages).map((page) => Number(page || 0)).filter(Boolean));
       const translations = translationBySegment();
-      return asArr(args.segments)
-        .map((row) => asObj(row))
-        .filter((row) => !picked.size || picked.has(Number(row.page || 0)))
-        .slice(0, limit)
+      const pageRows = pageTranslationRowsForPages(pages).map((translation) => ({
+        segment: {
+          segment_id: text(translation.scope_ref || translation.id),
+          page: Number(translation.page || 0),
+          locator: translation.locator || (translation.page ? `p. ${translation.page}` : label("page")),
+          text: text(translation.source_text),
+          text_hash: text(translation.source_hash),
+        },
+        translation,
+        state: text(translation.status || "translated"),
+      }));
+      const segmentRows = segmentRowsForPages(pages, Math.max(0, limit - pageRows.length))
         .map((segment) => ({
           segment,
           translation: translations.get(text(segment.segment_id)),
           state: translationStatus(segment, translations),
         }));
+      return [...pageRows, ...segmentRows].slice(0, limit);
     }
     function translationReaderHtml() {
       const pages = readerMode === "translation"
@@ -1169,7 +1234,7 @@
         ? `${label("translation")} · ${label("page")} ${pages.join(", ")}`
         : `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
       const body = rows.length ? rows.map(({ segment, translation, state }) => {
-        const translated = text(translation && translation.translated_text);
+        const translated = translatedTextFromRow(translation);
         return `
           <article class="pr-translation-row" data-page="${Number(segment.page || 0)}">
             <div class="pr-item-meta">${esc(segment.locator || (segment.page ? `p. ${segment.page}` : ""))} · ${esc(state)}</div>
@@ -1252,14 +1317,14 @@
       const rows = asArr(args.translations).map((row) => asObj(row));
       let found = rows.find((row) => (
         text(row.target_lang || "zh") === targetLang()
-        && text(row.translated_text)
+        && translatedTextFromRow(row)
         && refs.includes(text(row.segment_id || row.scope_ref))
         && text(row.status || "translated") !== "failed"
       ));
       if (found) return found;
       found = rows.find((row) => (
         text(row.target_lang || "zh") === targetLang()
-        && text(row.translated_text)
+        && translatedTextFromRow(row)
         && hash
         && text(row.source_hash || row.selected_text_hash) === hash
         && text(row.status || "translated") !== "failed"
@@ -1267,7 +1332,7 @@
       if (found) return found;
       return rows.find((row) => (
         text(row.target_lang || "zh") === targetLang()
-        && text(row.translated_text)
+        && translatedTextFromRow(row)
         && selected
         && text(row.source_text).trim()
         && (text(row.source_text).trim() === selected || selected.includes(text(row.source_text).trim()))
@@ -1282,12 +1347,13 @@
     function syncDockFromArgs() {
       if (currentSelection && currentSelection.selected_text) {
         const hit = findSelectionTranslation(currentSelection);
-        if (hit && text(hit.translated_text)) {
+        const hitText = translatedTextFromRow(hit);
+        if (hit && hitText) {
           dockState = {
             mode: "translation",
             status: label("translated"),
             selected_text: currentSelection.selected_text,
-            result: text(hit.translated_text),
+            result: hitText,
             pending: false,
             selection_hash: text(currentSelection.selected_text_hash),
           };
@@ -1317,6 +1383,15 @@
         : dockState.mode === "ai" ? label("ai")
         : label("selected_text");
       return `
+        <div class="pr-dock-actions">
+          <button class="pr-button primary" data-action="translate" ${hasSelection ? "" : "disabled"}>${esc(label("translate_selection"))}</button>
+          <button class="pr-button" data-action="annotate" ${hasSelection ? "" : "disabled"}>${esc(label("create_annotation"))}</button>
+          <button class="pr-button" data-action="chunk" ${hasSelection ? "" : "disabled"}>${esc(label("create_chunk"))}</button>
+          <button class="pr-button" data-action="cite" ${hasSelection ? "" : "disabled"}>${esc(label("create_citation"))}</button>
+          <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
+          <button class="pr-button" data-action="askSelection" ${hasSelection ? "" : "disabled"}>${esc(label("ask_selection"))}</button>
+          ${dockState.mode === "translation" && dockState.failed ? `<button class="pr-button" data-action="retryTranslation">${esc(label("retry"))}</button>` : ""}
+        </div>
         <div class="pr-dock-main">
           <div class="pr-dock-head">
             <span>${esc(title)}</span>
@@ -1325,16 +1400,84 @@
           <div class="pr-dock-text">${esc(dockState.selected_text || (hasSelection ? currentSelection.selected_text : ""))}</div>
           ${dockState.result ? `<div class="pr-dock-result">${esc(dockState.result)}</div>` : ""}
         </div>
-        <div class="pr-dock-actions">
-          <button class="pr-button primary" data-action="annotate" ${hasSelection ? "" : "disabled"}>${esc(label("create_annotation"))}</button>
-          <button class="pr-button" data-action="chunk" ${hasSelection ? "" : "disabled"}>${esc(label("create_chunk"))}</button>
-          <button class="pr-button" data-action="cite" ${hasSelection ? "" : "disabled"}>${esc(label("create_citation"))}</button>
-          <button class="pr-button" data-action="translate" ${hasSelection ? "" : "disabled"}>${esc(label("translate_selection"))}</button>
-          <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
-          <button class="pr-button" data-action="askSelection" ${hasSelection ? "" : "disabled"}>${esc(label("ask_selection"))}</button>
-          ${dockState.mode === "translation" && dockState.failed ? `<button class="pr-button" data-action="retryTranslation">${esc(label("retry"))}</button>` : ""}
-        </div>
       `;
+    }
+    function dockPlacementDefault() {
+      return text(settings().translation_dock_default || "selection") || "selection";
+    }
+    function selectionAnchorRect(selection = currentSelection) {
+      const picked = asObj(selection);
+      const pageNumber = Number(picked.page || currentPage || 0);
+      const wrap = pageWrap(pageNumber);
+      if (!wrap) return null;
+      const wrapBox = wrap.getBoundingClientRect();
+      const rects = asArr(picked.rects).map((row) => asObj(row)).filter((row) => (
+        Number(row.w || row.w_pct || 0) > 0 && Number(row.h || row.h_pct || 0) > 0
+      ));
+      if (!rects.length) {
+        return {
+          left: wrapBox.left + wrapBox.width / 2 - 1,
+          top: wrapBox.top + 24,
+          right: wrapBox.left + wrapBox.width / 2 + 1,
+          bottom: wrapBox.top + 28,
+          width: 2,
+          height: 4,
+        };
+      }
+      let left = Infinity;
+      let top = Infinity;
+      let right = -Infinity;
+      let bottom = -Infinity;
+      rects.forEach((rect) => {
+        const hasPct = rect.x_pct != null && rect.y_pct != null;
+        const x = hasPct ? wrapBox.left + Number(rect.x_pct || 0) * wrapBox.width : wrapBox.left + Number(rect.x || 0);
+        const y = hasPct ? wrapBox.top + Number(rect.y_pct || 0) * wrapBox.height : wrapBox.top + Number(rect.y || 0);
+        const w = hasPct ? Number(rect.w_pct || 0) * wrapBox.width : Number(rect.w || 0);
+        const h = hasPct ? Number(rect.h_pct || 0) * wrapBox.height : Number(rect.h || 0);
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x + w);
+        bottom = Math.max(bottom, y + h);
+      });
+      if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+      return { left, top, right, bottom, width: Math.max(2, right - left), height: Math.max(2, bottom - top) };
+    }
+    function placeSelectionDock() {
+      const dock = document.getElementById("selectionDock");
+      if (!dock || dock.classList.contains("idle")) return;
+      const viewer = document.getElementById("viewer");
+      const viewerBox = viewer ? viewer.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
+      const useBottom = dockPlacementDefault() === "bottom" || window.innerWidth <= 720 || Number(viewerBox.width || 0) < 420 || !(currentSelection && currentSelection.selected_text);
+      dock.classList.remove("bottom-sheet", "offscreen");
+      dock.style.removeProperty("--pr-dock-left");
+      dock.style.removeProperty("--pr-dock-top");
+      dock.style.removeProperty("width");
+      if (useBottom) {
+        dock.classList.add("bottom-sheet");
+        return;
+      }
+      const anchor = selectionAnchorRect(currentSelection);
+      if (!anchor || anchor.bottom < viewerBox.top || anchor.top > viewerBox.bottom || anchor.right < viewerBox.left || anchor.left > viewerBox.right) {
+        dock.classList.add("offscreen");
+        return;
+      }
+      const margin = 10;
+      const width = Math.min(520, Math.max(280, Number(viewerBox.width || window.innerWidth) - 20, 280));
+      dock.style.width = `${Math.min(width, window.innerWidth - 24)}px`;
+      const dockBox = dock.getBoundingClientRect();
+      const dockWidth = dockBox.width || Math.min(520, window.innerWidth - 24);
+      const dockHeight = dockBox.height || 120;
+      const minLeft = Math.max(8, Number(viewerBox.left || 0) + 8);
+      const maxLeft = Math.min(window.innerWidth - dockWidth - 8, Number(viewerBox.right || window.innerWidth) - dockWidth - 8);
+      const unclampedLeft = anchor.left + anchor.width / 2 - dockWidth / 2;
+      const left = Math.max(minLeft, Math.min(Math.max(minLeft, maxLeft), unclampedLeft));
+      const minTop = Math.max(8, Number(viewerBox.top || 0) + 8);
+      const maxTop = Math.min(window.innerHeight - dockHeight - 8, Number(viewerBox.bottom || window.innerHeight) - dockHeight - 8);
+      let top = anchor.top - dockHeight - margin;
+      if (top < minTop) top = anchor.bottom + margin;
+      top = Math.max(minTop, Math.min(Math.max(minTop, maxTop), top));
+      dock.style.setProperty("--pr-dock-left", `${left}px`);
+      dock.style.setProperty("--pr-dock-top", `${top}px`);
     }
     function refreshDock() {
       const dock = document.getElementById("selectionDock");
@@ -1346,6 +1489,7 @@
       dock.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => handleAction(button.dataset.action));
       });
+      placeSelectionDock();
       setHeight();
     }
     function translationCounts() {
@@ -1381,10 +1525,7 @@
       if (activeTab === "translation") {
         const counts = translationCounts();
         const pages = visiblePages.length ? visiblePages : [currentPage];
-        const translations = translationBySegment();
-        const rows = asArr(args.segments)
-          .filter((row) => pages.includes(Number(asObj(row).page || 0)))
-          .slice(0, 24);
+        const rows = translationRowsForPages(pages, 24);
         const summary = `
           <div class="pr-summary">
             <div class="pr-chip"><strong>${counts.translated}</strong><span>${esc(label("translated"))}</span></div>
@@ -1394,11 +1535,9 @@
           </div>
         `;
         if (!rows.length) return `${summary}<div class="pr-empty">${esc(label("empty"))}</div>`;
-        return `${summary}<div class="pr-list">${rows.map((row) => {
-          const obj = asObj(row);
-          const tr = translations.get(text(obj.segment_id));
-          const state = translationStatus(obj, translations);
-          const title = text(tr && tr.translated_text ? tr.translated_text : obj.text);
+        return `${summary}<div class="pr-list">${rows.map(({ segment, translation, state }) => {
+          const obj = asObj(segment);
+          const title = translatedTextFromRow(translation) || text(obj.text);
           return `
             <button class="pr-item" data-page="${Number(obj.page || 0)}">
               <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
@@ -1467,7 +1606,10 @@
       }
       const viewer = document.getElementById("viewer");
       if (viewer) {
-        viewer.addEventListener("scroll", scheduleViewportUpdate, { passive: true });
+        viewer.addEventListener("scroll", () => {
+          scheduleViewportUpdate();
+          placeSelectionDock();
+        }, { passive: true });
       }
       wireSide();
     }
@@ -1487,7 +1629,10 @@
       refreshTranslationReader();
       scheduleViewportUpdate();
       scheduleReaderStateChanged(true);
-      window.setTimeout(() => renderAround(currentPage, { force: true }), 60);
+      window.setTimeout(() => {
+        renderAround(currentPage, { force: true });
+        placeSelectionDock();
+      }, 60);
       setHeight();
     }
     function refreshSide() {
@@ -1645,16 +1790,17 @@
       }
       if (action === "translate") {
         const hit = findSelectionTranslation(selection);
+        const hitText = translatedTextFromRow(hit);
         dockState = {
           mode: "translation",
-          status: hit && text(hit.translated_text) ? label("translated") : label("translating"),
+          status: hit && hitText ? label("translated") : label("translating"),
           selected_text: text(selection.selected_text),
-          result: hit && text(hit.translated_text) ? text(hit.translated_text) : "",
-          pending: !(hit && text(hit.translated_text)),
+          result: hit && hitText ? hitText : "",
+          pending: !(hit && hitText),
           selection_hash: text(selection.selected_text_hash),
         };
         refreshDock();
-        if (hit && text(hit.translated_text)) return;
+        if (hit && hitText) return;
         return emitAction("translate_selection", { ...selection, target_lang: targetLang() });
       }
       if (action === "retryTranslation") {
@@ -1830,6 +1976,7 @@
       }
       releaseFarPages(pageNumber);
       scheduleLoadingWatchdog();
+      placeSelectionDock();
     }
     function releaseFarPages(primary) {
       const keep = overscanPages() + 4;
@@ -2258,7 +2405,10 @@
       shell.classList.toggle("fullscreen", fullscreenActive);
       const button = document.querySelector('[data-action="fullscreen"]');
       if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
-      window.setTimeout(() => renderAround(currentPage, { force: true }), 120);
+      window.setTimeout(() => {
+        renderAround(currentPage, { force: true });
+        placeSelectionDock();
+      }, 120);
       setHeight();
     }
     document.addEventListener("fullscreenchange", () => {
@@ -2266,7 +2416,10 @@
       shellEl()?.classList.toggle("fullscreen", fullscreenActive);
       const button = document.querySelector('[data-action="fullscreen"]');
       if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
-      window.setTimeout(() => renderAround(currentPage, { force: true }), 120);
+      window.setTimeout(() => {
+        renderAround(currentPage, { force: true });
+        placeSelectionDock();
+      }, 120);
     });
     document.addEventListener("mouseup", () => {
       if (!selectingText) return;
@@ -2334,6 +2487,7 @@
       setupIntersectionObserver();
       scrollToPage(page);
       renderAround(page, { force: true });
+      placeSelectionDock();
     }
     function scheduleViewportUpdate() {
       if (viewportTimer) window.clearTimeout(viewportTimer);
@@ -2370,6 +2524,7 @@
       if (pageChanged || activeTab === "translation" || activeTab === "ai") refreshSide();
       refreshTranslationReader();
       renderAround(primary);
+      placeSelectionDock();
       const signature = `${primary}:${pages.join(",")}`;
       const changedSignature = signature !== lastViewportSignature;
       if (changedSignature) {
@@ -2501,7 +2656,10 @@
     });
     window.addEventListener("resize", () => {
       if (resizeTimer) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => rerenderForScale(), 180);
+      resizeTimer = window.setTimeout(() => {
+        rerenderForScale();
+        placeSelectionDock();
+      }, 180);
     });
     send(READY, { apiVersion: 1 });
     send(SET_HEIGHT, { height: 820 });
