@@ -221,6 +221,51 @@ class CodexReadonlyResult:
         ).strip()
 
 
+def readable_codex_error(*values: object, limit: int = 500) -> str:
+    """Return a short human-readable Codex failure without retaining run logs."""
+
+    def clean_text(value: object) -> str:
+        return str(value or "").strip()
+
+    def shorten(value: object) -> str:
+        text = " ".join(clean_text(value).split())
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)].rstrip() + "..."
+
+    text = "\n".join(clean_text(value) for value in values if clean_text(value))
+    text = _sanitize(text)
+    if not text:
+        return "codex_readonly_failed"
+    patterns = (
+        r"No file descriptors available \(os error \d+\)",
+        r"config(?:uration)?[^.\n]{0,120}(?:failed|error)",
+        r"model [`'\"]?[^`'\"\n]+[`'\"]? does not exist[^.\n]*",
+        r"authentication required[^.\n]*",
+        r"api key auth is not supported",
+        r"Error code:\s*\d+[^.\n]*",
+        r"codex_not_found[^.\n]*",
+        r"command_timeout[^.\n]*",
+        r"command_error[^.\n]*",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return shorten(match.group(0))
+    for line in text.splitlines():
+        clean = shorten(line)
+        if not clean:
+            continue
+        if clean.startswith("OpenAI Codex ") or clean.startswith("--------"):
+            continue
+        if clean in {"user", "assistant"}:
+            continue
+        if " WARN " in clean and "failed" not in clean.casefold():
+            continue
+        return clean
+    return shorten(text)
+
+
 def configure(
     *,
     bin_path: str | None = None,
@@ -1774,6 +1819,7 @@ __all__ = [
     "profile_codex_home",
     "profile_config_template",
     "profile_config_path",
+    "readable_codex_error",
     "refresh_codex_cloud_task",
     "run_local_codex_task",
     "run_readonly_codex_prompt",

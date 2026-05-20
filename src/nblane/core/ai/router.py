@@ -53,7 +53,7 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
     "research.paper_search_codex": AIActionSpec(
         name="research.paper_search_codex",
         owner="research",
-        default_backend="external_agent",
+        default_backend="local_codex_readonly",
         fallback_backend="rule_fallback",
         output_mode="json",
         activity_policy="candidate",
@@ -326,7 +326,7 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
     "research.paper_deep_read_codex": AIActionSpec(
         name="research.paper_deep_read_codex",
         owner="research",
-        default_backend="external_agent",
+        default_backend="local_codex_readonly",
         fallback_backend="rule_fallback",
         output_mode="json",
         activity_policy="candidate",
@@ -354,7 +354,7 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
     "research.paper_compare_codex": AIActionSpec(
         name="research.paper_compare_codex",
         owner="research",
-        default_backend="external_agent",
+        default_backend="local_codex_readonly",
         fallback_backend="rule_fallback",
         output_mode="json",
         activity_policy="candidate",

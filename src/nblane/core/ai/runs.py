@@ -192,6 +192,8 @@ def record_activity_item(
     kind = spec.activity_policy
     if kind not in ("candidate", "patch", "writeback"):
         kind = "candidate"
+    if _is_paper_action(request.action):
+        return _record_paper_activity_item(profile, request, spec, result, kind)
     structured = result.structured
     payload: dict[str, Any] = {
         "action_result": structured,
@@ -247,6 +249,224 @@ def record_activity_item(
         if task_id:
             link_activity_item(profile, task_id, activity_id)
     return activity_id
+
+
+def _record_paper_activity_item(
+    profile: str,
+    request: AIActionRequest,
+    spec: AIActionSpec,
+    result: AIActionResult,
+    kind: str,
+) -> str:
+    """Record a privacy-thin Agent Activity item for Paper AI actions."""
+
+    structured = result.structured if isinstance(result.structured, dict) else {}
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    source_id = _paper_source_id(request, structured)
+    source_ids = _paper_source_ids(request, structured, source_id=source_id)
+    query = _short_activity_text(payload.get("query") or payload.get("goal"), 120)
+    output_refs = _paper_output_refs(structured)
+    task_id = _clean_text(structured.get("task_id"))
+    summary = _paper_activity_summary(request, result, structured, query=query)
+    warnings = _short_string_list(
+        list(result.warnings) + _clean_string_list(structured.get("warnings")),
+        limit=240,
+        max_items=8,
+    )
+    activity_payload: dict[str, Any] = {
+        "action": request.action,
+        "backend": result.backend,
+        "provider": result.backend,
+        "run_id": result.run_id,
+        "context_refs": list(request.context_refs),
+        "output_refs": output_refs,
+        "warnings": warnings,
+    }
+    if source_id:
+        activity_payload["source_id"] = source_id
+    if source_ids:
+        activity_payload["source_ids"] = source_ids
+    if query:
+        activity_payload["query"] = query
+    if task_id:
+        activity_payload["task_id"] = task_id
+
+    refs = {"input": list(request.context_refs)}
+    if source_ids:
+        refs["sources"] = source_ids
+    item = append_activity_item(
+        profile,
+        {
+            "id": f"act:ai:{result.run_id}",
+            "kind": kind,
+            "candidate_type": request.action.replace(".", "_"),
+            "source_page": "AI Gateway",
+            "source_ref": result.run_id,
+            "target_owner": spec.owner,
+            "status": "pending" if result.ok else "failed",
+            "title": _paper_activity_title(request, result, source_id, query),
+            "summary": summary,
+            "preview": _short_activity_text(summary, 300),
+            "refs": refs,
+            "payload": activity_payload,
+            "warnings": warnings,
+            "error": _short_activity_text(result.error, 240),
+            "changed_paths": [],
+            "action_name": request.action,
+            "backend": result.backend,
+            "run_id": result.run_id,
+            "input_refs": list(request.context_refs),
+        },
+    )
+    activity_id = _clean_text(item.get("id"))
+    if task_id:
+        link_activity_item(profile, task_id, activity_id)
+    return activity_id
+
+
+def _is_paper_action(action: str) -> bool:
+    return str(action or "").startswith("research.paper_")
+
+
+def _short_activity_text(value: object, limit: int = 240) -> str:
+    text = " ".join(_clean_text(value).split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "..."
+
+
+def _short_string_list(
+    values: object,
+    *,
+    limit: int,
+    max_items: int,
+) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in _clean_string_list(values):
+        short = _short_activity_text(value, limit)
+        if not short or short in seen:
+            continue
+        seen.add(short)
+        out.append(short)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _paper_source_id(
+    request: AIActionRequest,
+    structured: dict[str, Any],
+) -> str:
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    for value in (
+        payload.get("source_id"),
+        payload.get("research_source_id"),
+        structured.get("source_id"),
+        structured.get("ref"),
+    ):
+        clean = _clean_text(value)
+        if clean.startswith("source:"):
+            return clean
+    for ref in request.context_refs:
+        clean = _clean_text(ref)
+        if clean.startswith("source:"):
+            return clean
+    return _clean_text(payload.get("source_id") or structured.get("source_id"))
+
+
+def _paper_source_ids(
+    request: AIActionRequest,
+    structured: dict[str, Any],
+    *,
+    source_id: str,
+) -> list[str]:
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    values = _clean_string_list(payload.get("source_ids"))
+    values.extend(_clean_string_list(structured.get("source_ids")))
+    values.extend(
+        ref for ref in _clean_string_list(request.context_refs) if ref.startswith("source:")
+    )
+    if source_id:
+        values.insert(0, source_id)
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out[:12]
+
+
+def _paper_output_refs(structured: dict[str, Any]) -> dict[str, Any]:
+    refs: dict[str, Any] = {}
+    for key in (
+        "ref",
+        "cited_segment_refs",
+        "cited_chunk_refs",
+        "cited_annotation_refs",
+        "input_refs",
+        "expected_outputs",
+    ):
+        value = structured.get(key)
+        if isinstance(value, str):
+            clean = _clean_text(value)
+            if clean:
+                refs[key] = clean
+        else:
+            cleaned = _clean_string_list(value)
+            if cleaned:
+                refs[key] = cleaned[:20]
+    for key in ("results", "translations", "findings", "comparisons", "reading_plan"):
+        value = structured.get(key)
+        if isinstance(value, list):
+            refs[f"{key}_count"] = len(value)
+    task_id = _clean_text(structured.get("task_id"))
+    if task_id:
+        refs["task_id"] = task_id
+    return refs
+
+
+def _paper_activity_summary(
+    request: AIActionRequest,
+    result: AIActionResult,
+    structured: dict[str, Any],
+    *,
+    query: str,
+) -> str:
+    if not result.ok:
+        return _short_activity_text(result.error or "Paper AI action failed.", 240)
+    action = request.action
+    if action == "research.paper_search_codex":
+        count = len(structured.get("results") or [])
+        suffix = f" for {query}" if query else ""
+        return _short_activity_text(f"Paper search returned {count} candidate(s){suffix}.", 240)
+    if action == "research.paper_deep_read_codex":
+        count = len(structured.get("findings") or [])
+        return f"Codex deep-read candidate ready with {count} finding(s)."
+    if action == "research.paper_compare_codex":
+        count = len(structured.get("comparisons") or [])
+        return f"Codex paper comparison candidate ready with {count} comparison row(s)."
+    if "translations" in structured:
+        count = len(structured.get("translations") or [])
+        return f"Paper translation candidate returned {count} row(s)."
+    return _short_activity_text(f"Paper AI candidate ready for {action}.", 240)
+
+
+def _paper_activity_title(
+    request: AIActionRequest,
+    result: AIActionResult,
+    source_id: str,
+    query: str,
+) -> str:
+    if request.action == "research.paper_search_codex":
+        return _short_activity_text(
+            f"Paper search: {query or result.run_id}",
+            160,
+        )
+    if source_id:
+        return _short_activity_text(f"{request.action}: {source_id}", 160)
+    return _short_activity_text(request.action, 160)
 
 
 __all__ = [

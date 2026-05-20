@@ -25,6 +25,9 @@ from nblane.core.io import profile_dir
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperSearchResult,
+    _paper_search_imported_refs,
+    _paper_search_library_tree_hint,
+    _paper_search_result_has_import_ref,
     auto_chunk_paper,
     build_reader_payload,
     create_chunk_from_annotation,
@@ -676,24 +679,35 @@ def _render_paper_search(inbox) -> None:
                 result = search_papers_codex(
                     selected,
                     query,
-                    payload={"filters": filters, "project_refs": _text_lines(project_refs), "goal_refs": _text_lines(goal_refs)},
+                    payload={
+                        "filters": filters,
+                        "providers": providers,
+                        "project_refs": _text_lines(project_refs),
+                        "goal_refs": _text_lines(goal_refs),
+                        "already_imported": _paper_search_imported_refs(_pdir),
+                        "library_tree_hint": _paper_search_library_tree_hint(_pdir),
+                    },
                 )
                 raw = result.structured if isinstance(result.structured, dict) else {}
-                candidates = [
-                    item.to_dict()
-                    for item in (
-                        PaperSearchResult.from_dict(row)
-                        for row in raw.get("results", [])
-                    )
-                    if item is not None
-                ]
+                candidates = []
+                for row in raw.get("results", []):
+                    item = PaperSearchResult.from_dict(row)
+                    if item is None or not _paper_search_result_has_import_ref(item):
+                        continue
+                    candidates.append(item.to_dict())
                 if not candidates:
-                    st.warning(
-                        _l(
-                            "codex_search_fallback",
-                            "Codex returned no structured papers; using provider search fallback.",
+                    if result.error:
+                        st.warning(
+                            f"{result.backend or 'local_codex_readonly'} failed "
+                            f"({result.error}); using provider search fallback."
                         )
-                    )
+                    else:
+                        st.warning(
+                            _l(
+                                "codex_search_fallback",
+                                "Codex returned no structured papers; using provider search fallback.",
+                            )
+                        )
                     candidates = [row.to_dict() for row in search_papers(query, tuple(providers), int(limit), filters)]
                 for warning in result.warnings:
                     st.warning(str(warning))

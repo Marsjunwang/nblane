@@ -622,6 +622,7 @@
       ask_paper: "Ask",
       save_progress: "Save progress",
       review_card: "Review",
+      deep_read: "Deep Read",
       fullscreen: "Fullscreen",
       exit_fullscreen: "Exit fullscreen",
       mode_pdf: "PDF",
@@ -647,6 +648,7 @@
       translating_visible_pages: "Translating visible pages...",
       translating_full_paper: "Translating paper...",
       reviewing_paper: "Reviewing paper...",
+      deep_reading: "Running Codex deep read...",
       answering: "Answering...",
       answered: "Answered.",
       missing: "Missing",
@@ -916,6 +918,7 @@
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return label("translating_visible_pages");
       if (action === "translate_full_paper") return label("translating_full_paper");
       if (action === "generate_review_card") return label("reviewing_paper");
+      if (action === "codex_deep_read") return label("deep_reading");
       if (action === "ask_paper") return label("answering");
       return "Working...";
     }
@@ -923,13 +926,14 @@
       const message = text(result && result.message);
       if (message) return message;
       if (action === "ask_paper") return label("answered");
-      if (action === "generate_review_card") return label("saved");
+      if (action === "generate_review_card" || action === "codex_deep_read") return label("saved");
       return label("saved");
     }
     function actionButtonSelector(action) {
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
       if (action === "generate_review_card") return '[data-action="reviewCard"]';
+      if (action === "codex_deep_read") return '[data-action="deepRead"]';
       if (action === "ask_paper") return '[data-action="askQuestion"]';
       return "";
     }
@@ -1134,17 +1138,18 @@
         "translate_full_paper",
         "retry_translation_scope",
         "generate_review_card",
+        "codex_deep_read",
       ].includes(action);
     }
     function displayActionResult(action, result) {
       const warnings = asArr(result && result.warnings).map(text).filter(Boolean);
       if (warnings.length) status(warnings[0]);
       else if (result && result.message) status(text(result.message));
-      if (["translate_visible_pages", "translate_full_paper", "generate_review_card"].includes(action)) {
+      if (["translate_visible_pages", "translate_full_paper", "generate_review_card", "codex_deep_read"].includes(action)) {
         const data = asObj(result && result.data);
         const summary = data.summary || data.structured || data.analysis || data;
         setActionState(action, (result && result.ok === false) ? "error" : "done", warnings[0] || text(result && result.message) || label("saved"));
-        if (action === "generate_review_card") {
+        if (action === "generate_review_card" || action === "codex_deep_read") {
           dockState.pending = false;
           dockState.status = warnings[0] || text(result && result.message) || label("saved");
           dockState.result = JSON.stringify(summary, null, 2);
@@ -1388,6 +1393,7 @@
               <button class="pr-button primary" data-action="translateFull">${esc(label("translate_full_paper"))}</button>
               <button class="pr-button" data-action="translateVisible">${esc(label("translate_visible_pages"))}</button>
               <button class="pr-button" data-action="reviewCard">${esc(label("review_card"))}</button>
+              <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
               <button class="pr-button" data-action="ask">${esc(label("ask_paper"))}</button>
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
@@ -1543,6 +1549,13 @@
         chunks.push(`<div class="pr-panel-head">Rationale</div>${listHtml(analysis.score_rationale)}`);
       } else if (text(analysis.score_rationale)) {
         chunks.push(`<div class="pr-item"><div class="pr-item-meta">Rationale</div><div class="pr-item-title">${esc(analysis.score_rationale)}</div></div>`);
+      }
+      const deepRead = asObj(analysis.codex_deep_read || {});
+      if (Object.keys(deepRead).length) {
+        const plan = listHtml(deepRead.reading_plan);
+        const findings = listHtml(deepRead.findings);
+        if (plan) chunks.push(`<div class="pr-panel-head">Deep Read Plan</div>${plan}`);
+        if (findings) chunks.push(`<div class="pr-panel-head">Deep Read Findings</div>${findings}`);
       }
       if (latest && !hasAnalysis) {
         chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(latest)}</div></div>`);
@@ -1906,6 +1919,16 @@
         refreshSide();
         refreshDock();
         return startReaderTask("generate_review_card", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+      }
+      if (action === "deepRead") {
+        activeTab = "ai";
+        sidePanelCollapsed = false;
+        document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
+        document.querySelector(".pr-side")?.classList.remove("collapsed");
+        dockState = { mode: "ai", status: label("deep_reading"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        refreshSide();
+        refreshDock();
+        return startReaderTask("codex_deep_read", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
       if (action === "translateVisible") {
         const pages = visiblePages.length ? visiblePages : [currentPage];

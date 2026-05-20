@@ -29,6 +29,7 @@ ALLOWED_READER_TASK_ACTIONS: frozenset[str] = frozenset(
         TRANSLATE_FULL_PAPER,
         TRANSLATE_SELECTION,
         TRANSLATE_VISIBLE_PAGES,
+        "codex_deep_read",
         "generate_review_card",
     }
 )
@@ -376,6 +377,8 @@ def _action_label(action: str) -> str:
         return "Translating paper..."
     if action == "generate_review_card":
         return "Reviewing paper..."
+    if action == "codex_deep_read":
+        return "Running Codex deep read..."
     if action == ASK_PAPER:
         return "Answering..."
     return "Working..."

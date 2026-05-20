@@ -5,7 +5,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import yaml
 
 from nblane.core.ai import (
     create_remote_dev_task,
@@ -14,7 +17,12 @@ from nblane.core.ai import (
     run_ai_action,
 )
 from nblane.core.ai.actions import AIActionRequest
-from nblane.core.ai.backends import DirectLLMBackend, RuleFallbackBackend
+from nblane.core.ai.backends import (
+    DirectLLMBackend,
+    LocalReadonlyCodexBackend,
+    RuleFallbackBackend,
+    default_backends,
+)
 from nblane.core.ai.router import get_action_spec, registered_actions
 
 
@@ -64,6 +72,104 @@ class TestAIGateway(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.backend, "direct_llm")
         self.assertIn("ai_not_configured", result.error)
+
+    def test_local_readonly_codex_backend_registered_for_paper_actions(self) -> None:
+        """Paper Codex actions default to local read-only Codex, not handoff."""
+
+        registry = default_backends()
+
+        self.assertIn("local_codex_readonly", registry)
+        self.assertIsInstance(registry["local_codex_readonly"], LocalReadonlyCodexBackend)
+        for action in (
+            "research.paper_search_codex",
+            "research.paper_deep_read_codex",
+            "research.paper_compare_codex",
+        ):
+            spec = get_action_spec(action)
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec.default_backend, "local_codex_readonly")  # type: ignore[union-attr]
+            self.assertEqual(spec.fallback_backend, "rule_fallback")  # type: ignore[union-attr]
+        self.assertEqual(
+            get_action_spec("research.paper_translate").default_backend,  # type: ignore[union-attr]
+            "direct_llm",
+        )
+
+    def test_local_readonly_codex_backend_parses_paper_search_json(self) -> None:
+        """Gateway parses Codex's final JSON message as structured candidates."""
+
+        reply = """
+        {
+          "query": "VLA memory",
+          "results": [
+            {
+              "title": "Memory for Vision-Language-Action Models",
+              "url": "https://example.com/paper",
+              "provider_refs": ["semantic_scholar:abc"],
+              "reason": "Relevant memory architecture."
+            }
+          ],
+          "warnings": ["Verify venue."],
+          "ref": "paper-search:vla-memory"
+        }
+        """
+        readonly = SimpleNamespace(
+            ok=True,
+            output=reply,
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with patch(
+            "nblane.core.codex_adapter.run_readonly_codex_prompt",
+            return_value=readonly,
+        ) as run:
+            result = run_ai_action(
+                "research.paper_search_codex",
+                {"query": "VLA memory"},
+                profile="",
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "local_codex_readonly")
+        self.assertEqual(result.structured["results"][0]["title"], "Memory for Vision-Language-Action Models")  # type: ignore[index]
+        self.assertIn("Verify venue.", result.warnings)
+        prompt = run.call_args.args[1]
+        self.assertIn("Codex is read-only", prompt)
+        self.assertIn("Do not edit files", prompt)
+        self.assertIn("Do not generate patches", prompt)
+        self.assertIn("Do not write profile facts", prompt)
+        self.assertIn("Return one JSON object only", prompt)
+
+    def test_local_readonly_codex_invalid_json_falls_back_with_warning(self) -> None:
+        """Malformed Codex output is converted to a typed warning/fallback."""
+
+        readonly = SimpleNamespace(
+            ok=True,
+            output="not json",
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with patch(
+            "nblane.core.codex_adapter.run_readonly_codex_prompt",
+            return_value=readonly,
+        ):
+            result = run_ai_action(
+                "research.paper_search_codex",
+                {"query": "VLA memory"},
+                profile="",
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "rule_fallback")
+        self.assertIn("local_codex_readonly failed", result.warnings[0])
+        self.assertIn("codex_json_error", result.warnings[0])
 
     def test_rule_fallback_returns_deterministic_result(self) -> None:
         """Rule fallback can provide a usable empty/candidate state."""
@@ -285,6 +391,134 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(tasks[0]["activity_item_id"], result.activity_item_id)
         self.assertEqual(activity[0]["kind"], "patch")
         self.assertEqual(activity[0]["changed_paths"], [])
+
+    def test_paper_codex_preferred_external_agent_still_creates_handoff(self) -> None:
+        """Explicit Paper handoff overrides still create external agent tasks."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with (
+                patch("nblane.core.agent_tasks.profile_dir", lambda _name: profile),
+                patch("nblane.core.agent_activity.profile_dir", lambda _name: profile),
+                patch("nblane.core.ai.runs.profile_dir", lambda _name: profile),
+            ):
+                result = run_ai_action(
+                    "research.paper_search_codex",
+                    {"query": "VLA memory"},
+                    profile="alice",
+                    preferred_backend="external_agent",
+                )
+
+                from nblane.core.agent_tasks import load_agent_tasks
+
+                tasks = load_agent_tasks("alice")["tasks"]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "external_agent")
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["action_name"], "research.paper_search_codex")
+        self.assertEqual(tasks[0]["activity_item_id"], result.activity_item_id)
+
+    def test_paper_codex_success_activity_is_privacy_thin(self) -> None:
+        """Paper Codex success Activity stores refs and counts, not raw content."""
+
+        secret_segment = "PRIVATE SEGMENT TEXT SHOULD NOT BE STORED"
+        reply = {
+            "reading_plan": ["Read methods"],
+            "findings": [{"text": secret_segment, "refs": ["seg:1"]}],
+            "cited_segment_refs": ["seg:1"],
+            "cited_chunk_refs": [],
+            "cited_annotation_refs": [],
+            "warnings": [],
+            "ref": "source:paper:1",
+        }
+        readonly = SimpleNamespace(
+            ok=True,
+            output=__import__("json").dumps(reply),
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with (
+                patch("nblane.core.agent_activity.profile_dir", lambda _name: profile),
+                patch("nblane.core.ai.runs.profile_dir", lambda _name: profile),
+                patch(
+                    "nblane.core.codex_adapter.run_readonly_codex_prompt",
+                    return_value=readonly,
+                ),
+            ):
+                result = run_ai_action(
+                    "research.paper_deep_read_codex",
+                    {
+                        "source_id": "source:paper:1",
+                        "segments": [{"segment_id": "seg:1", "text": secret_segment}],
+                    },
+                    profile="alice",
+                    context_refs=["source:paper:1"],
+                    require_review=True,
+                )
+                activity_text = (profile / "agent-activity.yaml").read_text(encoding="utf-8")
+
+        self.assertTrue(result.ok)
+        self.assertNotIn(secret_segment, activity_text)
+        self.assertNotIn("action_result", activity_text)
+        self.assertNotIn("content:", activity_text)
+        self.assertNotIn("command", activity_text)
+        self.assertNotIn("stdout", activity_text)
+        self.assertNotIn("stderr", activity_text)
+        self.assertNotIn("raw_text", activity_text)
+
+    def test_paper_codex_failure_activity_is_privacy_thin(self) -> None:
+        """Paper Codex failure Activity stores a short error only."""
+
+        secret_raw = "RAW CODEX OUTPUT SHOULD NOT BE STORED"
+        readonly = SimpleNamespace(
+            ok=False,
+            output=secret_raw,
+            warnings=[],
+            error="config parse failed",
+            stdout=f"stdout {secret_raw}",
+            stderr="invalid config",
+            command="codex exec --sandbox read-only -",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with (
+                patch("nblane.core.agent_activity.profile_dir", lambda _name: profile),
+                patch("nblane.core.ai.runs.profile_dir", lambda _name: profile),
+                patch(
+                    "nblane.core.codex_adapter.run_readonly_codex_prompt",
+                    return_value=readonly,
+                ),
+            ):
+                result = run_ai_action(
+                    "research.paper_search_codex",
+                    {"query": "VLA memory"},
+                    profile="alice",
+                    preferred_backend="local_codex_readonly",
+                    require_review=True,
+                )
+                activity = yaml.safe_load(
+                    (profile / "agent-activity.yaml").read_text(encoding="utf-8")
+                )
+
+        item = activity["items"][0]
+        dumped = yaml.dump(item, allow_unicode=True)
+        self.assertFalse(result.ok)
+        self.assertEqual(item["status"], "failed")
+        self.assertEqual(item["payload"]["provider"], "local_codex_readonly")
+        self.assertLessEqual(len(item["summary"]), 240)
+        self.assertLessEqual(len(item["preview"]), 300)
+        self.assertNotIn(secret_raw, dumped)
+        for key in ("command", "stdout", "stderr", "raw_text"):
+            self.assertNotIn(key, item["payload"])
 
 
 if __name__ == "__main__":

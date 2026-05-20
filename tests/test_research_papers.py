@@ -14,6 +14,7 @@ import yaml
 from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
+    PaperSearchResult,
     build_reader_payload,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
@@ -40,6 +41,7 @@ from nblane.core.research_papers import (
     render_paper_page_preview,
     save_paper_pages,
     save_paper_segments,
+    search_papers_with_codex,
     text_hash,
     translate_full_paper,
     upsert_paper_library_node,
@@ -699,6 +701,90 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(sources[imported[0]].status, "reading")
         self.assertEqual(sources[imported[0]].library_node_refs, ["paper-node:vla"])
         self.assertEqual(sources[imported[0]].metadata["doi"], "10.1000/demo")
+
+    def test_search_papers_with_codex_uses_structured_candidates_without_importing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            codex_result = SimpleNamespace(
+                structured={
+                    "results": [
+                        {"title": "Title Only Candidate"},
+                        {
+                            "title": "Grounded Candidate",
+                            "url": "https://example.com/grounded",
+                            "doi": "10.1000/grounded",
+                            "provider_refs": ["semantic_scholar:grounded"],
+                            "reason": "Matches the query.",
+                        },
+                    ],
+                    "warnings": [],
+                },
+                warnings=[],
+                ok=True,
+                error="",
+            )
+            with patch(
+                "nblane.core.ai.gateway.run_ai_action",
+                return_value=codex_result,
+            ) as run:
+                rows = search_papers_with_codex(
+                    profile,
+                    "VLA memory",
+                    filters={"providers": ["semantic_scholar"], "limit": 5},
+                    context_refs={
+                        "context_refs": ["goal:vla"],
+                        "project_refs": ["project:piper"],
+                        "goal_refs": ["goal:vla"],
+                    },
+                )
+            sources = load_research_sources(profile).sources
+
+        self.assertEqual([row.title for row in rows], ["Grounded Candidate"])
+        self.assertEqual(rows[0].doi, "10.1000/grounded")
+        self.assertEqual(len(sources), 1)
+        payload = run.call_args.args[1]
+        self.assertEqual(payload["query"], "VLA memory")
+        self.assertEqual(payload["project_refs"], ["project:piper"])
+        self.assertEqual(payload["goal_refs"], ["goal:vla"])
+        self.assertIn("already_imported", payload)
+        self.assertIn("library_tree_hint", payload)
+
+    def test_search_papers_with_codex_falls_back_to_provider_search(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            codex_result = SimpleNamespace(
+                structured={"results": [], "warnings": ["No candidates"]},
+                warnings=["No candidates"],
+                ok=True,
+                error="",
+            )
+            provider_result = [
+                PaperSearchResult(
+                    title="Provider Candidate",
+                    canonical_url="https://example.com/provider",
+                    provider_refs=["arxiv"],
+                )
+            ]
+            with (
+                patch(
+                    "nblane.core.ai.gateway.run_ai_action",
+                    return_value=codex_result,
+                ),
+                patch(
+                    "nblane.core.research_papers.search_papers",
+                    return_value=provider_result,
+                ) as provider_search,
+            ):
+                rows = search_papers_with_codex(
+                    profile,
+                    "VLA memory",
+                    filters={"providers": ["arxiv"], "limit": 3},
+                )
+
+        self.assertEqual(rows, provider_result)
+        provider_search.assert_called_once()
+        self.assertEqual(provider_search.call_args.args[1], ("arxiv",))
+        self.assertEqual(provider_search.call_args.args[2], 3)
 
     def test_import_pdf_download_skips_unchecked_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

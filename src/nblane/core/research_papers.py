@@ -2502,9 +2502,15 @@ def search_papers_with_codex(
         refs = _clean_list(context_refs.get("context_refs"))
     from nblane.core.ai.gateway import run_ai_action
 
+    search_context = _paper_search_context_bundle(
+        profile,
+        query,
+        filters or {},
+        context_refs=context_refs,
+    )
     result = run_ai_action(
         "research.paper_search_codex",
-        {"query": query, "filters": filters or {}},
+        search_context,
         profile=profile,
         context_refs=refs,
         require_review=True,
@@ -2513,11 +2519,98 @@ def search_papers_with_codex(
     structured = result.structured if isinstance(result.structured, dict) else {}
     for row in structured.get("results") or structured.get("candidates") or []:
         candidate = PaperSearchResult.from_dict(row)
-        if candidate is not None:
+        if candidate is not None and _paper_search_result_has_import_ref(candidate):
             candidates.append(candidate)
     if candidates:
         return candidates
     return search_papers(query, tuple((filters or {}).get("providers") or PAPER_SEARCH_PROVIDERS), int((filters or {}).get("limit") or 10), filters)
+
+
+def _paper_search_context_bundle(
+    profile: str | Path,
+    query: str,
+    filters: dict[str, Any],
+    *,
+    context_refs: dict | list[str] | None = None,
+) -> dict[str, Any]:
+    """Build the compact prompt payload for local read-only Codex search."""
+
+    payload: dict[str, Any] = {
+        "query": _clean_text(query),
+        "filters": copy.deepcopy(filters),
+        "providers": _clean_list(filters.get("providers")) or list(PAPER_SEARCH_PROVIDERS),
+    }
+    if isinstance(context_refs, dict):
+        payload["context_refs"] = _clean_list(context_refs.get("context_refs"))
+        payload["project_refs"] = _clean_list(context_refs.get("project_refs"))
+        payload["goal_refs"] = _clean_list(context_refs.get("goal_refs"))
+    elif isinstance(context_refs, list):
+        payload["context_refs"] = _clean_list(context_refs)
+    else:
+        payload["context_refs"] = []
+    payload["already_imported"] = _paper_search_imported_refs(profile)
+    payload["library_tree_hint"] = _paper_search_library_tree_hint(profile)
+    return payload
+
+
+def _paper_search_imported_refs(profile: str | Path) -> list[dict[str, str]]:
+    """Return compact duplicate-avoidance refs for already imported papers."""
+
+    rows: list[dict[str, str]] = []
+    try:
+        sources = load_research_sources(_profile_root(profile)).sources
+    except Exception:
+        return rows
+    for source in sources:
+        if source.kind != "paper":
+            continue
+        metadata = source.metadata or {}
+        row = {
+            "source_id": _clean_text(source.id),
+            "title": _clean_text(source.title)[:160],
+            "doi": _clean_text(metadata.get("doi")),
+            "arxiv_id": _clean_text(metadata.get("arxiv_id")),
+            "semantic_scholar_id": _clean_text(metadata.get("semantic_scholar_id")),
+            "url": _canonical_url(source.url),
+        }
+        compact = {key: value for key, value in row.items() if value}
+        if compact:
+            rows.append(compact)
+        if len(rows) >= 200:
+            break
+    return rows
+
+
+def _paper_search_library_tree_hint(profile: str | Path) -> list[dict[str, str]]:
+    """Return compact library taxonomy hints for candidate placement."""
+
+    try:
+        tree = load_paper_library_tree(profile)
+    except Exception:
+        return []
+    rows: list[dict[str, str]] = []
+    for node in tree.nodes[:80]:
+        row = {
+            "id": _clean_text(node.id),
+            "title": _clean_text(node.title)[:120],
+            "parent_id": _clean_text(node.parent_id),
+            "description": _clean_text(node.description)[:240],
+        }
+        rows.append({key: value for key, value in row.items() if value})
+    return rows
+
+
+def _paper_search_result_has_import_ref(result: PaperSearchResult) -> bool:
+    """Return True when a search candidate has a checkable import reference."""
+
+    return bool(
+        result.canonical_url
+        or result.pdf_url
+        or result.doi
+        or result.arxiv_id
+        or result.semantic_scholar_id
+        or result.provider_refs
+    )
 
 
 def check_paper_links(results: list[PaperSearchResult | dict]) -> list[PaperSearchResult]:

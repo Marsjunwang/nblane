@@ -10,6 +10,7 @@ from typing import Any
 from nblane.core import git_backup
 from nblane.core.ai import (
     answer_paper_question,
+    deep_read_paper_codex,
     explain_paper_selection,
     generate_paper_review_card,
     translate_paper_segments,
@@ -174,6 +175,123 @@ def _context_segments(payload: dict[str, Any], segment_rows, *, limit: int = 30)
     if picked:
         return picked
     return [segment.to_dict() for segment in segment_rows[:limit]]
+
+
+def _compact_segments_for_deep_read(
+    payload: dict[str, Any],
+    segment_rows,
+    *,
+    limit: int = 40,
+    char_limit: int = 24_000,
+) -> list[dict[str, Any]]:
+    refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
+    visible_pages = {
+        int(item)
+        for item in payload.get("visible_pages", [])
+        if str(item).strip().isdigit()
+    } if isinstance(payload.get("visible_pages"), list) else set()
+    primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
+    if not refs and not visible_pages and primary_page:
+        visible_pages = {primary_page}
+    picked = [
+        segment
+        for segment in segment_rows
+        if (refs and segment.segment_id in refs)
+        or (visible_pages and segment.page in visible_pages)
+    ]
+    if not picked:
+        picked = list(segment_rows[:limit])
+    rows: list[dict[str, Any]] = []
+    total_chars = 0
+    for segment in picked:
+        text = str(segment.text or "").strip()
+        remaining = char_limit - total_chars
+        if remaining <= 0 or len(rows) >= limit:
+            break
+        clipped = text[: min(len(text), remaining, 1200)]
+        if not clipped:
+            continue
+        total_chars += len(clipped)
+        rows.append(
+            {
+                "segment_id": segment.segment_id,
+                "source_id": segment.source_id,
+                "page": segment.page,
+                "order": segment.order,
+                "section_path": list(segment.section_path),
+                "kind": segment.kind,
+                "text": clipped,
+                "text_hash": segment.text_hash,
+                "locator": segment.locator,
+            }
+        )
+    return rows
+
+
+def _compact_chunks_for_deep_read(chunk_rows, *, limit: int = 20) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for chunk in chunk_rows[:limit]:
+        metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+        rows.append(
+            {
+                "chunk_id": chunk.id,
+                "title": chunk.title,
+                "kind": chunk.kind,
+                "text": str(chunk.text or "")[:900],
+                "locator": chunk.locator,
+                "metadata": {
+                    key: metadata.get(key)
+                    for key in ("page", "segment_id", "selected_text_hash", "annotation_id")
+                    if metadata.get(key) not in (None, "", [])
+                },
+            }
+        )
+    return rows
+
+
+def _compact_annotations_for_deep_read(annotation_rows, *, limit: int = 24) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in annotation_rows[:limit]:
+        rows.append(
+            {
+                "annotation_id": row.id,
+                "kind": row.kind,
+                "page": row.page,
+                "locator": row.locator,
+                "selected_text": str(row.selected_text or "")[:600],
+                "note": str(row.note or "")[:400],
+                "tags": list(row.tags),
+                "segment_refs": list(row.segment_refs),
+            }
+        )
+    return rows
+
+
+def _compact_source_for_deep_read(source: Any, source_id: str) -> dict[str, Any]:
+    if source is None:
+        return {"id": source_id}
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    return {
+        "id": source.id,
+        "title": source.title,
+        "url": source.url,
+        "authors": list(source.authors),
+        "published": source.published,
+        "summary": str(source.summary or "")[:1200],
+        "metadata": {
+            key: metadata.get(key)
+            for key in (
+                "doi",
+                "arxiv_id",
+                "semantic_scholar_id",
+                "venue",
+                "page_count",
+                "fields_of_study",
+                "provider_refs",
+            )
+            if metadata.get(key) not in (None, "", [])
+        },
+    }
 
 
 def _selection_text(payload: dict[str, Any], segment_rows) -> str:
@@ -775,6 +893,49 @@ def _handle_reader_action_inner(
         return ReaderActionResult(
             data={"structured": ai_result.structured or {}},
             warnings=list(ai_result.warnings),
+        )
+
+    if action == "codex_deep_read":
+        source = load_research_sources(profile).by_id().get(source_id)
+        ai_result = deep_read_paper_codex(
+            ctx.profile_name,
+            source_id,
+            payload={
+                "source": _compact_source_for_deep_read(source, source_id),
+                "segments": _compact_segments_for_deep_read(payload, segment_rows),
+                "chunks": _compact_chunks_for_deep_read(chunk_rows),
+                "annotations": _compact_annotations_for_deep_read(annotation_rows),
+                "question": _payload_text(payload, "question", "prompt", "text"),
+                "reading_goal": _payload_text(payload, "reading_goal", "goal"),
+                "page": _payload_int(payload, "page"),
+                "visible_pages": payload.get("visible_pages")
+                if isinstance(payload.get("visible_pages"), list)
+                else [],
+                "locator": _payload_text(payload, "locator"),
+            },
+            require_review=True,
+        )
+        structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+        if ai_result.ok and structured:
+            analysis = load_paper_analysis(profile, source_id)
+            analysis["codex_deep_read"] = structured
+            analysis["codex_deep_read_updated"] = datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            )
+            save_paper_analysis(profile, source_id, analysis)
+        message = (
+            "Deep read candidate ready."
+            if ai_result.ok and structured
+            else ai_result.error or "Deep read did not return a candidate."
+        )
+        return ReaderActionResult(
+            ok=bool(ai_result.ok and structured),
+            data={
+                "structured": structured,
+                "analysis": load_paper_analysis(profile, source_id),
+            },
+            warnings=list(ai_result.warnings),
+            message=message,
         )
 
     if action == "generate_review_card":

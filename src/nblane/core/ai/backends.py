@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from nblane.core import llm
+from nblane.core.jsonutil import extract_json_object
 from nblane.core.agent_tasks import (
     AGENT_HARNESSES,
     AGENT_ROLES,
@@ -19,7 +20,7 @@ from nblane.core.ai.actions import (
 )
 from nblane.core.ai.prompts import prompt_for_action
 from nblane.core.ai.runs import new_run_id
-from nblane.core.ai.structured import validate_json_response
+from nblane.core.ai.structured import validate_json_response, validate_schema
 
 
 class DirectLLMBackend:
@@ -227,6 +228,147 @@ class ExternalAgentBackend:
         )
 
 
+class LocalReadonlyCodexBackend:
+    """Run Codex locally as a read-only advanced LLM for JSON AI Actions."""
+
+    name = "local_codex_readonly"
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        """Run one action through ``codex exec --sandbox read-only``."""
+
+        run_id = new_run_id(request.action)
+        prompt = prompt_for_action(request, spec)
+        codex_prompt = _readonly_codex_prompt(request, spec, prompt.system, prompt.user)
+        from nblane.core import codex_adapter
+
+        result = codex_adapter.run_readonly_codex_prompt(
+            request.profile,
+            codex_prompt,
+        )
+        raw = result.output
+        warnings = _merge_warning_texts(getattr(result, "warnings", []) or [])
+        if not result.ok:
+            error = codex_adapter.readable_codex_error(
+                getattr(result, "error", ""),
+                getattr(result, "stderr", ""),
+                raw,
+                getattr(result, "stdout", ""),
+            )
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                warnings=_merge_warning_texts(warnings, error),
+                error=error,
+            )
+
+        data = extract_json_object(raw)
+        if not isinstance(data, dict):
+            error = "codex_json_error: response did not contain a JSON object"
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                warnings=_merge_warning_texts(warnings, error),
+                error=error,
+            )
+
+        validation_error = validate_schema(data, spec.schema or {})
+        if validation_error:
+            error = f"codex_schema_error: {validation_error}"
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                structured=data,
+                warnings=_merge_warning_texts(warnings, error),
+                error=error,
+            )
+
+        warnings = _merge_warning_texts(warnings, data.get("warnings"))
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            content=json.dumps(data, ensure_ascii=False, indent=2),
+            structured=data,
+            warnings=warnings,
+        )
+
+
+def _readonly_codex_prompt(
+    request: AIActionRequest,
+    spec: AIActionSpec,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    """Combine an AI Action prompt with Codex read-only operating bounds."""
+
+    schema = json.dumps(spec.schema or {}, ensure_ascii=False, indent=2)
+    return "\n\n".join(
+        [
+            (
+                "You are Codex used inside nblane Paper Reading Studio through "
+                "the AI Gateway as a local read-only advanced LLM."
+            ),
+            "\n".join(
+                [
+                    "Boundaries:",
+                    "- Codex is read-only.",
+                    "- Do not edit files.",
+                    "- Do not generate patches.",
+                    "- Do not run code-changing commands.",
+                    "- Do not write profile facts.",
+                    "- Do not create or submit agent-task candidates.",
+                    "- Return one JSON object only, no markdown.",
+                    "- If search/network is unavailable, put that in warnings.",
+                ]
+            ),
+            (
+                "All outputs are reviewable candidates. For paper search, return "
+                "only candidates with a checkable URL, DOI, arXiv id, Semantic "
+                "Scholar id, or provider_refs. Do not write research/sources.yaml "
+                "or import papers."
+            ),
+            f"Action: {request.action}",
+            f"Profile: {request.profile}",
+            "Required JSON schema:\n" + schema,
+            "System prompt from AI Gateway:\n" + str(system_prompt or "").strip(),
+            "Business payload JSON:\n" + str(user_prompt or "").strip(),
+        ]
+    )
+
+
+def _merge_warning_texts(*values: object) -> list[str]:
+    """Normalize warnings without retaining duplicate long blobs."""
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        raw_items = value if isinstance(value, (list, tuple, set)) else [value]
+        for item in raw_items:
+            text = _clean_text(item)
+            if not text:
+                continue
+            if len(text) > 500:
+                text = text[:499].rstrip() + "..."
+            if text in seen:
+                continue
+            seen.add(text)
+            out.append(text)
+    return out
+
+
 def default_backends() -> dict[str, object]:
     """Return the standard backend registry."""
 
@@ -234,6 +376,7 @@ def default_backends() -> dict[str, object]:
         DirectLLMBackend(),
         WorkflowAgentBackend(),
         ExternalAgentBackend(),
+        LocalReadonlyCodexBackend(),
         RuleFallbackBackend(),
     ]
     return {backend.name: backend for backend in backends}
