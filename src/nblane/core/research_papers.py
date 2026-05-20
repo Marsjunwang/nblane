@@ -1682,6 +1682,8 @@ def build_reader_payload(
     page: int,
     requested_pages: set[int],
     target_lang: str,
+    include_page_previews: bool = True,
+    pdf_url_override: str | None = None,
 ) -> dict[str, object]:
     """Build a bounded reader payload without extracting, translating, or calling AI."""
 
@@ -1700,11 +1702,12 @@ def build_reader_payload(
     context_pages = sorted(_reader_page_set(page=page, requested_pages=requested_pages, total_pages=total_pages))
     context_page_set = set(context_pages)
     preview_rows: list[dict[str, object]] = []
-    for page_number in context_pages:
-        try:
-            preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
-        except Exception:
-            continue
+    if include_page_previews:
+        for page_number in context_pages:
+            try:
+                preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
+            except Exception:
+                continue
     segments = [
         segment.to_dict()
         for segment in load_paper_segments(profile, source_id)
@@ -1749,7 +1752,11 @@ def build_reader_payload(
         }
         for chunk in load_chunks(_profile_root(profile), source_id)
     ]
-    pdf_url = get_stable_pdf_url(profile, source_id) if _clean_text(metadata.get("pdf_asset_ref")) else ""
+    pdf_url = (
+        _clean_text(pdf_url_override)
+        if pdf_url_override is not None
+        else get_stable_pdf_url(profile, source_id) if _clean_text(metadata.get("pdf_asset_ref")) else ""
+    )
     return {
         "source": source.to_dict(),
         "pdf_url": pdf_url,

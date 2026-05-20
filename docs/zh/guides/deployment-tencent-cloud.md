@@ -101,17 +101,68 @@ sudo systemctl enable --now nblane
 sudo systemctl status nblane
 ```
 
+Research PDF Reader 由独立 FastAPI sidecar 提供，避免 PDF 滚动触发 Streamlit
+整页 rerun。先生成共享 token secret，并写入两个 service 都会读取的
+`/srv/nblane-data/.env`：
+
+```bash
+printf 'NBLANE_READER_TOKEN_SECRET=%s\n' "$(openssl rand -hex 32)" | sudo tee -a /srv/nblane-data/.env
+sudo chown nblane:nblane /srv/nblane-data/.env
+sudo chmod 600 /srv/nblane-data/.env
+```
+
+示例服务文件 `/etc/systemd/system/nblane-reader.service`：
+
+```ini
+[Unit]
+Description=nblane Paper Reader API
+After=network.target
+
+[Service]
+Type=simple
+User=nblane
+WorkingDirectory=/srv/nblane-app
+Environment=NBLANE_ROOT=/srv/nblane-data
+Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
+Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+Environment=NBLANE_RESEARCH_PDF_BACKEND=pymupdf
+Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
+EnvironmentFile=-/srv/nblane-data/.env
+ExecStart=/srv/nblane-app/.venv/bin/uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now nblane-reader
+sudo systemctl status nblane-reader
+```
+
 ## HTTPS 反向代理
 
 推荐 Caddy。示例 `/etc/caddy/Caddyfile`：
 
 ```caddyfile
 your-domain.com {
+    handle /reader/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
     reverse_proxy 127.0.0.1:8501
 }
 ```
 
-Streamlit 只监听 `127.0.0.1:8501`，不要在腾讯云安全组开放 `8501`。
+这里必须使用 `handle /reader/*`，不要使用 `handle_path /reader/*`；后者会剥掉
+FastAPI 需要的 `/reader` 路由前缀。
+
+Streamlit 只监听 `127.0.0.1:8501`，Reader API 只监听 `127.0.0.1:8502`，
+不要在腾讯云安全组开放 `8501` 或 `8502`。
 
 ## Paper Reading PDF 后端
 

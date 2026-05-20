@@ -114,7 +114,9 @@ Ingest and full evidence editing remain **CLI / Web**.
 ### Web UI
 
 ```bash
-streamlit run app.py
+NBLANE_READER_API_BASE=http://localhost:8502 streamlit run app.py
+# Optional sidecar used by Research PDF Reader in local dev without Caddy:
+uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --reload
 ```
 
 Core surfaces include **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**,

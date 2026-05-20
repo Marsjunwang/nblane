@@ -6,10 +6,12 @@ import base64
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 import streamlit as st
 import yaml
 
+from nblane.core.auth import mint_reader_token
 from nblane.core.ai import (
     answer_paper_question,
     explain_paper_selection,
@@ -133,7 +135,7 @@ from nblane.web_shared import (
 apply_ui_language_from_session()
 
 ui = research_ui()
-require_login()
+user = require_login()
 selected = select_profile()
 ui = research_ui()
 render_git_backup_notices()
@@ -2150,6 +2152,18 @@ def _render_paper_reader(inbox) -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
+    if source.metadata.get("pdf_asset_ref") and os.getenv("NBLANE_READER_USE_STREAMLIT_COMPONENT", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        try:
+            token = mint_reader_token(user.id, selected, source_id)
+        except Exception as exc:
+            st.error(str(exc))
+            return
+        base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+        encoded_source = quote(source_id, safe="")
+        encoded_token = quote(token, safe="")
+        iframe_src = f"{base}/reader/view/{encoded_source}?token={encoded_token}" if base else f"/reader/view/{encoded_source}?token={encoded_token}"
+        st.components.v1.iframe(iframe_src, height=1200, scrolling=False)
+        return
     page_rows = load_paper_pages(_pdir, source_id)
     segment_rows_for_reader = load_paper_segments(_pdir, source_id)
     annotation_rows_for_reader = load_paper_annotations(_pdir, source_id)

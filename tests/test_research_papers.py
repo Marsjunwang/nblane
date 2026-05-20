@@ -408,6 +408,46 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(cached.call_count, 2)
         self.assertEqual(cached.call_args.args[1], source_id)
 
+    def test_reader_payload_can_skip_page_previews_and_override_pdf_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(
+                    profile,
+                    source_id,
+                    [PaperPage(source_id=source_id, page=1, text="Page 1", text_hash=text_hash("Page 1"))],
+                )
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:1",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Segment 1",
+                            text_hash=text_hash("Segment 1"),
+                        )
+                    ],
+                )
+
+            with patch("nblane.core.research_papers.render_paper_page_preview") as preview:
+                payload = build_reader_payload(
+                    profile,
+                    source_id,
+                    page=1,
+                    requested_pages={1},
+                    target_lang="zh",
+                    include_page_previews=False,
+                    pdf_url_override="/reader/api/source%3Apaper%3Agrounded/pdf",
+                )
+
+        preview.assert_not_called()
+        self.assertEqual(payload["page_previews"], [])
+        self.assertEqual(payload["pdf_url"], "/reader/api/source%3Apaper%3Agrounded/pdf")
+
     def test_ensure_paper_reading_artifacts_prepares_missing_pages_and_segments_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))

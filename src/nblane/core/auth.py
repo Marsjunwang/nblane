@@ -5,7 +5,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import os
+import secrets
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +41,16 @@ class User:
         return self.role == "admin"
 
 
+@dataclass(frozen=True)
+class ReaderTokenClaims:
+    """Verified claims for a short-lived paper reader session token."""
+
+    user_id: str
+    profile: str
+    source_id: str
+    exp: int
+
+
 def auth_file_path() -> Path | None:
     """Return configured auth file path, if auth is enabled."""
     raw = os.getenv("NBLANE_AUTH_FILE", "").strip()
@@ -51,6 +64,14 @@ def auth_configured() -> bool:
     return auth_file_path() is not None
 
 
+def can_access_profile(user: User, profile: str) -> bool:
+    """Return whether *user* may access *profile*."""
+    clean = str(profile or "").strip()
+    if not clean:
+        return False
+    return bool(user.is_admin or clean in set(user.profiles))
+
+
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
@@ -58,6 +79,133 @@ def _b64(data: bytes) -> str:
 def _unb64(text: str) -> bytes:
     pad = "=" * (-len(text) % 4)
     return base64.urlsafe_b64decode((text + pad).encode("ascii"))
+
+
+def _reader_token_secret() -> bytes:
+    """Return the HMAC secret used for Reader iframe tokens.
+
+    Production deployments with Streamlit auth enabled must provide the secret
+    explicitly so the Streamlit and FastAPI processes can validate each
+    other's tokens. Local no-auth development gets a persisted per-root secret
+    so two dev processes still agree.
+    """
+
+    raw = os.getenv("NBLANE_READER_TOKEN_SECRET", "").strip()
+    if raw:
+        return raw.encode("utf-8")
+    if auth_configured():
+        raise AuthConfigError(
+            "NBLANE_READER_TOKEN_SECRET must be configured when auth is enabled"
+        )
+    try:
+        from nblane.core.paths import REPO_ROOT
+    except Exception:
+        REPO_ROOT = Path(os.getenv("NBLANE_ROOT") or ".").resolve()
+    secret_path = REPO_ROOT / ".reader-token-secret"
+    if secret_path.exists():
+        return secret_path.read_text(encoding="utf-8").strip().encode("utf-8")
+    secret = secrets.token_urlsafe(32)
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(
+        secret_path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(secret + "\n")
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+    return secret.encode("utf-8")
+
+
+def _reader_token_signature(payload_b64: str) -> str:
+    digest = hmac.new(
+        _reader_token_secret(),
+        payload_b64.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return _b64(digest)
+
+
+def mint_reader_token(
+    user_id: str,
+    profile: str,
+    source_id: str,
+    ttl_seconds: int = 3600,
+) -> str:
+    """Mint a short-lived signed token for one Reader iframe session."""
+
+    clean_user = str(user_id or "").strip()
+    clean_profile = str(profile or "").strip()
+    clean_source = str(source_id or "").strip()
+    if not clean_user or not clean_profile or not clean_source:
+        raise ValueError("reader token needs user_id, profile, and source_id")
+    now = int(time.time())
+    payload = {
+        "user_id": clean_user,
+        "profile": clean_profile,
+        "source_id": clean_source,
+        "iat": now,
+        "exp": now + max(60, int(ttl_seconds or 3600)),
+    }
+    payload_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    payload_b64 = _b64(payload_json)
+    return f"{payload_b64}.{_reader_token_signature(payload_b64)}"
+
+
+def verify_reader_token(
+    token: str,
+    expected_source_id: str | None = None,
+) -> ReaderTokenClaims | None:
+    """Verify a Reader token and return claims, or ``None`` if invalid."""
+
+    raw = str(token or "").strip()
+    if not raw or "." not in raw:
+        return None
+    payload_b64, signature = raw.rsplit(".", 1)
+    if not payload_b64 or not signature:
+        return None
+    try:
+        expected = _reader_token_signature(payload_b64)
+    except AuthConfigError:
+        raise
+    except Exception:
+        return None
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        payload = json.loads(_unb64(payload_b64).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    user_id = str(payload.get("user_id") or "").strip()
+    profile = str(payload.get("profile") or "").strip()
+    source_id = str(payload.get("source_id") or "").strip()
+    try:
+        exp = int(payload.get("exp") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not user_id or not profile or not source_id or exp < int(time.time()):
+        return None
+    if expected_source_id is not None and source_id != str(expected_source_id):
+        return None
+    return ReaderTokenClaims(
+        user_id=user_id,
+        profile=profile,
+        source_id=source_id,
+        exp=exp,
+    )
 
 
 def hash_password(

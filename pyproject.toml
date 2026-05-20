@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
     "jinja2>=3.1",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
     "markdown>=3.6",
     "streamlit>=1.56",
     "streamlit-crepe>=0.1.5",
@@ -61,6 +63,10 @@ include = ["nblane*", "schemas*"]
 "nblane.research_paper_reader_component" = [
     "frontend/static/index.html",
     "frontend/static/assets/*",
+]
+"nblane.web_reader_api" = [
+    "templates/*.html",
+    "static/assets/*",
 ]
 
 [tool.streamlit.component]

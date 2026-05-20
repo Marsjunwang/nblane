@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.reader-token-secret
 __pycache__/
 *.pyc
 *.egg-info/
