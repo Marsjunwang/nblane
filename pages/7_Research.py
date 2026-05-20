@@ -639,6 +639,10 @@ def _render_paper_search(inbox) -> None:
             "Search and import candidates. Results stay preview-only until you confirm import.",
         )
     )
+    prepare_notice_key = f"paper_reader_prepare_notice:{selected}"
+    prepare_notice = st.session_state.pop(prepare_notice_key, "")
+    if prepare_notice:
+        st.info(str(prepare_notice))
     mode = st.radio(
         _l("search_mode", "Search mode"),
         [
@@ -802,25 +806,28 @@ def _render_paper_search(inbox) -> None:
                             "download_pdf": pdf_strategy == _l("download_open_access_pdf", "Download open-access PDF"),
                         },
                     )
-                    refreshed = load_research_sources(selected).by_id()
-                    for source_id in imported:
-                        source = refreshed.get(source_id)
-                        if source is None or not source.metadata.get("pdf_asset_ref"):
-                            continue
-                        try:
-                            ensure_paper_reading_artifacts(_pdir, source_id, prefer_grobid=False)
-                        except Exception as exc:
-                            st.warning(
-                                _l(
-                                    "reading_artifacts_failed",
-                                    "Reading artifacts could not be prepared: {error}",
-                                ).format(error=exc)
-                            )
                     refresh_file_snapshots([_sources_path])
                     stash_git_backup_results()
                     clear_web_cache()
                     st.success(_l("imported_papers", "Imported papers: {ids}").format(ids=", ".join(imported) or "0"))
                     refreshed = load_research_sources(selected).by_id()
+                    imported_pdf_assets = [
+                        source_id
+                        for source_id in imported
+                        if (
+                            (refreshed.get(source_id).metadata if refreshed.get(source_id) is not None else {}).get(
+                                "pdf_asset_ref"
+                            )
+                        )
+                    ]
+                    if (
+                        pdf_strategy == _l("download_open_access_pdf", "Download open-access PDF")
+                        and imported_pdf_assets
+                    ):
+                        st.session_state[prepare_notice_key] = _l(
+                            "reader_background_prepare_hint",
+                            "PDF assets are saved now; Reader will prepare text in the background when opened.",
+                        )
                     for source_id in imported:
                         source = refreshed.get(source_id)
                         metadata = source.metadata if source is not None else {}
@@ -903,11 +910,14 @@ def _render_paper_search(inbox) -> None:
                 )
                 save_research_sources(selected, inbox)
                 import_paper_pdf(_pdir, source.id, uploaded.getvalue(), uploaded.name)
-                ensure_paper_reading_artifacts(_pdir, source.id, prefer_grobid=False)
                 refresh_file_snapshots([_sources_path])
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(ui["created"].format(id=source.id))
+                st.session_state[prepare_notice_key] = _l(
+                    "reader_background_prepare_hint",
+                    "PDF assets are saved now; Reader will prepare text in the background when opened.",
+                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))

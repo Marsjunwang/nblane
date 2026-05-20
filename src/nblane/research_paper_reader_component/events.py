@@ -21,6 +21,7 @@ REQUEST_READER_CONTEXT = "request_reader_context"
 REQUEST_PAGE_PREVIEWS = "request_page_previews"
 REQUEST_PAGE_PREVIEW = "request_page_preview"
 RETRY_TRANSLATION_SCOPE = "retry_translation_scope"
+PREPARE_READER_ARTIFACTS = "prepare_reader_artifacts"
 
 ReaderEventName = Literal[
     "annotation_create",
@@ -40,6 +41,7 @@ ReaderEventName = Literal[
     "request_page_previews",
     "request_page_preview",
     "retry_translation_scope",
+    "prepare_reader_artifacts",
 ]
 
 EVENT_NAMES: tuple[str, ...] = (
@@ -60,6 +62,7 @@ EVENT_NAMES: tuple[str, ...] = (
     REQUEST_PAGE_PREVIEWS,
     REQUEST_PAGE_PREVIEW,
     RETRY_TRANSLATION_SCOPE,
+    PREPARE_READER_ARTIFACTS,
 )
 
 
@@ -142,6 +145,7 @@ __all__ = [
     "EVENT_NAMES",
     "EXPLAIN_SELECTION",
     "MAX_BATCH_PAGES",
+    "PREPARE_READER_ARTIFACTS",
     "READER_STATE_CHANGED",
     "REQUEST_PAGE_PREVIEW",
     "REQUEST_PAGE_PREVIEWS",

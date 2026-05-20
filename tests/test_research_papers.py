@@ -614,13 +614,24 @@ class TestResearchPapers(unittest.TestCase):
                 patch("nblane.core.research_papers.git_backup.record_change"),
                 patch("nblane.core.research_sources.git_backup.record_change"),
             ):
-                first = ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=False)
+                progress: list[dict[str, object]] = []
+                first = ensure_paper_reading_artifacts(
+                    profile,
+                    source_id,
+                    prefer_grobid=False,
+                    progress_callback=progress.append,
+                )
                 second = ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=False)
             source = load_research_sources(profile).by_id()[source_id]
 
         self.assertTrue(first["ready"])
         self.assertEqual(first["pages"], 1)
         self.assertEqual(first["segments"], 1)
+        self.assertEqual(
+            [row["phase"] for row in progress],
+            ["extracting_pages", "saving_segments", "done"],
+        )
+        self.assertEqual(progress[-1]["label"], "Structured text ready")
         self.assertEqual(second["pages"], 1)
         self.assertEqual(pages_mock.call_count, 1)
         self.assertEqual(segments_mock.call_count, 1)

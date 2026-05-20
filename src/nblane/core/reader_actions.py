@@ -17,6 +17,7 @@ from nblane.core.ai import (
 )
 from nblane.core.research_papers import (
     create_paper_annotation,
+    ensure_paper_reading_artifacts,
     load_paper_analysis,
     load_paper_annotations,
     load_paper_pages,
@@ -49,6 +50,7 @@ from nblane.research_paper_reader_component.events import (
     CREATE_CHUNK_FROM_SELECTION,
     CREATE_CITATION,
     EXPLAIN_SELECTION,
+    PREPARE_READER_ARTIFACTS,
     RETRY_TRANSLATION_SCOPE,
     SAVE_PROGRESS,
     TRANSLATE_FULL_PAPER,
@@ -447,6 +449,32 @@ def _handle_reader_action_inner(
 
     if action == SAVE_PROGRESS:
         return save_reader_progress(ctx, payload)
+
+    if action == PREPARE_READER_ARTIFACTS:
+        prefer_grobid = payload.get("prefer_grobid", True)
+        if isinstance(prefer_grobid, str):
+            prefer_grobid = prefer_grobid.strip().lower() not in {"0", "false", "no", "off"}
+        summary = ensure_paper_reading_artifacts(
+            profile,
+            source_id,
+            prefer_grobid=bool(prefer_grobid),
+            progress_callback=progress_callback,
+        )
+        status = str(summary.get("status") or "")
+        if status == "missing_pdf":
+            message = "No PDF asset is attached."
+        elif status == "fallback":
+            message = "Fallback text ready"
+        elif status == "failed":
+            message = "Preparation failed"
+        else:
+            message = "Structured text ready"
+        return ReaderActionResult(
+            ok=status not in {"missing_pdf", "failed"} or bool(summary.get("ready")),
+            data={"summary": summary},
+            warnings=[str(item) for item in summary.get("warnings") or []],
+            message=message,
+        )
 
     if action in {ANNOTATION_CREATE, "create_annotation"}:
         ann = create_paper_annotation(

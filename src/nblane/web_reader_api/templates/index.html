@@ -169,6 +169,35 @@
       line-height: 1.35;
       white-space: nowrap;
     }
+    .pr-prep-status {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: .74rem;
+      font-weight: 760;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .pr-prep-status.ready {
+      border-color: rgba(33, 104, 91, .25);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .pr-prep-status.pending {
+      border-color: rgba(138, 91, 18, .25);
+      background: #fff8e8;
+      color: var(--warn);
+    }
+    .pr-prep-status.failed {
+      border-color: rgba(159, 29, 29, .28);
+      background: #fff3f3;
+      color: var(--danger);
+    }
     .pr-workspace {
       display: grid;
       --pr-compare-left: 50%;
@@ -766,9 +795,15 @@
       search: "Search",
       page: "Page",
       pdf_loading: "Loading PDF...",
+      pdf_ready: "PDF ready",
       pdf_missing: "No PDF page preview is available.",
       pdf_preview_mode: "Using page preview",
       pdf_error: "PDF.js could not render this paper.",
+      extracting_page_text: "Extracting page text",
+      running_grobid: "Running GROBID",
+      structured_text_ready: "Structured text ready",
+      fallback_text_ready: "Fallback text ready",
+      preparation_failed: "Preparation failed",
       selected_text: "Selected text",
       note: "Note",
       question: "Question",
@@ -834,6 +869,7 @@
     let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
+    let preparationTaskStartedFor = "";
     let optimisticAnnotations = [];
     let debugState = { lastNeedsLoadReason: "", lastSourceSignature: "", lastLoadMs: 0, fallbackHits: 0, events: [] };
     let cacheDbPromise = null;
@@ -1059,6 +1095,7 @@
       if (action === "translate_full_paper") return label("translating_full_paper");
       if (action === "generate_review_card") return label("reviewing_paper");
       if (action === "codex_deep_read") return label("deep_reading");
+      if (action === "prepare_reader_artifacts") return label("pdf_ready");
       if (action === "ask_paper") return label("answering");
       return "Working...";
     }
@@ -1066,6 +1103,13 @@
       const message = text(result && result.message);
       if (message) return message;
       if (action === "ask_paper") return label("answered");
+      if (action === "prepare_reader_artifacts") {
+        const summary = asObj(asObj(asObj(result).data).summary);
+        const statusValue = text(summary.status || "");
+        if (statusValue === "fallback") return label("fallback_text_ready");
+        if (statusValue === "failed" || statusValue === "missing_pdf") return label("preparation_failed");
+        return label("structured_text_ready");
+      }
       if (action === "generate_review_card" || action === "codex_deep_read") return label("saved");
       return label("saved");
     }
@@ -1096,6 +1140,13 @@
         el.classList.toggle("pending", phase === "pending");
         el.classList.toggle("error", phase === "error");
         el.textContent = actionState.message || "";
+      }
+      const prepEl = document.querySelector(".pr-prep-status");
+      if (prepEl) {
+        prepEl.classList.remove("ready", "pending", "failed");
+        prepEl.classList.add(preparationStatusClass());
+        prepEl.textContent = preparationStatusText();
+        prepEl.setAttribute("title", preparationStatusText());
       }
       document.querySelectorAll("[data-action]").forEach((button) => {
         const selector = actionButtonSelector(actionState.action);
@@ -1387,6 +1438,52 @@
     function targetLang() {
       return text(settings().target_lang || "zh") || "zh";
     }
+    function readerPreparation() {
+      return asObj(args.reader_preparation);
+    }
+    function preparationLabelFromStatus(statusValue, backend = "") {
+      if (statusValue === "ready") return label("structured_text_ready");
+      if (statusValue === "fallback" || (backend && backend !== "grobid")) return label("fallback_text_ready");
+      if (statusValue === "failed" || statusValue === "missing_pdf") return label("preparation_failed");
+      return label("pdf_ready");
+    }
+    function preparationStatusText() {
+      if (actionState.action === "prepare_reader_artifacts" && actionState.phase === "pending") {
+        return actionState.message || label("pdf_ready");
+      }
+      const prep = readerPreparation();
+      const labelText = text(prep.label);
+      if (labelText) return labelText;
+      return preparationLabelFromStatus(text(prep.status || ""), text(prep.structure_backend || ""));
+    }
+    function preparationStatusClass() {
+      if (actionState.action === "prepare_reader_artifacts" && actionState.phase === "pending") return "pending";
+      const statusValue = text(readerPreparation().status || "");
+      if (statusValue === "failed" || statusValue === "missing_pdf") return "failed";
+      if (statusValue === "pending") return "pending";
+      return "ready";
+    }
+    function preparationTaskSignature() {
+      const prep = readerPreparation();
+      return [
+        sourceId(),
+        pdfFingerprint(),
+        text(prep.pdf_fingerprint || ""),
+        text(prep.pages || 0),
+        text(prep.segments || 0),
+      ].join("|");
+    }
+    function maybeStartPreparationTask() {
+      const prep = readerPreparation();
+      if (!prep.needs_prepare) return;
+      const signature = preparationTaskSignature();
+      if (!signature || preparationTaskStartedFor === signature) return;
+      preparationTaskStartedFor = signature;
+      startReaderTask("prepare_reader_artifacts", {
+        page: currentPage || initialPage(),
+        prefer_grobid: true,
+      });
+    }
     function localStateKey() {
       return `nblane:reader:${sourceId() || text(READER_BOOT.sourceId || "source")}:state`;
     }
@@ -1519,6 +1616,7 @@
             <div class="pr-controls">
               <button class="pr-icon-button" data-action="prev" title="Previous page">&lt;</button>
               <span class="pr-status pr-status-main">${esc(message || label("pdf_loading"))}</span>
+              <span class="pr-prep-status ${attr(preparationStatusClass())}" title="${attr(preparationStatusText())}">${esc(preparationStatusText())}</span>
               <input class="pr-input pr-page-input" id="pageInput" value="${currentPage || 1}" inputmode="numeric" />
               <span class="pr-status">/ ${totalPages || "?"}</span>
               <button class="pr-icon-button" data-action="next" title="Next page">&gt;</button>
@@ -3497,6 +3595,8 @@
         } else {
           refreshForArgsUpdate();
         }
+        refreshActionStatus();
+        maybeStartPreparationTask();
       } catch (error) {
         renderShell(label("pdf_error"));
         const viewer = document.querySelector(".pr-viewer");

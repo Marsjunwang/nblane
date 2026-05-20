@@ -16,9 +16,12 @@ from nblane.core.auth import mint_reader_token
 from nblane.core.reader_actions import ReaderActionResult
 from nblane.core.research_papers import (
     PaperPage,
+    PaperSegment,
     import_paper_pdf,
     save_paper_pages,
+    save_paper_segments,
     text_hash,
+    upsert_paper_translations,
 )
 from nblane.core.research_sources import (
     ResearchSourceInbox,
@@ -105,8 +108,67 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(payload.status_code, 200)
         self.assertEqual(payload.json()["page_previews"], [])
         self.assertEqual(payload.json()["pdf_url"], f"/reader/api/{quote(source_id, safe='')}/pdf")
+        self.assertIn("reader_preparation", payload.json())
         self.assertEqual(payload.json()["settings"]["overscan_pages"], 3)
         self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], 36)
+
+    def test_payload_uses_current_page_window_for_reader_context(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            pages = [
+                PaperPage(source_id=source_id, page=index, text=f"Page {index}", text_hash=text_hash(f"Page {index}"))
+                for index in range(1, 9)
+            ]
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:{index}",
+                    source_id=source_id,
+                    page=index,
+                    order=index,
+                    text=f"Segment {index}",
+                    text_hash=text_hash(f"Segment {index}"),
+                )
+                for index in range(1, 9)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, pages)
+                save_paper_segments(profile, source_id, segments)
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segment.segment_id,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": f"zh {segment.page}",
+                        }
+                        for segment in segments
+                    ],
+                )
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            response = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=5")
+            payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["context_window"]["pages"], [4, 5, 6])
+        self.assertEqual({row["page"] for row in payload["segments"]}, {4, 5, 6})
+        self.assertEqual({row["page"] for row in payload["translations"]}, {4, 5, 6})
+        self.assertNotIn(1, {row["page"] for row in payload["segments"]})
 
     def test_payload_accepts_reader_token_query_fallback(self) -> None:
         source_id = "source:paper:grounded"
@@ -172,6 +234,12 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("setActionState", response.text)
         self.assertIn("startReaderTask", response.text)
         self.assertIn("watchReaderTask", response.text)
+        self.assertIn("prepare_reader_artifacts", response.text)
+        self.assertIn("reader_preparation", response.text)
+        self.assertIn("PDF ready", response.text)
+        self.assertIn("Structured text ready", response.text)
+        self.assertIn("Fallback text ready", response.text)
+        self.assertIn("Preparation failed", response.text)
         self.assertIn("translation_units", response.text)
         self.assertIn("renderTranslationPage", response.text)
         self.assertIn("syncCompareScroll", response.text)
@@ -322,6 +390,55 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "failed")
         self.assertIn("lost", response.json()["error"])
+
+    def test_reader_task_supports_prepare_reader_artifacts(self) -> None:
+        source_id = "source:paper:grounded"
+        task_id = "reader-task-prepare"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            with patch(
+                "nblane.core.reader_tasks.handle_reader_action",
+                return_value=ReaderActionResult(
+                    data={"summary": {"ready": True, "status": "ready", "pages": 1, "segments": 2}},
+                    message="Structured text ready",
+                ),
+            ):
+                started = client.post(
+                    f"/reader/api/{quote(source_id, safe='')}/tasks",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "task_id": task_id,
+                        "action": "prepare_reader_artifacts",
+                        "payload": {"page": 1, "prefer_grobid": True, "event_id": "evt-prepare"},
+                    },
+                )
+                snap = {}
+                for _ in range(20):
+                    status = client.get(f"/reader/api/{quote(source_id, safe='')}/tasks/{task_id}")
+                    snap = status.json()
+                    if snap.get("status") in {"done", "failed", "cancelled"}:
+                        break
+                    time.sleep(0.02)
+
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(started.json()["task"]["action"], "prepare_reader_artifacts")
+        self.assertEqual(started.json()["task"]["event_id"], "evt-prepare")
+        self.assertEqual(snap["status"], "done")
+        self.assertTrue(snap["refresh"]["payload"])
+        self.assertEqual(snap["progress"]["label"], "Structured text ready")
 
     def test_reader_task_start_validates_action_and_identity(self) -> None:
         source_id = "source:paper:grounded"

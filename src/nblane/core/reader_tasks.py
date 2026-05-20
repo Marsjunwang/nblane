@@ -13,6 +13,7 @@ from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.research_paper_reader_component.events import (
     ASK_PAPER,
     EXPLAIN_SELECTION,
+    PREPARE_READER_ARTIFACTS,
     RETRY_TRANSLATION_SCOPE,
     TRANSLATE_FULL_PAPER,
     TRANSLATE_SELECTION,
@@ -31,6 +32,7 @@ ALLOWED_READER_TASK_ACTIONS: frozenset[str] = frozenset(
         TRANSLATE_VISIBLE_PAGES,
         "codex_deep_read",
         "generate_review_card",
+        PREPARE_READER_ARTIFACTS,
     }
 )
 
@@ -265,29 +267,38 @@ def cleanup(now: float | None = None) -> None:
 
 def _progress_callback(task_id: str, action: str):
     def update(raw: dict[str, Any]) -> None:
-        if action != TRANSLATE_FULL_PAPER:
-            return
         with _COND:
             task = _TASKS.get(task_id)
             if not isinstance(task, dict) or str(task.get("status") or "") != "running":
                 return
-            total = int(raw.get("segments_selected") or 0)
-            current = int(raw.get("segments_processed") or 0)
-            saved = int(raw.get("updated") or 0)
-            batches = int(raw.get("batches") or 0)
-            batches_completed = int(raw.get("batches_completed") or 0)
-            label = "Translating paper..."
-            if total > 0:
-                label = f"Translating paper... {min(current, total)}/{total}"
-            task["progress"] = {
-                "phase": "running",
-                "label": label,
-                "current": min(current, total) if total > 0 else current,
-                "total": total,
-                "saved": saved,
-                "batches": batches,
-                "batches_completed": batches_completed,
-            }
+            if action == TRANSLATE_FULL_PAPER:
+                total = int(raw.get("segments_selected") or 0)
+                current = int(raw.get("segments_processed") or 0)
+                saved = int(raw.get("updated") or 0)
+                batches = int(raw.get("batches") or 0)
+                batches_completed = int(raw.get("batches_completed") or 0)
+                label = "Translating paper..."
+                if total > 0:
+                    label = f"Translating paper... {min(current, total)}/{total}"
+                task["progress"] = {
+                    "phase": "running",
+                    "label": label,
+                    "current": min(current, total) if total > 0 else current,
+                    "total": total,
+                    "saved": saved,
+                    "batches": batches,
+                    "batches_completed": batches_completed,
+                }
+            elif action == PREPARE_READER_ARTIFACTS:
+                task["progress"] = {
+                    "phase": str(raw.get("phase") or "running"),
+                    "label": str(raw.get("label") or "Preparing reader..."),
+                    "current": int(raw.get("current") or 0),
+                    "total": int(raw.get("total") or 0),
+                    "saved": int(raw.get("saved") or 0),
+                }
+            else:
+                return
             task["updated_at"] = time.time()
             _COND.notify_all()
 
@@ -379,6 +390,8 @@ def _action_label(action: str) -> str:
         return "Reviewing paper..."
     if action == "codex_deep_read":
         return "Running Codex deep read..."
+    if action == PREPARE_READER_ARTIFACTS:
+        return "PDF ready"
     if action == ASK_PAPER:
         return "Answering..."
     return "Working..."
@@ -388,6 +401,21 @@ def _progress_for_result(action: str, result: dict[str, Any]) -> dict[str, Any]:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
     saved = int(summary.get("saved") or summary.get("updated") or data.get("saved") or 0)
+    if action == PREPARE_READER_ARTIFACTS:
+        status = str(summary.get("status") or "")
+        label = {
+            "ready": "Structured text ready",
+            "fallback": "Fallback text ready",
+            "failed": "Preparation failed",
+            "missing_pdf": "Preparation failed",
+        }.get(status, str(result.get("message") or "PDF ready"))
+        return {
+            "phase": "done" if result.get("ok", True) is not False else "failed",
+            "label": label,
+            "current": 3 if result.get("ok", True) is not False else 0,
+            "total": 3,
+            "saved": int(summary.get("segments") or 0),
+        }
     total = int(
         summary.get("segments_selected")
         or summary.get("segments_total")

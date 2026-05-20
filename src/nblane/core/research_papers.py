@@ -934,11 +934,69 @@ def _paper_pdf_fingerprint(source: ResearchSource) -> str:
     )
 
 
+def _reader_preparation_label(status: str, structure_backend: str = "") -> str:
+    if status == "ready":
+        return "Structured text ready"
+    if status == "fallback" or (structure_backend and structure_backend != "grobid"):
+        return "Fallback text ready"
+    if status == "failed":
+        return "Preparation failed"
+    if status == "missing_pdf":
+        return "PDF missing"
+    return "PDF ready"
+
+
+def _reader_preparation_summary(
+    source: ResearchSource,
+    pages: list[PaperPage],
+    segments: list[PaperSegment],
+) -> dict[str, object]:
+    metadata = dict(source.metadata or {})
+    pdf_fingerprint = _paper_pdf_fingerprint(source)
+    marker = _clean_text(metadata.get("reading_artifacts_pdf_sha256"))
+    pdf_changed = bool(marker and pdf_fingerprint and marker != pdf_fingerprint)
+    has_pdf = _paper_has_pdf(source)
+    needs_prepare = bool(has_pdf and (not pages or not segments or pdf_changed))
+    structure_backend = _clean_text(metadata.get("structure_backend"))
+    status = _clean_text(metadata.get("reading_artifacts_status")) or ""
+    if not has_pdf:
+        status = "missing_pdf"
+    elif needs_prepare:
+        status = "pending"
+    elif not status:
+        status = "fallback" if structure_backend and structure_backend != "grobid" else "ready"
+    warnings = _clean_list(metadata.get("reading_artifacts_warnings")) + _clean_list(
+        metadata.get("structured_extraction_warnings")
+    )
+    total_pages = max(
+        [
+            int(metadata.get("page_count") or 0),
+            int(metadata.get("reading_artifacts_page_count") or 0),
+            *[page.page for page in pages],
+            1,
+        ]
+    )
+    return {
+        "ready": bool(has_pdf and not needs_prepare and (pages or segments)),
+        "needs_prepare": needs_prepare,
+        "status": status,
+        "label": _reader_preparation_label(status, structure_backend),
+        "pages": len(pages),
+        "segments": len(segments),
+        "total_pages": total_pages,
+        "structure_backend": structure_backend,
+        "pdf_fingerprint": pdf_fingerprint,
+        "pdf_changed": pdf_changed,
+        "warnings": warnings,
+    }
+
+
 def ensure_paper_reading_artifacts(
     profile: str | Path,
     source_id: str,
     *,
     prefer_grobid: bool = True,
+    progress_callback: Any | None = None,
 ) -> dict[str, object]:
     """Ensure page text and reading segments exist for the PDF reader.
 
@@ -948,10 +1006,31 @@ def ensure_paper_reading_artifacts(
     configured or fails, the reader keeps working through page-text fallback.
     """
 
+    def emit_progress(
+        phase: str,
+        label: str,
+        current: int,
+        total: int = 3,
+        *,
+        saved: int = 0,
+    ) -> None:
+        if not callable(progress_callback):
+            return
+        progress_callback(
+            {
+                "phase": phase,
+                "label": label,
+                "current": current,
+                "total": total,
+                "saved": saved,
+            }
+        )
+
     _, source = _source_by_id(profile, source_id)
     source_metadata = dict(source.metadata or {})
     pdf_fingerprint = _paper_pdf_fingerprint(source)
     if not _paper_has_pdf(source):
+        emit_progress("failed", "Preparation failed", 0, saved=0)
         return {
             "source_id": source_id,
             "ready": False,
@@ -971,6 +1050,7 @@ def ensure_paper_reading_artifacts(
     warnings: list[str] = []
 
     if needs_pages:
+        emit_progress("extracting_pages", "Extracting page text...", 1, saved=0)
         try:
             pages = extract_paper_pages(profile, source_id, backend="auto")
         except Exception as exc:
@@ -981,12 +1061,19 @@ def ensure_paper_reading_artifacts(
     if needs_segments:
         configured_grobid = bool(_clean_text(os.getenv("NBLANE_GROBID_URL")))
         segment_backend = "grobid" if prefer_grobid and configured_grobid else "fallback"
+        emit_progress(
+            "running_grobid" if segment_backend == "grobid" else "saving_segments",
+            "Running GROBID..." if segment_backend == "grobid" else "Saving fallback text...",
+            2,
+            saved=len(segments),
+        )
         try:
             segments = extract_paper_segments(profile, source_id, backend=segment_backend)
         except Exception as exc:
             warnings.append(f"Structured extraction failed: {exc}")
             if not segments:
                 try:
+                    emit_progress("saving_segments", "Saving fallback text...", 2, saved=0)
                     segments = extract_paper_segments(profile, source_id, backend="fallback")
                 except Exception as fallback_exc:
                     warnings.append(f"Page-text fallback failed: {fallback_exc}")
@@ -1013,6 +1100,12 @@ def ensure_paper_reading_artifacts(
     elif metadata.get("reading_artifacts_warnings"):
         ready_metadata["reading_artifacts_warnings"] = []
     _update_source_metadata_if_changed(profile, source_id, ready_metadata)
+    emit_progress(
+        "done" if status != "failed" else "failed",
+        _reader_preparation_label(status, structure_backend),
+        3 if status != "failed" else 0,
+        saved=len(segments),
+    )
 
     return {
         "source_id": source_id,
@@ -1911,6 +2004,7 @@ def build_reader_payload(
             except Exception:
                 continue
     all_segments = load_paper_segments(profile, source_id)
+    reader_preparation = _reader_preparation_summary(source, all_pages, all_segments)
     has_paged_segments = any(segment.page > 0 for segment in all_segments)
     segments = [
         segment.to_dict()
@@ -1985,6 +2079,7 @@ def build_reader_payload(
         "chunks": chunks,
         "analysis": load_paper_analysis(profile, source_id),
         "reader_state": _reader_state_from_metadata(metadata, page=page, target_lang=target_lang),
+        "reader_preparation": reader_preparation,
         "context_window": {
             "pages": context_pages,
             "has_more_before": bool(context_pages and min(context_pages) > 1),

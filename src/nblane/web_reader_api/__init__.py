@@ -171,7 +171,7 @@ def _payload_for_context(ctx: ReaderActionContext, page: int | None = None) -> d
         ctx.profile_path,
         ctx.source_id,
         page=current_page,
-        requested_pages=set(range(1, total_pages + 1)),
+        requested_pages=set(),
         target_lang=target_lang,
         include_page_previews=False,
         pdf_url_override=f"{READER_PREFIX}/api/{quote(ctx.source_id, safe='')}/pdf",
