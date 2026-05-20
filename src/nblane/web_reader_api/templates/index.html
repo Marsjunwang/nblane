@@ -659,6 +659,8 @@
     let loadSeq = 0;
     let pdfDocumentLoading = false;
     let payloadLoading = false;
+    let pageTextLayerCache = new Map();
+    let requestedTextLayers = new Set();
     const CACHE_DB = "nblane_pdf_reader_cache_v1";
     const CACHE_STORE = "pages";
 
@@ -795,7 +797,7 @@
     }
     function renderCacheMaxPages() {
       const raw = Number(settings().render_cache_max_pages);
-      return Number.isFinite(raw) ? Math.max(8, Math.min(120, raw)) : 24;
+      return Number.isFinite(raw) ? Math.max(8, Math.min(120, raw)) : 36;
     }
     async function prunePageCache(pdfIdentity) {
       try {
@@ -953,7 +955,24 @@
     }
     function overscanPages() {
       const raw = Number(settings().overscan_pages);
-      return Number.isFinite(raw) ? Math.max(0, Math.min(8, raw)) : 2;
+      if (Number.isFinite(raw)) return Math.max(0, Math.min(8, raw));
+      const cores = Number(navigator.hardwareConcurrency || 0);
+      const memory = Number(navigator.deviceMemory || 0);
+      if ((cores && cores <= 2) || (memory && memory <= 4)) return 2;
+      if ((cores && cores >= 8) || (memory && memory >= 8)) return 4;
+      return 3;
+    }
+    function pdfLoadTimeoutMs() {
+      const raw = Number(settings().pdf_load_timeout_ms);
+      return Number.isFinite(raw) ? Math.max(12000, Math.min(120000, raw)) : 30000;
+    }
+    function pdfPageRenderTimeoutMs() {
+      const raw = Number(settings().pdf_page_render_timeout_ms);
+      return Number.isFinite(raw) ? Math.max(6000, Math.min(60000, raw)) : 12000;
+    }
+    function pdfTextLayerTimeoutMs() {
+      const raw = Number(settings().pdf_text_layer_timeout_ms);
+      return Number.isFinite(raw) ? Math.max(6000, Math.min(60000, raw)) : 12000;
     }
     function targetLang() {
       return text(settings().target_lang || "zh") || "zh";
@@ -1798,7 +1817,7 @@
           if (pageNumber) renderAround(pageNumber);
         });
         scheduleViewportUpdate();
-      }, { root: viewer, rootMargin: "720px 0px", threshold: [0, .01, .25, .5, .75, 1] });
+      }, { root: viewer, rootMargin: "1080px 0px", threshold: [0, .01, .25, .5, .75, 1] });
       document.querySelectorAll(".pr-page-container").forEach((page) => observer.observe(page));
     }
     function pageDomReady(pageNumber, statusName = "") {
@@ -1907,6 +1926,17 @@
         if (state.renderTask) {
           try { state.renderTask.cancel(); } catch {}
         }
+        const textLayerPromise = withTimeout(
+          renderTextLayer(pageNumber, page, viewport),
+          pdfTextLayerTimeoutMs(),
+          "PDF.js text layer timed out."
+        ).catch((error) => {
+          state.textError = error && error.message ? error.message : text(error);
+          const layer = document.getElementById(`textLayer-${pageNumber}`);
+          if (layer) layer.innerHTML = "";
+          ensureBackendTextLayer(pageNumber, viewport);
+          return text(cached && cached.textBody);
+        });
         let renderedOk = false;
         state.renderTask = page.render({
           canvasContext: context,
@@ -1914,7 +1944,7 @@
           transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
         });
         try {
-          await withTimeout(state.renderTask.promise, 3500, "PDF.js render timed out; using image preview fallback.");
+          await withTimeout(state.renderTask.promise, pdfPageRenderTimeoutMs(), "PDF.js render timed out; using image preview fallback.");
           clearPagePreview(pageNumber);
           renderedOk = true;
           state.status = "rendered";
@@ -1932,7 +1962,7 @@
           try { state.renderTask.cancel(); } catch {}
         }
         state.renderTask = null;
-        const textBody = await renderTextLayer(pageNumber, page, viewport);
+        const textBody = await textLayerPromise;
         renderHighlights(pageNumber);
         try {
           if (!renderedOk) return;
@@ -2004,6 +2034,65 @@
         layer.appendChild(span);
       }
       return body;
+    }
+    function renderBackendTextLayer(pageNumber, data, viewport) {
+      const layer = document.getElementById(`textLayer-${pageNumber}`);
+      if (!layer || !data) return false;
+      const spans = asArr(asObj(data).spans);
+      if (!spans.length) return false;
+      layer.innerHTML = "";
+      const sourceWidth = Math.max(1, Number(asObj(data).width || viewport.width || 1));
+      const sourceHeight = Math.max(1, Number(asObj(data).height || viewport.height || 1));
+      const scaleX = Number(viewport.width || sourceWidth) / sourceWidth;
+      const scaleY = Number(viewport.height || sourceHeight) / sourceHeight;
+      const parts = [];
+      spans.forEach((row) => {
+        const spanData = asObj(row);
+        const body = text(spanData.text);
+        if (!body.trim()) return;
+        const x = Number(spanData.x || 0) * scaleX;
+        const y = Number(spanData.y || 0) * scaleY;
+        const w = Math.max(1, Number(spanData.w || 0) * scaleX);
+        const h = Math.max(1, Number(spanData.h || spanData.font_size || 10) * scaleY);
+        const span = document.createElement("span");
+        span.textContent = body.endsWith(" ") ? body : `${body} `;
+        span.style.left = `${x}px`;
+        span.style.top = `${y}px`;
+        span.style.width = `${w}px`;
+        span.style.height = `${h}px`;
+        span.style.fontSize = `${Math.max(4, h * .86)}px`;
+        span.style.lineHeight = "1";
+        span.style.display = "block";
+        span.dataset.page = String(pageNumber);
+        layer.appendChild(span);
+        parts.push(body);
+      });
+      if (parts.length) {
+        textCache.set(pageNumber, parts.join(" "));
+        renderHighlights(pageNumber);
+      }
+      return parts.length > 0;
+    }
+    async function ensureBackendTextLayer(pageNumber, viewport) {
+      const layer = document.getElementById(`textLayer-${pageNumber}`);
+      if (!layer || layer.querySelector("span")) return;
+      const cached = pageTextLayerCache.get(pageNumber);
+      if (cached && renderBackendTextLayer(pageNumber, cached, viewport)) return;
+      if (requestedTextLayers.has(pageNumber)) return;
+      requestedTextLayers.add(pageNumber);
+      try {
+        const response = await fetch(apiPath(`/api/${sourcePath()}/page-text-layer/${pageNumber}`), {
+          credentials: "same-origin",
+        });
+        if (response.status === 401) {
+          showExpiredSession();
+          return;
+        }
+        if (!response.ok) return;
+        const data = await response.json();
+        pageTextLayerCache.set(pageNumber, data);
+        renderBackendTextLayer(pageNumber, data, viewport);
+      } catch {}
     }
     function applyCachedPagePreview(pageNumber, viewport, cached) {
       const img = document.getElementById(`pagePreview-${pageNumber}`);
@@ -2093,6 +2182,7 @@
       }
       const pageInput = document.getElementById("pageInput");
       if (pageInput) pageInput.value = String(currentPage);
+      ensureBackendTextLayer(pageNumber, size);
       renderHighlights(pageNumber);
     }
     function applyAllKnownHighlights() {
@@ -2435,6 +2525,8 @@
       activeTab = text(local.active_tab || settings().active_tab || activeTab || "translation") || "translation";
       if (!["pdf", "compare", "translation"].includes(readerMode)) readerMode = "pdf";
       requestedPreviews = new Set();
+      requestedTextLayers = new Set();
+      pageTextLayerCache = new Map();
       currentSelection = null;
       dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
       textCache = new Map();
@@ -2468,7 +2560,7 @@
           source = { data: bytes };
         }
         loadingTask = window.pdfjsLib.getDocument(source);
-        const loadedDoc = await withTimeout(loadingTask.promise, Number(settings().pdf_load_timeout_ms || 9000), "PDF.js document load timed out; using page preview fallback.");
+        const loadedDoc = await withTimeout(loadingTask.promise, pdfLoadTimeoutMs(), "PDF.js document load timed out; using page preview fallback.");
         if (seq !== loadSeq) return;
         pdfDocumentLoading = false;
         pdfDoc = loadedDoc;
@@ -2519,6 +2611,7 @@
         const existing = asArr(args.page_previews).filter((row) => Number(asObj(row).page || 0) !== Number(pageNumber));
         args.page_previews = [...existing, preview];
         applyPagePreview(pageNumber, pageViewportSize(pageNumber));
+        ensureBackendTextLayer(pageNumber, pageViewportSize(pageNumber));
         renderHighlights(pageNumber);
         return preview;
       } catch {

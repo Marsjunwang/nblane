@@ -101,6 +101,8 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(payload.status_code, 200)
         self.assertEqual(payload.json()["page_previews"], [])
         self.assertEqual(payload.json()["pdf_url"], f"/reader/api/{quote(source_id, safe='')}/pdf")
+        self.assertEqual(payload.json()["settings"]["overscan_pages"], 3)
+        self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], 36)
 
     def test_view_without_token_or_cookie_is_401(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

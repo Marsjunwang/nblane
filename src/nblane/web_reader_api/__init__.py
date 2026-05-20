@@ -123,7 +123,7 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "scale_mode": reader_state.get("scale_mode") or "fit-width",
         "active_tab": reader_state.get("active_tab") or "translation",
         "target_lang": reader_state.get("target_lang") or target_lang or "zh",
-        "overscan_pages": 2,
+        "overscan_pages": 3,
         "auto_save_progress": False,
         "emit_passive_events": False,
         "side_panel_default": "collapsed" if reader_state.get("side_panel_collapsed", True) else "open",
@@ -132,9 +132,11 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "focus_chunk_id": reader_state.get("focused_chunk_id") or "",
         "height_mode": "viewport",
         "render_cache": True,
-        "render_cache_max_pages": 24,
+        "render_cache_max_pages": 36,
         "translation_dock_default": "bottom",
-        "pdf_load_timeout_ms": 9000,
+        "pdf_load_timeout_ms": 30000,
+        "pdf_page_render_timeout_ms": 12000,
+        "pdf_text_layer_timeout_ms": 12000,
     }
 
 
@@ -171,6 +173,57 @@ def _payload_for_context(ctx: ReaderActionContext, page: int | None = None) -> d
     payload["settings"] = _reader_settings(payload, current_page, target_lang)
     payload["events_contract_version"] = 1
     return payload
+
+
+def _paper_page_text_layer(profile_path: Path, source_id: str, page: int) -> dict[str, object]:
+    try:
+        import fitz  # type: ignore
+    except Exception as exc:  # pragma: no cover - optional dependency guard
+        raise HTTPException(status_code=503, detail="PyMuPDF is not available") from exc
+
+    try:
+        pdf_path = paper_pdf_asset_path(profile_path, source_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            if page < 1 or page > doc.page_count:
+                raise HTTPException(status_code=404, detail="page not found")
+            pdf_page = doc[page - 1]
+            rect = pdf_page.rect
+            data = pdf_page.get_text("dict")
+            spans: list[dict[str, object]] = []
+            for block in data.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        body = str(span.get("text") or "")
+                        if not body.strip():
+                            continue
+                        x0, y0, x1, y1 = [float(value) for value in span.get("bbox", (0, 0, 0, 0))]
+                        if x1 <= x0 or y1 <= y0:
+                            continue
+                        spans.append(
+                            {
+                                "text": body,
+                                "x": x0,
+                                "y": y0,
+                                "w": x1 - x0,
+                                "h": y1 - y0,
+                                "font_size": float(span.get("size") or max(1.0, y1 - y0)),
+                            }
+                        )
+            return {
+                "page": page,
+                "width": float(rect.width),
+                "height": float(rect.height),
+                "spans": spans[:4000],
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"failed to extract page text layer: {exc}") from exc
 
 
 def _iter_file_range(path: Path, start: int, end: int, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
@@ -275,6 +328,24 @@ async def reader_pdf(request: Request, source_id: str):
     return _range_response(path, request.headers.get("range"))
 
 
+@app.head(f"{READER_PREFIX}/api/{{source_id}}/pdf")
+async def reader_pdf_head(request: Request, source_id: str):
+    ctx = _request_context(request, source_id)
+    try:
+        path = paper_pdf_asset_path(ctx.profile_path, source_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        status_code=200,
+        media_type="application/pdf",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=300",
+            "Content-Length": str(path.stat().st_size),
+        },
+    )
+
+
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/payload")
 async def reader_payload(request: Request, source_id: str, page: int | None = None):
     ctx = _request_context(request, source_id)
@@ -285,6 +356,12 @@ async def reader_payload(request: Request, source_id: str, page: int | None = No
 async def reader_page_preview(request: Request, source_id: str, page: int):
     ctx = _request_context(request, source_id)
     return JSONResponse(render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=1100))
+
+
+@app.get(f"{READER_PREFIX}/api/{{source_id}}/page-text-layer/{{page}}")
+async def reader_page_text_layer(request: Request, source_id: str, page: int):
+    ctx = _request_context(request, source_id)
+    return JSONResponse(_paper_page_text_layer(ctx.profile_path, source_id, max(1, page)))
 
 
 async def _run_action_endpoint(
