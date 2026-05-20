@@ -434,7 +434,7 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
-    .pr-translation-block.placed {
+    .pr-translation-page.overlay .pr-translation-block.placed {
       position: absolute;
       margin: 0;
       overflow: hidden;
@@ -448,6 +448,116 @@
     .pr-translation-block.active {
       outline: 2px solid rgba(33, 104, 91, .32);
       background: rgba(235, 247, 242, .96);
+    }
+    .pr-translation-flow {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+      max-width: 860px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .pr-translation-section {
+      display: grid;
+      gap: 8px;
+      padding: 2px 0 10px;
+      border-bottom: 1px solid rgba(216, 224, 220, .72);
+    }
+    .pr-translation-section:last-child { border-bottom: 0; }
+    .pr-translation-section-title {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 7px 2px;
+      background: rgba(255, 255, 255, .96);
+      color: var(--accent-strong);
+      font-size: .82rem;
+      font-weight: 850;
+      line-height: 1.25;
+    }
+    .pr-translation-unit {
+      display: grid;
+      gap: 7px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+      scroll-margin-top: 62px;
+    }
+    .pr-translation-unit:hover {
+      border-color: rgba(33, 104, 91, .45);
+      background: #fbfdfc;
+    }
+    .pr-translation-unit.active {
+      border-color: rgba(33, 104, 91, .62);
+      background: rgba(235, 247, 242, .72);
+      box-shadow: 0 0 0 2px rgba(33, 104, 91, .10);
+    }
+    .pr-translation-unit-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .pr-translation-unit-status {
+      display: inline-flex;
+      min-height: 22px;
+      align-items: center;
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: .68rem;
+      font-weight: 820;
+      text-transform: uppercase;
+    }
+    .pr-translation-unit-status.translated {
+      border-color: rgba(33, 104, 91, .22);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .pr-translation-unit-status.stale,
+    .pr-translation-unit-status.missing {
+      border-color: rgba(138, 91, 18, .26);
+      background: #fff8e8;
+      color: var(--warn);
+    }
+    .pr-translation-unit-status.failed {
+      border-color: rgba(159, 29, 29, .28);
+      background: #fff3f3;
+      color: var(--danger);
+    }
+    .pr-translation-locator {
+      color: var(--muted);
+      font-size: .74rem;
+      font-weight: 780;
+      line-height: 1.25;
+    }
+    .pr-translation-unit-text {
+      color: var(--ink);
+      font-size: .94rem;
+      line-height: 1.72;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    .pr-translation-source-snippet {
+      color: var(--muted);
+      font-size: .75rem;
+      line-height: 1.42;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .pr-translation-unit-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
     }
     .pr-translation-row {
       display: grid;
@@ -501,6 +611,10 @@
       background: rgba(255, 255, 255, .97);
       box-shadow: 0 12px 30px rgba(23, 33, 31, .16);
     }
+    .pr-dock.dragging {
+      cursor: grabbing;
+      user-select: none;
+    }
     .pr-dock.idle { display: none; }
     .pr-dock.offscreen {
       visibility: hidden;
@@ -523,10 +637,32 @@
       display: flex;
       gap: 8px;
       align-items: center;
+      justify-content: space-between;
       color: var(--accent-strong);
       font-size: .78rem;
       font-weight: 850;
       line-height: 1.2;
+      cursor: grab;
+      user-select: none;
+    }
+    .pr-dock-title {
+      display: flex;
+      min-width: 0;
+      gap: 8px;
+      align-items: center;
+    }
+    .pr-dock-controls {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .pr-dock-mini {
+      min-height: 24px;
+      width: 24px;
+      padding: 0;
+      border-radius: 6px;
+      font-size: .72rem;
     }
     .pr-dock-status {
       color: var(--muted);
@@ -593,6 +729,31 @@
       box-shadow: 0 14px 34px rgba(23, 33, 31, .18);
     }
     .pr-annotation-popover .pr-textarea { min-height: 86px; }
+    .pr-annotation-read {
+      display: grid;
+      gap: 8px;
+    }
+    .pr-annotation-note {
+      color: var(--ink);
+      font-size: .84rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .pr-annotation-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .pr-annotation-tag {
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: .68rem;
+      font-weight: 760;
+    }
     .pr-annotation-popover-head {
       display: flex;
       justify-content: space-between;
@@ -652,7 +813,7 @@
       cursor: col-resize;
       z-index: 4;
     }
-    .pr-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
+    .pr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
     .pr-tab {
       min-height: 34px;
       border: 0;
@@ -772,12 +933,15 @@
     };
     const DEFAULT_UI = {
       annotations: "Annotations",
+      notes: "Notes",
       translation: "Translation",
-      ai: "Deep Read",
+      review: "Review",
+      ai: "Review",
       claims: "Claims",
       create_annotation: "Highlight",
-      create_chunk: "Chunk",
-      create_citation: "Cite",
+      create_note: "Note",
+      create_chunk: "Save quote",
+      create_citation: "Cite this",
       delete_annotation: "Delete annotation",
       translate_selection: "Translate",
       translate_full_paper: "Full translation",
@@ -785,7 +949,8 @@
       explain_selection: "Explain",
       ask_paper: "Ask",
       save_progress: "Save progress",
-      review_card: "Review",
+      review_card: "Analyze Paper",
+      analyze_paper: "Analyze Paper",
       deep_read: "Deep Read",
       fullscreen: "Fullscreen",
       exit_fullscreen: "Exit fullscreen",
@@ -826,8 +991,18 @@
       failed: "Failed",
       saved_pending: "Saved (pending sync)",
       saved: "Saved",
-      ask_selection: "Ask about this",
+      ask_selection: "Ask with selection",
       retry: "Retry",
+      edit: "Edit",
+      cancel: "Cancel",
+      close: "Close",
+      pin: "Pin",
+      unpin: "Unpin",
+      reset: "Reset",
+      dock_bottom: "Bottom",
+      all: "All",
+      current_page: "Current page",
+      translate: "Translate",
       selection_single_page: "Multi-page selection is captured from the first page for now.",
     };
     let args = {};
@@ -842,6 +1017,7 @@
     let observer = null;
     let currentSelection = null;
     let activeTab = "notes";
+    let notesFilterCurrentPage = true;
     let focusedAnnotationId = "";
     let eventSeq = 0;
     let lastFrameHeight = 0;
@@ -853,7 +1029,7 @@
     let panelWidth = 340;
     let syncLock = false;
     let activeTranslationAnchor = "";
-    let annotationPopover = { open: false, annotation: null, pending: false, x: 16, y: 16 };
+    let annotationPopover = { open: false, mode: "read", annotation: null, pending: false, dirty: false, x: 16, y: 16 };
     let readerMode = "pdf";
     let fullscreenActive = false;
     let requestedPreviews = new Set();
@@ -866,6 +1042,8 @@
     let lastSelectionEndedAt = 0;
     let loadingWatchdogTimer = null;
     let dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
+    let dockUiState = { dock_position: null, dock_pinned: false, dock_layout: "selection" };
+    let dockDragState = null;
     let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
@@ -1093,7 +1271,7 @@
     function taskActionLabel(action) {
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return label("translating_visible_pages");
       if (action === "translate_full_paper") return label("translating_full_paper");
-      if (action === "generate_review_card") return label("reviewing_paper");
+      if (action === "generate_review_card" || action === "analyze_paper") return label("reviewing_paper");
       if (action === "codex_deep_read") return label("deep_reading");
       if (action === "prepare_reader_artifacts") return label("pdf_ready");
       if (action === "ask_paper") return label("answering");
@@ -1110,13 +1288,13 @@
         if (statusValue === "failed" || statusValue === "missing_pdf") return label("preparation_failed");
         return label("structured_text_ready");
       }
-      if (action === "generate_review_card" || action === "codex_deep_read") return label("saved");
+      if (action === "generate_review_card" || action === "codex_deep_read" || action === "analyze_paper") return label("saved");
       return label("saved");
     }
     function actionButtonSelector(action) {
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
-      if (action === "generate_review_card") return '[data-action="reviewCard"]';
+      if (action === "generate_review_card" || action === "analyze_paper") return '[data-action="analyzePaper"]';
       if (action === "codex_deep_read") return '[data-action="deepRead"]';
       if (action === "ask_paper") return '[data-action="askQuestion"]';
       return "";
@@ -1313,6 +1491,7 @@
       if (action === "create_citation") return { method: "POST", path: `/api/${sourcePath()}/citation` };
       if (action === "save_progress") return { method: "POST", path: `/api/${sourcePath()}/progress` };
       if (action === "generate_review_card") return { method: "POST", path: `/api/${sourcePath()}/review` };
+      if (action === "analyze_paper") return { method: "POST", path: `/api/${sourcePath()}/analyze` };
       return { method: "POST", path: `/api/${sourcePath()}/action/${encodeURIComponent(action)}` };
     }
     function actionRefreshesPayload(action) {
@@ -1328,6 +1507,7 @@
         "translate_visible_pages",
         "translate_full_paper",
         "retry_translation_scope",
+        "analyze_paper",
         "generate_review_card",
         "codex_deep_read",
       ].includes(action);
@@ -1336,11 +1516,11 @@
       const warnings = asArr(result && result.warnings).map(text).filter(Boolean);
       if (warnings.length) status(warnings[0]);
       else if (result && result.message) status(text(result.message));
-      if (["translate_visible_pages", "translate_full_paper", "generate_review_card", "codex_deep_read"].includes(action)) {
+      if (["translate_visible_pages", "translate_full_paper", "generate_review_card", "codex_deep_read", "analyze_paper"].includes(action)) {
         const data = asObj(result && result.data);
         const summary = data.summary || data.structured || data.analysis || data;
         setActionState(action, (result && result.ok === false) ? "error" : "done", warnings[0] || text(result && result.message) || label("saved"));
-        if (action === "generate_review_card" || action === "codex_deep_read") {
+        if (action === "generate_review_card" || action === "codex_deep_read" || action === "analyze_paper") {
           dockState.pending = false;
           dockState.status = warnings[0] || text(result && result.message) || label("saved");
           dockState.result = JSON.stringify(summary, null, 2);
@@ -1506,6 +1686,10 @@
           side_panel_collapsed: sidePanelCollapsed,
           compare_split_ratio: compareSplitRatio,
           panel_width: panelWidth,
+          notes_filter_current_page: notesFilterCurrentPage,
+          dock_position: dockUiState.dock_position,
+          dock_pinned: dockUiState.dock_pinned,
+          dock_layout: dockUiState.dock_layout,
           updated: Date.now(),
         }));
       } catch {}
@@ -1565,6 +1749,16 @@
       const local = readLocalState();
       return Math.max(1, Number(local.page || settings().initial_page || settings().page || currentPage || 1));
     }
+    function syncDockUiFromLocal(local = readLocalState()) {
+      const position = asObj(local.dock_position);
+      dockUiState = {
+        dock_position: Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))
+          ? { x: Number(position.x), y: Number(position.y) }
+          : null,
+        dock_pinned: Boolean(local.dock_pinned),
+        dock_layout: ["floating", "bottom", "selection"].includes(text(local.dock_layout)) ? text(local.dock_layout) : "selection",
+      };
+    }
     function defaultBaseSize() {
       return pageBaseSizes.get(1) || { width: 612, height: 792 };
     }
@@ -1605,7 +1799,7 @@
     function renderShell(message = "") {
       const source = asObj(args.source);
       const title = text(source.title || source.id || "Paper");
-      if (activeTab === "translation") activeTab = "notes";
+      if (!["notes", "translation", "review", "claims"].includes(activeTab)) activeTab = "notes";
       syncDockFromArgs();
       const dockVisible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
       const workspaceStyle = `--pr-compare-left:${Math.max(20, Math.min(80, compareSplitRatio))}%;--pr-panel-width:${Math.max(280, Math.min(560, panelWidth))}px;`;
@@ -1638,8 +1832,7 @@
             <div class="pr-actions">
               <button class="pr-button primary" data-action="translateFull">${esc(label("translate_full_paper"))}</button>
               <button class="pr-button" data-action="translateVisible">${esc(label("translate_visible_pages"))}</button>
-              <button class="pr-button" data-action="reviewCard">${esc(label("review_card"))}</button>
-              <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
+              <button class="pr-button" data-action="analyzePaper">${esc(label("analyze_paper"))}</button>
               <button class="pr-button" data-action="ask">${esc(label("ask_paper"))}</button>
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
@@ -1659,8 +1852,9 @@
               <button class="pr-icon-button pr-side-rail" data-action="togglePanel" title="${attr(label("panel"))}">&lt;</button>
               <section class="pr-panel">
                 <div class="pr-tabs">
-                  ${tabButton("notes", label("annotations"))}
-                  ${tabButton("ai", label("deep_read"))}
+                  ${tabButton("notes", label("notes"))}
+                  ${tabButton("translation", label("translation"))}
+                  ${tabButton("review", label("review"))}
                   ${tabButton("claims", label("claims"))}
                 </div>
                 <div class="pr-panel-body" id="sideBody">${sideBodyHtml()}</div>
@@ -1804,6 +1998,127 @@
       if (paged.length) return paged;
       return units.filter((row) => !Number(row.page || 0)).slice(0, 12);
     }
+    function translationLayoutMode() {
+      const mode = text(settings().translation_layout || settings().translation_layout_mode || "flow");
+      return mode === "overlay" ? "overlay" : "flow";
+    }
+    function sectionTitleForUnit(unit) {
+      const obj = asObj(unit);
+      const path = asArr(obj.section_path).map((row) => text(row)).filter(Boolean);
+      if (path.length) return path.join(" / ");
+      const kind = text(obj.kind || obj.scope_type || "Text");
+      return kind === "table" ? "Tables" : kind === "caption" ? "Captions" : "Body";
+    }
+    function translationUnitGroups() {
+      const pages = new Set(translationPages().map((page) => Number(page || 0)).filter(Boolean));
+      const units = translationUnits()
+        .filter((unit) => !pages.size || !Number(unit.page || 0) || pages.has(Number(unit.page || 0)))
+        .sort((a, b) => (
+          (Number(a.page || 0) || 10 ** 9) - (Number(b.page || 0) || 10 ** 9)
+          || Number(a.order || 0) - Number(b.order || 0)
+          || text(a.unit_id).localeCompare(text(b.unit_id))
+        ));
+      const groups = [];
+      const byKey = new Map();
+      units.forEach((unit) => {
+        const title = sectionTitleForUnit(unit);
+        const key = `${title}`;
+        if (!byKey.has(key)) {
+          const group = { key, title, units: [] };
+          byKey.set(key, group);
+          groups.push(group);
+        }
+        byKey.get(key).units.push(unit);
+      });
+      return groups;
+    }
+    function translationUnitStatusLabel(statusName) {
+      const clean = text(statusName || "missing");
+      return label(clean, clean);
+    }
+    function translationUnitHtml(unit) {
+      const obj = asObj(unit);
+      const anchorId = text(obj.anchor_id || obj.unit_id);
+      const statusName = text(obj.status || (text(obj.translated_text) ? "translated" : "missing"));
+      const translated = text(obj.translated_text).trim();
+      const display = statusName === "failed" || !translated ? text(obj.source_text) : translated;
+      const page = Number(obj.page || 0);
+      const sourceSnippet = text(obj.source_text).replace(/\s+/g, " ").trim();
+      const stale = statusName === "stale";
+      const missing = statusName === "missing";
+      const failed = statusName === "failed";
+      const actionText = failed ? label("retry") : label("translate");
+      const actionHtml = (stale || missing || failed) ? `
+        <div class="pr-translation-unit-actions">
+          <button class="pr-button" data-translation-action="retry" data-anchor-id="${attr(anchorId)}">${esc(actionText)}</button>
+        </div>
+      ` : "";
+      return `
+        <article class="pr-translation-unit ${anchorId === activeTranslationAnchor ? "active" : ""}" data-anchor-id="${attr(anchorId)}" data-page="${page || ""}" data-segment-id="${attr(obj.segment_id || obj.scope_ref || "")}">
+          <div class="pr-translation-unit-head">
+            <div class="pr-translation-locator">${esc(obj.locator || (page ? `p. ${page}` : label("page")))}</div>
+            <span class="pr-translation-unit-status ${attr(statusName)}">${esc(translationUnitStatusLabel(statusName))}</span>
+          </div>
+          <div class="pr-translation-unit-text">${esc(display || translationUnitStatusLabel(statusName))}</div>
+          ${sourceSnippet ? `<div class="pr-translation-source-snippet">${esc(sourceSnippet)}</div>` : ""}
+          ${actionHtml}
+        </article>
+      `;
+    }
+    function translationFlowHtml() {
+      const groups = translationUnitGroups();
+      if (!groups.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      return `
+        <div class="pr-translation-flow">
+          ${groups.map((group) => `
+            <section class="pr-translation-section" data-section="${attr(group.key)}">
+              <div class="pr-translation-section-title">${esc(group.title)}</div>
+              ${group.units.map((unit) => translationUnitHtml(unit)).join("")}
+            </section>
+          `).join("")}
+        </div>
+      `;
+    }
+    function buildAnchorIndex() {
+      const index = new Map();
+      translationUnits().forEach((unit) => {
+        const obj = asObj(unit);
+        const anchorId = text(obj.anchor_id || obj.unit_id);
+        if (!anchorId) return;
+        index.set(anchorId, obj);
+        if (obj.segment_id) index.set(text(obj.segment_id), obj);
+        if (obj.scope_ref) index.set(text(obj.scope_ref), obj);
+      });
+      return index;
+    }
+    function activeSegmentFromViewport() {
+      const pages = visiblePages.length ? visiblePages : [currentPage];
+      const pageSet = new Set(pages.map((page) => Number(page || 0)).filter(Boolean));
+      const units = translationUnits()
+        .filter((unit) => pageSet.has(Number(unit.page || 0)))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+      const picked = units[0] || translationUnits().find((unit) => Number(unit.page || 0) === currentPage);
+      return picked ? text(picked.anchor_id || picked.unit_id) : "";
+    }
+    function setActiveAnchor(anchorId, options = {}) {
+      const clean = text(anchorId);
+      if (!clean) return;
+      activeTranslationAnchor = clean;
+      document.querySelectorAll(".pr-translation-unit, .pr-translation-block").forEach((el) => {
+        el.classList.toggle("active", text(el.getAttribute("data-anchor-id")) === clean);
+      });
+      const index = buildAnchorIndex();
+      const unit = index.get(clean);
+      if (unit && options.jumpToPage !== false) {
+        const page = Number(unit.page || 0);
+        if (page && page !== currentPage) scrollToPage(page);
+      }
+      if (options.scrollTranslation !== false) {
+        const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-block`);
+        row?.scrollIntoView({ block: "nearest", behavior: options.smooth === false ? "auto" : "smooth" });
+      }
+      if (options.refresh !== false) refreshSide();
+    }
     function unitDisplayText(unit) {
       const obj = asObj(unit);
       const translated = text(obj.translated_text).trim();
@@ -1857,7 +2172,7 @@
         `;
       }).join("") : `<article class="pr-translation-block missing">${esc(label("empty"))}</article>`;
       return `
-        <section class="pr-translation-page" data-page="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
+        <section class="pr-translation-page overlay" data-page="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
           ${previewHtml}
           <div class="pr-translation-page-label">${esc(label("page"))} ${Number(pageNumber || 0)}</div>
           ${body}
@@ -1867,10 +2182,13 @@
     function translationReaderHtml() {
       const pages = translationPages();
       const pageLabel = `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
-      const body = pages.map((pageNumber) => renderTranslationPage(pageNumber)).join("");
+      const body = translationLayoutMode() === "overlay"
+        ? pages.map((pageNumber) => renderTranslationPage(pageNumber)).join("")
+        : translationFlowHtml();
+      const bodyClass = translationLayoutMode() === "overlay" ? "pr-translation-pages" : "pr-translation-flow-wrap";
       return `
         <div class="pr-translation-head">${esc(pageLabel)}</div>
-        <div class="pr-translation-body pr-translation-pages">${body}</div>
+        <div class="pr-translation-body ${bodyClass}">${body}</div>
       `;
     }
     function refreshTranslationReader() {
@@ -1916,9 +2234,13 @@
       if (scores) chunks.push(scores);
       for (const [title, values] of [
         ["Key points", analysis.key_points],
-        ["Innovations", analysis.innovations || analysis.contributions],
+        ["Method", analysis.method || analysis.methods],
+        ["Experiments", analysis.experiments || analysis.evaluation],
         ["Limitations", analysis.limitations],
         ["Usefulness", analysis.usefulness],
+        ["Project relevance", analysis.project_relevance],
+        ["Reading plan", analysis.reading_plan],
+        ["Open questions", analysis.open_questions],
       ]) {
         const body = Array.isArray(values) ? listHtml(values) : (text(values) ? `<div class="pr-item"><div class="pr-item-title">${esc(values)}</div></div>` : "");
         if (body) chunks.push(`<div class="pr-panel-head">${esc(title)}</div>${body}`);
@@ -1927,6 +2249,14 @@
         chunks.push(`<div class="pr-panel-head">Rationale</div>${listHtml(analysis.score_rationale)}`);
       } else if (text(analysis.score_rationale)) {
         chunks.push(`<div class="pr-item"><div class="pr-item-meta">Rationale</div><div class="pr-item-title">${esc(analysis.score_rationale)}</div></div>`);
+      }
+      const citedRefs = [
+        ...asArr(analysis.cited_segment_refs),
+        ...asArr(analysis.cited_chunk_refs),
+        ...asArr(analysis.cited_annotation_refs),
+      ].map((row) => text(row)).filter(Boolean);
+      if (citedRefs.length) {
+        chunks.push(`<div class="pr-panel-head">Refs</div><div class="pr-item"><div class="pr-item-meta">${esc(citedRefs.join(", "))}</div></div>`);
       }
       const deepRead = asObj(analysis.codex_deep_read || {});
       if (Object.keys(deepRead).length) {
@@ -2017,22 +2347,31 @@
         : dockState.mode === "ai" ? label("ai")
         : label("selected_text");
       return `
-        <div class="pr-dock-actions">
-          <button class="pr-button primary" data-action="translate" ${hasSelection ? "" : "disabled"}>${esc(label("translate_selection"))}</button>
-          <button class="pr-button" data-action="annotate" ${hasSelection ? "" : "disabled"}>${esc(label("create_annotation"))}</button>
-          <button class="pr-button" data-action="chunk" ${hasSelection ? "" : "disabled"}>${esc(label("create_chunk"))}</button>
-          <button class="pr-button" data-action="cite" ${hasSelection ? "" : "disabled"}>${esc(label("create_citation"))}</button>
-          <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
-          <button class="pr-button" data-action="askSelection" ${hasSelection ? "" : "disabled"}>${esc(label("ask_selection"))}</button>
-          ${dockState.mode === "translation" && dockState.failed ? `<button class="pr-button" data-action="retryTranslation">${esc(label("retry"))}</button>` : ""}
-        </div>
         <div class="pr-dock-main">
           <div class="pr-dock-head">
-            <span>${esc(title)}</span>
-            <span class="pr-dock-status ${dockState.pending ? "pending" : ""}">${esc(dockState.status || "")}</span>
+            <div class="pr-dock-title">
+              <span>${esc(title)}</span>
+              <span class="pr-dock-status ${dockState.pending ? "pending" : ""}">${esc(dockState.status || "")}</span>
+            </div>
+            <div class="pr-dock-controls">
+              <button class="pr-icon-button pr-dock-mini" data-dock-action="pin" title="${attr(dockUiState.dock_pinned ? label("unpin") : label("pin"))}">${esc(dockUiState.dock_pinned ? "U" : "P")}</button>
+              <button class="pr-icon-button pr-dock-mini" data-dock-action="bottom" title="${attr(label("dock_bottom"))}">_</button>
+              <button class="pr-icon-button pr-dock-mini" data-dock-action="reset" title="${attr(label("reset"))}">R</button>
+              <button class="pr-icon-button pr-dock-mini" data-dock-action="close" title="${attr(label("close"))}">x</button>
+            </div>
           </div>
           <div class="pr-dock-text">${esc(dockState.selected_text || (hasSelection ? currentSelection.selected_text : ""))}</div>
           ${dockState.result ? `<div class="pr-dock-result">${esc(dockState.result)}</div>` : ""}
+        </div>
+        <div class="pr-dock-actions">
+          <button class="pr-button primary" data-action="translate" ${hasSelection ? "" : "disabled"}>${esc(label("translate_selection"))}</button>
+          <button class="pr-button" data-action="highlight" ${hasSelection ? "" : "disabled"}>${esc(label("create_annotation"))}</button>
+          <button class="pr-button" data-action="note" ${hasSelection ? "" : "disabled"}>${esc(label("create_note"))}</button>
+          <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
+          <button class="pr-button" data-action="askSelection" ${hasSelection ? "" : "disabled"}>${esc(label("ask_selection"))}</button>
+          <button class="pr-button" data-action="chunk" ${hasSelection ? "" : "disabled"}>${esc(label("create_chunk"))}</button>
+          <button class="pr-button" data-action="cite" ${hasSelection ? "" : "disabled"}>${esc(label("create_citation"))}</button>
+          ${dockState.mode === "translation" && dockState.failed ? `<button class="pr-button" data-action="retryTranslation">${esc(label("retry"))}</button>` : ""}
         </div>
       `;
     }
@@ -2040,11 +2379,37 @@
       if (!annotationPopover.open) return "";
       const ann = asObj(annotationPopover.annotation);
       const id = text(ann.id);
-      const title = id ? label("annotations") : label("create_annotation");
+      const mode = text(annotationPopover.mode || "read");
+      const title = id ? label("notes") : label("create_note");
       const note = text(ann.note);
       const selected = text(ann.selected_text || currentSelection?.selected_text || "").slice(0, 240);
+      const tags = asArr(ann.tags).map((row) => text(row)).filter(Boolean);
+      const locator = text(ann.locator || (ann.page ? `p. ${ann.page}` : ""));
+      if (mode === "read" && id) {
+        return `
+          <div class="pr-annotation-popover" style="--pr-annotation-left:${Number(annotationPopover.x || 16)}px;--pr-annotation-top:${Number(annotationPopover.y || 16)}px" data-annotation-popover-mode="read">
+            <div class="pr-annotation-popover-head">
+              <span>${esc(title)}</span>
+              <button class="pr-icon-button pr-dock-mini" data-annotation-popover-close title="${attr(label("close"))}">x</button>
+            </div>
+            <div class="pr-annotation-read">
+              ${selected ? `<div class="pr-item-meta">${esc(selected)}</div>` : ""}
+              <div class="pr-annotation-note">${esc(note || selected || label("empty"))}</div>
+              ${locator ? `<div class="pr-item-meta">${esc(locator)}</div>` : ""}
+              ${tags.length ? `<div class="pr-annotation-tags">${tags.map((tag) => `<span class="pr-annotation-tag">${esc(tag)}</span>`).join("")}</div>` : ""}
+              ${asArr(ann.segment_refs).length ? `<div class="pr-item-meta">${esc(asArr(ann.segment_refs).join(", "))}</div>` : ""}
+            </div>
+            <div class="pr-annotation-popover-actions">
+              <button class="pr-button" data-annotation-popover-edit>${esc(label("edit"))}</button>
+              <button class="pr-button" data-annotation-popover-chunk>${esc(label("create_chunk"))}</button>
+              <button class="pr-button" data-annotation-popover-cite>${esc(label("create_citation"))}</button>
+              <button class="pr-danger-button" data-annotation-popover-delete="${attr(id)}" title="${attr(label("delete_annotation"))}">x</button>
+            </div>
+          </div>
+        `;
+      }
       return `
-        <div class="pr-annotation-popover" style="--pr-annotation-left:${Number(annotationPopover.x || 16)}px;--pr-annotation-top:${Number(annotationPopover.y || 16)}px">
+        <div class="pr-annotation-popover" style="--pr-annotation-left:${Number(annotationPopover.x || 16)}px;--pr-annotation-top:${Number(annotationPopover.y || 16)}px" data-annotation-popover-mode="edit">
           <div class="pr-annotation-popover-head">
             <span>${esc(title)}</span>
             ${id ? `<button class="pr-danger-button" data-annotation-popover-delete="${attr(id)}" title="${attr(label("delete_annotation"))}">x</button>` : ""}
@@ -2052,7 +2417,7 @@
           ${selected ? `<div class="pr-item-meta">${esc(selected)}</div>` : ""}
           <textarea class="pr-textarea" id="annotationNoteInput" placeholder="${attr(label("note"))}">${esc(note)}</textarea>
           <div class="pr-annotation-popover-actions">
-            <button class="pr-button" data-annotation-popover-cancel>Cancel</button>
+            <button class="pr-button" data-annotation-popover-cancel>${esc(label("cancel"))}</button>
             <button class="pr-button primary" data-annotation-popover-save>${esc(label("saved"))}</button>
           </div>
         </div>
@@ -2062,15 +2427,33 @@
       const mount = document.getElementById("annotationPopoverMount");
       if (!mount) return;
       mount.innerHTML = annotationPopoverHtml();
+      mount.querySelector("[data-annotation-popover-close]")?.addEventListener("click", closeAnnotationPopover);
+      mount.querySelector("[data-annotation-popover-edit]")?.addEventListener("click", () => {
+        annotationPopover = { ...annotationPopover, mode: "edit", dirty: false };
+        refreshAnnotationPopover();
+      });
+      mount.querySelector("[data-annotation-popover-chunk]")?.addEventListener("click", () => {
+        const payload = annotationActionPayload(annotationPopover.annotation);
+        closeAnnotationPopover();
+        emitAction("create_chunk_from_selection", payload);
+      });
+      mount.querySelector("[data-annotation-popover-cite]")?.addEventListener("click", () => {
+        const payload = annotationActionPayload(annotationPopover.annotation);
+        closeAnnotationPopover();
+        emitAction("create_citation", payload);
+      });
       mount.querySelector("[data-annotation-popover-cancel]")?.addEventListener("click", closeAnnotationPopover);
       mount.querySelector("[data-annotation-popover-save]")?.addEventListener("click", saveAnnotationPopover);
+      mount.querySelector("#annotationNoteInput")?.addEventListener("input", () => {
+        annotationPopover.dirty = true;
+      });
       mount.querySelector("[data-annotation-popover-delete]")?.addEventListener("click", (event) => {
         const id = event.currentTarget.dataset.annotationPopoverDelete || "";
         if (!id) return;
         closeAnnotationPopover();
         emitAction("annotation_delete", { annotation_id: id, id, page: currentPage, locator: `p. ${currentPage}` });
       });
-      window.setTimeout(() => document.getElementById("annotationNoteInput")?.focus(), 20);
+      if (text(annotationPopover.mode || "read") === "edit") window.setTimeout(() => document.getElementById("annotationNoteInput")?.focus(), 20);
     }
     function annotationAnchorFromRect(rect) {
       const margin = 10;
@@ -2081,12 +2464,26 @@
     }
     function openAnnotationPopover(annotation, rect = null) {
       const anchor = annotationAnchorFromRect(rect || { left: window.innerWidth / 2 - 160, top: 80, bottom: 120 });
-      annotationPopover = { open: true, annotation: asObj(annotation), pending: !text(asObj(annotation).id), x: anchor.x, y: anchor.y };
+      const pending = !text(asObj(annotation).id);
+      annotationPopover = { open: true, mode: pending ? "edit" : "read", annotation: asObj(annotation), pending, dirty: false, x: anchor.x, y: anchor.y };
+      refreshAnnotationPopover();
+    }
+    function editAnnotationPopover(annotation, rect = null) {
+      const anchor = annotationAnchorFromRect(rect || { left: window.innerWidth / 2 - 160, top: 80, bottom: 120 });
+      annotationPopover = { open: true, mode: "edit", annotation: asObj(annotation), pending: !text(asObj(annotation).id), dirty: false, x: anchor.x, y: anchor.y };
       refreshAnnotationPopover();
     }
     function closeAnnotationPopover() {
-      annotationPopover = { open: false, annotation: null, pending: false, x: 16, y: 16 };
+      annotationPopover = { open: false, mode: "read", annotation: null, pending: false, dirty: false, x: 16, y: 16 };
       refreshAnnotationPopover();
+    }
+    function maybeCloseAnnotationPopover() {
+      if (annotationPopover.open && annotationPopover.mode === "edit" && annotationPopover.dirty) {
+        const noteInput = document.getElementById("annotationNoteInput");
+        noteInput?.focus();
+        return;
+      }
+      closeAnnotationPopover();
     }
     function saveAnnotationPopover() {
       const ann = asObj(annotationPopover.annotation);
@@ -2097,13 +2494,14 @@
       }
       const selection = currentSelection || {};
       if (!selection.selected_text) return closeAnnotationPopover();
-      optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind: "highlight", status: "pending", note });
+      const kind = text(ann.kind || "note") || "note";
+      optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind, status: "pending", note });
       renderHighlights(selection.page || currentPage);
       closeAnnotationPopover();
-      return emitAction("annotation_create", { ...selection, note });
+      return emitAction("annotation_create", { ...selection, note, kind });
     }
     function dockPlacementDefault() {
-      return text(settings().translation_dock_default || "selection") || "selection";
+      return text(dockUiState.dock_layout || settings().translation_dock_default || "selection") || "selection";
     }
     function selectionAnchorRect(selection = currentSelection) {
       const picked = asObj(selection);
@@ -2147,13 +2545,22 @@
       if (!dock || dock.classList.contains("idle")) return;
       const viewer = document.getElementById("viewer");
       const viewerBox = viewer ? viewer.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
-      const useBottom = dockPlacementDefault() === "bottom" || window.innerWidth <= 720 || Number(viewerBox.width || 0) < 420 || !(currentSelection && currentSelection.selected_text);
+      const layout = dockPlacementDefault();
+      const useFloating = layout === "floating" && dockUiState.dock_position;
+      const useBottom = !useFloating && (layout === "bottom" || window.innerWidth <= 720 || Number(viewerBox.width || 0) < 420 || !(currentSelection && currentSelection.selected_text));
       dock.classList.remove("bottom-sheet", "offscreen");
       dock.style.removeProperty("--pr-dock-left");
       dock.style.removeProperty("--pr-dock-top");
       dock.style.removeProperty("width");
       if (useBottom) {
         dock.classList.add("bottom-sheet");
+        return;
+      }
+      if (useFloating) {
+        const pos = clampDockPosition(dockUiState.dock_position.x, dockUiState.dock_position.y, dock);
+        dock.style.setProperty("--pr-dock-left", `${pos.x}px`);
+        dock.style.setProperty("--pr-dock-top", `${pos.y}px`);
+        dock.style.width = `${Math.min(520, window.innerWidth - 24)}px`;
         return;
       }
       const anchor = selectionAnchorRect(currentSelection);
@@ -2179,6 +2586,85 @@
       dock.style.setProperty("--pr-dock-left", `${left}px`);
       dock.style.setProperty("--pr-dock-top", `${top}px`);
     }
+    function clampDockPosition(x, y, dock = document.getElementById("selectionDock")) {
+      const box = dock ? dock.getBoundingClientRect() : { width: 520, height: 160 };
+      const width = Math.min(Number(box.width || 520), window.innerWidth - 24);
+      const height = Math.min(Number(box.height || 160), window.innerHeight - 24);
+      return {
+        x: Math.max(8, Math.min(window.innerWidth - width - 8, Number(x || 12))),
+        y: Math.max(8, Math.min(window.innerHeight - height - 8, Number(y || 12))),
+      };
+    }
+    function applyDockPosition(x, y, { persist = false } = {}) {
+      const dock = document.getElementById("selectionDock");
+      const pos = clampDockPosition(x, y, dock);
+      dockUiState = { dock_position: pos, dock_pinned: true, dock_layout: "floating" };
+      if (dock) {
+        dock.classList.remove("bottom-sheet", "offscreen");
+        dock.style.setProperty("--pr-dock-left", `${pos.x}px`);
+        dock.style.setProperty("--pr-dock-top", `${pos.y}px`);
+      }
+      if (persist) persistLocalState();
+    }
+    function wireDockControls() {
+      const dock = document.getElementById("selectionDock");
+      if (!dock) return;
+      dock.querySelectorAll("[data-dock-action]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const action = button.dataset.dockAction || "";
+          if (action === "close") {
+            currentSelection = null;
+            dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
+            return refreshDock();
+          }
+          if (action === "pin") {
+            const box = dock.getBoundingClientRect();
+            dockUiState.dock_pinned = !dockUiState.dock_pinned;
+            dockUiState.dock_layout = dockUiState.dock_pinned ? "floating" : "selection";
+            dockUiState.dock_position = dockUiState.dock_pinned ? clampDockPosition(box.left, box.top, dock) : null;
+            persistLocalState();
+            refreshDock();
+            return;
+          }
+          if (action === "bottom") {
+            dockUiState = { dock_position: null, dock_pinned: false, dock_layout: "bottom" };
+            persistLocalState();
+            refreshDock();
+            return;
+          }
+          if (action === "reset") {
+            dockUiState = { dock_position: null, dock_pinned: false, dock_layout: "selection" };
+            persistLocalState();
+            refreshDock();
+          }
+        });
+      });
+      const head = dock.querySelector(".pr-dock-head");
+      head?.addEventListener("pointerdown", (event) => {
+        if (event.target instanceof Element && event.target.closest("button")) return;
+        event.preventDefault();
+        const box = dock.getBoundingClientRect();
+        dockDragState = { startX: event.clientX, startY: event.clientY, left: box.left, top: box.top };
+        dock.classList.add("dragging");
+        const onMove = (moveEvent) => {
+          if (!dockDragState) return;
+          applyDockPosition(
+            dockDragState.left + (moveEvent.clientX - dockDragState.startX),
+            dockDragState.top + (moveEvent.clientY - dockDragState.startY)
+          );
+        };
+        const onUp = () => {
+          dock.classList.remove("dragging");
+          dockDragState = null;
+          persistLocalState();
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp, { once: true });
+      });
+    }
     function refreshDock() {
       const dock = document.getElementById("selectionDock");
       if (!dock) return;
@@ -2189,6 +2675,7 @@
       dock.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => handleAction(button.dataset.action));
       });
+      wireDockControls();
       placeSelectionDock();
       setHeight();
     }
@@ -2201,42 +2688,115 @@
       }
       return counts;
     }
+    function annotationTitle(annotation) {
+      const obj = asObj(annotation);
+      return itemText(obj, ["note", "selected_text"]) || text(obj.id);
+    }
+    function annotationActionPayload(annotation) {
+      const obj = asObj(annotation);
+      return {
+        annotation_id: text(obj.id),
+        selected_text: text(obj.selected_text),
+        selected_text_hash: text(obj.selected_text_hash),
+        page: Number(obj.page || currentPage),
+        rects: asArr(obj.rects),
+        segment_refs: asArr(obj.segment_refs),
+        locator: text(obj.locator || (obj.page ? `p. ${obj.page}` : "")),
+      };
+    }
+    function notesPanelHtml() {
+      const rows = asArr(args.annotations)
+        .map((row) => asObj(row))
+        .filter((row) => row.status !== "deleted")
+        .filter((row) => !notesFilterCurrentPage || Number(row.page || 0) === currentPage);
+      const filter = `
+        <div class="pr-dock-actions">
+          <button class="pr-button ${notesFilterCurrentPage ? "active" : ""}" data-notes-filter="page">${esc(label("current_page"))}</button>
+          <button class="pr-button ${!notesFilterCurrentPage ? "active" : ""}" data-notes-filter="all">${esc(label("all"))}</button>
+        </div>
+      `;
+      if (!rows.length) return `${filter}<div class="pr-empty">${esc(label("empty"))}</div>`;
+      return `${filter}<div class="pr-list">${rows.map((obj) => {
+        const id = text(obj.id);
+        const page = Number(obj.page || 0);
+        const title = annotationTitle(obj);
+        const focused = id && id === focusedAnnotationId;
+        return `
+          <div class="pr-annotation-row">
+            <button class="pr-item" data-jump-annotation="${attr(id)}" data-page="${page || ""}">
+              <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
+              <div class="pr-item-meta">${esc(obj.locator || (page ? `p. ${page}` : ""))}${focused ? " - focus" : ""}${asArr(obj.segment_refs).length ? " - refs" : ""}</div>
+            </button>
+            <button class="pr-danger-button" data-delete-annotation="${attr(id)}" data-page="${page || ""}" title="${attr(label("delete_annotation"))}">x</button>
+          </div>
+        `;
+      }).join("")}</div>`;
+    }
+    function translationPanelHtml() {
+      const counts = translationCounts();
+      const summary = `
+        <div class="pr-summary">
+          ${["translated", "missing", "stale", "failed"].map((key) => `
+            <div class="pr-chip"><strong>${Number(counts[key] || 0)}</strong><span>${esc(label(key))}</span></div>
+          `).join("")}
+        </div>
+        <div class="pr-dock-actions">
+          <button class="pr-button primary" data-action="translateVisible">${esc(label("translate_visible_pages"))}</button>
+          <button class="pr-button" data-translation-panel-retry>${esc(label("retry"))}</button>
+        </div>
+      `;
+      return `${summary}${translationFlowHtml()}`;
+    }
+    function pageFromLocator(value) {
+      const match = text(value).match(/p\.\s*(\d+)/i) || text(value).match(/page\s*(\d+)/i);
+      return match ? Number(match[1] || 0) : 0;
+    }
+    function claimsPanelHtml() {
+      const chunks = asArr(args.chunks).map((row) => asObj(row));
+      const citations = asArr(args.citations).map((row) => asObj(row));
+      const claims = asArr(args.claims).map((row) => asObj(row));
+      const sections = [];
+      if (chunks.length) {
+        sections.push(`<div class="pr-panel-head">Quotes</div><div class="pr-list">${chunks.map((obj) => `
+          <button class="pr-item" data-page="${Number(asObj(obj.metadata).page || 0)}">
+            <div class="pr-item-title">${esc(itemText(obj, ["text", "title"]).slice(0, 180))}</div>
+            <div class="pr-item-meta">${esc(obj.id || "")} - ${esc(obj.locator || "")}</div>
+          </button>
+        `).join("")}</div>`);
+      }
+      if (citations.length) {
+        sections.push(`<div class="pr-panel-head">Citations</div><div class="pr-list">${citations.map((obj) => `
+          <button class="pr-item" data-page="${pageFromLocator(obj.locator)}">
+            <div class="pr-item-title">${esc(itemText(obj, ["quote", "note", "bibliography"]).slice(0, 180))}</div>
+            <div class="pr-item-meta">${esc(obj.id || "")} - ${esc(obj.locator || obj.claim_id || "")}</div>
+          </button>
+        `).join("")}</div>`);
+      }
+      if (claims.length) {
+        sections.push(`<div class="pr-panel-head">Claims</div><div class="pr-list">${claims.map((obj) => `
+          <button class="pr-item" data-page="0">
+            <div class="pr-item-title">${esc(itemText(obj, ["text"]).slice(0, 180))}</div>
+            <div class="pr-item-meta">${esc(obj.id || "")} - ${esc(obj.status || "")}</div>
+          </button>
+        `).join("")}</div>`);
+      }
+      return sections.join("") || `<div class="pr-empty">${esc(label("empty"))}</div>`;
+    }
+    function reviewPanelHtml() {
+      return `${analysisBodyHtml()}<div class="pr-panel-head">Debug</div>${debugPanelHtml()}`;
+    }
     function sideBodyHtml() {
       if (activeTab === "notes") {
-        const rows = asArr(args.annotations).filter((row) => asObj(row).status !== "deleted");
-        if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
-        return `<div class="pr-list">${rows.map((row) => {
-          const obj = asObj(row);
-          const id = text(obj.id);
-          const page = Number(obj.page || 0);
-          const title = itemText(obj, ["selected_text", "note"]) || id;
-          const focused = id && id === focusedAnnotationId;
-          return `
-            <div class="pr-annotation-row">
-              <button class="pr-item" data-jump-annotation="${attr(id)}" data-page="${page || ""}">
-                <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
-                <div class="pr-item-meta">${esc(id)} - ${esc(obj.locator || (page ? `p. ${page}` : ""))}${focused ? " - focus" : ""}</div>
-              </button>
-              <button class="pr-danger-button" data-delete-annotation="${attr(id)}" data-page="${page || ""}" title="${attr(label("delete_annotation"))}">x</button>
-            </div>
-          `;
-        }).join("")}</div>`;
+        return notesPanelHtml();
+      }
+      if (activeTab === "translation") {
+        return translationPanelHtml();
       }
       if (activeTab === "claims") {
-        const rows = asArr(args.chunks);
-        if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
-        return `<div class="pr-list">${rows.map((row) => {
-          const obj = asObj(row);
-          return `
-            <button class="pr-item" data-page="${Number(asObj(obj.metadata).page || 0)}">
-              <div class="pr-item-title">${esc(itemText(obj, ["text", "title"]).slice(0, 180))}</div>
-              <div class="pr-item-meta">${esc(obj.id || "")} - ${esc(obj.locator || "")}</div>
-            </button>
-          `;
-        }).join("")}</div>`;
+        return claimsPanelHtml();
       }
-      if (activeTab === "ai") {
-        return `${analysisBodyHtml()}<div class="pr-panel-head">Debug</div>${debugPanelHtml()}`;
+      if (activeTab === "review") {
+        return reviewPanelHtml();
       }
       const rows = asArr(args.segments).filter((row) => Number(asObj(row).page || 0) === currentPage).slice(0, 16);
       if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
@@ -2294,6 +2854,7 @@
       }
       wireResizeHandles();
       wireTranslationRows();
+      wireDockControls();
       refreshAnnotationPopover();
       wireSide();
     }
@@ -2390,36 +2951,79 @@
       syncLock = true;
       window.setTimeout(() => { syncLock = false; }, 180);
       if (source === "pdf") {
-        const pageEl = translationPageElement(currentPage);
-        if (pageEl) pageEl.scrollIntoView({ block: "start" });
+        const anchorId = activeSegmentFromViewport();
+        if (anchorId) {
+          setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false });
+        } else {
+          const pageEl = translationPageElement(currentPage);
+          if (pageEl) pageEl.scrollIntoView({ block: "start" });
+        }
         return;
       }
       const box = translationReader.getBoundingClientRect();
-      const pages = [...translationReader.querySelectorAll(".pr-translation-page")];
-      const picked = pages.find((page) => {
-        const rect = page.getBoundingClientRect();
+      const rows = [...translationReader.querySelectorAll(".pr-translation-unit[data-anchor-id], .pr-translation-page[data-page]")];
+      const picked = rows.find((row) => {
+        const rect = row.getBoundingClientRect();
         return rect.bottom > box.top + 40 && rect.top < box.bottom - 40;
       });
       const page = Number(picked?.dataset.page || 0);
+      const anchorId = text(picked?.dataset.anchorId || "");
+      if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
       if (page && page !== currentPage) scrollToPage(page);
     }
     function wireTranslationRows() {
-      document.querySelectorAll(".pr-translation-block[data-anchor-id]").forEach((row) => {
+      document.querySelectorAll(".pr-translation-block[data-anchor-id], .pr-translation-unit[data-anchor-id]").forEach((row) => {
+        row.addEventListener("mouseenter", () => {
+          setActiveAnchor(row.dataset.anchorId || "", { jumpToPage: false, scrollTranslation: false, refresh: false });
+        });
         row.addEventListener("click", () => {
-          activeTranslationAnchor = row.dataset.anchorId || "";
-          const page = Number(row.dataset.page || 0);
-          if (page) scrollToPage(page);
-          refreshTranslationReader();
+          setActiveAnchor(row.dataset.anchorId || "", { scrollTranslation: false, refresh: true });
+        });
+      });
+      document.querySelectorAll("[data-translation-action]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const anchorId = button.dataset.anchorId || "";
+          const unit = buildAnchorIndex().get(anchorId) || {};
+          const page = Number(unit.page || currentPage || 0);
+          const segmentId = text(unit.segment_id || unit.scope_ref || "");
+          const payload = {
+            target_lang: targetLang(),
+            visible_pages: page ? [page] : visiblePages.slice(),
+            primary_page: page || currentPage,
+            scope_strategy: segmentId ? "segment" : "auto",
+            segment_refs: segmentId && text(unit.scope_type || "segment") !== "page" ? [segmentId] : [],
+          };
+          setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
+          startReaderTask("retry_translation_scope", payload);
         });
       });
     }
     function wireSide() {
+      document.querySelectorAll("[data-notes-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+          notesFilterCurrentPage = button.dataset.notesFilter !== "all";
+          persistLocalState();
+          refreshSide();
+        });
+      });
+      document.querySelector("[data-translation-panel-retry]")?.addEventListener("click", () => {
+        const pages = visiblePages.length ? visiblePages : [currentPage];
+        startReaderTask("retry_translation_scope", {
+          target_lang: targetLang(),
+          visible_pages: pages,
+          primary_page: currentPage,
+          scope_strategy: "auto",
+        });
+      });
       document.querySelectorAll("[data-jump-annotation]").forEach((button) => {
         button.addEventListener("click", () => {
           const id = button.dataset.jumpAnnotation || "";
           const page = Number(button.dataset.page || 0);
           focusedAnnotationId = id;
           if (page) scrollToPage(page);
+          const ann = asArr(args.annotations).map((row) => asObj(row)).find((row) => text(row.id) === id);
+          if (ann) openAnnotationPopover(ann, { left: window.innerWidth - 390, top: 90, bottom: 120 });
           scheduleReaderStateChanged(true);
         });
       });
@@ -2482,7 +3086,7 @@
       if (action === "search") return runSearch();
       if (action === "ask") {
         sidePanelCollapsed = false;
-        activeTab = "ai";
+        activeTab = "review";
         dockState = { mode: "ai", status: label("ask_paper"), selected_text: "", result: latestAiText(), pending: false, selection_hash: "" };
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
@@ -2505,18 +3109,18 @@
       if (action === "saveProgress") {
         return emitAction("save_progress", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
-      if (action === "reviewCard") {
-        activeTab = "ai";
+      if (action === "analyzePaper" || action === "reviewCard") {
+        activeTab = "review";
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
-        dockState = { mode: "ai", status: label("review_card"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        dockState = { mode: "ai", status: label("analyze_paper"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
-        return startReaderTask("generate_review_card", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+        return startReaderTask(action === "reviewCard" ? "generate_review_card" : "analyze_paper", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
       if (action === "deepRead") {
-        activeTab = "ai";
+        activeTab = "review";
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
@@ -2538,8 +3142,13 @@
       }
       const selection = currentSelection || {};
       if (!selection.selected_text) return;
-      if (action === "annotate") {
-        return openAnnotationPopover({ ...selection, note: "" }, selectionAnchorRect(selection));
+      if (action === "highlight") {
+        optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind: "highlight", status: "pending", note: "" });
+        renderHighlights(selection.page || currentPage);
+        return emitAction("annotation_create", { ...selection, note: "", kind: "highlight" });
+      }
+      if (action === "note" || action === "annotate") {
+        return editAnnotationPopover({ ...selection, note: "", kind: "note" }, selectionAnchorRect(selection));
       }
       if (action === "chunk") {
         dockState = { mode: "selection", status: label("saved_pending"), selected_text: text(selection.selected_text), result: "", pending: true, selection_hash: text(selection.selected_text_hash) };
@@ -3090,6 +3699,11 @@
           div.addEventListener("click", (event) => {
             event.stopPropagation();
             focusedAnnotationId = text(obj.id);
+            const refs = asArr(obj.segment_refs).map((row) => text(row)).filter(Boolean);
+            if (refs.length) {
+              const anchor = buildAnchorIndex().get(refs[0]);
+              setActiveAnchor(text(anchor?.anchor_id || refs[0]), { jumpToPage: false, scrollTranslation: true, refresh: false });
+            }
             openAnnotationPopover(obj, div.getBoundingClientRect());
             renderHighlights(pageNumber);
           });
@@ -3294,7 +3908,7 @@
       if (!(target instanceof Element)) return;
       if (target.closest("#selectionDock") || target.closest(".pr-text-layer") || target.closest(".pr-annotation-popover") || target.closest(".pr-highlight")) return;
       closeSelectionDock();
-      if (!target.closest(".pr-annotation-popover")) closeAnnotationPopover();
+      if (!target.closest(".pr-annotation-popover")) maybeCloseAnnotationPopover();
     });
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
@@ -3393,8 +4007,10 @@
       visiblePages = pages;
       const pageChanged = primary !== currentPage;
       currentPage = primary;
+      const viewportAnchor = activeSegmentFromViewport();
+      if (viewportAnchor) activeTranslationAnchor = viewportAnchor;
       updatePageUi();
-      if (pageChanged || activeTab === "translation" || activeTab === "ai") refreshSide();
+      if (pageChanged || activeTab === "translation" || activeTab === "review") refreshSide();
       refreshTranslationReader();
       renderAround(primary);
       placeSelectionDock();
@@ -3432,7 +4048,9 @@
       sidePanelCollapsed = typeof local.side_panel_collapsed === "boolean" ? local.side_panel_collapsed : text(settings().side_panel_default || "collapsed") !== "open";
       readerMode = text(local.reader_mode || settings().reader_mode || readerMode || "pdf") || "pdf";
       activeTab = text(local.active_tab || settings().active_tab || activeTab || "notes") || "notes";
-      if (activeTab === "translation") activeTab = "notes";
+      if (!["notes", "translation", "review", "claims"].includes(activeTab)) activeTab = "notes";
+      notesFilterCurrentPage = typeof local.notes_filter_current_page === "boolean" ? local.notes_filter_current_page : true;
+      syncDockUiFromLocal(local);
       compareSplitRatio = Math.max(25, Math.min(75, Number(local.compare_split_ratio || args.compare_split_ratio || settings().compare_split_ratio || 50)));
       panelWidth = Math.max(280, Math.min(560, Number(local.panel_width || args.panel_width || settings().panel_width || 340)));
       if (!["pdf", "compare", "translation"].includes(readerMode)) readerMode = "pdf";

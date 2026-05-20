@@ -126,6 +126,7 @@ class TestResearchPaperReaderComponent(unittest.TestCase):
         self.assertIn("reader_state_changed", events.EVENT_NAMES)
         self.assertIn("retry_translation_scope", events.EVENT_NAMES)
         self.assertIn("prepare_reader_artifacts", events.EVENT_NAMES)
+        self.assertIn("analyze_paper", events.EVENT_NAMES)
         self.assertEqual(events.clean_page_list([1, "2", 2, 0, "bad", 3]), [1, 2, 3])
 
     def test_wrapper_returns_none_for_empty_component_event(self) -> None:

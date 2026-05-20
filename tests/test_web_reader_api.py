@@ -241,13 +241,27 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("Fallback text ready", response.text)
         self.assertIn("Preparation failed", response.text)
         self.assertIn("translation_units", response.text)
+        self.assertIn("translationFlowHtml", response.text)
+        self.assertIn("translationUnitGroups", response.text)
+        self.assertIn("activeSegmentFromViewport", response.text)
+        self.assertIn("buildAnchorIndex", response.text)
+        self.assertIn("setActiveAnchor", response.text)
         self.assertIn("renderTranslationPage", response.text)
         self.assertIn("syncCompareScroll", response.text)
         self.assertIn("annotationPopover", response.text)
+        self.assertIn('mode: "read"', response.text)
+        self.assertIn("data-annotation-popover-edit", response.text)
+        self.assertIn("dock_position", response.text)
+        self.assertIn("dock_pinned", response.text)
+        self.assertIn("dock_layout", response.text)
         self.assertIn("panelResize", response.text)
         self.assertIn("compare_split_ratio", response.text)
-        self.assertIn("Deep Read", response.text)
-        self.assertNotIn('tabButton("translation"', response.text)
+        self.assertIn("Analyze Paper", response.text)
+        self.assertIn('tabButton("translation"', response.text)
+        self.assertIn('tabButton("review"', response.text)
+        self.assertNotIn('create_chunk: "Chunk"', response.text)
+        self.assertNotIn('create_citation: "Cite"', response.text)
+        self.assertNotIn("Ask about this", response.text)
         self.assertNotIn("streamlit:setComponentValue", response.text)
 
     def test_pdf_range_and_page_preview(self) -> None:
@@ -439,6 +453,60 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(snap["status"], "done")
         self.assertTrue(snap["refresh"]["payload"])
         self.assertEqual(snap["progress"]["label"], "Structured text ready")
+
+    def test_reader_task_supports_analyze_paper(self) -> None:
+        source_id = "source:paper:grounded"
+        task_id = "reader-task-analyze"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            with patch(
+                "nblane.core.reader_tasks.handle_reader_action",
+                return_value=ReaderActionResult(
+                    data={
+                        "analysis": {
+                            "scores": {"overall": 7},
+                            "cited_segment_refs": ["seg:1"],
+                        }
+                    },
+                    message="Analysis saved",
+                ),
+            ):
+                started = client.post(
+                    f"/reader/api/{quote(source_id, safe='')}/tasks",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "task_id": task_id,
+                        "action": "analyze_paper",
+                        "payload": {"page": 1, "event_id": "evt-analyze"},
+                    },
+                )
+                snap = {}
+                for _ in range(20):
+                    status = client.get(f"/reader/api/{quote(source_id, safe='')}/tasks/{task_id}")
+                    snap = status.json()
+                    if snap.get("status") in {"done", "failed", "cancelled"}:
+                        break
+                    time.sleep(0.02)
+
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(started.json()["task"]["action"], "analyze_paper")
+        self.assertEqual(started.json()["task"]["event_id"], "evt-analyze")
+        self.assertEqual(snap["status"], "done")
+        self.assertTrue(snap["refresh"]["payload"])
+        self.assertEqual(snap["progress"]["label"], "Analysis saved")
 
     def test_reader_task_start_validates_action_and_identity(self) -> None:
         source_id = "source:paper:grounded"

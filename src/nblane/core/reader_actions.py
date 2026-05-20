@@ -43,6 +43,7 @@ from nblane.core.research_workspace import (
     upsert_research_claim,
 )
 from nblane.research_paper_reader_component.events import (
+    ANALYZE_PAPER,
     ANNOTATION_CREATE,
     ANNOTATION_DELETE,
     ANNOTATION_UPDATE,
@@ -296,6 +297,111 @@ def _compact_source_for_deep_read(source: Any, source_id: str) -> dict[str, Any]
             if metadata.get(key) not in (None, "", [])
         },
     }
+
+
+def _clean_analysis_items(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        clean = value.strip()
+        return [clean] if clean else []
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if str(item or "").strip()]
+    return [value] if str(value or "").strip() else []
+
+
+def _analysis_text(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("text", "summary", "reason", "title", "rationale", "point"):
+            clean = str(value.get(key) or "").strip()
+            if clean:
+                return clean
+        return ""
+    return str(value or "").strip()
+
+
+def _analysis_refs_from_value(value: Any) -> list[str]:
+    refs: list[str] = []
+    if isinstance(value, dict):
+        for key in (
+            "refs",
+            "cited_refs",
+            "segment_refs",
+            "cited_segment_refs",
+            "chunk_refs",
+            "cited_chunk_refs",
+            "annotation_refs",
+            "cited_annotation_refs",
+        ):
+            refs.extend(_payload_list(value, key))
+    return refs
+
+
+def _analysis_score(value: Any) -> int:
+    try:
+        score = int(round(float(value)))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(10, score))
+
+
+def _normalize_paper_analysis(raw: dict[str, Any], source_id: str) -> dict[str, Any]:
+    warnings = _payload_list(raw, "warnings")
+    scores_raw = raw.get("scores") if isinstance(raw.get("scores"), dict) else {}
+    scores = {
+        "novelty": _analysis_score(scores_raw.get("novelty") or raw.get("novelty")),
+        "technical_depth": _analysis_score(scores_raw.get("technical_depth") or raw.get("technical_depth")),
+        "evidence_quality": _analysis_score(scores_raw.get("evidence_quality") or raw.get("evidence_quality")),
+        "reproducibility": _analysis_score(scores_raw.get("reproducibility") or raw.get("reproducibility")),
+        "relevance": _analysis_score(scores_raw.get("relevance") or raw.get("relevance")),
+        "overall": _analysis_score(scores_raw.get("overall") or raw.get("overall")),
+    }
+    analysis: dict[str, Any] = {
+        "source_id": source_id,
+        "tldr": _payload_text(raw, "tldr", "tl_dr", "summary", "abstract_judgement"),
+        "key_points": _clean_analysis_items(raw.get("key_points") or raw.get("findings") or raw.get("contributions")),
+        "method": _clean_analysis_items(raw.get("method") or raw.get("methods")),
+        "experiments": _clean_analysis_items(raw.get("experiments") or raw.get("evaluation")),
+        "limitations": _clean_analysis_items(raw.get("limitations")),
+        "usefulness": _payload_text(raw, "usefulness", "useful_for", "project_fit"),
+        "scores": scores,
+        "score_rationale": _clean_analysis_items(raw.get("score_rationale") or raw.get("rationale")),
+        "project_relevance": _clean_analysis_items(raw.get("project_relevance") or raw.get("relevance_notes")),
+        "reading_plan": _clean_analysis_items(raw.get("reading_plan") or raw.get("next_steps")),
+        "open_questions": _clean_analysis_items(raw.get("open_questions") or raw.get("questions")),
+        "cited_segment_refs": _payload_list(raw, "cited_segment_refs", "segment_refs"),
+        "cited_chunk_refs": _payload_list(raw, "cited_chunk_refs", "chunk_refs"),
+        "cited_annotation_refs": _payload_list(raw, "cited_annotation_refs", "annotation_refs"),
+        "warnings": warnings,
+    }
+    for key in ("key_points", "method", "experiments", "limitations", "score_rationale", "project_relevance"):
+        for item in _clean_analysis_items(analysis.get(key)):
+            for ref in _analysis_refs_from_value(item):
+                if ref.startswith("seg:") and ref not in analysis["cited_segment_refs"]:
+                    analysis["cited_segment_refs"].append(ref)
+                elif ref.startswith("chunk") and ref not in analysis["cited_chunk_refs"]:
+                    analysis["cited_chunk_refs"].append(ref)
+                elif ref.startswith("ann") and ref not in analysis["cited_annotation_refs"]:
+                    analysis["cited_annotation_refs"].append(ref)
+    substantive = [
+        *_clean_analysis_items(analysis["key_points"]),
+        *_clean_analysis_items(analysis["score_rationale"]),
+        *_clean_analysis_items(analysis["limitations"]),
+    ]
+    has_refs = bool(
+        analysis["cited_segment_refs"]
+        or analysis["cited_chunk_refs"]
+        or analysis["cited_annotation_refs"]
+        or any(_analysis_refs_from_value(item) for item in substantive)
+    )
+    if substantive and not has_refs:
+        warning = "Analysis has substantive claims without cited refs."
+        if warning not in analysis["warnings"]:
+            analysis["warnings"].append(warning)
+    if not analysis["tldr"]:
+        text_items = [_analysis_text(item) for item in _clean_analysis_items(analysis["key_points"])]
+        analysis["tldr"] = text_items[0] if text_items else ""
+    return analysis
 
 
 def _selection_text(payload: dict[str, Any], segment_rows) -> str:
@@ -957,6 +1063,32 @@ def _handle_reader_action_inner(
         return ReaderActionResult(
             data={"structured": ai_result.structured or {}},
             warnings=list(ai_result.warnings),
+        )
+
+    if action == ANALYZE_PAPER:
+        source = load_research_sources(profile).by_id().get(source_id)
+        ai_result = generate_paper_review_card(
+            ctx.profile_name,
+            source_id,
+            source=source.to_dict() if source is not None else {"id": source_id},
+            segments=[row.to_dict() for row in segment_rows],
+            chunks=[row.to_dict() for row in chunk_rows],
+            annotations=[row.to_dict() for row in annotation_rows],
+            require_review=False,
+        )
+        structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+        analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
+        if structured:
+            save_paper_analysis(profile, source_id, analysis)
+        message = "Analysis saved" if structured else (getattr(ai_result, "error", "") or "Analysis did not return structured output.")
+        return ReaderActionResult(
+            ok=bool(getattr(ai_result, "ok", True) and structured),
+            data={
+                "structured": analysis,
+                "analysis": load_paper_analysis(profile, source_id),
+            },
+            warnings=list(ai_result.warnings) + list(analysis.get("warnings") or []),
+            message=message,
         )
 
     if action == "codex_deep_read":

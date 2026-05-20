@@ -11,6 +11,7 @@ from typing import Any
 
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.research_paper_reader_component.events import (
+    ANALYZE_PAPER,
     ASK_PAPER,
     EXPLAIN_SELECTION,
     PREPARE_READER_ARTIFACTS,
@@ -30,6 +31,7 @@ ALLOWED_READER_TASK_ACTIONS: frozenset[str] = frozenset(
         TRANSLATE_FULL_PAPER,
         TRANSLATE_SELECTION,
         TRANSLATE_VISIBLE_PAGES,
+        ANALYZE_PAPER,
         "codex_deep_read",
         "generate_review_card",
         PREPARE_READER_ARTIFACTS,
@@ -386,7 +388,7 @@ def _action_label(action: str) -> str:
         return "Translating visible pages..."
     if action == TRANSLATE_FULL_PAPER:
         return "Translating paper..."
-    if action == "generate_review_card":
+    if action in {ANALYZE_PAPER, "generate_review_card"}:
         return "Reviewing paper..."
     if action == "codex_deep_read":
         return "Running Codex deep read..."
@@ -415,6 +417,16 @@ def _progress_for_result(action: str, result: dict[str, Any]) -> dict[str, Any]:
             "current": 3 if result.get("ok", True) is not False else 0,
             "total": 3,
             "saved": int(summary.get("segments") or 0),
+        }
+    if action == ANALYZE_PAPER:
+        scores = data.get("analysis") if isinstance(data.get("analysis"), dict) else data.get("structured")
+        score_count = len((scores or {}).get("scores") or {}) if isinstance(scores, dict) else 0
+        return {
+            "phase": "done" if result.get("ok", True) is not False else "failed",
+            "label": str(result.get("message") or "Analysis saved"),
+            "current": 1,
+            "total": 1,
+            "saved": score_count,
         }
     total = int(
         summary.get("segments_selected")

@@ -16,6 +16,7 @@ CREATE_CHUNK_FROM_SELECTION = "create_chunk_from_selection"
 CREATE_CITATION = "create_citation"
 SAVE_PROGRESS = "save_progress"
 CODEX_DEEP_READ = "codex_deep_read"
+ANALYZE_PAPER = "analyze_paper"
 READER_STATE_CHANGED = "reader_state_changed"
 REQUEST_READER_CONTEXT = "request_reader_context"
 REQUEST_PAGE_PREVIEWS = "request_page_previews"
@@ -35,6 +36,7 @@ ReaderEventName = Literal[
     "create_chunk_from_selection",
     "create_citation",
     "save_progress",
+    "analyze_paper",
     "codex_deep_read",
     "reader_state_changed",
     "request_reader_context",
@@ -56,6 +58,7 @@ EVENT_NAMES: tuple[str, ...] = (
     CREATE_CHUNK_FROM_SELECTION,
     CREATE_CITATION,
     SAVE_PROGRESS,
+    ANALYZE_PAPER,
     CODEX_DEEP_READ,
     READER_STATE_CHANGED,
     REQUEST_READER_CONTEXT,
@@ -139,6 +142,7 @@ __all__ = [
     "ANNOTATION_CREATE",
     "ANNOTATION_DELETE",
     "ANNOTATION_UPDATE",
+    "ANALYZE_PAPER",
     "ASK_PAPER",
     "CREATE_CHUNK_FROM_SELECTION",
     "CREATE_CITATION",

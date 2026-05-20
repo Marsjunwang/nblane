@@ -142,6 +142,24 @@ class TestReaderTasks(unittest.TestCase):
             with self.assertRaises(ValueError):
                 reader_tasks.start(ctx, "page_changed", {"page": 1}, task_id="reader-task-test-denied")
 
+    def test_allows_analyze_paper_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(Path(tmp))
+
+            with patch(
+                "nblane.core.reader_tasks.handle_reader_action",
+                return_value=ReaderActionResult(
+                    data={"analysis": {"scores": {"overall": 8}}},
+                    message="Analysis saved",
+                ),
+            ):
+                initial = reader_tasks.start(ctx, "analyze_paper", {"page": 1}, task_id="reader-task-test-analyze")
+                final = list(reader_tasks.iter_snapshots("reader-task-test-analyze", ctx=ctx, poll_seconds=0.01))[-1]
+
+        self.assertEqual(initial["action"], "analyze_paper")
+        self.assertEqual(final["status"], "done")
+        self.assertEqual(final["progress"]["label"], "Analysis saved")
+
 
 if __name__ == "__main__":
     unittest.main()

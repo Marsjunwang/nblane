@@ -571,6 +571,11 @@ async def reader_review(request: Request, source_id: str):
     return await _run_action_endpoint(request, source_id, "generate_review_card")
 
 
+@app.post(f"{READER_PREFIX}/api/{{source_id}}/analyze")
+async def reader_analyze(request: Request, source_id: str):
+    return await _run_action_endpoint(request, source_id, "analyze_paper")
+
+
 @app.post(f"{READER_PREFIX}/api/{{source_id}}/action/{{action}}")
 async def reader_generic_action(request: Request, source_id: str, action: str):
     return await _run_action_endpoint(request, source_id, action)

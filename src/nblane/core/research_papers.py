@@ -1918,6 +1918,8 @@ def build_translation_units(
                 "segment_id": "",
                 "page": page_row.page,
                 "order": index * 100000,
+                "section_path": [],
+                "kind": "page",
                 "locator": f"p. {page_row.page}",
                 "source_hash": page_hash,
                 "source_text": source_text,
@@ -1956,6 +1958,8 @@ def build_translation_units(
                 "segment_id": segment_id,
                 "page": page_number,
                 "order": order,
+                "section_path": copy.deepcopy(raw_segment.get("section_path") or []),
+                "kind": _clean_text(raw_segment.get("kind")) or "paragraph",
                 "locator": _clean_text(raw_segment.get("locator")) or (f"p. {page_number}" if page_number else ""),
                 "source_hash": source_hash,
                 "source_text": source_text,
@@ -2058,6 +2062,20 @@ def build_reader_payload(
         }
         for chunk in load_chunks(_profile_root(profile), source_id)
     ]
+    chunk_ids = {str(row.get("id") or "") for row in chunks}
+    citations = [
+        citation.to_dict()
+        for citation in load_research_citations(_profile_root(profile))
+        if citation.source_id == source_id or (citation.chunk_id and citation.chunk_id in chunk_ids)
+    ]
+    citation_ids = {str(row.get("id") or "") for row in citations}
+    claims = [
+        claim.to_dict()
+        for claim in load_research_claims(_profile_root(profile))
+        if source_id in claim.source_refs
+        or any(ref in chunk_ids for ref in claim.chunk_refs)
+        or any(ref in citation_ids for ref in claim.citation_refs)
+    ]
     pdf_url = (
         _clean_text(pdf_url_override)
         if pdf_url_override is not None
@@ -2077,6 +2095,8 @@ def build_reader_payload(
         "panel_width": _metadata_int(metadata, "panel_width", 340, minimum=280, maximum=560),
         "annotations": annotations,
         "chunks": chunks,
+        "citations": citations,
+        "claims": claims,
         "analysis": load_paper_analysis(profile, source_id),
         "reader_state": _reader_state_from_metadata(metadata, page=page, target_lang=target_lang),
         "reader_preparation": reader_preparation,

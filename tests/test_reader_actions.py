@@ -13,6 +13,7 @@ from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
     load_paper_annotations,
+    load_paper_analysis,
     load_paper_translations,
     save_paper_pages,
     save_paper_segments,
@@ -353,6 +354,37 @@ class TestReaderActions(unittest.TestCase):
 
         self.assertEqual(result.data["structured"], {"answer": "42"})
         self.assertEqual(result.warnings, ["check"])
+
+    def test_analyze_paper_saves_normalized_review_schema(self) -> None:
+        ai_result = SimpleNamespace(
+            ok=True,
+            structured={
+                "tldr": "Useful paper.",
+                "key_points": [{"text": "Grounded point", "refs": ["seg:1"]}],
+                "method": ["Ablation study"],
+                "scores": {"overall": 8, "novelty": 6},
+                "score_rationale": [{"text": "Evidence is direct.", "refs": ["seg:1"]}],
+            },
+            warnings=[],
+            error="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.reader_actions.generate_paper_review_card", return_value=ai_result),
+            ):
+                result = handle_reader_action(ctx, "analyze_paper", {"page": 1})
+            analysis = load_paper_analysis(profile, ctx.source_id)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.message, "Analysis saved")
+        self.assertEqual(result.data["structured"]["scores"]["overall"], 8)
+        self.assertEqual(result.data["structured"]["cited_segment_refs"], ["seg:1"])
+        self.assertEqual(analysis["tldr"], "Useful paper.")
+        self.assertEqual(analysis["scores"]["novelty"], 6)
+        self.assertEqual(analysis["cited_segment_refs"], ["seg:1"])
 
 
 if __name__ == "__main__":
