@@ -144,6 +144,10 @@ sudo systemctl enable --now nblane-reader
 sudo systemctl status nblane-reader
 ```
 
+Reader sidecar 是生产 PDF Reader 的唯一主路径；不要依赖旧的 Streamlit 静态组件路径。
+普通部署也不要开启 overlay 调试开关，只有排查 legacy PDF 贴图渲染时才临时设置
+`NBLANE_READER_DEBUG_OVERLAY=1`。
+
 ## HTTPS 反向代理
 
 推荐 Caddy。示例 `/etc/caddy/Caddyfile`：

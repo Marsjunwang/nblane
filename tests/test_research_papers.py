@@ -33,6 +33,7 @@ from nblane.core.research_papers import (
     load_paper_library_tree,
     load_paper_pdf_bytes,
     load_paper_translations,
+    migrate_legacy_translations_to_segments,
     move_papers_to_node,
     paper_overview,
     paper_pdf_asset_path,
@@ -506,22 +507,18 @@ class TestResearchPapers(unittest.TestCase):
             "无页码结构化段落译文。",
             [row["translated_text"] for row in payload["translations"]],
         )
-        self.assertIn(
-            "第一页译文。",
-            [row["translated_text"] for row in payload["translations"]],
-        )
         self.assertIn("translation_units", payload)
         self.assertIn("translation_summary", payload)
         self.assertIn("translation_revision", payload)
         self.assertEqual(payload["compare_split_ratio"], 50)
         self.assertEqual(payload["panel_width"], 340)
         units_by_scope = {row["scope_ref"]: row for row in payload["translation_units"]}
-        self.assertEqual(units_by_scope[f"page:1:{pages[0].text_hash}"]["translated_text"], "第一页译文。")
         self.assertEqual(units_by_scope["seg:unpaged:00001"]["translated_text"], "无页码结构化段落译文。")
-        self.assertEqual(payload["translation_summary"]["translated"], 2)
-        self.assertGreaterEqual(payload["translation_summary"]["missing"], 1)
+        self.assertNotIn(f"page:1:{pages[0].text_hash}", units_by_scope)
+        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"segment"})
+        self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
 
-    def test_build_reader_payload_prefers_layout_units_when_available(self) -> None:
+    def test_build_reader_payload_prefers_segments_when_layout_units_are_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
             source_id = "source:paper:grounded"
@@ -665,27 +662,16 @@ class TestResearchPapers(unittest.TestCase):
                     include_page_previews=False,
                 )
 
-        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"layout"})
-        self.assertFalse(any(row["scope_type"] == "page" for row in payload["translation_units"]))
+        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"segment"})
+        self.assertFalse(any(row["scope_type"] == "layout" for row in payload["translation_units"]))
         units_by_scope = {row["scope_ref"]: row for row in payload["translation_units"]}
-        self.assertEqual(units_by_scope[layout_scope]["translated_text"], "表格单元译文。")
-        self.assertEqual(units_by_scope[layout_scope]["kind"], "table_cell")
-        self.assertEqual(units_by_scope[layout_scope]["row"], 0)
-        self.assertEqual(units_by_scope[layout_scope]["col"], 1)
-        self.assertEqual(units_by_scope[layout_scope]["font_size"], 9.5)
-        self.assertEqual(units_by_scope[layout_scope]["line_count"], 2)
-        self.assertEqual(units_by_scope["layout:v2:1:00002:symbol"]["status"], "translated")
-        self.assertEqual(units_by_scope["layout:v2:1:00002:symbol"]["translated_text"], "%")
-        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["kind"], "figure_label")
-        self.assertFalse(units_by_scope["layout:v2:1:00003:figlabel"]["translatable"])
-        self.assertFalse(units_by_scope["layout:v2:1:00003:figlabel"]["display_source"])
-        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["translated_text"], "")
-        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["font_size"], 6.0)
-        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["line_count"], 1)
+        self.assertIn("seg:1", units_by_scope)
+        self.assertEqual(units_by_scope["seg:1"]["status"], "missing")
+        self.assertNotIn(layout_scope, units_by_scope)
         self.assertEqual(payload["page_models"], [{"page": 1, "width": 200.0, "height": 200.0, "rotation": 0}])
-        self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
-        self.assertEqual(stale_payload["translation_units"][0]["status"], "stale")
-        self.assertEqual(stale_payload["translation_summary"], {"translated": 0, "missing": 0, "stale": 1, "failed": 0})
+        self.assertEqual(payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})
+        self.assertEqual(stale_payload["translation_units"][0]["status"], "missing")
+        self.assertEqual(stale_payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})
 
     def test_build_paper_layout_units_outputs_stable_geometry_and_figure_labels(self) -> None:
         if not pymupdf_available():
@@ -808,7 +794,7 @@ class TestResearchPapers(unittest.TestCase):
                     include_page_previews=False,
                 )
 
-        self.assertEqual([row["scope_ref"] for row in payload["translation_units"]], [layout_scope])
+        self.assertEqual([row["scope_type"] for row in payload["translation_units"]], ["page"])
         self.assertNotIn(old_scope, [row["scope_ref"] for row in payload["translations"]])
         self.assertEqual(payload["translation_units"][0]["status"], "missing")
         self.assertEqual(payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})
@@ -931,6 +917,219 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(segments_mock.call_count, 1)
         self.assertEqual(source.metadata["reading_artifacts_pdf_sha256"], "abc123")
         self.assertEqual(source.metadata["reading_artifacts_page_count"], 1)
+        self.assertIn("translation_migration", first)
+
+    def test_ensure_paper_reading_artifacts_reports_grobid_coordinate_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "pdf_sha256": "abc123",
+                    "reading_artifacts_pdf_sha256": "abc123",
+                    "structure_backend": "grobid",
+                },
+            )
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                save_paper_pages(profile, source_id, [PaperPage(source_id=source_id, page=1, text="Page text.")])
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:source-paper-grounded:00001",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Structured text without coordinates.",
+                        )
+                    ],
+                )
+
+                result = ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
+
+        self.assertEqual(result["coordinate_extraction"]["segments_with_rects"], 0)
+        self.assertEqual(result["coordinate_extraction"]["segments_without_rects"], 1)
+        self.assertIn("without PDF coordinates", " ".join(result["warnings"]))
+
+    def test_migrate_legacy_translations_to_segments_copies_safe_layout_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segment = PaperSegment(
+                segment_id="seg:safe",
+                source_id=source_id,
+                page=1,
+                order=1,
+                text="Legacy layout source text.",
+                text_hash=text_hash("Legacy layout source text."),
+                rects=[{"page": 1, "x": 10, "y": 20, "w": 80, "h": 12, "page_width": 200, "page_height": 200}],
+            )
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, [segment])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "id": "tr:legacy-layout",
+                            "scope_type": "layout",
+                            "scope_ref": "layout:v2:1:00001:legacy",
+                            "page": 1,
+                            "source_hash": text_hash("Legacy layout source text."),
+                            "source_text": "Legacy layout source text.",
+                            "target_lang": "zh",
+                            "translated_text": "安全迁移译文。",
+                        }
+                    ],
+                )
+
+                summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang="zh")
+            translations = load_paper_translations(profile, source_id)
+            migrated = [row for row in translations if row.scope_type == "segment"]
+
+        self.assertEqual(summary["migrated"], 1)
+        self.assertEqual(summary["migrated_ids"], ["tr:legacy-layout"])
+        self.assertEqual(migrated[0].segment_id, "seg:safe")
+        self.assertEqual(migrated[0].source_hash, segment.text_hash)
+        self.assertEqual(migrated[0].translated_text, "安全迁移译文。")
+        self.assertEqual(migrated[0].generated_by, "migration:layout_to_segment")
+        self.assertEqual(migrated[0].rects, segment.rects)
+
+    def test_migrate_legacy_translations_to_segments_preserves_unsafe_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segment = PaperSegment(
+                segment_id="seg:current",
+                source_id=source_id,
+                page=1,
+                order=1,
+                text="Current segment body.",
+                text_hash=text_hash("Current segment body."),
+            )
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, [segment])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "scope_type": "layout",
+                            "scope_ref": "layout:v2:1:00001:legacy",
+                            "page": 1,
+                            "source_hash": text_hash("Unrelated legacy body."),
+                            "source_text": "Unrelated legacy body.",
+                            "target_lang": "zh",
+                            "translated_text": "不安全旧译文。",
+                        }
+                    ],
+                )
+
+                summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang="zh")
+            translations = load_paper_translations(profile, source_id)
+
+        self.assertEqual(summary["migrated"], 0)
+        self.assertEqual(len([row for row in translations if row.scope_type == "layout"]), 1)
+        self.assertFalse([row for row in translations if row.scope_type == "segment"])
+        self.assertIn("no safe segment match", " ".join(summary["warnings"]))
+
+    def test_migrate_legacy_page_translation_to_single_segment_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segment = PaperSegment(
+                segment_id="seg:single-page",
+                source_id=source_id,
+                page=2,
+                order=1,
+                text="Only paragraph on this page.",
+                text_hash=text_hash("Only paragraph on this page."),
+            )
+            page_hash = text_hash("Legacy full page text.")
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, [segment])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "id": "tr:legacy-page",
+                            "scope_type": "page",
+                            "scope_ref": f"page:2:{page_hash}",
+                            "page": 2,
+                            "source_hash": page_hash,
+                            "source_text": "Legacy full page text.",
+                            "target_lang": "zh",
+                            "translated_text": "单段页迁移译文。",
+                        }
+                    ],
+                )
+
+                summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang="zh")
+            migrated = [row for row in load_paper_translations(profile, source_id) if row.scope_type == "segment"]
+
+        self.assertEqual(summary["migrated"], 1)
+        self.assertEqual(migrated[0].segment_id, segment.segment_id)
+        self.assertEqual(migrated[0].source_hash, segment.text_hash)
+        self.assertEqual(migrated[0].generated_by, "migration:page_to_segment")
+
+    def test_migrate_legacy_translation_does_not_overwrite_current_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segment = PaperSegment(
+                segment_id="seg:current",
+                source_id=source_id,
+                page=1,
+                order=1,
+                text="Current segment body.",
+                text_hash=text_hash("Current segment body."),
+            )
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, [segment])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "id": "tr:current",
+                            "scope_type": "segment",
+                            "scope_ref": segment.segment_id,
+                            "segment_id": segment.segment_id,
+                            "page": 1,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": "已有当前译文。",
+                        },
+                        {
+                            "id": "tr:legacy-layout",
+                            "scope_type": "layout",
+                            "scope_ref": "layout:v2:1:00001:legacy",
+                            "page": 1,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": "旧布局译文。",
+                        },
+                    ],
+                )
+
+                summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang="zh")
+            segment_rows = [row for row in load_paper_translations(profile, source_id) if row.scope_type == "segment"]
+
+        self.assertEqual(summary["migrated"], 0)
+        self.assertEqual(len(segment_rows), 1)
+        self.assertEqual(segment_rows[0].translated_text, "已有当前译文。")
 
     def test_ensure_paper_reading_artifacts_missing_pdf_does_not_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1032,6 +1231,7 @@ class TestResearchPapers(unittest.TestCase):
             by_segment = {row.segment_id: row for row in translations}
 
         self.assertEqual([row["segment_id"] for row in call_batch], [segments[1].segment_id, segments[2].segment_id])
+        self.assertEqual(summary["scope"], "segment")
         self.assertEqual(summary["segments_selected"], 2)
         self.assertEqual(summary["translated"], 3)
         self.assertEqual(by_segment[segments[0].segment_id].translated_text, "已经翻译。")
@@ -1432,9 +1632,12 @@ class TestResearchPapers(unittest.TestCase):
 
     def test_grobid_tei_to_segments_and_bibliography(self) -> None:
         tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <facsimile>
+            <surface n="3" ulx="0" uly="0" lrx="600" lry="800" />
+          </facsimile>
           <text>
             <body>
-              <div n="3"><head>Method</head><p n="3">Memory encoder stores observations.</p></div>
+              <div n="3"><head>Method</head><p coords="3,60,120,300,40">Memory encoder stores observations.</p></div>
             </body>
             <back>
               <listBibl>
@@ -1454,10 +1657,47 @@ class TestResearchPapers(unittest.TestCase):
         refs = grobid_tei_to_bibliography("source:paper:grounded", tei)
 
         self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].page, 3)
+        self.assertEqual(segments[0].rects[0]["page"], 3)
+        self.assertAlmostEqual(segments[0].rects[0]["x_pct"], 0.1)
+        self.assertAlmostEqual(segments[0].rects[0]["w_pct"], 0.5)
         self.assertEqual(segments[0].section_path, ["Method"])
         self.assertIn("§ Method", segments[0].locator)
         self.assertEqual(refs[0]["title"], "Useful Paper")
         self.assertEqual(refs[0]["year"], "1843")
+
+    def test_grobid_tei_to_segments_includes_head_caption_and_formula_coordinates(self) -> None:
+        tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <facsimile>
+            <surface n="2" ulx="0" uly="0" lrx="500" lry="700" />
+          </facsimile>
+          <text>
+            <body>
+              <div n="2">
+                <head coords="2,40,50,180,24">Results</head>
+                <p coords="2,40,90,300,40">Accuracy improves with retrieval.</p>
+                <figure>
+                  <figDesc coords="2,42,180,260,32">Figure 1 shows the retrieval curve.</figDesc>
+                </figure>
+                <formula coords="2,50,250,200,28">R = softmax(qK^T)</formula>
+              </div>
+            </body>
+          </text>
+        </TEI>"""
+
+        segments = grobid_tei_to_segments("source:paper:grounded", tei)
+
+        self.assertEqual([segment.kind for segment in segments], ["heading", "paragraph", "caption", "formula"])
+        self.assertEqual([segment.text for segment in segments], [
+            "Results",
+            "Accuracy improves with retrieval.",
+            "Figure 1 shows the retrieval curve.",
+            "R = softmax(qK^T)",
+        ])
+        self.assertTrue(all(segment.page == 2 for segment in segments))
+        self.assertTrue(all(segment.rects and segment.rects[0]["page"] == 2 for segment in segments))
+        self.assertEqual(segments[0].section_path, ["Results"])
+        self.assertAlmostEqual(segments[2].rects[0]["x_pct"], 42 / 500)
 
     def test_structured_extraction_falls_back_when_grobid_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

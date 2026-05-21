@@ -26,7 +26,7 @@ source_of_truth: true
 
 ### 1.1 本地启动 Research PDF Reader
 
-Reader 的 PDF 阅读器默认是 **Streamlit 主应用 + FastAPI Reader sidecar** 两个进程。
+Reader 的 PDF 阅读器是 **Streamlit 主应用 + FastAPI Reader sidecar** 两个进程。
 本地开发没有 Caddy 反向代理时，需要先启动 sidecar，并让 Streamlit iframe 指向浏览器能访问的
 Reader API 地址：
 
@@ -48,16 +48,14 @@ PYTHONPATH=src .venv/bin/streamlit run app.py \
 会请求相对路径 `/reader/view/...`；没有 Caddy 时这个路径会被 Streamlit 自己接住，
 iframe 里加载的是另一个 Streamlit shell，而不是 Reader API，所以看起来是空白。
 
-只想单进程临时阅读时，可以用静态组件 fallback：
-
-```bash
-NBLANE_READER_USE_STREAMLIT_COMPONENT=1 \
-PYTHONPATH=src .venv/bin/streamlit run app.py \
-  --server.address=127.0.0.1 --server.port=8503 --server.headless=true
-```
+旧的单进程组件启动路径已停用。PDF Reader 的主入口始终是
+`/reader/view/{source_id}` 对应的 FastAPI sidecar。
 
 生产部署如果已经用 Caddy 将 `/reader/*` 反代到 `127.0.0.1:8502`，则不要设置
 `NBLANE_READER_API_BASE`，保持同源路径即可。
+
+普通阅读默认使用语义段落译文流，不把译文贴回 PDF rect。只有调试 legacy overlay 时才设置
+`NBLANE_READER_DEBUG_OVERLAY=1`。
 
 ---
 

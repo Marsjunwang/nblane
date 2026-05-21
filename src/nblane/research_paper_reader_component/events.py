@@ -101,6 +101,10 @@ class ReaderStatePayload(ReaderBasePayload, total=False):
     active_tab: str
     target_lang: str
     side_panel_collapsed: bool
+    left_rail_collapsed: bool
+    active_left_tab: str
+    translation_source_visible: bool
+    active_translation_anchor: str
     focused_annotation_id: str
     focused_chunk_id: str
     last_visible_pages: list[int]

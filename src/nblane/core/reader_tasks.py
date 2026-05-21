@@ -406,7 +406,7 @@ def _action_label(action: str) -> str:
     if action in {ANALYZE_PAPER, "generate_review_card"}:
         return "Reviewing paper..."
     if action == "codex_deep_read":
-        return "Running Codex deep read..."
+        return "Analyzing paper..."
     if action == PREPARE_READER_ARTIFACTS:
         return "PDF ready"
     if action == ASK_PAPER:

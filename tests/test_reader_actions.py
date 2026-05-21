@@ -70,12 +70,41 @@ class TestReaderActions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             profile, ctx = self._profile(Path(tmp))
             with patch("nblane.core.git_backup.record_change"):
-                result = handle_reader_action(ctx, "save_progress", {"page": 3})
+                result = handle_reader_action(
+                    ctx,
+                    "save_progress",
+                    {
+                        "page": 3,
+                        "reader_mode": "compare",
+                        "scale_mode": "fit-page",
+                        "active_tab": "translation",
+                        "target_lang": "zh",
+                        "side_panel_collapsed": False,
+                        "left_rail_collapsed": True,
+                        "active_left_tab": "pages",
+                        "translation_source_visible": False,
+                        "active_translation_anchor": "segment:seg:1",
+                        "visible_pages": [2, "3", "bad"],
+                        "compare_split_ratio": 67,
+                        "panel_width": 420,
+                    },
+                )
 
             source = load_research_sources(profile).by_id()[ctx.source_id]
 
         self.assertTrue(result.ok)
         self.assertEqual(source.metadata["last_read_page"], 3)
+        self.assertEqual(source.metadata["reader_mode"], "compare")
+        self.assertEqual(source.metadata["scale_mode"], "fit-page")
+        self.assertEqual(source.metadata["active_tab"], "translation")
+        self.assertFalse(source.metadata["side_panel_collapsed"])
+        self.assertTrue(source.metadata["left_rail_collapsed"])
+        self.assertEqual(source.metadata["active_left_tab"], "pages")
+        self.assertFalse(source.metadata["translation_source_visible"])
+        self.assertEqual(source.metadata["active_translation_anchor"], "segment:seg:1")
+        self.assertEqual(source.metadata["last_visible_pages"], [2, 3])
+        self.assertEqual(source.metadata["compare_split_ratio"], 67)
+        self.assertEqual(source.metadata["panel_width"], 420)
         self.assertEqual(source.status, "reading")
 
     def test_annotation_create_update_delete(self) -> None:
@@ -273,7 +302,7 @@ class TestReaderActions(unittest.TestCase):
                 result = handle_reader_action(
                     ctx,
                     "translate_visible_pages",
-                    {"visible_pages": [2], "target_lang": "zh"},
+                    {"visible_pages": [2], "target_lang": "zh", "scope_strategy": "page"},
                 )
             translations = load_paper_translations(profile, ctx.source_id)
 
@@ -288,6 +317,38 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(result.message, "Saved 1 translation row(s).")
         self.assertEqual(translations[0].scope_type, "page")
         self.assertEqual(translations[0].translated_text, "整页译文。")
+
+    def test_translate_visible_pages_defaults_to_segment_scope(self) -> None:
+        ai_result = SimpleNamespace(
+            structured={
+                "translations": [
+                    {
+                        "segment_id": "seg:1",
+                        "source_hash": text_hash("Important passage"),
+                        "translated_text": "重要段落。",
+                    }
+                ]
+            },
+            warnings=[],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.reader_actions.build_paper_layout_units") as layout_mock,
+                patch("nblane.core.reader_actions.translate_paper_segments", return_value=ai_result),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_visible_pages",
+                    {"visible_pages": [1], "target_lang": "zh"},
+                )
+            translations = load_paper_translations(profile, ctx.source_id)
+
+        layout_mock.assert_not_called()
+        self.assertEqual(result.data["summary"]["scope"], "segment")
+        self.assertEqual(translations[0].scope_type, "segment")
+        self.assertEqual(translations[0].segment_id, "seg:1")
 
     def test_translate_visible_pages_supports_layout_scope(self) -> None:
         layout_hash = text_hash("Visible positioned text.")

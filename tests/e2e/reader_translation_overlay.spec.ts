@@ -1,10 +1,17 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-const readerUrl = pathToFileURL(
-  path.resolve(process.cwd(), "src/nblane/research_paper_reader_component/frontend/static/index.html"),
-).href;
+const readerTemplatePath = path.resolve(process.cwd(), "src/nblane/web_reader_api/templates/index.html");
+const sourceId = "source:reader:geometry";
+
+function readerHtml() {
+  return fs
+    .readFileSync(readerTemplatePath, "utf-8")
+    .replace("{{ source_id_json|safe }}", JSON.stringify(sourceId))
+    .replace("{{ reader_prefix_json|safe }}", JSON.stringify("/reader"))
+    .replace("{{ reader_token_json|safe }}", JSON.stringify(""));
+}
 
 const previewDataUrl =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='100' viewBox='0 0 200 100'%3E%3Crect width='200' height='100' fill='white'/%3E%3Ctext x='20' y='32' font-size='12' fill='black'%3ESource PDF page%3C/text%3E%3C/svg%3E";
@@ -19,6 +26,7 @@ function readerPayload(withPreview = false) {
       page_count: 2,
       target_lang: "zh",
       translation_layout: "overlay",
+      debug_overlay_enabled: true,
       translation_overflow_policy: "fixed-expand",
       overscan_pages: 0,
       side_panel_default: "collapsed",
@@ -129,15 +137,18 @@ function readerPayload(withPreview = false) {
 }
 
 async function renderReader(page, payload) {
-  await page.goto(readerUrl);
-  await page.evaluate((args) => {
-    window.postMessage({ type: "streamlit:render", args }, "*");
-  }, payload);
+  await page.route("**/reader/api/**/payload**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(payload) });
+  });
+  await page.route("**/reader/assets/pdf.min.js", async (route) => {
+    await route.fulfill({ contentType: "application/javascript", body: "" });
+  });
+  await page.setContent(readerHtml(), { waitUntil: "domcontentloaded" });
   await expect(page.locator(".pr-translation-page")).toBeVisible();
   await expect(page.locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')).toBeVisible();
 }
 
-test("translation overlay uses stable page geometry in translation-only mode", async ({ page }) => {
+test("debug translation overlay uses stable page geometry", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 760 });
   await renderReader(page, readerPayload(false));
 
@@ -179,7 +190,7 @@ test("late page preview does not move placed overlay blocks", async ({ page }) =
   expect(before).not.toBeNull();
 
   await page.evaluate((args) => {
-    window.postMessage({ type: "streamlit:render", args }, "*");
+    return (window as any).onRender({ data: { args } });
   }, readerPayload(true));
   await expect(page.locator(".pr-translation-page-preview")).toBeVisible();
 

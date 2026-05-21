@@ -283,8 +283,7 @@ doi
 
 - `Open Reader`
 - `Move in Library Tree`
-- `Run Source Guide`
-- `Run Codex Deep Read`，仅在用户需要深度阅读计划或项目相关性分析时触发。
+- `Analyze Paper`，在用户需要结构化阅读报告、深度阅读计划或项目相关性分析时触发。
 
 ### 2.3 Paper Library
 
@@ -578,8 +577,7 @@ Reason:
 - reading status：last read page、annotations、chunks、translations、analysis。
 - synthesis status：research claims、citations、promoted status、exports。
 - risks：private publish risk、citation 断链、stale translation、duplicate conflict。
-- actions：Open Reader、Move in Tree、Run extraction、Run Source Guide、
-  Run Codex Deep Read、Archive、Discard。
+- actions：Open Reader、Move in Tree、Run extraction、Analyze Paper、Archive、Discard。
 
 这个 drawer 是“整理站”，Reader 是“阅读现场”。不要把批注编辑、长翻译和大段 AI
 问答塞进 Library。
@@ -744,8 +742,7 @@ Reader 面向读者提供这些核心功能：
 | Chunk 创建 | 把可引用段落沉淀为 research chunk。 |
 | Citation 创建 | 从选区或 chunk 生成带 locator 的 citation。 |
 | Ask Paper | 针对当前论文问答，答案必须带 segment / chunk / annotation refs。 |
-| Source Guide | 生成结构化阅读报告，帮助快速判断论文价值。 |
-| Codex Deep Read | 让 Codex 做更长任务：通读、比较、项目相关性分析、下一步阅读计划。 |
+| Analyze Paper | 生成结构化阅读报告、评分、项目相关性和下一步阅读建议。 |
 | Claim candidate | 从阅读内容生成 research claim candidate，用于读后感、文献综述或 blog。 |
 | Jump back | 从 annotation / chunk / citation / translation 跳回 PDF 原文位置。 |
 
@@ -765,7 +762,7 @@ Reader 的体验目标是减少论文阅读中的上下文切换：
 
 ```text
 Open Reader
-  -> Run Source Guide
+  -> Analyze Paper
   -> Translate abstract / introduction
   -> Ask Paper: 这篇论文和我的项目有什么关系？
   -> 高亮关键贡献和限制
@@ -780,7 +777,7 @@ Open Reader
 ```text
 Open Reader
   -> Translate paper / all missing
-  -> Codex Deep Read
+  -> Analyze Paper
   -> Section-by-section review
   -> Compare with same tree node papers
   -> Create literature memo
@@ -1038,9 +1035,12 @@ citation_refs: []
 
 ## 4. 第三方库和后端策略
 
-### 4.1 默认前端：PDF.js
+### 4.1 默认前端：FastAPI sidecar + PDF.js
 
-新增 `research_paper_reader_component`，使用 `pdfjs-dist`。
+PDF Reader 的主入口是 FastAPI sidecar 提供的 `/reader/view/{source_id}`。
+`research_paper_reader_component` 的静态 Streamlit runtime 已停用，仅保留
+`events.py` 作为事件常量契约。前端 PDF 渲染由 sidecar 模板加载 bundled PDF.js
+资产完成。
 
 职责：
 
@@ -1388,13 +1388,13 @@ question
 
 如果 refs 为空，UI 不显示为可信回答，只显示 warning。
 
-### 5.5 Codex Paper Search and Deep Read
+### 5.5 Codex Paper Search and Analyze Paper
 
 Codex 不用于每次小段翻译。Codex 用于更强的搜索和长任务：
 
 - Paper Search：根据 topic / project / goal 使用 web search 和 provider search
   找论文、检查链接、去重、返回导入候选。
-- Deep Read：通读全文 segments，生成结构化阅读报告。
+- Analyze Paper long read：通读全文 segments，生成结构化阅读报告。
 - Compare Papers：比较某个 tree node / subtree 中多篇论文的方法、假设、结果、缺口。
 - Project Fit：结合 current goal / project refs 判断论文对当前项目的价值。
 - Code Link：如果论文关联 GitHub repo，分析论文方法与代码实现对应关系。
@@ -1410,7 +1410,7 @@ Codex 使用当前 profile 专属 Web Codex：
   - provider filters
   - current project / goal / library tree hint
   - already imported DOI / arXiv / Semantic Scholar ids
-- Deep Read 场景只传当前 source 的必要 context bundle：
+- Analyze Paper 场景只传当前 source 的必要 context bundle：
   - source metadata
   - selected segments
   - chunks
@@ -1472,32 +1472,17 @@ def pymupdf_document_to_pages(source_id: str, doc: PyMuPDFDocument) -> list[Pape
 def pymupdf_document_to_fallback_segments(source_id: str, doc: PyMuPDFDocument) -> list[PaperSegment]: ...
 ```
 
-## 7. Reader Component 事件协议
+## 7. Reader Sidecar 事件协议
 
-新增 wrapper：
+Reader 由 FastAPI sidecar 提供 `/reader/view/{source_id}` 主入口。旧
+`research_paper_reader_component` runtime 不再作为 PDF Reader fallback；仅保留事件常量
+模块作为前后端契约来源：
 
 ```text
-src/nblane/research_paper_reader_component/__init__.py
+src/nblane/research_paper_reader_component/events.py
 ```
 
-Python 调用：
-
-```python
-st_research_paper_reader(
-    source=source_payload,
-    pdf_base64=pdf_base64,
-    pages=page_payload,
-    segments=segment_payload,
-    annotations=annotation_payload,
-    translations=translation_payload,
-    chunks=chunk_payload,
-    ui=ui_labels,
-    settings=settings,
-    key=f"paper_reader_{profile}_{source_id}",
-)
-```
-
-返回 event：
+Sidecar 前端通过 mutation/task endpoint 发送 event：
 
 ```json
 {
@@ -1530,7 +1515,7 @@ st_research_paper_reader(
 - `jump_to_chunk`
 - `set_reader_state`
 
-Streamlit 负责：
+FastAPI/core handler 负责：
 
 - 校验 payload
 - 调 core helper
@@ -1603,7 +1588,7 @@ Streamlit 负责：
 - 实现 source guide map-reduce。
 - 实现 paper QA local retrieval + grounded answer。
 - 实现 claim/citation candidates preview/apply。
-- 实现 Codex Paper Search activity 记录和 Codex Deep Read preview。
+- 实现 Codex Paper Search activity 记录和 Analyze Paper preview。
 
 验收：
 
@@ -1638,10 +1623,10 @@ Streamlit 负责：
   - GROBID adapter
   - export formatter
 - Frontend Worker
-  - `research_paper_reader_component`
-  - PDF.js viewer
+  - `src/nblane/web_reader_api/templates/index.html`
+  - PDF.js viewer / left rail / translation flow
   - annotation event schema
-  - component build/tests
+  - sidecar template contract tests
 - Research UI Worker
   - `pages/7_Research.py` 小页面重排
   - Paper Search / Library / Reader / Export UI
@@ -1717,10 +1702,10 @@ Streamlit 负责：
 
 ### Frontend
 
-```bash
-cd src/nblane/research_paper_reader_component/frontend
-npm run build
-```
+PDF Reader 不再构建 `research_paper_reader_component/frontend`。前端主路径在
+`src/nblane/web_reader_api/templates/index.html`，PDF.js 资产打包在
+`src/nblane/web_reader_api/static/assets/`。如需调试 legacy overlay，设置
+`NBLANE_READER_DEBUG_OVERLAY=1` 后走 sidecar Reader。
 
 JS tests：
 

@@ -1,4 +1,4 @@
-"""Side-effecting paper Reader actions shared by Streamlit fallback and FastAPI."""
+"""Side-effecting paper Reader actions shared by Streamlit and FastAPI entrypoints."""
 
 from __future__ import annotations
 
@@ -126,6 +126,21 @@ def _payload_int(payload: dict[str, Any], key: str, default: int = 0) -> int:
         return int(payload.get(key) or default)
     except (TypeError, ValueError):
         return default
+
+
+def _payload_bool(payload: dict[str, Any], key: str, default: bool = False) -> bool:
+    if key not in payload:
+        return default
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        clean = value.strip().lower()
+        if clean in {"1", "true", "yes", "on"}:
+            return True
+        if clean in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
 
 
 def _backup_warnings() -> list[str]:
@@ -569,6 +584,32 @@ def save_reader_progress(ctx: ReaderActionContext, payload: dict[str, Any]) -> R
     metadata = dict(src.metadata or {})
     metadata["last_read_page"] = page
     metadata["last_read_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    for key in (
+        "reader_mode",
+        "scale_mode",
+        "active_tab",
+        "target_lang",
+        "focused_annotation_id",
+        "focused_chunk_id",
+        "active_left_tab",
+        "active_translation_anchor",
+    ):
+        value = _payload_text(payload, key)
+        if value:
+            metadata[key] = value
+    for key, default in (("compare_split_ratio", 50), ("panel_width", 340)):
+        if key in payload:
+            metadata[key] = _payload_int(payload, key, default)
+    for key, default in (
+        ("side_panel_collapsed", True),
+        ("left_rail_collapsed", False),
+        ("translation_source_visible", True),
+    ):
+        if key in payload:
+            metadata[key] = _payload_bool(payload, key, default)
+    visible_pages = clean_page_list(payload.get("visible_pages") or payload.get("last_visible_pages"))
+    if visible_pages:
+        metadata["last_visible_pages"] = visible_pages
     update_research_source(inbox, ctx.source_id, metadata=metadata, status="reading")
     save_research_sources(ctx.profile_path, inbox)
     return ReaderActionResult(
@@ -625,6 +666,7 @@ def _handle_reader_action_inner(
             profile,
             source_id,
             prefer_grobid=bool(prefer_grobid),
+            target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             progress_callback=progress_callback,
         )
         status = str(summary.get("status") or "")
@@ -752,7 +794,7 @@ def _handle_reader_action_inner(
             source_id,
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             mode=_payload_text(payload, "mode") or "missing_or_stale",
-            scope_strategy=_payload_text(payload, "scope_strategy") or "auto",
+            scope_strategy=_payload_text(payload, "scope_strategy") or "segment",
             ai_profile=ctx.profile_name,
             require_review=False,
             progress_callback=progress_callback,
@@ -764,7 +806,7 @@ def _handle_reader_action_inner(
 
     if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
         target_lang = _payload_text(payload, "target_lang", "language") or "zh"
-        scope_strategy = _payload_text(payload, "scope_strategy") or "auto"
+        scope_strategy = _payload_text(payload, "scope_strategy") or "segment"
         if scope_strategy not in {"auto", "segment", "page", "layout"}:
             scope_strategy = "auto"
         refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
@@ -1348,15 +1390,18 @@ def _handle_reader_action_inner(
             annotations=[row.to_dict() for row in annotation_rows],
             require_review=False,
         )
-        if isinstance(ai_result.structured, dict):
-            save_paper_analysis(profile, source_id, ai_result.structured)
+        structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+        analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
+        if structured:
+            save_paper_analysis(profile, source_id, analysis)
         return ReaderActionResult(
+            ok=bool(getattr(ai_result, "ok", True) and structured),
             data={
-                "structured": ai_result.structured or {},
+                "structured": analysis,
                 "analysis": load_paper_analysis(profile, source_id),
             },
-            warnings=list(ai_result.warnings),
-            message="Saved" if isinstance(ai_result.structured, dict) else "",
+            warnings=list(ai_result.warnings) + list(analysis.get("warnings") or []),
+            message="Saved" if structured else "",
         )
 
     if action == "request_page_previews":

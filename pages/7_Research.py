@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +37,6 @@ from nblane.core.research_papers import (
     extract_paper_pages,
     extract_paper_segments,
     format_research_citations,
-    get_stable_pdf_url,
     grobid_readiness,
     import_paper_pdf,
     import_paper_search_results,
@@ -47,7 +45,6 @@ from nblane.core.research_papers import (
     load_paper_annotations,
     load_paper_library_tree,
     load_paper_pages,
-    load_paper_pdf_bytes,
     load_paper_segments,
     load_paper_translations,
     mark_imported_paper_results,
@@ -57,7 +54,6 @@ from nblane.core.research_papers import (
     paper_citation_diagnostics,
     paper_overview,
     paper_rows,
-    render_paper_page_preview,
     save_paper_analysis,
     save_paper_annotations,
     save_paper_note,
@@ -123,7 +119,6 @@ from nblane.core.research_workspace import (
     research_draft_to_blog_candidate,
     upsert_research_claim,
 )
-from nblane.research_paper_reader_component import st_research_paper_reader
 from nblane.core.public_site import create_blog_draft
 from nblane.web_auth import require_login
 from nblane.web_cache import clear_web_cache
@@ -1303,52 +1298,6 @@ def _payload_int(payload: dict, key: str, default: int = 0) -> int:
         return default
 
 
-@st.cache_data(show_spinner=False, max_entries=16)
-def _reader_pdf_base64_cached(profile_path: str, source_id: str) -> str:
-    return base64.b64encode(load_paper_pdf_bytes(Path(profile_path), source_id)).decode("ascii")
-
-
-def _reader_pdf_base64(source_id: str) -> str:
-    """Return full PDF bytes only when explicitly enabled for PDF.js debugging."""
-
-    enabled = os.getenv("NBLANE_READER_SEND_FULL_PDF", "").strip().lower() in {"1", "true", "yes", "on"}
-    if not enabled:
-        return ""
-    try:
-        return _reader_pdf_base64_cached(str(_pdir), source_id)
-    except Exception as exc:
-        st.warning(str(exc))
-        return ""
-
-
-def _reader_pdf_url(source_id: str) -> str:
-    """Return the stable Streamlit media URL for the paper PDF."""
-
-    try:
-        return get_stable_pdf_url(_pdir, source_id)
-    except Exception as exc:
-        st.warning(str(exc))
-        return ""
-
-
-@st.cache_data(show_spinner=False, max_entries=32)
-def _reader_page_preview(profile_path: str, source_id: str, page: int = 1) -> dict[str, object]:
-    return render_paper_page_preview(Path(profile_path), source_id, page, max_width=1100)
-
-
-def _reader_page_previews(source_id: str, current_page: int = 1) -> list[dict[str, object]]:
-    requested = int(st.session_state.get(_reader_key(source_id, "preview_page"), current_page) or current_page)
-    pages = sorted({max(1, int(current_page or 1)), max(1, requested), max(1, int(current_page or 1) - 1), max(1, int(current_page or 1) + 1)})
-    previews: list[dict[str, object]] = []
-    try:
-        for page in pages:
-            previews.append(_reader_page_preview(str(_pdir), source_id, page))
-        return previews
-    except Exception as exc:
-        st.caption(_l("pdf_preview_unavailable", "PDF image preview unavailable: {error}").format(error=exc))
-        return previews
-
-
 def _reader_requested_pages(source_id: str) -> set[int]:
     store = st.session_state.setdefault("reader_requested_pages", {})
     if not isinstance(store, dict):
@@ -1404,7 +1353,16 @@ def _save_reader_state(source_id: str, payload: dict) -> None:
         "last_read_page": page,
         "last_read_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
-    for key in ("reader_mode", "scale_mode", "active_tab", "target_lang", "focused_annotation_id", "focused_chunk_id"):
+    for key in (
+        "reader_mode",
+        "scale_mode",
+        "active_tab",
+        "target_lang",
+        "focused_annotation_id",
+        "focused_chunk_id",
+        "active_left_tab",
+        "active_translation_anchor",
+    ):
         value = _payload_text(payload, key)
         if value:
             metadata[key] = value
@@ -1413,6 +1371,10 @@ def _save_reader_state(source_id: str, payload: dict) -> None:
             metadata[key] = _payload_int(payload, key, int(metadata.get(key) or (50 if key == "compare_split_ratio" else 340)))
     if "side_panel_collapsed" in payload:
         metadata["side_panel_collapsed"] = bool(payload.get("side_panel_collapsed"))
+    if "left_rail_collapsed" in payload:
+        metadata["left_rail_collapsed"] = bool(payload.get("left_rail_collapsed"))
+    if "translation_source_visible" in payload:
+        metadata["translation_source_visible"] = bool(payload.get("translation_source_visible"))
     if visible_pages:
         metadata["last_visible_pages"] = visible_pages
     current = load_research_sources(selected)
@@ -2184,7 +2146,7 @@ def _render_paper_reader(inbox) -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
-    if source.metadata.get("pdf_asset_ref") and os.getenv("NBLANE_READER_USE_STREAMLIT_COMPONENT", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    if source.metadata.get("pdf_asset_ref"):
         try:
             token = mint_reader_token(user.id, selected, source_id)
         except Exception as exc:
@@ -2196,116 +2158,7 @@ def _render_paper_reader(inbox) -> None:
         iframe_src = f"{base}/reader/view/{encoded_source}?token={encoded_token}" if base else f"/reader/view/{encoded_source}?token={encoded_token}"
         st.components.v1.iframe(iframe_src, height=1200, scrolling=False)
         return
-    page_rows = load_paper_pages(_pdir, source_id)
-    segment_rows_for_reader = load_paper_segments(_pdir, source_id)
-    annotation_rows_for_reader = load_paper_annotations(_pdir, source_id)
-    translation_rows_for_reader = load_paper_translations(_pdir, source_id)
-    chunk_rows_for_reader = load_chunks(_pdir, source_id)
-    analysis_for_reader = load_paper_analysis(_pdir, source_id)
-    focus_annotation_id = st.session_state.get(_reader_key(source_id, "focus_annotation_id"), "")
-    reader_page = int(st.session_state.get(_reader_key(source_id, "page"), source.metadata.get("last_read_page") or 1) or 1)
-    if source.metadata.get("pdf_asset_ref"):
-        requested_pages = _reader_requested_pages(source_id)
-        visible_pages = st.session_state.get(_reader_key(source_id, "visible_pages"), [])
-        requested_pages.update(clean_page_list(visible_pages))
-        reader_payload = build_reader_payload(
-            _pdir,
-            source_id,
-            page=reader_page,
-            requested_pages=requested_pages,
-            target_lang=str(source.metadata.get("target_lang") or "zh"),
-        )
-        reader_state = reader_payload.get("reader_state") if isinstance(reader_payload.get("reader_state"), dict) else {}
-        context_window = reader_payload.get("context_window") if isinstance(reader_payload.get("context_window"), dict) else {}
-        event = st_research_paper_reader(
-            source=reader_payload["source"],
-            pdf_url=str(reader_payload.get("pdf_url") or _reader_pdf_url(source_id)),
-            pdf_base64=_reader_pdf_base64(source_id),
-            page_previews=reader_payload["page_previews"],
-            pages=reader_payload["pages"],
-            segments=reader_payload["segments"],
-            annotations=reader_payload["annotations"],
-            translations=reader_payload["translations"],
-            translation_units=reader_payload.get("translation_units", []),
-            translation_summary=reader_payload.get("translation_summary", {}),
-            translation_revision=str(reader_payload.get("translation_revision") or ""),
-            compare_split_ratio=reader_payload.get("compare_split_ratio") or 50,
-            panel_width=reader_payload.get("panel_width") or 340,
-            chunks=reader_payload["chunks"],
-            analysis=reader_payload["analysis"],
-            ui={
-                "annotations": _l("annotations", "Annotations"),
-                "translation": _l("translation", "Translation"),
-                "ai": "Deep Read",
-                "deep_read": "Deep Read",
-                "claims": ui["claims_citations"],
-                "create_annotation": _l("highlight", "Highlight"),
-                "delete_annotation": _l("delete_annotation", "Delete annotation"),
-                "create_chunk": ui["create_chunk"],
-                "create_citation": ui["create_citation"],
-                "translate_selection": _l("translate_selection", "Translate selection"),
-                "translate_full_paper": _l("translate_full_paper", "Full translation"),
-                "translate_visible_pages": _l("translate_visible_pages", "Visible pages"),
-                "explain_selection": _l("explain_selection", "Explain selection"),
-                "ask_paper": _l("ask_paper", "Ask paper"),
-                "save_progress": _l("save_progress", "Save progress"),
-                "review_card": _l("review_card", "Review"),
-                "fullscreen": _l("fullscreen", "Fullscreen"),
-                "exit_fullscreen": _l("exit_fullscreen", "Exit fullscreen"),
-                "mode_pdf": "PDF",
-                "mode_compare": _l("mode_compare", "Compare"),
-                "mode_translation": _l("mode_translation", "Translation only"),
-                "search": _l("search", "Search"),
-                "page": _l("page", "Page"),
-                "empty": ui["empty_status"],
-                "fit_width": _l("fit_width", "Fit width"),
-                "fit_page": _l("fit_page", "Fit page"),
-                "actual_size": _l("actual_size", "1:1"),
-                "panel": _l("panel", "Panel"),
-            },
-            settings={
-                "page": reader_state.get("last_read_page") or reader_page,
-                "initial_page": reader_state.get("last_read_page") or reader_page,
-                "page_count": context_window.get("total_pages") or source.metadata.get("page_count") or 1,
-                "context_window": context_window,
-                "view_mode": "continuous",
-                "reader_mode": reader_state.get("reader_mode") or "pdf",
-                "scale_mode": reader_state.get("scale_mode") or "fit-width",
-                "active_tab": reader_state.get("active_tab") or "notes",
-                "target_lang": reader_state.get("target_lang") or "zh",
-                "compare_split_ratio": reader_state.get("compare_split_ratio") or reader_payload.get("compare_split_ratio") or 50,
-                "panel_width": reader_state.get("panel_width") or reader_payload.get("panel_width") or 340,
-                "overscan_pages": 2,
-                "auto_save_progress": False,
-                "emit_passive_events": False,
-                "side_panel_default": "collapsed" if reader_state.get("side_panel_collapsed", True) else "open",
-                "side_panel_collapsed": reader_state.get("side_panel_collapsed", True),
-                "focus_annotation_id": focus_annotation_id,
-                "focus_chunk_id": st.session_state.get(_reader_key(source_id, "focus_chunk_id"), reader_state.get("focused_chunk_id") or ""),
-                "height_mode": "viewport",
-                "render_cache": True,
-                "render_cache_max_pages": 24,
-                "translation_layout": "overlay",
-                "translation_overflow_policy": "fixed-expand",
-                "translation_dock_default": "selection",
-                "pdf_load_timeout_ms": 9000,
-                "reader_action_status": st.session_state.get(_reader_key(source_id, "last_action_status"), {}),
-            },
-            key=f"paper_pdf_reader:{selected}:{source_id}",
-            height=1040,
-        )
-        _handle_reader_component_event(
-            source_id,
-            event,
-            segment_rows=segment_rows_for_reader,
-            annotation_rows=annotation_rows_for_reader,
-            chunk_rows=chunk_rows_for_reader,
-        )
-        _render_reader_ai_result(source_id)
-        _render_reader_translation_summary(source_id)
-        return
-    else:
-        st.info(_l("pdf_missing", "No PDF asset is attached; using text-mode Reader."))
+    st.info(_l("pdf_missing", "No PDF asset is attached; using text-mode Reader."))
 
     pages, segments, annotations, translations_tab, ai_tab, claims_tab = st.tabs(
         [

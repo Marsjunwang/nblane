@@ -1001,6 +1001,7 @@ def ensure_paper_reading_artifacts(
     source_id: str,
     *,
     prefer_grobid: bool = True,
+    target_lang: str = "",
     progress_callback: Any | None = None,
 ) -> dict[str, object]:
     """Ensure page text and reading segments exist for the PDF reader.
@@ -1083,10 +1084,28 @@ def ensure_paper_reading_artifacts(
                 except Exception as fallback_exc:
                     warnings.append(f"Page-text fallback failed: {fallback_exc}")
 
+    migration_lang = _clean_text(target_lang) or _clean_text(source_metadata.get("target_lang")) or "zh"
+    migration_summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang=migration_lang)
+
     _, source = _source_by_id(profile, source_id)
     metadata = dict(source.metadata or {})
     structure_backend = _clean_text(metadata.get("structure_backend"))
     structured_warnings = _clean_list(metadata.get("structured_extraction_warnings"))
+    rect_count = sum(1 for segment in segments if segment.rects)
+    coordinate_summary = {
+        "segments_with_rects": rect_count,
+        "segments_without_rects": max(0, len(segments) - rect_count),
+    }
+    coordinate_warnings: list[str] = []
+    if structure_backend == "grobid" and segments:
+        if rect_count == 0:
+            coordinate_warnings.append(
+                "GROBID returned structured text without PDF coordinates; Reader navigation will fall back to page-level anchors."
+            )
+        elif rect_count < len(segments):
+            coordinate_warnings.append(
+                "Some GROBID segments did not include PDF coordinates; those anchors will fall back to page-level navigation."
+            )
     status = "ready"
     if structure_backend and structure_backend != "grobid":
         status = "fallback"
@@ -1119,7 +1138,9 @@ def ensure_paper_reading_artifacts(
         "pages": len(pages),
         "segments": len(segments),
         "structure_backend": structure_backend,
-        "warnings": warnings + structured_warnings,
+        "coordinate_extraction": coordinate_summary,
+        "translation_migration": migration_summary,
+        "warnings": warnings + structured_warnings + coordinate_warnings,
     }
 
 
@@ -1193,11 +1214,29 @@ def process_grobid_fulltext(profile: str | Path, source_id: str) -> GrobidDocume
     base = _clean_text(os.getenv("NBLANE_GROBID_URL")) or "http://127.0.0.1:8070"
     pdf_bytes = load_paper_pdf_bytes(profile, source_id)
     boundary = "----nblane-paper-boundary"
-    body = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="input"; filename="paper.pdf"\r\n'
-        "Content-Type: application/pdf\r\n\r\n"
-    ).encode("utf-8") + pdf_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    fields = {
+        "teiCoordinates": "p,head,figure,formula,biblStruct",
+    }
+    chunks: list[bytes] = []
+    chunks.append(
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="input"; filename="paper.pdf"\r\n'
+            "Content-Type: application/pdf\r\n\r\n"
+        ).encode("utf-8")
+        + pdf_bytes
+        + b"\r\n"
+    )
+    for name, value in fields.items():
+        chunks.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        )
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(chunks)
     request = urllib.request.Request(
         base.rstrip("/") + "/api/processFulltextDocument",
         data=body,
@@ -1213,55 +1252,217 @@ def _tei_text(node: ET.Element) -> str:
     return " ".join(" ".join(node.itertext()).split())
 
 
+def _tei_local_name(node: ET.Element) -> str:
+    return str(node.tag).rsplit("}", 1)[-1].lower()
+
+
+def _tei_float(value: object) -> float:
+    text_value = _clean_text(value)
+    if not text_value:
+        return 0.0
+    match = re.search(r"-?\d+(?:\.\d+)?", text_value)
+    return float(match.group(0)) if match else 0.0
+
+
+def _tei_page_models(root: ET.Element) -> dict[int, dict[str, float]]:
+    models: dict[int, dict[str, float]] = {}
+    for node in root.iter():
+        if _tei_local_name(node) != "surface":
+            continue
+        raw_page = (
+            node.attrib.get("n")
+            or node.attrib.get("{http://www.w3.org/XML/1998/namespace}id")
+            or node.attrib.get("xml:id")
+            or ""
+        )
+        match = re.search(r"\d+", str(raw_page))
+        if not match:
+            continue
+        page = int(match.group(0))
+        ulx = _tei_float(node.attrib.get("ulx"))
+        uly = _tei_float(node.attrib.get("uly"))
+        lrx = _tei_float(node.attrib.get("lrx"))
+        lry = _tei_float(node.attrib.get("lry"))
+        width = lrx - ulx if lrx > ulx else _tei_float(node.attrib.get("width"))
+        height = lry - uly if lry > uly else _tei_float(node.attrib.get("height"))
+        if width > 0 and height > 0:
+            models[page] = {"width": width, "height": height}
+    return models
+
+
+def _grobid_coord_rects(coords: object, page_models: dict[int, dict[str, float]]) -> list[dict[str, object]]:
+    rects: list[dict[str, object]] = []
+    for chunk in re.split(r";\s*", _clean_text(coords)):
+        if not chunk:
+            continue
+        parts = [part.strip() for part in chunk.split(",")]
+        if len(parts) < 5:
+            continue
+        try:
+            page = int(float(parts[0]))
+            x = float(parts[1])
+            y = float(parts[2])
+            width = float(parts[3])
+            height = float(parts[4])
+        except (TypeError, ValueError):
+            continue
+        if page < 1 or width <= 0 or height <= 0:
+            continue
+        model = page_models.get(page) or {}
+        page_width = float(model.get("width") or 0)
+        page_height = float(model.get("height") or 0)
+        if page_width <= 0 or page_height <= 0:
+            rect: dict[str, object] = {
+                "page": page,
+                "x": x,
+                "y": y,
+                "w": width,
+                "h": height,
+            }
+        else:
+            rect = _rect_payload((x, y, x + width, y + height), page_width=page_width, page_height=page_height) or {}
+            rect["page"] = page
+        if rect:
+            rects.append(rect)
+    return rects
+
+
+def _grobid_node_rects(node: ET.Element, page_models: dict[int, dict[str, float]]) -> list[dict[str, object]]:
+    rects = _grobid_coord_rects(node.attrib.get("coords"), page_models)
+    if rects:
+        return rects
+    merged: list[dict[str, object]] = []
+    for child in node.iter():
+        if child is node:
+            continue
+        merged.extend(_grobid_coord_rects(child.attrib.get("coords"), page_models))
+    return merged
+
+
+def _grobid_page_from_rects(rects: list[dict[str, object]]) -> int:
+    pages = [int(row.get("page") or 0) for row in rects if str(row.get("page") or "").strip().isdigit()]
+    return min(pages) if pages else 0
+
+
+def _tei_int_attr(node: ET.Element | None, *names: str) -> int:
+    if node is None:
+        return 0
+    for name in names:
+        value = _clean_text(node.attrib.get(name))
+        if not value:
+            continue
+        match = re.search(r"\d+", value)
+        if match:
+            return int(match.group(0))
+    return 0
+
+
+def _tei_first_direct_child(node: ET.Element, local_name: str) -> ET.Element | None:
+    for child in list(node):
+        if _tei_local_name(child) == local_name:
+            return child
+    return None
+
+
+def _tei_first_descendant(node: ET.Element, local_name: str) -> ET.Element | None:
+    for child in node.iter():
+        if child is not node and _tei_local_name(child) == local_name:
+            return child
+    return None
+
+
 def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
     """Convert a small useful subset of GROBID TEI to paper segments."""
 
     if not _clean_text(tei_xml):
         return []
     root = ET.fromstring(tei_xml)
-    ns = {"tei": "http://www.tei-c.org/ns/1.0"}
-    body = root.find(".//tei:text/tei:body", ns)
-    if body is None:
-        body = root.find(".//text/body")
+    body = _tei_first_descendant(root, "body")
     if body is None:
         return []
+    page_models = _tei_page_models(root)
     segments: list[PaperSegment] = []
     order = 0
     slug = source_slug(source_id)
-    for div in body.findall(".//tei:div", ns) + body.findall(".//div"):
-        section_path = []
-        head = div.find("tei:head", ns)
-        if head is None:
-            head = div.find("head")
-        if head is not None:
-            title = _tei_text(head)
-            if title:
-                section_path.append(title)
-        paragraphs = div.findall("tei:p", ns) + div.findall("p")
-        for paragraph in paragraphs:
-            text = _tei_text(paragraph)
-            if not text:
-                continue
-            order += 1
-            try:
-                page = int(paragraph.attrib.get("n") or div.attrib.get("n") or 0)
-            except ValueError:
-                page = 0
-            locator = f"p. {page}" if page else ""
-            if section_path:
-                locator = (locator + " " if locator else "") + "§ " + " / ".join(section_path)
-            segments.append(
-                PaperSegment(
-                    segment_id=f"seg:{slug}:{order:05d}",
-                    source_id=source_id,
-                    page=page,
-                    order=order,
-                    section_path=section_path,
-                    kind="paragraph",
-                    text=text,
-                    locator=locator or f"§ {order}",
-                )
+
+    def append_segment(
+        node: ET.Element,
+        *,
+        kind: str,
+        section_path: list[str],
+        text: str = "",
+        page_hint: int = 0,
+        require_rects: bool = False,
+    ) -> None:
+        nonlocal order
+        clean_text = _clean_text(text) or _tei_text(node)
+        if not clean_text:
+            return
+        rects = _grobid_node_rects(node, page_models)
+        if require_rects and not rects:
+            return
+        page = (
+            _grobid_page_from_rects(rects)
+            or page_hint
+            or _tei_int_attr(node, "n", "facs", "target")
+        )
+        order += 1
+        locator = f"p. {page}" if page else ""
+        if section_path:
+            locator = (locator + " " if locator else "") + "§ " + " / ".join(section_path)
+        segments.append(
+            PaperSegment(
+                segment_id=f"seg:{slug}:{order:05d}",
+                source_id=source_id,
+                page=page,
+                order=order,
+                section_path=list(section_path),
+                kind=kind,
+                text=clean_text,
+                locator=locator or f"§ {order}",
+                rects=rects,
+                metadata={"grobid_tag": _tei_local_name(node)},
             )
+        )
+
+    def walk_figure(figure: ET.Element, section_path: list[str], page_hint: int) -> None:
+        figure_page = _grobid_page_from_rects(_grobid_node_rects(figure, page_models)) or page_hint
+        for child in list(figure):
+            local = _tei_local_name(child)
+            if local in {"head", "figdesc"}:
+                append_segment(child, kind="caption", section_path=section_path, page_hint=figure_page)
+            elif local == "p":
+                append_segment(child, kind="caption", section_path=section_path, page_hint=figure_page)
+            elif local == "formula":
+                append_segment(child, kind="formula", section_path=section_path, page_hint=figure_page)
+
+    def walk_container(container: ET.Element, section_path: list[str], page_hint: int = 0) -> None:
+        for child in list(container):
+            local = _tei_local_name(child)
+            if local == "div":
+                div_page = _tei_int_attr(child, "n") or page_hint
+                head = _tei_first_direct_child(child, "head")
+                title = _tei_text(head) if head is not None else ""
+                next_path = list(section_path)
+                if head is not None and title:
+                    next_path.append(title)
+                    append_segment(
+                        head,
+                        kind="heading",
+                        section_path=next_path,
+                        text=title,
+                        page_hint=div_page,
+                        require_rects=True,
+                    )
+                walk_container(child, next_path, page_hint=div_page)
+            elif local == "p":
+                append_segment(child, kind="paragraph", section_path=section_path, page_hint=page_hint)
+            elif local == "figure":
+                walk_figure(child, section_path, page_hint)
+            elif local == "formula":
+                append_segment(child, kind="formula", section_path=section_path, page_hint=page_hint)
+
+    walk_container(body, [])
     return segments
 
 
@@ -1793,6 +1994,123 @@ def upsert_paper_translations(
     return merged
 
 
+def _translation_match_text(value: str) -> str:
+    clean = _clean_text(value).casefold()
+    return re.sub(r"\s+", " ", clean)
+
+
+def _translation_text_match_ratio(source_text: str, segment_text: str) -> float:
+    source = _translation_match_text(source_text)
+    segment = _translation_match_text(segment_text)
+    if not source or not segment:
+        return 0.0
+    if source == segment:
+        return 1.0
+    shorter, longer = (source, segment) if len(source) <= len(segment) else (segment, source)
+    if shorter and shorter in longer:
+        return len(shorter) / max(1, len(longer))
+    source_tokens = set(source.split())
+    segment_tokens = set(segment.split())
+    if not source_tokens or not segment_tokens:
+        return 0.0
+    return len(source_tokens & segment_tokens) / max(1, len(source_tokens | segment_tokens))
+
+
+def migrate_legacy_translations_to_segments(
+    profile: str | Path,
+    source_id: str,
+    target_lang: str = "zh",
+) -> dict[str, object]:
+    """Copy safe page/layout translation cache rows onto current segment scopes."""
+
+    clean_lang = _clean_text(target_lang) or "zh"
+    segments = load_paper_segments(profile, source_id)
+    if not segments:
+        return {"migrated": 0, "skipped": 0, "warnings": ["No segments available for translation migration."]}
+    translations = load_paper_translations(profile, source_id)
+    existing_current = {
+        row.segment_id
+        for row in translations
+        if row.scope_type == "segment"
+        and row.segment_id
+        and row.target_lang == clean_lang
+        and row.status == "translated"
+        and _clean_text(row.translated_text)
+        and any(segment.segment_id == row.segment_id and segment.text_hash == row.source_hash for segment in segments)
+    }
+    by_page: dict[int, list[PaperSegment]] = {}
+    for segment in segments:
+        by_page.setdefault(int(segment.page or 0), []).append(segment)
+
+    savable: list[dict[str, object]] = []
+    migrated_ids: list[str] = []
+    warnings: list[str] = []
+    skipped = 0
+    for row in translations:
+        if row.target_lang != clean_lang or row.scope_type not in {"layout", "page"}:
+            continue
+        translated = _clean_text(row.translated_text)
+        if not translated or row.status == "failed":
+            skipped += 1
+            continue
+        candidates = by_page.get(int(row.page or 0), [])
+        picked: PaperSegment | None = None
+        if row.scope_type == "page":
+            if len(candidates) == 1:
+                picked = candidates[0]
+            else:
+                for segment in candidates:
+                    if _translation_text_match_ratio(row.source_text, segment.text) >= 0.96:
+                        picked = segment
+                        break
+        else:
+            best_score = 0.0
+            for segment in candidates:
+                score = _translation_text_match_ratio(row.source_text, segment.text)
+                if score > best_score:
+                    best_score = score
+                    picked = segment
+            if best_score < 0.8:
+                picked = None
+        if picked is None:
+            skipped += 1
+            warnings.append(f"Skipped legacy {row.scope_type} translation {row.id}: no safe segment match.")
+            continue
+        if picked.segment_id in existing_current:
+            skipped += 1
+            continue
+        savable.append(
+            {
+                "source_id": source_id,
+                "scope_type": "segment",
+                "scope_ref": picked.segment_id,
+                "segment_id": picked.segment_id,
+                "page": picked.page,
+                "order": picked.order,
+                "anchor_id": f"segment:{picked.segment_id}",
+                "locator": picked.locator or (f"p. {picked.page}" if picked.page else ""),
+                "source_hash": picked.text_hash,
+                "source_text": picked.text,
+                "target_lang": clean_lang,
+                "translated_text": translated,
+                "rects": copy.deepcopy(picked.rects),
+                "generated_by": f"migration:{row.scope_type}_to_segment",
+                "warnings": [f"Migrated from legacy {row.scope_type} translation {row.id}."],
+                "status": "translated",
+            }
+        )
+        migrated_ids.append(row.id)
+        existing_current.add(picked.segment_id)
+    if savable:
+        upsert_paper_translations(profile, source_id, savable)
+    return {
+        "migrated": len(savable),
+        "skipped": skipped,
+        "migrated_ids": migrated_ids,
+        "warnings": warnings,
+    }
+
+
 def _reader_page_set(
     *,
     page: int,
@@ -1821,6 +2139,21 @@ def _metadata_int(metadata: dict[str, object], key: str, default: int, *, minimu
     return max(minimum, min(maximum, value))
 
 
+def _metadata_bool(metadata: dict[str, object], key: str, default: bool = False) -> bool:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        clean = value.strip().lower()
+        if clean in {"1", "true", "yes", "on"}:
+            return True
+        if clean in {"0", "false", "no", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
 def _reader_state_from_metadata(metadata: dict[str, object], *, page: int, target_lang: str) -> dict[str, object]:
     try:
         last_read_page = int(metadata.get("last_read_page") or page or 1)
@@ -1831,11 +2164,15 @@ def _reader_state_from_metadata(metadata: dict[str, object], *, page: int, targe
         "scale_mode": _clean_text(metadata.get("scale_mode")) or "fit-width",
         "active_tab": _clean_text(metadata.get("active_tab")) or "notes",
         "target_lang": _clean_text(metadata.get("target_lang")) or target_lang or "zh",
-        "side_panel_collapsed": bool(metadata.get("side_panel_collapsed", True)),
+        "side_panel_collapsed": _metadata_bool(metadata, "side_panel_collapsed", True),
         "compare_split_ratio": _metadata_int(metadata, "compare_split_ratio", 50, minimum=20, maximum=80),
         "panel_width": _metadata_int(metadata, "panel_width", 340, minimum=280, maximum=560),
         "focused_annotation_id": _clean_text(metadata.get("focused_annotation_id")),
         "focused_chunk_id": _clean_text(metadata.get("focused_chunk_id")),
+        "left_rail_collapsed": _metadata_bool(metadata, "left_rail_collapsed", False),
+        "active_left_tab": _clean_text(metadata.get("active_left_tab")) or "outline",
+        "translation_source_visible": _metadata_bool(metadata, "translation_source_visible", True),
+        "active_translation_anchor": _clean_text(metadata.get("active_translation_anchor")),
         "last_visible_pages": [
             int(item)
             for item in metadata.get("last_visible_pages", [])
@@ -1844,6 +2181,35 @@ def _reader_state_from_metadata(metadata: dict[str, object], *, page: int, targe
         "last_read_page": max(1, last_read_page),
         "last_read_at": _clean_text(metadata.get("last_read_at")),
     }
+
+
+def _reader_outline_from_segments(segments: list[PaperSegment]) -> list[dict[str, object]]:
+    """Build a lightweight section outline without including segment body text."""
+
+    outline: list[dict[str, object]] = []
+    seen: set[tuple[str, ...]] = set()
+    for segment in sorted(segments, key=lambda row: (row.page or 10**9, row.order, row.segment_id)):
+        path = tuple(_clean_text(item) for item in segment.section_path if _clean_text(item))
+        for level, _ in enumerate(path, start=1):
+            key = path[:level]
+            if key in seen:
+                continue
+            seen.add(key)
+            title = key[-1]
+            anchor_seed = "|".join(key)
+            outline.append(
+                {
+                    "anchor_id": f"outline:{source_slug(segment.source_id)}:{hashlib.sha256(anchor_seed.encode('utf-8')).hexdigest()[:12]}",
+                    "target_anchor_id": f"segment:{segment.segment_id}",
+                    "segment_id": segment.segment_id,
+                    "title": title,
+                    "page": int(segment.page or 0),
+                    "order": int(segment.order or 0),
+                    "level": level,
+                    "section_path": list(key),
+                }
+            )
+    return outline
 
 
 def _translation_revision(profile: str | Path, source_id: str, target_lang: str) -> str:
@@ -2539,7 +2905,7 @@ def build_translation_units(
     units: list[dict[str, object]] = []
     summary = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
     layout_rows = [copy.deepcopy(row) for row in (layout_units or []) if isinstance(row, dict)]
-    if layout_rows:
+    if layout_rows and not segments and not pages:
         layout_translations = {
             _clean_text(row.get("scope_ref") or row.get("segment_id")): row
             for row in translations
@@ -2599,37 +2965,38 @@ def build_translation_units(
             if segment_id:
                 segment_translations[segment_id] = row
 
-    for index, page_row in enumerate(page_rows, start=1):
-        source_text = _clean_text(page_row.text)
-        if not source_text:
-            continue
-        page_hash = page_row.text_hash or text_hash(source_text)
-        translation = page_translations.get(page_row.page)
-        translated_text = translation_text_from_row(translation or {})
-        status = _translation_unit_status(translation, page_hash)
-        summary[status] = summary.get(status, 0) + 1
-        scope_ref = f"page:{page_row.page}:{page_hash}"
-        units.append(
-            {
-                "unit_id": scope_ref,
-                "anchor_id": scope_ref,
-                "scope_type": "page",
-                "scope_ref": scope_ref,
-                "segment_id": "",
-                "page": page_row.page,
-                "order": index * 100000,
-                "section_path": [],
-                "kind": "page",
-                "locator": f"p. {page_row.page}",
-                "source_hash": page_hash,
-                "source_text": source_text,
-                "target_lang": target_lang,
-                "translated_text": translated_text,
-                "status": status,
-                "status_reason": _clean_text((translation or {}).get("status_reason")),
-                "rects": [],
-            }
-        )
+    if not segments:
+        for index, page_row in enumerate(page_rows, start=1):
+            source_text = _clean_text(page_row.text)
+            if not source_text:
+                continue
+            page_hash = page_row.text_hash or text_hash(source_text)
+            translation = page_translations.get(page_row.page)
+            translated_text = translation_text_from_row(translation or {})
+            status = _translation_unit_status(translation, page_hash)
+            summary[status] = summary.get(status, 0) + 1
+            scope_ref = f"page:{page_row.page}:{page_hash}"
+            units.append(
+                {
+                    "unit_id": scope_ref,
+                    "anchor_id": scope_ref,
+                    "scope_type": "page",
+                    "scope_ref": scope_ref,
+                    "segment_id": "",
+                    "page": page_row.page,
+                    "order": index * 100000,
+                    "section_path": [],
+                    "kind": "page",
+                    "locator": f"p. {page_row.page}",
+                    "source_hash": page_hash,
+                    "source_text": source_text,
+                    "target_lang": target_lang,
+                    "translated_text": translated_text,
+                    "status": status,
+                    "status_reason": _clean_text((translation or {}).get("status_reason")),
+                    "rects": [],
+                }
+            )
 
     for raw_segment in sorted(segments, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("segment_id")))):
         segment_id = _clean_text(raw_segment.get("segment_id"))
@@ -2717,6 +3084,7 @@ def build_reader_payload(
         if isinstance(row, dict)
     }
     all_segments = load_paper_segments(profile, source_id)
+    outline = _reader_outline_from_segments(all_segments)
     reader_preparation = _reader_preparation_summary(source, all_pages, all_segments)
     has_paged_segments = any(segment.page > 0 for segment in all_segments)
     segments = [
@@ -2727,6 +3095,7 @@ def build_reader_payload(
     ]
     segment_ids = {str(row.get("segment_id") or "") for row in segments}
     segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
+    segment_first = bool(all_segments)
     translations: list[dict[str, object]] = []
     for row in load_paper_translations(profile, source_id):
         if row.target_lang != target_lang:
@@ -2735,13 +3104,19 @@ def build_reader_payload(
         row_page = int(row.page or segment_pages.get(row.segment_id, 0))
         include_row = False
         if scope_type == "layout":
-            include_row = row.scope_ref in layout_scope_refs
-        elif row_page in context_page_set:
-            include_row = True
-        elif row.segment_id and row.segment_id in segment_ids:
-            include_row = True
-        elif scope_type == "page" and any(str(row.scope_ref).startswith(f"page:{page_number}:") for page_number in context_pages):
-            include_row = True
+            if segment_first:
+                include_row = False
+            else:
+                include_row = row.scope_ref in layout_scope_refs
+        elif scope_type == "page":
+            if segment_first:
+                include_row = False
+            else:
+                include_row = row_page in context_page_set or any(str(row.scope_ref).startswith(f"page:{page_number}:") for page_number in context_pages)
+        elif scope_type == "selection":
+            include_row = row_page in context_page_set or row_page <= 0
+        elif scope_type == "segment":
+            include_row = row_page in context_page_set or bool(row.segment_id and row.segment_id in segment_ids)
         if include_row:
             translations.append({**row.to_dict(), "page": row_page})
     page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
@@ -2797,6 +3172,7 @@ def build_reader_payload(
         "pdf_url": pdf_url,
         "page_previews": preview_rows,
         "page_models": page_models,
+        "outline": outline,
         "pages": [page_row.to_dict() for page_row in page_context_rows],
         "segments": segments,
         "translations": translations,
@@ -3040,7 +3416,7 @@ def translate_full_paper(
     mode: str = "missing_or_stale",
     batch_size: int = 20,
     *,
-    scope_strategy: str = "auto",
+    scope_strategy: str = "segment",
     ai_profile: str | None = None,
     require_review: bool = True,
     progress_callback: Any | None = None,
@@ -3055,7 +3431,7 @@ def translate_full_paper(
 
     clean_lang = _clean_text(target_lang) or "zh"
     clean_mode = _clean_text(mode).lower() or "missing_or_stale"
-    clean_scope_strategy = _clean_text(scope_strategy).lower() or "auto"
+    clean_scope_strategy = _clean_text(scope_strategy).lower() or "segment"
     if clean_scope_strategy not in {"auto", "segment", "page", "layout"}:
         clean_scope_strategy = "auto"
     if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
@@ -3537,6 +3913,7 @@ def translate_full_paper(
         "source_id": source_id,
         "target_lang": clean_lang,
         "mode": clean_mode,
+        "scope": "segment",
         "segments_total": len(segments),
         "segments_selected": len(selected_segments),
         "batches": len(batches),
@@ -4948,6 +5325,7 @@ __all__ = [
     "load_paper_segments",
     "load_paper_translations",
     "mark_imported_paper_results",
+    "migrate_legacy_translations_to_segments",
     "move_papers_to_node",
     "normalize_translation_row",
     "paper_citation_diagnostics",

@@ -113,11 +113,10 @@ Ingest and full evidence editing remain **CLI / Web**.
 
 ### Web UI
 
-Run the Web UI from the repo root. The Research PDF Reader has two local-dev
-options:
+Run the Web UI from the repo root. The Research PDF Reader is served by the
+FastAPI sidecar; local development needs both the Reader API and Streamlit.
 
-**Recommended for Reader development: Streamlit + FastAPI sidecar.** Start the
-Reader API first, then start Streamlit with a browser-reachable
+Start the Reader API first, then start Streamlit with a browser-reachable
 `NBLANE_READER_API_BASE`:
 
 ```bash
@@ -137,11 +136,10 @@ for port `8502`. If this variable is omitted without a reverse proxy, the
 iframe uses `/reader/view/...`; plain Streamlit will serve its own shell at that
 path, which looks like a blank Reader.
 
-**One-process fallback:** set `NBLANE_READER_USE_STREAMLIT_COMPONENT=1` to use
-the static Streamlit component instead of the FastAPI iframe Reader.
-
 In production behind Caddy, leave `NBLANE_READER_API_BASE` unset and route
-`/reader/*` to the FastAPI sidecar.
+`/reader/*` to the FastAPI sidecar. Translation is shown as a semantic flow by
+default; set `NBLANE_READER_DEBUG_OVERLAY=1` only when debugging the legacy PDF
+overlay renderer.
 
 Core surfaces include **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**,
 **Research Workspace**, **Output Studio**, **Public Build**, **Team View**,

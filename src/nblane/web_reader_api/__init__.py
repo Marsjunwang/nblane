@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -140,11 +141,16 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "side_panel_collapsed": reader_state.get("side_panel_collapsed", True),
         "focus_annotation_id": reader_state.get("focused_annotation_id") or "",
         "focus_chunk_id": reader_state.get("focused_chunk_id") or "",
+        "left_rail_collapsed": reader_state.get("left_rail_collapsed", False),
+        "active_left_tab": reader_state.get("active_left_tab") or "outline",
+        "translation_source_visible": reader_state.get("translation_source_visible", True),
+        "active_translation_anchor": reader_state.get("active_translation_anchor") or "",
         "height_mode": "viewport",
         "render_cache": True,
         "render_cache_max_pages": 36,
-        "translation_layout": "overlay",
+        "translation_layout": "flow",
         "translation_overflow_policy": "fixed-expand",
+        "debug_overlay_enabled": os.getenv("NBLANE_READER_DEBUG_OVERLAY", "").strip().lower() in {"1", "true", "yes", "on"},
         "translation_dock_default": "selection",
         "pdf_load_timeout_ms": 30000,
         "pdf_page_render_timeout_ms": 12000,
@@ -152,7 +158,26 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
     }
 
 
-def _payload_for_context(ctx: ReaderActionContext, page: int | None = None) -> dict[str, object]:
+def _query_pages(request: Request) -> set[int]:
+    pages: set[int] = set()
+    for key in ("pages", "requested_pages"):
+        for raw in request.query_params.getlist(key):
+            for part in str(raw or "").split(","):
+                try:
+                    page = int(part)
+                except (TypeError, ValueError):
+                    continue
+                if page > 0:
+                    pages.add(page)
+    return pages
+
+
+def _payload_for_context(
+    ctx: ReaderActionContext,
+    page: int | None = None,
+    *,
+    requested_pages: set[int] | None = None,
+) -> dict[str, object]:
     inbox = load_research_sources(ctx.profile_path)
     source = inbox.by_id().get(ctx.source_id)
     if source is None:
@@ -174,7 +199,7 @@ def _payload_for_context(ctx: ReaderActionContext, page: int | None = None) -> d
         ctx.profile_path,
         ctx.source_id,
         page=current_page,
-        requested_pages=set(),
+        requested_pages=set(requested_pages or set()),
         target_lang=target_lang,
         include_page_previews=False,
         pdf_url_override=f"{READER_PREFIX}/api/{quote(ctx.source_id, safe='')}/pdf",
@@ -329,7 +354,7 @@ async def reader_pdf_head(request: Request, source_id: str):
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/payload")
 async def reader_payload(request: Request, source_id: str, page: int | None = None):
     ctx = _request_context(request, source_id)
-    return JSONResponse(_payload_for_context(ctx, page=page))
+    return JSONResponse(_payload_for_context(ctx, page=page, requested_pages=_query_pages(request)))
 
 
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/page-preview/{{page}}")

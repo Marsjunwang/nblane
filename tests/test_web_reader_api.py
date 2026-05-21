@@ -111,7 +111,11 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("reader_preparation", payload.json())
         self.assertEqual(payload.json()["settings"]["overscan_pages"], 3)
         self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], 36)
-        self.assertEqual(payload.json()["settings"]["translation_layout"], "overlay")
+        self.assertEqual(payload.json()["settings"]["reader_mode"], "pdf")
+        self.assertEqual(payload.json()["settings"]["translation_layout"], "flow")
+        self.assertIn("outline", payload.json())
+        self.assertFalse(payload.json()["settings"]["debug_overlay_enabled"])
+        self.assertEqual(payload.json()["settings"]["active_left_tab"], "outline")
         self.assertEqual(payload.json()["settings"]["translation_overflow_policy"], "fixed-expand")
 
     def test_payload_uses_current_page_window_for_reader_context(self) -> None:
@@ -135,6 +139,7 @@ class TestWebReaderApi(unittest.TestCase):
                     source_id=source_id,
                     page=index,
                     order=index,
+                    section_path=[f"Section {index}"],
                     text=f"Segment {index}",
                     text_hash=text_hash(f"Segment {index}"),
                 )
@@ -165,12 +170,20 @@ class TestWebReaderApi(unittest.TestCase):
 
             response = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=5")
             payload = response.json()
+            expanded = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=5&pages=2,8")
+            expanded_payload = expanded.json()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["context_window"]["pages"], [4, 5, 6])
         self.assertEqual({row["page"] for row in payload["segments"]}, {4, 5, 6})
         self.assertEqual({row["page"] for row in payload["translations"]}, {4, 5, 6})
+        self.assertTrue(payload["outline"])
+        self.assertIn("target_anchor_id", payload["outline"][0])
+        self.assertNotIn("text", payload["outline"][0])
         self.assertNotIn(1, {row["page"] for row in payload["segments"]})
+        self.assertEqual(expanded.status_code, 200)
+        self.assertEqual(expanded_payload["context_window"]["pages"], [2, 4, 5, 6, 8])
+        self.assertEqual({row["page"] for row in expanded_payload["segments"]}, {2, 4, 5, 6, 8})
 
     def test_payload_accepts_reader_token_query_fallback(self) -> None:
         source_id = "source:paper:grounded"
@@ -236,6 +249,8 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("setActionState", response.text)
         self.assertIn("startReaderTask", response.text)
         self.assertIn("watchReaderTask", response.text)
+        self.assertIn("schedulePayloadRefresh", response.text)
+        self.assertIn('params.set("pages", requestedPages.join(","))', response.text)
         self.assertIn("prepare_reader_artifacts", response.text)
         self.assertIn("reader_preparation", response.text)
         self.assertIn("PDF ready", response.text)
@@ -243,6 +258,12 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("Fallback text ready", response.text)
         self.assertIn("Preparation failed", response.text)
         self.assertIn("page_models", response.text)
+        self.assertIn("outline", response.text)
+        self.assertIn("pr-left-rail", response.text)
+        self.assertIn("railTabButton(\"outline\"", response.text)
+        self.assertIn("railTabButton(\"pages\"", response.text)
+        self.assertIn("railTabButton(\"search\"", response.text)
+        self.assertIn("data-rail-tab", response.text)
         self.assertIn("translation_units", response.text)
         self.assertIn("translationFlowHtml", response.text)
         self.assertIn("translationUnitGroups", response.text)
@@ -252,6 +273,8 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("renderTranslationPage", response.text)
         self.assertIn("translationOverflowPolicy", response.text)
         self.assertIn("fitTranslationBlocks", response.text)
+        self.assertIn("debugOverlayEnabled", response.text)
+        self.assertIn("debugOverlayActive", response.text)
         self.assertIn("showTranslationUnitDock", response.text)
         self.assertIn("translationPageBaseSize", response.text)
         self.assertIn("scaleForTranslationPage", response.text)
@@ -264,7 +287,7 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn('if (text(obj.scope_type) !== "layout" || !hasRectGeometry(obj)) return false;', response.text)
         self.assertIn('if (text(obj.scope_type) === "layout") return obj.display_source === true ? text(obj.source_text) : "";', response.text)
         self.assertIn('data-scope-type', response.text)
-        self.assertIn('scope_strategy: "layout"', response.text)
+        self.assertIn('scope_strategy: "segment"', response.text)
         self.assertNotIn('if (text(obj.scope_type) === "layout") return "";', response.text)
         self.assertNotIn("pr-translation-block.layout.empty", response.text)
         self.assertNotIn(".layout.missing", response.text)
@@ -281,8 +304,13 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("panelResize", response.text)
         self.assertIn("compare_split_ratio", response.text)
         self.assertIn("Analyze Paper", response.text)
+        self.assertIn('data-action="analyzePaper"', response.text)
         self.assertIn('tabButton("translation"', response.text)
         self.assertIn('tabButton("review"', response.text)
+        self.assertNotIn('<button class="pr-button primary" data-action="translateFull"', response.text)
+        self.assertNotIn('<button class="pr-button" data-action="ask"', response.text)
+        self.assertNotIn('data-action="reviewCard"', response.text)
+        self.assertNotIn('<div class="pr-panel-head">Debug</div>${debugPanelHtml()}', response.text)
         self.assertNotIn('create_chunk: "Chunk"', response.text)
         self.assertNotIn('create_citation: "Cite"', response.text)
         self.assertNotIn("Ask about this", response.text)
