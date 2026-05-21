@@ -7042,6 +7042,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             continue
         if view != "other" and not is_paper:
             continue
+        metadata = source.metadata or {}
         annotations = load_paper_annotations(profile, source.id) if is_paper else []
         translations = load_paper_translations(profile, source.id) if is_paper else []
         diagnostics = paper_source_diagnostics(profile, source.id) if is_paper else {"badges": []}
@@ -7052,12 +7053,21 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             "title": source.title,
             "tree_path": ", ".join(paths.get(ref, ref) for ref in refs) or "Unsorted",
             "status": source.status,
-            "has_pdf": bool((source.metadata or {}).get("pdf_asset_ref")),
+            "authors": ", ".join(source.authors),
+            "published": source.published or _clean_text(metadata.get("year")),
+            "venue": _clean_text(metadata.get("venue")),
+            "tags": list(source.tags),
+            "url": source.url or _clean_text(metadata.get("canonical_url") or metadata.get("pdf_url")),
+            "summary": source.summary or _clean_text(metadata.get("abstract")),
+            "notes": source.notes,
+            "has_pdf": bool(metadata.get("pdf_asset_ref")),
+            "pdf_pages": metadata.get("page_count", ""),
+            "last_read_page": metadata.get("last_read_page", ""),
             "annotations_count": len([ann for ann in annotations if ann.status == "active"]),
             "chunks_count": chunk_counts.get(source.id, 0),
             "claims_count": claim_counts.get(source.id, 0),
             "citations_count": citation_counts.get(source.id, 0),
-            "last_read": _clean_text((source.metadata or {}).get("last_read_at") or source.reading.updated_at),
+            "last_read": _clean_text(metadata.get("last_read_at") or source.reading.updated_at),
             "visibility": source.visibility,
             "badges": [],
             "diagnostics": diagnostics,
@@ -7072,7 +7082,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             badges.append("Stale translation")
         if source.visibility == "private":
             badges.append("Private source")
-        if _clean_text((source.metadata or {}).get("pdf_download_status")) in {
+        if _clean_text(metadata.get("pdf_download_status")) in {
             "failed",
             "skipped_needs_link_check",
         }:
@@ -7083,6 +7093,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             label = _clean_text(badge)
             if label and label not in badges:
                 badges.append(label)
+        badge_set = set(badges)
         match = True
         if view == "unsorted":
             match = is_paper and not refs
@@ -7090,8 +7101,26 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             match = source.status == view
         elif view == "annotated":
             match = bool(row["annotations_count"] or row["chunks_count"] or not source.reading.empty)
-        elif node_id:
-            match = node_id in refs
+        elif view == "no_pdf":
+            match = is_paper and not row["has_pdf"]
+        elif view in {"needs_extraction", "ready_to_parse"}:
+            match = is_paper and bool(row["has_pdf"]) and (
+                not row["chunks_count"] or PAPER_DIAGNOSTIC_BADGES["needs_structured_extraction"] in badge_set
+            )
+        elif view in {"claims_need_review", "review_queue"}:
+            match = source.status == "candidate_ready" or "AI candidates" in badge_set
+        elif view == "duplicate_risk":
+            match = PAPER_DIAGNOSTIC_BADGES["duplicate_risk"] in badge_set
+        elif view == "stale_translation":
+            match = "Stale translation" in badge_set or PAPER_DIAGNOSTIC_BADGES["stale_translation"] in badge_set
+        elif view in {"recent", "recently_read"}:
+            match = bool(row["last_read"])
+        elif view == "private":
+            match = source.visibility == "private"
+        elif view in {"reviewed", "summarized"}:
+            match = source.status == "summarized"
+        if node_id and node_id not in refs:
+            match = False
         if match:
             rows.append(row)
     return rows

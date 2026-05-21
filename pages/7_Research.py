@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import html
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -319,6 +320,11 @@ def _save_sources(inbox, message: str) -> None:
     st.success(message)
 
 
+def _accept_latest_sources_for_additive_write() -> None:
+    """Let additive imports proceed after passive Reader progress writes."""
+    refresh_file_snapshots([_sources_path])
+
+
 def _render_source_form(inbox, *, source=None, prefix: str) -> None:
     existing = source
     with st.form(prefix):
@@ -623,6 +629,254 @@ def _node_options() -> dict[str, str]:
     return {"": _l("unsorted_inbox", "Unsorted Inbox"), **paths}
 
 
+_LIBRARY_VIEW_LABELS = {
+    "all": "All Papers",
+    "unsorted": "Unsorted Inbox",
+    "reading": "Reading",
+    "no_pdf": "PDF Missing",
+    "needs_extraction": "Needs Extraction",
+    "claims_need_review": "Claims Need Review",
+    "duplicate_risk": "Duplicate Risk",
+    "stale_translation": "Stale Translation",
+    "recent": "Recently Read",
+    "private": "Private Sources",
+    "reviewed": "Reviewed",
+    "archived": "Archived",
+    "discarded": "Discarded",
+}
+
+
+def _paper_library_key(name: str) -> str:
+    return f"paper_library:{selected}:{name}"
+
+
+def _reader_view_url(source_id: str) -> str:
+    token = mint_reader_token(user.id, selected, source_id)
+    base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+    encoded_source = quote(source_id, safe="")
+    encoded_token = quote(token, safe="")
+    path = f"/reader/view/{encoded_source}?token={encoded_token}"
+    return f"{base}{path}" if base else path
+
+
+def _short_text(value: object, limit: int = 160) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _badge_html(label: object, *, tone: str = "neutral") -> str:
+    clean = html.escape(str(label or "").strip())
+    if not clean:
+        return ""
+    return f'<span class="paper-badge paper-badge-{tone}">{clean}</span>'
+
+
+def _badge_tone(label: object) -> str:
+    text = str(label or "").lower()
+    if any(part in text for part in ("missing", "broken", "failed", "warning")):
+        return "warn"
+    if any(part in text for part in ("duplicate", "stale", "needs")):
+        return "alert"
+    if any(part in text for part in ("ready", "pdf", "reviewed")):
+        return "ok"
+    return "neutral"
+
+
+def _paper_badges_html(row: dict[str, object], *, limit: int = 5) -> str:
+    badges = [str(item) for item in row.get("badges", []) if str(item).strip()]
+    if row.get("has_pdf") and "PDF ready" not in badges:
+        badges.insert(0, "PDF ready")
+    if not badges:
+        return ""
+    visible = badges[:limit]
+    rendered = [_badge_html(label, tone=_badge_tone(label)) for label in visible]
+    if len(badges) > limit:
+        rendered.append(_badge_html(f"+{len(badges) - limit}", tone="neutral"))
+    return " ".join(item for item in rendered if item)
+
+
+def _paper_primary_meta(row: dict[str, object]) -> str:
+    parts = []
+    if row.get("authors"):
+        parts.append(_short_text(row.get("authors"), 80))
+    if row.get("published"):
+        parts.append(str(row.get("published")))
+    if row.get("venue"):
+        parts.append(str(row.get("venue")))
+    if row.get("tree_path"):
+        parts.append(str(row.get("tree_path")))
+    return " · ".join(part for part in parts if part)
+
+
+def _paper_tag_line(row: dict[str, object]) -> str:
+    tags = [str(tag) for tag in row.get("tags", []) if str(tag).strip()]
+    return " ".join(_badge_html(tag, tone="tag") for tag in tags[:6])
+
+
+def _library_badge_set(row: dict[str, object]) -> set[str]:
+    return {str(item) for item in row.get("badges", []) if str(item).strip()}
+
+
+def _library_row_matches_view(row: dict[str, object], view: str) -> bool:
+    badges = _library_badge_set(row)
+    source = row.get("source")
+    status = str(row.get("status") or "")
+    visibility = str(row.get("visibility") or "")
+    if view == "all":
+        return True
+    if view == "unsorted":
+        return str(row.get("tree_path") or "") == "Unsorted" or "Unsorted" in badges
+    if view in {"reading", "archived", "discarded"}:
+        return status == view
+    if view == "candidate_ready":
+        return status == "candidate_ready" or "AI candidates" in badges
+    if view == "no_pdf":
+        return not bool(row.get("has_pdf"))
+    if view == "needs_extraction":
+        return bool(row.get("has_pdf")) and (
+            not int(row.get("chunks_count") or 0) or "Needs structured extraction" in badges
+        )
+    if view == "claims_need_review":
+        return status == "candidate_ready" or "AI candidates" in badges
+    if view == "duplicate_risk":
+        return "Duplicate risk" in badges
+    if view == "stale_translation":
+        return "Stale translation" in badges
+    if view == "recent":
+        return bool(row.get("last_read"))
+    if view == "private":
+        return visibility == "private"
+    if view == "reviewed":
+        return status == "summarized" or bool(getattr(source, "evidence_refs", []))
+    return True
+
+
+def _library_view_count(rows: list[dict[str, object]], view: str) -> int:
+    return sum(1 for row in rows if _library_row_matches_view(row, view))
+
+
+def _paper_node_counts(rows: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        source = row.get("source")
+        for ref in getattr(source, "library_node_refs", []) or []:
+            counts[str(ref)] = counts.get(str(ref), 0) + 1
+    return counts
+
+
+def _paper_tree_buttons(tree, rows: list[dict[str, object]]) -> None:
+    counts = _paper_node_counts(rows)
+    nodes = tree.by_id()
+    children: dict[str, list] = {}
+    for node in tree.nodes:
+        children.setdefault(node.parent_id or "", []).append(node)
+
+    current_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
+
+    def walk(parent_id: str = "", depth: int = 0, seen: set[str] | None = None) -> None:
+        seen = seen or set()
+        for node in sorted(children.get(parent_id, []), key=lambda item: (item.order, item.title)):
+            if node.id in seen:
+                continue
+            prefix = "  " * depth + ("> " if depth else "")
+            label = f"{prefix}{node.title} ({counts.get(node.id, 0)})"
+            button_type = "primary" if current_node == node.id else "secondary"
+            if st.button(label, key=_paper_library_key(f"node:{node.id}"), type=button_type, use_container_width=True):
+                st.session_state[_paper_library_key("node")] = node.id
+                st.session_state[_paper_library_key("view")] = "all"
+                st.session_state.pop(_paper_library_key("detail"), None)
+                st.rerun()
+            walk(node.id, depth + 1, seen | {node.id})
+
+    if not nodes:
+        st.caption(_l("tree_empty", "No library nodes yet."))
+        return
+    walk()
+
+
+def _render_paper_library_styles() -> None:
+    st.markdown(
+        """
+<style>
+.paper-card {
+  border: 1px solid rgba(49, 51, 63, 0.16);
+  border-radius: 8px;
+  padding: 0.8rem 0.9rem;
+  margin: 0 0 0.75rem 0;
+  background: rgba(255, 255, 255, 0.82);
+}
+.paper-card-active {
+  border-color: rgba(33, 115, 220, 0.7);
+  background: rgba(33, 115, 220, 0.06);
+}
+.paper-title {
+  font-weight: 700;
+  font-size: 1.02rem;
+  line-height: 1.35;
+  color: rgb(31, 41, 55);
+  margin-bottom: 0.22rem;
+}
+.paper-meta {
+  color: rgba(49, 51, 63, 0.68);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  margin-bottom: 0.45rem;
+}
+.paper-summary {
+  color: rgba(49, 51, 63, 0.82);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  margin: 0.35rem 0 0.55rem 0;
+}
+.paper-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  margin: 0.08rem 0.16rem 0.08rem 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  border: 1px solid rgba(49, 51, 63, 0.14);
+  background: rgba(49, 51, 63, 0.055);
+  color: rgba(31, 41, 55, 0.86);
+}
+.paper-badge-ok {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: rgba(22, 163, 74, 0.09);
+  color: rgb(22, 101, 52);
+}
+.paper-badge-warn {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.12);
+  color: rgb(146, 64, 14);
+}
+.paper-badge-alert {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: rgba(220, 38, 38, 0.08);
+  color: rgb(153, 27, 27);
+}
+.paper-badge-tag {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: rgba(37, 99, 235, 0.075);
+  color: rgb(30, 64, 175);
+}
+.paper-detail-title {
+  font-size: 1.05rem;
+  font-weight: 750;
+  line-height: 1.35;
+  margin-bottom: 0.25rem;
+}
+.paper-muted {
+  color: rgba(49, 51, 63, 0.65);
+  font-size: 0.82rem;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def _marked_search_results(results: list[object]) -> list[PaperSearchResult]:
     return mark_imported_paper_results(_pdir, results)
 
@@ -921,7 +1175,7 @@ def _render_paper_search(inbox) -> None:
                 )
             if confirmed:
                 try:
-                    assert_files_current([_sources_path])
+                    _accept_latest_sources_for_additive_write()
                     imported = import_paper_search_results(
                         _pdir,
                         result_dicts,
@@ -988,7 +1242,7 @@ def _render_paper_search(inbox) -> None:
             submitted = st.form_submit_button(_l("import_url", "Import URL"), type="primary")
         if submitted:
             try:
-                assert_files_current([_sources_path])
+                _accept_latest_sources_for_additive_write()
                 source_id = import_paper_url(
                     _pdir,
                     url,
@@ -1026,7 +1280,7 @@ def _render_paper_search(inbox) -> None:
             try:
                 if uploaded is None:
                     raise ValueError("Select a PDF first.")
-                assert_files_current([_sources_path])
+                _accept_latest_sources_for_additive_write()
                 inbox = load_research_sources(selected)
                 source = add_research_source(
                     inbox,
@@ -1105,17 +1359,8 @@ def _render_grobid_status_block(source=None) -> None:
             )
 
 
-def _render_paper_library(inbox) -> None:
-    st.subheader(_l("paper_library", "Paper Library"))
-    st.caption(
-        _l(
-            "paper_library_caption",
-            "Tree nodes describe where papers belong; status, tags, PDF assets, and reading artifacts are paper properties.",
-        )
-    )
-    _render_grobid_status_block()
-    with st.expander(_l("library_tree", "Library Tree"), expanded=False):
-        tree = load_paper_library_tree(_pdir)
+def _render_library_collection_manager(tree, node_options: dict[str, str]) -> None:
+    with st.expander(_l("manage_collections", "Manage collections"), expanded=False):
         if tree.nodes:
             st.dataframe(
                 [
@@ -1131,10 +1376,7 @@ def _render_paper_library(inbox) -> None:
                 use_container_width=True,
                 hide_index=True,
             )
-        else:
-            st.caption(_l("tree_empty", "No library nodes yet."))
         with st.form(f"paper_library_node:{selected}"):
-            node_options = _node_options()
             title = st.text_input(_l("node_title", "Node title"))
             node_id = st.text_input(_l("node_id", "Node id"))
             parent_id = st.selectbox(
@@ -1161,63 +1403,20 @@ def _render_paper_library(inbox) -> None:
                 st.error(str(exc))
 
         diagnostics = validate_paper_library(_pdir)
-        for item in diagnostics:
-            st.warning(str(item))
+        if diagnostics:
+            st.markdown(f"**{_l('library_diagnostics', 'Library diagnostics')}**")
+            for item in diagnostics:
+                st.warning(str(item))
 
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        view = st.selectbox(
-            _l("smart_view", "Smart View"),
-            [
-                "all",
-                "unsorted",
-                "reading",
-                "annotated",
-                "candidate_ready",
-                "archived",
-                "discarded",
-                "other",
-            ],
-            format_func=lambda item: {
-                "all": "All Papers",
-                "unsorted": "Unsorted Inbox",
-                "reading": "Reading",
-                "annotated": "Annotated",
-                "candidate_ready": "Candidate Ready",
-                "archived": "Archived",
-                "discarded": "Discarded",
-                "other": "Other Sources",
-            }.get(item, item),
-        )
-    with c2:
-        node_options = _node_options()
-        node_filter = st.selectbox(
-            _l("tree_filter", "Tree filter"),
-            options=list(node_options),
-            format_func=lambda ref: node_options.get(ref, ref),
-        )
-    rows = paper_rows(_pdir, view=view, node_id=node_filter)
-    display_rows = []
-    for row in rows:
-        display_row = {
-            key: value
-            for key, value in row.items()
-            if key not in {"source"}
-        }
-        display_row["badges"] = ", ".join(str(item) for item in row.get("badges", []) if str(item).strip())
-        display_rows.append(display_row)
-    if display_rows:
-        st.dataframe(display_rows, use_container_width=True, hide_index=True)
-    else:
-        st.caption(_l("library_empty", "No papers match this view."))
 
-    paper_ids = [str(row.get("id")) for row in rows]
-    selected_rows = st.multiselect(
-        _l("select_papers", "Select papers"),
-        options=paper_ids,
-        format_func=lambda sid: _source_label(inbox, sid),
-    )
-    with st.expander(_l("bulk_actions", "Bulk actions"), expanded=bool(selected_rows)):
+def _render_library_bulk_actions(selected_rows: list[str], node_options: dict[str, str]) -> None:
+    if not selected_rows:
+        return
+    with st.container(border=True):
+        st.markdown(
+            _l("bulk_selected_count", "**{count} selected**").format(count=len(selected_rows)),
+            unsafe_allow_html=True,
+        )
         b1, b2, b3 = st.columns(3)
         with b1:
             bulk_node = st.selectbox(
@@ -1226,7 +1425,12 @@ def _render_paper_library(inbox) -> None:
                 format_func=lambda ref: node_options.get(ref, ref),
                 key=f"bulk_node:{selected}",
             )
-            if st.button(_l("move_to_node", "Move to node"), disabled=not selected_rows):
+            if st.button(
+                _l("move_to_node", "Move to node"),
+                disabled=not selected_rows,
+                icon=":material/drive_file_move:",
+                use_container_width=True,
+            ):
                 try:
                     assert_files_current([_sources_path])
                     move_papers_to_node(_pdir, selected_rows, bulk_node)
@@ -1242,8 +1446,14 @@ def _render_paper_library(inbox) -> None:
                 _l("set_status", "Set status"),
                 SOURCE_STATUSES,
                 key=f"bulk_status:{selected}",
+                format_func=_status_label,
             )
-            if st.button(_l("set_status", "Set status"), disabled=not selected_rows):
+            if st.button(
+                _l("set_status", "Set status"),
+                disabled=not selected_rows,
+                icon=":material/rule:",
+                use_container_width=True,
+            ):
                 try:
                     assert_files_current([_sources_path])
                     current = load_research_sources(selected)
@@ -1255,7 +1465,12 @@ def _render_paper_library(inbox) -> None:
                     st.error(str(exc))
         with b3:
             tag_text = st.text_input(_l("add_tags", "Add tags"), key=f"bulk_tags:{selected}")
-            if st.button(_l("add_tags", "Add tags"), disabled=not selected_rows):
+            if st.button(
+                _l("add_tags", "Add tags"),
+                disabled=not selected_rows,
+                icon=":material/sell:",
+                use_container_width=True,
+            ):
                 try:
                     assert_files_current([_sources_path])
                     current = load_research_sources(selected)
@@ -1263,130 +1478,453 @@ def _render_paper_library(inbox) -> None:
                     for source_id in selected_rows:
                         source = by_id.get(source_id)
                         if source is not None:
-                            update_research_source(current, source_id, tags=[*source.tags, *_tags(tag_text)])
+                            update_research_source(
+                                current,
+                                source_id,
+                                tags=_unique_text([*source.tags, *_tags(tag_text)]),
+                            )
                     _save_sources(current, ui["saved"])
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
-    if paper_ids:
-        detail_id = st.selectbox(
-            _l("detail_paper", "Detail paper"),
+
+def _render_paper_card(row: dict[str, object], *, active: bool) -> None:
+    source = row.get("source")
+    source_id = str(row.get("id") or "")
+    classes = "paper-card paper-card-active" if active else "paper-card"
+    title = html.escape(str(row.get("title") or source_id))
+    meta = html.escape(_paper_primary_meta(row))
+    summary = html.escape(_short_text(row.get("summary") or row.get("notes"), 220))
+    badges = _paper_badges_html(row)
+    tags = _paper_tag_line(row)
+    metrics = html.escape(
+        " · ".join(
+            [
+                f"{_l('annotations', 'Annotations')}: {row.get('annotations_count', 0)}",
+                f"{ui['chunk_refs']}: {row.get('chunks_count', 0)}",
+                f"{ui['research_claims']}: {row.get('claims_count', 0)}",
+                f"{ui['research_citations']}: {row.get('citations_count', 0)}",
+            ]
+        )
+    )
+    st.markdown(
+        f"""
+<div class="{classes}">
+  <div class="paper-title">{title}</div>
+  <div class="paper-meta">{meta}</div>
+  <div>{badges}</div>
+  {f'<div class="paper-summary">{summary}</div>' if summary else ''}
+  {f'<div>{tags}</div>' if tags else ''}
+  <div class="paper-meta">{metrics}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    a1, a2, a3 = st.columns([1, 1, 1.2])
+    with a1:
+        if st.button(
+            _l("details", "Details"),
+            key=_paper_library_key(f"detail_button:{source_id}"),
+            type="primary" if active else "secondary",
+            icon=":material/article:",
+            use_container_width=True,
+        ):
+            st.session_state[_paper_library_key("detail")] = source_id
+            st.rerun()
+    with a2:
+        if getattr(source, "metadata", {}).get("pdf_asset_ref"):
+            try:
+                st.link_button(
+                    _l("open_reader", "Open Reader"),
+                    _reader_view_url(source_id),
+                    icon=":material/menu_book:",
+                    use_container_width=True,
+                )
+            except Exception as exc:
+                st.caption(str(exc))
+        else:
+            st.button(
+                _l("open_reader", "Open Reader"),
+                key=_paper_library_key(f"reader_disabled:{source_id}"),
+                disabled=True,
+                icon=":material/menu_book:",
+                use_container_width=True,
+            )
+    with a3:
+        if st.button(
+            _l("send_to_reader_tab", "Use in Reader tab"),
+            key=_paper_library_key(f"use_reader:{source_id}"),
+            icon=":material/ads_click:",
+            use_container_width=True,
+        ):
+            st.session_state[f"paper_reader_source:{selected}"] = source_id
+            st.session_state[_paper_library_key("detail")] = source_id
+            st.success(_l("reader_tab_selected", "Selected for the Reader tab."))
+
+
+def _render_paper_detail_panel(
+    inbox,
+    source,
+    detail_row: dict[str, object],
+    node_options: dict[str, str],
+) -> None:
+    annotations = load_paper_annotations(_pdir, source.id)
+    translations = load_paper_translations(_pdir, source.id)
+    pages_count = len(load_paper_pages(_pdir, source.id))
+    segments_count = len(load_paper_segments(_pdir, source.id))
+    source_chunks = load_chunks(_pdir, source.id)
+    title = html.escape(source.title or source.id)
+    meta = html.escape(_paper_primary_meta(detail_row))
+    st.markdown(
+        f"""
+<div class="paper-detail-title">{title}</div>
+<div class="paper-muted">{meta}</div>
+<div>{_paper_badges_html(detail_row, limit=8)}</div>
+""",
+        unsafe_allow_html=True,
+    )
+    st.caption(f"`{source.id}`")
+
+    m1, m2 = st.columns(2)
+    m1.metric("PDF", "ready" if source.metadata.get("pdf_asset_ref") else "missing")
+    m2.metric(_l("last_read_page", "Last page"), source.metadata.get("last_read_page", "") or "-")
+    m3, m4 = st.columns(2)
+    m3.metric(_l("segments", "Segments"), segments_count)
+    m4.metric(_l("annotations", "Annotations"), len([ann for ann in annotations if ann.status == "active"]))
+    m5, m6 = st.columns(2)
+    m5.metric(ui["research_claims"], detail_row.get("claims_count", 0))
+    m6.metric(ui["research_citations"], detail_row.get("citations_count", 0))
+
+    st.markdown(f"**{_l('quick_actions', 'Quick actions')}**")
+    q1, q2 = st.columns(2)
+    with q1:
+        if source.metadata.get("pdf_asset_ref"):
+            try:
+                st.link_button(
+                    _l("open_reader", "Open Reader"),
+                    _reader_view_url(source.id),
+                    icon=":material/menu_book:",
+                    type="primary",
+                    use_container_width=True,
+                )
+            except Exception as exc:
+                st.caption(str(exc))
+        else:
+            st.button(
+                _l("open_reader", "Open Reader"),
+                disabled=True,
+                icon=":material/menu_book:",
+                use_container_width=True,
+            )
+    with q2:
+        if st.button(
+            _l("continue_in_reader_tab", "Reader tab"),
+            key=_paper_library_key(f"detail_reader_tab:{source.id}"),
+            icon=":material/ads_click:",
+            use_container_width=True,
+        ):
+            st.session_state[f"paper_reader_source:{selected}"] = source.id
+            st.success(_l("reader_tab_selected", "Selected for the Reader tab."))
+
+    q3, q4 = st.columns(2)
+    with q3:
+        if st.button(
+            _l("run_extraction", "Run extraction"),
+            key=_paper_library_key(f"extract:{source.id}"),
+            disabled=not source.metadata.get("pdf_asset_ref"),
+            icon=":material/auto_fix_high:",
+            use_container_width=True,
+        ):
+            try:
+                ensure_paper_reading_artifacts(_pdir, source.id)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with q4:
+        if st.button(
+            _l("auto_chunk", "Auto chunk"),
+            key=_paper_library_key(f"auto_chunk:{source.id}"),
+            icon=":material/content_cut:",
+            use_container_width=True,
+        ):
+            try:
+                chunks = auto_chunk_paper(_pdir, source.id)
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(_l("created_chunks", "Created chunks: {count}").format(count=len(chunks)))
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+    with st.expander(_l("organize_paper", "Organize paper"), expanded=False):
+        first_ref = source.library_node_refs[0] if source.library_node_refs else ""
+        status_index = SOURCE_STATUSES.index(source.status) if source.status in SOURCE_STATUSES else 0
+        node_refs = list(node_options)
+        node_index = node_refs.index(first_ref) if first_ref in node_refs else 0
+        with st.form(_paper_library_key(f"organize_form:{source.id}")):
+            next_status = st.selectbox(
+                _l("set_status", "Set status"),
+                SOURCE_STATUSES,
+                index=status_index,
+                format_func=_status_label,
+            )
+            next_node = st.selectbox(
+                _l("move_to_node", "Move to node"),
+                node_refs,
+                index=node_index,
+                format_func=lambda ref: node_options.get(ref, ref),
+            )
+            next_tags = st.text_input(ui["tags"], value=", ".join(source.tags))
+            saved = st.form_submit_button(ui["save"], type="primary")
+        if saved:
+            try:
+                assert_files_current([_sources_path])
+                current = load_research_sources(selected)
+                update_research_source(
+                    current,
+                    source.id,
+                    status=next_status,
+                    tags=_tags(next_tags),
+                    library_node_refs=[next_node] if next_node else [],
+                )
+                _save_sources(current, ui["saved"])
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+    detail_tabs = st.tabs(
+        [
+            _l("notes", "Notes"),
+            _l("artifacts", "Artifacts"),
+            _l("metadata", "Metadata"),
+        ]
+    )
+    with detail_tabs[0]:
+        if source.summary:
+            st.markdown(f"**{ui['summary']}**")
+            st.write(source.summary)
+        if source.notes:
+            st.markdown(f"**{ui['notes']}**")
+            st.write(source.notes)
+        if source.url:
+            st.link_button(_l("open_source", "Open source"), source.url, icon=":material/open_in_new:")
+        if not any([source.summary, source.notes, source.url]):
+            st.caption(_l("paper_notes_empty", "No summary, notes, or source URL yet."))
+    with detail_tabs[1]:
+        st.write(
+            {
+                "pdf_asset_ref": source.metadata.get("pdf_asset_ref", ""),
+                "pages": source.metadata.get("page_count", "") or pages_count,
+                "segments": segments_count,
+                "chunks": len(source_chunks),
+                "translations": len(translations),
+                "structure_backend": source.metadata.get("structure_backend", ""),
+                "structured_extracted_at": source.metadata.get("structured_extracted_at", ""),
+            }
+        )
+        warnings = source.metadata.get("structured_extraction_warnings") or source.metadata.get("text_extraction_warnings") or []
+        for warning in warnings:
+            st.warning(str(warning))
+    with detail_tabs[2]:
+        st.code(
+            yaml.dump(
+                {
+                    "metadata": source.metadata,
+                    "library_node_refs": source.library_node_refs,
+                    "tags": source.tags,
+                    "authors": source.authors,
+                    "published": source.published,
+                    "project_refs": source.project_refs,
+                    "goal_refs": source.goal_refs,
+                    "reading": source.reading.to_dict(),
+                },
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+            language="yaml",
+        )
+
+
+def _render_paper_library(inbox) -> None:
+    st.subheader(_l("paper_library", "Paper Library"))
+    st.caption(
+        _l(
+            "paper_library_caption",
+            "Organize papers into collections, continue reading, and move each source through extraction, claims, and review.",
+        )
+    )
+    _render_paper_library_styles()
+
+    all_rows = paper_rows(_pdir, view="all")
+    tree = load_paper_library_tree(_pdir)
+    node_options = _node_options()
+    current_view = str(st.session_state.setdefault(_paper_library_key("view"), "all") or "all")
+    current_node = str(st.session_state.setdefault(_paper_library_key("node"), "") or "")
+    if current_view not in _LIBRARY_VIEW_LABELS:
+        current_view = "all"
+        st.session_state[_paper_library_key("view")] = current_view
+
+    metric_cols = st.columns(5)
+    metric_cols[0].metric(_l("papers_total", "Papers"), len(all_rows))
+    metric_cols[1].metric(_l("reading", "Reading"), _library_view_count(all_rows, "reading"))
+    metric_cols[2].metric(_l("pdf_missing", "PDF missing"), _library_view_count(all_rows, "no_pdf"))
+    metric_cols[3].metric(_l("needs_extraction", "Needs extraction"), _library_view_count(all_rows, "needs_extraction"))
+    metric_cols[4].metric(_l("claims_need_review", "Claims review"), _library_view_count(all_rows, "claims_need_review"))
+
+    left, middle, right = st.columns([0.23, 0.47, 0.30], gap="large")
+    with left:
+        st.markdown(f"**{_l('smart_views', 'Smart Views')}**")
+        for view_id, fallback in _LIBRARY_VIEW_LABELS.items():
+            count = _library_view_count(all_rows, view_id)
+            label = f"{_l(f'library_view_{view_id}', fallback)} ({count})"
+            button_type = "primary" if current_view == view_id and not current_node else "secondary"
+            if st.button(
+                label,
+                key=_paper_library_key(f"view:{view_id}"),
+                type=button_type,
+                use_container_width=True,
+            ):
+                st.session_state[_paper_library_key("view")] = view_id
+                st.session_state[_paper_library_key("node")] = ""
+                st.session_state.pop(_paper_library_key("detail"), None)
+                st.rerun()
+        st.divider()
+        st.markdown(f"**{_l('collections', 'Collections')}**")
+        if st.button(
+            _l("clear_tree_filter", "All collections"),
+            key=_paper_library_key("clear_node"),
+            type="primary" if not current_node else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state[_paper_library_key("node")] = ""
+            st.rerun()
+        _paper_tree_buttons(tree, all_rows)
+        _render_library_collection_manager(tree, node_options)
+        with st.expander(_l("parser_status", "Parser status"), expanded=False):
+            _render_grobid_status_block()
+
+    with middle:
+        toolbar = st.columns([2.2, 1, 1])
+        with toolbar[0]:
+            query = st.text_input(
+                _l("search_library", "Search title, author, tag, note..."),
+                key=_paper_library_key("query"),
+                label_visibility="collapsed",
+                placeholder=_l("search_library", "Search title, author, tag, note..."),
+            )
+        with toolbar[1]:
+            sort_mode = st.selectbox(
+                _l("sort", "Sort"),
+                ["recent", "added", "title", "status", "claims"],
+                format_func=lambda item: {
+                    "recent": _l("sort_recent", "Recently read"),
+                    "added": _l("sort_added", "Recently added"),
+                    "title": ui["title_label"],
+                    "status": ui["status"],
+                    "claims": ui["research_claims"],
+                }.get(item, item),
+                key=_paper_library_key("sort"),
+                label_visibility="collapsed",
+            )
+        with toolbar[2]:
+            show_table = st.toggle(
+                _l("table_view", "Table"),
+                value=False,
+                key=_paper_library_key("table_view"),
+            )
+
+        rows = paper_rows(_pdir, view=current_view, node_id=current_node)
+        clean_query = str(query or "").strip().lower()
+        if clean_query:
+            rows = [
+                row
+                for row in rows
+                if clean_query
+                in " ".join(
+                    [
+                        str(row.get("title") or ""),
+                        str(row.get("authors") or ""),
+                        str(row.get("published") or ""),
+                        str(row.get("venue") or ""),
+                        str(row.get("tree_path") or ""),
+                        str(row.get("summary") or ""),
+                        str(row.get("notes") or ""),
+                        " ".join(str(tag) for tag in row.get("tags", [])),
+                        " ".join(str(badge) for badge in row.get("badges", [])),
+                    ]
+                ).lower()
+            ]
+        if sort_mode == "title":
+            rows = sorted(rows, key=lambda row: str(row.get("title") or "").lower())
+        elif sort_mode == "status":
+            rows = sorted(rows, key=lambda row: (str(row.get("status") or ""), str(row.get("title") or "").lower()))
+        elif sort_mode == "claims":
+            rows = sorted(rows, key=lambda row: int(row.get("claims_count") or 0), reverse=True)
+        elif sort_mode == "added":
+            rows = sorted(rows, key=lambda row: str(getattr(row.get("source"), "captured_at", "") or ""), reverse=True)
+        else:
+            rows = sorted(rows, key=lambda row: str(row.get("last_read") or ""), reverse=True)
+
+        paper_ids = [str(row.get("id")) for row in rows]
+        selected_rows = st.multiselect(
+            _l("select_papers", "Select papers"),
             options=paper_ids,
             format_func=lambda sid: _source_label(inbox, sid),
-            key=f"paper_library_detail:{selected}",
+            key=_paper_library_key("bulk_select"),
         )
-        source = inbox.by_id().get(detail_id)
-        if source is not None:
-            detail_row = next((row for row in rows if str(row.get("id")) == detail_id), {})
-            annotations = load_paper_annotations(_pdir, source.id)
-            translations = load_paper_translations(_pdir, source.id)
-            pages_count = len(load_paper_pages(_pdir, source.id))
-            segments_count = len(load_paper_segments(_pdir, source.id))
-            source_chunks = load_chunks(_pdir, source.id)
-            with st.expander(_l("detail_drawer", "Detail drawer"), expanded=True):
-                metadata_tab, storage_tab, workflow_tab = st.tabs(
-                    [
-                        _l("metadata", "Metadata"),
-                        _l("storage", "Storage"),
-                        _l("workflow", "Workflow"),
-                    ]
-                )
-                with metadata_tab:
-                    st.markdown(f"**{source.title}**")
-                    st.caption(source.id)
-                    st.code(
-                        yaml.dump(
-                            {
-                                "metadata": source.metadata,
-                                "library_node_refs": source.library_node_refs,
-                                "tags": source.tags,
-                                "authors": source.authors,
-                                "published": source.published,
-                                "url": source.url,
-                                "project_refs": source.project_refs,
-                                "goal_refs": source.goal_refs,
-                                "summary": source.summary,
-                            },
-                            allow_unicode=True,
-                            default_flow_style=False,
-                            sort_keys=False,
-                        ),
-                        language="yaml",
-                    )
-                with storage_tab:
-                    s1, s2, s3, s4 = st.columns(4)
-                    s1.metric("PDF", "yes" if source.metadata.get("pdf_asset_ref") else "missing")
-                    s2.metric(_l("pages", "Pages"), source.metadata.get("page_count", "") or pages_count)
-                    s3.metric(_l("segments", "Segments"), segments_count)
-                    s4.metric(_l("translations", "Translations"), len(translations))
-                    st.code(
-                        yaml.dump(
-                            {
-                                "pdf_asset_ref": source.metadata.get("pdf_asset_ref", ""),
-                                "pdf_sha256": source.metadata.get("pdf_sha256", ""),
-                                "pdf_byte_size": source.metadata.get("pdf_byte_size", ""),
-                                "page_count": source.metadata.get("page_count", ""),
-                                "pdf_imported_at": source.metadata.get("pdf_imported_at", ""),
-                                "pdf_warnings": source.metadata.get("pdf_warnings", []),
-                                "text_extraction_backend": source.metadata.get("text_extraction_backend")
-                                or source.metadata.get("local_pdf_backend", ""),
-                                "local_pdf_backend": source.metadata.get("local_pdf_backend", ""),
-                                "text_extracted_at": source.metadata.get("text_extracted_at", ""),
-                                "text_extraction_warnings": source.metadata.get("text_extraction_warnings", []),
-                                "structure_backend": source.metadata.get("structure_backend", ""),
-                                "structured_extracted_at": source.metadata.get("structured_extracted_at", ""),
-                                "structured_extraction_warnings": source.metadata.get("structured_extraction_warnings", []),
-                                "grobid_status": source.metadata.get("grobid_status", ""),
-                            },
-                            allow_unicode=True,
-                            default_flow_style=False,
-                            sort_keys=False,
-                        ),
-                        language="yaml",
-                    )
-                with workflow_tab:
-                    badges = [str(item) for item in detail_row.get("badges", []) if str(item).strip()]
-                    if badges:
-                        st.caption(" · ".join(badges))
-                    w1, w2, w3, w4 = st.columns(4)
-                    w1.metric(_l("annotations", "Annotations"), len(annotations))
-                    w2.metric(ui["chunk_refs"], len(source_chunks))
-                    w3.metric(ui["research_claims"], detail_row.get("claims_count", 0))
-                    w4.metric(ui["research_citations"], detail_row.get("citations_count", 0))
-                    st.code(
-                        yaml.dump(
-                            {
-                                "status": source.status,
-                                "visibility": source.visibility,
-                                "last_read": detail_row.get("last_read", ""),
-                                "evidence_refs": source.evidence_refs,
-                                "reading": source.reading.to_dict(),
-                            },
-                            allow_unicode=True,
-                            default_flow_style=False,
-                            sort_keys=False,
-                        ),
-                        language="yaml",
-                    )
-                    if st.button(ui["archive"], key=f"archive:{source.id}"):
-                        try:
-                            assert_files_current([_sources_path])
-                            current = load_research_sources(selected)
-                            update_research_source(current, source.id, status="archived")
-                            _save_sources(current, ui["saved"])
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(str(exc))
-                    if st.button(ui["discard"], key=f"discard:{source.id}"):
-                        try:
-                            assert_files_current([_sources_path])
-                            current = load_research_sources(selected)
-                            update_research_source(current, source.id, status="discarded")
-                            _save_sources(current, ui["saved"])
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(str(exc))
+        _render_library_bulk_actions(selected_rows, node_options)
+
+        active_label = _LIBRARY_VIEW_LABELS.get(current_view, current_view)
+        if current_node:
+            active_label = node_options.get(current_node, current_node)
+        st.caption(
+            _l("library_result_count", "{count} papers in {view}").format(
+                count=len(rows),
+                view=active_label,
+            )
+        )
+        if not rows:
+            st.info(_l("library_empty", "No papers match this view."))
+        elif show_table:
+            display_rows = []
+            for row in rows:
+                display_row = {
+                    key: value
+                    for key, value in row.items()
+                    if key not in {"source", "diagnostics"}
+                }
+                display_row["tags"] = ", ".join(str(item) for item in row.get("tags", []))
+                display_row["badges"] = ", ".join(str(item) for item in row.get("badges", []) if str(item).strip())
+                display_rows.append(display_row)
+            st.dataframe(display_rows, use_container_width=True, hide_index=True)
+        else:
+            detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
+            if detail_id not in paper_ids and paper_ids:
+                detail_id = paper_ids[0]
+                st.session_state[_paper_library_key("detail")] = detail_id
+            for row in rows:
+                _render_paper_card(row, active=str(row.get("id")) == detail_id)
+
+    with right:
+        detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
+        by_id = inbox.by_id()
+        if not detail_id and rows:
+            detail_id = str(rows[0].get("id") or "")
+            st.session_state[_paper_library_key("detail")] = detail_id
+        source = by_id.get(detail_id)
+        if source is None:
+            st.info(_l("select_paper_detail_hint", "Select a paper to see details and actions."))
+            return
+        detail_row = next(
+            (row for row in all_rows if str(row.get("id")) == detail_id),
+            next((row for row in rows if str(row.get("id")) == detail_id), {}),
+        )
+        _render_paper_detail_panel(inbox, source, detail_row, node_options)
 
 
 def _segment_dicts(source_id: str, limit: int = 20) -> list[dict[str, object]]:

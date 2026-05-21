@@ -145,6 +145,50 @@ class TestResearchSources(unittest.TestCase):
         self.assertEqual(loaded_source.reading.translation, "一段有用摘录。")
         self.assertEqual(loaded_source.reading.claim_candidates[0]["type"], "learning")
 
+    def test_save_preserves_newer_reader_progress_metadata(self) -> None:
+        """Stale source saves keep newer passive Reader state from disk."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            inbox = ResearchSourceInbox(profile="alice")
+            source = add_research_source(
+                inbox,
+                "Paper",
+                source_id="source:paper:demo",
+                kind="paper",
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "last_read_page": 1,
+                    "last_read_at": "2026-05-21T10:00:00+00:00",
+                },
+            )
+            save_research_sources(profile, inbox)
+
+            stale = load_research_sources(profile)
+            update_research_source(stale, source.id, summary="Edited from stale UI")
+
+            reader = load_research_sources(profile)
+            update_research_source(
+                reader,
+                source.id,
+                metadata={
+                    **reader.by_id()[source.id].metadata,
+                    "last_read_page": 9,
+                    "last_read_at": "2026-05-21T10:30:00+00:00",
+                    "panel_width": 420,
+                },
+            )
+            save_research_sources(profile, reader)
+
+            save_research_sources(profile, stale)
+            loaded_source = load_research_sources(profile).by_id()[source.id]
+
+        self.assertEqual(loaded_source.summary, "Edited from stale UI")
+        self.assertEqual(loaded_source.metadata["pdf_asset_ref"], "papers/demo.pdf")
+        self.assertEqual(loaded_source.metadata["last_read_page"], 9)
+        self.assertEqual(loaded_source.metadata["last_read_at"], "2026-05-21T10:30:00+00:00")
+        self.assertEqual(loaded_source.metadata["panel_width"], 420)
+
     def test_generate_reading_draft_fallback(self) -> None:
         """Reading draft fallback is useful without configured AI."""
         inbox = ResearchSourceInbox(profile="alice")

@@ -45,6 +45,24 @@ SOURCE_STATUSES = (
 )
 SOURCE_VISIBILITIES = ("private", "public")
 SOURCE_ORIGINS = ("manual", "home_capture", "connector", "resume_import")
+READER_STATE_METADATA_KEYS = (
+    "last_read_page",
+    "last_read_at",
+    "last_visible_pages",
+    "reader_mode",
+    "scale_mode",
+    "active_tab",
+    "target_lang",
+    "focused_annotation_id",
+    "focused_chunk_id",
+    "active_left_tab",
+    "active_translation_anchor",
+    "compare_split_ratio",
+    "panel_width",
+    "side_panel_collapsed",
+    "left_rail_collapsed",
+    "translation_source_visible",
+)
 
 
 def profile_dir(name: str) -> Path:
@@ -408,6 +426,65 @@ def load_research_sources_raw(name_or_dir: str | Path) -> dict | None:
     return _load_yaml_dict(_profile_file_path(name_or_dir))
 
 
+def _metadata_epoch(value: object) -> float | None:
+    clean = _clean_text(value)
+    if not clean:
+        return None
+    try:
+        return datetime.fromisoformat(clean.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _reader_state_is_newer(
+    current_metadata: dict[str, object],
+    next_metadata: dict[str, object],
+) -> bool:
+    """Return True when disk has newer passive Reader state."""
+    current_at = _metadata_epoch(current_metadata.get("last_read_at"))
+    next_at = _metadata_epoch(next_metadata.get("last_read_at"))
+    if current_at is not None:
+        if next_at is None or current_at > next_at:
+            return True
+        return False
+    current_text = _clean_text(current_metadata.get("last_read_at"))
+    next_text = _clean_text(next_metadata.get("last_read_at"))
+    if current_text:
+        return not next_text or current_text > next_text
+    return any(
+        key in current_metadata and key not in next_metadata
+        for key in READER_STATE_METADATA_KEYS
+    )
+
+
+def _preserve_newer_reader_state(
+    path: Path,
+    inbox: ResearchSourceInbox,
+) -> None:
+    """Merge newer passive Reader metadata from disk into a pending save."""
+    if not path.exists():
+        return
+    raw = _load_yaml_dict(path)
+    if raw is None:
+        return
+    current_by_id = ResearchSourceInbox.from_dict(raw).by_id()
+    for source in inbox.sources:
+        current = current_by_id.get(source.id)
+        if current is None:
+            continue
+        current_metadata = dict(current.metadata or {})
+        if not any(key in current_metadata for key in READER_STATE_METADATA_KEYS):
+            continue
+        next_metadata = dict(source.metadata or {})
+        if not _reader_state_is_newer(current_metadata, next_metadata):
+            continue
+        merged = dict(next_metadata)
+        for key in READER_STATE_METADATA_KEYS:
+            if key in current_metadata:
+                merged[key] = copy.deepcopy(current_metadata[key])
+        source.metadata = merged
+
+
 def add_research_source(
     inbox: ResearchSourceInbox,
     title: str,
@@ -529,6 +606,7 @@ def save_research_sources(
     inbox.profile = inbox.profile or path.parent.parent.name
     inbox.updated = date.today().isoformat()
     path.parent.mkdir(parents=True, exist_ok=True)
+    _preserve_newer_reader_state(path, inbox)
     header = (
         f"# Research sources for {inbox.profile or path.parent.parent.name}\n"
         "# Sources are not evidence until reviewed into evidence candidates.\n\n"

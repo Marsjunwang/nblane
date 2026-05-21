@@ -1249,6 +1249,7 @@
     let panelWidth = 340;
     let syncLock = false;
     let viewportAnchorSyncMutedUntil = 0;
+    let userAnchorLockedUntil = 0;
     let activeTranslationAnchor = "";
     let leftRailCollapsed = false;
     let activeLeftTab = "outline";
@@ -2392,6 +2393,19 @@
       const rectPage = asArr(obj.rects).map((rect) => Number(asObj(rect).page || 0)).find(Boolean);
       return rectPage || currentPage || 1;
     }
+    function preferredTranslationClickPage(unit, rowPage = 0) {
+      const obj = asObj(unit);
+      const row = Number(rowPage || 0);
+      if (!Object.keys(obj).length) return row || currentPage || 1;
+      if (row && unitCoversPage(obj, row)) return row;
+      const current = Number(currentPage || 0);
+      if (current && unitCoversPage(obj, current)) return current;
+      for (const page of visiblePages) {
+        const candidate = Number(page || 0);
+        if (candidate && unitCoversPage(obj, candidate)) return candidate;
+      }
+      return preferredPageForUnit(obj, row);
+    }
     function unitHighlightPages(unit) {
       const obj = asObj(unit);
       const pages = new Set();
@@ -2412,6 +2426,14 @@
     }
     function viewportAnchorSyncMuted() {
       return performance.now() < viewportAnchorSyncMutedUntil;
+    }
+    function lockUserAnchor(ms = 1600) {
+      const duration = Number(ms || 0) || 1600;
+      userAnchorLockedUntil = Math.max(userAnchorLockedUntil, performance.now() + duration);
+      muteViewportAnchorSync(duration);
+    }
+    function userAnchorLocked() {
+      return performance.now() < userAnchorLockedUntil;
     }
     function isPositionedTranslationScope(scopeType) {
       const clean = text(scopeType);
@@ -3752,7 +3774,7 @@
     }
     function syncCompareScroll(source) {
       if (readerMode !== "compare" || syncLock) return;
-      if (viewportAnchorSyncMuted()) return;
+      if (viewportAnchorSyncMuted() || userAnchorLocked()) return;
       const viewer = document.getElementById("viewer");
       const translationReader = document.getElementById("translationReader");
       if (!viewer || !translationReader) return;
@@ -3805,8 +3827,12 @@
         });
         row.addEventListener("click", () => {
           const anchorId = row.dataset.anchorId || "";
-          const page = Number(row.dataset.page || 0);
-          setActiveAnchor(anchorId, { scrollTranslation: false, refresh: false, targetPage: page, preserveTranslationScroll: true });
+          const unit = buildAnchorIndex().get(anchorId) || {};
+          const page = preferredTranslationClickPage(unit, Number(row.dataset.page || 0));
+          lockUserAnchor(1800);
+          setActiveAnchor(anchorId, { scrollTranslation: false, refresh: false, targetPage: page, preserveTranslationScroll: true, syncMuteMs: 1800 });
+          persistLocalState();
+          scheduleReaderStateChanged(true);
           if (row.classList.contains("overflowing") || isPositionedTranslationScope(row.dataset.scopeType)) {
             showTranslationUnitDock(anchorId);
           } else {
@@ -5023,7 +5049,7 @@
       visiblePages = pages;
       const pageChanged = primary !== currentPage;
       currentPage = primary;
-      const syncMuted = viewportAnchorSyncMuted();
+      const syncMuted = viewportAnchorSyncMuted() || userAnchorLocked();
       const viewportAnchor = syncMuted ? "" : activeSegmentFromViewport();
       if (viewportAnchor) activeTranslationAnchor = viewportAnchor;
       updatePageUi();

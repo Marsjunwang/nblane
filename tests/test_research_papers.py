@@ -188,6 +188,52 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(tree.nodes[0].title, "Memory")
         self.assertEqual(source.library_node_refs, ["paper-node:vla-memory"])
 
+    def test_paper_rows_support_library_workbench_views(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                node = upsert_paper_library_node(
+                    profile,
+                    "VLA",
+                    node_id="paper-node:vla",
+                )
+                inbox = load_research_sources(profile)
+                add_research_source(
+                    inbox,
+                    "Structured VLA Paper",
+                    source_id="source:paper:structured-vla",
+                    kind="paper",
+                    status="reading",
+                    authors=["Ada Lovelace", "Grace Hopper"],
+                    published="2026",
+                    tags=["vla", "robotics"],
+                    library_node_refs=[node.id],
+                    metadata={"pdf_asset_ref": "papers/demo.pdf", "page_count": 8},
+                )
+                add_research_source(
+                    inbox,
+                    "Grounded Claims",
+                    source_id="source:paper:grounded-duplicate",
+                    kind="paper",
+                )
+                save_research_sources(profile, inbox)
+
+            no_pdf = {row["id"] for row in paper_rows(profile, view="no_pdf")}
+            needs_extraction = paper_rows(profile, view="needs_extraction", node_id=node.id)
+            duplicate_risk = {row["id"] for row in paper_rows(profile, view="duplicate_risk")}
+            vla_row = needs_extraction[0]
+
+        self.assertIn("source:paper:grounded", no_pdf)
+        self.assertEqual([row["id"] for row in needs_extraction], ["source:paper:structured-vla"])
+        self.assertEqual(vla_row["authors"], "Ada Lovelace, Grace Hopper")
+        self.assertEqual(vla_row["tree_path"], "VLA")
+        self.assertEqual(vla_row["tags"], ["vla", "robotics"])
+        self.assertIn("source:paper:grounded", duplicate_risk)
+        self.assertIn("source:paper:grounded-duplicate", duplicate_risk)
+
     def test_annotations_and_translations_are_segment_hash_aware(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
