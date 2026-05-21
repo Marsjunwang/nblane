@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from typing import Any
 
 from nblane.core import llm
@@ -49,6 +50,7 @@ class DirectLLMBackend:
             prompt.system,
             prompt.user,
             temperature=spec.temperature,
+            model=_model_override(request.payload),
         )
         if raw.startswith("LLM error:") or raw.startswith(
             "AI features not configured"
@@ -245,9 +247,14 @@ class LocalReadonlyCodexBackend:
         codex_prompt = _readonly_codex_prompt(request, spec, prompt.system, prompt.user)
         from nblane.core import codex_adapter
 
+        config = None
+        model = _model_override(request.payload, "codex_model", "deep_read_model", "ai_model")
+        if model:
+            config = replace(codex_adapter.current_config(profile=request.profile), model=model)
         result = codex_adapter.run_readonly_codex_prompt(
             request.profile,
             codex_prompt,
+            config=config,
         )
         raw = result.output
         warnings = _merge_warning_texts(getattr(result, "warnings", []) or [])
@@ -367,6 +374,16 @@ def _merge_warning_texts(*values: object) -> list[str]:
             seen.add(text)
             out.append(text)
     return out
+
+
+def _model_override(payload: dict[str, Any], *keys: str) -> str:
+    """Return an optional per-action model override from a business payload."""
+
+    for key in keys or ("ai_model", "llm_model", "model_override"):
+        value = _clean_text(payload.get(key))
+        if value:
+            return value
+    return ""
 
 
 def default_backends() -> dict[str, object]:

@@ -164,6 +164,7 @@ def chat(
     stream: bool = False,
     *,
     stream_callback: Callable[[str], None] | None = None,
+    model: str | None = None,
 ) -> str:
     """Send a single-turn chat and return the reply text.
 
@@ -186,7 +187,7 @@ def chat(
         )
         use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(
-            model=_MODEL,
+            model=str(model or "").strip() or _MODEL,
             temperature=temperature,
             stream=use_stream,
             messages=[
@@ -209,6 +210,7 @@ def chat_messages(
     *,
     stream: bool = False,
     stream_callback: Callable[[str], None] | None = None,
+    model: str | None = None,
 ) -> str:
     """Multi-turn chat: *system* plus *messages* (user/assistant only).
 
@@ -242,7 +244,7 @@ def chat_messages(
         )
         use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(
-            model=_MODEL,
+            model=str(model or "").strip() or _MODEL,
             temperature=temperature,
             stream=use_stream,
             messages=api_messages,

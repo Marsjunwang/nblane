@@ -23,6 +23,7 @@ from nblane.core.ai.backends import (
     RuleFallbackBackend,
     default_backends,
 )
+from nblane.core.codex_adapter import CodexConfig
 from nblane.core.ai.router import get_action_spec, registered_actions
 from nblane.core.ai.structured import validate_schema
 
@@ -73,6 +74,38 @@ class TestAIGateway(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.backend, "direct_llm")
         self.assertIn("ai_not_configured", result.error)
+
+    def test_direct_backend_passes_per_action_model_override(self) -> None:
+        """Paper action model preferences are handed to the LLM client."""
+
+        spec = get_action_spec("research.paper_translate")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="research.paper_translate",
+            profile="",
+            payload={
+                "source_id": "source:paper:1",
+                "ai_model": "qwen-plus",
+                "segments": [
+                    {
+                        "segment_id": "seg:1",
+                        "text": "hello",
+                        "text_hash": "sha256:abc",
+                    }
+                ],
+            },
+        )
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch(
+                "nblane.core.llm.chat",
+                return_value='{"translations":[{"segment_id":"seg:1","source_hash":"sha256:abc","translated_text":"你好"}],"warnings":[],"ref":"paper:1"}',
+            ) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(chat.call_args.kwargs["model"], "qwen-plus")
 
     def test_local_readonly_codex_backend_registered_for_paper_actions(self) -> None:
         """Paper Codex actions default to local read-only Codex, not handoff."""
@@ -143,6 +176,46 @@ class TestAIGateway(unittest.TestCase):
         self.assertIn("Do not generate patches", prompt)
         self.assertIn("Do not write profile facts", prompt)
         self.assertIn("Return one JSON object only", prompt)
+
+    def test_local_readonly_codex_backend_passes_model_override(self) -> None:
+        """DeepRead can use a profile-selected Codex model."""
+
+        reply = """
+        {
+          "reading_plan": [],
+          "findings": [],
+          "cited_segment_refs": [],
+          "cited_chunk_refs": [],
+          "cited_annotation_refs": [],
+          "warnings": [],
+          "ref": "paper:1"
+        }
+        """
+        readonly = SimpleNamespace(
+            ok=True,
+            output=reply,
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with (
+            patch("nblane.core.codex_adapter.current_config", return_value=CodexConfig(model="default-codex")),
+            patch(
+                "nblane.core.codex_adapter.run_readonly_codex_prompt",
+                return_value=readonly,
+            ) as run,
+        ):
+            result = run_ai_action(
+                "research.paper_deep_read_codex",
+                {"source_id": "source:paper:1", "codex_model": "gpt-5.1-codex"},
+                profile="",
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
 
     def test_local_readonly_codex_invalid_json_falls_back_with_warning(self) -> None:
         """Malformed Codex output is converted to a typed warning/fallback."""

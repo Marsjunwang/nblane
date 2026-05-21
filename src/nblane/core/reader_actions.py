@@ -27,6 +27,7 @@ from nblane.core.research_papers import (
     load_paper_segments,
     load_paper_translations,
     normalize_translation_row,
+    reader_translation_layout_units,
     save_paper_analysis,
     save_paper_annotations,
     text_hash,
@@ -519,7 +520,7 @@ def _blank_translation_backend_warning(ai_result: Any, translations: list[dict[s
 
 
 def _visible_translation_batch_size(scope: str) -> int:
-    default = 6 if scope == "layout" else 12
+    default = 12 if scope == "layout" else 12
     try:
         value = int(os.getenv("NBLANE_READER_VISIBLE_TRANSLATION_BATCH_SIZE", str(default)) or default)
     except (TypeError, ValueError):
@@ -846,7 +847,7 @@ def _handle_reader_action_inner(
             emit_translation_progress("extracting_layout", "Extracting page layout...")
             layout_units = [
                 unit
-                for unit in build_paper_layout_units(profile, source_id, pages=visible_pages)
+                for unit in reader_translation_layout_units(build_paper_layout_units(profile, source_id, pages=visible_pages))
                 if bool(unit.get("translatable", True))
             ]
             existing_layout_by_scope = {

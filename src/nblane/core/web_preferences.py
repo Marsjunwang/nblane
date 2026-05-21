@@ -94,6 +94,7 @@ def normalize_web_preferences(
     source = _strip_secret_keys(raw if isinstance(raw, dict) else {})
     ai = source.get("ai") if isinstance(source.get("ai"), dict) else {}
     llm = ai.get("llm") if isinstance(ai.get("llm"), dict) else {}
+    paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
     kanban = source.get("kanban") if isinstance(source.get("kanban"), dict) else {}
     backend = _clean_text(ai.get("kanban_backend"))
     ui_lang = _language(llm.get("ui_lang"))
@@ -114,6 +115,10 @@ def normalize_web_preferences(
                 "custom_model": _clean_text(llm.get("custom_model")),
                 "ui_lang": ui_lang,
                 "reply_lang": reply_lang,
+            },
+            "paper": {
+                "translation_model": _clean_text(paper.get("translation_model")),
+                "deep_read_model": _clean_text(paper.get("deep_read_model")),
             },
             "kanban_backend": backend if backend in _AI_BACKENDS else "",
         },

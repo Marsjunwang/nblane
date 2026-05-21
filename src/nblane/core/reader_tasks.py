@@ -229,28 +229,35 @@ def iter_snapshots(
     last_updated = -1.0
     last_status = ""
     while True:
+        current: dict[str, Any] | None = None
+        terminal = False
         with _COND:
             task = _TASKS.get(clean_id)
             now = time.time()
             if not isinstance(task, dict):
-                yield _lost_snapshot(clean_id, ctx=ctx, now=now)
-                return
-            _assert_context_allowed(task, ctx)
-            _mark_timeout_locked(clean_id, task, now)
-            current = _snapshot_locked(task)
-            updated_at = float(current.get("updated_at", 0.0) or 0.0)
-            status = str(current.get("status") or "")
-            should_yield = updated_at != last_updated or status != last_status
-            if should_yield:
-                last_updated = updated_at
-                last_status = status
-            if status in TERMINAL_STATUSES:
+                current = _lost_snapshot(clean_id, ctx=ctx, now=now)
+                terminal = True
+            else:
+                _assert_context_allowed(task, ctx)
+                _mark_timeout_locked(clean_id, task, now)
+                snapshot_row = _snapshot_locked(task)
+                updated_at = float(snapshot_row.get("updated_at", 0.0) or 0.0)
+                status = str(snapshot_row.get("status") or "")
+                should_yield = updated_at != last_updated or status != last_status
                 if should_yield:
-                    yield current
-                return
-            if should_yield:
-                yield current
-            _COND.wait(timeout=max(0.05, poll_seconds))
+                    last_updated = updated_at
+                    last_status = status
+                    current = snapshot_row
+                terminal = status in TERMINAL_STATUSES
+                if not should_yield and terminal:
+                    return
+                if not should_yield:
+                    _COND.wait(timeout=max(0.05, poll_seconds))
+                    continue
+        if current is not None:
+            yield current
+        if terminal:
+            return
 
 
 def cleanup(now: float | None = None) -> None:

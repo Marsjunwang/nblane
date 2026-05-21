@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-13
+last_verified: 2026-05-21
 source_of_truth: true
 ---
 
@@ -33,7 +33,7 @@ Reader API 地址：
 ```bash
 # Terminal 1: Reader API
 PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
-  --host 127.0.0.1 --port 8502 --reload
+  --host 127.0.0.1 --port 8502 --reload --reload-dir src
 
 # Terminal 2: Streamlit UI
 NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
@@ -48,14 +48,37 @@ PYTHONPATH=src .venv/bin/streamlit run app.py \
 会请求相对路径 `/reader/view/...`；没有 Caddy 时这个路径会被 Streamlit 自己接住，
 iframe 里加载的是另一个 Streamlit shell，而不是 Reader API，所以看起来是空白。
 
+另一个本地开发白屏原因是 sidecar 使用 `--reload` 监控了整个仓库。Reader 的 extract pages /
+extract segments 会写入 `profiles/` 下的论文产物；如果 uvicorn reload 监听整个仓库，提取时可能触发
+sidecar reload 或高 CPU 轮询，导致 `8502` 短暂无响应，iframe 看起来空白。开发时请使用
+`--reload-dir src`，让 sidecar 只监听代码目录；需要最稳定时也可以去掉 `--reload`。
+
 旧的单进程组件启动路径已停用。PDF Reader 的主入口始终是
 `/reader/view/{source_id}` 对应的 FastAPI sidecar。
 
 生产部署如果已经用 Caddy 将 `/reader/*` 反代到 `127.0.0.1:8502`，则不要设置
 `NBLANE_READER_API_BASE`，保持同源路径即可。
 
-普通阅读默认使用语义段落译文流，不把译文贴回 PDF rect。只有调试 legacy overlay 时才设置
+普通阅读默认使用译文 flow 视图，不把译文贴回 PDF rect。当前页/可见页翻译会保留 layout rect，
+用于点击译文块时跳转和高亮 PDF 原文块。只有调试 legacy overlay 时才设置
 `NBLANE_READER_DEBUG_OVERLAY=1`。
+
+Reader 左侧 `Pages` 会列出 PDF 的全部页码；缩略图按视口懒加载，滚动到对应页附近时再请求
+sidecar 的 page preview。翻译当前页时 Reader 会优先使用 layout/page 自动策略，保存带 rect 的
+译文块；在翻译页点击译文块会跳回 PDF 对应页和块位置，并高亮对应区域。若某篇旧论文只有语义段落
+译文、没有 layout rect，可在 Reader 内重新执行当前页翻译来生成可跳转的 layout 译文。
+
+Reader 右侧 `Review` 会显示当前上下文页的图表提取结果。图表提取优先使用 PDF 内嵌图片和
+PyMuPDF 表格检测；如果论文使用矢量图导致没有独立图片对象，则会根据 `Figure/Table` caption
+裁剪附近区域。点击图表卡片会跳转并高亮 PDF 中的对应区域，便于对照阅读。
+
+Research 页右上角有 **AI配置**。这里保存的是 profile 级别的非密钥偏好：
+
+- **当前页翻译模型**：用于 Reader 当前页/可见页翻译，以及文本模式 Reader 的翻译动作。
+- **DeepRead 模型**：用于 Reader 的 Deep read/Codex deep read，也用于 Analyze Paper 的深读评审模型覆盖。
+
+留空或选择默认时沿用侧边栏/环境变量里的全局模型。配置会写入
+`profiles/<profile>/web-preferences.yaml`，不会保存 API key。
 
 ---
 

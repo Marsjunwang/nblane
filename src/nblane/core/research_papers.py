@@ -601,6 +601,123 @@ def render_paper_page_preview(
     }
 
 
+def extract_paper_figures(
+    profile: str | Path,
+    source_id: str,
+    *,
+    pages: set[int] | list[int] | tuple[int, ...] | None = None,
+    max_items: int = 12,
+    max_width: int = 520,
+) -> list[dict[str, object]]:
+    """Return cropped figure/table-like page images for Reader review panes."""
+
+    try:
+        requested_pages = {
+            int(item)
+            for item in (pages or [])
+            if str(item).strip().isdigit() and int(item) > 0
+        }
+        limit = max(1, min(36, int(max_items or 12)))
+        width_limit = max(160, min(1000, int(max_width or 520)))
+    except (TypeError, ValueError):
+        requested_pages = set()
+        limit = 12
+        width_limit = 520
+    try:
+        pdf_path = paper_pdf_asset_path(profile, source_id)
+        import fitz  # type: ignore[import-not-found]
+    except Exception:
+        return []
+
+    out: list[dict[str, object]] = []
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            for page_number, pdf_page in enumerate(doc, start=1):
+                if requested_pages and page_number not in requested_pages:
+                    continue
+                page_rect = pdf_page.rect
+                page_width = float(page_rect.width)
+                page_height = float(page_rect.height)
+                if page_width <= 0 or page_height <= 0:
+                    continue
+                layer = _pdf_page_text_layer_payload(pdf_page, page_number)
+                captions = _figure_caption_candidates(layer)
+                candidates: list[tuple[str, int, dict[str, object]]] = []
+                for image_index, raw_rect in enumerate(layer.get("image_rects") or [], start=1):
+                    if isinstance(raw_rect, dict):
+                        candidates.append(("figure", image_index, raw_rect))
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        tables = list(getattr(pdf_page.find_tables(), "tables", []) or [])
+                except Exception:
+                    tables = []
+                for table_index, table in enumerate(tables, start=1):
+                    table_rect = _rect_payload(
+                        getattr(table, "bbox", ()),
+                        page_width=page_width,
+                        page_height=page_height,
+                    )
+                    if table_rect is not None:
+                        candidates.append(("table", table_index, table_rect))
+                for caption_index, caption in enumerate(captions, start=1):
+                    fallback_rect = _caption_region_rect(
+                        caption,
+                        candidates=[row[2] for row in candidates],
+                        page_width=page_width,
+                        page_height=page_height,
+                    )
+                    if fallback_rect is not None:
+                        candidates.append(("caption", caption_index, fallback_rect))
+                used_rects: list[dict[str, object]] = []
+                for item_index, (kind, kind_index, raw_rect) in enumerate(candidates, start=1):
+                    rect = _expanded_figure_rect(raw_rect, captions, page_width=page_width, page_height=page_height)
+                    if rect is None:
+                        continue
+                    if _rect_area(rect) < max(900.0, page_width * page_height * 0.01):
+                        continue
+                    if any(
+                        _rect_overlap_ratio(rect, used) > 0.72 or _rect_overlap_ratio(used, rect) > 0.72
+                        for used in used_rects
+                    ):
+                        continue
+                    used_rects.append(rect)
+                    clip = fitz.Rect(
+                        float(rect.get("x") or 0),
+                        float(rect.get("y") or 0),
+                        float(rect.get("x") or 0) + float(rect.get("w") or 0),
+                        float(rect.get("y") or 0) + float(rect.get("h") or 0),
+                    )
+                    zoom = min(2.0, max(0.6, width_limit / max(1.0, float(rect.get("w") or 1))))
+                    pixmap = pdf_page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip, alpha=False)
+                    png_bytes = pixmap.tobytes("png")
+                    caption = _nearest_caption_text(rect, captions)
+                    figure_id = f"figure:{source_slug(source_id)}:{page_number}:{item_index:03d}"
+                    out.append(
+                        {
+                            "id": figure_id,
+                            "anchor_id": figure_id,
+                            "page": page_number,
+                            "order": item_index,
+                            "kind": kind,
+                            "kind_index": kind_index,
+                            "caption": caption,
+                            "source_text": caption,
+                            "locator": f"p. {page_number}",
+                            "rect": rect,
+                            "rects": [rect],
+                            "mime": "image/png",
+                            "width": int(pixmap.width),
+                            "height": int(pixmap.height),
+                            "data_url": "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii"),
+                        }
+                    )
+                    if len(out) >= limit:
+                        return out
+    except Exception:
+        return out
+    return out
+
+
 def pymupdf_available() -> bool:
     """Return True when PyMuPDF's ``fitz`` module can be imported."""
 
@@ -1344,6 +1461,27 @@ def _grobid_page_from_rects(rects: list[dict[str, object]]) -> int:
     return min(pages) if pages else 0
 
 
+def _grobid_first_page_hint(node: ET.Element, page_models: dict[int, dict[str, float]]) -> int:
+    rect_page = _grobid_page_from_rects(_grobid_node_rects(node, page_models))
+    if rect_page:
+        return rect_page
+    own_page = _tei_int_attr(node, "n", "facs", "target")
+    if own_page:
+        return own_page
+    for child in node.iter():
+        if child is node:
+            continue
+        child_page = _grobid_page_from_rects(_grobid_node_rects(child, page_models)) or _tei_int_attr(
+            child,
+            "n",
+            "facs",
+            "target",
+        )
+        if child_page:
+            return child_page
+    return 0
+
+
 def _tei_int_attr(node: ET.Element | None, *names: str) -> int:
     if node is None:
         return 0
@@ -1440,7 +1578,7 @@ def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
         for child in list(container):
             local = _tei_local_name(child)
             if local == "div":
-                div_page = _tei_int_attr(child, "n") or page_hint
+                div_page = _grobid_first_page_hint(child, page_models) or page_hint
                 head = _tei_first_direct_child(child, "head")
                 title = _tei_text(head) if head is not None else ""
                 next_path = list(section_path)
@@ -1452,7 +1590,7 @@ def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
                         section_path=next_path,
                         text=title,
                         page_hint=div_page,
-                        require_rects=True,
+                        require_rects=False,
                     )
                 walk_container(child, next_path, page_hint=div_page)
             elif local == "p":
@@ -2188,7 +2326,17 @@ def _reader_outline_from_segments(segments: list[PaperSegment]) -> list[dict[str
 
     outline: list[dict[str, object]] = []
     seen: set[tuple[str, ...]] = set()
-    for segment in sorted(segments, key=lambda row: (row.page or 10**9, row.order, row.segment_id)):
+    sorted_segments = sorted(segments, key=lambda row: (row.page or 10**9, row.order, row.segment_id))
+    page_by_path: dict[tuple[str, ...], int] = {}
+    target_by_path: dict[tuple[str, ...], PaperSegment] = {}
+    for segment in sorted_segments:
+        path = tuple(_clean_text(item) for item in segment.section_path if _clean_text(item))
+        for level, _ in enumerate(path, start=1):
+            key = path[:level]
+            if int(segment.page or 0) > 0:
+                page_by_path.setdefault(key, int(segment.page or 0))
+                target_by_path.setdefault(key, segment)
+    for segment in sorted_segments:
         path = tuple(_clean_text(item) for item in segment.section_path if _clean_text(item))
         for level, _ in enumerate(path, start=1):
             key = path[:level]
@@ -2196,20 +2344,263 @@ def _reader_outline_from_segments(segments: list[PaperSegment]) -> list[dict[str
                 continue
             seen.add(key)
             title = key[-1]
+            if not _outline_title_allowed(title, kind="heading"):
+                continue
+            target_segment = target_by_path.get(key) or segment
+            page_number = int(page_by_path.get(key) or target_segment.page or segment.page or 0)
+            if page_number <= 0:
+                continue
             anchor_seed = "|".join(key)
             outline.append(
                 {
                     "anchor_id": f"outline:{source_slug(segment.source_id)}:{hashlib.sha256(anchor_seed.encode('utf-8')).hexdigest()[:12]}",
-                    "target_anchor_id": f"segment:{segment.segment_id}",
-                    "segment_id": segment.segment_id,
+                    "target_anchor_id": f"segment:{target_segment.segment_id}",
+                    "segment_id": target_segment.segment_id,
                     "title": title,
-                    "page": int(segment.page or 0),
-                    "order": int(segment.order or 0),
+                    "page": page_number,
+                    "order": int(target_segment.order or segment.order or 0),
                     "level": level,
                     "section_path": list(key),
                 }
             )
+    if not outline:
+        fallback_seen: set[tuple[int, str]] = set()
+        for segment in sorted_segments:
+            for title, level, offset in _outline_titles_from_segment(segment):
+                if not title:
+                    continue
+                page_number = int(segment.page or 0)
+                key = (page_number, title.lower())
+                if key in fallback_seen:
+                    continue
+                fallback_seen.add(key)
+                anchor_seed = f"{segment.segment_id}|{offset}|{title}"
+                outline.append(
+                    {
+                        "anchor_id": f"outline:{source_slug(segment.source_id)}:{hashlib.sha256(anchor_seed.encode('utf-8')).hexdigest()[:12]}",
+                        "target_anchor_id": f"segment:{segment.segment_id}",
+                        "segment_id": segment.segment_id,
+                        "title": title,
+                        "page": page_number,
+                        "order": int(segment.order or 0) * 1000 + int(offset or 0),
+                        "level": level,
+                        "section_path": [title],
+                    }
+                )
     return outline
+
+
+_COMMON_OUTLINE_HEADINGS = {
+    "abstract",
+    "introduction",
+    "background",
+    "related work",
+    "preliminaries",
+    "method",
+    "methods",
+    "methodology",
+    "approach",
+    "experiments",
+    "experiment",
+    "experimental setup",
+    "evaluation",
+    "results",
+    "analysis",
+    "discussion",
+    "limitations",
+    "limitation",
+    "conclusion",
+    "conclusions",
+    "references",
+    "appendix",
+    "acknowledgements",
+    "acknowledgments",
+}
+
+_TABLE_OR_FIGURE_HEADINGS = {
+    "amount",
+    "annotation",
+    "action seq.",
+    "current pos.",
+    "data communication",
+    "dataset",
+    "depth",
+    "destination",
+    "done",
+    "end frame",
+    "image",
+    "modality",
+    "plan segmentation",
+    "primitive",
+    "spatial information",
+    "start frame",
+    "state",
+    "task desc.",
+    "trajectory",
+}
+
+
+def _outline_title_from_segment(segment: PaperSegment) -> str:
+    kind = _clean_text(segment.kind).lower()
+    text = " ".join(_clean_text(segment.text).split())
+    if int(segment.page or 0) <= 0:
+        return ""
+    if not _outline_title_allowed(text, kind=kind):
+        return ""
+    if kind == "heading":
+        return text
+    if re.match(r"^\d+(?:\.\d+)*\.?\s+[A-Z][A-Za-z0-9 ,:/()\\-]{2,}$", text):
+        return text
+    letters = re.sub(r"[^A-Za-z]", "", text)
+    if len(letters) >= 5 and letters.upper() == letters and not text.endswith("."):
+        return text.title() if len(text) > 28 else text
+    return ""
+
+
+def _outline_titles_from_segment(segment: PaperSegment) -> list[tuple[str, int, int]]:
+    title = _outline_title_from_segment(segment)
+    if title:
+        return [(title, _outline_level_for_title(title), 0)]
+    return _outline_titles_from_segment_lines(segment)
+
+
+def _outline_titles_from_segment_lines(segment: PaperSegment) -> list[tuple[str, int, int]]:
+    if int(segment.page or 0) <= 0:
+        return []
+    kind = _clean_text(segment.kind).lower()
+    if kind in {"title", "authors", "affiliation", "caption", "formula", "table_cell", "figure_label", "symbol", "page"}:
+        return []
+    raw_lines = [
+        (idx, " ".join(_clean_text(line).split()))
+        for idx, line in enumerate(str(segment.text or "").splitlines(), start=1)
+    ]
+    lines = [(idx, line) for idx, line in raw_lines if line]
+    results: list[tuple[str, int, int]] = []
+    seen: set[str] = set()
+    consumed_lines: set[int] = set()
+    for pos, (line_no, line) in enumerate(lines):
+        if line_no in consumed_lines:
+            continue
+        marker_match = re.fullmatch(r"\d+(?:\.\d+)*\.?", line)
+        if marker_match and pos + 1 < len(lines):
+            next_no, next_line = lines[pos + 1]
+            marker = line.rstrip(".")
+            if _section_marker_allowed(marker) and _line_looks_like_outline_heading(next_line, numbered=True, page=int(segment.page or 0), marker=marker):
+                title = f"{marker} {_outline_display_title(next_line)}"
+                if _outline_title_allowed(title, kind="heading"):
+                    clean_key = title.lower()
+                    if clean_key not in seen:
+                        seen.add(clean_key)
+                        results.append((title, _outline_level_for_title(title), line_no * 10))
+                        consumed_lines.add(next_no)
+                continue
+        inline_match = re.match(r"^(\d+(?:\.\d+)*)\.?\s+(.+)$", line)
+        if inline_match:
+            marker = inline_match.group(1)
+            title_text = _outline_display_title(inline_match.group(2).strip())
+            title = f"{marker} {title_text}"
+            if _section_marker_allowed(marker) and _line_looks_like_outline_heading(title_text, numbered=True, page=int(segment.page or 0), marker=marker) and _outline_title_allowed(title, kind="heading"):
+                clean_key = title.lower()
+                if clean_key not in seen:
+                    seen.add(clean_key)
+                    results.append((title, _outline_level_for_title(title), line_no * 10))
+                continue
+        if _line_looks_like_outline_heading(line, numbered=False, page=int(segment.page or 0)):
+            title = _outline_display_title(line)
+            if _outline_title_allowed(title, kind="heading"):
+                clean_key = title.lower()
+                if clean_key not in seen:
+                    seen.add(clean_key)
+                    results.append((title, _outline_level_for_title(title), line_no * 10))
+    return results[:12]
+
+
+def _outline_level_for_title(title: str) -> int:
+    clean = " ".join(_clean_text(title).split())
+    match = re.match(r"^(\d+(?:\.\d+)*)", clean)
+    if match:
+        return max(1, min(4, match.group(1).count(".") + 1))
+    if re.match(r"^[A-Z]\s+", clean):
+        return 2
+    return 1
+
+
+def _outline_display_title(title: str) -> str:
+    clean = " ".join(_clean_text(title).split())
+    letters = re.sub(r"[^A-Za-z]", "", clean)
+    if letters and letters.upper() == letters and len(letters) >= 4:
+        return clean.title()
+    return clean
+
+
+def _section_marker_allowed(marker: str) -> bool:
+    clean = marker.rstrip(".")
+    first = clean.split(".", 1)[0]
+    if not first.isdigit() or int(first) <= 0:
+        return False
+    return len(first) <= 1
+
+
+def _line_looks_like_outline_heading(line: str, *, numbered: bool, page: int, marker: str = "") -> bool:
+    clean = " ".join(_clean_text(line).split())
+    if not clean or len(clean) > 88:
+        return False
+    lowered = clean.lower().strip(" .:")
+    if lowered in _TABLE_OR_FIGURE_HEADINGS:
+        return False
+    if not _outline_title_allowed(clean, kind="heading"):
+        return False
+    if re.search(r"@\w|https?://|www\.|[{}%/]", clean, flags=re.IGNORECASE):
+        return False
+    if re.search(r"\[[0-9,;:\-\s]+\]", clean):
+        return False
+    if clean.endswith((".", ",", ";")):
+        return False
+    words = clean.split()
+    if len(words) > 10:
+        return False
+    if numbered:
+        if page == 1 and lowered not in _COMMON_OUTLINE_HEADINGS:
+            return False
+        if re.fullmatch(r"[\W\d_]+", clean):
+            return False
+        if marker and "." not in marker and lowered not in _COMMON_OUTLINE_HEADINGS and len(words) <= 1:
+            return False
+        if marker and "." not in marker and ("：" in clean or ":" in clean) and len(clean) > 20:
+            return False
+        return bool(re.match(r"^[A-Z0-9\u4e00-\u9fff]", clean))
+    if lowered in _COMMON_OUTLINE_HEADINGS:
+        return True
+    if page == 1:
+        return lowered in {"abstract", "introduction"}
+    letters = re.sub(r"[^A-Za-z]", "", clean)
+    if not re.match(r"^[A-Z\u4e00-\u9fff]", clean):
+        return False
+    if re.search(r"\d", clean):
+        return False
+    if letters and letters.upper() == letters and len(letters) >= 4 and 2 <= len(words) <= 6:
+        return True
+    return False
+
+
+def _outline_title_allowed(title: str, *, kind: str = "") -> bool:
+    clean = " ".join(_clean_text(title).split())
+    if not clean or len(clean) > 96:
+        return False
+    clean_kind = _clean_text(kind).lower()
+    if clean_kind in {"title", "authors", "affiliation", "caption", "formula", "table_cell", "figure_label", "symbol", "page"}:
+        return False
+    if re.fullmatch(r"\d+(?:\.\d+)*\.?", clean):
+        return False
+    if re.match(r"^(figure|fig\.?|table|algorithm|equation|appendix)\s*\d*[\s.:,-]", clean, flags=re.IGNORECASE):
+        return False
+    if re.fullmatch(r"[A-Za-z][A-Za-z -]{1,24}\.", clean):
+        return False
+    if re.search(r"@\w|https?://|www\.", clean, flags=re.IGNORECASE):
+        return False
+    if len(clean.split()) <= 2 and clean.endswith("."):
+        return False
+    return True
 
 
 def _translation_revision(profile: str | Path, source_id: str, target_lang: str) -> str:
@@ -2368,6 +2759,143 @@ def _rect_overlap_ratio(rect: dict[str, object], other: dict[str, object]) -> fl
     overlap_h = max(0.0, min(ay1, by1) - max(ay0, by0))
     area = _rect_area(rect)
     return (overlap_w * overlap_h / area) if area else 0.0
+
+
+def _rect_union_payload(
+    rects: list[dict[str, object]],
+    *,
+    page_width: float,
+    page_height: float,
+) -> dict[str, object] | None:
+    if not rects:
+        return None
+    try:
+        x0 = min(float(rect.get("x") or 0) for rect in rects)
+        y0 = min(float(rect.get("y") or 0) for rect in rects)
+        x1 = max(float(rect.get("x") or 0) + float(rect.get("w") or 0) for rect in rects)
+        y1 = max(float(rect.get("y") or 0) + float(rect.get("h") or 0) for rect in rects)
+    except (TypeError, ValueError):
+        return None
+    return _rect_payload((x0, y0, x1, y1), page_width=page_width, page_height=page_height)
+
+
+def _figure_caption_candidates(layer: dict[str, object]) -> list[dict[str, object]]:
+    captions: list[dict[str, object]] = []
+    for raw_line in layer.get("lines") or []:
+        if not isinstance(raw_line, dict):
+            continue
+        text = _clean_text(raw_line.get("text"))
+        if not re.match(r"^(fig(?:ure)?\.?|table)\s*\d+", text, flags=re.IGNORECASE):
+            continue
+        rect = _rect_from_layer_line(raw_line)
+        if rect is None:
+            continue
+        captions.append({"text": text, "rect": rect})
+    return captions
+
+
+def _expanded_figure_rect(
+    image_rect: dict[str, object],
+    captions: list[dict[str, object]],
+    *,
+    page_width: float,
+    page_height: float,
+) -> dict[str, object] | None:
+    near_rects = [copy.deepcopy(image_rect)]
+    try:
+        image_x = float(image_rect.get("x") or 0)
+        image_y = float(image_rect.get("y") or 0)
+        image_w = float(image_rect.get("w") or 0)
+        image_h = float(image_rect.get("h") or 0)
+    except (TypeError, ValueError):
+        return None
+    for caption in captions:
+        rect = caption.get("rect") if isinstance(caption, dict) else None
+        if not isinstance(rect, dict):
+            continue
+        try:
+            cap_x = float(rect.get("x") or 0)
+            cap_y = float(rect.get("y") or 0)
+            cap_w = float(rect.get("w") or 0)
+            cap_h = float(rect.get("h") or 0)
+        except (TypeError, ValueError):
+            continue
+        horizontal_overlap = max(0.0, min(image_x + image_w, cap_x + cap_w) - max(image_x, cap_x))
+        if horizontal_overlap < min(image_w, cap_w) * 0.25:
+            continue
+        gap_below = cap_y - (image_y + image_h)
+        gap_above = image_y - (cap_y + cap_h)
+        if -24 <= gap_below <= 90 or -24 <= gap_above <= 70:
+            near_rects.append(copy.deepcopy(rect))
+    return _rect_union_payload(near_rects, page_width=page_width, page_height=page_height)
+
+
+def _caption_region_rect(
+    caption: dict[str, object],
+    *,
+    candidates: list[dict[str, object]],
+    page_width: float,
+    page_height: float,
+) -> dict[str, object] | None:
+    """Infer a figure/table crop around a caption when the PDF has vector art."""
+
+    rect = caption.get("rect") if isinstance(caption, dict) else None
+    if not isinstance(rect, dict):
+        return None
+    try:
+        cap_x = float(rect.get("x") or 0)
+        cap_y = float(rect.get("y") or 0)
+        cap_w = float(rect.get("w") or 0)
+        cap_h = float(rect.get("h") or 0)
+    except (TypeError, ValueError):
+        return None
+    if cap_w <= 0 or cap_h <= 0 or page_width <= 0 or page_height <= 0:
+        return None
+    text_value = _clean_text(caption.get("text")).lower()
+    is_table = text_value.startswith("table")
+    center = cap_x + cap_w / 2
+    width = min(page_width - 24, max(cap_w + 80, page_width * 0.68))
+    x0 = max(12.0, min(page_width - width - 12.0, center - width / 2))
+    x1 = min(page_width - 12.0, x0 + width)
+    if is_table:
+        y0 = max(12.0, cap_y - 8.0)
+        y1 = min(page_height - 12.0, cap_y + cap_h + min(260.0, page_height * 0.38))
+    else:
+        y0 = max(12.0, cap_y - min(260.0, page_height * 0.38))
+        y1 = min(page_height - 12.0, cap_y + cap_h + 8.0)
+    if y1 - y0 < max(36.0, cap_h * 2.0):
+        return None
+    fallback = _rect_payload((x0, y0, x1, y1), page_width=page_width, page_height=page_height)
+    if fallback is None:
+        return None
+    if any(_rect_overlap_ratio(candidate, fallback) > 0.45 for candidate in candidates):
+        return None
+    return fallback
+
+
+def _nearest_caption_text(rect: dict[str, object], captions: list[dict[str, object]]) -> str:
+    try:
+        x = float(rect.get("x") or 0)
+        y = float(rect.get("y") or 0)
+        w = float(rect.get("w") or 0)
+        h = float(rect.get("h") or 0)
+    except (TypeError, ValueError):
+        return ""
+    best: tuple[float, str] | None = None
+    for caption in captions:
+        cap_rect = caption.get("rect") if isinstance(caption, dict) else None
+        if not isinstance(cap_rect, dict):
+            continue
+        try:
+            cap_x = float(cap_rect.get("x") or 0)
+            cap_y = float(cap_rect.get("y") or 0)
+        except (TypeError, ValueError):
+            continue
+        distance = abs(cap_y - (y + h)) + abs(cap_x - x) * 0.15
+        text_value = _clean_text(caption.get("text"))
+        if text_value and (best is None or distance < best[0]):
+            best = (distance, text_value)
+    return best[1] if best else ""
 
 
 def _bbox_values(bbox: object) -> tuple[float, float, float, float] | None:
@@ -2569,6 +3097,149 @@ def _layout_kind(text: str, font_size: float, *, table: bool = False, symbol: bo
     return "paragraph"
 
 
+def _front_matter_layout_kind(
+    *,
+    page: int,
+    text: str,
+    rect: dict[str, object],
+    font_size: float,
+    current_kind: str,
+) -> str:
+    """Classify first-page title/author metadata before translation grouping."""
+
+    if int(page or 0) != 1:
+        return current_kind
+    try:
+        y_pct = float(rect.get("y_pct"))
+    except (TypeError, ValueError):
+        try:
+            y_pct = float(rect.get("y") or 0) / max(1.0, float(rect.get("page_height") or 0))
+        except (TypeError, ValueError):
+            y_pct = 1.0
+    if y_pct > 0.36:
+        return current_kind
+    clean = " ".join(_clean_text(text).split())
+    if not clean:
+        return current_kind
+    if font_size >= 15:
+        return "title"
+    lower = clean.lower()
+    affiliation_markers = (
+        "university",
+        "institute",
+        "college",
+        "department",
+        "school",
+        "laboratory",
+        "lab",
+        "academy",
+        "research",
+        "corresponding",
+        "equal contribution",
+    )
+    looks_affiliation = any(marker in lower for marker in affiliation_markers) or bool(
+        re.search(r"@\w|\.edu\b|\.ac\.", lower)
+    )
+    nameish_words = re.findall(r"[A-Z][A-Za-z.'-]+", clean)
+    has_author_separators = "," in clean or ";" in clean or re.search(r"\band\b", lower)
+    sentence_like = clean.endswith(".") and len(clean.split()) > 6
+    if looks_affiliation and len(clean) <= 240:
+        return "affiliation"
+    if has_author_separators and len(nameish_words) >= 2 and not sentence_like:
+        return "authors"
+    return current_kind
+
+
+def _candidate_primary_rect(candidate: dict[str, object]) -> dict[str, object] | None:
+    for rect in candidate.get("rects") or []:
+        if isinstance(rect, dict) and _rect_area(rect) > 0:
+            return rect
+    return None
+
+
+def _layout_candidates_same_band(previous: dict[str, object], current: dict[str, object]) -> bool:
+    prev_rect = _candidate_primary_rect(previous)
+    cur_rect = _candidate_primary_rect(current)
+    if prev_rect is None or cur_rect is None:
+        return False
+    try:
+        prev_y = float(prev_rect.get("y") or 0)
+        prev_h = float(prev_rect.get("h") or 0)
+        cur_y = float(cur_rect.get("y") or 0)
+        prev_x = float(prev_rect.get("x") or 0)
+        cur_x = float(cur_rect.get("x") or 0)
+        prev_w = float(prev_rect.get("w") or 0)
+        cur_w = float(cur_rect.get("w") or 0)
+        page_width = max(float(prev_rect.get("page_width") or 0), float(cur_rect.get("page_width") or 0), 1.0)
+        font_size = max(float(previous.get("font_size") or 0), float(current.get("font_size") or 0), 8.0)
+    except (TypeError, ValueError):
+        return False
+    vertical_gap = cur_y - (prev_y + prev_h)
+    if vertical_gap < -6 or vertical_gap > max(14.0, font_size * 1.25):
+        return False
+    prev_center = prev_x + prev_w / 2
+    cur_center = cur_x + cur_w / 2
+    center_delta = abs(prev_center - cur_center)
+    overlap = max(0.0, min(prev_x + prev_w, cur_x + cur_w) - max(prev_x, cur_x))
+    return center_delta <= max(48.0, page_width * 0.18) or overlap >= min(prev_w, cur_w) * 0.28
+
+
+def _merge_layout_candidate_pair(previous: dict[str, object], current: dict[str, object], *, kind: str) -> dict[str, object]:
+    rects = [
+        copy.deepcopy(rect)
+        for rect in [*_clean_rect_list(previous.get("rects")), *_clean_rect_list(current.get("rects"))]
+    ]
+    merged = {
+        **previous,
+        "source_text": "\n".join(
+            part
+            for part in [_clean_text(previous.get("source_text")), _clean_text(current.get("source_text"))]
+            if part
+        ),
+        "kind": kind,
+        "rects": rects,
+        "sort_y": min(float(previous.get("sort_y") or 0), float(current.get("sort_y") or 0)),
+        "sort_x": min(float(previous.get("sort_x") or 0), float(current.get("sort_x") or 0)),
+        "font_size": max(float(previous.get("font_size") or 0), float(current.get("font_size") or 0)),
+        "line_count": int(previous.get("line_count") or 1) + int(current.get("line_count") or 1),
+    }
+    if kind in {"authors", "affiliation"}:
+        merged["translatable"] = False
+        merged["preserve_source"] = True
+    return merged
+
+
+def _clean_rect_list(value: object) -> list[dict[str, object]]:
+    return [copy.deepcopy(row) for row in value or [] if isinstance(row, dict)]
+
+
+def _merge_adjacent_layout_candidates(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not candidates:
+        return []
+    rows = sorted(candidates, key=lambda row: (int(row.get("page") or 0), float(row.get("sort_y") or 0), float(row.get("sort_x") or 0)))
+    merged: list[dict[str, object]] = []
+    for candidate in rows:
+        if not merged:
+            merged.append(candidate)
+            continue
+        previous = merged[-1]
+        prev_kind = _clean_text(previous.get("kind"))
+        cur_kind = _clean_text(candidate.get("kind"))
+        same_page = int(previous.get("page") or 0) == int(candidate.get("page") or 0)
+        if same_page and prev_kind == cur_kind == "title" and _layout_candidates_same_band(previous, candidate):
+            merged[-1] = _merge_layout_candidate_pair(previous, candidate, kind="title")
+            continue
+        if same_page and {prev_kind, cur_kind} <= {"authors", "affiliation"} and _layout_candidates_same_band(previous, candidate):
+            merged[-1] = _merge_layout_candidate_pair(
+                previous,
+                candidate,
+                kind="affiliation" if "affiliation" in {prev_kind, cur_kind} else "authors",
+            )
+            continue
+        merged.append(candidate)
+    return merged
+
+
 def _layout_scope_ref(page: int, order: int, source_hash: str) -> str:
     short_hash = _clean_text(source_hash).removeprefix("sha256:")[:12] or f"{order:05d}"
     return f"layout:v2:{int(page)}:{int(order):05d}:{short_hash}"
@@ -2688,7 +3359,21 @@ def _same_layout_paragraph(previous: dict[str, object], current: dict[str, objec
         return False
     prev_kind = _layout_kind(prev_text, float(previous.get("font_size") or 0))
     cur_kind = _layout_kind(cur_text, float(current.get("font_size") or 0))
-    if prev_kind in {"title", "caption"} or cur_kind in {"title", "caption"}:
+    if prev_kind == "title" or cur_kind == "title":
+        if prev_kind != cur_kind:
+            return False
+        try:
+            prev_center = float(prev_rect.get("x") or 0) + float(prev_rect.get("w") or 0) / 2
+            cur_center = float(cur_rect.get("x") or 0) + float(cur_rect.get("w") or 0) / 2
+            page_width = max(float(prev_rect.get("page_width") or 0), float(cur_rect.get("page_width") or 0), 1.0)
+            prev_y = float(prev_rect.get("y") or 0)
+            prev_h = float(prev_rect.get("h") or 0)
+            cur_y = float(cur_rect.get("y") or 0)
+            font_size = max(float(previous.get("font_size") or 0), float(current.get("font_size") or 0), 12.0)
+        except (TypeError, ValueError):
+            return False
+        return -6 <= cur_y - (prev_y + prev_h) <= max(14.0, font_size * 1.15) and abs(prev_center - cur_center) <= max(56.0, page_width * 0.20)
+    if prev_kind == "caption" or cur_kind == "caption":
         return False
     try:
         prev_x = float(prev_rect.get("x") or 0)
@@ -2761,14 +3446,26 @@ def _layout_candidates_from_text_layer(
             if not translatable and re.search(r"[A-Za-z\u4e00-\u9fff]", text):
                 if not inside_image:
                     continue
+            kind = "figure_label" if inside_image else _layout_kind(text, font_size, symbol=not translatable)
+            kind = _front_matter_layout_kind(
+                page=page,
+                text=text,
+                rect=rect,
+                font_size=font_size,
+                current_kind=kind,
+            )
+            preserve_source = (not translatable) and not inside_image
+            if kind in {"authors", "affiliation"}:
+                translatable = False
+                preserve_source = True
             candidates.append(
                 {
                     "page": page,
                     "source_text": text,
-                    "kind": "figure_label" if inside_image else _layout_kind(text, font_size, symbol=not translatable),
+                    "kind": kind,
                     "rects": [rect],
                     "translatable": translatable,
-                    "preserve_source": (not translatable) and not inside_image,
+                    "preserve_source": preserve_source,
                     "sort_y": rect["y"],
                     "sort_x": rect["x"],
                     "font_size": font_size,
@@ -2777,7 +3474,7 @@ def _layout_candidates_from_text_layer(
                     "dir": copy.deepcopy(group[0].get("dir") or [1.0, 0.0]),
                 }
             )
-    return candidates
+    return _merge_adjacent_layout_candidates(candidates)
 
 
 def build_paper_layout_units(
@@ -2890,6 +3587,33 @@ def build_paper_layout_units(
     except Exception:
         return []
     return units
+
+
+def reader_translation_layout_units(layout_units: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Return layout units suitable for the normal Reader translation flow.
+
+    The raw PDF layout contains table cells, figure-internal labels, and symbols.
+    Those are useful for geometry and debugging overlays, but they make the normal
+    paragraph translation view noisy and can regress to page-like chunks.
+    """
+
+    rows: list[dict[str, object]] = []
+    excluded_kinds = {"table_cell", "figure_label", "symbol"}
+    for raw_unit in layout_units:
+        if not isinstance(raw_unit, dict):
+            continue
+        source_text = _clean_text(raw_unit.get("source_text") or raw_unit.get("text"))
+        if not source_text:
+            continue
+        kind = _clean_text(raw_unit.get("kind"))
+        if kind in excluded_kinds:
+            continue
+        translatable = bool(raw_unit.get("translatable", True))
+        display_source = bool(raw_unit.get("display_source", not translatable))
+        if not translatable and not display_source:
+            continue
+        rows.append(copy.deepcopy(raw_unit))
+    return rows
 
 
 def build_translation_units(
@@ -3078,9 +3802,11 @@ def build_reader_payload(
     page_models = _page_models_from_pdf(profile, source_id, context_pages)
     if not page_models:
         page_models = _page_models_from_layout_units(layout_units, context_pages)
+    figures = extract_paper_figures(profile, source_id, pages=context_pages, max_items=12, max_width=520)
+    reader_layout_units = reader_translation_layout_units(layout_units)
     layout_scope_refs = {
         _clean_text(row.get("scope_ref") or row.get("unit_id"))
-        for row in layout_units
+        for row in reader_layout_units
         if isinstance(row, dict)
     }
     all_segments = load_paper_segments(profile, source_id)
@@ -3095,37 +3821,37 @@ def build_reader_payload(
     ]
     segment_ids = {str(row.get("segment_id") or "") for row in segments}
     segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
-    segment_first = bool(all_segments)
+    current_translation_rows = load_paper_translations(profile, source_id)
+    prefer_layout_units = bool(reader_layout_units)
     translations: list[dict[str, object]] = []
-    for row in load_paper_translations(profile, source_id):
+    for row in current_translation_rows:
         if row.target_lang != target_lang:
             continue
         scope_type = _clean_text(row.scope_type) or "segment"
         row_page = int(row.page or segment_pages.get(row.segment_id, 0))
         include_row = False
         if scope_type == "layout":
-            if segment_first:
-                include_row = False
-            else:
-                include_row = row.scope_ref in layout_scope_refs
+            include_row = row.scope_ref in layout_scope_refs
         elif scope_type == "page":
-            if segment_first:
+            if prefer_layout_units or all_segments:
                 include_row = False
             else:
                 include_row = row_page in context_page_set or any(str(row.scope_ref).startswith(f"page:{page_number}:") for page_number in context_pages)
         elif scope_type == "selection":
             include_row = row_page in context_page_set or row_page <= 0
         elif scope_type == "segment":
-            include_row = row_page in context_page_set or bool(row.segment_id and row.segment_id in segment_ids)
+            include_row = False if prefer_layout_units else row_page in context_page_set or bool(row.segment_id and row.segment_id in segment_ids)
         if include_row:
             translations.append({**row.to_dict(), "page": row_page})
     page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
+    unit_pages = [] if prefer_layout_units else page_context_rows
+    unit_segments = [] if prefer_layout_units else segments
     translation_units, translation_summary = build_translation_units(
-        pages=page_context_rows,
-        segments=segments,
+        pages=unit_pages,
+        segments=unit_segments,
         translations=translations,
         target_lang=target_lang,
-        layout_units=layout_units,
+        layout_units=reader_layout_units,
     )
     annotations = [
         ann.to_dict()
@@ -3172,6 +3898,7 @@ def build_reader_payload(
         "pdf_url": pdf_url,
         "page_previews": preview_rows,
         "page_models": page_models,
+        "figures": figures,
         "outline": outline,
         "pages": [page_row.to_dict() for page_row in page_context_rows],
         "segments": segments,
@@ -3446,7 +4173,11 @@ def translate_full_paper(
         ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
         segments = load_paper_segments(profile, source_id)
     pages = load_paper_pages(profile, source_id)
-    layout_units = build_paper_layout_units(profile, source_id) if clean_scope_strategy == "layout" else []
+    layout_units = (
+        reader_translation_layout_units(build_paper_layout_units(profile, source_id))
+        if clean_scope_strategy == "layout"
+        else []
+    )
     if layout_units:
         translations = load_paper_translations(profile, source_id)
         existing_by_scope = {
@@ -5305,6 +6036,7 @@ __all__ = [
     "create_reading_note_markdown",
     "download_paper_pdf",
     "ensure_paper_reading_artifacts",
+    "extract_paper_figures",
     "extract_paper_page_text_layer",
     "extract_paper_pages",
     "extract_paper_segments",
@@ -5339,6 +6071,7 @@ __all__ = [
     "paper_source_diagnostics",
     "process_grobid_fulltext",
     "pymupdf_available",
+    "reader_translation_layout_units",
     "research_asset_root",
     "render_paper_page_preview",
     "save_paper_analysis",

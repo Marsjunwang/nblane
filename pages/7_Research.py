@@ -10,6 +10,8 @@ from urllib.parse import quote
 import streamlit as st
 import yaml
 
+from nblane.core import codex_adapter
+from nblane.core import llm as llm_client
 from nblane.core.auth import mint_reader_token
 from nblane.core.ai import (
     answer_paper_question,
@@ -22,6 +24,7 @@ from nblane.core.ai import (
 )
 from nblane.core.io import profile_dir
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
+from nblane.core.web_preferences import load_web_preferences, update_web_preferences
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperSearchResult,
@@ -173,6 +176,134 @@ def _tags(value: str) -> list[str]:
 
 def _l(key: str, default: str) -> str:
     return ui.get(key, default)
+
+
+_MODEL_DEFAULT = "__default__"
+_MODEL_CUSTOM = "__custom__"
+_PAPER_MODEL_SUGGESTIONS = (
+    "qwen3.6-plus",
+    "qwen-plus",
+    "qwen-max",
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-5.1-codex",
+)
+
+
+def _paper_ai_prefs() -> dict[str, str]:
+    prefs = load_web_preferences(selected)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
+    return {
+        "translation_model": str(paper.get("translation_model") or "").strip(),
+        "deep_read_model": str(paper.get("deep_read_model") or "").strip(),
+    }
+
+
+def _model_picker(label: str, pref_name: str, current: str, default_model: str) -> str:
+    suggestions: list[str] = []
+    for value in (default_model, *_PAPER_MODEL_SUGGESTIONS):
+        clean = str(value or "").strip()
+        if clean and clean not in suggestions:
+            suggestions.append(clean)
+    current = str(current or "").strip()
+    options = [_MODEL_DEFAULT, *suggestions, _MODEL_CUSTOM]
+    if current and current not in suggestions:
+        initial = _MODEL_CUSTOM
+    elif current:
+        initial = current
+    else:
+        initial = _MODEL_DEFAULT
+    choice = st.selectbox(
+        label,
+        options,
+        index=options.index(initial),
+        format_func=lambda value: (
+            _l("ai_config_use_default", "Use app default")
+            if value == _MODEL_DEFAULT
+            else _l("ai_config_custom_model", "Custom model")
+            if value == _MODEL_CUSTOM
+            else value
+        ),
+        key=f"paper_ai_config:{selected}:{pref_name}:choice",
+    )
+    if choice == _MODEL_DEFAULT:
+        return ""
+    if choice == _MODEL_CUSTOM:
+        return st.text_input(
+            _l("ai_config_custom_model", "Custom model"),
+            value=current if current and current not in suggestions else "",
+            key=f"paper_ai_config:{selected}:{pref_name}:custom",
+        ).strip()
+    return str(choice).strip()
+
+
+def _effective_model_caption(label: str, configured: str, default_model: str) -> str:
+    configured = str(configured or "").strip()
+    default_model = str(default_model or "").strip()
+    missing = _l("missing", "missing")
+    if configured:
+        if default_model and configured != default_model:
+            model = f"{configured} ({_l('ai_config_overrides_default', 'overrides default')} {default_model})"
+        else:
+            model = configured
+    else:
+        model = f"{_l('ai_config_use_default', 'Use app default')}: {default_model or missing}"
+    return f"{label}: {model}"
+
+
+def _render_ai_config_panel() -> None:
+    with st.form(f"paper_ai_config_form:{selected}", border=False):
+        prefs = _paper_ai_prefs()
+        llm_default = str(llm_client.current_config(mask_key=True).get("model") or "").strip()
+        codex_default = str(codex_adapter.current_config(profile=selected).model or "").strip() or llm_default
+        st.caption(
+            _l(
+                "ai_config_caption",
+                "Choose paper-reading models. Leave a field on app default to follow the global sidebar/runtime configuration.",
+            )
+        )
+        default_bits = [
+            _effective_model_caption(
+                _l("ai_config_translation_model", "Current-page translation model"),
+                prefs["translation_model"],
+                llm_default,
+            ),
+            _effective_model_caption(
+                _l("ai_config_deep_read_model", "DeepRead model"),
+                prefs["deep_read_model"],
+                codex_default,
+            ),
+        ]
+        st.caption(" · ".join(default_bits))
+        translation_model = _model_picker(
+            _l("ai_config_translation_model", "Current-page translation model"),
+            "translation_model",
+            prefs["translation_model"],
+            llm_default,
+        )
+        deep_read_model = _model_picker(
+            _l("ai_config_deep_read_model", "DeepRead model"),
+            "deep_read_model",
+            prefs["deep_read_model"],
+            codex_default,
+        )
+        if st.form_submit_button(_l("save", "Save"), type="primary", use_container_width=True):
+            update_web_preferences(
+                selected,
+                {
+                    "ai": {
+                        "paper": {
+                            "translation_model": translation_model,
+                            "deep_read_model": deep_read_model,
+                        }
+                    }
+                },
+            )
+            st.success(_l("ai_config_saved", "AI preferences saved."))
+            st.rerun()
 
 
 def _status_label(status: str) -> str:
@@ -477,10 +608,14 @@ def _paper_sources(inbox) -> list:
 
 
 def _source_label(inbox, source_id: str) -> str:
-    return next(
-        (source.title or source.id for source in inbox.sources if source.id == source_id),
-        source_id,
-    )
+    source = next((source for source in inbox.sources if source.id == source_id), None)
+    if source is None:
+        return source_id
+    label = source.title or source.id
+    duplicate_titles = sum(1 for row in inbox.sources if (row.title or row.id) == label)
+    if duplicate_titles > 1:
+        label = f"{label} · {source.id}"
+    return label
 
 
 def _node_options() -> dict[str, str]:
@@ -2042,9 +2177,21 @@ def _render_paper_reader(inbox) -> None:
     if not papers:
         st.caption(_l("no_papers", "No paper sources yet."))
         return
+    default_index = max(
+        range(len(papers)),
+        key=lambda idx: (
+            100 if (papers[idx].metadata or {}).get("pdf_asset_ref") else 0,
+            30 if (papers[idx].metadata or {}).get("structured_extracted_at") else 0,
+            20 if (papers[idx].metadata or {}).get("structure_backend") else 0,
+            10 if (papers[idx].metadata or {}).get("text_extracted_at") else 0,
+            5 if (papers[idx].metadata or {}).get("page_count") else 0,
+            -idx,
+        ),
+    )
     source_id = st.selectbox(
         ui["source_id"],
         options=[source.id for source in papers],
+        index=default_index,
         format_func=lambda sid: _source_label(inbox, sid),
         key=f"paper_reader_source:{selected}",
     )
@@ -2088,6 +2235,7 @@ def _render_paper_reader(inbox) -> None:
         f"{source.metadata.get('reading_artifacts_status') or source.metadata.get('structure_backend', '') or _l('missing', 'missing')}",
     ]
     st.markdown(f"**{source.title}**")
+    st.caption(f"`{source_id}`")
     st.caption(" · ".join(status_bits))
     st.caption(
         _l(
@@ -3154,7 +3302,17 @@ with _head_l:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
 with _head_goal:
-    render_current_goal_strip(selected, compact=True, align="right")
+    _goal_col, _ai_col = st.columns([4, 2], gap="small", vertical_alignment="center")
+    with _goal_col:
+        render_current_goal_strip(selected, compact=True, align="right")
+    with _ai_col:
+        with st.popover(
+            _l("ai_config", "AI Config"),
+            key=f"research_ai_config_popover:{selected}",
+            icon=":material/tune:",
+            use_container_width=True,
+        ):
+            _render_ai_config_panel()
 
 inbox = load_research_sources(selected)
 

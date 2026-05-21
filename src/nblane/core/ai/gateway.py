@@ -14,6 +14,7 @@ from nblane.core.ai.runs import (
     new_run_id,
     record_activity_item,
 )
+from nblane.core.web_preferences import load_web_preferences
 
 
 def run_ai_action(
@@ -222,17 +223,20 @@ def translate_paper_segments(
     segments: list[dict[str, Any]],
     *,
     target_lang: str = "zh",
+    model: str | None = None,
     context_refs: list[str] | None = None,
     require_review: bool = True,
 ) -> AIActionResult:
     """Typed helper for ``research.paper_translate``."""
 
+    model_override = _clean_model(model) or _paper_ai_model(profile, "translation_model")
     return run_ai_action(
         "research.paper_translate",
         {
             "source_id": source_id,
             "segments": segments,
             "target_lang": target_lang,
+            **({"ai_model": model_override} if model_override else {}),
         },
         profile=profile,
         context_refs=context_refs or [source_id],
@@ -298,11 +302,13 @@ def generate_paper_review_card(
     segments: list[dict[str, Any]] | None = None,
     chunks: list[dict[str, Any]] | None = None,
     annotations: list[dict[str, Any]] | None = None,
+    model: str | None = None,
     context_refs: list[str] | None = None,
     require_review: bool = True,
 ) -> AIActionResult:
     """Typed helper for ``research.paper_review_card``."""
 
+    model_override = _clean_model(model) or _paper_ai_model(profile, "deep_read_model")
     return run_ai_action(
         "research.paper_review_card",
         {
@@ -311,6 +317,7 @@ def generate_paper_review_card(
             "segments": segments or [],
             "chunks": chunks or [],
             "annotations": annotations or [],
+            **({"ai_model": model_override} if model_override else {}),
         },
         profile=profile,
         context_refs=context_refs or [source_id],
@@ -364,6 +371,7 @@ def deep_read_paper_codex(
     profile: str,
     source_id: str,
     *,
+    model: str | None = None,
     context_refs: list[str] | None = None,
     payload: dict[str, Any] | None = None,
     require_review: bool = True,
@@ -372,6 +380,9 @@ def deep_read_paper_codex(
 
     body = dict(payload or {})
     body["source_id"] = source_id
+    model_override = _clean_model(model) or _paper_ai_model(profile, "deep_read_model")
+    if model_override:
+        body["codex_model"] = model_override
     return run_ai_action(
         "research.paper_deep_read_codex",
         body,
@@ -508,6 +519,25 @@ def _normalize_context(
     if isinstance(context, Mapping):
         return dict(context)
     return {}
+
+
+def _clean_model(value: str | None) -> str:
+    return str(value or "").strip()
+
+
+def _paper_ai_model(profile: str, key: str) -> str:
+    """Return a profile-scoped paper AI model preference, when configured."""
+
+    clean_profile = str(profile or "").strip()
+    if not clean_profile:
+        return ""
+    try:
+        prefs = load_web_preferences(clean_profile)
+    except Exception:
+        return ""
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
+    return str(paper.get(key) or "").strip()
 
 
 def _reply_language_value(value: str | None) -> str:

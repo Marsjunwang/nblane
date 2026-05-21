@@ -285,7 +285,7 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("layoutOverlayUnitsForPage", response.text)
         self.assertIn("fallbackUnitsForPage", response.text)
         self.assertIn('if (text(obj.scope_type) !== "layout" || !hasRectGeometry(obj)) return false;', response.text)
-        self.assertIn('if (text(obj.scope_type) === "layout") return obj.display_source === true ? text(obj.source_text) : "";', response.text)
+        self.assertIn('if (text(obj.scope_type) === "layout") return obj.display_source === true ? flowText(obj.source_text) : "";', response.text)
         self.assertIn('data-scope-type', response.text)
         self.assertIn('scope_strategy: "segment"', response.text)
         self.assertNotIn('if (text(obj.scope_type) === "layout") return "";', response.text)

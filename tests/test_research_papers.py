@@ -17,11 +17,13 @@ from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
     PaperSearchResult,
+    _reader_outline_from_segments,
     build_reader_payload,
     build_paper_layout_units,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
+    extract_paper_figures,
     extract_paper_segments,
     format_research_citations,
     get_stable_pdf_url,
@@ -518,13 +520,14 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"segment"})
         self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
 
-    def test_build_reader_payload_prefers_segments_when_layout_units_are_available(self) -> None:
+    def test_build_reader_payload_prefers_layout_units_when_layout_translations_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
             source_id = "source:paper:grounded"
             page_hash = text_hash("Whole page text.")
-            layout_hash = text_hash("Table cell text")
+            layout_hash = text_hash("Positioned body text")
             layout_scope = "layout:v2:1:00001:abc123"
+            table_scope = "layout:v2:1:00002:table"
             layout_units = [
                 {
                     "unit_id": layout_scope,
@@ -533,9 +536,9 @@ class TestResearchPapers(unittest.TestCase):
                     "scope_ref": layout_scope,
                     "page": 1,
                     "order": 1,
-                    "kind": "table_cell",
+                    "kind": "paragraph",
                     "locator": "p. 1",
-                    "source_text": "Table cell text",
+                    "source_text": "Positioned body text",
                     "source_hash": layout_hash,
                     "translatable": True,
                     "font_size": 9.5,
@@ -554,17 +557,31 @@ class TestResearchPapers(unittest.TestCase):
                             "page_height": 200,
                         }
                     ],
+                },
+                {
+                    "unit_id": table_scope,
+                    "anchor_id": table_scope,
+                    "scope_type": "layout",
+                    "scope_ref": table_scope,
+                    "page": 1,
+                    "order": 2,
+                    "kind": "table_cell",
+                    "locator": "p. 1",
+                    "source_text": "Table cell text",
+                    "source_hash": text_hash("Table cell text"),
+                    "translatable": True,
+                    "rects": [{"x": 90, "y": 20, "w": 48, "h": 20, "page_width": 200, "page_height": 200}],
                     "table_id": "table:1",
                     "row": 0,
                     "col": 1,
                 },
                 {
-                    "unit_id": "layout:v2:1:00002:symbol",
-                    "anchor_id": "layout:v2:1:00002:symbol",
+                    "unit_id": "layout:v2:1:00003:symbol",
+                    "anchor_id": "layout:v2:1:00003:symbol",
                     "scope_type": "layout",
-                    "scope_ref": "layout:v2:1:00002:symbol",
+                    "scope_ref": "layout:v2:1:00003:symbol",
                     "page": 1,
-                    "order": 2,
+                    "order": 3,
                     "kind": "symbol",
                     "locator": "p. 1",
                     "source_text": "%",
@@ -573,12 +590,12 @@ class TestResearchPapers(unittest.TestCase):
                     "rects": [{"x": 95, "y": 20, "w": 8, "h": 8, "page_width": 200, "page_height": 200}],
                 },
                 {
-                    "unit_id": "layout:v2:1:00003:figlabel",
-                    "anchor_id": "layout:v2:1:00003:figlabel",
+                    "unit_id": "layout:v2:1:00004:figlabel",
+                    "anchor_id": "layout:v2:1:00004:figlabel",
                     "scope_type": "layout",
-                    "scope_ref": "layout:v2:1:00003:figlabel",
+                    "scope_ref": "layout:v2:1:00004:figlabel",
                     "page": 1,
-                    "order": 3,
+                    "order": 4,
                     "kind": "figure_label",
                     "locator": "p. 1",
                     "source_text": "Dense axis label",
@@ -618,14 +635,23 @@ class TestResearchPapers(unittest.TestCase):
                             "scope_type": "layout",
                             "scope_ref": layout_scope,
                             "source_hash": layout_hash,
-                            "source_text": "Table cell text",
+                            "source_text": "Positioned body text",
                             "target_lang": "zh",
                             "page": 1,
-                            "translated_text": "表格单元译文。",
+                            "translated_text": "正文译文。",
                         },
                         {
                             "scope_type": "layout",
-                            "scope_ref": "layout:v2:1:00003:figlabel",
+                            "scope_ref": table_scope,
+                            "source_hash": text_hash("Table cell text"),
+                            "source_text": "Table cell text",
+                            "target_lang": "zh",
+                            "page": 1,
+                            "translated_text": "表格单元译文不应显示。",
+                        },
+                        {
+                            "scope_type": "layout",
+                            "scope_ref": "layout:v2:1:00004:figlabel",
                             "source_hash": text_hash("Dense axis label"),
                             "source_text": "Dense axis label",
                             "target_lang": "zh",
@@ -648,8 +674,8 @@ class TestResearchPapers(unittest.TestCase):
             stale_units = [
                 {
                     **layout_units[0],
-                    "source_text": "Changed table cell text",
-                    "source_hash": text_hash("Changed table cell text"),
+                    "source_text": "Changed positioned body text",
+                    "source_hash": text_hash("Changed positioned body text"),
                 }
             ]
             with patch("nblane.core.research_papers.build_paper_layout_units", return_value=stale_units):
@@ -662,16 +688,16 @@ class TestResearchPapers(unittest.TestCase):
                     include_page_previews=False,
                 )
 
-        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"segment"})
-        self.assertFalse(any(row["scope_type"] == "layout" for row in payload["translation_units"]))
+        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"layout"})
         units_by_scope = {row["scope_ref"]: row for row in payload["translation_units"]}
-        self.assertIn("seg:1", units_by_scope)
-        self.assertEqual(units_by_scope["seg:1"]["status"], "missing")
-        self.assertNotIn(layout_scope, units_by_scope)
+        self.assertIn(layout_scope, units_by_scope)
+        self.assertEqual(units_by_scope[layout_scope]["status"], "translated")
+        self.assertNotIn("seg:1", units_by_scope)
+        self.assertNotIn(table_scope, units_by_scope)
         self.assertEqual(payload["page_models"], [{"page": 1, "width": 200.0, "height": 200.0, "rotation": 0}])
-        self.assertEqual(payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})
-        self.assertEqual(stale_payload["translation_units"][0]["status"], "missing")
-        self.assertEqual(stale_payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})
+        self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
+        self.assertEqual(stale_payload["translation_units"][0]["status"], "stale")
+        self.assertEqual(stale_payload["translation_summary"], {"translated": 0, "missing": 0, "stale": 1, "failed": 0})
 
     def test_build_paper_layout_units_outputs_stable_geometry_and_figure_labels(self) -> None:
         if not pymupdf_available():
@@ -738,6 +764,90 @@ class TestResearchPapers(unittest.TestCase):
             self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
             self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
 
+    def test_build_paper_layout_units_merges_title_and_marks_front_matter(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=420)
+        page.insert_text((36, 42), "RH20T-P: A Primitive-Level", fontsize=18)
+        page.insert_text((46, 64), "Robotic Manipulation Benchmark", fontsize=18)
+        page.insert_text((62, 104), "Alice Chen, Bob Li, Carol Wang", fontsize=10)
+        page.insert_text((66, 120), "Robotics Lab, Example University", fontsize=10)
+        page.insert_textbox(
+            fitz.Rect(36, 170, 290, 220),
+            "This benchmark evaluates robotic manipulation policies with primitive-level annotations.",
+            fontsize=10,
+        )
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "front-matter.pdf")
+            units = build_paper_layout_units(profile, source_id, pages={1})
+
+        titles = [unit for unit in units if unit.get("kind") == "title"]
+        front_matter = [unit for unit in units if unit.get("kind") in {"authors", "affiliation"}]
+        paragraphs = [unit for unit in units if unit.get("kind") == "paragraph"]
+
+        self.assertEqual(len(titles), 1)
+        self.assertIn("Primitive-Level", titles[0]["source_text"])
+        self.assertIn("Robotic Manipulation Benchmark", titles[0]["source_text"])
+        self.assertTrue(titles[0]["translatable"])
+        self.assertEqual(titles[0]["line_count"], 2)
+        self.assertEqual(len(front_matter), 1)
+        self.assertIn("Alice Chen", front_matter[0]["source_text"])
+        self.assertIn("Example University", front_matter[0]["source_text"])
+        self.assertFalse(front_matter[0]["translatable"])
+        self.assertTrue(front_matter[0]["display_source"])
+        self.assertTrue(paragraphs)
+
+    def test_extract_paper_figures_returns_cropped_images_with_rects(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=240, height=320)
+        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 18, 12), 0)
+        pix.clear_with(0xDDDDDD)
+        page.insert_image(fitz.Rect(36, 70, 204, 170), stream=pix.tobytes("png"))
+        page.insert_text((42, 190), "Figure 1. A compact architecture diagram.", fontsize=10)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "figures.pdf")
+            figures = extract_paper_figures(profile, source_id, pages={1}, max_items=4, max_width=240)
+
+        self.assertTrue(figures)
+        figure = figures[0]
+        self.assertEqual(figure["page"], 1)
+        self.assertTrue(str(figure["data_url"]).startswith("data:image/png;base64,"))
+        self.assertIn("Figure 1", figure["caption"])
+        self.assertEqual(figure["anchor_id"], figure["id"])
+        self.assertEqual(figure["rects"], [figure["rect"]])
+        rect = figure["rect"]
+        self.assertGreater(rect["w"], 0)
+        self.assertGreater(rect["h"], 0)
+        self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
+        self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
+
     def test_build_reader_payload_filters_old_layout_cache_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
@@ -794,10 +904,110 @@ class TestResearchPapers(unittest.TestCase):
                     include_page_previews=False,
                 )
 
-        self.assertEqual([row["scope_type"] for row in payload["translation_units"]], ["page"])
+        self.assertEqual([row["scope_type"] for row in payload["translation_units"]], ["layout"])
         self.assertNotIn(old_scope, [row["scope_ref"] for row in payload["translations"]])
         self.assertEqual(payload["translation_units"][0]["status"], "missing")
         self.assertEqual(payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})
+
+    def test_reader_outline_rejects_fragmentary_headings(self) -> None:
+        source_id = "source:paper:grounded"
+        outline = _reader_outline_from_segments(
+            [
+                PaperSegment(
+                    segment_id="seg:bad-number-path",
+                    source_id=source_id,
+                    page=1,
+                    order=1,
+                    text="3.",
+                    kind="heading",
+                    section_path=["3."],
+                ),
+                PaperSegment(
+                    segment_id="seg:bad-short-path",
+                    source_id=source_id,
+                    page=2,
+                    order=2,
+                    text="Metric.",
+                    kind="paragraph",
+                    section_path=["Metric."],
+                ),
+                PaperSegment(
+                    segment_id="seg:good-path",
+                    source_id=source_id,
+                    page=3,
+                    order=3,
+                    text="The experiment setup uses three suites.",
+                    kind="paragraph",
+                    section_path=["Experimental Setup"],
+                ),
+            ]
+        )
+        fallback_outline = _reader_outline_from_segments(
+            [
+                PaperSegment(segment_id="seg:number", source_id=source_id, page=1, order=1, text="3.", kind="paragraph"),
+                PaperSegment(segment_id="seg:metric", source_id=source_id, page=1, order=2, text="Metric.", kind="paragraph"),
+                PaperSegment(segment_id="seg:unpaged", source_id=source_id, page=0, order=3, text="Conclusion", kind="heading"),
+                PaperSegment(segment_id="seg:results", source_id=source_id, page=2, order=4, text="3 Experimental Results", kind="paragraph"),
+                PaperSegment(segment_id="seg:conclusion", source_id=source_id, page=3, order=5, text="CONCLUSION", kind="paragraph"),
+            ]
+        )
+
+        self.assertEqual([row["title"] for row in outline], ["Experimental Setup"])
+        self.assertEqual(outline[0]["page"], 3)
+        self.assertEqual([row["title"] for row in fallback_outline], ["3 Experimental Results", "CONCLUSION"])
+        self.assertNotIn(0, [row["page"] for row in fallback_outline])
+
+    def test_reader_outline_extracts_headings_from_page_text_fallback(self) -> None:
+        source_id = "source:paper:page-text"
+        outline = _reader_outline_from_segments(
+            [
+                PaperSegment(
+                    segment_id="seg:page-1",
+                    source_id=source_id,
+                    page=1,
+                    order=1,
+                    text="\n".join(
+                        [
+                            "A Very Useful Paper",
+                            "Alice Example, Bob Example",
+                            "1 Example University",
+                            "Abstract",
+                            "This paper studies robust readers.",
+                        ]
+                    ),
+                    kind="paragraph",
+                ),
+                PaperSegment(
+                    segment_id="seg:page-2",
+                    source_id=source_id,
+                    page=2,
+                    order=2,
+                    text="\n".join(
+                        [
+                            "1",
+                            "INTRODUCTION",
+                            "The body starts here.",
+                            "2",
+                            "RELATED WORK",
+                            "Table 1: Comparison with Existing Systems.",
+                            "Dataset",
+                            "Amount",
+                            "3.1",
+                            "Experimental Setup",
+                            "We evaluate the system.",
+                        ]
+                    ),
+                    kind="paragraph",
+                ),
+            ]
+        )
+
+        self.assertEqual(
+            [row["title"] for row in outline],
+            ["Abstract", "1 Introduction", "2 Related Work", "3.1 Experimental Setup"],
+        )
+        self.assertNotIn("1 Example University", [row["title"] for row in outline])
+        self.assertNotIn("Dataset", [row["title"] for row in outline])
 
     def test_get_stable_pdf_url_uses_fingerprint_cache_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1656,13 +1866,16 @@ class TestResearchPapers(unittest.TestCase):
         segments = grobid_tei_to_segments("source:paper:grounded", tei)
         refs = grobid_tei_to_bibliography("source:paper:grounded", tei)
 
-        self.assertEqual(len(segments), 1)
+        self.assertEqual(len(segments), 2)
+        self.assertEqual([segment.kind for segment in segments], ["heading", "paragraph"])
         self.assertEqual(segments[0].page, 3)
-        self.assertEqual(segments[0].rects[0]["page"], 3)
-        self.assertAlmostEqual(segments[0].rects[0]["x_pct"], 0.1)
-        self.assertAlmostEqual(segments[0].rects[0]["w_pct"], 0.5)
         self.assertEqual(segments[0].section_path, ["Method"])
-        self.assertIn("§ Method", segments[0].locator)
+        self.assertEqual(segments[1].page, 3)
+        self.assertEqual(segments[1].rects[0]["page"], 3)
+        self.assertAlmostEqual(segments[1].rects[0]["x_pct"], 0.1)
+        self.assertAlmostEqual(segments[1].rects[0]["w_pct"], 0.5)
+        self.assertEqual(segments[1].section_path, ["Method"])
+        self.assertIn("§ Method", segments[1].locator)
         self.assertEqual(refs[0]["title"], "Useful Paper")
         self.assertEqual(refs[0]["year"], "1843")
 
@@ -1698,6 +1911,30 @@ class TestResearchPapers(unittest.TestCase):
         self.assertTrue(all(segment.rects and segment.rects[0]["page"] == 2 for segment in segments))
         self.assertEqual(segments[0].section_path, ["Results"])
         self.assertAlmostEqual(segments[2].rects[0]["x_pct"], 42 / 500)
+
+    def test_grobid_tei_to_segments_keeps_headings_without_coordinates(self) -> None:
+        tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <facsimile>
+            <surface n="3" ulx="0" uly="0" lrx="500" lry="700" />
+          </facsimile>
+          <text>
+            <body>
+              <div>
+                <head>Method</head>
+                <p coords="3,50,80,250,40">We train a policy.</p>
+              </div>
+            </body>
+          </text>
+        </TEI>"""
+
+        segments = grobid_tei_to_segments("source:paper:grounded", tei)
+
+        self.assertEqual([segment.kind for segment in segments], ["heading", "paragraph"])
+        self.assertEqual(segments[0].text, "Method")
+        self.assertEqual(segments[0].page, 3)
+        self.assertEqual(segments[0].section_path, ["Method"])
+        self.assertEqual(segments[0].rects, [])
+        self.assertEqual(segments[1].rects[0]["page"], 3)
 
     def test_structured_extraction_falls_back_when_grobid_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1780,7 +2017,7 @@ class TestResearchPapers(unittest.TestCase):
                 grobid_status={"available": True, "message": "GROBID ready"},
             )
 
-        self.assertEqual(len(segments), 1)
+        self.assertEqual(len(segments), 2)
         self.assertEqual(source.metadata["structure_backend"], "grobid")
         self.assertEqual(source.metadata["structured_extraction_warnings"], [])
         self.assertNotIn("GROBID unavailable", diagnostics["badges"])

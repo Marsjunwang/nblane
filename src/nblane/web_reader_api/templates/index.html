@@ -457,8 +457,9 @@
       pointer-events: none;
     }
     .pr-highlight.focus {
-      background: rgba(33, 104, 91, .20);
-      outline-color: rgba(33, 104, 91, .55);
+      background: rgba(33, 104, 91, .28);
+      outline: 2px solid rgba(33, 104, 91, .74);
+      box-shadow: 0 0 0 3px rgba(33, 104, 91, .14);
     }
     .pr-highlight.pending {
       background: rgba(33, 104, 91, .16);
@@ -710,8 +711,8 @@
       color: var(--ink);
       font-size: .94rem;
       line-height: 1.72;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      white-space: pre-line;
     }
     .pr-translation-source-snippet {
       color: var(--muted);
@@ -1032,6 +1033,47 @@
     .pr-item:hover { border-color: rgba(33, 104, 91, .45); background: #fbfdfc; }
     .pr-item-title { font-size: .8rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
     .pr-item-meta { color: var(--muted); font-size: .73rem; line-height: 1.25; overflow-wrap: anywhere; }
+    .pr-figure-list {
+      display: grid;
+      gap: 8px;
+      max-height: 420px;
+      overflow: auto;
+    }
+    .pr-figure-card {
+      display: grid;
+      gap: 7px;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+      text-align: left;
+    }
+    .pr-figure-card:hover,
+    .pr-figure-card.active {
+      border-color: rgba(33, 104, 91, .52);
+      background: #fbfdfc;
+    }
+    .pr-figure-card.active {
+      box-shadow: inset 3px 0 0 rgba(33, 104, 91, .64);
+    }
+    .pr-figure-card img {
+      display: block;
+      width: 100%;
+      max-height: 210px;
+      object-fit: contain;
+      border: 1px solid rgba(216, 224, 220, .72);
+      border-radius: 6px;
+      background: #fff;
+    }
+    .pr-figure-caption {
+      color: var(--ink);
+      font-size: .78rem;
+      font-weight: 760;
+      line-height: 1.32;
+      overflow-wrap: anywhere;
+    }
     .pr-annotation-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 30px;
@@ -1107,6 +1149,7 @@
       notes: "Notes",
       translation: "Translation",
       review: "Review",
+      figures: "Figures",
       ai: "Review",
       claims: "Claims",
       create_annotation: "Highlight",
@@ -1122,7 +1165,7 @@
       save_progress: "Save progress",
       review_card: "Analyze Paper",
       analyze_paper: "Analyze Paper",
-      deep_read: "Analyze Paper",
+      deep_read: "Deep read",
       fullscreen: "Fullscreen",
       exit_fullscreen: "Exit fullscreen",
       mode_pdf: "PDF",
@@ -1219,6 +1262,7 @@
     let requestedContextPages = new Set();
     let resizeTimer = null;
     let viewportTimer = null;
+    let pageThumbTimer = null;
     let payloadRefreshTimer = null;
     let readerStateTimer = null;
     let lastReaderStateEmit = 0;
@@ -1461,6 +1505,15 @@
       if (action === "ask_paper") return label("answering");
       return "Working...";
     }
+    function translationTaskAction(action) {
+      return ["translate_visible_pages", "retry_translation_scope", "translate_full_paper"].includes(text(action));
+    }
+    function taskIsPending() {
+      return text(actionState.phase) === "pending";
+    }
+    function translationTaskBusy() {
+      return taskIsPending() && translationTaskAction(actionState.action);
+    }
     function taskDoneLabel(action, result) {
       const message = text(result && result.message);
       if (message) return message;
@@ -1479,7 +1532,7 @@
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
       if (action === "generate_review_card" || action === "analyze_paper") return '[data-action="analyzePaper"]';
-      if (action === "codex_deep_read") return '[data-action="analyzePaper"]';
+      if (action === "codex_deep_read") return '[data-action="deepRead"]';
       if (action === "ask_paper") return '[data-action="askQuestion"]';
       return "";
     }
@@ -1522,6 +1575,13 @@
           button.disabled = false;
         }
       });
+      document.querySelectorAll("[data-translation-action]").forEach((button) => {
+        const busy = translationTaskBusy();
+        button.classList.toggle("busy", busy);
+        button.disabled = busy;
+        if (busy) button.setAttribute("aria-busy", "true");
+        else button.removeAttribute("aria-busy");
+      });
     }
     function setActionState(action, phase, message = "", extra = {}) {
       actionState = {
@@ -1545,6 +1605,11 @@
       }
     }
     async function startReaderTask(action, payload = {}) {
+      if (translationTaskAction(action) && translationTaskBusy()) {
+        status(actionState.message || label("translating"));
+        refreshActionStatus();
+        return null;
+      }
       const cleanPayload = basePayload({ ...payload, event_id: payload.event_id || eventId(action) });
       const eventIdValue = cleanPayload.event_id;
       debugState.events.unshift({ action, event_id: eventIdValue });
@@ -2049,6 +2114,7 @@
             </div>
             <div class="pr-actions">
               <button class="pr-button primary" data-action="analyzePaper">${esc(label("analyze_paper"))}</button>
+              <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
               <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
@@ -2110,6 +2176,9 @@
     function outlineRows() {
       return asArr(args.outline).map((row) => asObj(row)).filter((row) => text(row.title));
     }
+    function pageThumbRailVisible() {
+      return activeLeftTab === "pages" || (activeLeftTab === "outline" && !outlineRows().length && pageRailNumbers().length > 1);
+    }
     function leftRailBodyHtml() {
       if (activeLeftTab === "pages") return pageRailHtml();
       if (activeLeftTab === "search") return searchRailHtml();
@@ -2117,7 +2186,7 @@
     }
     function outlineRailHtml() {
       const rows = outlineRows();
-      if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      if (!rows.length) return pageRailNumbers().length > 1 ? pageRailHtml() : `<div class="pr-empty">${esc(label("empty"))}</div>`;
       return `<div class="pr-outline-list">${rows.map((row) => {
         const page = Number(row.page || 0);
         const level = Math.max(1, Math.min(4, Number(row.level || 1)));
@@ -2133,11 +2202,7 @@
     }
     function pageRailNumbers() {
       const count = totalPages || knownPageCount(currentPage);
-      const around = new Set([1, count, currentPage, currentPage - 1, currentPage + 1, ...visiblePages]);
-      return [...around]
-        .map((page) => Number(page || 0))
-        .filter((page) => page >= 1 && page <= count)
-        .sort((a, b) => a - b);
+      return Array.from({ length: count }, (_, index) => index + 1);
     }
     function pageRailHtml() {
       const pages = pageRailNumbers();
@@ -2147,7 +2212,7 @@
         const src = text(preview && preview.data_url);
         return `
           <button class="pr-page-thumb ${page === currentPage ? "active" : ""}" data-page-thumb="${page}">
-            <img alt="" data-preview-page="${page}" ${src ? `src="${attr(src)}"` : ""} />
+            <img alt="" loading="lazy" data-preview-page="${page}" ${src ? `src="${attr(src)}"` : ""} />
             <span>
               <span class="pr-outline-title">${esc(label("page"))} ${page}</span>
               <span class="pr-outline-meta">${page === currentPage ? esc(label("current_page")) : ""}</span>
@@ -2359,25 +2424,39 @@
       const clean = text(statusName || "missing");
       return label(clean, clean);
     }
+    function flowText(value) {
+      const raw = text(value).replace(/\r\n/g, "\n").replace(/\u00ad/g, "");
+      return raw
+        .split(/\n{2,}/)
+        .map((block) => block
+          .replace(/([A-Za-z])-\s*\n\s*([A-Za-z])/g, "$1$2")
+          .replace(/([\u4e00-\u9fff])\s*\n\s*([\u4e00-\u9fff])/g, "$1$2")
+          .replace(/\s*\n\s*/g, " ")
+          .replace(/[ \t]{2,}/g, " ")
+          .trim())
+        .filter(Boolean)
+        .join("\n\n");
+    }
     function translationUnitHtml(unit) {
       const obj = asObj(unit);
       const anchorId = text(obj.anchor_id || obj.unit_id);
       const statusName = text(obj.status || (text(obj.translated_text) ? "translated" : "missing"));
       const translated = text(obj.translated_text).trim();
-      const display = statusName === "failed" || !translated ? text(obj.source_text) : translated;
+      const display = flowText(statusName === "failed" || !translated ? text(obj.source_text) : translated);
       const page = Number(obj.page || 0);
-      const sourceSnippet = text(obj.source_text).replace(/\s+/g, " ").trim();
+      const sourceSnippet = flowText(obj.source_text).replace(/\s+/g, " ").trim();
       const stale = statusName === "stale";
       const missing = statusName === "missing";
       const failed = statusName === "failed";
       const actionText = failed ? label("retry") : label("translate");
+      const actionDisabled = translationTaskBusy() ? ` disabled aria-busy="true"` : "";
       const actionHtml = (stale || missing || failed) ? `
         <div class="pr-translation-unit-actions">
-          <button class="pr-button" data-translation-action="retry" data-anchor-id="${attr(anchorId)}">${esc(actionText)}</button>
+          <button class="pr-button" data-translation-action="retry" data-anchor-id="${attr(anchorId)}"${actionDisabled}>${esc(actionText)}</button>
         </div>
       ` : "";
       return `
-        <article class="pr-translation-unit ${anchorId === activeTranslationAnchor ? "active" : ""}" data-anchor-id="${attr(anchorId)}" data-page="${page || ""}" data-segment-id="${attr(obj.segment_id || obj.scope_ref || "")}">
+        <article class="pr-translation-unit ${anchorId === activeTranslationAnchor ? "active" : ""}" data-anchor-id="${attr(anchorId)}" data-page="${page || ""}" data-segment-id="${attr(obj.segment_id || obj.scope_ref || "")}" data-scope-type="${attr(obj.scope_type || "")}">
           <div class="pr-translation-unit-head">
             <div class="pr-translation-locator">${esc(obj.locator || (page ? `p. ${page}` : label("page")))}</div>
             <span class="pr-translation-unit-status ${attr(statusName)}">${esc(translationUnitStatusLabel(statusName))}</span>
@@ -2412,6 +2491,10 @@
         if (obj.segment_id) index.set(text(obj.segment_id), obj);
         if (obj.scope_ref) index.set(text(obj.scope_ref), obj);
       });
+      figureRows().forEach((figure) => {
+        const anchorId = text(figure.anchor_id || figure.id);
+        if (anchorId) index.set(anchorId, figure);
+      });
       return index;
     }
     function activeSegmentFromViewport() {
@@ -2427,33 +2510,79 @@
       const clean = text(anchorId);
       if (!clean) return;
       activeTranslationAnchor = clean;
-      document.querySelectorAll(".pr-translation-unit, .pr-translation-block").forEach((el) => {
+      document.querySelectorAll(".pr-translation-unit, .pr-translation-block, .pr-figure-card").forEach((el) => {
         el.classList.toggle("active", text(el.getAttribute("data-anchor-id")) === clean);
+        if (el.hasAttribute("data-figure-anchor")) {
+          el.classList.toggle("active", text(el.getAttribute("data-figure-anchor")) === clean);
+        }
       });
       const index = buildAnchorIndex();
       const unit = index.get(clean);
       if (unit && options.jumpToPage !== false) {
         const page = Number(unit.page || 0);
-        if (page && readerMode === "translation") {
+        const hasRect = Boolean(primaryRectForUnit(unit));
+        const allowPageFallback = options.allowPageFallback === true;
+        if (page && (hasRect || allowPageFallback) && readerMode === "translation") {
           setReaderMode("pdf");
-          window.setTimeout(() => scrollToPage(page), 80);
-        } else if (page && page !== currentPage) {
-          scrollToPage(page);
+          window.setTimeout(() => scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback }), 100);
+        } else if (page && (hasRect || allowPageFallback)) {
+          scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback });
         }
       }
       if (options.scrollTranslation !== false) {
-        const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-block`);
+        const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-block, [data-figure-anchor="${CSS.escape(clean)}"].pr-figure-card`);
         row?.scrollIntoView({ block: "nearest", behavior: options.smooth === false ? "auto" : "smooth" });
       }
-      if (unit && Number(unit.page || 0)) renderHighlights(Number(unit.page || 0));
+      if (unit && Number(unit.page || 0) && primaryRectForUnit(unit)) renderHighlights(Number(unit.page || 0));
       if (options.refresh !== false) refreshSide();
+    }
+    function primaryRectForUnit(unit) {
+      const obj = asObj(unit);
+      const page = Number(obj.page || 0);
+      return asArr(obj.rects).map((row) => asObj(row)).find((rect) => {
+        const rectPage = Number(rect.page || page || 0);
+        return (!page || !rectPage || rectPage === page) && Number(rect.w || rect.w_pct || 0) > 0 && Number(rect.h || rect.h_pct || 0) > 0;
+      }) || null;
+    }
+    function scrollToUnit(unit, options = {}) {
+      const obj = asObj(unit);
+      const page = Number(obj.page || currentPage || 0);
+      if (!page) return;
+      const rect = primaryRectForUnit(obj);
+      if (!rect) {
+        if (options.allowPageFallback === true) scrollToPage(page);
+        return;
+      }
+      const finish = () => {
+        const viewer = document.getElementById("viewer");
+        const wrap = pageWrap(page);
+        if (!viewer || !wrap) {
+          if (options.allowPageFallback === true) scrollToPage(page);
+          return;
+        }
+        const hasPct = rect.x_pct != null || rect.y_pct != null || rect.w_pct != null || rect.h_pct != null;
+        const y = hasPct ? Number(rect.y_pct || 0) * wrap.clientHeight : Number(rect.y || 0) * scaleForPage(page);
+        const top = Math.max(0, wrap.offsetTop + y - Math.max(40, viewer.clientHeight * .28));
+        viewer.scrollTo({ top, behavior: options.smooth === false ? "auto" : "smooth" });
+        currentPage = page;
+        updatePageUi();
+        renderAround(page);
+        renderHighlights(page);
+        requestReaderContext([page - 1, page, page + 1]);
+      };
+      if (page !== currentPage || !pageDomReady(page)) {
+        scrollToPage(page);
+        window.setTimeout(finish, 140);
+      } else {
+        finish();
+      }
     }
     function unitDisplayText(unit) {
       const obj = asObj(unit);
       const translated = text(obj.translated_text).trim();
-      if (translated && text(obj.status || "translated") !== "failed") return translated;
-      if (text(obj.scope_type) === "layout") return obj.display_source === true ? text(obj.source_text) : "";
-      return text(obj.source_text);
+      if (translated && text(obj.status || "translated") !== "failed") return flowText(translated);
+      if (text(obj.scope_type) === "layout") return obj.display_source === true ? flowText(obj.source_text) : "";
+      return flowText(obj.source_text);
     }
     function pageModelFromUnits(pageNumber) {
       for (const unit of translationUnits()) {
@@ -2643,6 +2772,37 @@
     function analysisObj() {
       return asObj(args.analysis || args.review_card || args.paper_analysis);
     }
+    function figureRows() {
+      return asArr(args.figures)
+        .map((row) => {
+          const obj = asObj(row);
+          const anchorId = text(obj.anchor_id || obj.id);
+          const rects = asArr(obj.rects).length ? asArr(obj.rects) : (obj.rect ? [obj.rect] : []);
+          return { ...obj, anchor_id: anchorId, unit_id: anchorId, scope_type: "figure", rects };
+        })
+        .filter((row) => text(row.anchor_id) && Number(row.page || 0) > 0 && text(row.data_url));
+    }
+    function figuresPanelHtml() {
+      const rows = figureRows();
+      if (!rows.length) return "";
+      return `
+        <div class="pr-panel-head">${esc(label("figures"))}</div>
+        <div class="pr-figure-list">
+          ${rows.map((row) => {
+            const anchorId = text(row.anchor_id);
+            const page = Number(row.page || 0);
+            const caption = text(row.caption || row.source_text || row.locator || `${label("page")} ${page}`);
+            return `
+              <button class="pr-figure-card ${anchorId === activeTranslationAnchor ? "active" : ""}" data-anchor-id="${attr(anchorId)}" data-figure-anchor="${attr(anchorId)}" data-page="${page}">
+                <img alt="" loading="lazy" src="${attr(row.data_url)}" />
+                <div class="pr-figure-caption">${esc(caption || `${label("figures")} · ${label("page")} ${page}`)}</div>
+                <div class="pr-item-meta">${esc(row.locator || (page ? `p. ${page}` : ""))}</div>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
     function scoreHtml(scores) {
       const obj = asObj(scores);
       const keys = ["overall", "novelty", "technical_depth", "evidence_quality", "reproducibility", "relevance"];
@@ -2668,6 +2828,7 @@
       const analysis = analysisObj();
       const hasAnalysis = Object.keys(analysis).length > 0;
       const latest = latestAiText();
+      if (!hasAnalysis && !latest && figureRows().length) return "";
       if (!hasAnalysis && !latest) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
       const chunks = [];
       if (text(analysis.tldr || analysis.summary)) {
@@ -3124,6 +3285,15 @@
       setHeight();
     }
     function translationCounts() {
+      const summary = asObj(args.translation_summary);
+      if (["translated", "missing", "stale", "failed"].some((key) => summary[key] != null)) {
+        return {
+          translated: Number(summary.translated || 0),
+          missing: Number(summary.missing || 0),
+          stale: Number(summary.stale || 0),
+          failed: Number(summary.failed || 0),
+        };
+      }
       const translations = translationBySegment();
       const counts = { translated: 0, missing: 0, stale: 0, failed: 0 };
       for (const segment of asArr(args.segments)) {
@@ -3228,7 +3398,7 @@
       return sections.join("") || `<div class="pr-empty">${esc(label("empty"))}</div>`;
     }
     function reviewPanelHtml() {
-      return `${analysisBodyHtml()}${debugOverlayEnabled() ? `<div class="pr-panel-head">${esc(label("debug"))}</div>${debugPanelHtml()}` : ""}`;
+      return `${analysisBodyHtml()}${figuresPanelHtml()}${debugOverlayEnabled() ? `<div class="pr-panel-head">${esc(label("debug"))}</div>${debugPanelHtml()}` : ""}`;
     }
     function sideBodyHtml() {
       if (activeTab === "notes") {
@@ -3344,11 +3514,31 @@
           if (page) scrollToPage(page);
         });
       });
+      document.querySelector(".pr-left-rail .pr-rail-body")?.addEventListener("scroll", () => {
+        if (!pageThumbRailVisible()) return;
+        if (pageThumbTimer) window.clearTimeout(pageThumbTimer);
+        pageThumbTimer = window.setTimeout(requestVisiblePageThumbPreviews, 120);
+      }, { passive: true });
       document.querySelector(".pr-left-rail #searchInput")?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") runSearch();
       });
       document.querySelector('.pr-left-rail [data-action="search"]')?.addEventListener("click", runSearch);
-      if (activeLeftTab === "pages") requestPagePreviews(pageRailNumbers());
+      if (pageThumbRailVisible()) requestVisiblePageThumbPreviews();
+    }
+    function requestVisiblePageThumbPreviews() {
+      if (!pageThumbRailVisible()) return;
+      const railBody = document.querySelector(".pr-left-rail .pr-rail-body");
+      const box = railBody ? railBody.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const pages = [...document.querySelectorAll("[data-page-thumb]")]
+        .filter((button) => {
+          const rect = button.getBoundingClientRect();
+          return rect.bottom >= box.top - 420 && rect.top <= box.bottom + 420;
+        })
+        .map((button) => Number(button.dataset.pageThumb || 0))
+        .filter(Boolean)
+        .slice(0, 24);
+      if (!pages.includes(currentPage)) pages.push(currentPage);
+      requestPagePreviews(pages);
     }
     function setReaderMode(mode) {
       const next = ["pdf", "compare", "translation"].includes(mode) ? mode : "pdf";
@@ -3498,17 +3688,24 @@
       document.querySelectorAll("[data-translation-action]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
+          if (button.disabled || translationTaskBusy()) {
+            status(actionState.message || label("translating"));
+            refreshActionStatus();
+            return;
+          }
           const anchorId = button.dataset.anchorId || "";
           const unit = buildAnchorIndex().get(anchorId) || {};
           const page = Number(unit.page || currentPage || 0);
           const scopeType = text(unit.scope_type || "segment");
           const segmentId = text(unit.segment_id || unit.scope_ref || "");
+          const scopeRef = text(unit.scope_ref || unit.unit_id || anchorId);
           const payload = {
             target_lang: targetLang(),
             visible_pages: page ? [page] : visiblePages.slice(),
             primary_page: page || currentPage,
             scope_strategy: scopeType === "layout" ? "layout" : segmentId && scopeType === "segment" ? "segment" : "auto",
             segment_refs: segmentId && scopeType === "segment" ? [segmentId] : [],
+            scope_refs: scopeType === "layout" && scopeRef ? [scopeRef] : [],
           };
           setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
           startReaderTask("retry_translation_scope", payload);
@@ -3529,7 +3726,7 @@
           target_lang: targetLang(),
           visible_pages: pages,
           primary_page: currentPage,
-          scope_strategy: "segment",
+          scope_strategy: "auto",
         });
       });
       document.querySelector("[data-debug-action=\"toggleOverlay\"]")?.addEventListener("click", () => {
@@ -3542,6 +3739,14 @@
         }
         persistLocalState();
         refreshSide();
+      });
+      document.querySelectorAll("[data-figure-anchor]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const anchorId = button.dataset.figureAnchor || "";
+          if (!anchorId) return;
+          setActiveAnchor(anchorId, { scrollTranslation: false, allowPageFallback: true });
+          scheduleReaderStateChanged(true);
+        });
       });
       document.querySelectorAll("[data-jump-annotation]").forEach((button) => {
         button.addEventListener("click", () => {
@@ -3656,7 +3861,7 @@
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
-        dockState = { mode: "ai", status: label("analyze_paper"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        dockState = { mode: "ai", status: label("deep_read"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
         return startReaderTask(action === "reviewCard" ? "generate_review_card" : "analyze_paper", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
@@ -3669,7 +3874,7 @@
         dockState = { mode: "ai", status: label("analyze_paper"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
-        return startReaderTask("analyze_paper", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+        return startReaderTask("codex_deep_read", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
       }
       if (action === "translateVisible") {
         const pages = visiblePages.length ? visiblePages : [currentPage];
@@ -3679,7 +3884,7 @@
           target_lang: targetLang(),
           visible_pages: pages,
           primary_page: currentPage,
-          scope_strategy: "segment",
+          scope_strategy: "auto",
         });
       }
       if (action === "retryTranslation" && dockState.mode === "translation") {
@@ -3795,6 +4000,7 @@
         layer.addEventListener("pointerdown", () => { selectingText = true; });
         layer.addEventListener("mouseup", handleSelection);
         layer.addEventListener("keyup", handleSelection);
+        layer.addEventListener("dblclick", handleTextDoubleClick);
       });
       applyAllKnownHighlights();
     }
@@ -4418,6 +4624,73 @@
         .filter(Boolean)
         .slice(0, 4);
     }
+    function unitRectForWrap(unit, rect, wrap) {
+      const obj = asObj(rect);
+      const pctReady = obj.x_pct != null || obj.y_pct != null || obj.w_pct != null || obj.h_pct != null;
+      const page = Number(asObj(unit).page || 0);
+      const scale = scaleForPage(page || currentPage || 1);
+      const x = pctReady ? Number(obj.x_pct || 0) * wrap.clientWidth : Number(obj.x || 0) * scale;
+      const y = pctReady ? Number(obj.y_pct || 0) * wrap.clientHeight : Number(obj.y || 0) * scale;
+      const w = pctReady ? Number(obj.w_pct || 0) * wrap.clientWidth : Number(obj.w || 0) * scale;
+      const h = pctReady ? Number(obj.h_pct || 0) * wrap.clientHeight : Number(obj.h || 0) * scale;
+      if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
+      return { x, y, w, h, area: w * h };
+    }
+    function layoutUnitAtPoint(pageNumber, clientX, clientY) {
+      const page = Number(pageNumber || 0);
+      const wrap = pageWrap(page);
+      if (!wrap) return null;
+      const box = wrap.getBoundingClientRect();
+      const x = Number(clientX) - box.left;
+      const y = Number(clientY) - box.top;
+      const margin = 5;
+      const hits = [];
+      translationUnits().forEach((unit) => {
+        const obj = asObj(unit);
+        if (text(obj.scope_type) !== "layout" || Number(obj.page || 0) !== page) return;
+        if (obj.translatable === false && obj.display_source !== true) return;
+        asArr(obj.rects).forEach((rawRect) => {
+          const rect = unitRectForWrap(obj, rawRect, wrap);
+          if (!rect) return;
+          if (x >= rect.x - margin && x <= rect.x + rect.w + margin && y >= rect.y - margin && y <= rect.y + rect.h + margin) {
+            hits.push({ unit: obj, area: rect.area, y: rect.y });
+          }
+        });
+      });
+      hits.sort((a, b) => a.area - b.area || a.y - b.y);
+      return hits.length ? hits[0].unit : null;
+    }
+    async function handleTextDoubleClick(event) {
+      const page = Number(event.currentTarget?.dataset?.page || pageNumberForPoint(event.clientX, event.clientY) || currentPage || 0);
+      const unit = layoutUnitAtPoint(page, event.clientX, event.clientY);
+      if (!unit) {
+        requestReaderContext([page]);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      try { window.getSelection()?.removeAllRanges(); } catch {}
+      currentSelection = null;
+      const anchorId = text(unit.anchor_id || unit.unit_id || unit.scope_ref);
+      const scopeRef = text(unit.scope_ref || unit.unit_id || anchorId);
+      if (!anchorId) return;
+      activeTranslationAnchor = anchorId;
+      if (readerMode === "pdf") setReaderMode("compare");
+      else refreshTranslationReader();
+      setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false });
+      showTranslationUnitDock(anchorId);
+      renderHighlights(page);
+      const statusName = text(unit.status || (text(unit.translated_text) ? "translated" : "missing"));
+      if (unit.translatable !== false && ["missing", "stale", "failed"].includes(statusName) && scopeRef) {
+        await startReaderTask("retry_translation_scope", {
+          target_lang: targetLang(),
+          visible_pages: [page],
+          primary_page: page,
+          scope_strategy: "layout",
+          scope_refs: [scopeRef],
+        });
+      }
+    }
     function segmentRefsForPages(pages) {
       const picked = new Set(pages.map((page) => Number(page || 0)));
       return asArr(args.segments)
@@ -4760,8 +5033,15 @@
           showExpiredSession();
           return null;
         }
-        if (!response.ok) return null;
+        if (!response.ok) {
+          requestedPreviews.delete(Number(pageNumber || 0));
+          return null;
+        }
         const preview = await response.json();
+        if (!text(asObj(preview).data_url)) {
+          requestedPreviews.delete(Number(pageNumber || 0));
+          return null;
+        }
         const existing = asArr(args.page_previews).filter((row) => Number(asObj(row).page || 0) !== Number(pageNumber));
         args.page_previews = [...existing, preview];
         applyPagePreview(pageNumber, pageViewportSize(pageNumber));
@@ -4771,6 +5051,7 @@
         if (readerMode !== "pdf") refreshTranslationReader();
         return preview;
       } catch {
+        requestedPreviews.delete(Number(pageNumber || 0));
         return null;
       }
     }

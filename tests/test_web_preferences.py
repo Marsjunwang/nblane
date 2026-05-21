@@ -58,6 +58,10 @@ class TestWebPreferences(unittest.TestCase):
                                 "ui_lang": "zh",
                                 "reply_lang": "en",
                             },
+                            "paper": {
+                                "translation_model": "qwen-plus",
+                                "deep_read_model": "gpt-5.1-codex",
+                            },
                             "kanban_backend": "codex",
                         },
                         "kanban": {
@@ -74,6 +78,8 @@ class TestWebPreferences(unittest.TestCase):
                 bob = load_web_preferences("bob")
 
         self.assertEqual(alice["ai"]["llm"]["provider"], "OpenAI")
+        self.assertEqual(alice["ai"]["paper"]["translation_model"], "qwen-plus")
+        self.assertEqual(alice["ai"]["paper"]["deep_read_model"], "gpt-5.1-codex")
         self.assertEqual(alice["ai"]["kanban_backend"], "codex")
         self.assertEqual(alice["kanban"]["subtask_granularity"], "checklist")
         self.assertEqual(alice["kanban"]["subtask_style_hint"], "artifact-first")
