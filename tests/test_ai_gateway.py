@@ -24,6 +24,7 @@ from nblane.core.ai.backends import (
     default_backends,
 )
 from nblane.core.ai.router import get_action_spec, registered_actions
+from nblane.core.ai.structured import validate_schema
 
 
 class TestAIGateway(unittest.TestCase):
@@ -263,6 +264,30 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(row["segment_id"], "seg:paper:1:0001")
         self.assertEqual(row["source_hash"], "sha256:known")
         self.assertEqual(row["target_lang"], "zh")
+
+    def test_paper_translation_schema_accepts_scope_ref_only_layout_rows(self) -> None:
+        """Layout providers may key rows by scope_ref instead of segment_id."""
+
+        spec = get_action_spec("research.paper_translate")
+        self.assertIsNotNone(spec)
+        error = validate_schema(
+            {
+                "translations": [
+                    {
+                        "scope_type": "layout",
+                        "scope_ref": "layout:v2:1:00001:abc123",
+                        "source_hash": "sha256:known",
+                        "translated_text": "定位译文。",
+                        "target_lang": "zh",
+                    }
+                ],
+                "warnings": [],
+                "ref": "source:paper:1",
+            },
+            spec.schema,  # type: ignore[union-attr]
+        )
+
+        self.assertEqual(error, "")
 
     def test_paper_qa_without_input_refs_warns_and_does_not_guess(self) -> None:
         """Paper QA fallback refuses unsupported answers."""

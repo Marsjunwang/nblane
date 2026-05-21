@@ -308,13 +308,15 @@ class TestReaderActions(unittest.TestCase):
                 "rects": [{"x": 10, "y": 20, "w": 80, "h": 24, "page_width": 200, "page_height": 200}],
             }
         ]
+        captured_batches: list[list[dict[str, object]]] = []
 
         def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+            captured_batches.append([dict(row) for row in batch])
             return SimpleNamespace(
                 structured={
                     "translations": [
                         {
-                            "segment_id": row["segment_id"],
+                            "scope_ref": row["scope_ref"],
                             "source_hash": row["source_hash"],
                             "translated_text": "可见布局译文。",
                         }
@@ -346,6 +348,13 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(summary["saved"], 1)
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(summary["skipped"], 0)
+        self.assertEqual(len(captured_batches), 1)
+        self.assertEqual(captured_batches[0][0]["scope_type"], "layout")
+        self.assertEqual(captured_batches[0][0]["scope_ref"], layout_scope)
+        self.assertEqual(captured_batches[0][0]["segment_id"], layout_scope)
+        self.assertEqual(captured_batches[0][0]["page"], 1)
+        self.assertEqual(captured_batches[0][0]["order"], 1)
+        self.assertEqual(captured_batches[0][0]["rects"][0]["w"], 80)
         self.assertEqual(translations[0].scope_type, "layout")
         self.assertEqual(translations[0].scope_ref, layout_scope)
         self.assertEqual(translations[0].segment_id, "")

@@ -18,6 +18,7 @@ from nblane.core.research_papers import (
     PaperSegment,
     PaperSearchResult,
     build_reader_payload,
+    build_paper_layout_units,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
@@ -540,6 +541,8 @@ class TestResearchPapers(unittest.TestCase):
                     "source_text": "Table cell text",
                     "source_hash": layout_hash,
                     "translatable": True,
+                    "font_size": 9.5,
+                    "line_count": 2,
                     "rects": [
                         {
                             "x": 10,
@@ -571,6 +574,23 @@ class TestResearchPapers(unittest.TestCase):
                     "source_hash": text_hash("%"),
                     "translatable": False,
                     "rects": [{"x": 95, "y": 20, "w": 8, "h": 8, "page_width": 200, "page_height": 200}],
+                },
+                {
+                    "unit_id": "layout:v2:1:00003:figlabel",
+                    "anchor_id": "layout:v2:1:00003:figlabel",
+                    "scope_type": "layout",
+                    "scope_ref": "layout:v2:1:00003:figlabel",
+                    "page": 1,
+                    "order": 3,
+                    "kind": "figure_label",
+                    "locator": "p. 1",
+                    "source_text": "Dense axis label",
+                    "source_hash": text_hash("Dense axis label"),
+                    "translatable": False,
+                    "display_source": False,
+                    "font_size": 6.0,
+                    "line_count": 1,
+                    "rects": [{"x": 120, "y": 120, "w": 32, "h": 9, "page_width": 200, "page_height": 200}],
                 },
             ]
             with patch("nblane.core.research_papers.git_backup.record_change"):
@@ -605,6 +625,15 @@ class TestResearchPapers(unittest.TestCase):
                             "target_lang": "zh",
                             "page": 1,
                             "translated_text": "表格单元译文。",
+                        },
+                        {
+                            "scope_type": "layout",
+                            "scope_ref": "layout:v2:1:00003:figlabel",
+                            "source_hash": text_hash("Dense axis label"),
+                            "source_text": "Dense axis label",
+                            "target_lang": "zh",
+                            "page": 1,
+                            "translated_text": "旧图内标签译文不应显示。",
                         }
                     ],
                 )
@@ -643,11 +672,85 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(units_by_scope[layout_scope]["kind"], "table_cell")
         self.assertEqual(units_by_scope[layout_scope]["row"], 0)
         self.assertEqual(units_by_scope[layout_scope]["col"], 1)
+        self.assertEqual(units_by_scope[layout_scope]["font_size"], 9.5)
+        self.assertEqual(units_by_scope[layout_scope]["line_count"], 2)
         self.assertEqual(units_by_scope["layout:v2:1:00002:symbol"]["status"], "translated")
         self.assertEqual(units_by_scope["layout:v2:1:00002:symbol"]["translated_text"], "%")
+        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["kind"], "figure_label")
+        self.assertFalse(units_by_scope["layout:v2:1:00003:figlabel"]["translatable"])
+        self.assertFalse(units_by_scope["layout:v2:1:00003:figlabel"]["display_source"])
+        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["translated_text"], "")
+        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["font_size"], 6.0)
+        self.assertEqual(units_by_scope["layout:v2:1:00003:figlabel"]["line_count"], 1)
+        self.assertEqual(payload["page_models"], [{"page": 1, "width": 200.0, "height": 200.0, "rotation": 0}])
         self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
         self.assertEqual(stale_payload["translation_units"][0]["status"], "stale")
         self.assertEqual(stale_payload["translation_summary"], {"translated": 0, "missing": 0, "stale": 1, "failed": 0})
+
+    def test_build_paper_layout_units_outputs_stable_geometry_and_figure_labels(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=240, height=320)
+        page.insert_text((24, 32), "A Precise Title", fontsize=18)
+        page.insert_textbox(
+            fitz.Rect(24, 60, 210, 92),
+            "This is a main body paragraph for layout extraction.",
+            fontsize=10,
+        )
+        page.insert_text((24, 120), "Figure 1. A useful caption", fontsize=10)
+        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10), 0)
+        pix.clear_with(0xEEEEEE)
+        page.insert_image(fitz.Rect(40, 150, 190, 220), stream=pix.tobytes("png"))
+        page.insert_text((55, 178), "AXIS LABEL", fontsize=8)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "geometry.pdf")
+            units = build_paper_layout_units(profile, source_id, pages={1})
+
+        self.assertTrue(units)
+        by_kind: dict[str, list[dict[str, object]]] = {}
+        for unit in units:
+            by_kind.setdefault(str(unit.get("kind")), []).append(unit)
+
+        self.assertIn("title", by_kind)
+        self.assertIn("paragraph", by_kind)
+        self.assertIn("caption", by_kind)
+        self.assertIn("figure_label", by_kind)
+        self.assertTrue(by_kind["title"][0]["translatable"])
+        self.assertTrue(by_kind["paragraph"][0]["translatable"])
+        self.assertTrue(by_kind["caption"][0]["translatable"])
+
+        figure_label = by_kind["figure_label"][0]
+        self.assertFalse(figure_label["translatable"])
+        self.assertFalse(figure_label["display_source"])
+        self.assertEqual(figure_label["translated_text"], "")
+        self.assertGreater(float(figure_label["font_size"]), 0)
+        self.assertEqual(figure_label["line_count"], 1)
+
+        for unit in [by_kind["title"][0], by_kind["paragraph"][0], by_kind["caption"][0], figure_label]:
+            rect = unit["rects"][0]
+            self.assertEqual(rect["page_width"], 240.0)
+            self.assertEqual(rect["page_height"], 320.0)
+            for key in ("x", "y", "w", "h", "x_pct", "y_pct", "w_pct", "h_pct"):
+                self.assertIn(key, rect)
+            self.assertGreater(rect["w"], 0)
+            self.assertGreater(rect["h"], 0)
+            self.assertGreaterEqual(rect["x_pct"], 0)
+            self.assertGreaterEqual(rect["y_pct"], 0)
+            self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
+            self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
 
     def test_build_reader_payload_filters_old_layout_cache_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

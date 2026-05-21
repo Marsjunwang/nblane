@@ -35,10 +35,12 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "anything unverified."
     ),
     "research.paper_translate": (
-        "Translate only the supplied paper segments. Preserve segment_id and "
-        "source_hash for every translation row so stale cached translations "
-        "can be rejected. Put the translated content in translated_text; do "
-        "not use text for translated output."
+        "Translate only the supplied paper translation units. A segment_id may "
+        "be a semantic segment id or a positioned layout scope id. Preserve "
+        "segment_id, scope_ref when present, and source_hash for every "
+        "translation row so stale cached translations can be rejected. Do not "
+        "invent, modify, or return coordinates. Put only the translated content "
+        "in translated_text; do not use text for translated output."
     ),
     "research.paper_explain_selection": (
         "Explain only the supplied selection and cited paper context. Keep the "

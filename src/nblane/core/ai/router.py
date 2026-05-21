@@ -80,10 +80,14 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["segment_id", "source_hash"],
+                        "required": ["source_hash"],
                         "properties": {
                             "segment_id": {"type": "string"},
+                            "scope_type": {"type": "string"},
+                            "scope_ref": {"type": "string"},
                             "source_hash": {"type": "string"},
+                            "translated_text": {"type": "string"},
+                            "target_lang": {"type": "string"},
                         },
                     },
                 },

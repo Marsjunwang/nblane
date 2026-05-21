@@ -355,23 +355,39 @@
       gap: 10px;
       align-content: start;
       padding: 10px;
+      overflow-x: hidden;
     }
     .pr-translation-pages {
       display: grid;
       gap: 18px;
       justify-items: center;
       min-height: 100%;
+      min-width: 0;
+      overflow-x: hidden;
+    }
+    .pr-translation-page-shell {
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+      max-width: 100%;
     }
     .pr-translation-page {
       position: relative;
       width: var(--pr-page-width, 760px);
-      min-height: var(--pr-page-height, 980px);
-      padding: clamp(28px, 5%, 58px);
+      height: var(--pr-page-height, 980px);
       overflow: hidden;
       border: 1px solid rgba(23, 33, 31, .12);
       background: #fff;
       box-shadow: 0 4px 20px rgba(23, 33, 31, .10);
+      contain: layout paint;
     }
+    .pr-translation-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    .pr-translation-preview-layer { z-index: 0; }
+    .pr-translation-overlay-layer { z-index: 1; pointer-events: none; }
     .pr-translation-page-preview {
       position: absolute;
       inset: 0;
@@ -416,18 +432,25 @@
     .pr-translation-page.overlay .pr-translation-block.placed {
       position: absolute;
       margin: 0;
+      padding: 2px 3px;
       overflow: hidden;
       font-size: clamp(.72rem, var(--pr-translation-font, .9rem), 1rem);
       line-height: 1.35;
       height: var(--pr-translation-height, auto);
       max-height: var(--pr-translation-height, none);
       cursor: pointer;
+      pointer-events: auto;
     }
-    .pr-translation-page.overlay .pr-translation-block.layout.empty,
-    .pr-translation-page.overlay .pr-translation-block.layout.missing,
-    .pr-translation-page.overlay .pr-translation-block.layout.failed {
-      background: rgba(255, 255, 255, .97);
+    .pr-translation-page.overlay .pr-translation-block.layout.placeholder {
+      padding: 0;
+      border: 1px dashed rgba(33, 104, 91, .18);
+      background: transparent;
       color: transparent;
+    }
+    .pr-translation-page.overlay .pr-translation-block.layout.placeholder:hover,
+    .pr-translation-page.overlay .pr-translation-block.layout.placeholder.active {
+      border-color: rgba(33, 104, 91, .42);
+      background: rgba(227, 242, 238, .16);
     }
     .pr-translation-page.overlay .pr-translation-block.placed.overflowing::after {
       content: "";
@@ -438,6 +461,11 @@
       height: 1.7em;
       background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.98) 64%);
       pointer-events: none;
+    }
+    .pr-translation-fallback {
+      display: grid;
+      gap: 8px;
+      width: min(var(--pr-page-width, 760px), 100%);
     }
     .pr-translation-row {
       display: grid;
@@ -1304,6 +1332,7 @@
       wireShell();
       refreshActionStatus();
       placeSelectionDock();
+      if (readerMode !== "pdf") window.requestAnimationFrame(() => refreshTranslationReader());
       setHeight();
     }
     function tabButton(tab, title) {
@@ -1418,9 +1447,10 @@
       });
     }
     function translationPages() {
-      const unitPages = translationUnits().map((row) => Number(row.page || 0)).filter(Boolean);
-      const pages = readerMode === "translation" ? contextPages() : (visiblePages.length ? visiblePages : [currentPage]);
-      const merged = [...new Set([...pages, ...unitPages])].filter(Boolean).sort((a, b) => a - b);
+      const pages = readerMode === "compare"
+        ? (visiblePages.length ? visiblePages : [currentPage])
+        : [currentPage || initialPage()];
+      const merged = [...new Set(pages.map((page) => Number(page || 0)).filter(Boolean))].sort((a, b) => a - b);
       return merged.length ? merged : [currentPage || 1];
     }
     function unitsForPage(pageNumber) {
@@ -1429,12 +1459,49 @@
       if (paged.length) return paged;
       return units.filter((row) => !Number(row.page || 0)).slice(0, 12);
     }
+    function hasRectGeometry(unit) {
+      return asArr(asObj(unit).rects).some((rect) => {
+        const row = asObj(rect);
+        return Number(row.w_pct || row.w || 0) > 0 && Number(row.h_pct || row.h || 0) > 0;
+      });
+    }
+    function layoutOverlayUnitsForPage(pageNumber) {
+      return unitsForPage(pageNumber).filter((unit) => {
+        const obj = asObj(unit);
+        if (text(obj.scope_type) !== "layout" || !hasRectGeometry(obj)) return false;
+        if (obj.translatable === false && obj.display_source !== true) return false;
+        return true;
+      });
+    }
+    function fallbackUnitsForPage(pageNumber) {
+      return unitsForPage(pageNumber).filter((unit) => {
+        const obj = asObj(unit);
+        if (text(obj.scope_type) !== "layout") return true;
+        if (obj.translatable === false && obj.display_source !== true) return false;
+        return !hasRectGeometry(obj);
+      });
+    }
     function unitDisplayText(unit) {
       const obj = asObj(unit);
       const translated = text(obj.translated_text).trim();
       if (translated && text(obj.status || "translated") !== "failed") return translated;
-      if (text(obj.scope_type) === "layout") return "";
+      if (text(obj.scope_type) === "layout") return obj.display_source === true ? text(obj.source_text) : "";
       return text(obj.source_text);
+    }
+    function translationFallbackUnitHtml(unit) {
+      const obj = asObj(unit);
+      const anchorId = text(obj.anchor_id || obj.unit_id);
+      const statusName = text(obj.status || (text(obj.translated_text) ? "translated" : "missing"));
+      const display = unitDisplayText(obj) || translationUnitStatusLabel(statusName);
+      const page = Number(obj.page || 0);
+      const sourceSnippet = text(obj.source_text).replace(/\s+/g, " ").trim();
+      return `
+        <article class="pr-translation-row ${anchorId === activeTranslationAnchor ? "active" : ""}" data-anchor-id="${attr(anchorId)}" data-page="${page || ""}" data-scope-type="${attr(obj.scope_type || "")}">
+          <div class="pr-translation-source">${esc(obj.locator || (page ? `p. ${page}` : label("page")))} · ${esc(translationUnitStatusLabel(statusName))}</div>
+          <div class="pr-translation-text">${esc(display)}</div>
+          ${sourceSnippet ? `<div class="pr-translation-source">${esc(sourceSnippet.slice(0, 220))}</div>` : ""}
+        </article>
+      `;
     }
     function translationUnitStatusLabel(statusName) {
       const clean = text(statusName || "missing");
@@ -1456,7 +1523,7 @@
       const clean = text(anchorId);
       if (!clean) return;
       activeTranslationAnchor = clean;
-      document.querySelectorAll(".pr-translation-block").forEach((el) => {
+      document.querySelectorAll(".pr-translation-block, .pr-translation-row[data-anchor-id]").forEach((el) => {
         el.classList.toggle("active", text(el.getAttribute("data-anchor-id")) === clean);
       });
       const unit = buildAnchorIndex().get(clean);
@@ -1465,10 +1532,86 @@
         if (page && page !== currentPage) scrollToPage(page);
       }
       if (options.scrollTranslation !== false) {
-        const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-block`);
+        const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-block, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-row`);
         row?.scrollIntoView({ block: "nearest", behavior: options.smooth === false ? "auto" : "smooth" });
       }
       if (options.refresh !== false) refreshSide();
+    }
+    function pageModelFromUnits(pageNumber) {
+      for (const unit of translationUnits()) {
+        if (Number(asObj(unit).page || 0) !== Number(pageNumber || 0)) continue;
+        for (const rawRect of asArr(asObj(unit).rects)) {
+          const rect = asObj(rawRect);
+          const width = Number(rect.page_width || 0);
+          const height = Number(rect.page_height || 0);
+          if (width > 0 && height > 0) return { page: pageNumber, width, height, rotation: 0 };
+        }
+      }
+      return null;
+    }
+    function translationPageBaseSize(pageNumber) {
+      const model = asArr(args.page_models).map((row) => asObj(row)).find((row) => Number(row.page || 0) === Number(pageNumber || 0));
+      if (model && Number(model.width || 0) > 0 && Number(model.height || 0) > 0) {
+        return {
+          page: Number(pageNumber || model.page || 1),
+          width: Number(model.width),
+          height: Number(model.height),
+          rotation: Number(model.rotation || 0),
+        };
+      }
+      if (pageBaseSizes.has(Number(pageNumber || 0))) {
+        const size = pageBaseSizes.get(Number(pageNumber || 0));
+        return { page: Number(pageNumber || 1), width: Number(size.width || 612), height: Number(size.height || 792), rotation: 0 };
+      }
+      return pageModelFromUnits(pageNumber) || { page: Number(pageNumber || 1), width: 612, height: 792, rotation: 0 };
+    }
+    function scaleForTranslationPage(pageNumber) {
+      const body = document.querySelector(".pr-translation-body");
+      const reader = document.getElementById("translationReader");
+      const container = body || reader;
+      const base = translationPageBaseSize(pageNumber);
+      const widthSpace = Math.max(240, (container ? container.clientWidth : 760) - 24);
+      return Math.max(.35, Math.min(3, widthSpace / Math.max(1, base.width)));
+    }
+    function translationPageViewportSize(pageNumber) {
+      const base = translationPageBaseSize(pageNumber);
+      const pageScale = scaleForTranslationPage(pageNumber);
+      return {
+        page: Number(pageNumber || 1),
+        baseWidth: base.width,
+        baseHeight: base.height,
+        rotation: base.rotation,
+        width: Math.max(180, base.width * pageScale),
+        height: Math.max(220, base.height * pageScale),
+        scale: pageScale,
+      };
+    }
+    function clampUnit(value, min = 0, max = 1) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return min;
+      return Math.max(min, Math.min(max, number));
+    }
+    function normalizedRect(rect, pageModel) {
+      const raw = asObj(rect);
+      let x = Number(raw.x_pct);
+      let y = Number(raw.y_pct);
+      let w = Number(raw.w_pct);
+      let h = Number(raw.h_pct);
+      if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) {
+        const sourceWidth = Number(raw.page_width || pageModel.baseWidth || pageModel.width || 0);
+        const sourceHeight = Number(raw.page_height || pageModel.baseHeight || pageModel.height || 0);
+        if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+        x = Number(raw.x || 0) / sourceWidth;
+        y = Number(raw.y || 0) / sourceHeight;
+        w = Number(raw.w || 0) / sourceWidth;
+        h = Number(raw.h || 0) / sourceHeight;
+      }
+      x = clampUnit(x);
+      y = clampUnit(y);
+      w = clampUnit(w, 0, 1 - x);
+      h = clampUnit(h, 0, 1 - y);
+      if (w < .002 || h < .002) return null;
+      return { x, y, w, h };
     }
     function translationBlockPlacement(unit, size) {
       const rects = asArr(asObj(unit).rects).map((row) => asObj(row)).filter((row) => (
@@ -1480,11 +1623,12 @@
       let right = -Infinity;
       let bottom = -Infinity;
       rects.forEach((rect) => {
-        const hasPct = rect.x_pct != null && rect.y_pct != null;
-        const x = hasPct ? Number(rect.x_pct || 0) * size.width : Number(rect.x || 0) * Number(size.scale || 1);
-        const y = hasPct ? Number(rect.y_pct || 0) * size.height : Number(rect.y || 0) * Number(size.scale || 1);
-        const w = hasPct ? Number(rect.w_pct || 0) * size.width : Number(rect.w || 0) * Number(size.scale || 1);
-        const h = hasPct ? Number(rect.h_pct || 0) * size.height : Number(rect.h || 0) * Number(size.scale || 1);
+        const normalized = normalizedRect(rect, size);
+        if (!normalized) return;
+        const x = normalized.x * size.width;
+        const y = normalized.y * size.height;
+        const w = normalized.w * size.width;
+        const h = normalized.h * size.height;
         left = Math.min(left, x);
         top = Math.min(top, y);
         right = Math.max(right, x + w);
@@ -1494,54 +1638,68 @@
       const width = Math.max(24, right - left);
       const height = Math.max(16, bottom - top);
       const body = unitDisplayText(unit);
+      const sourceFont = Number(asObj(unit).font_size || 0) * Number(size.scale || 1);
       const density = body.length ? Math.sqrt((width * height) / Math.max(1, body.length * 5.4)) : height * .72;
-      const fontSize = Math.max(8, Math.min(15, density, height * .72));
+      const fontSize = Math.max(8, Math.min(16, sourceFont || density, height * .76));
       return {
         className: "placed",
-        style: `left:${Math.round(left)}px;top:${Math.round(top)}px;width:${Math.round(width)}px;height:${Math.round(height)}px;--pr-translation-height:${Math.round(height)}px;--pr-translation-font:${fontSize}px;`,
+        style: `left:${left.toFixed(2)}px;top:${top.toFixed(2)}px;width:${Math.max(2, width).toFixed(2)}px;height:${Math.max(2, height).toFixed(2)}px;--pr-translation-height:${Math.round(height)}px;--pr-translation-font:${fontSize.toFixed(2)}px;`,
       };
     }
     function fitTranslationBlocks() {
       if (translationLayoutMode() !== "overlay" || translationOverflowPolicy() !== "fixed-expand") return;
       document.querySelectorAll(".pr-translation-block.placed").forEach((block) => {
+        if (!text(block.textContent).trim()) return;
         block.classList.remove("overflowing");
-        let fontSize = Number.parseFloat(window.getComputedStyle(block).fontSize || "12") || 12;
-        for (let index = 0; index < 14 && fontSize > 8; index += 1) {
-          if (block.scrollHeight <= block.clientHeight + 1 && block.scrollWidth <= block.clientWidth + 1) break;
-          fontSize = Math.max(8, fontSize * .9);
-          block.style.setProperty("--pr-translation-font", `${fontSize}px`);
+        const initial = Number.parseFloat(window.getComputedStyle(block).fontSize || "12") || 12;
+        let low = 7;
+        let high = Math.max(low, initial);
+        for (let index = 0; index < 12; index += 1) {
+          const mid = (low + high) / 2;
+          block.style.setProperty("--pr-translation-font", `${mid}px`);
+          const fits = block.scrollHeight <= block.clientHeight + 1 && block.scrollWidth <= block.clientWidth + 1;
+          if (fits) low = mid;
+          else high = mid;
         }
+        block.style.setProperty("--pr-translation-font", `${low}px`);
         if (block.scrollHeight > block.clientHeight + 2 || block.scrollWidth > block.clientWidth + 2) {
           block.classList.add("overflowing");
         }
       });
     }
     function renderTranslationPage(pageNumber) {
-      const size = pageViewportSize(pageNumber || currentPage || 1);
+      const size = translationPageViewportSize(pageNumber || currentPage || 1);
       const preview = previewForPage(pageNumber);
       const previewHtml = preview ? `<img class="pr-translation-page-preview" alt="" src="${attr(preview.data_url)}" />` : "";
-      const units = unitsForPage(pageNumber);
-      const body = units.length ? units.map((unit) => {
+      const overlayUnits = layoutOverlayUnitsForPage(pageNumber);
+      const overlayBody = overlayUnits.map((unit) => {
         const obj = asObj(unit);
         const display = unitDisplayText(obj);
         const statusName = text(obj.status || (text(obj.translated_text) ? "translated" : "missing"));
         const active = text(obj.anchor_id || obj.unit_id) === activeTranslationAnchor;
         const placement = translationBlockPlacement(obj, size);
-        const scopeType = text(obj.scope_type || "");
-        const isLayout = scopeType === "layout";
         const empty = !display;
-        const blockText = isLayout ? display : (display || label(statusName) || statusName);
+        if (!placement.className) return "";
         return `
-          <article class="pr-translation-block ${attr(statusName)} ${isLayout ? "layout" : ""} ${empty ? "empty" : ""} ${active ? "active" : ""} ${attr(placement.className)}" style="${attr(placement.style)}" data-anchor-id="${attr(obj.anchor_id || obj.unit_id)}" data-page="${Number(obj.page || pageNumber || 0)}" data-scope-type="${attr(scopeType)}">
-            ${esc(blockText)}
+          <article class="pr-translation-block ${attr(statusName)} layout ${empty ? "empty placeholder" : ""} ${active ? "active" : ""} ${attr(placement.className)}" style="${attr(placement.style)}" data-anchor-id="${attr(obj.anchor_id || obj.unit_id)}" data-page="${Number(obj.page || pageNumber || 0)}" data-scope-type="layout">
+            ${esc(display)}
           </article>
         `;
-      }).join("") : `<article class="pr-translation-block missing">${esc(label("empty"))}</article>`;
+      }).join("");
+      const fallbackUnits = fallbackUnitsForPage(pageNumber);
+      const fallbackHtml = fallbackUnits.length ? `
+        <section class="pr-translation-fallback">
+          ${fallbackUnits.map((unit) => translationFallbackUnitHtml(unit)).join("")}
+        </section>
+      ` : "";
       return `
-        <section class="pr-translation-page overlay" data-page="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
-          ${previewHtml}
-          <div class="pr-translation-page-label">${esc(label("page"))} ${Number(pageNumber || 0)}</div>
-          ${body}
+        <section class="pr-translation-page-shell" data-page-shell="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
+          <section class="pr-translation-page overlay" data-page="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
+            <div class="pr-translation-layer pr-translation-preview-layer">${previewHtml}</div>
+            <div class="pr-translation-layer pr-translation-overlay-layer">${overlayBody}</div>
+            <div class="pr-translation-page-label">${esc(label("page"))} ${Number(pageNumber || 0)}</div>
+          </section>
+          ${fallbackHtml}
         </section>
       `;
     }
@@ -2099,7 +2257,7 @@
       return true;
     }
     function wireTranslationRows() {
-      document.querySelectorAll(".pr-translation-block[data-anchor-id]").forEach((row) => {
+      document.querySelectorAll(".pr-translation-block[data-anchor-id], .pr-translation-row[data-anchor-id]").forEach((row) => {
         row.addEventListener("mouseenter", () => {
           setActiveAnchor(row.dataset.anchorId || "", { jumpToPage: false, scrollTranslation: false, refresh: false });
         });

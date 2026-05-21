@@ -1874,6 +1874,81 @@ def _translation_unit_status(row: dict[str, object] | None, source_hash: str) ->
     return "translated"
 
 
+def _default_page_model(page: int) -> dict[str, object]:
+    return {"page": int(page), "width": 612.0, "height": 792.0, "rotation": 0}
+
+
+def _page_models_from_pdf(
+    profile: str | Path,
+    source_id: str,
+    pages: set[int] | list[int] | tuple[int, ...],
+) -> list[dict[str, object]]:
+    requested_pages = {
+        int(item)
+        for item in (pages or [])
+        if str(item).strip().isdigit() and int(item) > 0
+    }
+    if not requested_pages:
+        return []
+    try:
+        pdf_path = paper_pdf_asset_path(profile, source_id)
+    except (FileNotFoundError, ValueError):
+        return []
+    try:
+        import fitz  # type: ignore[import-not-found]  # noqa: F401
+    except Exception:
+        return []
+    models: list[dict[str, object]] = []
+    try:
+        with fitz.open(str(pdf_path)) as doc:  # type: ignore[name-defined]
+            for page_number in sorted(requested_pages):
+                if page_number < 1 or page_number > int(doc.page_count):
+                    continue
+                pdf_page = doc.load_page(page_number - 1)
+                rect = pdf_page.rect
+                models.append(
+                    {
+                        "page": page_number,
+                        "width": float(rect.width),
+                        "height": float(rect.height),
+                        "rotation": int(getattr(pdf_page, "rotation", 0) or 0),
+                    }
+                )
+    except Exception:
+        return []
+    return models
+
+
+def _page_models_from_layout_units(
+    layout_units: list[dict[str, object]],
+    pages: list[int],
+) -> list[dict[str, object]]:
+    by_page: dict[int, dict[str, object]] = {}
+    for unit in layout_units:
+        try:
+            page_number = int(unit.get("page") or 0)
+        except (TypeError, ValueError):
+            page_number = 0
+        if page_number < 1:
+            continue
+        for raw_rect in unit.get("rects") or []:
+            if not isinstance(raw_rect, dict):
+                continue
+            try:
+                width = float(raw_rect.get("page_width") or 0)
+                height = float(raw_rect.get("page_height") or 0)
+            except (TypeError, ValueError):
+                width = 0.0
+                height = 0.0
+            if width > 0 and height > 0:
+                by_page.setdefault(
+                    page_number,
+                    {"page": page_number, "width": width, "height": height, "rotation": 0},
+                )
+                break
+    return [by_page.get(page_number, _default_page_model(page_number)) for page_number in pages]
+
+
 def _rect_payload(
     bbox: object,
     *,
@@ -1974,10 +2049,20 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
     page_width = float(getattr(rect, "width", 0.0) or 0.0)
     page_height = float(getattr(rect, "height", 0.0) or 0.0)
     data = pdf_page.get_text("dict")
+    image_rects: list[dict[str, object]] = []
     spans: list[dict[str, object]] = []
     lines: list[dict[str, object]] = []
     for block_index, block in enumerate(data.get("blocks", []) if isinstance(data, dict) else []):
-        if not isinstance(block, dict) or block.get("type") != 0:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") != 0:
+            image_rect = _rect_payload(
+                block.get("bbox", ()),
+                page_width=page_width,
+                page_height=page_height,
+            )
+            if image_rect is not None:
+                image_rects.append(image_rect)
             continue
         for line_index, line in enumerate(block.get("lines", []) or []):
             if not isinstance(line, dict):
@@ -2045,6 +2130,7 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
         "page": int(page_number),
         "width": page_width,
         "height": page_height,
+        "image_rects": image_rects[:1000],
         "spans": spans[:4000],
         "lines": lines[:4000],
     }
@@ -2157,7 +2243,7 @@ def _layout_unit_from_candidate(candidate: dict[str, object], order: int) -> dic
         "translatable": translatable,
         "display_source": preserve_source,
     }
-    for key in ("table_id", "row", "col", "row_span", "col_span", "rotation", "dir"):
+    for key in ("table_id", "row", "col", "row_span", "col_span", "rotation", "dir", "font_size", "line_count"):
         if key in candidate:
             unit[key] = candidate[key]
     return unit
@@ -2265,6 +2351,12 @@ def _layout_candidates_from_text_layer(
     layer: dict[str, object],
     accepted_table_rects: list[dict[str, object]],
 ) -> list[dict[str, object]]:
+    image_rects = [
+        rect
+        for raw in layer.get("image_rects") or []
+        if isinstance(raw, dict) and _rect_area(raw) > 0
+        if isinstance(rect := copy.deepcopy(raw), dict)
+    ]
     lines_by_block: dict[int, list[dict[str, object]]] = {}
     for raw_line in layer.get("lines") or []:
         if not isinstance(raw_line, dict):
@@ -2298,19 +2390,23 @@ def _layout_candidates_from_text_layer(
             if not text:
                 continue
             font_size = max((float(row.get("font_size") or 0) for row in group), default=0.0)
-            translatable = _layout_text_is_translatable(text)
+            inside_image = any(_rect_overlap_ratio(rect, image_rect) > 0.55 for image_rect in image_rects)
+            translatable = _layout_text_is_translatable(text) and not inside_image
             if not translatable and re.search(r"[A-Za-z\u4e00-\u9fff]", text):
-                continue
+                if not inside_image:
+                    continue
             candidates.append(
                 {
                     "page": page,
                     "source_text": text,
-                    "kind": _layout_kind(text, font_size, symbol=not translatable),
+                    "kind": "figure_label" if inside_image else _layout_kind(text, font_size, symbol=not translatable),
                     "rects": [rect],
                     "translatable": translatable,
-                    "preserve_source": not translatable,
+                    "preserve_source": (not translatable) and not inside_image,
                     "sort_y": rect["y"],
                     "sort_x": rect["x"],
+                    "font_size": font_size,
+                    "line_count": len(group),
                     "rotation": group[0].get("rotation", 0),
                     "dir": copy.deepcopy(group[0].get("dir") or [1.0, 0.0]),
                 }
@@ -2460,8 +2556,8 @@ def build_translation_units(
             display_source = bool(raw_unit.get("display_source", not translatable))
             translated_text = translation_text_from_row(translation or {})
             status = _translation_unit_status(translation, source_hash) if translatable else "translated"
-            if not translatable and not translated_text and display_source:
-                translated_text = source_text
+            if not translatable:
+                translated_text = source_text if display_source else ""
             if translatable:
                 summary[status] = summary.get(status, 0) + 1
             unit = {
@@ -2612,6 +2708,9 @@ def build_reader_payload(
             except Exception:
                 continue
     layout_units = build_paper_layout_units(profile, source_id, pages=context_pages)
+    page_models = _page_models_from_pdf(profile, source_id, context_pages)
+    if not page_models:
+        page_models = _page_models_from_layout_units(layout_units, context_pages)
     layout_scope_refs = {
         _clean_text(row.get("scope_ref") or row.get("unit_id"))
         for row in layout_units
@@ -2697,6 +2796,7 @@ def build_reader_payload(
         "source": source.to_dict(),
         "pdf_url": pdf_url,
         "page_previews": preview_rows,
+        "page_models": page_models,
         "pages": [page_row.to_dict() for page_row in page_context_rows],
         "segments": segments,
         "translations": translations,

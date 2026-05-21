@@ -499,6 +499,10 @@ def fallback_structured(
             translations.append(
                 {
                     "segment_id": segment_id,
+                    "scope_type": _clean_text(segment.get("scope_type")),
+                    "scope_ref": _clean_text(segment.get("scope_ref")),
+                    "page": segment.get("page"),
+                    "order": segment.get("order"),
                     "source_hash": source_hash,
                     "source_text": text,
                     "target_lang": target_lang,
