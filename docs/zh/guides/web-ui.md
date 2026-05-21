@@ -59,14 +59,17 @@ sidecar reload 或高 CPU 轮询，导致 `8502` 短暂无响应，iframe 看起
 生产部署如果已经用 Caddy 将 `/reader/*` 反代到 `127.0.0.1:8502`，则不要设置
 `NBLANE_READER_API_BASE`，保持同源路径即可。
 
-普通阅读默认使用译文 flow 视图，不把译文贴回 PDF rect。当前页/可见页翻译会保留 layout rect，
+普通阅读默认使用译文 flow 视图，不把译文贴回 PDF rect。当前页/可见页翻译会优先使用
+`paper-structure` 结构单元，并保留合并后的段落 rect，
 用于点击译文块时跳转和高亮 PDF 原文块。只有调试 legacy overlay 时才设置
 `NBLANE_READER_DEBUG_OVERLAY=1`。
 
 Reader 左侧 `Pages` 会列出 PDF 的全部页码；缩略图按视口懒加载，滚动到对应页附近时再请求
-sidecar 的 page preview。翻译当前页时 Reader 会优先使用 layout/page 自动策略，保存带 rect 的
-译文块；在翻译页点击译文块会跳回 PDF 对应页和块位置，并高亮对应区域。若某篇旧论文只有语义段落
-译文、没有 layout rect，可在 Reader 内重新执行当前页翻译来生成可跳转的 layout 译文。
+sidecar 的 page preview。翻译当前页时 Reader 会优先使用 `structure -> layout -> page -> segment`
+自动策略；structure 由 PDF layout 几何、标题/caption/front matter 规则和 GROBID section 弱对齐生成，
+缓存到 `profiles/<profile>/research/paper-structure/`。在翻译页点击译文块会跳回 PDF 对应页和段落位置，
+并高亮对应区域。若某篇旧论文只有语义段落译文、没有 structure/layout rect，可在 Reader 内重新执行
+当前页翻译来生成可跳转的结构化译文。
 
 Reader 右侧 `Review` 会显示当前上下文页的图表提取结果。图表提取优先使用 PDF 内嵌图片和
 PyMuPDF 表格检测；如果论文使用矢量图导致没有独立图片对象，则会根据 `Figure/Table` caption

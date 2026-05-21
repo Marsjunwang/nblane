@@ -17,9 +17,11 @@ from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
     PaperSearchResult,
+    PaperStructureUnit,
     _reader_outline_from_segments,
     build_reader_payload,
     build_paper_layout_units,
+    build_paper_structure_units,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
@@ -34,6 +36,7 @@ from nblane.core.research_papers import (
     load_paper_annotations,
     load_paper_library_tree,
     load_paper_pdf_bytes,
+    load_paper_structure_units,
     load_paper_translations,
     migrate_legacy_translations_to_segments,
     move_papers_to_node,
@@ -43,10 +46,12 @@ from nblane.core.research_papers import (
     pymupdf_available,
     paper_citation_diagnostics,
     paper_source_diagnostics,
+    reader_translation_structure_units,
     research_asset_root,
     render_paper_page_preview,
     save_paper_pages,
     save_paper_segments,
+    save_paper_structure_units,
     search_papers_with_codex,
     text_hash,
     translate_full_paper,
@@ -688,16 +693,19 @@ class TestResearchPapers(unittest.TestCase):
                     include_page_previews=False,
                 )
 
-        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"layout"})
+        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"structure"})
         units_by_scope = {row["scope_ref"]: row for row in payload["translation_units"]}
-        self.assertIn(layout_scope, units_by_scope)
-        self.assertEqual(units_by_scope[layout_scope]["status"], "translated")
+        structure_units = list(units_by_scope.values())
+        self.assertEqual(len(structure_units), 1)
+        self.assertEqual(structure_units[0]["source_text"], "Positioned body text")
+        self.assertEqual(structure_units[0]["translated_text"], "正文译文。")
+        self.assertEqual(structure_units[0]["status"], "translated")
         self.assertNotIn("seg:1", units_by_scope)
         self.assertNotIn(table_scope, units_by_scope)
         self.assertEqual(payload["page_models"], [{"page": 1, "width": 200.0, "height": 200.0, "rotation": 0}])
         self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
-        self.assertEqual(stale_payload["translation_units"][0]["status"], "stale")
-        self.assertEqual(stale_payload["translation_summary"], {"translated": 0, "missing": 0, "stale": 1, "failed": 0})
+        self.assertEqual(stale_payload["translation_units"][0]["status"], "translated")
+        self.assertEqual(stale_payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
 
     def test_build_paper_layout_units_outputs_stable_geometry_and_figure_labels(self) -> None:
         if not pymupdf_available():
@@ -810,6 +818,279 @@ class TestResearchPapers(unittest.TestCase):
         self.assertTrue(front_matter[0]["display_source"])
         self.assertTrue(paragraphs)
 
+    def test_build_paper_structure_units_merges_front_matter_and_caption_flow(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=340, height=460)
+        page.insert_text((36, 42), "RH20T-P: A Primitive-Level", fontsize=18)
+        page.insert_text((40, 64), "Robotic Manipulation Dataset", fontsize=18)
+        page.insert_text((54, 100), "Alice Chen Bob Li Carol Wang", fontsize=10)
+        page.insert_text((54, 116), "Robotics Laboratory, Example University", fontsize=10)
+        page.insert_text((36, 160), "Abstract", fontsize=12)
+        page.insert_textbox(
+            fitz.Rect(36, 180, 300, 222),
+            "This benchmark evaluates composable robotic manipulation agents.",
+            fontsize=10,
+        )
+        page.insert_text((36, 260), "Figure 1: Overview of the collection setup", fontsize=10)
+        page.insert_text((36, 276), "and primitive-level annotations.", fontsize=10)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "structure.pdf")
+            units = build_paper_structure_units(profile, source_id, force=True)
+            cached = load_paper_structure_units(profile, source_id)
+
+        self.assertEqual(len(cached), len(units))
+        titles = [unit for unit in units if unit.kind == "title"]
+        authors = [unit for unit in units if unit.kind == "authors"]
+        affiliations = [unit for unit in units if unit.kind == "affiliation"]
+        captions = [unit for unit in units if unit.kind == "caption"]
+        figure_objects = [unit for unit in units if unit.kind == "figure"]
+        translation_rows = reader_translation_structure_units(units)
+
+        self.assertEqual(len(titles), 1)
+        self.assertIn("Primitive-Level", titles[0].text)
+        self.assertIn("Robotic Manipulation Dataset", titles[0].text)
+        self.assertTrue(authors)
+        self.assertTrue(affiliations)
+        self.assertFalse(authors[0].translatable)
+        self.assertFalse(affiliations[0].translatable)
+        self.assertEqual({row["scope_type"] for row in translation_rows}, {"structure"})
+        self.assertNotIn("authors", {row["kind"] for row in translation_rows})
+        self.assertNotIn("affiliation", {row["kind"] for row in translation_rows})
+        self.assertTrue(captions)
+        self.assertIn("primitive-level annotations", captions[0].text)
+        self.assertTrue(figure_objects)
+        self.assertFalse(figure_objects[0].translatable)
+        self.assertIn("caption", {row["kind"] for row in translation_rows})
+        self.assertNotIn("figure", {row["kind"] for row in translation_rows})
+
+    def test_build_paper_structure_units_repairs_split_span_spaces(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=260, height=220)
+        page.insert_text((24, 60), "dataset", fontsize=10)
+        page.insert_text((68, 60), "for", fontsize=10)
+        page.insert_text((90, 60), "future", fontsize=10)
+        page.insert_text((130, 60), "development", fontsize=10)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "spaces.pdf")
+            units = build_paper_structure_units(profile, source_id, force=True)
+
+        text = " ".join(unit.text for unit in units)
+        self.assertIn("dataset for future development", text)
+        self.assertNotIn("datasetforfuturedevelopment", text)
+
+    def test_build_paper_structure_units_orders_two_columns_without_cross_column_merge(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=420, height=520)
+        page.insert_textbox(fitz.Rect(34, 80, 190, 125), "Left column first paragraph.", fontsize=10)
+        page.insert_textbox(fitz.Rect(230, 80, 386, 125), "Right column first paragraph.", fontsize=10)
+        page.insert_textbox(fitz.Rect(34, 150, 190, 195), "Left column second paragraph.", fontsize=10)
+        page.insert_textbox(fitz.Rect(230, 150, 386, 195), "Right column second paragraph.", fontsize=10)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "columns.pdf")
+            units = build_paper_structure_units(profile, source_id, force=True)
+
+        paragraphs = [unit.text for unit in units if unit.kind == "paragraph"]
+        self.assertEqual(
+            paragraphs[:4],
+            [
+                "Left column first paragraph.",
+                "Left column second paragraph.",
+                "Right column first paragraph.",
+                "Right column second paragraph.",
+            ],
+        )
+
+    def test_build_paper_structure_units_uses_grobid_section_path_without_overriding_boundaries(self) -> None:
+        layout_hash = text_hash("A layout-grounded paragraph about robots.")
+        layout_units = [
+            {
+                "unit_id": "layout:v2:2:00001:intro",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:2:00001:intro",
+                "page": 2,
+                "order": 1,
+                "kind": "paragraph",
+                "source_text": "A layout-grounded paragraph about robots.",
+                "source_hash": layout_hash,
+                "translatable": True,
+                "rects": [{"x": 20, "y": 80, "w": 160, "h": 24, "page_width": 240, "page_height": 320}],
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:intro",
+                            source_id=source_id,
+                            page=2,
+                            order=1,
+                            text="A layout-grounded paragraph about robots.",
+                            text_hash=layout_hash,
+                            section_path=["1 Introduction"],
+                        )
+                    ],
+                )
+            with (
+                patch("nblane.core.research_papers.build_paper_layout_units", return_value=layout_units),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                units = build_paper_structure_units(profile, source_id, force=True)
+
+        paragraphs = [unit for unit in units if unit.kind == "paragraph"]
+        self.assertEqual(len(paragraphs), 1)
+        self.assertEqual(paragraphs[0].section_path, ["1 Introduction"])
+        self.assertEqual(paragraphs[0].text, "A layout-grounded paragraph about robots.")
+
+    def test_build_paper_structure_units_keeps_pre_abstract_caption_outside_abstract_and_merges_cross_page_abstract(self) -> None:
+        layout_units = [
+            {
+                "unit_id": "layout:v2:1:00001:caption",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:1:00001:caption",
+                "page": 1,
+                "order": 1,
+                "kind": "caption",
+                "source_text": "Figure 1: Overview of our RH20T-P dataset.",
+                "source_hash": text_hash("Figure 1: Overview of our RH20T-P dataset."),
+                "translatable": True,
+                "rects": [{"x": 64, "y": 450, "w": 450, "h": 34, "x_pct": 0.10, "y_pct": 0.57, "w_pct": 0.72, "h_pct": 0.04, "page_width": 640, "page_height": 790}],
+            },
+            {
+                "unit_id": "layout:v2:1:00002:abstract-heading",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:1:00002:abstract-heading",
+                "page": 1,
+                "order": 2,
+                "kind": "paragraph",
+                "source_text": "Abstract",
+                "source_hash": text_hash("Abstract"),
+                "translatable": True,
+                "font_size": 13,
+                "rects": [{"x": 280, "y": 515, "w": 80, "h": 20, "x_pct": 0.44, "y_pct": 0.65, "w_pct": 0.13, "h_pct": 0.03, "page_width": 640, "page_height": 790}],
+            },
+            {
+                "unit_id": "layout:v2:1:00003:abstract-p1",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:1:00003:abstract-p1",
+                "page": 1,
+                "order": 3,
+                "kind": "paragraph",
+                "source_text": "Achieving generalizability in solving out-of-distribution tasks is one of the ultimate goals of learning robotic manipulation. Therefore, we propose RH20T-P, a primitive-level robotic manipulation dataset, which contains about 38k video clips covering diverse manipulation tasks.",
+                "source_hash": text_hash("abstract p1"),
+                "translatable": True,
+                "rects": [{"x": 100, "y": 540, "w": 430, "h": 150, "x_pct": 0.16, "y_pct": 0.68, "w_pct": 0.67, "h_pct": 0.19, "page_width": 640, "page_height": 790}],
+            },
+            {
+                "unit_id": "layout:v2:2:00001:abstract-p2",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:2:00001:abstract-p2",
+                "page": 2,
+                "order": 1,
+                "kind": "paragraph",
+                "source_text": "and implement an exemplar baseline called RA-P on our RH20T-P, whose positive performance validates that the proposed dataset can offer composable generalization.",
+                "source_hash": text_hash("abstract p2"),
+                "translatable": True,
+                "rects": [{"x": 100, "y": 72, "w": 430, "h": 54, "x_pct": 0.16, "y_pct": 0.09, "w_pct": 0.67, "h_pct": 0.07, "page_width": 640, "page_height": 790}],
+            },
+            {
+                "unit_id": "layout:v2:1:00004:footnote",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:1:00004:footnote",
+                "page": 1,
+                "order": 4,
+                "kind": "paragraph",
+                "source_text": "∗Equal contribution. †Corresponding author.",
+                "source_hash": text_hash("∗Equal contribution. †Corresponding author."),
+                "translatable": True,
+                "rects": [{"x": 100, "y": 690, "w": 430, "h": 18, "x_pct": 0.16, "y_pct": 0.87, "w_pct": 0.67, "h_pct": 0.02, "page_width": 640, "page_height": 790}],
+            },
+            {
+                "unit_id": "layout:v2:2:00002:intro",
+                "scope_type": "layout",
+                "scope_ref": "layout:v2:2:00002:intro",
+                "page": 2,
+                "order": 2,
+                "kind": "paragraph",
+                "source_text": "INTRODUCTION",
+                "source_hash": text_hash("INTRODUCTION"),
+                "translatable": True,
+                "font_size": 13,
+                "rects": [{"x": 260, "y": 145, "w": 120, "h": 22, "x_pct": 0.41, "y_pct": 0.18, "w_pct": 0.19, "h_pct": 0.03, "page_width": 640, "page_height": 790}],
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with (
+                patch("nblane.core.research_papers.build_paper_layout_units", return_value=layout_units),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                units = build_paper_structure_units(profile, source_id, force=True)
+
+        captions = [unit for unit in units if unit.kind == "caption"]
+        footnotes = [unit for unit in units if unit.kind == "footnote"]
+        abstract_paragraphs = [unit for unit in units if unit.kind == "paragraph" and unit.section_path == ["Abstract"]]
+
+        self.assertTrue(captions)
+        self.assertEqual(captions[0].section_path, [])
+        self.assertLess(captions[0].order, next(unit.order for unit in units if unit.kind == "heading" and unit.text == "Abstract"))
+        self.assertEqual(len(footnotes), 1)
+        self.assertEqual(footnotes[0].section_path, [])
+        self.assertEqual(len(abstract_paragraphs), 1)
+        self.assertEqual(abstract_paragraphs[0].page_start, 1)
+        self.assertEqual(abstract_paragraphs[0].page_end, 2)
+        self.assertIn("Achieving generalizability", abstract_paragraphs[0].text)
+        self.assertIn("and implement an exemplar baseline", abstract_paragraphs[0].text)
+        self.assertNotIn("Equal contribution", abstract_paragraphs[0].text)
+        self.assertEqual({rect.get("page") for rect in abstract_paragraphs[0].rects}, {1, 2})
+
     def test_extract_paper_figures_returns_cropped_images_with_rects(self) -> None:
         if not pymupdf_available():
             self.skipTest("PyMuPDF is not available")
@@ -904,7 +1185,7 @@ class TestResearchPapers(unittest.TestCase):
                     include_page_previews=False,
                 )
 
-        self.assertEqual([row["scope_type"] for row in payload["translation_units"]], ["layout"])
+        self.assertEqual([row["scope_type"] for row in payload["translation_units"]], ["structure"])
         self.assertNotIn(old_scope, [row["scope_ref"] for row in payload["translations"]])
         self.assertEqual(payload["translation_units"][0]["status"], "missing")
         self.assertEqual(payload["translation_summary"], {"translated": 0, "missing": 1, "stale": 0, "failed": 0})

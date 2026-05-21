@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import base64
 import contextlib
+import difflib
 import hashlib
 import io
 import json
@@ -66,6 +67,7 @@ except Exception:  # pragma: no cover - Streamlit is optional for core imports.
 LIBRARY_TREE_FILENAME = "library-tree.yaml"
 PAPER_PAGES_DIRNAME = "paper-pages"
 PAPER_SEGMENTS_DIRNAME = "paper-segments"
+PAPER_STRUCTURE_DIRNAME = "paper-structure"
 PAPER_ANNOTATIONS_DIRNAME = "annotations"
 PAPER_TRANSLATIONS_DIRNAME = "translations"
 PAPER_ANALYSIS_DIRNAME = "analysis"
@@ -75,7 +77,20 @@ PAPER_EXPORTS_DIRNAME = "exports"
 PAPER_ANNOTATION_KINDS = ("highlight", "note", "question")
 PAPER_ANNOTATION_STATUSES = ("active", "deleted")
 PAPER_TRANSLATION_STATUSES = ("translated", "missing", "stale", "failed")
-PAPER_TRANSLATION_SCOPES = ("segment", "page", "selection", "layout")
+PAPER_TRANSLATION_SCOPES = ("segment", "page", "selection", "layout", "structure")
+PAPER_STRUCTURE_VERSION = "v4"
+PAPER_STRUCTURE_TRANSLATION_KINDS = ("title", "heading", "paragraph", "caption")
+PAPER_STRUCTURE_BODY_EXCLUDED_KINDS = (
+    "authors",
+    "affiliation",
+    "figure",
+    "table",
+    "footnote",
+    "reference",
+    "symbol",
+    "figure_label",
+    "table_cell",
+)
 PAPER_SEARCH_PROVIDERS = ("arxiv", "semantic_scholar")
 NO_LLM_TRANSLATION_WARNING = "No LLM translation backend produced text."
 PDF_MAX_BYTES_DEFAULT = 75 * 1024 * 1024
@@ -840,6 +855,102 @@ class PaperSegment:
         return data
 
 
+@dataclass
+class PaperStructureUnit:
+    unit_id: str
+    source_id: str
+    kind: str
+    page_start: int
+    page_end: int
+    order: int
+    text: str
+    text_hash: str = ""
+    section_path: list[str] = field(default_factory=list)
+    locator: str = ""
+    rects: list[dict[str, object]] = field(default_factory=list)
+    source_unit_ids: list[str] = field(default_factory=list)
+    translatable: bool = True
+    display_source: bool = False
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: object) -> "PaperStructureUnit | None":
+        if not isinstance(data, dict):
+            return None
+        unit_id = _clean_text(data.get("unit_id"))
+        source_id = _clean_text(data.get("source_id"))
+        text = _clean_text(data.get("text") or data.get("source_text"))
+        if not unit_id or not source_id or not text:
+            return None
+        try:
+            page_start = int(data.get("page_start") or data.get("page") or 0)
+            page_end = int(data.get("page_end") or page_start)
+            order = int(data.get("order") or 0)
+        except (TypeError, ValueError):
+            return None
+        if page_start < 1 or page_end < page_start:
+            return None
+        metadata = _clean_mapping(data.get("metadata"))
+        translatable = _metadata_bool(
+            {"value": data.get("translatable")},
+            "value",
+            default=True,
+        )
+        display_source = _metadata_bool(
+            {"value": data.get("display_source")},
+            "value",
+            default=not translatable,
+        )
+        return cls(
+            unit_id=unit_id,
+            source_id=source_id,
+            kind=_clean_text(data.get("kind")) or "paragraph",
+            page_start=page_start,
+            page_end=page_end,
+            order=order,
+            text=text,
+            text_hash=_clean_text(data.get("text_hash")) or text_hash(text),
+            section_path=_clean_list(data.get("section_path")),
+            locator=_clean_text(data.get("locator")) or (
+                f"p. {page_start}" if page_start == page_end else f"pp. {page_start}-{page_end}"
+            ),
+            rects=[
+                copy.deepcopy(row)
+                for row in data.get("rects") or []
+                if isinstance(row, dict)
+            ],
+            source_unit_ids=_clean_list(data.get("source_unit_ids")),
+            translatable=translatable,
+            display_source=display_source,
+            metadata=metadata,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        text = _clean_text(self.text)
+        metadata = copy.deepcopy(self.metadata)
+        metadata.setdefault("structure_version", PAPER_STRUCTURE_VERSION)
+        data: dict[str, object] = {
+            "unit_id": self.unit_id,
+            "source_id": self.source_id,
+            "kind": self.kind or "paragraph",
+            "page_start": int(self.page_start),
+            "page_end": int(self.page_end or self.page_start),
+            "order": int(self.order),
+            "text": text,
+            "text_hash": self.text_hash or text_hash(text),
+            "section_path": list(self.section_path),
+            "locator": self.locator
+            or (f"p. {self.page_start}" if self.page_start == self.page_end else f"pp. {self.page_start}-{self.page_end}"),
+            "rects": copy.deepcopy(self.rects),
+            "source_unit_ids": list(self.source_unit_ids),
+            "translatable": bool(self.translatable),
+            "display_source": bool(self.display_source),
+        }
+        if metadata:
+            data["metadata"] = metadata
+        return data
+
+
 def load_paper_pages(profile: str | Path, source_id: str) -> list[PaperPage]:
     return [
         page
@@ -879,6 +990,31 @@ def save_paper_segments(profile: str | Path, source_id: str, segments: list[Pape
         _jsonl_path(profile, PAPER_SEGMENTS_DIRNAME, source_id),
         rows,
         action=f"update paper segments for {source_id}",
+    )
+
+
+def load_paper_structure_units(profile: str | Path, source_id: str) -> list[PaperStructureUnit]:
+    return [
+        unit
+        for row in _load_jsonl(_jsonl_path(profile, PAPER_STRUCTURE_DIRNAME, source_id))
+        if (unit := PaperStructureUnit.from_dict(row)) is not None
+    ]
+
+
+def save_paper_structure_units(
+    profile: str | Path,
+    source_id: str,
+    units: list[PaperStructureUnit | dict],
+) -> Path:
+    rows = []
+    for item in units:
+        unit = item if isinstance(item, PaperStructureUnit) else PaperStructureUnit.from_dict(item)
+        if unit is not None:
+            rows.append(unit.to_dict())
+    return _write_jsonl(
+        _jsonl_path(profile, PAPER_STRUCTURE_DIRNAME, source_id),
+        rows,
+        action=f"update paper structure units for {source_id}",
     )
 
 
@@ -2390,6 +2526,44 @@ def _reader_outline_from_segments(segments: list[PaperSegment]) -> list[dict[str
     return outline
 
 
+def _reader_outline_from_structure_units(units: list[PaperStructureUnit]) -> list[dict[str, object]]:
+    """Build the Reader outline from paper structure headings."""
+
+    outline: list[dict[str, object]] = []
+    seen: set[tuple[str, ...]] = set()
+    for unit in sorted(units, key=lambda row: (row.page_start, row.order, row.unit_id)):
+        if unit.kind != "heading":
+            continue
+        title = " ".join(_clean_text(unit.text).split())
+        if not _outline_title_allowed(title, kind="heading"):
+            continue
+        path = tuple(unit.section_path or [title])
+        for level, _ in enumerate(path, start=1):
+            key = path[:level]
+            if key in seen:
+                continue
+            seen.add(key)
+            clean_title = key[-1]
+            if not _outline_title_allowed(clean_title, kind="heading"):
+                continue
+            anchor_seed = "|".join(key)
+            outline.append(
+                {
+                    "anchor_id": f"outline:{source_slug(unit.source_id)}:{hashlib.sha256(anchor_seed.encode('utf-8')).hexdigest()[:12]}",
+                    "target_anchor_id": unit.unit_id,
+                    "segment_id": "",
+                    "scope_ref": unit.unit_id,
+                    "scope_type": "structure",
+                    "title": clean_title,
+                    "page": int(unit.page_start or 0),
+                    "order": int(unit.order or 0),
+                    "level": level,
+                    "section_path": list(key),
+                }
+            )
+    return outline
+
+
 _COMMON_OUTLINE_HEADINGS = {
     "abstract",
     "introduction",
@@ -2605,7 +2779,7 @@ def _outline_title_allowed(title: str, *, kind: str = "") -> bool:
 
 def _translation_revision(profile: str | Path, source_id: str, target_lang: str) -> str:
     parts = [source_id, target_lang]
-    for dirname in (PAPER_PAGES_DIRNAME, PAPER_SEGMENTS_DIRNAME, PAPER_TRANSLATIONS_DIRNAME):
+    for dirname in (PAPER_PAGES_DIRNAME, PAPER_SEGMENTS_DIRNAME, PAPER_STRUCTURE_DIRNAME, PAPER_TRANSLATIONS_DIRNAME):
         path = _jsonl_path(profile, dirname, source_id)
         try:
             stat = path.stat()
@@ -2936,6 +3110,68 @@ def _line_direction(line: dict[str, object]) -> tuple[list[float], float]:
     return [round(dx, 4), round(dy, 4)], round(rotation, 2)
 
 
+def _text_boundary_needs_space(left: str, right: str) -> bool:
+    left_clean = str(left or "")
+    right_clean = str(right or "")
+    if not left_clean or not right_clean:
+        return False
+    if left_clean[-1].isspace() or right_clean[0].isspace():
+        return False
+    if re.search(r"[\u4e00-\u9fff]$", left_clean) or re.match(r"^[\u4e00-\u9fff]", right_clean):
+        return False
+    if left_clean[-1] in "([{/<-" or right_clean[0] in ".,;:!?)]}%/":
+        return False
+    return bool(re.search(r"[A-Za-z0-9]$", left_clean) and re.match(r"^[A-Za-z0-9]", right_clean))
+
+
+def _join_pdf_spans_with_geometry(span_parts: list[tuple[str, tuple[float, float, float, float], float]]) -> str:
+    """Join PyMuPDF spans without losing natural word spaces."""
+
+    out = ""
+    previous_bbox: tuple[float, float, float, float] | None = None
+    previous_size = 0.0
+    for raw_text, bbox, font_size in span_parts:
+        part = str(raw_text or "")
+        if not part:
+            continue
+        if not out:
+            out = part
+            previous_bbox = bbox
+            previous_size = font_size
+            continue
+        separator = ""
+        if previous_bbox is not None:
+            gap = float(bbox[0]) - float(previous_bbox[2])
+            threshold = max(1.2, min(8.0, max(previous_size, font_size, 8.0) * 0.16))
+            if gap > threshold and _text_boundary_needs_space(out, part):
+                separator = " "
+        elif _text_boundary_needs_space(out, part):
+            separator = " "
+        out = f"{out}{separator}{part}"
+        previous_bbox = bbox
+        previous_size = font_size
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
+def _join_pdf_lines_as_text(lines: list[str]) -> str:
+    """Join visual PDF lines into source text while repairing hyphenated wraps."""
+
+    cleaned = [_clean_text(line) for line in lines if _clean_text(line)]
+    if not cleaned:
+        return ""
+    out = cleaned[0]
+    for line in cleaned[1:]:
+        if re.search(r"[A-Za-z]-$", out) and re.match(r"^[a-z]", line):
+            out = out[:-1] + line
+        elif re.search(r"[\u4e00-\u9fff]$", out) and re.match(r"^[\u4e00-\u9fff]", line):
+            out += line
+        elif out.endswith(("(", "[", "{", "/", "-")) or line.startswith((".", ",", ";", ":", "!", "?", ")", "]", "}", "%")):
+            out += line
+        else:
+            out += " " + line
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
 def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str, object]:
     """Return the PyMuPDF text layer used by both Reader selection fallback and layout units."""
 
@@ -2963,6 +3199,7 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
                 continue
             direction, rotation = _line_direction(line)
             line_parts: list[str] = []
+            line_span_parts: list[tuple[str, tuple[float, float, float, float], float]] = []
             line_bboxes: list[tuple[float, float, float, float]] = []
             max_font_size = 0.0
             span_indexes: list[int] = []
@@ -2993,9 +3230,10 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
                     }
                 )
                 line_parts.append(body)
+                line_span_parts.append((body, span_bbox, font_size))
                 line_bboxes.append(span_bbox)
                 max_font_size = max(max_font_size, font_size)
-            text = "".join(line_parts).strip()
+            text = _join_pdf_spans_with_geometry(line_span_parts) if line_span_parts else "".join(line_parts).strip()
             if not text:
                 continue
             line_bbox = _bbox_values(line.get("bbox", ())) or _bbox_union(line_bboxes)
@@ -3054,16 +3292,22 @@ def _layout_text_lines(block: dict[str, object]) -> tuple[str, float]:
     for raw_line in block.get("lines") or []:
         if not isinstance(raw_line, dict):
             continue
-        parts: list[str] = []
+        parts: list[tuple[str, tuple[float, float, float, float], float]] = []
+        fallback_parts: list[str] = []
         for raw_span in raw_line.get("spans") or []:
             if not isinstance(raw_span, dict):
                 continue
-            parts.append(str(raw_span.get("text") or ""))
+            body = str(raw_span.get("text") or "")
+            fallback_parts.append(body)
             try:
-                max_font = max(max_font, float(raw_span.get("size") or 0))
+                font_size = float(raw_span.get("size") or 0)
             except (TypeError, ValueError):
-                pass
-        line = "".join(parts).strip()
+                font_size = 0.0
+            max_font = max(max_font, font_size)
+            bbox = _bbox_values(raw_span.get("bbox", ()))
+            if body and bbox is not None:
+                parts.append((body, bbox, font_size))
+        line = _join_pdf_spans_with_geometry(parts) if parts else "".join(fallback_parts).strip()
         if line:
             lines.append(line)
     return "\n".join(lines).strip(), max_font
@@ -3437,7 +3681,11 @@ def _layout_candidates_from_text_layer(
             rect = _line_group_rect(group)
             if rect is None:
                 continue
-            text = "\n".join(_clean_text(row.get("text")) for row in group if _clean_text(row.get("text"))).strip()
+            text = _join_pdf_lines_as_text([
+                _clean_text(row.get("text"))
+                for row in group
+                if _clean_text(row.get("text"))
+            ])
             if not text:
                 continue
             font_size = max((float(row.get("font_size") or 0) for row in group), default=0.0)
@@ -3616,6 +3864,1058 @@ def reader_translation_layout_units(layout_units: list[dict[str, object]]) -> li
     return rows
 
 
+def _paper_structure_clean_text(text: object) -> str:
+    return _join_pdf_lines_as_text(str(text or "").replace("\r\n", "\n").splitlines())
+
+
+def _paper_structure_locator(page_start: int, page_end: int) -> str:
+    return f"p. {page_start}" if page_start == page_end else f"pp. {page_start}-{page_end}"
+
+
+def _paper_structure_rect_union(rects: list[dict[str, object]]) -> dict[str, object] | None:
+    clean_rects = [rect for rect in rects if isinstance(rect, dict) and _rect_area(rect) > 0]
+    if not clean_rects:
+        return None
+    try:
+        page_width = max(float(rect.get("page_width") or 0) for rect in clean_rects)
+        page_height = max(float(rect.get("page_height") or 0) for rect in clean_rects)
+    except (TypeError, ValueError):
+        return None
+    return _rect_union_payload(clean_rects, page_width=page_width, page_height=page_height)
+
+
+def _paper_structure_rects_for_page(rects: object, page: int) -> list[dict[str, object]]:
+    rows = _clean_rect_list(rects)
+    for rect in rows:
+        rect.setdefault("page", int(page))
+    return rows
+
+
+def _paper_structure_primary_rect(row: dict[str, object]) -> dict[str, object] | None:
+    for rect in row.get("rects") or []:
+        if isinstance(rect, dict) and _rect_area(rect) > 0:
+            return rect
+    return None
+
+
+def _paper_structure_heading_kind(text: str, *, page: int, font_size: float, layout_kind: str) -> str:
+    clean = " ".join(_clean_text(text).split())
+    if not clean:
+        return layout_kind or "paragraph"
+    lower = clean.lower().strip(" .:")
+    if re.match(r"^[*∗†‡§¶]\s*", clean) or lower.startswith(("preprint", "under review", "equal contribution", "corresponding author")):
+        return "footnote"
+    if re.match(r"^(figure|fig\.?|table|algorithm)\s*\d+", clean, flags=re.IGNORECASE):
+        return "caption"
+    if layout_kind in {"title", "authors", "affiliation", "table_cell", "figure_label", "symbol", "footnote"}:
+        return layout_kind
+    if re.fullmatch(r"\d+(?:\.\d+)*\.?", clean):
+        return "heading_marker"
+    numbered = re.match(r"^(\d+(?:\.\d+)*)\.?\s+(.+)$", clean)
+    if numbered:
+        marker = numbered.group(1)
+        title = numbered.group(2).strip()
+        if _section_marker_allowed(marker) and _line_looks_like_outline_heading(title, numbered=True, page=page, marker=marker):
+            return "heading"
+    if lower in _COMMON_OUTLINE_HEADINGS or lower.startswith(("appendix", "references", "acknowledg")):
+        return "heading"
+    if font_size >= 13 and _line_looks_like_outline_heading(clean, numbered=False, page=page):
+        return "heading"
+    return "paragraph"
+
+
+def _paper_structure_front_matter_kind(
+    *,
+    page: int,
+    text: str,
+    rect: dict[str, object] | None,
+    font_size: float,
+    layout_kind: str,
+    seen_title: bool,
+) -> str:
+    if page != 1 or rect is None:
+        return layout_kind
+    try:
+        y_pct = float(rect.get("y_pct"))
+    except (TypeError, ValueError):
+        y_pct = 1.0
+    if y_pct > 0.38:
+        return layout_kind
+    clean = " ".join(_clean_text(text).split())
+    lower = clean.lower()
+    if not clean:
+        return layout_kind
+    if layout_kind == "title" or (not seen_title and font_size >= 14 and y_pct <= 0.28):
+        return "title"
+    affiliation_markers = (
+        "university",
+        "institute",
+        "college",
+        "department",
+        "school",
+        "laboratory",
+        "laboratories",
+        "lab",
+        "academy",
+        "email",
+        "corresponding",
+        "equal contribution",
+    )
+    if any(marker in lower for marker in affiliation_markers) or re.search(r"@\w|\.edu\b|\.ac\.", lower):
+        return "affiliation"
+    nameish_words = re.findall(r"[A-Z][A-Za-z.'-]+", clean)
+    mostly_names = len(nameish_words) >= 2 and len(clean.split()) <= max(12, len(nameish_words) + 4)
+    if mostly_names and not clean.endswith(".") and y_pct <= 0.34:
+        return "authors"
+    return layout_kind
+
+
+def _paper_structure_kind_for_layout(unit: dict[str, object], *, seen_title: bool) -> str:
+    text = _paper_structure_clean_text(unit.get("source_text") or unit.get("text"))
+    layout_kind = _clean_text(unit.get("kind")) or "paragraph"
+    try:
+        page = int(unit.get("page") or 0)
+    except (TypeError, ValueError):
+        page = 0
+    try:
+        font_size = float(unit.get("font_size") or 0)
+    except (TypeError, ValueError):
+        font_size = 0.0
+    rect = _paper_structure_primary_rect(unit)
+    front_kind = _paper_structure_front_matter_kind(
+        page=page,
+        text=text,
+        rect=rect,
+        font_size=font_size,
+        layout_kind=layout_kind,
+        seen_title=seen_title,
+    )
+    if front_kind != layout_kind:
+        return front_kind
+    return _paper_structure_heading_kind(text, page=page, font_size=font_size, layout_kind=layout_kind)
+
+
+def _paper_structure_candidate_looks_like_table_cell(candidate: dict[str, object]) -> bool:
+    kind = _clean_text(candidate.get("kind"))
+    if kind not in {"paragraph", "heading", "heading_marker"}:
+        return False
+    text = " ".join(_clean_text(candidate.get("text")).split())
+    if not text:
+        return False
+    if re.match(r"^(fig(?:ure)?\.?|table|algorithm)\s*\d+", text, flags=re.IGNORECASE):
+        return False
+    rect = _paper_structure_primary_rect(candidate)
+    if rect is None:
+        return False
+    try:
+        width = float(rect.get("w") or 0)
+        page_width = float(rect.get("page_width") or 0)
+        line_count = int(candidate.get("line_count") or 1)
+    except (TypeError, ValueError):
+        return False
+    if line_count > 2:
+        return False
+    if page_width and width > page_width * 0.58:
+        return False
+    tokens = re.findall(r"[A-Za-z0-9\u4e00-\u9fff]+(?:[-/][A-Za-z0-9\u4e00-\u9fff]+)*", text)
+    token_count = len(tokens)
+    if token_count <= 0:
+        return False
+    if len(text) > 96 or token_count > 10:
+        return False
+    if token_count >= 3 and re.search(r"[.!?。！？]$", text):
+        return False
+    if token_count >= 6 and re.search(
+        r"\b(is|are|was|were|has|have|had|can|could|should|would|will|contains|evaluates|studies|proposes?)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
+def _paper_structure_distinct_x_count(rows: list[tuple[int, dict[str, object], dict[str, object]]]) -> int:
+    centers: list[float] = []
+    page_width = 0.0
+    for _, _, rect in rows:
+        try:
+            centers.append(float(rect.get("x") or 0) + float(rect.get("w") or 0) / 2)
+            page_width = max(page_width, float(rect.get("page_width") or 0))
+        except (TypeError, ValueError):
+            continue
+    if not centers:
+        return 0
+    threshold = max(12.0, page_width * 0.025)
+    distinct = 0
+    last: float | None = None
+    for center in sorted(centers):
+        if last is None or abs(center - last) > threshold:
+            distinct += 1
+            last = center
+    return distinct
+
+
+def _paper_structure_row_groups(
+    rows: list[tuple[int, dict[str, object], dict[str, object]]],
+) -> list[list[tuple[int, dict[str, object], dict[str, object]]]]:
+    groups: list[dict[str, object]] = []
+    for item in sorted(rows, key=lambda row: (float(row[2].get("y") or 0), float(row[2].get("x") or 0))):
+        _, candidate, rect = item
+        try:
+            center_y = float(rect.get("y") or 0) + float(rect.get("h") or 0) / 2
+            height = float(rect.get("h") or 0)
+            font_size = float(candidate.get("font_size") or height or 8.0)
+        except (TypeError, ValueError):
+            continue
+        if groups:
+            previous = groups[-1]
+            threshold = max(4.0, float(previous.get("height") or 0) * 0.75, font_size * 0.70)
+            if abs(center_y - float(previous.get("center_y") or 0)) <= threshold:
+                items = previous["items"]
+                if isinstance(items, list):
+                    items.append(item)
+                    count = len(items)
+                    previous["center_y"] = (float(previous.get("center_y") or 0) * (count - 1) + center_y) / count
+                    previous["height"] = max(float(previous.get("height") or 0), height)
+                continue
+        groups.append({"center_y": center_y, "height": height, "items": [item]})
+    return [group["items"] for group in groups if isinstance(group.get("items"), list)]  # type: ignore[list-item]
+
+
+def _paper_structure_column_groups(
+    rows: list[tuple[int, dict[str, object], dict[str, object]]],
+) -> list[list[tuple[int, dict[str, object], dict[str, object]]]]:
+    groups: list[dict[str, object]] = []
+    page_width = 0.0
+    for _, _, rect in rows:
+        try:
+            page_width = max(page_width, float(rect.get("page_width") or 0))
+        except (TypeError, ValueError):
+            continue
+    threshold = max(14.0, page_width * 0.035)
+    for item in sorted(rows, key=lambda row: (float(row[2].get("x") or 0) + float(row[2].get("w") or 0) / 2, float(row[2].get("y") or 0))):
+        _, _, rect = item
+        try:
+            center_x = float(rect.get("x") or 0) + float(rect.get("w") or 0) / 2
+        except (TypeError, ValueError):
+            continue
+        if groups and abs(center_x - float(groups[-1].get("center_x") or 0)) <= threshold:
+            items = groups[-1]["items"]
+            if isinstance(items, list):
+                items.append(item)
+                count = len(items)
+                groups[-1]["center_x"] = (float(groups[-1].get("center_x") or 0) * (count - 1) + center_x) / count
+            continue
+        groups.append({"center_x": center_x, "items": [item]})
+    return [group["items"] for group in groups if isinstance(group.get("items"), list)]  # type: ignore[list-item]
+
+
+def _paper_structure_table_caption_regions(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    regions: list[dict[str, object]] = []
+    for candidate in candidates:
+        if _clean_text(candidate.get("kind")) != "caption":
+            continue
+        text = " ".join(_clean_text(candidate.get("text")).split())
+        if not re.match(r"^table\s*\d+", text, flags=re.IGNORECASE):
+            continue
+        rect = _paper_structure_primary_rect(candidate)
+        if rect is None:
+            continue
+        try:
+            page_width = float(rect.get("page_width") or 0)
+            page_height = float(rect.get("page_height") or 0)
+            cap_x = float(rect.get("x") or 0)
+            cap_y = float(rect.get("y") or 0)
+            cap_w = float(rect.get("w") or 0)
+            cap_h = float(rect.get("h") or 0)
+        except (TypeError, ValueError):
+            continue
+        if page_width <= 0 or page_height <= 0:
+            continue
+        center = cap_x + cap_w / 2
+        width = min(page_width - 24.0, max(cap_w + 120.0, page_width * 0.72))
+        x0 = max(12.0, min(page_width - width - 12.0, center - width / 2))
+        y0 = max(12.0, cap_y - min(130.0, page_height * 0.18))
+        y1 = min(page_height - 12.0, cap_y + cap_h + min(280.0, page_height * 0.38))
+        region = _rect_payload((x0, y0, x0 + width, y1), page_width=page_width, page_height=page_height)
+        if region is not None:
+            region["page"] = int(candidate.get("page_start") or 0)
+            regions.append(region)
+    return regions
+
+
+def _paper_structure_rect_inside_region(rect: dict[str, object], region: dict[str, object]) -> bool:
+    try:
+        cx = float(rect.get("x") or 0) + float(rect.get("w") or 0) / 2
+        cy = float(rect.get("y") or 0) + float(rect.get("h") or 0) / 2
+        rx0 = float(region.get("x") or 0)
+        ry0 = float(region.get("y") or 0)
+        rx1 = rx0 + float(region.get("w") or 0)
+        ry1 = ry0 + float(region.get("h") or 0)
+    except (TypeError, ValueError):
+        return False
+    return rx0 <= cx <= rx1 and ry0 <= cy <= ry1
+
+
+def _paper_structure_apply_inferred_table_cells(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Mark table-like layout fragments that PyMuPDF did not label as cells."""
+
+    if not candidates:
+        return candidates
+    by_page: dict[int, list[tuple[int, dict[str, object], dict[str, object]]]] = {}
+    for index, candidate in enumerate(candidates):
+        if not _paper_structure_candidate_looks_like_table_cell(candidate):
+            continue
+        rect = _paper_structure_primary_rect(candidate)
+        if rect is None:
+            continue
+        try:
+            page = int(candidate.get("page_start") or 0)
+        except (TypeError, ValueError):
+            page = 0
+        if page > 0:
+            by_page.setdefault(page, []).append((index, candidate, rect))
+    if not by_page:
+        return candidates
+
+    caption_regions_by_page: dict[int, list[dict[str, object]]] = {}
+    for region in _paper_structure_table_caption_regions(candidates):
+        try:
+            page = int(region.get("page") or 0)
+        except (TypeError, ValueError):
+            page = 0
+        if page > 0:
+            caption_regions_by_page.setdefault(page, []).append(region)
+
+    marked: set[int] = set()
+    for page, cells in by_page.items():
+        if len(cells) < 4:
+            continue
+        row_groups = _paper_structure_row_groups(cells)
+        dense_rows = [group for group in row_groups if _paper_structure_distinct_x_count(group) >= 2]
+        if len(dense_rows) >= 2 and sum(len(group) for group in dense_rows) >= 4:
+            for group in dense_rows:
+                marked.update(index for index, _, _ in group)
+
+        column_groups = _paper_structure_column_groups(cells)
+        dense_columns = [group for group in column_groups if len(group) >= 2]
+        if len(dense_columns) >= 2 and sum(len(group) for group in dense_columns) >= 4:
+            for group in dense_columns:
+                marked.update(index for index, _, _ in group)
+
+        for region in caption_regions_by_page.get(page, []):
+            in_region = [item for item in cells if _paper_structure_rect_inside_region(item[2], region) or _rect_overlap_ratio(item[2], region) > 0.35]
+            if len(in_region) < 3:
+                continue
+            region_rows = _paper_structure_row_groups(in_region)
+            region_columns = _paper_structure_column_groups(in_region)
+            has_rows = any(_paper_structure_distinct_x_count(group) >= 2 for group in region_rows)
+            has_columns = len([group for group in region_columns if len(group) >= 2]) >= 2
+            if has_rows or has_columns:
+                marked.update(index for index, _, _ in in_region)
+
+    if not marked:
+        return candidates
+
+    clusters_by_page: dict[int, list[list[int]]] = {}
+    for page, cells in by_page.items():
+        page_marked = [item for item in cells if item[0] in marked]
+        if not page_marked:
+            continue
+        page_height = 0.0
+        try:
+            page_height = max(float(item[2].get("page_height") or 0) for item in page_marked)
+        except (TypeError, ValueError):
+            page_height = 0.0
+        cluster_gap = max(32.0, page_height * 0.045)
+        clusters: list[list[int]] = []
+        previous_bottom: float | None = None
+        for index, _, rect in sorted(page_marked, key=lambda item: (float(item[2].get("y") or 0), float(item[2].get("x") or 0))):
+            try:
+                top = float(rect.get("y") or 0)
+                bottom = top + float(rect.get("h") or 0)
+            except (TypeError, ValueError):
+                top = bottom = 0.0
+            if not clusters or (previous_bottom is not None and top - previous_bottom > cluster_gap):
+                clusters.append([index])
+            else:
+                clusters[-1].append(index)
+            previous_bottom = max(previous_bottom or bottom, bottom)
+        clusters_by_page[page] = clusters
+
+    table_id_by_index: dict[int, str] = {}
+    for page, clusters in clusters_by_page.items():
+        for cluster_index, indexes in enumerate(clusters, start=1):
+            if len(indexes) < 3:
+                continue
+            table_id = f"table:inferred:{page}:{cluster_index}"
+            for index in indexes:
+                table_id_by_index[index] = table_id
+
+    out = [copy.deepcopy(candidate) for candidate in candidates]
+    for index in marked:
+        row = out[index]
+        row["kind"] = "table_cell"
+        row["translatable"] = False
+        row["display_source"] = False
+        metadata = _clean_mapping(row.get("metadata"))
+        metadata.setdefault("inferred_table_cell", True)
+        table_id = table_id_by_index.get(index)
+        if table_id:
+            metadata.setdefault("table_id", table_id)
+        row["metadata"] = metadata
+    return out
+
+
+def _paper_structure_sort_key_factory(candidates: list[dict[str, object]]):
+    page_has_columns: dict[int, bool] = {}
+    for page in {int(row.get("page_start") or 0) for row in candidates}:
+        page_rows = [row for row in candidates if int(row.get("page_start") or 0) == page]
+        centers: list[float] = []
+        page_width = 0.0
+        for row in page_rows:
+            rect = _paper_structure_primary_rect(row)
+            if rect is None:
+                continue
+            try:
+                width = float(rect.get("w") or 0)
+                x = float(rect.get("x") or 0)
+                page_width = max(page_width, float(rect.get("page_width") or 0))
+            except (TypeError, ValueError):
+                continue
+            if page_width and width < page_width * 0.58 and row.get("kind") not in {"title", "authors", "affiliation"}:
+                centers.append(x + width / 2)
+        if page_width and centers:
+            left = [value for value in centers if value < page_width * 0.46]
+            right = [value for value in centers if value > page_width * 0.54]
+            page_has_columns[page] = len(left) >= 2 and len(right) >= 2
+
+    def key(row: dict[str, object]) -> tuple[float, float, float, float, str]:
+        page = int(row.get("page_start") or 0)
+        rect = _paper_structure_primary_rect(row) or {}
+        try:
+            x = float(rect.get("x") or row.get("sort_x") or 0)
+            y = float(rect.get("y") or row.get("sort_y") or 0)
+            width = float(rect.get("w") or 0)
+            page_width = float(rect.get("page_width") or 0)
+            y_pct = float(rect.get("y_pct") or 0)
+        except (TypeError, ValueError):
+            x = y = width = page_width = y_pct = 0.0
+        kind = _clean_text(row.get("kind"))
+        is_front = page == 1 and y_pct <= 0.34 and kind in {"title", "authors", "affiliation"}
+        if page_has_columns.get(page) and not is_front and page_width and width < page_width * 0.62:
+            column = 0 if x + width / 2 < page_width / 2 else 1
+            return (page, 1, column, y, _clean_text(row.get("unit_id")))
+        return (page, 0 if is_front else 2, y, x, _clean_text(row.get("unit_id")))
+
+    return key
+
+
+def _paper_structure_candidates_from_layout(layout_units: list[dict[str, object]], source_id: str) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    seen_title = False
+    for raw in sorted(layout_units, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id")))):
+        if not isinstance(raw, dict):
+            continue
+        raw_text_value = str(raw.get("source_text") or raw.get("text") or "")
+        raw_front_matter_lines = [
+            _clean_text(line)
+            for line in raw_text_value.replace("\r\n", "\n").splitlines()
+            if _clean_text(line)
+        ]
+        raw_kind = _clean_text(raw.get("kind"))
+        if raw_kind in {"authors", "affiliation"} and len(raw_front_matter_lines) > 1:
+            try:
+                base_order = int(raw.get("order") or 0)
+            except (TypeError, ValueError):
+                base_order = 0
+            for line_index, line_text in enumerate(raw_front_matter_lines, start=1):
+                line_raw = {
+                    **raw,
+                    "source_text": line_text,
+                    "text": line_text,
+                    "order": base_order * 10 + line_index,
+                    "line_count": 1,
+                }
+                candidates.extend(_paper_structure_candidates_from_layout([line_raw], source_id))
+            if any(candidate.get("kind") == "title" for candidate in candidates):
+                seen_title = True
+            continue
+        text = _paper_structure_clean_text(raw_text_value)
+        if not text:
+            continue
+        try:
+            page = int(raw.get("page") or 0)
+            order = int(raw.get("order") or 0)
+        except (TypeError, ValueError):
+            continue
+        if page < 1:
+            continue
+        kind = _paper_structure_kind_for_layout(raw, seen_title=seen_title)
+        if kind == "title":
+            seen_title = True
+        rects = _paper_structure_rects_for_page(raw.get("rects"), page)
+        translatable = kind in PAPER_STRUCTURE_TRANSLATION_KINDS and _layout_text_is_translatable(text)
+        display_source = kind in {"authors", "affiliation"}
+        candidates.append(
+            {
+                "source_id": source_id,
+                "kind": kind,
+                "page_start": page,
+                "page_end": page,
+                "order": order,
+                "text": text,
+                "rects": rects,
+                "source_unit_ids": [_clean_text(raw.get("unit_id") or raw.get("scope_ref"))],
+                "translatable": translatable,
+                "display_source": display_source,
+                "sort_x": float((_paper_structure_primary_rect(raw) or {}).get("x") or raw.get("sort_x") or 0),
+                "sort_y": float((_paper_structure_primary_rect(raw) or {}).get("y") or raw.get("sort_y") or 0),
+                "font_size": raw.get("font_size"),
+                "line_count": raw.get("line_count"),
+                "metadata": {
+                    key: copy.deepcopy(raw.get(key))
+                    for key in ("table_id", "row", "col", "row_span", "col_span", "rotation", "dir")
+                    if key in raw
+                },
+            }
+        )
+    candidates = _paper_structure_apply_inferred_table_cells(candidates)
+    candidates.sort(key=_paper_structure_sort_key_factory(candidates))
+    return candidates
+
+
+def _paper_structure_merge_text(left: str, right: str, *, kind: str) -> str:
+    if kind == "title":
+        return "\n".join(part for part in [_clean_text(left), _clean_text(right)] if part)
+    return _join_pdf_lines_as_text([left, right])
+
+
+def _paper_structure_merge_pair(left: dict[str, object], right: dict[str, object], *, kind: str | None = None) -> dict[str, object]:
+    merged_kind = kind or _clean_text(left.get("kind")) or _clean_text(right.get("kind")) or "paragraph"
+    rects = [*_clean_rect_list(left.get("rects")), *_clean_rect_list(right.get("rects"))]
+    source_ids = [*_clean_list(left.get("source_unit_ids")), *_clean_list(right.get("source_unit_ids"))]
+    text = _paper_structure_merge_text(_clean_text(left.get("text")), _clean_text(right.get("text")), kind=merged_kind)
+    metadata = _clean_mapping(left.get("metadata"))
+    metadata.update(_clean_mapping(right.get("metadata")))
+    return {
+        **left,
+        "kind": merged_kind,
+        "page_end": max(int(left.get("page_end") or left.get("page_start") or 0), int(right.get("page_end") or right.get("page_start") or 0)),
+        "text": text,
+        "rects": rects,
+        "source_unit_ids": [item for item in source_ids if item],
+        "translatable": merged_kind in PAPER_STRUCTURE_TRANSLATION_KINDS and _layout_text_is_translatable(text),
+        "display_source": merged_kind in {"authors", "affiliation"},
+        "font_size": max(float(left.get("font_size") or 0), float(right.get("font_size") or 0)),
+        "line_count": int(left.get("line_count") or 1) + int(right.get("line_count") or 1),
+        "metadata": metadata,
+    }
+
+
+def _paper_structure_same_column(left: dict[str, object], right: dict[str, object]) -> bool:
+    left_rect = _paper_structure_primary_rect(left)
+    right_rect = _paper_structure_primary_rect(right)
+    if left_rect is None or right_rect is None:
+        return False
+    try:
+        lx = float(left_rect.get("x") or 0)
+        lw = float(left_rect.get("w") or 0)
+        rx = float(right_rect.get("x") or 0)
+        rw = float(right_rect.get("w") or 0)
+        page_width = max(float(left_rect.get("page_width") or 0), float(right_rect.get("page_width") or 0), 1.0)
+    except (TypeError, ValueError):
+        return False
+    overlap = max(0.0, min(lx + lw, rx + rw) - max(lx, rx))
+    if overlap >= min(lw, rw) * 0.40:
+        return True
+    return abs(lx - rx) <= max(14.0, page_width * 0.035)
+
+
+def _paper_structure_vertical_gap(left: dict[str, object], right: dict[str, object]) -> float:
+    left_rect = _paper_structure_primary_rect(left)
+    right_rect = _paper_structure_primary_rect(right)
+    if left_rect is None or right_rect is None:
+        return 10**9
+    try:
+        return float(right_rect.get("y") or 0) - (float(left_rect.get("y") or 0) + float(left_rect.get("h") or 0))
+    except (TypeError, ValueError):
+        return 10**9
+
+
+def _paper_structure_caption_continuation(left: dict[str, object], right: dict[str, object]) -> bool:
+    if int(left.get("page_end") or 0) != int(right.get("page_start") or 0):
+        return False
+    if _clean_text(right.get("kind")) in {"title", "heading", "caption", "authors", "affiliation", "table_cell", "figure_label", "symbol"}:
+        return False
+    gap = _paper_structure_vertical_gap(left, right)
+    return -3 <= gap <= 24 and _paper_structure_same_column(left, right)
+
+
+def _paper_structure_paragraph_continuation(left: dict[str, object], right: dict[str, object]) -> bool:
+    if int(left.get("page_end") or 0) != int(right.get("page_start") or 0):
+        return False
+    if _clean_text(left.get("kind")) != "paragraph" or _clean_text(right.get("kind")) != "paragraph":
+        return False
+    if not _paper_structure_same_column(left, right):
+        return False
+    gap = _paper_structure_vertical_gap(left, right)
+    if gap < -3 or gap > 20:
+        return False
+    left_text = _clean_text(left.get("text"))
+    right_text = _clean_text(right.get("text"))
+    if not left_text or not right_text:
+        return False
+    if len(left_text) < 80 or len(right_text) < 80:
+        return True
+    if re.search(r"[-,:;(\[]$", left_text):
+        return True
+    if re.match(r"^[a-z,;:)]", right_text):
+        return True
+    return False
+
+
+def _paper_structure_unit_sort_key_factory(units: list[PaperStructureUnit]):
+    page_has_columns: dict[int, bool] = {}
+    for page in {int(unit.page_start or 0) for unit in units}:
+        centers: list[float] = []
+        page_width = 0.0
+        for unit in units:
+            if int(unit.page_start or 0) != page or unit.kind not in {"paragraph", "heading", "caption"}:
+                continue
+            rect = _paper_structure_primary_rect(unit.to_dict())
+            if rect is None:
+                continue
+            try:
+                width = float(rect.get("w") or 0)
+                x = float(rect.get("x") or 0)
+                page_width = max(page_width, float(rect.get("page_width") or 0))
+            except (TypeError, ValueError):
+                continue
+            if page_width and width < page_width * 0.58:
+                centers.append(x + width / 2)
+        if page_width and centers:
+            left = [value for value in centers if value < page_width * 0.46]
+            right = [value for value in centers if value > page_width * 0.54]
+            page_has_columns[page] = len(left) >= 2 and len(right) >= 2
+
+    def key(unit: PaperStructureUnit) -> tuple[float, float, float, float, str]:
+        rect = _paper_structure_primary_rect(unit.to_dict()) or {}
+        try:
+            page = int(unit.page_start or 0)
+            x = float(rect.get("x") or 0)
+            y = float(rect.get("y") or 0)
+            width = float(rect.get("w") or 0)
+            page_width = float(rect.get("page_width") or 0)
+            y_pct = float(rect.get("y_pct") or 0)
+        except (TypeError, ValueError):
+            page = int(unit.page_start or 0)
+            x = y = width = page_width = y_pct = 0.0
+        is_front = page == 1 and y_pct <= 0.34 and unit.kind in {"title", "authors", "affiliation"}
+        lane = 0 if is_front else 1
+        if page_has_columns.get(page) and page_width and width < page_width * 0.62 and not is_front:
+            column = 0 if x + width / 2 < page_width / 2 else 1
+            return (page, lane, column, y, unit.unit_id)
+        return (page, lane, 2, y, unit.unit_id)
+
+    return key
+
+
+def _paper_structure_reassign_order_and_sections(units: list[PaperStructureUnit]) -> list[PaperStructureUnit]:
+    sorted_units = sorted(units, key=_paper_structure_unit_sort_key_factory(units))
+    current_section: list[str] = []
+    out: list[PaperStructureUnit] = []
+    for order, unit in enumerate(sorted_units, start=1):
+        unit.order = order
+        if unit.kind == "heading":
+            current_section = [" ".join(unit.text.split())]
+            unit.section_path = list(current_section)
+        elif unit.kind == "paragraph":
+            unit.section_path = list(unit.section_path or current_section)
+        elif unit.kind == "caption":
+            if current_section:
+                unit.metadata.setdefault("near_section_path", list(current_section))
+            unit.section_path = []
+        elif unit.kind in {"figure", "table"}:
+            if current_section:
+                unit.metadata.setdefault("near_section_path", list(current_section))
+            unit.section_path = []
+        elif unit.kind in {"title", "authors", "affiliation", "footnote", "reference", "symbol", "figure_label", "table_cell"}:
+            unit.section_path = []
+        unit.locator = _paper_structure_locator(unit.page_start, unit.page_end)
+        out.append(unit)
+    return out
+
+
+def _paper_structure_top_y(unit: PaperStructureUnit) -> float:
+    rect = _paper_structure_primary_rect(unit.to_dict()) or {}
+    try:
+        return float(rect.get("y_pct"))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _paper_structure_cross_page_continuation(left: PaperStructureUnit, right: PaperStructureUnit) -> bool:
+    if left.kind != "paragraph" or right.kind != "paragraph":
+        return False
+    if left.page_end + 1 != right.page_start:
+        return False
+    if not left.section_path or left.section_path != right.section_path:
+        return False
+    if _paper_structure_top_y(right) > 0.22:
+        return False
+    left_text = _clean_text(left.text)
+    right_text = _clean_text(right.text)
+    if not left_text or not right_text:
+        return False
+    if re.match(r"^(and|or|but|while|which|that|whose|where|with|without|by|to|of|for|in|on|as|also|furthermore|moreover)\b", right_text, flags=re.IGNORECASE):
+        return True
+    if re.match(r"^[a-z,;:)]", right_text):
+        return True
+    if not re.search(r"[.!?。！？][\"')\]]?$", left_text):
+        return True
+    return False
+
+
+def _paper_structure_merge_unit_pair(left: PaperStructureUnit, right: PaperStructureUnit) -> PaperStructureUnit:
+    text = _join_pdf_lines_as_text([left.text, right.text])
+    row_hash = text_hash(text)
+    left.text = text
+    left.text_hash = row_hash
+    left.page_end = max(left.page_end, right.page_end)
+    left.rects = [*_clean_rect_list(left.rects), *_clean_rect_list(right.rects)]
+    left.source_unit_ids = [*_clean_list(left.source_unit_ids), right.unit_id, *_clean_list(right.source_unit_ids)]
+    left.locator = _paper_structure_locator(left.page_start, left.page_end)
+    left.unit_id = f"psu:{source_slug(left.source_id)}:{left.page_start}:{int(left.order):05d}:{row_hash.removeprefix('sha256:')[:12]}"
+    return left
+
+
+def _paper_structure_merge_cross_page_continuations(units: list[PaperStructureUnit]) -> list[PaperStructureUnit]:
+    ordered = sorted(units, key=lambda unit: (unit.page_start, unit.order, unit.unit_id))
+    consumed: set[str] = set()
+    for current in ordered:
+        if current.unit_id in consumed or current.kind != "paragraph":
+            continue
+        for previous in reversed(ordered):
+            if previous.unit_id == current.unit_id or previous.unit_id in consumed:
+                continue
+            if previous.page_end + 1 < current.page_start:
+                break
+            if _paper_structure_cross_page_continuation(previous, current):
+                _paper_structure_merge_unit_pair(previous, current)
+                consumed.add(current.unit_id)
+                break
+    return [unit for unit in ordered if unit.unit_id not in consumed]
+
+
+def _paper_structure_units_from_candidates(source_id: str, candidates: list[dict[str, object]]) -> list[PaperStructureUnit]:
+    merged: list[dict[str, object]] = []
+    for candidate in candidates:
+        kind = _clean_text(candidate.get("kind"))
+        if kind == "heading_marker" and merged:
+            merged.append(candidate)
+            continue
+        if merged:
+            previous = merged[-1]
+            prev_kind = _clean_text(previous.get("kind"))
+            same_page = int(previous.get("page_end") or 0) == int(candidate.get("page_start") or 0)
+            if same_page and prev_kind == kind == "title":
+                merged[-1] = _paper_structure_merge_pair(previous, candidate, kind="title")
+                continue
+            if same_page and prev_kind == kind and kind in {"authors", "affiliation"}:
+                merged[-1] = _paper_structure_merge_pair(previous, candidate, kind=kind)
+                continue
+            if same_page and prev_kind == "heading_marker" and kind in {"paragraph", "heading"}:
+                title = _join_pdf_lines_as_text([_clean_text(previous.get("text")), _clean_text(candidate.get("text"))])
+                if _paper_structure_heading_kind(
+                    title,
+                    page=int(candidate.get("page_start") or 0),
+                    font_size=float(candidate.get("font_size") or 0),
+                    layout_kind="paragraph",
+                ) == "heading":
+                    previous["text"] = title
+                    merged[-1] = _paper_structure_merge_pair(previous, candidate, kind="heading")
+                    continue
+            if prev_kind == "caption" and _paper_structure_caption_continuation(previous, candidate):
+                merged[-1] = _paper_structure_merge_pair(previous, candidate, kind="caption")
+                continue
+            if _paper_structure_paragraph_continuation(previous, candidate):
+                merged[-1] = _paper_structure_merge_pair(previous, candidate, kind="paragraph")
+                continue
+        merged.append(candidate)
+
+    units: list[PaperStructureUnit] = []
+    slug = source_slug(source_id)
+    current_section: list[str] = []
+    order = 0
+    for row in merged:
+        kind = _clean_text(row.get("kind"))
+        if kind == "heading_marker":
+            continue
+        text = _clean_text(row.get("text"))
+        if not text:
+            continue
+        order += 1
+        page_start = int(row.get("page_start") or 1)
+        page_end = int(row.get("page_end") or page_start)
+        row_hash = text_hash(text)
+        short_hash = row_hash.removeprefix("sha256:")[:12]
+        if kind == "heading":
+            current_section = [" ".join(text.split())]
+        section_path = list(current_section) if kind == "paragraph" else ([] if kind in {"title", "authors", "affiliation", "caption", "figure", "table"} else list(current_section))
+        rects = _clean_rect_list(row.get("rects"))
+        translatable = kind in PAPER_STRUCTURE_TRANSLATION_KINDS and bool(row.get("translatable", True))
+        display_source = kind in {"authors", "affiliation"} or bool(row.get("display_source", False))
+        units.append(
+            PaperStructureUnit(
+                unit_id=f"psu:{slug}:{page_start}:{order:05d}:{short_hash}",
+                source_id=source_id,
+                kind=kind,
+                page_start=page_start,
+                page_end=page_end,
+                order=order,
+                text=text,
+                text_hash=row_hash,
+                section_path=section_path,
+                locator=_paper_structure_locator(page_start, page_end),
+                rects=rects,
+                source_unit_ids=_clean_list(row.get("source_unit_ids")),
+                translatable=translatable,
+                display_source=display_source,
+                metadata=_clean_mapping(row.get("metadata")),
+            )
+        )
+
+    units = _paper_structure_add_caption_objects(units, slug=slug)
+    units = _paper_structure_add_table_units(units, slug=slug)
+    return _paper_structure_reassign_order_and_sections(units)
+
+
+def _paper_structure_add_caption_objects(units: list[PaperStructureUnit], *, slug: str) -> list[PaperStructureUnit]:
+    additions: list[PaperStructureUnit] = []
+    for caption in units:
+        if caption.kind != "caption":
+            continue
+        clean = " ".join(caption.text.split())
+        match = re.match(r"^(fig(?:ure)?\.?|table|algorithm)\s*\d+", clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        label = match.group(1).lower()
+        kind = "table" if label == "table" else "figure"
+        text = clean[:400]
+        row_hash = text_hash(f"{kind}:{text}")
+        order = max(1, int(caption.order or 1) - 1)
+        additions.append(
+            PaperStructureUnit(
+                unit_id=f"psu:{slug}:{caption.page_start}:{order:05d}:{row_hash.removeprefix('sha256:')[:12]}",
+                source_id=caption.source_id,
+                kind=kind,
+                page_start=caption.page_start,
+                page_end=caption.page_end,
+                order=order,
+                text=text,
+                text_hash=row_hash,
+                section_path=list(caption.section_path),
+                locator=caption.locator,
+                rects=copy.deepcopy(caption.rects),
+                source_unit_ids=[caption.unit_id],
+                translatable=False,
+                display_source=False,
+                metadata={"inferred_from_caption": True, "caption_unit_id": caption.unit_id},
+            )
+        )
+    if not additions:
+        return units
+    return sorted([*units, *additions], key=lambda unit: (unit.page_start, unit.order, unit.unit_id))
+
+
+def _paper_structure_add_table_units(units: list[PaperStructureUnit], *, slug: str) -> list[PaperStructureUnit]:
+    table_groups: dict[str, list[PaperStructureUnit]] = {}
+    for unit in units:
+        table_id = _clean_text(unit.metadata.get("table_id"))
+        if table_id and unit.kind == "table_cell":
+            table_groups.setdefault(table_id, []).append(unit)
+    additions: list[PaperStructureUnit] = []
+    for table_id, cells in table_groups.items():
+        if not cells:
+            continue
+        page_start = min(cell.page_start for cell in cells)
+        page_end = max(cell.page_end for cell in cells)
+        order = min(cell.order for cell in cells)
+        rect = _paper_structure_rect_union([rect for cell in cells for rect in cell.rects])
+        text = " ".join(cell.text for cell in cells if cell.text)[:2000] or table_id
+        row_hash = text_hash(text)
+        additions.append(
+            PaperStructureUnit(
+                unit_id=f"psu:{slug}:{page_start}:{order:05d}:{row_hash.removeprefix('sha256:')[:12]}",
+                source_id=cells[0].source_id,
+                kind="table",
+                page_start=page_start,
+                page_end=page_end,
+                order=order - 1 if order > 1 else order,
+                text=text,
+                text_hash=row_hash,
+                section_path=list(cells[0].section_path),
+                locator=_paper_structure_locator(page_start, page_end),
+                rects=[rect] if rect is not None else [],
+                source_unit_ids=[unit.unit_id for unit in cells],
+                translatable=False,
+                display_source=False,
+                metadata={"table_id": table_id},
+            )
+        )
+    if not additions:
+        return units
+    return sorted([*units, *additions], key=lambda unit: (unit.page_start, unit.order, unit.unit_id))
+
+
+def _paper_structure_match_ratio(left: str, right: str) -> float:
+    clean_left = _translation_match_text(left)
+    clean_right = _translation_match_text(right)
+    if not clean_left or not clean_right:
+        return 0.0
+    if clean_left == clean_right:
+        return 1.0
+    if clean_left in clean_right or clean_right in clean_left:
+        return min(len(clean_left), len(clean_right)) / max(len(clean_left), len(clean_right))
+    return difflib.SequenceMatcher(None, clean_left[:900], clean_right[:900]).ratio()
+
+
+def _paper_structure_apply_grobid_alignment(
+    units: list[PaperStructureUnit],
+    segments: list[PaperSegment],
+) -> list[PaperStructureUnit]:
+    if not units or not segments:
+        return units
+    candidates = [
+        segment
+        for segment in segments
+        if segment.section_path and _clean_text(segment.text)
+    ]
+    if not candidates:
+        return units
+    out: list[PaperStructureUnit] = []
+    current_section: list[str] = []
+    for unit in units:
+        if unit.kind == "heading":
+            current_section = [" ".join(unit.text.split())]
+            unit.section_path = list(current_section)
+            out.append(unit)
+            continue
+        if unit.kind != "paragraph":
+            out.append(unit)
+            continue
+        best: tuple[float, PaperSegment] | None = None
+        for segment in candidates:
+            if segment.page and unit.page_start and abs(int(segment.page) - int(unit.page_start)) > 1:
+                continue
+            score = _paper_structure_match_ratio(unit.text, segment.text)
+            if score >= 0.72 and (best is None or score > best[0]):
+                best = (score, segment)
+        if best is not None:
+            unit.section_path = list(best[1].section_path)
+            current_section = list(unit.section_path)
+        elif current_section and not unit.section_path:
+            unit.section_path = list(current_section)
+        out.append(unit)
+    return out
+
+
+def _paper_structure_quality_flags(units: list[PaperStructureUnit]) -> list[str]:
+    flags: list[str] = []
+    if not any(unit.kind == "heading" for unit in units):
+        flags.append("outline_empty")
+    translatable = [unit for unit in units if unit.kind in PAPER_STRUCTURE_TRANSLATION_KINDS and unit.translatable]
+    if translatable:
+        short_count = sum(1 for unit in translatable if len(unit.text.split()) <= 4 and unit.kind == "paragraph")
+        if short_count / max(1, len(translatable)) > 0.30:
+            flags.append("short_fragment_ratio_high")
+    if units and not any(unit.kind == "title" for unit in units if unit.page_start == 1):
+        flags.append("front_matter_title_missing")
+    captions = [unit for unit in units if unit.kind == "caption"]
+    figures_or_tables = [unit for unit in units if unit.kind in {"figure", "table"}]
+    if captions and len(figures_or_tables) and len(captions) > len(figures_or_tables) * 3:
+        flags.append("caption_orphan_ratio_high")
+    return flags
+
+
+def _paper_structure_llm_repair_enabled() -> bool:
+    return str(os.environ.get("NBLANE_PAPER_STRUCTURE_LLM_REPAIR", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _paper_structure_apply_llm_repair_hook(units: list[PaperStructureUnit]) -> list[PaperStructureUnit]:
+    if not _paper_structure_llm_repair_enabled():
+        return units
+    flags = _paper_structure_quality_flags(units)
+    if not flags:
+        return units
+    for unit in units:
+        unit.metadata.setdefault("llm_repair_requested", False)
+        unit.metadata.setdefault("structure_quality_flags", list(flags))
+    return units
+
+
+def build_paper_structure_units(
+    profile: str | Path,
+    source_id: str,
+    *,
+    force: bool = False,
+) -> list[PaperStructureUnit]:
+    """Build cached, layout-grounded paper structure units for Reader translation."""
+
+    if not force:
+        cached = load_paper_structure_units(profile, source_id)
+        if cached and all(unit.metadata.get("structure_version") == PAPER_STRUCTURE_VERSION for unit in cached):
+            return cached
+    layout_units = build_paper_layout_units(profile, source_id)
+    if not layout_units:
+        return []
+    candidates = _paper_structure_candidates_from_layout(layout_units, source_id)
+    units = _paper_structure_units_from_candidates(source_id, candidates)
+    units = _paper_structure_apply_grobid_alignment(units, load_paper_segments(profile, source_id))
+    units = _paper_structure_merge_cross_page_continuations(units)
+    units = _paper_structure_reassign_order_and_sections(units)
+    units = _paper_structure_apply_llm_repair_hook(units)
+    if units:
+        save_paper_structure_units(profile, source_id, units)
+    return units
+
+
+def reader_translation_structure_units(units: list[PaperStructureUnit | dict]) -> list[dict[str, object]]:
+    """Return structure units that belong in the normal Reader translation flow."""
+
+    rows: list[dict[str, object]] = []
+    allowed = set(PAPER_STRUCTURE_TRANSLATION_KINDS)
+    for item in units:
+        unit = item if isinstance(item, PaperStructureUnit) else PaperStructureUnit.from_dict(item)
+        if unit is None or unit.kind not in allowed:
+            continue
+        if not unit.translatable and not unit.display_source:
+            continue
+        source_text = _clean_text(unit.text)
+        if not source_text:
+            continue
+        row = unit.to_dict()
+        row.update(
+            {
+                "unit_id": unit.unit_id,
+                "anchor_id": unit.unit_id,
+                "scope_type": "structure",
+                "scope_ref": unit.unit_id,
+                "segment_id": "",
+                "page": unit.page_start,
+                "page_end": unit.page_end,
+                "source_hash": unit.text_hash or text_hash(source_text),
+                "source_text": source_text,
+                "target_lang": "",
+                "translated_text": source_text if unit.display_source and not unit.translatable else "",
+                "status": "translated" if not unit.translatable else "missing",
+            }
+        )
+        rows.append(row)
+    return sorted(rows, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id"))))
+
+
 def build_translation_units(
     *,
     pages: list[PaperPage],
@@ -3631,17 +4931,32 @@ def build_translation_units(
     layout_rows = [copy.deepcopy(row) for row in (layout_units or []) if isinstance(row, dict)]
     if layout_rows and not segments and not pages:
         layout_translations = {
-            _clean_text(row.get("scope_ref") or row.get("segment_id")): row
+            (
+                _clean_text(row.get("scope_type")) or "segment",
+                _clean_text(row.get("scope_ref") or row.get("segment_id")),
+            ): row
             for row in translations
-            if _clean_text(row.get("scope_type")) == "layout" and _clean_text(row.get("target_lang") or "zh") == target_lang
+            if _clean_text(row.get("target_lang") or "zh") == target_lang
+            and _clean_text(row.get("scope_ref") or row.get("segment_id"))
+        }
+        legacy_by_hash: dict[str, dict[str, object]] = {
+            _clean_text(row.get("source_hash")): row
+            for row in translations
+            if _clean_text(row.get("target_lang") or "zh") == target_lang
+            and _clean_text(row.get("scope_type")) in {"layout", "segment", "page"}
+            and _clean_text(row.get("source_hash"))
+            and translation_text_from_row(row)
         }
         for raw_unit in sorted(layout_rows, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id")))):
             scope_ref = _clean_text(raw_unit.get("scope_ref") or raw_unit.get("unit_id"))
             source_text = _clean_text(raw_unit.get("source_text") or raw_unit.get("text"))
             if not scope_ref or not source_text:
                 continue
+            scope_type = _clean_text(raw_unit.get("scope_type")) or "layout"
             source_hash = _clean_text(raw_unit.get("source_hash")) or text_hash(source_text)
-            translation = layout_translations.get(scope_ref)
+            translation = layout_translations.get((scope_type, scope_ref))
+            if translation is None and scope_type == "structure":
+                translation = legacy_by_hash.get(source_hash)
             translatable = bool(raw_unit.get("translatable", True))
             display_source = bool(raw_unit.get("display_source", not translatable))
             translated_text = translation_text_from_row(translation or {})
@@ -3654,7 +4969,7 @@ def build_translation_units(
                 **raw_unit,
                 "unit_id": scope_ref,
                 "anchor_id": _clean_text(raw_unit.get("anchor_id")) or scope_ref,
-                "scope_type": "layout",
+                "scope_type": scope_type,
                 "scope_ref": scope_ref,
                 "segment_id": "",
                 "source_hash": source_hash,
@@ -3798,19 +5113,39 @@ def build_reader_payload(
                 preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
             except Exception:
                 continue
+    all_structure_units = build_paper_structure_units(profile, source_id)
     layout_units = build_paper_layout_units(profile, source_id, pages=context_pages)
     page_models = _page_models_from_pdf(profile, source_id, context_pages)
     if not page_models:
         page_models = _page_models_from_layout_units(layout_units, context_pages)
     figures = extract_paper_figures(profile, source_id, pages=context_pages, max_items=12, max_width=520)
     reader_layout_units = reader_translation_layout_units(layout_units)
+    reader_structure_units = reader_translation_structure_units(
+        [
+            unit
+            for unit in all_structure_units
+            if unit.page_start in context_page_set
+            or unit.page_end in context_page_set
+            or any(page_number in context_page_set for page_number in range(unit.page_start, unit.page_end + 1))
+        ]
+    )
+    structure_scope_refs = {
+        _clean_text(row.get("scope_ref") or row.get("unit_id"))
+        for row in reader_structure_units
+        if isinstance(row, dict)
+    }
+    structure_hashes = {
+        _clean_text(row.get("source_hash"))
+        for row in reader_structure_units
+        if isinstance(row, dict) and _clean_text(row.get("source_hash"))
+    }
     layout_scope_refs = {
         _clean_text(row.get("scope_ref") or row.get("unit_id"))
         for row in reader_layout_units
         if isinstance(row, dict)
     }
     all_segments = load_paper_segments(profile, source_id)
-    outline = _reader_outline_from_segments(all_segments)
+    outline = _reader_outline_from_structure_units(all_structure_units) or _reader_outline_from_segments(all_segments)
     reader_preparation = _reader_preparation_summary(source, all_pages, all_segments)
     has_paged_segments = any(segment.page > 0 for segment in all_segments)
     segments = [
@@ -3822,7 +5157,8 @@ def build_reader_payload(
     segment_ids = {str(row.get("segment_id") or "") for row in segments}
     segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
     current_translation_rows = load_paper_translations(profile, source_id)
-    prefer_layout_units = bool(reader_layout_units)
+    prefer_structure_units = bool(reader_structure_units)
+    prefer_layout_units = bool(reader_layout_units) and not prefer_structure_units
     translations: list[dict[str, object]] = []
     for row in current_translation_rows:
         if row.target_lang != target_lang:
@@ -3830,7 +5166,11 @@ def build_reader_payload(
         scope_type = _clean_text(row.scope_type) or "segment"
         row_page = int(row.page or segment_pages.get(row.segment_id, 0))
         include_row = False
-        if scope_type == "layout":
+        if scope_type == "structure":
+            include_row = row.scope_ref in structure_scope_refs
+        elif prefer_structure_units and scope_type in {"layout", "segment", "page"}:
+            include_row = row.source_hash in structure_hashes and bool(_clean_text(row.translated_text))
+        elif scope_type == "layout":
             include_row = row.scope_ref in layout_scope_refs
         elif scope_type == "page":
             if prefer_layout_units or all_segments:
@@ -3844,14 +5184,16 @@ def build_reader_payload(
         if include_row:
             translations.append({**row.to_dict(), "page": row_page})
     page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
-    unit_pages = [] if prefer_layout_units else page_context_rows
-    unit_segments = [] if prefer_layout_units else segments
+    positioned_units = reader_structure_units if prefer_structure_units else reader_layout_units
+    prefer_positioned_units = prefer_structure_units or prefer_layout_units
+    unit_pages = [] if prefer_positioned_units else page_context_rows
+    unit_segments = [] if prefer_positioned_units else segments
     translation_units, translation_summary = build_translation_units(
         pages=unit_pages,
         segments=unit_segments,
         translations=translations,
         target_lang=target_lang,
-        layout_units=reader_layout_units,
+        layout_units=positioned_units,
     )
     annotations = [
         ann.to_dict()
@@ -4067,11 +5409,13 @@ def _layout_translation_status_counts(
     translations: list[PaperTranslation],
     *,
     target_lang: str,
+    scope_type: str = "layout",
 ) -> dict[str, int]:
+    clean_scope_type = _clean_text(scope_type) or "layout"
     by_scope = {
         row.scope_ref: row
         for row in translations
-        if row.scope_type == "layout" and row.target_lang == target_lang
+        if row.scope_type == clean_scope_type and row.target_lang == target_lang
     }
     counts = {"translated": 0, "missing": 0, "stale": 0, "failed": 0}
     for unit in layout_units:
@@ -4096,10 +5440,11 @@ def _layout_unit_translation_payload(unit: dict[str, object], *, source_id: str)
     source_text = _clean_text(unit.get("source_text") or unit.get("text"))
     source_hash = _clean_text(unit.get("source_hash")) or text_hash(source_text)
     scope_ref = _clean_text(unit.get("scope_ref") or unit.get("unit_id"))
+    scope_type = _clean_text(unit.get("scope_type")) or "layout"
     return {
         "segment_id": scope_ref,
         "source_id": source_id,
-        "scope_type": "layout",
+        "scope_type": scope_type,
         "scope_ref": scope_ref,
         "page": int(unit.get("page") or 0),
         "order": int(unit.get("order") or 0),
@@ -4159,7 +5504,7 @@ def translate_full_paper(
     clean_lang = _clean_text(target_lang) or "zh"
     clean_mode = _clean_text(mode).lower() or "missing_or_stale"
     clean_scope_strategy = _clean_text(scope_strategy).lower() or "segment"
-    if clean_scope_strategy not in {"auto", "segment", "page", "layout"}:
+    if clean_scope_strategy not in {"auto", "segment", "page", "layout", "structure"}:
         clean_scope_strategy = "auto"
     if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
         raise ValueError(f"Unknown full-paper translation mode: {mode}")
@@ -4173,17 +5518,24 @@ def translate_full_paper(
         ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
         segments = load_paper_segments(profile, source_id)
     pages = load_paper_pages(profile, source_id)
-    layout_units = (
-        reader_translation_layout_units(build_paper_layout_units(profile, source_id))
-        if clean_scope_strategy == "layout"
+    structure_units = (
+        reader_translation_structure_units(build_paper_structure_units(profile, source_id))
+        if clean_scope_strategy in {"auto", "structure"}
         else []
     )
+    layout_units = (
+        reader_translation_layout_units(build_paper_layout_units(profile, source_id))
+        if not structure_units and clean_scope_strategy in {"auto", "layout"}
+        else []
+    )
+    positioned_scope_type = "structure" if structure_units else "layout" if layout_units else ""
+    layout_units = structure_units or layout_units
     if layout_units:
         translations = load_paper_translations(profile, source_id)
         existing_by_scope = {
             row.scope_ref: row
             for row in translations
-            if row.scope_type == "layout" and row.target_lang == clean_lang
+            if row.scope_type == positioned_scope_type and row.target_lang == clean_lang
         }
         selected_units: list[dict[str, object]] = []
         for unit in layout_units:
@@ -4250,7 +5602,7 @@ def translate_full_paper(
                     row_ref = _clean_text(row.get("segment_id") or row.get("scope_ref"))
                     unit = unit_map.get(row_ref)
                     if unit is None:
-                        warnings.append("Skipped translation row without a known layout scope.")
+                        warnings.append(f"Skipped translation row without a known {positioned_scope_type} scope.")
                         continue
                     source_hash = _clean_text(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash"))
                     unit_hash = _clean_text(unit.get("source_hash"))
@@ -4268,7 +5620,7 @@ def translate_full_paper(
                         {
                             **copy.deepcopy(row),
                             "source_id": source_id,
-                            "scope_type": "layout",
+                            "scope_type": positioned_scope_type,
                             "scope_ref": scope_ref,
                             "segment_id": "",
                             "page": page_number,
@@ -4291,7 +5643,7 @@ def translate_full_paper(
                                 "source_id": source_id,
                                 "target_lang": clean_lang,
                                 "mode": clean_mode,
-                                "scope": "layout",
+                                "scope": positioned_scope_type,
                                 "batches": len(batches),
                                 "batches_completed": batches_completed,
                                 "segments_selected": len(selected_units),
@@ -4305,12 +5657,17 @@ def translate_full_paper(
         if accepted_rows:
             upsert_paper_translations(profile, source_id, accepted_rows)
         final_translations = load_paper_translations(profile, source_id)
-        counts = _layout_translation_status_counts(layout_units, final_translations, target_lang=clean_lang)
+        counts = _layout_translation_status_counts(
+            layout_units,
+            final_translations,
+            target_lang=clean_lang,
+            scope_type=positioned_scope_type,
+        )
         return {
             "source_id": source_id,
             "target_lang": clean_lang,
             "mode": clean_mode,
-            "scope": "layout",
+            "scope": positioned_scope_type,
             "segments_total": len([unit for unit in layout_units if bool(unit.get("translatable", True))]),
             "segments_selected": len(selected_units),
             "batches": len(batches),
@@ -6017,6 +7374,7 @@ __all__ = [
     "PAPER_EXPORTS_DIRNAME",
     "PAPER_PAGES_DIRNAME",
     "PAPER_SEGMENTS_DIRNAME",
+    "PAPER_STRUCTURE_DIRNAME",
     "PAPER_TRANSLATIONS_DIRNAME",
     "PaperAnnotation",
     "PaperAsset",
@@ -6025,9 +7383,11 @@ __all__ = [
     "PaperPage",
     "PaperSearchResult",
     "PaperSegment",
+    "PaperStructureUnit",
     "PaperTranslation",
     "auto_chunk_paper",
     "build_paper_layout_units",
+    "build_paper_structure_units",
     "build_reader_payload",
     "build_translation_units",
     "check_paper_links",
@@ -6055,6 +7415,7 @@ __all__ = [
     "load_paper_pages",
     "load_paper_pdf_bytes",
     "load_paper_segments",
+    "load_paper_structure_units",
     "load_paper_translations",
     "mark_imported_paper_results",
     "migrate_legacy_translations_to_segments",
@@ -6072,6 +7433,7 @@ __all__ = [
     "process_grobid_fulltext",
     "pymupdf_available",
     "reader_translation_layout_units",
+    "reader_translation_structure_units",
     "research_asset_root",
     "render_paper_page_preview",
     "save_paper_analysis",
@@ -6080,6 +7442,7 @@ __all__ = [
     "save_paper_note",
     "save_paper_pages",
     "save_paper_segments",
+    "save_paper_structure_units",
     "save_paper_translations",
     "save_research_export",
     "search_papers",

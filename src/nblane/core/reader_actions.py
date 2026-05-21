@@ -19,6 +19,7 @@ from nblane.core.ai import (
 from nblane.core.research_papers import (
     NO_LLM_TRANSLATION_WARNING,
     build_paper_layout_units,
+    build_paper_structure_units,
     create_paper_annotation,
     ensure_paper_reading_artifacts,
     load_paper_analysis,
@@ -28,6 +29,7 @@ from nblane.core.research_papers import (
     load_paper_translations,
     normalize_translation_row,
     reader_translation_layout_units,
+    reader_translation_structure_units,
     save_paper_analysis,
     save_paper_annotations,
     text_hash,
@@ -474,11 +476,12 @@ def _layout_translation_payload(unit: dict[str, Any], source_id: str) -> dict[st
     source_text = _payload_text(unit, "source_text", "text")
     source_hash = _payload_text(unit, "source_hash") or text_hash(source_text)
     scope_ref = _payload_text(unit, "scope_ref", "unit_id")
+    scope_type = _payload_text(unit, "scope_type") or "layout"
     page = _payload_int(unit, "page")
     return {
         "segment_id": scope_ref,
         "source_id": source_id,
-        "scope_type": "layout",
+        "scope_type": scope_type,
         "scope_ref": scope_ref,
         "page": page,
         "order": _payload_int(unit, "order"),
@@ -807,8 +810,8 @@ def _handle_reader_action_inner(
 
     if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
         target_lang = _payload_text(payload, "target_lang", "language") or "zh"
-        scope_strategy = _payload_text(payload, "scope_strategy") or "segment"
-        if scope_strategy not in {"auto", "segment", "page", "layout"}:
+        scope_strategy = _payload_text(payload, "scope_strategy") or "auto"
+        if scope_strategy not in {"auto", "segment", "page", "layout", "structure"}:
             scope_strategy = "auto"
         refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
         scope_refs = set(_payload_list(payload, "scope_refs", "scope_ref"))
@@ -842,8 +845,42 @@ def _handle_reader_action_inner(
             except Exception:
                 return
 
-        layout_scope_rows: dict[str, dict[str, Any]] = {}
-        if visible_pages and scope_strategy in {"layout", "auto"} and (not refs or scope_refs):
+        positioned_scope_rows: dict[str, dict[str, Any]] = {}
+        positioned_scope_type = ""
+        if visible_pages and scope_strategy in {"structure", "auto"} and (not refs or scope_refs):
+            emit_translation_progress("extracting_structure", "Building paper structure...")
+            structure_units = [
+                unit
+                for unit in reader_translation_structure_units(build_paper_structure_units(profile, source_id))
+                if bool(unit.get("translatable", True))
+                and (
+                    int(unit.get("page") or 0) in visible_pages
+                    or int(unit.get("page_end") or unit.get("page") or 0) in visible_pages
+                )
+            ]
+            existing_structure_by_scope = {
+                row.scope_ref: row
+                for row in current_translations
+                if row.scope_type == "structure" and row.target_lang == target_lang
+            }
+            for unit in structure_units:
+                payload_row = _layout_translation_payload(unit, source_id)
+                scope_ref = _payload_text(payload_row, "scope_ref", "segment_id")
+                if not scope_ref or not _payload_text(payload_row, "text", "source_text"):
+                    continue
+                if scope_refs and scope_ref not in scope_refs:
+                    continue
+                if not scope_refs and _translation_row_current(existing_structure_by_scope.get(scope_ref), _payload_text(payload_row, "source_hash"), target_lang):
+                    continue
+                positioned_scope_rows[scope_ref] = payload_row
+            if positioned_scope_rows:
+                positioned_scope_type = "structure"
+        if (
+            visible_pages
+            and not positioned_scope_rows
+            and scope_strategy in {"layout", "auto"}
+            and (not refs or scope_refs)
+        ):
             emit_translation_progress("extracting_layout", "Extracting page layout...")
             layout_units = [
                 unit
@@ -864,16 +901,18 @@ def _handle_reader_action_inner(
                     continue
                 if not scope_refs and _translation_row_current(existing_layout_by_scope.get(scope_ref), _payload_text(payload_row, "source_hash"), target_lang):
                     continue
-                layout_scope_rows[scope_ref] = payload_row
+                positioned_scope_rows[scope_ref] = payload_row
+            if positioned_scope_rows:
+                positioned_scope_type = "layout"
         segments = [
             segment
             for segment in segment_rows
             if (refs and segment.segment_id in refs)
             or (visible_pages and segment.page in visible_pages)
         ]
-        segment_payloads = list(layout_scope_rows.values()) if layout_scope_rows else [segment.to_dict() for segment in segments]
+        segment_payloads = list(positioned_scope_rows.values()) if positioned_scope_rows else [segment.to_dict() for segment in segments]
         page_scope_rows: dict[str, dict[str, Any]] = {}
-        use_page_scope = bool(visible_pages) and not layout_scope_rows and (
+        use_page_scope = bool(visible_pages) and not positioned_scope_rows and (
             scope_strategy == "page"
             or (
                 scope_strategy == "auto"
@@ -919,7 +958,7 @@ def _handle_reader_action_inner(
                 data={"summary": summary},
                 message="No extracted text is available for the visible page yet.",
             )
-        batch_scope = "layout" if layout_scope_rows else "page" if page_scope_rows else "segment"
+        batch_scope = positioned_scope_type if positioned_scope_rows else "page" if page_scope_rows else "segment"
         batch_size = _visible_translation_batch_size(batch_scope)
         batches = [
             segment_payloads[index : index + batch_size]
@@ -928,7 +967,7 @@ def _handle_reader_action_inner(
         translations: list[dict[str, Any]] = []
         warnings: list[str] = []
         combined_structured: dict[str, Any] = {"translations": [], "warnings": []}
-        layout_backend_warning = ""
+        positioned_backend_warning = ""
         processed = 0
         for batch_index, batch in enumerate(batches, start=1):
             emit_translation_progress(
@@ -959,10 +998,10 @@ def _handle_reader_action_inner(
             combined_structured["translations"].extend(batch_rows)
             if batch_warnings:
                 combined_structured["warnings"].extend(batch_warnings)
-            if layout_scope_rows:
+            if positioned_scope_rows:
                 warning = _blank_translation_backend_warning(ai_result, batch_rows)
                 if warning:
-                    layout_backend_warning = warning
+                    positioned_backend_warning = warning
             processed += len(batch)
             emit_translation_progress(
                 "translating",
@@ -980,28 +1019,28 @@ def _handle_reader_action_inner(
         saved = 0
         failed = 0
         skipped = 0
-        if layout_scope_rows:
-            scope = "layout"
-            backend_warning = layout_backend_warning
+        if positioned_scope_rows:
+            scope = positioned_scope_type or "layout"
+            backend_warning = positioned_backend_warning
             if backend_warning and backend_warning not in warnings:
                 warnings.append(backend_warning)
-            layout_index: dict[str, dict[str, Any]] = {}
-            for layout_row in layout_scope_rows.values():
-                layout_index[str(layout_row["segment_id"])] = layout_row
-                layout_index[str(layout_row["scope_ref"])] = layout_row
+            positioned_index: dict[str, dict[str, Any]] = {}
+            for positioned_row in positioned_scope_rows.values():
+                positioned_index[str(positioned_row["segment_id"])] = positioned_row
+                positioned_index[str(positioned_row["scope_ref"])] = positioned_row
             for row in translations:
                 row_ref = str(row.get("segment_id") or row.get("scope_ref") or "")
                 if not row_ref:
                     warnings.append("Skipped translation row without segment_id or scope_ref.")
                     skipped += 1
                     continue
-                layout_row = layout_index.get(row_ref)
-                if layout_row is None:
-                    warnings.append(f"Skipped translation row for unknown layout scope: {row_ref}.")
+                positioned_row = positioned_index.get(row_ref)
+                if positioned_row is None:
+                    warnings.append(f"Skipped translation row for unknown {scope} scope: {row_ref}.")
                     skipped += 1
                     continue
                 source_hash = str(row.get("source_hash") or row.get("text_hash") or row.get("source_text_hash") or "").strip()
-                if source_hash != layout_row["source_hash"]:
+                if source_hash != positioned_row["source_hash"]:
                     warnings.append(f"Skipped translation for {row_ref}: source_hash mismatch.")
                     skipped += 1
                     continue
@@ -1014,17 +1053,17 @@ def _handle_reader_action_inner(
                 savable.append(
                     {
                         **row,
-                        "scope_type": "layout",
-                        "scope_ref": layout_row["scope_ref"],
+                        "scope_type": scope,
+                        "scope_ref": positioned_row["scope_ref"],
                         "segment_id": "",
-                        "page": layout_row["page"],
-                        "order": layout_row["order"],
-                        "locator": layout_row["locator"],
-                        "source_hash": layout_row["source_hash"],
-                        "source_text": layout_row["source_text"],
+                        "page": positioned_row["page"],
+                        "order": positioned_row["order"],
+                        "locator": positioned_row["locator"],
+                        "source_hash": positioned_row["source_hash"],
+                        "source_text": positioned_row["source_text"],
                         "target_lang": target_lang,
                         "translated_text": translated_text,
-                        "rects": layout_row.get("rects", []),
+                        "rects": positioned_row.get("rects", []),
                     }
                 )
                 saved += 1

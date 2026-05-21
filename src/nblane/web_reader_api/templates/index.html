@@ -1248,6 +1248,7 @@
     let compareSplitRatio = 50;
     let panelWidth = 340;
     let syncLock = false;
+    let viewportAnchorSyncMutedUntil = 0;
     let activeTranslationAnchor = "";
     let leftRailCollapsed = false;
     let activeLeftTab = "outline";
@@ -2357,7 +2358,7 @@
     }
     function unitsForPage(pageNumber) {
       const units = translationUnits();
-      const paged = units.filter((row) => Number(row.page || 0) === Number(pageNumber));
+      const paged = units.filter((row) => unitCoversPage(row, Number(pageNumber)));
       if (paged.length) return paged;
       return units.filter((row) => !Number(row.page || 0)).slice(0, 12);
     }
@@ -2367,10 +2368,59 @@
         return Number(row.w_pct || row.w || 0) > 0 && Number(row.h_pct || row.h || 0) > 0;
       });
     }
+    function unitCoversPage(unit, pageNumber) {
+      const obj = asObj(unit);
+      const page = Number(pageNumber || 0);
+      const start = unitStartPage(obj);
+      const end = Number(obj.page_end || start || 0);
+      if (page && start && end && page >= start && page <= end) return true;
+      return asArr(obj.rects).some((rect) => Number(asObj(rect).page || 0) === page);
+    }
+    function unitStartPage(unit) {
+      const obj = asObj(unit);
+      const explicit = Number(obj.page || obj.page_start || 0);
+      if (explicit) return explicit;
+      const rectPage = asArr(obj.rects).map((rect) => Number(asObj(rect).page || 0)).find(Boolean);
+      return rectPage || 0;
+    }
+    function preferredPageForUnit(unit, targetPage = 0) {
+      const obj = asObj(unit);
+      const requested = Number(targetPage || 0);
+      if (requested && unitCoversPage(obj, requested)) return requested;
+      const start = unitStartPage(obj);
+      if (start) return start;
+      const rectPage = asArr(obj.rects).map((rect) => Number(asObj(rect).page || 0)).find(Boolean);
+      return rectPage || currentPage || 1;
+    }
+    function unitHighlightPages(unit) {
+      const obj = asObj(unit);
+      const pages = new Set();
+      asArr(obj.rects).forEach((rect) => {
+        const page = Number(asObj(rect).page || 0);
+        if (page) pages.add(page);
+      });
+      const start = unitStartPage(obj);
+      const end = Number(obj.page_end || start || 0);
+      if (!pages.size && start && end) {
+        for (let page = start; page <= end; page += 1) pages.add(page);
+      }
+      if (!pages.size && start) pages.add(start);
+      return [...pages];
+    }
+    function muteViewportAnchorSync(ms = 900) {
+      viewportAnchorSyncMutedUntil = Math.max(viewportAnchorSyncMutedUntil, performance.now() + ms);
+    }
+    function viewportAnchorSyncMuted() {
+      return performance.now() < viewportAnchorSyncMutedUntil;
+    }
+    function isPositionedTranslationScope(scopeType) {
+      const clean = text(scopeType);
+      return clean === "layout" || clean === "structure";
+    }
     function layoutOverlayUnitsForPage(pageNumber) {
       return unitsForPage(pageNumber).filter((unit) => {
         const obj = asObj(unit);
-        if (text(obj.scope_type) !== "layout" || !hasRectGeometry(obj)) return false;
+        if (!isPositionedTranslationScope(obj.scope_type) || !hasRectGeometry(obj)) return false;
         if (obj.translatable === false && obj.display_source !== true) return false;
         return true;
       });
@@ -2378,7 +2428,7 @@
     function fallbackUnitsForPage(pageNumber) {
       return unitsForPage(pageNumber).filter((unit) => {
         const obj = asObj(unit);
-        if (text(obj.scope_type) !== "layout") return true;
+        if (!isPositionedTranslationScope(obj.scope_type)) return true;
         if (obj.translatable === false && obj.display_source !== true) return false;
         return !hasRectGeometry(obj);
       });
@@ -2393,14 +2443,16 @@
     function sectionTitleForUnit(unit) {
       const obj = asObj(unit);
       const path = asArr(obj.section_path).map((row) => text(row)).filter(Boolean);
-      if (path.length) return path.join(" / ");
       const kind = text(obj.kind || obj.scope_type || "Text");
-      return kind === "table" ? "Tables" : kind === "caption" ? "Captions" : "Body";
+      if (kind === "title") return "Front Matter";
+      if (kind === "table" || kind === "caption") return "Captions";
+      if (path.length) return path.join(" / ");
+      return "Body";
     }
     function translationUnitGroups() {
       const pages = new Set(translationPages().map((page) => Number(page || 0)).filter(Boolean));
       const units = translationUnits()
-        .filter((unit) => !pages.size || !Number(unit.page || 0) || pages.has(Number(unit.page || 0)))
+        .filter((unit) => !pages.size || !Number(unit.page || 0) || [...pages].some((page) => unitCoversPage(unit, page)))
         .sort((a, b) => (
           (Number(a.page || 0) || 10 ** 9) - (Number(b.page || 0) || 10 ** 9)
           || Number(a.order || 0) - Number(b.order || 0)
@@ -2500,15 +2552,51 @@
     function activeSegmentFromViewport() {
       const pages = visiblePages.length ? visiblePages : [currentPage];
       const pageSet = new Set(pages.map((page) => Number(page || 0)).filter(Boolean));
-      const units = translationUnits()
-        .filter((unit) => pageSet.has(Number(unit.page || 0)))
-        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-      const picked = units[0] || translationUnits().find((unit) => Number(unit.page || 0) === currentPage);
+      const viewer = document.getElementById("viewer");
+      const candidates = [];
+      if (viewer) {
+        const viewerBox = viewer.getBoundingClientRect();
+        const targetY = viewerBox.top + Math.min(viewerBox.height * .34, 260);
+        translationUnits().forEach((unit) => {
+          const obj = asObj(unit);
+          if (![...pageSet].some((page) => unitCoversPage(obj, page))) return;
+          asArr(obj.rects).forEach((rawRect) => {
+            const rect = asObj(rawRect);
+            const rectPage = Number(rect.page || obj.page || 0);
+            if (!rectPage || !pageSet.has(rectPage)) return;
+            const wrap = pageWrap(rectPage);
+            if (!wrap) return;
+            const local = unitRectForWrap(obj, rect, wrap);
+            if (!local) return;
+            const wrapBox = wrap.getBoundingClientRect();
+            const top = wrapBox.top + local.y;
+            const bottom = top + local.h;
+            const overlap = Math.max(0, Math.min(bottom, viewerBox.bottom) - Math.max(top, viewerBox.top));
+            if (overlap <= 0) return;
+            const clamped = Math.max(top, Math.min(targetY, bottom));
+            candidates.push({
+              unit: obj,
+              page: rectPage,
+              score: Math.abs(clamped - targetY) + (rectPage === currentPage ? 0 : 1000) - Math.min(overlap, 120) * .05,
+            });
+          });
+        });
+      }
+      candidates.sort((a, b) => (
+        a.score - b.score
+        || Number(a.unit.order || 0) - Number(b.unit.order || 0)
+        || text(a.unit.unit_id).localeCompare(text(b.unit.unit_id))
+      ));
+      const picked = candidates[0]?.unit || translationUnits()
+        .filter((unit) => unitCoversPage(unit, currentPage))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))[0]
+        || translationUnits().find((unit) => Number(unit.page || 0) === currentPage);
       return picked ? text(picked.anchor_id || picked.unit_id) : "";
     }
     function setActiveAnchor(anchorId, options = {}) {
       const clean = text(anchorId);
       if (!clean) return;
+      const previousAnchor = activeTranslationAnchor;
       activeTranslationAnchor = clean;
       document.querySelectorAll(".pr-translation-unit, .pr-translation-block, .pr-figure-card").forEach((el) => {
         el.classList.toggle("active", text(el.getAttribute("data-anchor-id")) === clean);
@@ -2519,36 +2607,49 @@
       const index = buildAnchorIndex();
       const unit = index.get(clean);
       if (unit && options.jumpToPage !== false) {
-        const page = Number(unit.page || 0);
-        const hasRect = Boolean(primaryRectForUnit(unit));
+        const page = preferredPageForUnit(unit, options.targetPage || options.page || 0);
+        const hasRect = Boolean(primaryRectForUnit(unit, page));
         const allowPageFallback = options.allowPageFallback === true;
+        if (page && (hasRect || allowPageFallback)) {
+          muteViewportAnchorSync(Number(options.syncMuteMs || 900));
+        }
         if (page && (hasRect || allowPageFallback) && readerMode === "translation") {
           setReaderMode("pdf");
-          window.setTimeout(() => scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback }), 100);
+          window.setTimeout(() => scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page }), 100);
         } else if (page && (hasRect || allowPageFallback)) {
-          scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback });
+          scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page });
         }
       }
+      if (options.preserveTranslationScroll === true) muteViewportAnchorSync(Number(options.syncMuteMs || 900));
       if (options.scrollTranslation !== false) {
         const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-block, [data-figure-anchor="${CSS.escape(clean)}"].pr-figure-card`);
         row?.scrollIntoView({ block: "nearest", behavior: options.smooth === false ? "auto" : "smooth" });
       }
-      if (unit && Number(unit.page || 0) && primaryRectForUnit(unit)) renderHighlights(Number(unit.page || 0));
+      const previousUnit = previousAnchor ? index.get(previousAnchor) : null;
+      const pagesToRefresh = new Set([
+        ...unitHighlightPages(previousUnit),
+        ...unitHighlightPages(unit),
+      ]);
+      pagesToRefresh.forEach((page) => renderHighlights(page));
       if (options.refresh !== false) refreshSide();
     }
-    function primaryRectForUnit(unit) {
+    function primaryRectForUnit(unit, targetPage = 0) {
       const obj = asObj(unit);
-      const page = Number(obj.page || 0);
-      return asArr(obj.rects).map((row) => asObj(row)).find((rect) => {
+      const page = preferredPageForUnit(obj, targetPage);
+      const rects = asArr(obj.rects).map((row) => asObj(row));
+      return rects.find((rect) => {
         const rectPage = Number(rect.page || page || 0);
-        return (!page || !rectPage || rectPage === page) && Number(rect.w || rect.w_pct || 0) > 0 && Number(rect.h || rect.h_pct || 0) > 0;
+        return page && rectPage === page && Number(rect.w || rect.w_pct || 0) > 0 && Number(rect.h || rect.h_pct || 0) > 0;
+      }) || rects.find((rect) => {
+        const rectPage = Number(rect.page || 0);
+        return !rectPage && Number(rect.w || rect.w_pct || 0) > 0 && Number(rect.h || rect.h_pct || 0) > 0;
       }) || null;
     }
     function scrollToUnit(unit, options = {}) {
       const obj = asObj(unit);
-      const page = Number(obj.page || currentPage || 0);
+      const page = preferredPageForUnit(obj, options.page || options.targetPage || 0);
       if (!page) return;
-      const rect = primaryRectForUnit(obj);
+      const rect = primaryRectForUnit(obj, page);
       if (!rect) {
         if (options.allowPageFallback === true) scrollToPage(page);
         return;
@@ -2581,7 +2682,7 @@
       const obj = asObj(unit);
       const translated = text(obj.translated_text).trim();
       if (translated && text(obj.status || "translated") !== "failed") return flowText(translated);
-      if (text(obj.scope_type) === "layout") return obj.display_source === true ? flowText(obj.source_text) : "";
+      if (isPositionedTranslationScope(obj.scope_type)) return obj.display_source === true ? flowText(obj.source_text) : "";
       return flowText(obj.source_text);
     }
     function pageModelFromUnits(pageNumber) {
@@ -2661,9 +2762,13 @@
       return { x, y, w, h };
     }
     function translationBlockPlacement(unit, size) {
-      const rects = asArr(asObj(unit).rects).map((row) => asObj(row)).filter((row) => (
-        Number(row.w || row.w_pct || 0) > 0 && Number(row.h || row.h_pct || 0) > 0
-      ));
+      const pageNumber = Number(asObj(size).page || 0);
+      const rects = asArr(asObj(unit).rects).map((row) => asObj(row)).filter((row) => {
+        const rectPage = Number(row.page || asObj(unit).page || 0);
+        return (!pageNumber || !rectPage || rectPage === pageNumber)
+          && Number(row.w || row.w_pct || 0) > 0
+          && Number(row.h || row.h_pct || 0) > 0;
+      });
       if (!rects.length) return { className: "", style: "" };
       let left = Infinity;
       let top = Infinity;
@@ -2728,7 +2833,7 @@
         const empty = !display;
         if (!placement.className) return "";
         return `
-          <article class="pr-translation-block ${attr(statusName)} layout ${empty ? "empty placeholder" : ""} ${active ? "active" : ""} ${attr(placement.className)}" style="${attr(placement.style)}" data-anchor-id="${attr(obj.anchor_id || obj.unit_id)}" data-page="${Number(obj.page || pageNumber || 0)}" data-scope-type="layout">
+          <article class="pr-translation-block ${attr(statusName)} ${attr(text(obj.scope_type || "layout"))} ${empty ? "empty placeholder" : ""} ${active ? "active" : ""} ${attr(placement.className)}" style="${attr(placement.style)}" data-anchor-id="${attr(obj.anchor_id || obj.unit_id)}" data-page="${Number(pageNumber || obj.page || 0)}" data-scope-type="${attr(obj.scope_type || "layout")}">
             ${esc(display)}
           </article>
         `;
@@ -2762,11 +2867,30 @@
         <div class="pr-translation-body ${bodyClass}">${body}</div>
       `;
     }
-    function refreshTranslationReader() {
+    function refreshTranslationReader(options = {}) {
       const el = document.getElementById("translationReader");
+      const previousScrollTop = el ? el.scrollTop : 0;
+      const previousAnchor = activeTranslationAnchor;
+      let previousAnchorTop = null;
+      if (el && options.preserveScroll && previousAnchor) {
+        const row = el.querySelector(`[data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-block`);
+        if (row) previousAnchorTop = row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      }
       if (el && readerMode !== "pdf") requestPagePreviews(translationPages());
       if (el) el.innerHTML = translationReaderHtml();
       wireTranslationRows();
+      if (el && options.preserveScroll) {
+        window.requestAnimationFrame(() => {
+          if (previousAnchor && previousAnchorTop !== null) {
+            const row = el.querySelector(`[data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-block`);
+            if (row) {
+              el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - previousAnchorTop;
+              return;
+            }
+          }
+          el.scrollTop = previousScrollTop;
+        });
+      }
       window.requestAnimationFrame(() => fitTranslationBlocks());
     }
     function analysisObj() {
@@ -3563,12 +3687,12 @@
       }, 60);
       setHeight();
     }
-    function refreshSide() {
+    function refreshSide(options = {}) {
       const side = document.getElementById("sideBody");
       if (side) side.innerHTML = sideBodyHtml();
       document.querySelectorAll(".pr-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === activeTab));
       wireSide();
-      refreshTranslationReader();
+      refreshTranslationReader({ preserveScroll: options.preserveTranslationScroll === true });
       setHeight();
     }
     function updateWorkspaceSizing() {
@@ -3628,6 +3752,7 @@
     }
     function syncCompareScroll(source) {
       if (readerMode !== "compare" || syncLock) return;
+      if (viewportAnchorSyncMuted()) return;
       const viewer = document.getElementById("viewer");
       const translationReader = document.getElementById("translationReader");
       if (!viewer || !translationReader) return;
@@ -3652,7 +3777,10 @@
       const page = Number(picked?.dataset.page || 0);
       const anchorId = text(picked?.dataset.anchorId || "");
       if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
-      if (page && page !== currentPage) scrollToPage(page);
+      if (page && page !== currentPage) {
+        muteViewportAnchorSync(600);
+        scrollToPage(page);
+      }
     }
     function showTranslationUnitDock(anchorId) {
       const unit = buildAnchorIndex().get(text(anchorId));
@@ -3677,8 +3805,9 @@
         });
         row.addEventListener("click", () => {
           const anchorId = row.dataset.anchorId || "";
-          setActiveAnchor(anchorId, { scrollTranslation: false, refresh: false });
-          if (row.classList.contains("overflowing") || text(row.dataset.scopeType) === "layout") {
+          const page = Number(row.dataset.page || 0);
+          setActiveAnchor(anchorId, { scrollTranslation: false, refresh: false, targetPage: page, preserveTranslationScroll: true });
+          if (row.classList.contains("overflowing") || isPositionedTranslationScope(row.dataset.scopeType)) {
             showTranslationUnitDock(anchorId);
           } else {
             refreshSide();
@@ -3703,9 +3832,9 @@
             target_lang: targetLang(),
             visible_pages: page ? [page] : visiblePages.slice(),
             primary_page: page || currentPage,
-            scope_strategy: scopeType === "layout" ? "layout" : segmentId && scopeType === "segment" ? "segment" : "auto",
+            scope_strategy: isPositionedTranslationScope(scopeType) ? scopeType : segmentId && scopeType === "segment" ? "segment" : "auto",
             segment_refs: segmentId && scopeType === "segment" ? [segmentId] : [],
-            scope_refs: scopeType === "layout" && scopeRef ? [scopeRef] : [],
+            scope_refs: isPositionedTranslationScope(scopeType) && scopeRef ? [scopeRef] : [],
           };
           setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
           startReaderTask("retry_translation_scope", payload);
@@ -3851,7 +3980,7 @@
       }
       if (action === "translateFull") {
         setReaderMode("translation");
-        return startReaderTask("translate_full_paper", { target_lang: targetLang(), mode: "missing_or_stale", scope_strategy: "segment" });
+        return startReaderTask("translate_full_paper", { target_lang: targetLang(), mode: "missing_or_stale", scope_strategy: "structure" });
       }
       if (action === "saveProgress") {
         return emitAction("save_progress", readerStatePayload({ page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` }));
@@ -3900,9 +4029,9 @@
             target_lang: targetLang(),
             visible_pages: page ? [page] : visiblePages.slice(),
             primary_page: page || currentPage,
-            scope_strategy: scopeType === "layout" ? "layout" : segmentId && scopeType === "segment" ? "segment" : "auto",
+            scope_strategy: isPositionedTranslationScope(scopeType) ? scopeType : segmentId && scopeType === "segment" ? "segment" : "auto",
             segment_refs: segmentId && scopeType === "segment" ? [segmentId] : [],
-            scope_refs: scopeType === "layout" && scopeRef ? [scopeRef] : [],
+            scope_refs: isPositionedTranslationScope(scopeType) && scopeRef ? [scopeRef] : [],
           });
         }
       }
@@ -4446,9 +4575,11 @@
       if (!layer) return;
       layer.innerHTML = "";
       const activeUnit = activeTranslationAnchor ? buildAnchorIndex().get(activeTranslationAnchor) : null;
-      if (activeUnit && Number(activeUnit.page || 0) === pageNumber) {
+      if (activeUnit && unitCoversPage(activeUnit, pageNumber)) {
         asArr(activeUnit.rects).forEach((rect) => {
           const r = asObj(rect);
+          const rectPage = Number(r.page || activeUnit.page || 0);
+          if (rectPage && rectPage !== Number(pageNumber || 0)) return;
           const pctReady = r.x_pct != null || r.y_pct != null || r.w_pct != null || r.h_pct != null;
           const x = pctReady ? Number(r.x_pct || 0) * layer.clientWidth : Number(r.x || 0);
           const y = pctReady ? Number(r.y_pct || 0) * layer.clientHeight : Number(r.y || 0);
@@ -4627,7 +4758,7 @@
     function unitRectForWrap(unit, rect, wrap) {
       const obj = asObj(rect);
       const pctReady = obj.x_pct != null || obj.y_pct != null || obj.w_pct != null || obj.h_pct != null;
-      const page = Number(asObj(unit).page || 0);
+      const page = Number(obj.page || asObj(unit).page || currentPage || 1);
       const scale = scaleForPage(page || currentPage || 1);
       const x = pctReady ? Number(obj.x_pct || 0) * wrap.clientWidth : Number(obj.x || 0) * scale;
       const y = pctReady ? Number(obj.y_pct || 0) * wrap.clientHeight : Number(obj.y || 0) * scale;
@@ -4647,9 +4778,10 @@
       const hits = [];
       translationUnits().forEach((unit) => {
         const obj = asObj(unit);
-        if (text(obj.scope_type) !== "layout" || Number(obj.page || 0) !== page) return;
+        if (!isPositionedTranslationScope(obj.scope_type) || !unitCoversPage(obj, page)) return;
         if (obj.translatable === false && obj.display_source !== true) return;
         asArr(obj.rects).forEach((rawRect) => {
+          if (Number(asObj(rawRect).page || obj.page || 0) !== page) return;
           const rect = unitRectForWrap(obj, rawRect, wrap);
           if (!rect) return;
           if (x >= rect.x - margin && x <= rect.x + rect.w + margin && y >= rect.y - margin && y <= rect.y + rect.h + margin) {
@@ -4686,7 +4818,7 @@
           target_lang: targetLang(),
           visible_pages: [page],
           primary_page: page,
-          scope_strategy: "layout",
+          scope_strategy: text(unit.scope_type || "structure"),
           scope_refs: [scopeRef],
         });
       }
@@ -4891,12 +5023,15 @@
       visiblePages = pages;
       const pageChanged = primary !== currentPage;
       currentPage = primary;
-      const viewportAnchor = activeSegmentFromViewport();
+      const syncMuted = viewportAnchorSyncMuted();
+      const viewportAnchor = syncMuted ? "" : activeSegmentFromViewport();
       if (viewportAnchor) activeTranslationAnchor = viewportAnchor;
       updatePageUi();
-      if (pageChanged || activeTab === "translation" || activeTab === "review") refreshSide();
+      if (pageChanged || activeTab === "translation" || activeTab === "review") {
+        refreshSide({ preserveTranslationScroll: syncMuted || readerMode === "compare" });
+      }
       if (pageChanged || activeLeftTab === "pages") refreshLeftRail();
-      refreshTranslationReader();
+      refreshTranslationReader({ preserveScroll: syncMuted || readerMode === "compare" });
       renderAround(primary);
       placeSelectionDock();
       const signature = `${primary}:${pages.join(",")}`;
