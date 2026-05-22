@@ -10,6 +10,8 @@ from unittest.mock import patch
 from nblane.core.research_connectors import (
     ConnectorAdapter,
     ConnectorItem,
+    discover_connector_items,
+    import_connector_items,
     load_connectors,
     parse_arxiv_feed,
     parse_github_payload,
@@ -156,6 +158,58 @@ class TestResearchConnectors(unittest.TestCase):
         self.assertNotIn("secret", serialized)
         self.assertNotIn("should-not-persist", sources_serialized)
         self.assertEqual(saved["connectors"][0]["last_result"]["imported"], 0)
+
+    def test_discover_preview_and_selected_import_with_collection_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with patch("nblane.core.research_connectors.git_backup.record_change"):
+                row = upsert_connector(
+                    profile,
+                    provider="github",
+                    query="octo/demo",
+                    options={"api_key": "secret", "limit": 1},
+                )
+            before_sources_exists = (profile / "research" / "sources.yaml").exists()
+
+            with (
+                patch.dict("nblane.core.research_connectors.ADAPTERS", {"github": FakeAdapter()}),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_connectors.git_backup.record_change"),
+            ):
+                preview = discover_connector_items(profile, str(row["id"]))
+                after_preview_sources_exists = (profile / "research" / "sources.yaml").exists()
+                fingerprint = str(preview["candidates"][0]["fingerprint"])
+                imported = import_connector_items(
+                    profile,
+                    str(row["id"]),
+                    [fingerprint],
+                    target={"kind": "collection", "node_id": "paper-node:vla"},
+                )
+                duplicate_preview = discover_connector_items(profile, str(row["id"]))
+
+            sources = load_research_sources(profile)
+            saved = load_connectors(profile)
+            serialized = (profile / "research" / "connectors.yaml").read_text(encoding="utf-8")
+            sources_serialized = (profile / "research" / "sources.yaml").read_text(encoding="utf-8")
+
+        self.assertFalse(before_sources_exists)
+        self.assertFalse(after_preview_sources_exists)
+        self.assertEqual(preview["discovered"], 1)
+        self.assertEqual(preview["importable"], 1)
+        self.assertFalse(preview["candidates"][0]["duplicate"]["is_duplicate"])
+        self.assertEqual(imported.imported, 1)
+        self.assertEqual(imported.skipped, 0)
+        self.assertEqual([source.title for source in sources.sources], ["octo/demo"])
+        self.assertEqual(sources.sources[0].library_node_refs, ["paper-node:vla"])
+        self.assertTrue(duplicate_preview["candidates"][0]["duplicate"]["is_duplicate"])
+        self.assertEqual(
+            duplicate_preview["candidates"][0]["duplicate"]["existing_source_id"],
+            sources.sources[0].id,
+        )
+        self.assertEqual(saved["connectors"][0]["last_result"]["selected"], 1)
+        self.assertNotIn("secret", serialized)
+        self.assertNotIn("should-not-persist", sources_serialized)
 
 
 if __name__ == "__main__":

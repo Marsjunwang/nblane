@@ -104,10 +104,25 @@ def _choice(value: object, options: tuple[str, ...], default: str) -> str:
     return clean if clean in options else default
 
 
+def _append_unique(values: list[str], value: object) -> None:
+    clean = _clean_text(value)
+    if clean and clean not in values:
+        values.append(clean)
+
+
+def _normalized_text(value: object) -> str:
+    return re.sub(r"\s+", " ", _clean_text(value)).casefold()
+
+
 def _research_root(profile: str | Path) -> Path:
     if isinstance(profile, Path):
         return profile / RESEARCH_DIRNAME if profile.name != RESEARCH_DIRNAME else profile
     return profile_dir(profile) / RESEARCH_DIRNAME
+
+
+def _profile_root(profile: str | Path) -> Path:
+    root = _research_root(profile)
+    return root.parent if root.name == RESEARCH_DIRNAME else root
 
 
 def _profile_name(profile: str | Path) -> str:
@@ -755,11 +770,13 @@ def research_claim_to_evidence_candidate(profile: str | Path, claim_id: str) -> 
         raise ValueError(f"Unknown research claim: {clean_claim}")
     if not claim.source_refs and not claim.chunk_refs and not claim.human_note:
         raise ValueError("Research claim is not source-aware enough for evidence.")
+    chunks = {chunk.id: chunk for chunk in load_chunks(profile)}
+    source_refs = _claim_source_refs(claim, chunks)
     row: dict[str, Any] = {
         "type": "learning" if claim.type in {"finding", "hypothesis"} else claim.type,
         "title": claim.text[:96],
         "summary": claim.text,
-        "source_refs": list(claim.source_refs),
+        "source_refs": source_refs,
         "review_status": "needs_review",
         "public_readiness": "private",
         "confidence": claim.confidence,
@@ -796,6 +813,616 @@ def research_draft_to_blog_candidate(profile: str | Path, draft_id: str) -> dict
             "Research draft candidate: publish only after checking source visibility and promoted research claims."
         ],
         "body": body,
+    }
+
+
+def _source_card(source: ResearchSource | None) -> dict[str, Any]:
+    if source is None:
+        return {}
+    return {
+        "id": source.id,
+        "title": source.title,
+        "kind": source.kind,
+        "url": source.url,
+        "status": source.status,
+        "visibility": source.visibility,
+        "authors": list(source.authors),
+        "published": source.published,
+        "tags": list(source.tags),
+        "library_node_refs": list(source.library_node_refs),
+    }
+
+
+def _claim_source_refs(claim: ResearchClaim, chunks: dict[str, ResearchChunk]) -> list[str]:
+    refs: list[str] = []
+    for ref in claim.source_refs:
+        _append_unique(refs, ref)
+    for chunk_ref in claim.chunk_refs:
+        chunk = chunks.get(chunk_ref)
+        if chunk is not None:
+            _append_unique(refs, chunk.source_id)
+    return refs
+
+
+def _verify_citation_row(
+    citation: ResearchCitation,
+    *,
+    claims: dict[str, ResearchClaim],
+    chunks: dict[str, ResearchChunk],
+    sources: dict[str, ResearchSource],
+) -> dict[str, Any]:
+    if citation.claim_id not in claims:
+        return {
+            "ok": False,
+            "level": "error",
+            "message": f"Unknown research claim: {citation.claim_id}",
+            "citation_id": citation.id,
+        }
+    if citation.source_id and citation.source_id not in sources:
+        return {
+            "ok": False,
+            "level": "error",
+            "message": f"Unknown research source: {citation.source_id}",
+            "citation_id": citation.id,
+        }
+    chunk = chunks.get(citation.chunk_id)
+    if citation.chunk_id and chunk is None:
+        return {
+            "ok": False,
+            "level": "error",
+            "message": f"Unknown research chunk: {citation.chunk_id}",
+            "citation_id": citation.id,
+        }
+    if chunk is not None and citation.source_id and citation.source_id != chunk.source_id:
+        return {
+            "ok": False,
+            "level": "error",
+            "message": f"Citation source {citation.source_id} does not match chunk source {chunk.source_id}.",
+            "citation_id": citation.id,
+        }
+    if not citation.quote:
+        return {
+            "ok": False,
+            "level": "missing_quote",
+            "message": "Citation has no quote to verify.",
+            "citation_id": citation.id,
+        }
+    if chunk is None:
+        return {
+            "ok": False,
+            "level": "weak",
+            "message": "Citation quote cannot be verified without a chunk.",
+            "citation_id": citation.id,
+        }
+    quote = _normalized_text(citation.quote)
+    chunk_text = _normalized_text(chunk.text)
+    if quote and chunk_text and quote in chunk_text:
+        return {
+            "ok": True,
+            "level": "ok",
+            "message": "Quote matches the linked chunk.",
+            "citation_id": citation.id,
+        }
+    return {
+        "ok": False,
+        "level": "warning",
+        "message": f"Quote does not match linked chunk {citation.chunk_id}.",
+        "citation_id": citation.id,
+    }
+
+
+def verify_research_citation(profile: str | Path, citation_id: str) -> dict[str, Any]:
+    """Verify one citation's claim/source/chunk/quote linkage."""
+    clean_id = _clean_text(citation_id)
+    citations = {citation.id: citation for citation in load_research_citations(profile)}
+    citation = citations.get(clean_id)
+    if citation is None:
+        return {
+            "ok": False,
+            "level": "error",
+            "message": f"Unknown research citation: {clean_id}",
+            "citation_id": clean_id,
+        }
+    return _verify_citation_row(
+        citation,
+        claims={claim.id: claim for claim in load_research_claims(profile)},
+        chunks={chunk.id: chunk for chunk in load_chunks(profile)},
+        sources=_known_source_map(profile),
+    )
+
+
+def update_research_claim_status(
+    profile: str | Path,
+    claim_id: str,
+    status: str,
+    note: str = "",
+) -> ResearchClaim:
+    """Update one research claim's lifecycle status."""
+    clean_id = _clean_text(claim_id)
+    clean_status = _choice(status, RESEARCH_CLAIM_STATUSES, "")
+    if not clean_status:
+        raise ValueError(f"Unknown research claim status: {status}")
+    claims = load_research_claims(profile)
+    claim = next((item for item in claims if item.id == clean_id), None)
+    if claim is None:
+        raise ValueError(f"Unknown research claim: {clean_id}")
+    updated = copy.deepcopy(claim)
+    updated.status = clean_status
+    updated.updated = _now()
+    if note:
+        updated.rationale = (
+            f"{updated.rationale}\n{_clean_text(note)}".strip()
+            if updated.rationale
+            else _clean_text(note)
+        )
+    if updated.status == "ready":
+        _validate_claim_refs(profile, updated)
+    claims = [updated if item.id == clean_id else item for item in claims]
+    save_research_claims(profile, claims)
+    return updated
+
+
+def update_research_claim_links(
+    profile: str | Path,
+    claim_id: str,
+    *,
+    source_refs: object = None,
+    chunk_refs: object = None,
+    citation_refs: object = None,
+    mode: str = "append",
+) -> ResearchClaim:
+    """Patch source/chunk/citation refs for one research claim."""
+    clean_id = _clean_text(claim_id)
+    replace = _clean_text(mode) == "replace"
+    claims = load_research_claims(profile)
+    claim = next((item for item in claims if item.id == clean_id), None)
+    if claim is None:
+        raise ValueError(f"Unknown research claim: {clean_id}")
+    known_citations = {citation.id for citation in load_research_citations(profile)}
+    next_claim = copy.deepcopy(claim)
+    for attr, raw_refs, known in (
+        ("source_refs", source_refs, set(_known_source_map(profile))),
+        ("chunk_refs", chunk_refs, _known_chunk_ids(profile)),
+        ("citation_refs", citation_refs, known_citations),
+    ):
+        if raw_refs is None:
+            continue
+        refs = _clean_list(raw_refs)
+        missing = [ref for ref in refs if ref not in known]
+        if missing:
+            raise ValueError(f"Unknown research {attr}: {', '.join(missing)}")
+        if replace:
+            setattr(next_claim, attr, refs)
+        else:
+            merged = list(getattr(next_claim, attr))
+            for ref in refs:
+                _append_unique(merged, ref)
+            setattr(next_claim, attr, merged)
+    next_claim.updated = _now()
+    _validate_claim_refs(profile, next_claim)
+    claims = [next_claim if item.id == clean_id else item for item in claims]
+    save_research_claims(profile, claims)
+    return next_claim
+
+
+def build_research_claim_review_payload(
+    profile: str | Path,
+    *,
+    source_id: str = "",
+    status: str = "",
+    queue: str = "",
+) -> dict[str, Any]:
+    """Build a review-board payload for source-aware claims and citations."""
+    sources = _known_source_map(profile)
+    chunks = {chunk.id: chunk for chunk in load_chunks(profile)}
+    claims = {claim.id: claim for claim in load_research_claims(profile)}
+    citations = {citation.id: citation for citation in load_research_citations(profile)}
+    clean_source = _clean_text(source_id)
+    clean_status = _clean_text(status)
+    clean_queue = _clean_text(queue)
+    source_chunks = [
+        chunk
+        for chunk in chunks.values()
+        if not clean_source or chunk.source_id == clean_source
+    ]
+    quote_checks = {
+        citation.id: _verify_citation_row(
+            citation,
+            claims=claims,
+            chunks=chunks,
+            sources=sources,
+        )
+        for citation in citations.values()
+    }
+
+    def claim_matches(claim: ResearchClaim) -> bool:
+        if clean_status and claim.status != clean_status:
+            return False
+        if clean_source and clean_source not in _claim_source_refs(claim, chunks):
+            return False
+        claim_citations = [citations[ref] for ref in claim.citation_refs if ref in citations]
+        checks = [quote_checks[citation.id] for citation in claim_citations]
+        if clean_queue == "missing_citation" and claim_citations:
+            return False
+        if clean_queue == "quote_warning" and not any(not check.get("ok") for check in checks):
+            return False
+        if clean_queue == "ready" and claim.status != "ready":
+            return False
+        if clean_queue == "promoted" and claim.status != "promoted":
+            return False
+        return True
+
+    chunk_cards: list[dict[str, Any]] = []
+    for chunk in source_chunks:
+        related_claims = [
+            claim.id
+            for claim in claims.values()
+            if chunk.id in claim.chunk_refs
+        ]
+        related_citations = [
+            citation.id
+            for citation in citations.values()
+            if citation.chunk_id == chunk.id
+        ]
+        chunk_cards.append(
+            {
+                "id": chunk.id,
+                "source_id": chunk.source_id,
+                "kind": chunk.kind,
+                "title": chunk.title,
+                "locator": chunk.locator,
+                "text": chunk.text,
+                "linked_claims": related_claims,
+                "linked_citations": related_citations,
+            }
+        )
+
+    claim_cards: list[dict[str, Any]] = []
+    for claim in claims.values():
+        if not claim_matches(claim):
+            continue
+        claim_citation_refs = [ref for ref in claim.citation_refs if ref in citations]
+        checks = [quote_checks[ref] for ref in claim_citation_refs]
+        citation_status = "missing"
+        quote_status = "missing"
+        if claim_citation_refs:
+            citation_status = "verified" if checks and all(check.get("ok") for check in checks) else "weak"
+            quote_status = "ok" if citation_status == "verified" else "warning"
+        claim_cards.append(
+            {
+                "id": claim.id,
+                "text": claim.text,
+                "status": claim.status,
+                "type": claim.type,
+                "confidence": claim.confidence,
+                "source_refs": _claim_source_refs(claim, chunks),
+                "chunk_refs": list(claim.chunk_refs),
+                "citation_refs": list(claim.citation_refs),
+                "evidence_refs": list(claim.evidence_refs),
+                "output_refs": list(claim.output_refs),
+                "citation_status": citation_status,
+                "quote_status": quote_status,
+                "promote_ready": bool(claim.source_refs or claim.chunk_refs or claim.human_note),
+                "warnings": list(claim.warnings),
+                "rationale": claim.rationale,
+                "generated_by": claim.generated_by,
+                "created": claim.created,
+                "updated": claim.updated,
+            }
+        )
+
+    citation_cards: list[dict[str, Any]] = []
+    for citation in citations.values():
+        chunk = chunks.get(citation.chunk_id)
+        if clean_source and citation.source_id != clean_source and (
+            chunk is None or chunk.source_id != clean_source
+        ):
+            continue
+        citation_cards.append(
+            {
+                "id": citation.id,
+                "claim_id": citation.claim_id,
+                "source_id": citation.source_id,
+                "chunk_id": citation.chunk_id,
+                "locator": citation.locator,
+                "quote": citation.quote,
+                "url": citation.url,
+                "bibliography": citation.bibliography,
+                "note": citation.note,
+                "quote_check": quote_checks[citation.id],
+            }
+        )
+
+    return {
+        "filters": {
+            "source_id": clean_source,
+            "status": clean_status,
+            "queue": clean_queue,
+        },
+        "source": _source_card(sources.get(clean_source)),
+        "summary": {
+            "sources": len(sources),
+            "chunks": len(chunk_cards),
+            "claims": len(claim_cards),
+            "citations": len(citation_cards),
+            "ready_claims": sum(1 for claim in claims.values() if claim.status == "ready"),
+            "promoted_claims": sum(1 for claim in claims.values() if claim.status == "promoted"),
+            "missing_citation_claims": sum(1 for claim in claims.values() if not claim.citation_refs),
+            "quote_warnings": sum(1 for check in quote_checks.values() if not check.get("ok")),
+        },
+        "chunk_cards": chunk_cards,
+        "claim_cards": claim_cards,
+        "citation_cards": citation_cards,
+    }
+
+
+def build_research_export_manifest(
+    profile: str | Path,
+    *,
+    citation_refs: object = None,
+    claim_refs: object = None,
+    source_refs: object = None,
+) -> dict[str, Any]:
+    """Build a provenance and safety manifest before exporting research material."""
+    sources = _known_source_map(profile)
+    chunks = {chunk.id: chunk for chunk in load_chunks(profile)}
+    claims = {claim.id: claim for claim in load_research_claims(profile)}
+    citations = {citation.id: citation for citation in load_research_citations(profile)}
+    selected_citations = _clean_list(citation_refs)
+    selected_claims = _clean_list(claim_refs)
+    selected_sources = _clean_list(source_refs)
+    if not selected_citations and not selected_claims and not selected_sources:
+        selected_citations = list(citations)
+        selected_claims = list(claims)
+    if selected_citations:
+        for citation_id in selected_citations:
+            citation = citations.get(citation_id)
+            if citation is not None:
+                _append_unique(selected_claims, citation.claim_id)
+                _append_unique(selected_sources, citation.source_id)
+                chunk = chunks.get(citation.chunk_id)
+                if chunk is not None:
+                    _append_unique(selected_sources, chunk.source_id)
+    if selected_claims:
+        for claim_id in selected_claims:
+            claim = claims.get(claim_id)
+            if claim is None:
+                continue
+            for source_ref in _claim_source_refs(claim, chunks):
+                _append_unique(selected_sources, source_ref)
+            for citation_ref in claim.citation_refs:
+                _append_unique(selected_citations, citation_ref)
+    private_source_refs = [
+        ref for ref in selected_sources
+        if sources.get(ref) is not None and sources[ref].visibility == "private"
+    ]
+    missing_source_refs = [ref for ref in selected_sources if ref and ref not in sources]
+    missing_claim_refs = [ref for ref in selected_claims if ref and ref not in claims]
+    missing_citation_refs = [ref for ref in selected_citations if ref and ref not in citations]
+    broken_citation_refs = [
+        ref for ref in selected_citations
+        if ref in citations and not verify_research_citation(profile, ref).get("ok")
+    ]
+    unpromoted_claim_refs = [
+        ref for ref in selected_claims
+        if ref in claims and claims[ref].status != "promoted"
+    ]
+    blockers: list[dict[str, object]] = []
+    for ref in private_source_refs:
+        blockers.append({"kind": "private_source", "ref": ref})
+    for ref in unpromoted_claim_refs:
+        blockers.append({"kind": "unpromoted_research_claim", "ref": ref})
+    for ref in broken_citation_refs:
+        blockers.append({"kind": "broken_citation", "ref": ref})
+    for kind, refs in (
+        ("missing_source", missing_source_refs),
+        ("missing_research_claim", missing_claim_refs),
+        ("missing_citation", missing_citation_refs),
+    ):
+        for ref in refs:
+            blockers.append({"kind": kind, "ref": ref})
+    return {
+        "source_refs": selected_sources,
+        "claim_refs": selected_claims,
+        "citation_refs": selected_citations,
+        "private_source_refs": private_source_refs,
+        "unpromoted_claim_refs": unpromoted_claim_refs,
+        "broken_citation_refs": broken_citation_refs,
+        "missing_source_refs": missing_source_refs,
+        "missing_claim_refs": missing_claim_refs,
+        "missing_citation_refs": missing_citation_refs,
+        "publish_allowed": not blockers,
+        "blockers": blockers,
+        "sources": [_source_card(sources.get(ref)) for ref in selected_sources if ref in sources],
+        "claims": [claims[ref].to_dict() for ref in selected_claims if ref in claims],
+        "citations": [citations[ref].to_dict() for ref in selected_citations if ref in citations],
+    }
+
+
+def build_research_export_payload(
+    profile: str | Path,
+    *,
+    citation_refs: object = None,
+    claim_refs: object = None,
+    source_refs: object = None,
+) -> dict[str, Any]:
+    """Build the synthesis/export read model for UI callers."""
+    drafts = load_research_drafts(profile)
+    manifest = build_research_export_manifest(
+        profile,
+        citation_refs=citation_refs,
+        claim_refs=claim_refs,
+        source_refs=source_refs,
+    )
+    return {
+        "manifest": manifest,
+        "drafts": copy.deepcopy(drafts),
+        "counts": {
+            "drafts": len(drafts),
+            "sources": len(manifest["source_refs"]),
+            "claims": len(manifest["claim_refs"]),
+            "citations": len(manifest["citation_refs"]),
+            "blockers": len(manifest["blockers"]),
+        },
+    }
+
+
+def build_research_overview_payload(profile: str | Path) -> dict[str, Any]:
+    """Build an action-oriented Research Workspace overview payload."""
+    inbox = load_research_sources(_profile_root(profile))
+    sources = inbox.by_id()
+    chunks = load_chunks(profile)
+    claims = load_research_claims(profile)
+    citations = load_research_citations(profile)
+    drafts = load_research_drafts(profile)
+    citation_checks = {
+        citation.id: verify_research_citation(profile, citation.id)
+        for citation in citations
+    }
+    ready_claims = [claim for claim in claims if claim.status == "ready"]
+    promoted_claims = [claim for claim in claims if claim.status == "promoted"]
+    private_risk_refs: list[str] = []
+    for claim in [*ready_claims, *promoted_claims]:
+        for ref in _claim_source_refs(claim, {chunk.id: chunk for chunk in chunks}):
+            source = sources.get(ref)
+            if source is not None and source.visibility == "private":
+                _append_unique(private_risk_refs, ref)
+    broken_citation_refs = [
+        citation_id
+        for citation_id, check in citation_checks.items()
+        if not check.get("ok")
+    ]
+    recent_sources = sorted(
+        inbox.sources,
+        key=lambda source: _clean_text(
+            (source.metadata or {}).get("last_read_at")
+            or source.reading.updated_at
+            or source.captured_at
+        ),
+        reverse=True,
+    )[:8]
+    next_actions: list[dict[str, object]] = []
+    reading_sources = [source for source in inbox.sources if source.status == "reading"]
+    if reading_sources:
+        next_actions.append(
+            {
+                "kind": "continue_reading",
+                "label": f"Continue reading {len(reading_sources)} source(s)",
+                "target_tab": "reader",
+                "source_refs": [source.id for source in reading_sources[:5]],
+            }
+        )
+    if ready_claims:
+        next_actions.append(
+            {
+                "kind": "review_claims",
+                "label": f"Review {len(ready_claims)} ready research claim(s)",
+                "target_tab": "claims",
+                "filters": {"status": "ready"},
+            }
+        )
+    if broken_citation_refs:
+        next_actions.append(
+            {
+                "kind": "fix_citations",
+                "label": f"Fix {len(broken_citation_refs)} citation warning(s)",
+                "target_tab": "claims",
+                "filters": {"queue": "quote_warning"},
+                "citation_refs": broken_citation_refs,
+            }
+        )
+    if private_risk_refs:
+        next_actions.append(
+            {
+                "kind": "review_private_publish_risk",
+                "label": f"Review {len(private_risk_refs)} private source risk(s)",
+                "target_tab": "export",
+                "source_refs": private_risk_refs,
+            }
+        )
+    if drafts:
+        next_actions.append(
+            {
+                "kind": "review_drafts",
+                "label": f"Review {len(drafts)} synthesis draft(s)",
+                "target_tab": "export",
+            }
+        )
+    if not inbox.sources:
+        next_actions.append(
+            {
+                "kind": "import_sources",
+                "label": "Import papers, repos, or web sources",
+                "target_tab": "advanced_connectors",
+            }
+        )
+    risks = []
+    if private_risk_refs:
+        risks.append(
+            {
+                "kind": "private_publish_risk",
+                "refs": private_risk_refs,
+                "action": "open_export_gate",
+            }
+        )
+    if broken_citation_refs:
+        risks.append(
+            {
+                "kind": "broken_citations",
+                "refs": broken_citation_refs,
+                "action": "open_citation_inspector",
+            }
+        )
+    return {
+        "profile": _profile_name(profile),
+        "funnel_counts": {
+            "sources": len(inbox.sources),
+            "papers": sum(1 for source in inbox.sources if source.kind == "paper"),
+            "reading": len(reading_sources),
+            "chunks": len(chunks),
+            "claims_draft": sum(1 for claim in claims if claim.status == "draft"),
+            "claims_ready": len(ready_claims),
+            "claims_promoted": len(promoted_claims),
+            "citations": len(citations),
+            "drafts": len(drafts),
+        },
+        "queues": {
+            "inbox": sum(1 for source in inbox.sources if source.status == "inbox"),
+            "candidate_ready": sum(1 for source in inbox.sources if source.status == "candidate_ready"),
+            "archived": sum(1 for source in inbox.sources if source.status == "archived"),
+            "discarded": sum(1 for source in inbox.sources if source.status == "discarded"),
+            "private_sources": sum(1 for source in inbox.sources if source.visibility == "private"),
+            "public_sources": sum(1 for source in inbox.sources if source.visibility == "public"),
+        },
+        "next_actions": next_actions,
+        "risks": risks,
+        "recent_activity": [
+            {
+                "source": _source_card(source),
+                "last_read": _clean_text((source.metadata or {}).get("last_read_at") or source.reading.updated_at),
+                "next_action": "continue_reading" if source.status == "reading" else "review_source",
+            }
+            for source in recent_sources
+        ],
+    }
+
+
+def build_connector_inbox_payload(
+    profile: str | Path,
+    connector_id: str = "",
+    dry_run_cache_id: str = "",
+) -> dict[str, Any]:
+    """Return connector configs and optional discovery preview for the Research UI."""
+    from nblane.core.research_connectors import discover_connector_items, load_connectors
+
+    book = load_connectors(profile)
+    clean_id = _clean_text(connector_id)
+    preview = discover_connector_items(profile, clean_id) if clean_id else {}
+    return {
+        "connectors": copy.deepcopy(book.get("connectors") or []),
+        "selected_connector_id": clean_id,
+        "dry_run_cache_id": _clean_text(dry_run_cache_id),
+        "preview": preview,
     }
 
 
@@ -838,6 +1465,11 @@ __all__ = [
     "ResearchChunk",
     "ResearchClaim",
     "ResearchCitation",
+    "build_connector_inbox_payload",
+    "build_research_claim_review_payload",
+    "build_research_export_manifest",
+    "build_research_export_payload",
+    "build_research_overview_payload",
     "create_chunk",
     "create_citation",
     "draft_synthesis_from_claims",
@@ -852,6 +1484,9 @@ __all__ = [
     "save_research_claims",
     "save_research_drafts",
     "source_slug",
+    "update_research_claim_links",
+    "update_research_claim_status",
     "upsert_research_claim",
     "validate_research_workspace",
+    "verify_research_citation",
 ]

@@ -8197,6 +8197,7 @@ def save_research_export(
     *,
     format: str,
     prefix: str = "paper-export",
+    manifest: dict[str, object] | None = None,
 ) -> Path:
     """Persist an explicit user-requested paper export."""
 
@@ -8206,7 +8207,26 @@ def save_research_export(
     path = _research_root(profile) / PAPER_EXPORTS_DIRNAME / f"{_slug(prefix, fallback='export')}-{timestamp}.{ext}"
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(path, body if body.endswith("\n") else body + "\n")
-    git_backup.record_change([path], action=f"save research export {path.name}")
+    changed_paths = [path]
+    if manifest is not None:
+        manifest_path = path.with_name(f"{path.stem}.manifest.yaml")
+        manifest_payload = {
+            "schema_version": "1.0",
+            "export_file": path.name,
+            "created": _now(),
+            **_clean_mapping(manifest),
+        }
+        atomic_write_text(
+            manifest_path,
+            yaml.dump(
+                manifest_payload,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+        )
+        changed_paths.append(manifest_path)
+    git_backup.record_change(changed_paths, action=f"save research export {path.name}")
     return path
 
 

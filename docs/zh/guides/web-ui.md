@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-21
+last_verified: 2026-05-22
 source_of_truth: true
 ---
 
@@ -13,7 +13,7 @@ source_of_truth: true
 
 | 项目 | 说明 |
 |------|------|
-| 入口 | 在仓库根目录启动 Streamlit；Research PDF Reader 默认还需要 FastAPI sidecar |
+| 入口 | 在仓库根目录启动 Streamlit；Research PDF Reader 和 Paper Library standalone 默认还需要 FastAPI sidecar |
 | 范围 | `app.py` + `pages/*.py`；这是文件驱动的私有工作台。Public Site 页面会构建静态公开产物，但 Streamlit 应用本身**不是**托管公开站点 |
 
 ---
@@ -24,11 +24,11 @@ source_of_truth: true
 2. 至少一个 `profiles/` 下的档案（`nblane init <名称>`）。
 3. 可选 **LLM**：在 `.env` 配置 `LLM_API_KEY` 等，以使用差距页 AI 教练、首页简历摄入、看板「已完成→证据」。看板页也可选择本地 **Codex** 作为只读 AI backend，替代看板内的 LLM 动作。未配置时仍可使用规则差距分析与全部非 AI 编辑。
 
-### 1.1 本地启动 Research PDF Reader
+### 1.1 本地启动 Research PDF Reader 和 Paper Library
 
-Reader 的 PDF 阅读器是 **Streamlit 主应用 + FastAPI Reader sidecar** 两个进程。
+Research 的 PDF Reader 和 Paper Library standalone 是 **Streamlit 主应用 + FastAPI sidecar** 两个进程。
 本地开发没有 Caddy 反向代理时，需要先启动 sidecar，并让 Streamlit iframe 指向浏览器能访问的
-Reader API 地址：
+sidecar 地址：
 
 ```bash
 # 在仓库根目录启动两个 tmux session。
@@ -36,7 +36,7 @@ Reader API 地址：
 tmux kill-session -t nblane-reader-api 2>/dev/null || true
 tmux kill-session -t nblane-streamlit-ui 2>/dev/null || true
 
-# Reader API: http://127.0.0.1:8502
+# Research sidecar: http://127.0.0.1:8502
 tmux new-session -d -s nblane-reader-api -c "$PWD" \
   'PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
     --host 127.0.0.1 --port 8502 --reload --reload-dir src'
@@ -65,7 +65,13 @@ tmux kill-session -t nblane-streamlit-ui
 如果通过 SSH / IDE port forwarding 在浏览器访问，请同时转发 `8503` 和 `8502`，并把
 `NBLANE_READER_API_BASE` 设成浏览器能打开的 `8502` URL。
 
-白屏常见原因是只启动了 Streamlit，或者没有设置 `NBLANE_READER_API_BASE`。这时 iframe
+启动后常用入口：
+
+- Streamlit Research：`http://127.0.0.1:8503`
+- Paper Library standalone：`http://127.0.0.1:8502/paper-library?profile=<profile>`
+- PDF Reader：从 Paper Library 的 `Open Reader` 打开，或访问 `/reader/view/{source_id}`。
+
+Reader 或 Paper Library 白屏的常见原因是只启动了 Streamlit，或者没有设置 `NBLANE_READER_API_BASE`。这时 iframe
 会请求相对路径 `/reader/view/...`；没有 Caddy 时这个路径会被 Streamlit 自己接住，
 iframe 里加载的是另一个 Streamlit shell，而不是 Reader API，所以看起来是空白。
 
@@ -75,7 +81,8 @@ sidecar reload 或高 CPU 轮询，导致 `8502` 短暂无响应，iframe 看起
 `--reload-dir src`，让 sidecar 只监听代码目录；需要最稳定时也可以去掉 `--reload`。
 
 旧的单进程组件启动路径已停用。PDF Reader 的主入口始终是
-`/reader/view/{source_id}` 对应的 FastAPI sidecar。
+`/reader/view/{source_id}` 对应的 FastAPI sidecar；Paper Library 的主工作台入口是
+`/paper-library?profile=<profile>`。
 
 生产部署如果已经用 Caddy 将 `/reader/*` 反代到 `127.0.0.1:8502`，则不要设置
 `NBLANE_READER_API_BASE`，保持同源路径即可。
@@ -282,6 +289,11 @@ Research 页右上角有 **AI配置**。这里保存的是 profile 级别的非�
 
 - **Source Inbox** 继续接收网页、论文、repo、书籍、手动链接和 Home capture；写入
   `research/sources.yaml`，不会直接写 evidence、skill status 或公开输出。
+- **Paper Library** 是论文选择和整理入口；主体验已迁到 `8502 /paper-library`，
+  支持 tree / paper list / detail 同 canvas、collection 操作、拖拽、右键菜单、搜索筛选、
+  PDF 状态和 Reader quick action。Streamlit Research 页保留工作台入口和 fallback。
+- **Reader** 是单篇论文阅读现场；从 Paper Library 打开后直接进入对应论文，不再在 Reader
+  顶部用全库下拉重新选择论文。没有当前论文时，Reader 会引导回 Paper Library 或继续最近阅读。
 - **Reading Room** 对单个 source 生成翻译、摘要、claim candidates 和 citations；保存后仍停留在 source-scoped annotations。
 - **Claims & Citations** 可把 source 切成 `research/chunks/*.jsonl`，创建
   `research/claims.yaml` research claim，并用 `research/citations.yaml` 绑定

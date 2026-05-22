@@ -483,7 +483,7 @@ def _labels() -> dict[str, str]:
         "parent_collection": "Parent collection",
         "purge_collection": "Purge forever",
         "quick_actions": "Quick actions",
-        "reader_tab": "Reader tab",
+        "reader_tab": "Reader tab (fallback)",
         "remove_from_current_collection": "Remove from current collection",
         "rename": "Rename",
         "restore_collection": "Restore collection",
@@ -663,7 +663,8 @@ def handle_paper_library_event(
         next_state = {"detail_id": _clean_text(payload.get("source_id"))}
         return PaperLibraryEventResult(message="", changed=changed, next=next_state)
     if action == "paper_library_sync_reader_tab":
-        next_state = {"reader_source_id": _clean_text(payload.get("source_id"))}
+        source_id = _clean_text(payload.get("source_id"))
+        next_state = {"reader_source_id": source_id, "detail_id": source_id}
         return PaperLibraryEventResult(message="Selected for the Reader tab.", next=next_state)
     if action == "paper_library_delete_paper_preview":
         preview = build_paper_delete_preview(_profile_root(profile), event_paper_ids())

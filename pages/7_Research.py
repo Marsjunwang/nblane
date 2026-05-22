@@ -9,7 +9,7 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import streamlit as st
 import yaml
@@ -128,12 +128,17 @@ from nblane.core.research_sources import (
 )
 from nblane.core.research_connectors import (
     CONNECTOR_PROVIDERS,
+    discover_connector_items,
+    import_connector_items,
     load_connectors,
     sync_connector,
     upsert_connector,
 )
 from nblane.core.research_workspace import (
     RESEARCH_CHUNK_KINDS,
+    build_research_claim_review_payload,
+    build_research_export_manifest,
+    build_research_overview_payload,
     create_chunk,
     create_citation,
     draft_synthesis_from_claims,
@@ -143,6 +148,7 @@ from nblane.core.research_workspace import (
     load_research_drafts,
     research_claim_to_evidence_candidate,
     research_draft_to_blog_candidate,
+    update_research_claim_status,
     upsert_research_claim,
 )
 from nblane.core.public_site import create_blog_draft
@@ -171,7 +177,13 @@ render_git_backup_notices()
 
 _pdir = profile_dir(selected)
 _sources_path = _pdir / "research" / "sources.yaml"
+_research_claims_path = _pdir / "research" / "claims.yaml"
+_research_citations_path = _pdir / "research" / "citations.yaml"
+_research_connectors_path = _pdir / "research" / "connectors.yaml"
 ensure_file_snapshot(_sources_path)
+ensure_file_snapshot(_research_claims_path)
+ensure_file_snapshot(_research_citations_path)
+ensure_file_snapshot(_research_connectors_path)
 
 
 def _text_lines(value: str) -> list[str]:
@@ -947,8 +959,55 @@ def _render_candidate_preview(inbox) -> None:
 
 def _render_workspace_overview(inbox) -> None:
     overview = paper_overview(_pdir)
+    command = build_research_overview_payload(_pdir)
     connector_rows = list(load_connectors(_pdir).get("connectors") or [])
     enabled_connectors = [row for row in connector_rows if bool(row.get("enabled", True))]
+
+    st.subheader(_l("research_command_center", "Research Command Center"))
+    funnel = command.get("funnel_counts") or {}
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric(_l("research_sources", "Sources"), funnel.get("sources", 0))
+    c2.metric(_l("papers_reading", "Reading"), funnel.get("reading", 0))
+    c3.metric(_l("chunks", "Chunks"), funnel.get("chunks", 0))
+    c4.metric(_l("claims_ready", "Claims ready"), funnel.get("claims_ready", 0))
+    c5.metric(_l("citations", "Citations"), funnel.get("citations", 0))
+    c6.metric(_l("synthesis_drafts", "Drafts"), funnel.get("drafts", 0))
+
+    action_rows = list(command.get("next_actions") or [])
+    if action_rows:
+        st.markdown(f"**{_l('next_actions', 'Next actions')}**")
+        for action in action_rows[:5]:
+            with st.container(border=True):
+                label = str(action.get("label") or action.get("kind") or "")
+                st.markdown(f"**{label}**")
+                kind = str(action.get("kind") or "")
+                target_tab = str(action.get("target_tab") or "")
+                source_refs = [str(ref) for ref in action.get("source_refs") or []]
+                if source_refs:
+                    st.caption(", ".join(source_refs))
+                if kind == "continue_reading" and source_refs:
+                    if st.button(
+                        _l("continue_reading", "Continue reading"),
+                        key=f"overview_continue_reading:{selected}:{source_refs[0]}",
+                        icon=":material/menu_book:",
+                    ):
+                        st.session_state[f"paper_reader_source:{selected}"] = source_refs[0]
+                        st.rerun()
+                elif target_tab == "export":
+                    st.caption(_l("open_synthesis_export_tab", "Open Synthesis / Export to review this queue."))
+                elif target_tab == "claims":
+                    st.caption(_l("open_claims_tab", "Open Claims & Citations to review this queue."))
+                elif target_tab == "advanced_connectors":
+                    st.caption(_l("open_connectors_tab", "Open Advanced Connectors to import sources."))
+    else:
+        st.caption(_l("no_research_actions", "No research actions need attention."))
+
+    risk_rows = list(command.get("risks") or [])
+    if risk_rows:
+        with st.expander(_l("research_risks", "Research risks"), expanded=True):
+            for risk in risk_rows:
+                refs = ", ".join(str(ref) for ref in risk.get("refs") or [])
+                st.warning(f"{risk.get('kind')}: {refs}")
 
     st.subheader(_l("paper_reading_pipeline", "Reading Pipeline"))
     p1, p2, p3, p4, p5, p6 = st.columns(6)
@@ -1104,6 +1163,30 @@ def _reader_view_url(source_id: str) -> str:
     encoded_source = quote(source_id, safe="")
     encoded_token = quote(token, safe="")
     path = f"/reader/view/{encoded_source}?token={encoded_token}"
+    return f"{base}{path}" if base else path
+
+
+def _paper_library_workspace_url(
+    *,
+    view: str = "",
+    node_id: str = "",
+    query: str = "",
+    sort: str = "",
+    detail_id: str = "",
+) -> str:
+    base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+    params = {"profile": selected}
+    optional = {
+        "view": view,
+        "node_id": node_id,
+        "query": query,
+        "sort": sort,
+        "detail_id": detail_id,
+    }
+    params.update(
+        {key: str(value).strip() for key, value in optional.items() if str(value or "").strip()}
+    )
+    path = f"/paper-library?{urlencode(params)}"
     return f"{base}{path}" if base else path
 
 
@@ -2652,7 +2735,7 @@ def _render_paper_card(row: dict[str, object], *, active: bool) -> None:
             )
     with a3:
         if st.button(
-            _l("send_to_reader_tab", "Use in Reader tab"),
+            _l("send_to_reader_tab", "Use in Reader tab (fallback)"),
             key=_paper_library_key(f"use_reader:{source_id}"),
             icon=":material/ads_click:",
             use_container_width=True,
@@ -2718,7 +2801,7 @@ def _render_paper_detail_panel(
             )
     with q2:
         if st.button(
-            _l("continue_in_reader_tab", "Reader tab"),
+            _l("continue_in_reader_tab", "Reader tab (fallback)"),
             key=_paper_library_key(f"detail_reader_tab:{source.id}"),
             icon=":material/ads_click:",
             use_container_width=True,
@@ -2904,8 +2987,7 @@ def _render_paper_library(inbox) -> None:
             "Organize papers into collections, continue reading, and move each source through extraction, claims, and review.",
         )
     )
-    reader_base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
-    workspace_url = f"{reader_base}/paper-library?profile={quote(selected, safe='')}" if reader_base else f"/paper-library?profile={quote(selected, safe='')}"
+    workspace_url = _paper_library_workspace_url()
     try:
         st.link_button(
             _l("open_paper_library_workspace", "Open Paper Library Workspace"),
@@ -3972,34 +4054,56 @@ def _render_paper_reader(inbox) -> None:
     if not papers:
         st.caption(_l("no_papers", "No paper sources yet."))
         return
-    default_index = max(
-        range(len(papers)),
-        key=lambda idx: (
-            100 if (papers[idx].metadata or {}).get("pdf_asset_ref") else 0,
-            30 if (papers[idx].metadata or {}).get("structured_extracted_at") else 0,
-            20 if (papers[idx].metadata or {}).get("structure_backend") else 0,
-            10 if (papers[idx].metadata or {}).get("text_extracted_at") else 0,
-            5 if (papers[idx].metadata or {}).get("page_count") else 0,
-            -idx,
-        ),
-    )
     reader_source_key = f"paper_reader_source:{selected}"
     paper_ids = [source.id for source in papers]
     remembered_source_id = str(st.session_state.get(reader_source_key, "") or "")
     if remembered_source_id not in paper_ids:
-        st.session_state[reader_source_key] = papers[default_index].id
-    with st.expander(_l("change_reader_paper", "Change Reader paper"), expanded=False):
-        source_id = st.selectbox(
-            ui["source_id"],
-            options=paper_ids,
-            index=paper_ids.index(st.session_state[reader_source_key]),
-            format_func=lambda sid: _source_label(inbox, sid),
-            key=reader_source_key,
+        st.session_state.pop(reader_source_key, None)
+        remembered_source_id = ""
+
+    if not remembered_source_id:
+        st.info(_l("reader_no_paper_selected", "No paper selected. Open Paper Library to choose a paper to read."))
+        actions = st.columns([1.2, 1.2, 3])
+        with actions[0]:
+            try:
+                st.link_button(
+                    _l("open_paper_library", "Open Paper Library"),
+                    _paper_library_workspace_url(),
+                    icon=":material/library_books:",
+                    type="primary",
+                    use_container_width=True,
+                )
+            except Exception:
+                st.caption(
+                    f"{_l('paper_library_workspace_url', 'Workspace')}: "
+                    f"`{_paper_library_workspace_url()}`"
+                )
+        recent_rows = sorted(
+            paper_rows(_pdir, view="recent"),
+            key=lambda row: str(row.get("last_read") or ""),
+            reverse=True,
         )
-    source_id = str(st.session_state.get(reader_source_key, source_id) or source_id)
-    st.session_state[_paper_library_key("detail")] = source_id
+        recent_source_id = str((recent_rows[0] if recent_rows else {}).get("id") or "")
+        if recent_source_id:
+            with actions[1]:
+                if st.button(
+                    _l("continue_recent_paper", "Continue recent paper"),
+                    key=f"paper_reader_continue_recent:{selected}:{recent_source_id}",
+                    icon=":material/history:",
+                    use_container_width=True,
+                ):
+                    st.session_state[reader_source_key] = recent_source_id
+                    st.rerun()
+            st.caption(
+                f"{_l('recent_papers', 'Recent papers')}: "
+                f"{_source_label(inbox, recent_source_id)}"
+            )
+        return
+
+    source_id = remembered_source_id
     source = inbox.by_id().get(source_id)
     if source is None:
+        st.session_state.pop(reader_source_key, None)
         return
     existing_pages = load_paper_pages(_pdir, source_id)
     existing_segments = load_paper_segments(_pdir, source_id)
@@ -4018,8 +4122,23 @@ def _render_paper_reader(inbox) -> None:
         f"{_l('structured_extraction', 'Structure')}: "
         f"{source.metadata.get('reading_artifacts_status') or source.metadata.get('structure_backend', '') or _l('missing', 'missing')}",
     ]
-    st.markdown(f"**{source.title}**")
-    st.caption(f"`{source_id}`")
+    heading, library_action = st.columns([4, 1.2], vertical_alignment="top")
+    with heading:
+        st.markdown(f"**{source.title}**")
+        st.caption(f"`{source_id}`")
+    with library_action:
+        try:
+            st.link_button(
+                _l("open_in_library", "Open in Library"),
+                _paper_library_workspace_url(detail_id=source_id),
+                icon=":material/library_books:",
+                use_container_width=True,
+            )
+        except Exception:
+            st.caption(
+                f"{_l('paper_library_workspace_url', 'Workspace')}: "
+                f"`{_paper_library_workspace_url(detail_id=source_id)}`"
+            )
     st.caption(" · ".join(status_bits))
     st.caption(
         _l(
@@ -4480,6 +4599,233 @@ def _render_claims_citations(inbox) -> None:
     claim_rows = load_research_claims(_pdir)
     claim_ids = [claim.id for claim in claim_rows]
     citation_rows = load_research_citations(_pdir)
+    status_filter = st.selectbox(
+        _l("claim_status_filter", "Claim status filter"),
+        options=["", "draft", "ready", "promoted", "dismissed"],
+        format_func=lambda value: _l("all_statuses", "All statuses") if not value else value,
+        key=f"research_claim_status_filter:{selected}",
+    )
+    queue_filter = st.selectbox(
+        _l("claim_queue_filter", "Review queue"),
+        options=["", "missing_citation", "quote_warning", "ready", "promoted"],
+        format_func=lambda value: {
+            "": _l("all_queues", "All queues"),
+            "missing_citation": _l("missing_citation", "Missing citation"),
+            "quote_warning": _l("quote_warning", "Quote warning"),
+            "ready": _l("ready_claims", "Ready claims"),
+            "promoted": _l("promoted_claims", "Promoted claims"),
+        }.get(value, value),
+        key=f"research_claim_queue_filter:{selected}",
+    )
+    review = build_research_claim_review_payload(
+        _pdir,
+        source_id=source_id,
+        status=status_filter,
+        queue=queue_filter,
+    )
+    summary = review.get("summary") or {}
+    st.subheader(_l("claim_review_board", "Claim review board"))
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric(_l("chunks", "Chunks"), summary.get("chunks", 0))
+    m2.metric(ui["research_claims"], summary.get("claims", 0))
+    m3.metric(ui["research_citations"], summary.get("citations", 0))
+    m4.metric(_l("missing_citation", "Missing citation"), summary.get("missing_citation_claims", 0))
+    m5.metric(_l("quote_warnings", "Quote warnings"), summary.get("quote_warnings", 0))
+
+    evidence_col, claim_col, citation_col = st.columns([1.15, 1.9, 1.35], gap="medium")
+    with evidence_col:
+        st.markdown(f"**{_l('source_evidence', 'Source evidence')}**")
+        chunk_cards = list(review.get("chunk_cards") or [])
+        if chunk_cards:
+            for chunk in chunk_cards[:8]:
+                with st.container(border=True):
+                    st.markdown(f"**{chunk.get('title') or chunk.get('id')}**")
+                    st.caption(" · ".join(str(item) for item in [chunk.get("kind"), chunk.get("locator")] if item))
+                    linked = []
+                    if chunk.get("linked_claims"):
+                        linked.append(f"{ui['research_claims']}: {', '.join(chunk.get('linked_claims') or [])}")
+                    if chunk.get("linked_citations"):
+                        linked.append(f"{ui['research_citations']}: {', '.join(chunk.get('linked_citations') or [])}")
+                    if linked:
+                        st.caption(" · ".join(linked))
+                    st.write(_short_text(chunk.get("text"), 360))
+            if len(chunk_cards) > 8:
+                st.caption(_l("more_chunks_hidden", "{count} more chunk(s) hidden by this compact view.").format(count=len(chunk_cards) - 8))
+        else:
+            st.caption(ui["chunks_empty"])
+
+    with claim_col:
+        st.markdown(f"**{_l('research_claim_review', 'Research claim review')}**")
+        claim_cards = list(review.get("claim_cards") or [])
+        if claim_cards:
+            for claim_card in claim_cards:
+                claim_id = str(claim_card.get("id") or "")
+                with st.container(border=True):
+                    st.markdown(f"**{claim_id}**")
+                    st.caption(
+                        " · ".join(
+                            str(item)
+                            for item in [
+                                claim_card.get("status"),
+                                claim_card.get("type"),
+                                f"confidence={claim_card.get('confidence')}",
+                                f"citation={claim_card.get('citation_status')}",
+                                f"quote={claim_card.get('quote_status')}",
+                            ]
+                            if item
+                        )
+                    )
+                    st.write(claim_card.get("text") or "")
+                    refs_line = " · ".join(
+                        [
+                            f"sources: {', '.join(claim_card.get('source_refs') or []) or '0'}",
+                            f"chunks: {', '.join(claim_card.get('chunk_refs') or []) or '0'}",
+                            f"citations: {', '.join(claim_card.get('citation_refs') or []) or '0'}",
+                        ]
+                    )
+                    st.caption(refs_line)
+                    if claim_card.get("citation_status") == "missing":
+                        st.warning(_l("claim_missing_citation_warning", "This claim has no citation yet. Bind a citation before public use."))
+                    elif claim_card.get("quote_status") == "warning":
+                        st.warning(_l("claim_quote_warning", "At least one linked citation needs quote review."))
+                    for warning in claim_card.get("warnings") or []:
+                        st.warning(str(warning))
+                    try:
+                        patch = research_claim_to_evidence_candidate(_pdir, claim_id)
+                    except Exception as exc:
+                        patch = None
+                        st.warning(str(exc))
+                    with st.expander(_l("evidence_candidate_preview", "Evidence candidate preview"), expanded=False):
+                        if patch is not None:
+                            st.code(
+                                yaml.dump(patch, allow_unicode=True, default_flow_style=False, sort_keys=False),
+                                language="yaml",
+                            )
+                        else:
+                            st.caption(_l("no_candidate_preview", "No candidate preview is available for this claim."))
+                    a1, a2, a3 = st.columns(3)
+                    with a1:
+                        if st.button(
+                            _l("mark_ready", "Mark ready"),
+                            key=f"research_claim_mark_ready:{selected}:{claim_id}",
+                            disabled=claim_card.get("status") in {"ready", "promoted", "dismissed"},
+                            icon=":material/check_circle:",
+                            use_container_width=True,
+                        ):
+                            try:
+                                assert_files_current([_research_claims_path])
+                                update_research_claim_status(_pdir, claim_id, "ready")
+                                refresh_file_snapshots([_research_claims_path])
+                                stash_git_backup_results()
+                                clear_web_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
+                    with a2:
+                        source_refs = [str(ref) for ref in claim_card.get("source_refs") or []]
+                        if st.button(
+                            _l("promote_to_evidence", "Promote"),
+                            key=f"research_claim_promote:{selected}:{claim_id}",
+                            disabled=patch is None or not source_refs or claim_card.get("status") == "promoted",
+                            icon=":material/upgrade:",
+                            use_container_width=True,
+                        ):
+                            try:
+                                assert_files_current([_sources_path, _research_claims_path, _pdir / "evidence-pool.yaml"])
+                                result = apply_research_evidence_candidate(selected, source_refs[0], patch or {})
+                                matched_claim = next((item for item in claim_rows if item.id == claim_id), None)
+                                if matched_claim is not None:
+                                    upsert_research_claim(
+                                        _pdir,
+                                        matched_claim.text,
+                                        claim_id=matched_claim.id,
+                                        status="promoted",
+                                        type=matched_claim.type,
+                                        source_refs=matched_claim.source_refs,
+                                        chunk_refs=matched_claim.chunk_refs,
+                                        citation_refs=matched_claim.citation_refs,
+                                        evidence_refs=[*matched_claim.evidence_refs, result["evidence_id"]],
+                                        rationale=matched_claim.rationale,
+                                        human_note=matched_claim.human_note,
+                                        warnings=matched_claim.warnings,
+                                        generated_by=matched_claim.generated_by or "research_workspace",
+                                    )
+                                refresh_file_snapshots(
+                                    [
+                                        _sources_path,
+                                        _research_claims_path,
+                                        _pdir / "evidence-pool.yaml",
+                                        _pdir / "agent-activity.yaml",
+                                    ]
+                                )
+                                stash_git_backup_results()
+                                clear_web_cache()
+                                st.success(ui["created"].format(id=result["evidence_id"]))
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
+                    with a3:
+                        if st.button(
+                            _l("dismiss", "Dismiss"),
+                            key=f"research_claim_dismiss:{selected}:{claim_id}",
+                            disabled=claim_card.get("status") == "dismissed",
+                            icon=":material/do_not_disturb_on:",
+                            use_container_width=True,
+                        ):
+                            try:
+                                assert_files_current([_research_claims_path])
+                                update_research_claim_status(
+                                    _pdir,
+                                    claim_id,
+                                    "dismissed",
+                                    note="Dismissed from Research claim review board.",
+                                )
+                                refresh_file_snapshots([_research_claims_path])
+                                stash_git_backup_results()
+                                clear_web_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
+        else:
+            st.caption(ui["claims_empty"])
+
+    with citation_col:
+        st.markdown(f"**{_l('citation_inspector', 'Citation inspector')}**")
+        citation_cards = list(review.get("citation_cards") or [])
+        if citation_cards:
+            for citation in citation_cards[:10]:
+                check = citation.get("quote_check") if isinstance(citation.get("quote_check"), dict) else {}
+                with st.container(border=True):
+                    st.markdown(f"**{citation.get('id')}**")
+                    st.caption(
+                        " · ".join(
+                            str(item)
+                            for item in [
+                                f"claim={citation.get('claim_id')}",
+                                f"source={citation.get('source_id')}",
+                                f"chunk={citation.get('chunk_id') or 'none'}",
+                                check.get("level"),
+                            ]
+                            if item
+                        )
+                    )
+                    message = str(check.get("message") or "")
+                    if check.get("ok"):
+                        st.success(message)
+                    else:
+                        st.warning(message)
+                    if citation.get("quote"):
+                        st.write(citation.get("quote"))
+                    if citation.get("locator") or citation.get("bibliography"):
+                        st.caption(f"{citation.get('locator') or ''} · {citation.get('bibliography') or ''}")
+            if len(citation_cards) > 10:
+                st.caption(_l("more_citations_hidden", "{count} more citation(s) hidden by this compact view.").format(count=len(citation_cards) - 10))
+        else:
+            st.caption(ui["citations_empty"])
+
+    st.divider()
+    st.caption(_l("manual_research_editing_hint", "Manual source/chunk/claim/citation editors remain below as fallback tools."))
+
     chunk_tab, claim_tab, citation_tab = st.tabs(
         [
             _l("chunks", "Chunks"),
@@ -4757,10 +5103,15 @@ def _render_synthesis_drafts() -> None:
                 citation_refs,
                 format=export_format,
             )
+            export_manifest = build_research_export_manifest(
+                _pdir,
+                citation_refs=citation_refs,
+            )
         except Exception as exc:
             export_body = ""
+            export_manifest = {}
             st.warning(str(exc))
-        private_refs = _private_source_refs_for_citations(citation_refs)
+        private_refs = list(export_manifest.get("private_source_refs") or [])
         if private_refs:
             st.warning(
                 _l(
@@ -4768,6 +5119,30 @@ def _render_synthesis_drafts() -> None:
                     "This export includes private paper sources; keep it private or remove them before public use: {refs}",
                 ).format(refs=", ".join(private_refs))
             )
+        blockers = list(export_manifest.get("blockers") or [])
+        if export_manifest:
+            with st.expander(_l("export_manifest", "Export manifest"), expanded=bool(blockers)):
+                e1, e2, e3, e4 = st.columns(4)
+                e1.metric(_l("sources_total", "Sources"), len(export_manifest.get("source_refs") or []))
+                e2.metric(ui["research_claims"], len(export_manifest.get("claim_refs") or []))
+                e3.metric(ui["research_citations"], len(export_manifest.get("citation_refs") or []))
+                e4.metric(_l("publish_blockers", "Publish blockers"), len(blockers))
+                if blockers:
+                    for blocker in blockers:
+                        st.warning(f"{blocker.get('kind')}: {blocker.get('ref')}")
+                st.code(
+                    yaml.dump(
+                        {
+                            key: value
+                            for key, value in export_manifest.items()
+                            if key not in {"sources", "claims", "citations"}
+                        },
+                        allow_unicode=True,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                    language="yaml",
+                )
         if export_body:
             st.text_area(
                 _l("export_preview", "Export preview"),
@@ -4786,7 +5161,12 @@ def _render_synthesis_drafts() -> None:
             )
             if st.button(_l("save_export", "Save export"), disabled=not save_private_export):
                 try:
-                    path = save_research_export(_pdir, export_body, format=export_format)
+                    path = save_research_export(
+                        _pdir,
+                        export_body,
+                        format=export_format,
+                        manifest=export_manifest,
+                    )
                     stash_git_backup_results()
                     clear_web_cache()
                     st.success(str(path))
@@ -4916,6 +5296,12 @@ def _render_synthesis_drafts() -> None:
     )
     try:
         candidate = research_draft_to_blog_candidate(_pdir, draft_id)
+        candidate_manifest = build_research_export_manifest(
+            _pdir,
+            source_refs=list(candidate.get("related_sources") or []),
+            claim_refs=list(candidate.get("related_research_claims") or []),
+            citation_refs=list(candidate.get("related_citations") or []),
+        )
         st.subheader(ui["blog_candidate_preview"])
         st.code(
             yaml.dump(
@@ -4933,10 +5319,41 @@ def _render_synthesis_drafts() -> None:
             disabled=True,
             key=f"blog_candidate_body:{selected}:{draft_id}",
         )
+        blog_blockers = list(candidate_manifest.get("blockers") or [])
+        with st.expander(_l("blog_candidate_manifest", "Blog candidate manifest"), expanded=bool(blog_blockers)):
+            if blog_blockers:
+                for blocker in blog_blockers:
+                    st.warning(f"{blocker.get('kind')}: {blocker.get('ref')}")
+            st.code(
+                yaml.dump(
+                    {
+                        key: value
+                        for key, value in candidate_manifest.items()
+                        if key not in {"sources", "claims", "citations"}
+                    },
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                ),
+                language="yaml",
+            )
     except Exception as exc:
         candidate = None
+        candidate_manifest = {}
+        blog_blockers = []
         st.warning(str(exc))
-    if st.button(ui["create_blog_draft"], disabled=candidate is None):
+    confirm_candidate_blockers = not blog_blockers or st.checkbox(
+        _l(
+            "confirm_blog_candidate_blockers",
+            "Create draft anyway; I will fix private, unpromoted, or broken refs before public use.",
+        ),
+        value=False,
+        key=f"research_blog_candidate_blockers:{selected}:{draft_id}",
+    )
+    if st.button(
+        ui["create_blog_draft"],
+        disabled=candidate is None or not confirm_candidate_blockers,
+    ):
         try:
             path = create_blog_draft(
                 selected,
@@ -5008,23 +5425,21 @@ def _render_connectors() -> None:
         options=[str(row.get("id")) for row in rows],
         key=f"research_connector_run:{selected}",
     )
+    preview_key = f"research_connector_preview:{selected}:{picked}"
     dry_col, run_col = st.columns(2)
     with dry_col:
         if st.button(ui["connector_dry_run"]):
             try:
-                result = sync_connector(_pdir, picked, dry_run=True)
-                st.code(
-                    yaml.dump(result.to_dict(), allow_unicode=True, default_flow_style=False, sort_keys=False),
-                    language="yaml",
-                )
+                st.session_state[preview_key] = discover_connector_items(_pdir, picked)
+                st.rerun()
             except Exception as exc:
                 st.error(str(exc))
     with run_col:
         if st.button(ui["connector_run_now"], type="primary"):
             try:
-                assert_files_current([_sources_path])
+                assert_files_current([_sources_path, _research_connectors_path])
                 result = sync_connector(_pdir, picked, dry_run=False)
-                refresh_file_snapshots([_sources_path, _pdir / "research" / "connectors.yaml"])
+                refresh_file_snapshots([_sources_path, _research_connectors_path])
                 stash_git_backup_results()
                 clear_web_cache()
                 st.code(
@@ -5033,6 +5448,101 @@ def _render_connectors() -> None:
                 )
             except Exception as exc:
                 st.error(str(exc))
+
+    preview = st.session_state.get(preview_key)
+    if not isinstance(preview, dict):
+        return
+    st.subheader(_l("connector_inbox", "Connector Inbox"))
+    p1, p2, p3 = st.columns(3)
+    p1.metric(_l("discovered", "Discovered"), preview.get("discovered", 0))
+    p2.metric(_l("importable", "Importable"), preview.get("importable", 0))
+    p3.metric(_l("duplicates", "Duplicates"), preview.get("skipped", 0))
+    for warning in preview.get("warnings") or []:
+        st.warning(str(warning))
+
+    node_options = _node_options(include_unsorted=False)
+    target_options = {"": _l("source_inbox", "Source Inbox"), **node_options}
+    target_node = st.selectbox(
+        _l("connector_import_target", "Import target"),
+        options=list(target_options),
+        format_func=lambda ref: target_options.get(ref, ref),
+        key=f"research_connector_import_target:{selected}:{picked}",
+    )
+    selected_fingerprints: list[str] = []
+    for index, candidate in enumerate(preview.get("candidates") or []):
+        if not isinstance(candidate, dict):
+            continue
+        item = candidate.get("item") if isinstance(candidate.get("item"), dict) else {}
+        duplicate = candidate.get("duplicate") if isinstance(candidate.get("duplicate"), dict) else {}
+        fingerprint = str(candidate.get("fingerprint") or "")
+        with st.container(border=True):
+            head, pick = st.columns([4, 1], vertical_alignment="center")
+            with head:
+                st.markdown(f"**{item.get('title') or fingerprint}**")
+                st.caption(
+                    " · ".join(
+                        str(value)
+                        for value in [
+                            item.get("provider"),
+                            item.get("kind"),
+                            item.get("published"),
+                            item.get("url"),
+                        ]
+                        if value
+                    )
+                )
+                if item.get("summary"):
+                    st.write(_short_text(item.get("summary"), 320))
+                if duplicate.get("is_duplicate"):
+                    st.warning(
+                        _l(
+                            "connector_duplicate",
+                            "Duplicate candidate: {reason} -> {source_id}",
+                        ).format(
+                            reason=duplicate.get("reason") or "duplicate",
+                            source_id=duplicate.get("existing_source_id") or "",
+                        )
+                    )
+            with pick:
+                selected_candidate = st.checkbox(
+                    _l("import_candidate", "Import"),
+                    value=bool(candidate.get("selected")) and not bool(duplicate.get("is_duplicate")),
+                    disabled=bool(duplicate.get("is_duplicate")) or not fingerprint,
+                    key=f"research_connector_candidate:{selected}:{picked}:{index}",
+                )
+            if selected_candidate and fingerprint:
+                selected_fingerprints.append(fingerprint)
+
+    if st.button(
+        _l("import_selected_connector_items", "Import selected"),
+        type="primary",
+        disabled=not selected_fingerprints,
+        key=f"research_connector_import_selected:{selected}:{picked}",
+    ):
+        try:
+            assert_files_current([_sources_path, _research_connectors_path])
+            result = import_connector_items(
+                _pdir,
+                picked,
+                selected_fingerprints,
+                target={
+                    "kind": "collection" if target_node else "source_inbox",
+                    "node_id": target_node,
+                },
+            )
+            refresh_file_snapshots([_sources_path, _research_connectors_path])
+            stash_git_backup_results()
+            clear_web_cache()
+            st.success(
+                _l(
+                    "connector_imported_count",
+                    "Imported {imported} candidate(s); skipped {skipped}.",
+                ).format(imported=result.imported, skipped=result.skipped)
+            )
+            st.session_state.pop(preview_key, None)
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 
 _head_l, _head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")

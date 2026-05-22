@@ -60,6 +60,7 @@ from nblane.core.research_papers import (
     render_paper_page_preview,
     restore_paper_library_node,
     save_paper_pages,
+    save_research_export,
     save_paper_segments,
     save_paper_structure_units,
     search_papers_with_codex,
@@ -332,6 +333,13 @@ class TestResearchPapers(unittest.TestCase):
                         "payload": {"source_id": "source:paper:grounded"},
                     },
                 )
+                reader_sync_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_sync_reader_tab",
+                        "payload": {"source_id": "source:paper:grounded"},
+                    },
+                )
             source = load_research_sources(profile).by_id()["source:paper:grounded"]
             with (
                 patch("nblane.core.research_papers.git_backup.record_change"),
@@ -377,6 +385,8 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(payload["detail"]["source_id"], "source:paper:grounded")
         self.assertEqual(payload["detail"]["primary_node_id"], node_id)
         self.assertEqual(select_result.next["detail_id"], "source:paper:grounded")
+        self.assertEqual(reader_sync_result.next["reader_source_id"], "source:paper:grounded")
+        self.assertEqual(reader_sync_result.next["detail_id"], "source:paper:grounded")
         self.assertEqual(trash_result.changed["nodes"], [node_id])
         trash_section = next(section for section in trash_payload["sections"] if section["id"] == "collections")
         trash_root = next(item for item in trash_section["items"] if item["id"] == "collections:trash")
@@ -2800,6 +2810,23 @@ class TestResearchPapers(unittest.TestCase):
                 chunk_refs=[chunk.id],
                 citation_refs=[citation.id],
             )
+            with patch("nblane.core.research_papers.git_backup.record_change") as record:
+                export_path = save_research_export(
+                    profile,
+                    md,
+                    format="markdown",
+                    manifest={
+                        "source_refs": ["source:paper:grounded"],
+                        "claim_refs": [claim.id],
+                        "citation_refs": [citation.id],
+                        "publish_allowed": True,
+                    },
+                )
+            manifest_path = export_path.with_name(f"{export_path.stem}.manifest.yaml")
+            export_exists = export_path.exists()
+            manifest_exists = manifest_path.exists()
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            changed_paths = record.call_args.args[0]
 
         self.assertEqual(overview["papers_total"], 1)
         self.assertEqual(overview["ready_research_claims"], 1)
@@ -2809,6 +2836,11 @@ class TestResearchPapers(unittest.TestCase):
         self.assertIn("## Chunks", note)
         self.assertIn("## Claims", note)
         self.assertIn("## Citations", note)
+        self.assertTrue(export_exists)
+        self.assertTrue(manifest_exists)
+        self.assertEqual(manifest["export_file"], export_path.name)
+        self.assertEqual(manifest["source_refs"], ["source:paper:grounded"])
+        self.assertEqual(changed_paths, [export_path, manifest_path])
 
     def test_quote_mismatch_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
