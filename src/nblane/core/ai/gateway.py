@@ -14,7 +14,10 @@ from nblane.core.ai.runs import (
     new_run_id,
     record_activity_item,
 )
-from nblane.core.web_preferences import load_web_preferences
+from nblane.core.web_preferences import (
+    AI_ACTION_DEFAULT_BACKENDS,
+    load_web_preferences,
+)
 
 
 def run_ai_action(
@@ -208,11 +211,17 @@ def search_papers_codex(
 
     body = dict(payload or {})
     body["query"] = query
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
+        "research.paper_search_codex",
+        body,
+    )
     return run_ai_action(
         "research.paper_search_codex",
         body,
         profile=profile,
         context_refs=context_refs or [],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -229,16 +238,19 @@ def translate_paper_segments(
 ) -> AIActionResult:
     """Typed helper for ``research.paper_translate``."""
 
-    model_override = _clean_model(model) or _paper_ai_model(profile, "translation_model")
-    preferred_backend = _paper_ai_backend(profile, "translation_backend")
-    return run_ai_action(
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
         "research.paper_translate",
         {
             "source_id": source_id,
             "segments": segments,
             "target_lang": target_lang,
-            **({"ai_model": model_override} if model_override else {}),
         },
+        model=model,
+    )
+    return run_ai_action(
+        "research.paper_translate",
+        body,
         profile=profile,
         context_refs=context_refs or [source_id],
         preferred_backend=preferred_backend or None,
@@ -259,11 +271,17 @@ def explain_paper_selection(
 
     body = dict(payload or {})
     body.update({"source_id": source_id, "selected_text": selected_text})
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
+        "research.paper_explain_selection",
+        body,
+    )
     return run_ai_action(
         "research.paper_explain_selection",
         body,
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -281,7 +299,8 @@ def generate_paper_source_guide(
 ) -> AIActionResult:
     """Typed helper for ``research.paper_source_guide``."""
 
-    return run_ai_action(
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
         "research.paper_source_guide",
         {
             "source_id": source_id,
@@ -290,8 +309,13 @@ def generate_paper_source_guide(
             "chunks": chunks or [],
             "annotations": annotations or [],
         },
+    )
+    return run_ai_action(
+        "research.paper_source_guide",
+        body,
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -310,8 +334,8 @@ def generate_paper_review_card(
 ) -> AIActionResult:
     """Typed helper for ``research.paper_review_card``."""
 
-    model_override = _clean_model(model) or _paper_ai_model(profile, "deep_read_model")
-    return run_ai_action(
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
         "research.paper_review_card",
         {
             "source_id": source_id,
@@ -319,10 +343,15 @@ def generate_paper_review_card(
             "segments": segments or [],
             "chunks": chunks or [],
             "annotations": annotations or [],
-            **({"ai_model": model_override} if model_override else {}),
         },
+        model=model,
+    )
+    return run_ai_action(
+        "research.paper_review_card",
+        body,
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -340,11 +369,17 @@ def answer_paper_question(
 
     body = dict(payload or {})
     body.update({"source_id": source_id, "question": question})
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
+        "research.paper_qa",
+        body,
+    )
     return run_ai_action(
         "research.paper_qa",
         body,
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -360,11 +395,17 @@ def extract_paper_claims(
 ) -> AIActionResult:
     """Typed helper for ``research.paper_claim_extract``."""
 
-    return run_ai_action(
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
         "research.paper_claim_extract",
         {"source_id": source_id, "segments": segments or [], "chunks": chunks or []},
+    )
+    return run_ai_action(
+        "research.paper_claim_extract",
+        body,
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -382,14 +423,18 @@ def deep_read_paper_codex(
 
     body = dict(payload or {})
     body["source_id"] = source_id
-    model_override = _clean_model(model) or _paper_ai_model(profile, "deep_read_model")
-    if model_override:
-        body["codex_model"] = model_override
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
+        "research.paper_deep_read_codex",
+        body,
+        model=model,
+    )
     return run_ai_action(
         "research.paper_deep_read_codex",
         body,
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -406,11 +451,17 @@ def compare_papers_codex(
 
     body = dict(payload or {})
     body["source_ids"] = source_ids
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
+        "research.paper_compare_codex",
+        body,
+    )
     return run_ai_action(
         "research.paper_compare_codex",
         body,
         profile=profile,
         context_refs=context_refs or source_ids,
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -428,7 +479,8 @@ def draft_kanban_task_alignment(
 ) -> AIActionResult:
     """Typed helper for ``kanban.task_alignment``."""
 
-    return run_ai_action(
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
         "kanban.task_alignment",
         {
             "task_id": task_id,
@@ -437,8 +489,13 @@ def draft_kanban_task_alignment(
             "ai_context": ai_context,
             "reply_language": _reply_language_value(reply_language),
         },
+    )
+    return run_ai_action(
+        "kanban.task_alignment",
+        body,
         profile=profile if require_review else "",
         context_refs=context_refs or [],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -462,7 +519,8 @@ def draft_kanban_subtasks(
 ) -> AIActionResult:
     """Typed helper for ``kanban.subtasks``."""
 
-    return run_ai_action(
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
         "kanban.subtasks",
         {
             "task_id": task_id,
@@ -477,8 +535,13 @@ def draft_kanban_subtasks(
             "subtask_style_hint": subtask_style_hint,
             "reply_language": _reply_language_value(reply_language),
         },
+    )
+    return run_ai_action(
+        "kanban.subtasks",
+        body,
         profile=profile if require_review else "",
         context_refs=context_refs or [],
+        preferred_backend=preferred_backend,
         require_review=require_review,
     )
 
@@ -511,6 +574,109 @@ def create_remote_dev_task(
         profile=profile,
         context_refs=input_refs or [],
     )
+
+
+def _with_action_ai_preferences(
+    profile: str,
+    action_name: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    model: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Apply profile-scoped backend/model preferences to one action payload."""
+
+    body = dict(payload or {})
+    config = _action_ai_config(profile, action_name)
+    user_backend = config.get("backend") or _default_user_backend(action_name)
+    preferred_backend = _gateway_backend(config.get("backend"))
+    model_override = _clean_model(model) or str(config.get("model") or "").strip()
+    if model_override:
+        if user_backend == "codex":
+            body["codex_model"] = model_override
+        else:
+            body["ai_model"] = model_override
+    return body, preferred_backend
+
+
+def _action_ai_config(profile: str, action_name: str) -> dict[str, str]:
+    """Return the effective user-facing backend/model preference for an action."""
+
+    clean_profile = str(profile or "").strip()
+    if not clean_profile:
+        return {"backend": "", "model": ""}
+    try:
+        prefs = load_web_preferences(clean_profile)
+    except Exception:
+        return {"backend": "", "model": ""}
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    action = actions.get(action_name) if isinstance(actions.get(action_name), dict) else {}
+    backend = _user_backend_value(action.get("backend"))
+    if not action:
+        backend = _legacy_action_backend(ai, action_name)
+    effective_backend = backend or _default_user_backend(action_name)
+    model_key = "codex_model" if effective_backend == "codex" else "llm_model"
+    model = _clean_model(action.get(model_key))
+    if not model and not action:
+        model = _legacy_action_model(ai, action_name, effective_backend)
+    return {"backend": backend, "model": model}
+
+
+def _legacy_action_backend(ai: dict[str, Any], action_name: str) -> str:
+    """Read old pre-matrix backend fields when tests or profiles supply them."""
+
+    if action_name == "research.paper_translate":
+        paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
+        return _user_backend_value(paper.get("translation_backend"))
+    if action_name in {"kanban.task_alignment", "kanban.subtasks"}:
+        return _user_backend_value(ai.get("kanban_backend"))
+    return ""
+
+
+def _legacy_action_model(
+    ai: dict[str, Any],
+    action_name: str,
+    effective_backend: str,
+) -> str:
+    """Read old pre-matrix model fields when tests or profiles supply them."""
+
+    paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
+    if action_name == "research.paper_translate":
+        return _clean_model(paper.get("translation_model"))
+    if (
+        effective_backend == "codex"
+        and action_name
+        in {
+            "research.paper_search_codex",
+            "research.paper_deep_read_codex",
+            "research.paper_compare_codex",
+        }
+    ):
+        return _clean_model(paper.get("deep_read_model"))
+    return ""
+
+
+def _default_user_backend(action_name: str) -> str:
+    """Return the user-facing default backend for an action."""
+
+    value = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+    return value if value in {"llm", "codex"} else "llm"
+
+
+def _gateway_backend(user_backend: object) -> str:
+    """Map a user-facing backend value to an AI Gateway backend name."""
+
+    backend = _user_backend_value(user_backend)
+    if backend == "codex":
+        return "local_codex_readonly"
+    if backend == "llm":
+        return "direct_llm"
+    return ""
+
+
+def _user_backend_value(value: object) -> str:
+    clean = str(value or "").strip()
+    return clean if clean in {"llm", "codex"} else ""
 
 
 def _normalize_context(

@@ -27,6 +27,7 @@ from nblane.core.codex_adapter import (
     login_with_api_key,
     parse_cloud_task_id,
     parse_diff_changed_paths,
+    readable_codex_error,
     profile_codex_home,
     profile_config_template,
     refresh_codex_cloud_task,
@@ -399,6 +400,26 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertEqual(args[args.index("--sandbox") + 1], "read-only")
         self.assertNotIn("worktree", " ".join(map(str, args)))
         self.assertEqual(captured["env"].get("CODEX_HOME"), tmp)
+
+    def test_readable_codex_error_prefers_provider_error_json(self) -> None:
+        """Codex stderr banners should not hide the actual provider error."""
+
+        message = readable_codex_error(
+            "",
+            "\n".join(
+                [
+                    "OpenAI Codex v0.131.0-alpha.9",
+                    "--------",
+                    "workdir: /home/ubuntu/nblane",
+                    "model: qwen-plus",
+                    'ERROR: {"error":"端点/codex未配置模型qwen-plus"}',
+                ]
+            ),
+            "",
+            "",
+        )
+
+        self.assertEqual(message, "端点/codex未配置模型qwen-plus")
 
     def test_profile_config_template_is_valid_yaml(self) -> None:
         """Missing codex.yaml can start from a valid editable template."""

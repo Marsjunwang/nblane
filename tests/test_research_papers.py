@@ -22,8 +22,11 @@ from nblane.core.research_papers import (
     build_reader_payload,
     build_paper_layout_units,
     build_paper_structure_units,
+    build_paper_delete_preview,
     create_paper_library_node,
     create_reading_note_markdown,
+    delete_paper_reader_artifacts,
+    delete_paper_record,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
     extract_paper_figures,
@@ -66,6 +69,10 @@ from nblane.core.research_papers import (
     translate_full_paper,
     upsert_paper_library_node,
     upsert_paper_translations,
+)
+from nblane.core.paper_library_workspace import (
+    build_paper_library_payload,
+    handle_paper_library_event,
 )
 from nblane.core.research_sources import (
     ResearchSourceInbox,
@@ -286,6 +293,238 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(source_after_append.library_node_refs, [next_primary.id, secondary.id, primary.id])
         self.assertEqual(source_after_remove.library_node_refs, [next_primary.id, primary.id])
         self.assertEqual(updated.library_node_refs, [primary.id])
+
+    def test_paper_library_workspace_payload_and_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                create_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_create_collection",
+                        "payload": {"title": "Workspace"},
+                    },
+                )
+                node_id = create_result.changed["nodes"][0]
+                move_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_drop_papers_to_collection",
+                        "payload": {
+                            "node_id": node_id,
+                            "paper_ids": ["source:paper:grounded"],
+                        },
+                    },
+                )
+                payload = build_paper_library_payload(
+                    profile,
+                    current_node=node_id,
+                    detail_id="source:paper:grounded",
+                    user_id="local",
+                )
+                select_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_select_paper",
+                        "payload": {"source_id": "source:paper:grounded"},
+                    },
+                )
+            source = load_research_sources(profile).by_id()["source:paper:grounded"]
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                trash_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_trash_collection",
+                        "payload": {"node_id": node_id, "paper_policy": "move_to_unsorted"},
+                    },
+                )
+                trash_payload = build_paper_library_payload(profile, user_id="local")
+                restore_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_restore_collection",
+                        "payload": {"node_id": node_id},
+                    },
+                )
+                restored_payload = build_paper_library_payload(profile, user_id="local")
+                handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_trash_collection",
+                        "payload": {"node_id": node_id, "paper_policy": "move_to_unsorted"},
+                    },
+                )
+                purge_result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_purge_collection",
+                        "payload": {"node_id": node_id, "paper_policy": "move_to_unsorted"},
+                    },
+                )
+                purged_payload = build_paper_library_payload(profile, user_id="local")
+
+        self.assertTrue(create_result.ok)
+        self.assertEqual(move_result.changed["sources"], ["source:paper:grounded"])
+        self.assertEqual(source.library_node_refs, [node_id])
+        self.assertEqual(payload["active_node_id"], node_id)
+        self.assertEqual(payload["papers"][0]["id"], "source:paper:grounded")
+        self.assertEqual(payload["detail"]["source_id"], "source:paper:grounded")
+        self.assertEqual(payload["detail"]["primary_node_id"], node_id)
+        self.assertEqual(select_result.next["detail_id"], "source:paper:grounded")
+        self.assertEqual(trash_result.changed["nodes"], [node_id])
+        trash_section = next(section for section in trash_payload["sections"] if section["id"] == "collections")
+        trash_root = next(item for item in trash_section["items"] if item["id"] == "collections:trash")
+        self.assertEqual(trash_root["children"][0]["id"], node_id)
+        self.assertEqual(trash_root["children"][0]["type"], "collection_trash")
+        self.assertEqual(restore_result.changed["nodes"], [node_id])
+        restored_section = next(section for section in restored_payload["sections"] if section["id"] == "collections")
+        restored_root = next(item for item in restored_section["items"] if item["id"] == "collections:all")
+        self.assertEqual(restored_root["children"][0]["id"], node_id)
+        self.assertEqual(purge_result.changed["nodes"], [node_id])
+        purged_section = next(section for section in purged_payload["sections"] if section["id"] == "collections")
+        self.assertFalse(any(item["id"] == "collections:trash" for item in purged_section["items"]))
+        self.assertEqual(payload["metrics"]["papers"], 1)
+        self.assertEqual(select_result.next["detail_id"], "source:paper:grounded")
+
+    def test_paper_library_status_action_is_visible_in_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_update_papers_status",
+                        "payload": {
+                            "paper_ids": ["source:paper:grounded"],
+                            "status": "discarded",
+                        },
+                    },
+                )
+                discarded_payload = build_paper_library_payload(
+                    profile,
+                    current_view="discarded",
+                    detail_id="source:paper:grounded",
+                    user_id="local",
+                )
+                all_payload = build_paper_library_payload(profile, current_view="all", user_id="local")
+
+            source = load_research_sources(profile).by_id()["source:paper:grounded"]
+
+        self.assertEqual(source.status, "discarded")
+        self.assertEqual(result.changed["sources"], ["source:paper:grounded"])
+        self.assertEqual(result.message, "Discarded 1 paper.")
+        self.assertEqual(discarded_payload["papers"][0]["status"], "discarded")
+        self.assertEqual(discarded_payload["papers"][0]["status_label"], "Discarded")
+        self.assertEqual(discarded_payload["detail"]["status_label"], "Discarded")
+        self.assertIn("source:paper:grounded", [paper["id"] for paper in all_payload["papers"]])
+
+    def test_delete_paper_record_previews_and_preserves_assets_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                import_paper_pdf(profile, "source:paper:grounded", PDF_BYTES, "paper.pdf")
+                save_paper_pages(
+                    profile,
+                    "source:paper:grounded",
+                    [PaperPage(source_id="source:paper:grounded", page=1, text="Page text.")],
+                )
+                asset_path = paper_pdf_asset_path(profile, "source:paper:grounded")
+                preview = build_paper_delete_preview(profile, ["source:paper:grounded"])
+                result = delete_paper_record(profile, ["source:paper:grounded"])
+
+            sources = load_research_sources(profile).by_id()
+
+            self.assertTrue(preview["can_delete"])
+            self.assertEqual(preview["totals"]["artifact_files"], 1)
+            self.assertEqual(result["deleted_sources"], ["source:paper:grounded"])
+            self.assertEqual(result["deleted_pdf_assets"], [])
+            self.assertNotIn("source:paper:grounded", sources)
+            self.assertTrue(asset_path.exists())
+            self.assertTrue((profile / "research" / "paper-pages" / "source-paper-grounded.jsonl").exists())
+
+    def test_delete_paper_record_can_delete_pdf_asset_when_unreferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                import_paper_pdf(profile, "source:paper:grounded", PDF_BYTES, "paper.pdf")
+                asset_ref = load_research_sources(profile).by_id()["source:paper:grounded"].metadata["pdf_asset_ref"]
+                asset_path = paper_pdf_asset_path(profile, "source:paper:grounded")
+                result = delete_paper_record(
+                    profile,
+                    ["source:paper:grounded"],
+                    delete_pdf_asset=True,
+                )
+
+            self.assertEqual(result["deleted_pdf_assets"], [asset_ref])
+            self.assertFalse(asset_path.exists())
+
+    def test_delete_paper_record_blocks_referenced_papers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                ann = create_paper_annotation(
+                    profile,
+                    "source:paper:grounded",
+                    "Important quote.",
+                    page=1,
+                )
+                chunk = create_chunk(
+                    profile,
+                    "source:paper:grounded",
+                    "Reusable quote.",
+                    locator="p. 1",
+                )
+                claim = upsert_research_claim(
+                    profile,
+                    "This paper supports the claim.",
+                    source_refs=["source:paper:grounded"],
+                    chunk_refs=[chunk.id],
+                )
+                citation = create_citation(
+                    profile,
+                    claim.id,
+                    source_id="source:paper:grounded",
+                    chunk_id=chunk.id,
+                )
+                preview = build_paper_delete_preview(profile, ["source:paper:grounded"])
+
+            blocker_types = {row["type"] for row in preview["blocking_refs"]}
+            self.assertIn("annotation", blocker_types)
+            self.assertIn("chunk", blocker_types)
+            self.assertIn("claim", blocker_types)
+            self.assertIn("citation", blocker_types)
+            self.assertIn(ann.id, preview["papers"][0]["refs"]["active_annotations"])
+            self.assertIn(citation.id, preview["papers"][0]["refs"]["citations"])
+            with self.assertRaisesRegex(ValueError, "blocked"):
+                delete_paper_record(profile, ["source:paper:grounded"])
+            with self.assertRaisesRegex(ValueError, "blocked"):
+                delete_paper_reader_artifacts(profile, "source:paper:grounded")
 
     def test_paper_rows_support_library_workbench_views(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

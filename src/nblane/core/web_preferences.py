@@ -24,6 +24,19 @@ _SECRET_KEY_RE = re.compile(
 _AI_BACKENDS = {"llm", "codex"}
 _LANGUAGES = {"en", "zh"}
 _GRANULARITIES = {"milestone", "checklist", "implementation"}
+AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
+    "research.paper_search_codex": "codex",
+    "research.paper_translate": "llm",
+    "research.paper_explain_selection": "llm",
+    "research.paper_source_guide": "llm",
+    "research.paper_review_card": "llm",
+    "research.paper_qa": "llm",
+    "research.paper_claim_extract": "llm",
+    "research.paper_deep_read_codex": "codex",
+    "research.paper_compare_codex": "codex",
+    "kanban.task_alignment": "llm",
+    "kanban.subtasks": "llm",
+}
 
 
 def _now() -> str:
@@ -95,6 +108,7 @@ def normalize_web_preferences(
     ai = source.get("ai") if isinstance(source.get("ai"), dict) else {}
     llm = ai.get("llm") if isinstance(ai.get("llm"), dict) else {}
     paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
     kanban = source.get("kanban") if isinstance(source.get("kanban"), dict) else {}
     backend = _clean_text(ai.get("kanban_backend"))
     ui_lang = _language(llm.get("ui_lang"))
@@ -121,6 +135,7 @@ def normalize_web_preferences(
                 "translation_model": _clean_text(paper.get("translation_model")),
                 "deep_read_model": _clean_text(paper.get("deep_read_model")),
             },
+            "actions": _normalize_ai_actions(actions, paper, backend),
             "kanban_backend": backend if backend in _AI_BACKENDS else "",
         },
         "kanban": {
@@ -150,6 +165,92 @@ def backend_value(value: Any) -> str:
     return clean if clean in _AI_BACKENDS else ""
 
 
+def _normalize_ai_actions(
+    raw: dict[str, Any],
+    paper: dict[str, Any],
+    kanban_backend: str,
+) -> dict[str, dict[str, str]]:
+    """Return the per-feature AI routing/model matrix."""
+
+    actions: dict[str, dict[str, str]] = {}
+    for action_name in AI_ACTION_DEFAULT_BACKENDS:
+        source = raw.get(action_name) if isinstance(raw.get(action_name), dict) else {}
+        actions[action_name] = _normalize_ai_action(action_name, source)
+
+    _apply_legacy_paper_preferences(actions, paper)
+    _apply_legacy_kanban_preferences(actions, kanban_backend)
+    return actions
+
+
+def _normalize_ai_action(action_name: str, raw: dict[str, Any]) -> dict[str, str]:
+    """Normalize one non-secret action routing preference."""
+
+    backend = backend_value(raw.get("backend"))
+    model = _clean_text(raw.get("model") or raw.get("ai_model"))
+    llm_model = _clean_text(raw.get("llm_model"))
+    codex_model = _clean_text(raw.get("codex_model"))
+    if model:
+        if backend == "codex" and not codex_model:
+            codex_model = model
+        elif backend == "llm" and not llm_model:
+            llm_model = model
+        elif not backend:
+            default_backend = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+            if default_backend == "codex" and not codex_model:
+                codex_model = model
+            elif not llm_model:
+                llm_model = model
+    return {
+        "backend": backend,
+        "llm_model": llm_model,
+        "codex_model": codex_model,
+    }
+
+
+def _apply_legacy_paper_preferences(
+    actions: dict[str, dict[str, str]],
+    paper: dict[str, Any],
+) -> None:
+    translation = actions.get("research.paper_translate")
+    if isinstance(translation, dict):
+        backend = backend_value(paper.get("translation_backend"))
+        if backend and not translation.get("backend"):
+            translation["backend"] = backend
+        model = _clean_text(paper.get("translation_model"))
+        if model:
+            target_key = (
+                "codex_model"
+                if (translation.get("backend") or "llm") == "codex"
+                else "llm_model"
+            )
+            if not translation.get(target_key):
+                translation[target_key] = model
+
+    deep_read_model = _clean_text(paper.get("deep_read_model"))
+    if deep_read_model:
+        for action_name in (
+            "research.paper_search_codex",
+            "research.paper_deep_read_codex",
+            "research.paper_compare_codex",
+        ):
+            action = actions.get(action_name)
+            if isinstance(action, dict) and not action.get("codex_model"):
+                action["codex_model"] = deep_read_model
+
+
+def _apply_legacy_kanban_preferences(
+    actions: dict[str, dict[str, str]],
+    kanban_backend: str,
+) -> None:
+    backend = backend_value(kanban_backend)
+    if not backend:
+        return
+    for action_name in ("kanban.task_alignment", "kanban.subtasks"):
+        action = actions.get(action_name)
+        if isinstance(action, dict) and not action.get("backend"):
+            action["backend"] = backend
+
+
 def _strip_secret_keys(value: Any) -> Any:
     if isinstance(value, dict):
         out: dict[str, Any] = {}
@@ -173,6 +274,7 @@ def _language(value: object) -> str:
 
 
 __all__ = [
+    "AI_ACTION_DEFAULT_BACKENDS",
     "WEB_PREFERENCES_FILENAME",
     "WEB_PREFERENCES_SCHEMA_VERSION",
     "load_web_preferences",

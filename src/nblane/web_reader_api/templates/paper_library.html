@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paper Library · nblane</title>
+    {% for href in styles %}
+    <link rel="stylesheet" href="{{ href }}" />
+    {% endfor %}
+    <style>
+      html,
+      body {
+        min-height: 100%;
+        background: #f5f7fa;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__ = {
+        runtime: "standalone",
+        profile: {{ profile_json | safe }}
+      };
+    </script>
+    {% for src in scripts %}
+    <script type="module" src="{{ src }}"></script>
+    {% endfor %}
+  </body>
+</html>

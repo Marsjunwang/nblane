@@ -29,6 +29,8 @@ class TestWebPreferences(unittest.TestCase):
 
         self.assertEqual(prefs["profile"], "alice")
         self.assertEqual(prefs["ai"]["kanban_backend"], "")
+        self.assertIn("research.paper_translate", prefs["ai"]["actions"])
+        self.assertEqual(prefs["ai"]["actions"]["research.paper_translate"]["backend"], "")
         self.assertEqual(prefs["kanban"]["subtask_granularity"], "")
 
     def test_save_and_load_profile_scoped_preferences(self) -> None:
@@ -63,6 +65,16 @@ class TestWebPreferences(unittest.TestCase):
                                 "translation_model": "qwen-plus",
                                 "deep_read_model": "gpt-5.1-codex",
                             },
+                            "actions": {
+                                "research.paper_review_card": {
+                                    "backend": "codex",
+                                    "codex_model": "gpt-5.1-codex",
+                                },
+                                "kanban.subtasks": {
+                                    "backend": "llm",
+                                    "llm_model": "qwen-max",
+                                },
+                            },
                             "kanban_backend": "codex",
                         },
                         "kanban": {
@@ -82,10 +94,18 @@ class TestWebPreferences(unittest.TestCase):
         self.assertEqual(alice["ai"]["paper"]["translation_backend"], "codex")
         self.assertEqual(alice["ai"]["paper"]["translation_model"], "qwen-plus")
         self.assertEqual(alice["ai"]["paper"]["deep_read_model"], "gpt-5.1-codex")
+        self.assertEqual(alice["ai"]["actions"]["research.paper_translate"]["backend"], "codex")
+        self.assertEqual(alice["ai"]["actions"]["research.paper_translate"]["codex_model"], "qwen-plus")
+        self.assertEqual(alice["ai"]["actions"]["research.paper_review_card"]["backend"], "codex")
+        self.assertEqual(alice["ai"]["actions"]["research.paper_review_card"]["codex_model"], "gpt-5.1-codex")
+        self.assertEqual(alice["ai"]["actions"]["kanban.subtasks"]["backend"], "llm")
+        self.assertEqual(alice["ai"]["actions"]["kanban.subtasks"]["llm_model"], "qwen-max")
         self.assertEqual(alice["ai"]["kanban_backend"], "codex")
+        self.assertEqual(alice["ai"]["actions"]["kanban.task_alignment"]["backend"], "codex")
         self.assertEqual(alice["kanban"]["subtask_granularity"], "checklist")
         self.assertEqual(alice["kanban"]["subtask_style_hint"], "artifact-first")
         self.assertEqual(bob["ai"]["kanban_backend"], "llm")
+        self.assertEqual(bob["ai"]["actions"]["kanban.subtasks"]["backend"], "llm")
         self.assertNotEqual(web_preferences_path(root / "alice"), web_preferences_path(root / "bob"))
 
     def test_secret_like_fields_are_not_normalized_or_saved(self) -> None:
@@ -100,6 +120,22 @@ class TestWebPreferences(unittest.TestCase):
                     "authorization": "Bearer nope",
                 },
                 "kanban_backend": "codex",
+                "actions": {
+                    "research.paper_translate": {
+                        "backend": "llm",
+                        "llm_model": "qwen-plus",
+                        "api_key": "sk-should-not-save",
+                    },
+                    "research.paper_search_codex": {
+                        "backend": "codex",
+                        "codex_model": "gpt-5.1-codex",
+                        "token": "tok",
+                    },
+                    "unknown.action": {
+                        "backend": "codex",
+                        "codex_model": "not-normalized",
+                    },
+                },
                 "secret": {"nested": "nope"},
             },
             "kanban": {
@@ -116,6 +152,9 @@ class TestWebPreferences(unittest.TestCase):
 
         self.assertEqual(normalized["ai"]["llm"]["provider"], "OpenAI")
         self.assertEqual(normalized["ai"]["kanban_backend"], "codex")
+        self.assertEqual(normalized["ai"]["actions"]["research.paper_translate"]["llm_model"], "qwen-plus")
+        self.assertEqual(normalized["ai"]["actions"]["research.paper_search_codex"]["codex_model"], "gpt-5.1-codex")
+        self.assertNotIn("unknown.action", normalized["ai"]["actions"])
         self.assertNotIn("sk-should-not-save", dumped)
         self.assertNotIn("authorization", dumped)
         self.assertNotIn("password", dumped)

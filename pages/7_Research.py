@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import html
+import re
+import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +28,15 @@ from nblane.core.ai import (
 )
 from nblane.core.io import profile_dir
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
-from nblane.core.web_preferences import load_web_preferences, update_web_preferences
+from nblane.core.web_preferences import (
+    AI_ACTION_DEFAULT_BACKENDS,
+    load_web_preferences,
+    update_web_preferences,
+)
+from nblane.core.paper_library_workspace import (
+    build_paper_library_payload,
+    handle_paper_library_event,
+)
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperSearchResult,
@@ -146,6 +156,7 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
+    kanban_ai_backend_key,
     select_profile,
     stash_git_backup_results,
 )
@@ -193,7 +204,8 @@ def _l(key: str, default: str) -> str:
 
 _MODEL_DEFAULT = "__default__"
 _MODEL_CUSTOM = "__custom__"
-_PAPER_MODEL_SUGGESTIONS = (
+_BACKEND_DEFAULT = "__default__"
+_LLM_MODEL_SUGGESTIONS = (
     "qwen3.6-plus",
     "qwen-plus",
     "qwen-max",
@@ -201,30 +213,108 @@ _PAPER_MODEL_SUGGESTIONS = (
     "deepseek-reasoner",
     "gpt-4o",
     "gpt-4o-mini",
+)
+_CODEX_MODEL_SUGGESTIONS = (
+    "gpt-5.5",
     "gpt-5.1-codex",
+    "gpt-5-codex",
+)
+_AI_CONFIG_GROUPS = (
+    (
+        "paper",
+        "Paper",
+        (
+            (
+                "research.paper_search_codex",
+                "Paper search",
+                "Search and candidate discovery.",
+            ),
+            (
+                "research.paper_translate",
+                "Paper translation",
+                "Full paper, visible pages, and selection translation.",
+            ),
+            (
+                "research.paper_review_card",
+                "Paper review",
+                "Analyze Paper / review card generation.",
+            ),
+            (
+                "research.paper_source_guide",
+                "Source guide",
+                "Structured paper summary and reading guide.",
+            ),
+            (
+                "research.paper_qa",
+                "Paper Q&A",
+                "Ask-paper answers from reader context.",
+            ),
+            (
+                "research.paper_claim_extract",
+                "Claim extraction",
+                "Research claim candidates from paper text.",
+            ),
+            (
+                "research.paper_deep_read_codex",
+                "Deep read",
+                "High-depth paper analysis candidate.",
+            ),
+            (
+                "research.paper_compare_codex",
+                "Paper compare",
+                "Compare multiple imported papers.",
+            ),
+        ),
+    ),
+    (
+        "kanban",
+        "Kanban",
+        (
+            (
+                "kanban.task_alignment",
+                "Task alignment",
+                "Clarify underspecified Kanban cards before drafting.",
+            ),
+            (
+                "kanban.subtasks",
+                "Subtask drafts",
+                "Generate reviewable subtasks for a Kanban card.",
+            ),
+        ),
+    ),
 )
 
 
-def _paper_ai_prefs() -> dict[str, str]:
+def _ai_action_prefs() -> dict[str, dict[str, str]]:
     prefs = load_web_preferences(selected)
     ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
-    paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
-    return {
-        "translation_backend": str(paper.get("translation_backend") or "").strip(),
-        "translation_model": str(paper.get("translation_model") or "").strip(),
-        "deep_read_model": str(paper.get("deep_read_model") or "").strip(),
-    }
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    out: dict[str, dict[str, str]] = {}
+    for action_name in AI_ACTION_DEFAULT_BACKENDS:
+        action = actions.get(action_name) if isinstance(actions.get(action_name), dict) else {}
+        out[action_name] = {
+            "backend": str(action.get("backend") or "").strip(),
+            "llm_model": str(action.get("llm_model") or "").strip(),
+            "codex_model": str(action.get("codex_model") or "").strip(),
+        }
+    return out
 
 
-def _model_picker(label: str, pref_name: str, current: str, default_model: str) -> str:
-    suggestions: list[str] = []
-    for value in (default_model, *_PAPER_MODEL_SUGGESTIONS):
+def _model_picker(
+    label: str,
+    pref_name: str,
+    current: str,
+    default_model: str,
+    suggestions: tuple[str, ...],
+) -> str:
+    model_suggestions: list[str] = []
+    for value in (default_model, *suggestions):
         clean = str(value or "").strip()
-        if clean and clean not in suggestions:
-            suggestions.append(clean)
+        if clean and clean not in model_suggestions:
+            model_suggestions.append(clean)
     current = str(current or "").strip()
-    options = [_MODEL_DEFAULT, *suggestions, _MODEL_CUSTOM]
-    if current and current not in suggestions:
+    options = [_MODEL_DEFAULT, *model_suggestions, _MODEL_CUSTOM]
+    if current and current not in model_suggestions:
         initial = _MODEL_CUSTOM
     elif current:
         initial = current
@@ -241,67 +331,137 @@ def _model_picker(label: str, pref_name: str, current: str, default_model: str) 
             if value == _MODEL_CUSTOM
             else value
         ),
-        key=f"paper_ai_config:{selected}:{pref_name}:choice",
+        key=f"ai_config:{selected}:{pref_name}:choice",
     )
     if choice == _MODEL_DEFAULT:
         return ""
     if choice == _MODEL_CUSTOM:
         return st.text_input(
             _l("ai_config_custom_model", "Custom model"),
-            value=current if current and current not in suggestions else "",
-            key=f"paper_ai_config:{selected}:{pref_name}:custom",
+            value=current if current and current not in model_suggestions else "",
+            key=f"ai_config:{selected}:{pref_name}:custom",
         ).strip()
     return str(choice).strip()
 
 
-def _backend_picker(label: str, pref_name: str, current: str) -> str:
-    options = [_MODEL_DEFAULT, "llm", "codex"]
+def _backend_picker(label: str, pref_name: str, current: str, default_backend: str) -> str:
+    options = [_BACKEND_DEFAULT, "llm", "codex"]
     current = str(current or "").strip()
-    initial = current if current in {"llm", "codex"} else _MODEL_DEFAULT
+    initial = current if current in {"llm", "codex"} else _BACKEND_DEFAULT
     choice = st.selectbox(
         label,
         options,
         index=options.index(initial),
         format_func=lambda value: (
-            _l("ai_config_use_default", "Use app default")
-            if value == _MODEL_DEFAULT
+            f"{_l('ai_config_use_default', 'Use app default')} ({_backend_label(default_backend)})"
+            if value == _BACKEND_DEFAULT
             else "LLM"
             if value == "llm"
             else "Codex"
         ),
-        key=f"paper_ai_config:{selected}:{pref_name}:choice",
+        key=f"ai_config:{selected}:{pref_name}:choice",
     )
-    return "" if choice == _MODEL_DEFAULT else str(choice).strip()
+    return "" if choice == _BACKEND_DEFAULT else str(choice).strip()
 
 
-def _effective_model_caption(label: str, configured: str, default_model: str) -> str:
-    configured = str(configured or "").strip()
-    default_model = str(default_model or "").strip()
-    missing = _l("missing", "missing")
-    if configured:
-        if default_model and configured != default_model:
-            model = f"{configured} ({_l('ai_config_overrides_default', 'overrides default')} {default_model})"
-        else:
-            model = configured
-    else:
-        model = f"{_l('ai_config_use_default', 'Use app default')}: {default_model or missing}"
-    return f"{label}: {model}"
+def _backend_label(backend: str) -> str:
+    return "Codex" if backend == "codex" else "LLM"
 
 
-def _effective_backend_caption(label: str, configured: str) -> str:
-    configured = str(configured or "").strip()
-    if configured == "codex":
-        value = "Codex"
-    elif configured == "llm":
-        value = "LLM"
-    else:
-        value = f"{_l('ai_config_use_default', 'Use app default')}: LLM"
-    return f"{label}: {value}"
+def _default_backend_for_action(action_name: str) -> str:
+    backend = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+    return backend if backend in {"llm", "codex"} else "llm"
 
 
-def _run_llm_availability_test(model: str) -> None:
+def _effective_backend(action_name: str, config: dict[str, str]) -> str:
+    configured = str(config.get("backend") or "").strip()
+    return configured if configured in {"llm", "codex"} else _default_backend_for_action(action_name)
+
+
+def _effective_model(
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> str:
+    backend = _effective_backend(action_name, config)
+    if backend == "codex":
+        return str(config.get("codex_model") or codex_default or "").strip()
+    return str(config.get("llm_model") or llm_default or "").strip()
+
+
+def _effective_action_caption(
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> str:
+    backend = _effective_backend(action_name, config)
+    model = _effective_model(
+        action_name,
+        config,
+        llm_default=llm_default,
+        codex_default=codex_default,
+    )
+    model_label = model or (
+        _l("ai_config_codex_cli_default", "Codex CLI default")
+        if backend == "codex"
+        else _l("missing", "missing")
+    )
+    test = _model_test_summary(backend, model, action_name=action_name)
+    bits = [
+        f"{_l('ai_config_effective_backend', 'Effective backend')}: {_backend_label(backend)}",
+        f"{_l('ai_config_effective_model', 'Effective model')}: {model_label}",
+    ]
+    if test:
+        bits.append(test)
+    return " · ".join(bits)
+
+
+def _model_test_key(backend: str, model: str, *, action_name: str = "") -> str:
+    safe_model = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(model or "default")).strip("_")
+    safe_action = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(action_name or "global")).strip("_")
+    return f"ai_config:{selected}:test:{safe_action or 'global'}:{backend}:{safe_model or 'default'}"
+
+
+def _record_model_test(
+    backend: str,
+    model: str,
+    ok: bool,
+    latency: float,
+    message: str,
+    *,
+    action_name: str = "",
+) -> None:
+    st.session_state[_model_test_key(backend, model, action_name=action_name)] = {
+        "ok": bool(ok),
+        "latency": float(latency),
+        "message": str(message or "").strip()[:240],
+        "tested_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+def _model_test_summary(backend: str, model: str, *, action_name: str = "") -> str:
+    result = st.session_state.get(_model_test_key(backend, model, action_name=action_name))
+    if not isinstance(result, dict):
+        return ""
+    status = (
+        _l("ai_config_available", "available")
+        if result.get("ok")
+        else _l("ai_config_unavailable", "unavailable")
+    )
+    latency = float(result.get("latency") or 0.0)
+    return f"{status}, {latency:.1f}s"
+
+
+def _run_llm_availability_test(model: str, *, action_name: str = "") -> None:
+    started = time.perf_counter()
     if not llm_client.is_configured():
-        st.warning(_l("ai_config_llm_unconfigured", "LLM API key is not configured."))
+        message = _l("ai_config_llm_unconfigured", "LLM API key is not configured.")
+        _record_model_test("llm", model, False, time.perf_counter() - started, message, action_name=action_name)
+        st.warning(message)
         return
     reply = llm_client.chat(
         "Return exactly OK. No prose.",
@@ -309,13 +469,19 @@ def _run_llm_availability_test(model: str) -> None:
         temperature=0,
         model=str(model or "").strip() or None,
     )
+    latency = time.perf_counter() - started
     if reply.startswith("LLM error:") or reply.startswith("AI features not configured"):
+        _record_model_test("llm", model, False, latency, reply, action_name=action_name)
         st.warning(reply)
     else:
-        st.success(_l("ai_config_model_available", "Model test succeeded."))
+        _record_model_test("llm", model, True, latency, reply or "OK", action_name=action_name)
+        st.success(
+            f"{_l('ai_config_model_available', 'Model test succeeded.')} ({latency:.1f}s)"
+        )
 
 
-def _run_codex_availability_test(model: str) -> None:
+def _run_codex_availability_test(model: str, *, action_name: str = "") -> None:
+    started = time.perf_counter()
     cfg = codex_adapter.current_config(profile=selected)
     if str(model or "").strip():
         cfg = replace(cfg, model=str(model or "").strip())
@@ -325,103 +491,210 @@ def _run_codex_availability_test(model: str) -> None:
         config=cfg,
         timeout_seconds=min(float(cfg.timeout_seconds or 30.0), 30.0),
     )
+    latency = time.perf_counter() - started
     if result.ok:
-        st.success(_l("ai_config_model_available", "Model test succeeded."))
+        _record_model_test("codex", model, True, latency, result.output or "OK", action_name=action_name)
+        st.success(
+            f"{_l('ai_config_model_available', 'Model test succeeded.')} ({latency:.1f}s)"
+        )
     else:
-        st.warning(codex_adapter.readable_codex_error(result.error, result.stderr, result.output, result.stdout))
+        message = codex_adapter.readable_codex_error(
+            result.error,
+            result.stderr,
+            result.output,
+            result.stdout,
+        )
+        _record_model_test("codex", model, False, latency, message, action_name=action_name)
+        st.warning(message)
+
+
+def _run_action_availability_test(
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> None:
+    backend = _effective_backend(action_name, config)
+    model = _effective_model(
+        action_name,
+        config,
+        llm_default=llm_default,
+        codex_default=codex_default,
+    )
+    if backend == "codex":
+        _run_codex_availability_test(model, action_name=action_name)
+    else:
+        _run_llm_availability_test(model, action_name=action_name)
+
+
+def _render_action_config_row(
+    action_name: str,
+    label: str,
+    help_text: str,
+    current: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> dict[str, str]:
+    default_backend = _default_backend_for_action(action_name)
+    st.markdown(f"**{label}**")
+    st.caption(help_text)
+    cols = st.columns([1.05, 1.25, 1.25, 0.85], gap="small")
+    with cols[0]:
+        backend = _backend_picker(
+            _l("ai_config_backend", "Backend"),
+            f"{action_name}:backend",
+            current.get("backend", ""),
+            default_backend,
+        )
+    with cols[1]:
+        llm_model = _model_picker(
+            _l("ai_config_llm_model", "LLM model"),
+            f"{action_name}:llm_model",
+            current.get("llm_model", ""),
+            llm_default,
+            _LLM_MODEL_SUGGESTIONS,
+        )
+    with cols[2]:
+        codex_model = _model_picker(
+            _l("ai_config_codex_model", "Codex model"),
+            f"{action_name}:codex_model",
+            current.get("codex_model", ""),
+            codex_default,
+            _CODEX_MODEL_SUGGESTIONS,
+        )
+    test_clicked = False
+    with cols[3]:
+        st.caption(_l("ai_config_test", "Test"))
+        test_clicked = st.form_submit_button(
+            _l("ai_config_test_model", "Test model"),
+            key=f"ai_config:{selected}:{action_name}:test_model",
+            use_container_width=True,
+        )
+    next_config = {
+        "backend": backend,
+        "llm_model": llm_model,
+        "codex_model": codex_model,
+    }
+    st.caption(
+        _effective_action_caption(
+            action_name,
+            next_config,
+            llm_default=llm_default,
+            codex_default=codex_default,
+        )
+    )
+    if test_clicked:
+        _run_action_availability_test(
+            action_name,
+            next_config,
+            llm_default=llm_default,
+            codex_default=codex_default,
+        )
+    return next_config
+
+
+def _legacy_ai_patch(actions: dict[str, dict[str, str]]) -> dict[str, object]:
+    translation = actions.get("research.paper_translate", {})
+    translation_backend = str(translation.get("backend") or "").strip()
+    translation_model = (
+        str(translation.get("codex_model") or "").strip()
+        if translation_backend == "codex"
+        else str(translation.get("llm_model") or "").strip()
+    )
+    deep_read = actions.get("research.paper_deep_read_codex", {})
+    search = actions.get("research.paper_search_codex", {})
+    deep_read_model = (
+        str(deep_read.get("codex_model") or "").strip()
+        or str(search.get("codex_model") or "").strip()
+    )
+    kanban_subtasks = actions.get("kanban.subtasks", {})
+    kanban_backend = str(kanban_subtasks.get("backend") or "").strip()
+    return {
+        "paper": {
+            "translation_backend": translation_backend,
+            "translation_model": translation_model,
+            "deep_read_model": deep_read_model,
+        },
+        "kanban_backend": kanban_backend,
+    }
+
+
+def _action_label_map() -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for _group_key, _group_label, rows in _AI_CONFIG_GROUPS:
+        for action_name, label, _help_text in rows:
+            labels[action_name] = label
+    return labels
 
 
 def _render_ai_config_panel() -> None:
-    prefs = _paper_ai_prefs()
+    actions = _ai_action_prefs()
     llm_default = str(llm_client.current_config(mask_key=True).get("model") or "").strip()
     codex_cfg = codex_adapter.current_config(profile=selected)
-    codex_default = str(codex_cfg.model or "").strip() or llm_default
-    with st.form(f"paper_ai_config_form:{selected}", border=False):
-        st.caption(
-            _l(
-                "ai_config_caption",
-                "Choose paper-reading backends and models. Leave a field on app default to follow the global sidebar/runtime configuration.",
-            )
-        )
-        default_bits = [
-            _effective_backend_caption(
-                _l("ai_config_translation_backend", "Translation backend"),
-                prefs["translation_backend"],
-            ),
-            _effective_model_caption(
-                _l("ai_config_translation_model", "Translation model"),
-                prefs["translation_model"],
-                codex_default if prefs["translation_backend"] == "codex" else llm_default,
-            ),
-            _effective_model_caption(
-                _l("ai_config_deep_read_model", "DeepRead model"),
-                prefs["deep_read_model"],
-                codex_default,
-            ),
-        ]
-        st.caption(" · ".join(default_bits))
-        translation_backend = _backend_picker(
-            _l("ai_config_translation_backend", "Translation backend"),
-            "translation_backend",
-            prefs["translation_backend"],
-        )
-        translation_backend_effective = translation_backend or prefs["translation_backend"] or "llm"
-        translation_model = _model_picker(
-            _l("ai_config_translation_model", "Translation model"),
-            "translation_model",
-            prefs["translation_model"],
-            codex_default if translation_backend_effective == "codex" else llm_default,
-        )
-        deep_read_model = _model_picker(
-            _l("ai_config_deep_read_model", "DeepRead model"),
-            "deep_read_model",
-            prefs["deep_read_model"],
-            codex_default,
-        )
-        if st.form_submit_button(_l("save", "Save"), type="primary", use_container_width=True):
-            update_web_preferences(
-                selected,
-                {
-                    "ai": {
-                        "paper": {
-                            "translation_backend": translation_backend,
-                            "translation_model": translation_model,
-                            "deep_read_model": deep_read_model,
-                        }
-                    }
-                },
-            )
-            st.success(_l("ai_config_saved", "AI preferences saved."))
-            st.rerun()
+    codex_default = str(codex_cfg.model or "").strip()
     llm_cfg = llm_client.current_config(mask_key=True)
-    codex_status = codex_adapter.codex_status(replace(codex_cfg, timeout_seconds=min(float(codex_cfg.timeout_seconds or 8.0), 8.0)))
-    status_cols = st.columns(2)
-    with status_cols[0]:
+    codex_status = codex_adapter.codex_status(
+        replace(
+            codex_cfg,
+            timeout_seconds=min(float(codex_cfg.timeout_seconds or 8.0), 8.0),
+        )
+    )
+    runtime_cols = st.columns(2)
+    with runtime_cols[0]:
         st.caption(
             f"LLM: {'configured' if llm_cfg.get('configured') else 'missing key'} · "
             f"{llm_cfg.get('model') or _l('missing', 'missing')}"
         )
-        if st.button(
-            _l("ai_config_test_llm", "Test LLM model"),
-            key=f"paper_ai_config:{selected}:test_llm",
-            use_container_width=True,
-        ):
-            _run_llm_availability_test(prefs["translation_model"] or llm_default)
-    with status_cols[1]:
+    with runtime_cols[1]:
         codex_bits = [
             "installed" if codex_status.installed else "missing",
             "logged in" if codex_status.logged_in else "login unknown",
-            codex_cfg.model or _l("ai_config_use_default", "Use app default"),
+            codex_cfg.model or _l("ai_config_codex_cli_default", "Codex CLI default"),
         ]
         st.caption("Codex: " + " · ".join(codex_bits))
         if codex_status.error:
             st.caption(codex_status.error)
-        if st.button(
-            _l("ai_config_test_codex", "Test Codex model"),
-            key=f"paper_ai_config:{selected}:test_codex",
-            use_container_width=True,
-        ):
-            _run_codex_availability_test(prefs["deep_read_model"] or codex_cfg.model)
+
+    next_actions: dict[str, dict[str, str]] = {}
+    with st.form(f"ai_config_form:{selected}", border=False):
+        st.caption(
+            _l(
+                "ai_config_caption",
+                "Choose the AI backend and model per feature. Leave fields on app default to follow the global sidebar/runtime configuration.",
+            )
+        )
+        for group_key, group_label, rows in _AI_CONFIG_GROUPS:
+            with st.expander(
+                _l(f"ai_config_group_{group_key}", group_label),
+                expanded=group_key == "paper",
+            ):
+                for action_name, label, help_text in rows:
+                    next_actions[action_name] = _render_action_config_row(
+                        action_name,
+                        _l(f"ai_config_label_{action_name}", label),
+                        _l(f"ai_config_help_{action_name}", help_text),
+                        actions.get(action_name, {}),
+                        llm_default=llm_default,
+                        codex_default=codex_default,
+                    )
+        if st.form_submit_button(_l("save", "Save"), type="primary", use_container_width=True):
+            legacy_patch = _legacy_ai_patch(next_actions)
+            update_web_preferences(
+                selected,
+                {
+                    "ai": {
+                        "actions": next_actions,
+                        **legacy_patch,
+                    }
+                },
+            )
+            kanban_backend = str(legacy_patch.get("kanban_backend") or "").strip()
+            if kanban_backend:
+                st.session_state[kanban_ai_backend_key(selected)] = kanban_backend
+            st.success(_l("ai_config_saved", "AI preferences saved."))
+            st.rerun()
 
 
 def _status_label(status: str) -> str:
@@ -1182,123 +1455,60 @@ def _handle_paper_library_component_event(event: dict[str, object] | None) -> No
         return
     if event_id:
         st.session_state[dedupe_key] = event_id
-    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-
-    def selected_ids() -> list[str]:
-        raw = payload.get("paper_ids") or st.session_state.get(_paper_library_key("bulk_select"), []) or []
-        return [str(item).strip() for item in raw if str(item).strip()]
 
     try:
-        if action == "paper_library_select_view":
-            st.session_state[_paper_library_key("view")] = str(payload.get("view_id") or "all")
-            st.session_state[_paper_library_key("node")] = ""
-            st.session_state.pop(_paper_library_key("detail"), None)
-            st.rerun()
-        if action == "paper_library_select_collection":
-            st.session_state[_paper_library_key("view")] = "all"
-            st.session_state[_paper_library_key("node")] = str(payload.get("node_id") or "")
-            st.session_state.pop(_paper_library_key("detail"), None)
-            st.rerun()
-        if action == "paper_library_select_paper":
-            st.session_state[_paper_library_key("detail")] = str(payload.get("source_id") or "")
-            st.rerun()
-        if action == "paper_library_create_collection":
-            create_paper_library_node(
-                _pdir,
-                str(payload.get("title") or ""),
-                parent_id=str(payload.get("parent_id") or ""),
-            )
-        elif action == "paper_library_rename_collection":
-            rename_paper_library_node(
-                _pdir,
-                str(payload.get("node_id") or ""),
-                str(payload.get("title") or ""),
-            )
-        elif action == "paper_library_move_collection":
-            position_paper_library_node(
-                _pdir,
-                str(payload.get("node_id") or ""),
-                parent_id=str(payload.get("parent_id") or ""),
-                before_node_id=str(payload.get("before_node_id") or ""),
-                after_node_id=str(payload.get("after_node_id") or ""),
-            )
-        elif action == "paper_library_reorder_collection":
-            reorder_paper_library_node(
-                _pdir,
-                str(payload.get("node_id") or ""),
-                str(payload.get("direction") or "down"),
-            )
-        elif action == "paper_library_trash_collection":
+        source_mutating_actions = {
+            "paper_library_trash_collection",
+            "paper_library_purge_collection",
+            "paper_library_add_selected_papers_to_collection",
+            "paper_library_move_selected_papers_to_collection",
+            "paper_library_drop_papers_to_collection",
+            "paper_library_remove_papers_from_collection",
+            "paper_library_update_papers_status",
+            "paper_library_run_extraction",
+            "paper_library_auto_chunk",
+            "paper_library_delete_paper_record",
+            "paper_library_delete_paper_asset",
+            "paper_library_delete_paper_artifacts",
+            "paper_library_purge_discarded_papers",
+        }
+        if action in source_mutating_actions:
             assert_files_current([_sources_path])
-            trash_paper_library_node(
-                _pdir,
-                str(payload.get("node_id") or ""),
-                paper_policy=str(payload.get("paper_policy") or "move_to_parent"),
-            )
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_purge_collection":
-            assert_files_current([_sources_path])
-            purge_paper_library_node(
-                _pdir,
-                str(payload.get("node_id") or ""),
-                paper_policy=str(payload.get("paper_policy") or "move_to_unsorted"),
-            )
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_restore_collection":
-            restore_paper_library_node(_pdir, str(payload.get("node_id") or ""))
-        elif action == "paper_library_add_selected_papers_to_collection":
-            assert_files_current([_sources_path])
-            move_papers_to_node(
-                _pdir,
-                selected_ids(),
-                str(payload.get("node_id") or ""),
-                append=True,
-            )
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_move_selected_papers_to_collection":
-            assert_files_current([_sources_path])
-            move_papers_to_node(
-                _pdir,
-                selected_ids(),
-                str(payload.get("node_id") or ""),
-                append=False,
-            )
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_drop_papers_to_collection":
-            assert_files_current([_sources_path])
-            move_papers_to_node(
-                _pdir,
-                selected_ids(),
-                str(payload.get("node_id") or ""),
-                append=bool(payload.get("append")),
-            )
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_remove_papers_from_collection":
-            assert_files_current([_sources_path])
-            remove_papers_from_node(
-                _pdir,
-                selected_ids(),
-                str(payload.get("node_id") or ""),
-            )
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_update_papers_status":
-            assert_files_current([_sources_path])
-            next_status = str(payload.get("status") or "")
-            if next_status not in SOURCE_STATUSES:
-                raise ValueError(f"Unknown source status: {next_status}")
-            current = load_research_sources(selected)
-            for source_id in selected_ids():
-                update_research_source(current, source_id, status=next_status)
-            save_research_sources(selected, current)
-            refresh_file_snapshots([_sources_path])
-        elif action == "paper_library_run_extraction":
-            for source_id in selected_ids():
-                ensure_paper_reading_artifacts(_pdir, source_id)
-        else:
+        result = handle_paper_library_event(
+            _pdir,
+            event,
+            selected_paper_ids=[
+                str(item).strip()
+                for item in st.session_state.get(_paper_library_key("bulk_select"), []) or []
+                if str(item).strip()
+            ],
+        )
+        if not result.ok:
+            if result.message:
+                st.error(result.message)
             return
-        stash_git_backup_results()
-        clear_web_cache()
-        st.success(ui["saved"])
+        if action in source_mutating_actions:
+            refresh_file_snapshots([_sources_path])
+
+        next_state = result.next
+        if "view" in next_state:
+            st.session_state[_paper_library_key("view")] = next_state.get("view") or "all"
+        if "node_id" in next_state:
+            st.session_state[_paper_library_key("node")] = next_state.get("node_id") or ""
+        if "detail_id" in next_state:
+            detail_id = next_state.get("detail_id") or ""
+            if detail_id:
+                st.session_state[_paper_library_key("detail")] = detail_id
+            else:
+                st.session_state.pop(_paper_library_key("detail"), None)
+        if "reader_source_id" in next_state and next_state["reader_source_id"]:
+            st.session_state[f"paper_reader_source:{selected}"] = next_state["reader_source_id"]
+
+        if result.changed:
+            stash_git_backup_results()
+            clear_web_cache()
+        if result.message:
+            st.success(result.message if result.changed else result.message)
         st.rerun()
     except Exception as exc:
         st.error(str(exc))
@@ -2694,6 +2904,17 @@ def _render_paper_library(inbox) -> None:
             "Organize papers into collections, continue reading, and move each source through extraction, claims, and review.",
         )
     )
+    reader_base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+    workspace_url = f"{reader_base}/paper-library?profile={quote(selected, safe='')}" if reader_base else f"/paper-library?profile={quote(selected, safe='')}"
+    try:
+        st.link_button(
+            _l("open_paper_library_workspace", "Open Paper Library Workspace"),
+            workspace_url,
+            icon=":material/open_in_new:",
+            use_container_width=False,
+        )
+    except Exception:
+        st.caption(f"{_l('paper_library_workspace_url', 'Workspace')}: `{workspace_url}`")
     _render_paper_library_styles()
 
     all_rows = paper_rows(_pdir, view="all")
@@ -2729,77 +2950,50 @@ def _render_paper_library(inbox) -> None:
         if str(item).strip()
     ]
     if paper_library_component_available():
-        wide, right = st.columns([0.70, 0.30], gap="large")
-        with wide:
-            toolbar = st.columns([2.2, 1])
-            with toolbar[0]:
-                query = st.text_input(
-                    _l("search_library", "Search title, author, tag, note..."),
-                    key=_paper_library_key("query"),
-                    label_visibility="collapsed",
-                    placeholder=_l("search_library", "Search title, author, tag, note..."),
-                )
-            with toolbar[1]:
-                sort_mode = st.selectbox(
-                    _l("sort", "Sort"),
-                    ["recent", "added", "title", "status", "claims"],
-                    format_func=lambda item: {
-                        "recent": _l("sort_recent", "Recently read"),
-                        "added": _l("sort_added", "Recently added"),
-                        "title": ui["title_label"],
-                        "status": ui["status"],
-                        "claims": ui["research_claims"],
-                    }.get(item, item),
-                    key=_paper_library_key("sort"),
-                    label_visibility="collapsed",
-                )
-            rows = _filter_paper_library_rows(
-                paper_rows(_pdir, view=current_view, node_id=current_node),
-                query=query,
-                sort_mode=sort_mode,
+        toolbar = st.columns([2.2, 1])
+        with toolbar[0]:
+            query = st.text_input(
+                _l("search_library", "Search title, author, tag, note..."),
+                key=_paper_library_key("query"),
+                label_visibility="collapsed",
+                placeholder=_l("search_library", "Search title, author, tag, note..."),
             )
-            paper_ids = [str(row.get("id")) for row in rows]
-            detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
-            if detail_id not in paper_ids and paper_ids:
-                detail_id = paper_ids[0]
-                st.session_state[_paper_library_key("detail")] = detail_id
-            active_label = _LIBRARY_VIEW_LABELS.get(current_view, current_view)
-            if current_node:
-                active_label = node_options.get(current_node, current_node)
-            component_event = st_paper_library_tree(
-                payload=_paper_library_component_payload(
-                    tree,
-                    all_rows,
-                    current_view=current_view,
-                    current_node=current_node,
-                    selected_paper_ids=selected_paper_ids_for_tree,
-                    papers=_paper_component_rows(rows),
-                    active_label=active_label,
-                    detail_id=detail_id,
-                ),
-                key=_paper_library_key("workbench_component"),
-                height=820,
+        with toolbar[1]:
+            sort_mode = st.selectbox(
+                _l("sort", "Sort"),
+                ["recent", "added", "title", "status", "claims"],
+                format_func=lambda item: {
+                    "recent": _l("sort_recent", "Recently read"),
+                    "added": _l("sort_added", "Recently added"),
+                    "title": ui["title_label"],
+                    "status": ui["status"],
+                    "claims": ui["research_claims"],
+                }.get(item, item),
+                key=_paper_library_key("sort"),
+                label_visibility="collapsed",
             )
-            _handle_paper_library_component_event(component_event)
-            _render_library_collection_manager(tree, node_options)
-            with st.expander(_l("parser_status", "Parser status"), expanded=False):
-                _render_grobid_status_block()
-
-        with right:
-            detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
-            by_id = inbox.by_id()
-            if not detail_id and rows:
-                detail_id = str(rows[0].get("id") or "")
-                st.session_state[_paper_library_key("detail")] = detail_id
-            source = by_id.get(detail_id)
-            if source is None:
-                st.info(_l("select_paper_detail_hint", "Select a paper to see details and actions."))
-                return
-            detail_row = next(
-                (row for row in all_rows if str(row.get("id")) == detail_id),
-                next((row for row in rows if str(row.get("id")) == detail_id), {}),
-            )
-            _render_paper_detail_panel(inbox, source, detail_row, node_options)
+        payload = build_paper_library_payload(
+            _pdir,
+            current_view=current_view,
+            current_node=current_node,
+            query=str(query or ""),
+            sort_mode=str(sort_mode or "recent"),
+            selected_paper_ids=selected_paper_ids_for_tree,
+            detail_id=str(st.session_state.get(_paper_library_key("detail"), "") or ""),
+            user_id=user.id,
+            reader_base=os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/"),
+        )
+        if payload.get("detail_id"):
+            st.session_state[_paper_library_key("detail")] = str(payload.get("detail_id") or "")
+        component_event = st_paper_library_tree(
+            payload=payload,
+            key=_paper_library_key("workbench_component"),
+            height=860,
+        )
+        _handle_paper_library_component_event(component_event)
+        _render_library_collection_manager(tree, node_options)
+        with st.expander(_l("parser_status", "Parser status"), expanded=False):
+            _render_grobid_status_block()
         return
 
     left, middle, right = st.columns([0.23, 0.47, 0.30], gap="large")

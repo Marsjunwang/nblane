@@ -12,17 +12,29 @@ test("normalizePayload keeps stable defaults", () => {
   const payload = normalizePayload({
     active_view: "reading",
     active_label: "Reading",
+    profile: "alice",
+    query: "robot",
+    sort_mode: "title",
     detail_id: "source:paper:a",
     selected_paper_ids: ["a", "", "b"],
     papers: [{ id: "source:paper:a" }],
+    detail: { id: "source:paper:a", title: "A" },
+    metrics: { papers: 1 },
+    diagnostics: ["ok", ""],
     sections: [{ id: "library" }],
   });
   assert.equal(payload.activeView, "reading");
   assert.equal(payload.activeNodeId, "");
   assert.equal(payload.activeLabel, "Reading");
+  assert.equal(payload.profile, "alice");
+  assert.equal(payload.query, "robot");
+  assert.equal(payload.sortMode, "title");
   assert.equal(payload.detailId, "source:paper:a");
   assert.deepEqual(payload.selectedPaperIds, ["a", "b"]);
   assert.equal(payload.papers.length, 1);
+  assert.equal(payload.detail.title, "A");
+  assert.equal(payload.metrics.papers, 1);
+  assert.deepEqual(payload.diagnostics, ["ok"]);
   assert.equal(payload.sections.length, 1);
 });
 

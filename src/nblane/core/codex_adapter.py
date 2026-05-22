@@ -237,9 +237,23 @@ def readable_codex_error(*values: object, limit: int = 500) -> str:
     text = _sanitize(text)
     if not text:
         return "codex_readonly_failed"
+    for line in text.splitlines():
+        clean = clean_text(line)
+        if "ERROR:" not in clean:
+            continue
+        payload = clean.split("ERROR:", 1)[1].strip()
+        if payload.startswith("{"):
+            try:
+                data = json.loads(payload)
+            except json.JSONDecodeError:
+                data = {}
+            if isinstance(data, dict) and clean_text(data.get("error")):
+                return shorten(data["error"])
+        return shorten(clean)
     patterns = (
         r"No file descriptors available \(os error \d+\)",
         r"config(?:uration)?[^.\n]{0,120}(?:failed|error)",
+        r"端点/[^.\n]{0,120}未配置模型[^.\n]*",
         r"model [`'\"]?[^`'\"\n]+[`'\"]? does not exist[^.\n]*",
         r"authentication required[^.\n]*",
         r"api key auth is not supported",

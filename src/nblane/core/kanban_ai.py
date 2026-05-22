@@ -860,7 +860,12 @@ def generate_kanban_task_alignment_options(
     if found is None:
         return []
     _, _, task = found
-    if _use_codex_backend(ai_backend):
+    effective_backend = _kanban_action_backend(
+        profile_name,
+        "kanban.task_alignment",
+        ai_backend,
+    )
+    if _use_codex_backend(effective_backend):
         return generate_codex_kanban_task_alignment_options(
             profile_name,
             sections,
@@ -1134,7 +1139,12 @@ def generate_kanban_subtask_proposals_detailed(
             message=_generation_message("task_not_found"),
         )
     _, _, task = found
-    if _use_codex_backend(ai_backend):
+    effective_backend = _kanban_action_backend(
+        profile_name,
+        "kanban.subtasks",
+        ai_backend,
+    )
+    if _use_codex_backend(effective_backend):
         draft = generate_codex_kanban_planning_draft(
             profile_name,
             sections,
@@ -1264,7 +1274,18 @@ def generate_codex_kanban_planning_draft(
     )
     from nblane.core import codex_adapter
 
-    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    config = None
+    model = _kanban_action_codex_model(profile_name, "kanban.subtasks")
+    if model:
+        config = replace(
+            codex_adapter.current_config(profile=profile_name or None),
+            model=model,
+        )
+    result = codex_adapter.run_readonly_codex_prompt(
+        profile_name,
+        prompt,
+        config=config,
+    )
     raw_text = result.output
     warnings = list(getattr(result, "warnings", []) or [])
     if not result.ok:
@@ -1343,7 +1364,18 @@ def generate_codex_kanban_task_alignment_options(
     )
     from nblane.core import codex_adapter
 
-    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    config = None
+    model = _kanban_action_codex_model(profile_name, "kanban.task_alignment")
+    if model:
+        config = replace(
+            codex_adapter.current_config(profile=profile_name or None),
+            model=model,
+        )
+    result = codex_adapter.run_readonly_codex_prompt(
+        profile_name,
+        prompt,
+        config=config,
+    )
     if not result.ok:
         return _fallback_alignments(task)
     parsed = _parse_alignments(result.output, task_id=task_id)
@@ -1527,6 +1559,53 @@ def _use_codex_backend(value: object) -> bool:
     """Return True when a Kanban AI call should use local read-only Codex."""
 
     return str(value or "").strip().casefold() == "codex"
+
+
+def _kanban_action_backend(
+    profile_name: str,
+    action_name: str,
+    fallback: str = "llm",
+) -> str:
+    """Return the profile-selected backend for a Kanban action."""
+
+    profile = _clean_text(profile_name)
+    if profile:
+        try:
+            from nblane.core.web_preferences import load_web_preferences
+
+            prefs = load_web_preferences(profile)
+            ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+            actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+            action = (
+                actions.get(action_name)
+                if isinstance(actions.get(action_name), dict)
+                else {}
+            )
+            backend = _clean_text(action.get("backend"))
+            if backend in {"llm", "codex"}:
+                return backend
+        except Exception:
+            pass
+    clean_fallback = _clean_text(fallback)
+    return clean_fallback if clean_fallback in {"llm", "codex"} else "llm"
+
+
+def _kanban_action_codex_model(profile_name: str, action_name: str) -> str:
+    """Return the profile-selected Codex model for a Kanban action."""
+
+    profile = _clean_text(profile_name)
+    if not profile:
+        return ""
+    try:
+        from nblane.core.web_preferences import load_web_preferences
+
+        prefs = load_web_preferences(profile)
+    except Exception:
+        return ""
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    action = actions.get(action_name) if isinstance(actions.get(action_name), dict) else {}
+    return _clean_text(action.get("codex_model"))
 
 
 def _string_list(value: object, *, limit: int = 8) -> list[str]:

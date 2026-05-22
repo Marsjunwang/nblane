@@ -17,7 +17,9 @@ from nblane.core.reader_actions import ReaderActionResult
 from nblane.core.research_papers import (
     PaperPage,
     PaperSegment,
+    create_paper_annotation,
     import_paper_pdf,
+    paper_pdf_asset_path,
     save_paper_pages,
     save_paper_segments,
     text_hash,
@@ -329,6 +331,161 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertNotIn('create_citation: "Cite"', response.text)
         self.assertNotIn("Ask about this", response.text)
         self.assertNotIn("streamlit:setComponentValue", response.text)
+
+    def test_paper_library_standalone_page_api_and_events(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+
+            page = client.get("/paper-library?profile=alice")
+            payload = client.get("/api/research/alice/paper-library")
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                created = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_create_collection",
+                        "payload": {"title": "Workspace"},
+                        "state": {"view": "all", "sort_mode": "recent"},
+                    },
+                )
+                node_id = created.json()["result"]["changed"]["nodes"][0]
+                moved = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_drop_papers_to_collection",
+                        "payload": {
+                            "node_id": node_id,
+                            "paper_ids": [source_id],
+                        },
+                        "state": {
+                            "view": "all",
+                            "node_id": node_id,
+                            "detail_id": source_id,
+                            "sort_mode": "recent",
+                        },
+                    },
+                )
+            reader_token = client.post(
+                f"/api/research/alice/papers/{quote(source_id, safe='')}/reader-token"
+            )
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("NBLANE_PAPER_LIBRARY_BOOTSTRAP", page.text)
+        self.assertEqual(payload.status_code, 200)
+        self.assertEqual(payload.json()["payload"]["metrics"]["papers"], 1)
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(moved.status_code, 200)
+        self.assertEqual(moved.json()["payload"]["active_node_id"], node_id)
+        self.assertEqual(moved.json()["payload"]["detail"]["primary_node_id"], node_id)
+        self.assertEqual(reader_token.status_code, 200)
+        self.assertIn("/reader/view/source%3Apaper%3Agrounded", reader_token.json()["reader_url"])
+
+    def test_paper_library_api_previews_and_deletes_paper_record(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            asset_path = paper_pdf_asset_path(profile, source_id)
+
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                preview = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_delete_paper_preview",
+                        "payload": {"paper_ids": [source_id]},
+                        "state": {"view": "all", "detail_id": source_id, "sort_mode": "recent"},
+                    },
+                )
+                deleted = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_delete_paper_record",
+                        "payload": {"paper_ids": [source_id], "confirm": source_id},
+                        "state": {"view": "all", "detail_id": source_id, "sort_mode": "recent"},
+                    },
+                )
+            sources = load_research_sources(profile).by_id()
+
+            self.assertEqual(preview.status_code, 200)
+            preview_payload = preview.json()["result"]["data"]["delete_preview"]
+            self.assertTrue(preview_payload["can_delete"])
+            self.assertEqual(preview_payload["totals"]["papers"], 1)
+            self.assertGreaterEqual(preview_payload["totals"]["artifact_files"], 1)
+            self.assertEqual(deleted.status_code, 200)
+            self.assertEqual(deleted.json()["result"]["changed"]["sources"], [source_id])
+            self.assertEqual(deleted.json()["result"]["changed"]["pdf_assets"], [])
+            self.assertEqual(deleted.json()["payload"]["metrics"]["papers"], 0)
+            self.assertNotIn(source_id, sources)
+            self.assertTrue(asset_path.exists())
+
+    def test_paper_library_api_blocks_referenced_delete(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                annotation = create_paper_annotation(profile, source_id, "Important quote.", page=1)
+                preview = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_delete_paper_preview",
+                        "payload": {"paper_ids": [source_id]},
+                        "state": {"view": "all", "detail_id": source_id, "sort_mode": "recent"},
+                    },
+                )
+                blocked = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_delete_paper_record",
+                        "payload": {"paper_ids": [source_id], "confirm": source_id},
+                        "state": {"view": "all", "detail_id": source_id, "sort_mode": "recent"},
+                    },
+                )
+            sources = load_research_sources(profile).by_id()
+
+            self.assertEqual(preview.status_code, 200)
+            blockers = preview.json()["result"]["data"]["delete_preview"]["blocking_refs"]
+            self.assertIn(annotation.id, [row["id"] for row in blockers])
+            self.assertEqual(blocked.status_code, 400)
+            self.assertIn("blocked", blocked.json()["detail"])
+            self.assertIn(source_id, sources)
 
     def test_pdf_range_and_page_preview(self) -> None:
         source_id = "source:paper:grounded"

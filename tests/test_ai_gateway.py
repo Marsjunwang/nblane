@@ -12,7 +12,9 @@ import yaml
 
 from nblane.core.ai import (
     create_remote_dev_task,
+    draft_kanban_subtasks,
     draft_resume_for_job,
+    generate_paper_review_card,
     recommend_research_sources,
     run_ai_action,
     translate_paper_segments,
@@ -271,6 +273,110 @@ class TestAIGateway(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.backend, "local_codex_readonly")
         self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
+
+    def test_action_matrix_can_route_paper_review_to_codex_model(self) -> None:
+        """Feature-level preferences can pick Codex and a Codex model."""
+
+        reply = """
+        {
+          "tldr": "Useful paper.",
+          "key_points": [],
+          "innovations": [],
+          "method": [],
+          "experiments": [],
+          "limitations": [],
+          "usefulness": "",
+          "scores": {
+            "novelty": 5,
+            "technical_depth": 5,
+            "evidence_quality": 5,
+            "reproducibility": 5,
+            "relevance": 5,
+            "overall": 5
+          },
+          "score_rationale": [],
+          "cited_segment_refs": [],
+          "cited_chunk_refs": [],
+          "cited_annotation_refs": [],
+          "warnings": [],
+          "ref": "source:paper:1"
+        }
+        """
+        readonly = SimpleNamespace(
+            ok=True,
+            output=reply,
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        prefs = {
+            "ai": {
+                "actions": {
+                    "research.paper_review_card": {
+                        "backend": "codex",
+                        "codex_model": "gpt-5.1-codex",
+                    }
+                }
+            }
+        }
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value=prefs),
+            patch("nblane.core.ai.gateway.record_activity_item", return_value=""),
+            patch("nblane.core.ai.gateway.append_ai_run"),
+            patch("nblane.core.codex_adapter.current_config", return_value=CodexConfig(model="default-codex")),
+            patch(
+                "nblane.core.codex_adapter.run_readonly_codex_prompt",
+                return_value=readonly,
+            ) as run,
+        ):
+            result = generate_paper_review_card(
+                "alice",
+                "source:paper:1",
+                segments=[],
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "local_codex_readonly")
+        self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
+
+    def test_action_matrix_passes_kanban_llm_model_override(self) -> None:
+        """Kanban subtask drafting can use a feature-selected LLM model."""
+
+        prefs = {
+            "ai": {
+                "actions": {
+                    "kanban.subtasks": {
+                        "backend": "llm",
+                        "llm_model": "qwen-max",
+                    }
+                }
+            }
+        }
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value=prefs),
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch(
+                "nblane.core.llm.chat",
+                return_value='{"subtasks":[{"title":"Draft evaluation table"}]}',
+            ) as chat,
+        ):
+            result = draft_kanban_subtasks(
+                "alice",
+                task_id="task_1",
+                task_title="Evaluate VLA paper",
+                task_text="Evaluate VLA paper",
+                existing_subtasks="- (none)",
+                gap_analysis="No gap.",
+                allowed_gap_ids=[],
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "direct_llm")
+        self.assertEqual(chat.call_args.kwargs["model"], "qwen-max")
 
     def test_local_readonly_codex_invalid_json_falls_back_with_warning(self) -> None:
         """Malformed Codex output is converted to a typed warning/fallback."""

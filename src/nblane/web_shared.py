@@ -185,14 +185,47 @@ def kanban_ai_backend_key(profile: str) -> str:
 def kanban_ai_backend(profile: str) -> str:
     """Return the selected Kanban AI backend."""
 
-    value = str(st.session_state.get(kanban_ai_backend_key(profile)) or "llm")
+    key = kanban_ai_backend_key(profile)
+    if key not in st.session_state:
+        st.session_state[key] = _kanban_ai_backend_preference(profile)
+    value = str(st.session_state.get(key) or "llm")
     return value if value in _KANBAN_AI_BACKENDS else "llm"
 
 
 def kanban_ai_suffix(profile: str) -> str:
     """Return the language/backend suffix for Kanban AI draft caches."""
 
-    return f"{llm_client.reply_language()}_{kanban_ai_backend(profile)}"
+    backend = kanban_ai_backend(profile)
+    base_suffix = f"{llm_client.reply_language()}_{kanban_ai_backend(profile)}"
+    model = _kanban_ai_model_preference(profile, backend)
+    model_suffix = re.sub(r"[^a-zA-Z0-9_.-]+", "_", model).strip("_") or "default"
+    return f"{base_suffix}_{model_suffix}"
+
+
+def _kanban_ai_backend_preference(profile: str) -> str:
+    prefs = load_web_preferences(profile)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    subtasks = (
+        actions.get("kanban.subtasks")
+        if isinstance(actions.get("kanban.subtasks"), dict)
+        else {}
+    )
+    backend = str(subtasks.get("backend") or ai.get("kanban_backend") or "").strip()
+    return backend if backend in _KANBAN_AI_BACKENDS else "llm"
+
+
+def _kanban_ai_model_preference(profile: str, backend: str) -> str:
+    prefs = load_web_preferences(profile)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    subtasks = (
+        actions.get("kanban.subtasks")
+        if isinstance(actions.get("kanban.subtasks"), dict)
+        else {}
+    )
+    key = "codex_model" if backend == "codex" else "llm_model"
+    return str(subtasks.get(key) or "").strip()
 
 
 def _sync_to_persistent() -> None:
@@ -646,11 +679,7 @@ def _codex_status(profile: str) -> codex_adapter.CodexStatus:
 def _render_kanban_ai_backend_selector(profile: str, u: dict[str, str]) -> None:
     key = kanban_ai_backend_key(profile)
     if key not in st.session_state:
-        prefs = load_web_preferences(profile)
-        ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
-        backend = str(ai.get("kanban_backend") or "").strip()
-        if backend in _KANBAN_AI_BACKENDS:
-            st.session_state[key] = backend
+        st.session_state[key] = _kanban_ai_backend_preference(profile)
     st.selectbox(
         u.get("kb_ai_backend", "Kanban AI Engine"),
         list(_KANBAN_AI_BACKENDS),
@@ -666,7 +695,19 @@ def _render_kanban_ai_backend_selector(profile: str, u: dict[str, str]) -> None:
     )
     update_web_preferences(
         profile,
-        {"ai": {"kanban_backend": kanban_ai_backend(profile)}},
+        {
+            "ai": {
+                "kanban_backend": kanban_ai_backend(profile),
+                "actions": {
+                    "kanban.task_alignment": {
+                        "backend": kanban_ai_backend(profile),
+                    },
+                    "kanban.subtasks": {
+                        "backend": kanban_ai_backend(profile),
+                    },
+                },
+            }
+        },
     )
 
 

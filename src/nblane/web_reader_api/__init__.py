@@ -15,7 +15,12 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 
 from nblane.core import auth as auth_core
-from nblane.core.profile_io import profile_dir
+from nblane.core.auth import mint_reader_token
+from nblane.core.paper_library_workspace import (
+    build_paper_library_payload,
+    handle_paper_library_event,
+)
+from nblane.core.profile_io import list_profiles, profile_dir
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core import reader_tasks
 from nblane.core.research_papers import (
@@ -34,6 +39,8 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 STATIC_DIR = PACKAGE_DIR / "static"
 ASSET_DIR = STATIC_DIR / "assets"
+PAPER_LIBRARY_FRONTEND_DIR = PACKAGE_DIR.parent / "paper_library_component" / "frontend" / "static"
+PAPER_LIBRARY_ASSET_DIR = PAPER_LIBRARY_FRONTEND_DIR / "assets"
 
 app = FastAPI(title="nblane Paper Reader API")
 
@@ -46,6 +53,47 @@ def _local_user() -> auth_core.User:
         role="admin",
         teams=("*",),
     )
+
+
+def _paper_library_user(profile: str) -> auth_core.User:
+    clean = str(profile or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="profile is required")
+    if not auth_core.auth_configured():
+        return _local_user()
+    # Paper Library standalone auth will later share the Streamlit login session.
+    # Until then, production auth deployments should keep using the Streamlit
+    # entrypoint or Reader token flows.
+    raise HTTPException(status_code=401, detail="paper library session required")
+
+
+def _paper_library_profile_dir(profile: str) -> Path:
+    try:
+        path = profile_dir(profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="profile not found") from exc
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="profile not found")
+    user = _paper_library_user(profile)
+    if not auth_core.can_access_profile(user, profile):
+        raise HTTPException(status_code=403, detail="profile forbidden")
+    return path
+
+
+def _paper_library_assets() -> dict[str, list[str]]:
+    if not PAPER_LIBRARY_ASSET_DIR.exists():
+        return {"scripts": [], "styles": []}
+    scripts = sorted(
+        f"/paper-library/assets/{path.name}"
+        for path in PAPER_LIBRARY_ASSET_DIR.glob("*.js")
+        if path.is_file()
+    )
+    styles = sorted(
+        f"/paper-library/assets/{path.name}"
+        for path in PAPER_LIBRARY_ASSET_DIR.glob("*.css")
+        if path.is_file()
+    )
+    return {"scripts": scripts, "styles": styles}
 
 
 def _user_for_claims(claims: auth_core.ReaderTokenClaims) -> auth_core.User:
@@ -223,6 +271,118 @@ def _paper_page_text_layer(profile_path: Path, source_id: str, page: int) -> dic
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"failed to extract page text layer: {exc}") from exc
+
+
+@app.get("/paper-library")
+async def paper_library_view(request: Request, profile: str = ""):
+    clean_profile = str(profile or "").strip()
+    if not clean_profile:
+        profiles = list_profiles()
+        clean_profile = profiles[0] if profiles else ""
+    if clean_profile:
+        _paper_library_profile_dir(clean_profile)
+    assets = _paper_library_assets()
+    return TEMPLATES.TemplateResponse(
+        request,
+        "paper_library.html",
+        {
+            "profile_json": json.dumps(clean_profile, ensure_ascii=False),
+            "scripts": assets["scripts"],
+            "styles": assets["styles"],
+        },
+    )
+
+
+@app.get("/paper-library/assets/{file_name}")
+async def paper_library_asset(file_name: str):
+    if "/" in file_name or "\\" in file_name:
+        raise HTTPException(status_code=404, detail="asset not found")
+    path = PAPER_LIBRARY_ASSET_DIR / file_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="asset not found")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/research/{profile}/paper-library")
+async def paper_library_payload(
+    profile: str,
+    view: str = "all",
+    node_id: str = "",
+    query: str = "",
+    sort: str = "recent",
+    detail_id: str = "",
+):
+    profile_path = _paper_library_profile_dir(profile)
+    payload = build_paper_library_payload(
+        profile_path,
+        current_view=view,
+        current_node=node_id,
+        query=query,
+        sort_mode=sort,
+        detail_id=detail_id,
+        user_id=_paper_library_user(profile).id,
+        reader_base="",
+    )
+    return JSONResponse({"ok": True, "payload": payload})
+
+
+@app.post("/api/research/{profile}/paper-library/events")
+async def paper_library_events(request: Request, profile: str):
+    _same_origin_mutation(request)
+    profile_path = _paper_library_profile_dir(profile)
+    body = await _json_body(request)
+    state = body.get("state") if isinstance(body.get("state"), dict) else {}
+    try:
+        result = handle_paper_library_event(profile_path, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result.ok:
+        return JSONResponse(result.to_dict(), status_code=400)
+    next_state = result.next
+    view = str(next_state.get("view") or state.get("view") or "all")
+    node_id = str(next_state.get("node_id") if "node_id" in next_state else state.get("node_id") or "")
+    detail_id = str(next_state.get("detail_id") if "detail_id" in next_state else state.get("detail_id") or "")
+    payload = build_paper_library_payload(
+        profile_path,
+        current_view=view,
+        current_node=node_id,
+        query=str(state.get("query") or ""),
+        sort_mode=str(state.get("sort_mode") or state.get("sort") or "recent"),
+        detail_id=detail_id,
+        user_id=_paper_library_user(profile).id,
+        reader_base="",
+    )
+    return JSONResponse({"ok": True, "result": result.to_dict(), "payload": payload})
+
+
+@app.get("/api/research/{profile}/papers/{source_id}")
+async def paper_library_paper(profile: str, source_id: str):
+    profile_path = _paper_library_profile_dir(profile)
+    payload = build_paper_library_payload(
+        profile_path,
+        detail_id=source_id,
+        user_id=_paper_library_user(profile).id,
+        reader_base="",
+    )
+    detail = payload.get("detail") if isinstance(payload.get("detail"), dict) else {}
+    if detail.get("source_id") != source_id and detail.get("id") != source_id:
+        raise HTTPException(status_code=404, detail="source not found")
+    return JSONResponse({"ok": True, "paper": detail})
+
+
+@app.post("/api/research/{profile}/papers/{source_id}/reader-token")
+async def paper_library_reader_token(profile: str, source_id: str):
+    _paper_library_profile_dir(profile)
+    user = _paper_library_user(profile)
+    token = mint_reader_token(user.id, profile, source_id)
+    return JSONResponse(
+        {
+            "ok": True,
+            "token": token,
+            "reader_url": f"/reader/view/{quote(source_id, safe='')}?token={quote(token, safe='')}",
+        }
+    )
 
 
 def _iter_file_range(path: Path, start: int, end: int, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
