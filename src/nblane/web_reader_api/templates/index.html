@@ -1249,7 +1249,13 @@
     let panelWidth = 340;
     let syncLock = false;
     let viewportAnchorSyncMutedUntil = 0;
+    let translationHoverMutedUntil = 0;
+    let translationScrollSyncMutedUntil = 0;
+    let translationScrollWired = new WeakSet();
     let userAnchorLockedUntil = 0;
+    let userAnchorIntent = "";
+    let userAnchorIntentSeq = 0;
+    let stickyUserAnchor = "";
     let activeTranslationAnchor = "";
     let leftRailCollapsed = false;
     let activeLeftTab = "outline";
@@ -1378,9 +1384,8 @@
       const pdfUrl = text(args.pdf_url);
       const source = asObj(args.source);
       const sourceKey = text(source.id || source.source_id || source.url || "");
-      const fingerprint = pdfFingerprint();
-      const pdfKey = fingerprint || pdfUrl || (pdfBase64 ? `base64:${pdfBase64.length}:${pdfBase64.slice(0, 80)}:${pdfBase64.slice(-80)}` : "");
-      return `${sourceKey}\n${fingerprint}\n${pdfKey}`;
+      const pdfKey = pdfUrl || (pdfBase64 ? `base64:${pdfBase64.length}:${pdfBase64.slice(0, 80)}:${pdfBase64.slice(-80)}` : "");
+      return `${sourceKey}\n${pdfKey}`;
     }
     function pdfCacheIdentity() {
       return text(pdfFingerprint() || args.pdf_url || pdfSourceSignature());
@@ -1741,7 +1746,7 @@
       if (action === "ask_paper") return { method: "POST", path: `/api/${sourcePath()}/ask` };
       if (action === "create_chunk_from_selection" || action === "create_chunk") return { method: "POST", path: `/api/${sourcePath()}/chunk` };
       if (action === "create_citation") return { method: "POST", path: `/api/${sourcePath()}/citation` };
-      if (action === "save_progress") return { method: "POST", path: `/api/${sourcePath()}/progress` };
+      if (action === "save_progress" || action === "reader_state_changed") return { method: "POST", path: `/api/${sourcePath()}/progress` };
       if (action === "generate_review_card") return { method: "POST", path: `/api/${sourcePath()}/review` };
       if (action === "analyze_paper") return { method: "POST", path: `/api/${sourcePath()}/analyze` };
       return { method: "POST", path: `/api/${sourcePath()}/action/${encodeURIComponent(action)}` };
@@ -1795,12 +1800,12 @@
       const action = text(asObj(event).action);
       const payload = asObj(asObj(event).payload);
       if (!action) return null;
-      if (["selection_created", "page_changed", "viewport_changed", "reader_state_changed", "request_reader_context", "request_page_previews"].includes(action)) {
+      if (["selection_created", "page_changed", "viewport_changed", "request_reader_context", "request_page_previews"].includes(action)) {
         return null;
       }
       const endpoint = endpointForAction(action, payload);
       try {
-        status(action === "save_progress" ? label("saved_pending") : "Working...");
+        if (action !== "reader_state_changed") status(action === "save_progress" ? label("saved_pending") : "Working...");
         const response = await fetch(apiPath(endpoint.path), {
           method: endpoint.method,
           credentials: "same-origin",
@@ -1820,7 +1825,7 @@
           refreshDock();
           return result;
         }
-        displayActionResult(action, result);
+        if (action !== "reader_state_changed") displayActionResult(action, result);
         if (actionRefreshesPayload(action)) {
           await loadReaderPayload({ preserveView: true });
         }
@@ -1866,6 +1871,9 @@
         last_visible_pages: visiblePages.slice(),
         ...extra,
       };
+    }
+    function emitReaderStateChanged() {
+      emitAction("reader_state_changed", readerStatePayload());
     }
     function emitPassiveEvents() {
       const value = settings().emit_passive_events;
@@ -1980,6 +1988,17 @@
         }));
       } catch {}
     }
+    function localStateFresh(local, maxAgeMs = 30000) {
+      const updated = Number(asObj(local).updated || 0);
+      return Boolean(updated) && Date.now() - updated >= 0 && Date.now() - updated <= maxAgeMs;
+    }
+    function activeTranslationAnchorFromState(local) {
+      const serverAnchor = text(settings().active_translation_anchor || "");
+      const localAnchor = text(asObj(local).active_translation_anchor || "");
+      if (userAnchorIntent) return text(activeTranslationAnchor || userAnchorIntent || localAnchor || serverAnchor || "");
+      if (localAnchor && localStateFresh(local)) return localAnchor;
+      return text(serverAnchor || localAnchor || activeTranslationAnchor || "");
+    }
     function contextWindow() {
       return asObj(settings().context_window);
     }
@@ -1998,6 +2017,7 @@
         readerStateTimer = null;
         lastReaderStateEmit = Date.now();
         persistLocalState();
+        emitReaderStateChanged();
       }, wait);
     }
     function requestReaderContext(pages) {
@@ -2158,7 +2178,7 @@
       wireShell();
       refreshActionStatus();
       placeSelectionDock();
-      if (readerMode !== "pdf") window.requestAnimationFrame(() => refreshTranslationReader());
+      if (readerMode !== "pdf") window.requestAnimationFrame(() => refreshTranslationReader({ preserveScroll: true }));
       setHeight();
     }
     function leftRailHtml() {
@@ -2427,13 +2447,54 @@
     function viewportAnchorSyncMuted() {
       return performance.now() < viewportAnchorSyncMutedUntil;
     }
+    function muteTranslationHover(ms = 900) {
+      translationHoverMutedUntil = Math.max(translationHoverMutedUntil, performance.now() + Number(ms || 0));
+    }
+    function translationHoverMuted() {
+      return performance.now() < translationHoverMutedUntil;
+    }
+    function muteTranslationScrollSync(ms = 900) {
+      translationScrollSyncMutedUntil = Math.max(translationScrollSyncMutedUntil, performance.now() + Number(ms || 0));
+    }
+    function translationScrollSyncMuted() {
+      return performance.now() < translationScrollSyncMutedUntil;
+    }
     function lockUserAnchor(ms = 1600) {
       const duration = Number(ms || 0) || 1600;
       userAnchorLockedUntil = Math.max(userAnchorLockedUntil, performance.now() + duration);
       muteViewportAnchorSync(duration);
     }
+    function beginUserAnchorIntent(anchorId) {
+      const clean = text(anchorId);
+      if (!clean) return 0;
+      if (readerStateTimer) {
+        window.clearTimeout(readerStateTimer);
+        readerStateTimer = null;
+      }
+      userAnchorIntent = clean;
+      userAnchorIntentSeq += 1;
+      muteViewportAnchorSync(2400);
+      muteTranslationHover(4200);
+      return userAnchorIntentSeq;
+    }
+    function releaseUserAnchorIntent(anchorId, seq = 0) {
+      const clean = text(anchorId);
+      if (clean && userAnchorIntent && clean !== userAnchorIntent) return;
+      if (seq && seq !== userAnchorIntentSeq) return;
+      userAnchorIntent = "";
+      userAnchorLockedUntil = 0;
+      muteViewportAnchorSync(240);
+      muteTranslationHover(1200);
+    }
     function userAnchorLocked() {
-      return performance.now() < userAnchorLockedUntil;
+      return Boolean(userAnchorIntent) || performance.now() < userAnchorLockedUntil;
+    }
+    function setStickyUserAnchor(anchorId) {
+      stickyUserAnchor = text(anchorId);
+    }
+    function clearStickyUserAnchor(anchorId = "") {
+      const clean = text(anchorId);
+      if (!clean || clean === stickyUserAnchor) stickyUserAnchor = "";
     }
     function isPositionedTranslationScope(scopeType) {
       const clean = text(scopeType);
@@ -2571,7 +2632,43 @@
       });
       return index;
     }
+    function anchorVisibleInViewer(anchorId) {
+      const clean = text(anchorId);
+      if (!clean) return false;
+      const viewer = document.getElementById("viewer");
+      const unit = buildAnchorIndex().get(clean);
+      if (!viewer || !unit) return false;
+      const viewerBox = viewer.getBoundingClientRect();
+      return asArr(asObj(unit).rects).some((rawRect) => {
+        const rect = asObj(rawRect);
+        const rectPage = Number(rect.page || unit.page || 0);
+        if (!rectPage || !unitCoversPage(unit, currentPage)) return false;
+        const wrap = pageWrap(rectPage);
+        if (!wrap) return false;
+        const local = unitRectForWrap(unit, rect, wrap);
+        if (!local) return false;
+        const wrapBox = wrap.getBoundingClientRect();
+        const top = wrapBox.top + local.y;
+        const bottom = top + local.h;
+        return Math.max(0, Math.min(bottom, viewerBox.bottom) - Math.max(top, viewerBox.top)) > 4;
+      });
+    }
+    function anchorVisibleInTranslation(anchorId) {
+      const clean = text(anchorId);
+      const reader = document.getElementById("translationReader");
+      const scroller = translationScrollElement();
+      if (!clean || !reader || !scroller) return false;
+      const row = reader.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-block`);
+      if (!row) return false;
+      const box = scroller.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      return Math.max(0, Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top)) > 12;
+    }
     function activeSegmentFromViewport() {
+      if (stickyUserAnchor) {
+        if (anchorVisibleInViewer(stickyUserAnchor)) return stickyUserAnchor;
+        clearStickyUserAnchor(stickyUserAnchor);
+      }
       const pages = visiblePages.length ? visiblePages : [currentPage];
       const pageSet = new Set(pages.map((page) => Number(page || 0)).filter(Boolean));
       const viewer = document.getElementById("viewer");
@@ -2582,6 +2679,7 @@
         translationUnits().forEach((unit) => {
           const obj = asObj(unit);
           if (![...pageSet].some((page) => unitCoversPage(obj, page))) return;
+          const unitPage = unitStartPage(obj);
           asArr(obj.rects).forEach((rawRect) => {
             const rect = asObj(rawRect);
             const rectPage = Number(rect.page || obj.page || 0);
@@ -2599,19 +2697,25 @@
             candidates.push({
               unit: obj,
               page: rectPage,
-              score: Math.abs(clamped - targetY) + (rectPage === currentPage ? 0 : 1000) - Math.min(overlap, 120) * .05,
+              unitPage,
+              score: Math.abs(clamped - targetY) + (unitPage === currentPage ? 0 : 1000) - Math.min(overlap, 120) * .05,
             });
           });
         });
       }
-      candidates.sort((a, b) => (
+      const ranked = candidates.filter((candidate) => candidate.unitPage === currentPage);
+      const sortable = ranked.length ? ranked : candidates;
+      sortable.sort((a, b) => (
         a.score - b.score
         || Number(a.unit.order || 0) - Number(b.unit.order || 0)
         || text(a.unit.unit_id).localeCompare(text(b.unit.unit_id))
       ));
-      const picked = candidates[0]?.unit || translationUnits()
+      const picked = sortable[0]?.unit || translationUnits()
         .filter((unit) => unitCoversPage(unit, currentPage))
-        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))[0]
+        .sort((a, b) => (
+          (unitStartPage(a) === currentPage ? 0 : 1) - (unitStartPage(b) === currentPage ? 0 : 1)
+          || Number(a.order || 0) - Number(b.order || 0)
+        ))[0]
         || translationUnits().find((unit) => Number(unit.page || 0) === currentPage);
       return picked ? text(picked.anchor_id || picked.unit_id) : "";
     }
@@ -2620,6 +2724,7 @@
       if (!clean) return;
       const previousAnchor = activeTranslationAnchor;
       activeTranslationAnchor = clean;
+      let scrollPromise = Promise.resolve();
       document.querySelectorAll(".pr-translation-unit, .pr-translation-block, .pr-figure-card").forEach((el) => {
         el.classList.toggle("active", text(el.getAttribute("data-anchor-id")) === clean);
         if (el.hasAttribute("data-figure-anchor")) {
@@ -2637,14 +2742,15 @@
         }
         if (page && (hasRect || allowPageFallback) && readerMode === "translation") {
           setReaderMode("pdf");
-          window.setTimeout(() => scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page }), 100);
+          scrollPromise = delay(100).then(() => scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page, intentSeq: options.intentSeq || 0, intentAnchor: clean }));
         } else if (page && (hasRect || allowPageFallback)) {
-          scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page });
+          scrollPromise = scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page, intentSeq: options.intentSeq || 0, intentAnchor: clean });
         }
       }
       if (options.preserveTranslationScroll === true) muteViewportAnchorSync(Number(options.syncMuteMs || 900));
       if (options.scrollTranslation !== false) {
         const row = document.querySelector(`[data-anchor-id="${CSS.escape(clean)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(clean)}"].pr-translation-block, [data-figure-anchor="${CSS.escape(clean)}"].pr-figure-card`);
+        if (row) muteTranslationScrollSync(Number(options.translationSyncMuteMs || options.syncMuteMs || 1200));
         row?.scrollIntoView({ block: "nearest", behavior: options.smooth === false ? "auto" : "smooth" });
       }
       const previousUnit = previousAnchor ? index.get(previousAnchor) : null;
@@ -2654,6 +2760,23 @@
       ]);
       pagesToRefresh.forEach((page) => renderHighlights(page));
       if (options.refresh !== false) refreshSide();
+      return scrollPromise;
+    }
+    async function performUserAnchorJump(anchorId, options = {}) {
+      const clean = text(anchorId);
+      if (!clean) return;
+      const seq = beginUserAnchorIntent(clean);
+      setStickyUserAnchor(clean);
+      try {
+        const scrollPromise = Promise.resolve(setActiveAnchor(clean, { ...options, intentSeq: seq }));
+        await scrollPromise;
+        await waitForLayoutFrames(2);
+        setActiveAnchor(clean, { jumpToPage: false, scrollTranslation: false, refresh: false });
+        persistLocalState();
+        scheduleReaderStateChanged(true);
+      } finally {
+        releaseUserAnchorIntent(clean, seq);
+      }
     }
     function primaryRectForUnit(unit, targetPage = 0) {
       const obj = asObj(unit);
@@ -2667,37 +2790,57 @@
         return !rectPage && Number(rect.w || rect.w_pct || 0) > 0 && Number(rect.h || rect.h_pct || 0) > 0;
       }) || null;
     }
-    function scrollToUnit(unit, options = {}) {
+    async function scrollToUnit(unit, options = {}) {
+      const intentStillCurrent = () => {
+        if (options.intentSeq && options.intentSeq !== userAnchorIntentSeq) return false;
+        if (options.intentAnchor && userAnchorIntent && text(options.intentAnchor) !== userAnchorIntent) return false;
+        return true;
+      };
       const obj = asObj(unit);
       const page = preferredPageForUnit(obj, options.page || options.targetPage || 0);
       if (!page) return;
       const rect = primaryRectForUnit(obj, page);
       if (!rect) {
-        if (options.allowPageFallback === true) scrollToPage(page);
+        if (!intentStillCurrent()) return;
+        if (options.allowPageFallback === true) await scrollToPage(page, { smooth: options.smooth !== false });
         return;
       }
-      const finish = () => {
+      const finish = async () => {
+        if (!intentStillCurrent()) return;
         const viewer = document.getElementById("viewer");
         const wrap = pageWrap(page);
         if (!viewer || !wrap) {
-          if (options.allowPageFallback === true) scrollToPage(page);
+          if (options.allowPageFallback === true) await scrollToPage(page, { smooth: options.smooth !== false });
           return;
         }
         const hasPct = rect.x_pct != null || rect.y_pct != null || rect.w_pct != null || rect.h_pct != null;
         const y = hasPct ? Number(rect.y_pct || 0) * wrap.clientHeight : Number(rect.y || 0) * scaleForPage(page);
-        const top = Math.max(0, wrap.offsetTop + y - Math.max(40, viewer.clientHeight * .28));
+        const viewerBox = viewer.getBoundingClientRect();
+        const wrapBox = wrap.getBoundingClientRect();
+        const containerY = Number(viewer.scrollTop || 0) + (wrapBox.top - viewerBox.top) + y;
+        const top = Math.max(0, containerY - Math.max(40, viewer.clientHeight * .28));
+        const previousScrollBehavior = viewer.style.scrollBehavior || "";
+        if (options.smooth === false) viewer.style.scrollBehavior = "auto";
         viewer.scrollTo({ top, behavior: options.smooth === false ? "auto" : "smooth" });
+        if (options.smooth === false) window.setTimeout(() => { viewer.style.scrollBehavior = previousScrollBehavior; }, 30);
         currentPage = page;
         updatePageUi();
         renderAround(page);
         renderHighlights(page);
         requestReaderContext([page - 1, page, page + 1]);
+        await waitForScrollSettled(viewer, {
+          timeoutMs: Number(options.timeoutMs || 5200),
+          minWaitMs: options.smooth === false ? 0 : 180,
+          quietFrames: options.smooth === false ? 2 : 10,
+        });
       };
       if (page !== currentPage || !pageDomReady(page)) {
-        scrollToPage(page);
-        window.setTimeout(finish, 140);
+        await scrollToPage(page, { smooth: options.smooth !== false });
+        if (!intentStillCurrent()) return;
+        await waitForLayoutFrames(2);
+        await finish();
       } else {
-        finish();
+        await finish();
       }
     }
     function unitDisplayText(unit) {
@@ -2889,29 +3032,53 @@
         <div class="pr-translation-body ${bodyClass}">${body}</div>
       `;
     }
+    function translationScrollElement() {
+      const reader = document.getElementById("translationReader");
+      if (!reader) return null;
+      return reader.querySelector(".pr-translation-body") || reader;
+    }
+    function wireTranslationScroll() {
+      const scrollEl = translationScrollElement();
+      if (!scrollEl || translationScrollWired.has(scrollEl)) return;
+      scrollEl.addEventListener("scroll", () => syncCompareScroll("translation"), { passive: true });
+      translationScrollWired.add(scrollEl);
+    }
     function refreshTranslationReader(options = {}) {
       const el = document.getElementById("translationReader");
-      const previousScrollTop = el ? el.scrollTop : 0;
+      const previousScroller = translationScrollElement();
+      const previousScrollTop = previousScroller ? previousScroller.scrollTop : 0;
       const previousAnchor = activeTranslationAnchor;
+      const preserveScroll = options.preserveScroll === true || (readerMode === "compare" && options.resetScroll !== true);
       let previousAnchorTop = null;
-      if (el && options.preserveScroll && previousAnchor) {
+      if (preserveScroll) {
+        muteTranslationHover(700);
+        muteTranslationScrollSync(1600);
+      }
+      if (el && previousScroller && preserveScroll && previousAnchor) {
         const row = el.querySelector(`[data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-block`);
-        if (row) previousAnchorTop = row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        if (row) previousAnchorTop = row.getBoundingClientRect().top - previousScroller.getBoundingClientRect().top;
       }
       if (el && readerMode !== "pdf") requestPagePreviews(translationPages());
       if (el) el.innerHTML = translationReaderHtml();
       wireTranslationRows();
-      if (el && options.preserveScroll) {
-        window.requestAnimationFrame(() => {
+      wireTranslationScroll();
+      if (el && preserveScroll) {
+        const restoreScroll = () => {
+          const nextScroller = translationScrollElement();
+          if (!nextScroller) return;
           if (previousAnchor && previousAnchorTop !== null) {
             const row = el.querySelector(`[data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-unit, [data-anchor-id="${CSS.escape(previousAnchor)}"].pr-translation-block`);
             if (row) {
-              el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - previousAnchorTop;
+              muteTranslationScrollSync(1200);
+              nextScroller.scrollTop += row.getBoundingClientRect().top - nextScroller.getBoundingClientRect().top - previousAnchorTop;
               return;
             }
           }
-          el.scrollTop = previousScrollTop;
-        });
+          muteTranslationScrollSync(1200);
+          nextScroller.scrollTop = previousScrollTop;
+        };
+        restoreScroll();
+        window.requestAnimationFrame(restoreScroll);
       }
       window.requestAnimationFrame(() => fitTranslationBlocks());
     }
@@ -3615,7 +3782,7 @@
       }
       const translationReader = document.getElementById("translationReader");
       if (translationReader) {
-        translationReader.addEventListener("scroll", () => syncCompareScroll("translation"), { passive: true });
+        wireTranslationScroll();
       }
       wireResizeHandles();
       wireTranslationRows();
@@ -3702,7 +3869,7 @@
       refreshTranslationReader();
       refreshLeftRail();
       scheduleViewportUpdate();
-      scheduleReaderStateChanged(true);
+      if (!userAnchorLocked()) scheduleReaderStateChanged(true);
       window.setTimeout(() => {
         renderAround(currentPage, { force: true });
         placeSelectionDock();
@@ -3790,7 +3957,13 @@
         }
         return;
       }
-      const box = translationReader.getBoundingClientRect();
+      if (translationScrollSyncMuted()) return;
+      if (stickyUserAnchor) {
+        if (anchorVisibleInTranslation(stickyUserAnchor)) return;
+        clearStickyUserAnchor(stickyUserAnchor);
+      }
+      const scrollEl = translationScrollElement() || translationReader;
+      const box = scrollEl.getBoundingClientRect();
       const rows = [...translationReader.querySelectorAll(".pr-translation-unit[data-anchor-id], .pr-translation-page[data-page]")];
       const picked = rows.find((row) => {
         const rect = row.getBoundingClientRect();
@@ -3801,7 +3974,7 @@
       if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
       if (page && page !== currentPage) {
         muteViewportAnchorSync(600);
-        scrollToPage(page);
+        scrollToPage(page, { smooth: false });
       }
     }
     function showTranslationUnitDock(anchorId) {
@@ -3823,16 +3996,14 @@
     function wireTranslationRows() {
       document.querySelectorAll(".pr-translation-block[data-anchor-id], .pr-translation-unit[data-anchor-id]").forEach((row) => {
         row.addEventListener("mouseenter", () => {
+          if (translationHoverMuted() || viewportAnchorSyncMuted() || userAnchorLocked()) return;
           setActiveAnchor(row.dataset.anchorId || "", { jumpToPage: false, scrollTranslation: false, refresh: false });
         });
         row.addEventListener("click", () => {
           const anchorId = row.dataset.anchorId || "";
           const unit = buildAnchorIndex().get(anchorId) || {};
           const page = preferredTranslationClickPage(unit, Number(row.dataset.page || 0));
-          lockUserAnchor(1800);
-          setActiveAnchor(anchorId, { scrollTranslation: false, refresh: false, targetPage: page, preserveTranslationScroll: true, syncMuteMs: 1800 });
-          persistLocalState();
-          scheduleReaderStateChanged(true);
+          performUserAnchorJump(anchorId, { scrollTranslation: false, refresh: false, targetPage: page, preserveTranslationScroll: true, syncMuteMs: 2400, smooth: false }).catch(() => {});
           if (row.classList.contains("overflowing") || isPositionedTranslationScope(row.dataset.scopeType)) {
             showTranslationUnitDock(anchorId);
           } else {
@@ -4174,13 +4345,14 @@
     function skeletonPageCount() {
       return document.querySelectorAll(".pr-page-container").length;
     }
-    function refreshForArgsUpdate() {
+    function refreshForArgsUpdate(options = {}) {
+      const preserveTranslationScroll = options.preserveTranslationScroll === true || userAnchorLocked() || readerMode === "compare";
       focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
       const serverHashes = new Set(asArr(args.annotations).map((row) => text(asObj(row).selected_text_hash)).filter(Boolean));
       optimisticAnnotations = optimisticAnnotations.filter((row) => !serverHashes.has(text(row.selected_text_hash)));
       syncDockFromArgs();
       refreshLeftRail();
-      refreshSide();
+      refreshSide({ preserveTranslationScroll });
       refreshDock();
       applyAllKnownHighlights();
       updatePageUi();
@@ -4561,6 +4733,56 @@
         step(count);
       });
     }
+    function delay(ms) {
+      return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms || 0))));
+    }
+    function waitForScrollSettled(element, options = {}) {
+      if (!element) return Promise.resolve();
+      const timeoutMs = Math.max(250, Number(options.timeoutMs || 4500));
+      const minWaitMs = Math.max(0, Number(options.minWaitMs || 120));
+      const quietFrames = Math.max(1, Number(options.quietFrames || 8));
+      const start = performance.now();
+      let lastTop = Number(element.scrollTop || 0);
+      let stableFrames = 0;
+      let done = false;
+      let rafId = 0;
+      let timeoutId = 0;
+      let onScrollEnd = null;
+      return new Promise((resolve) => {
+        const onScroll = () => {
+          stableFrames = 0;
+        };
+        const finish = () => {
+          if (done) return;
+          done = true;
+          if (timeoutId) window.clearTimeout(timeoutId);
+          if (rafId) window.cancelAnimationFrame(rafId);
+          element.removeEventListener("scroll", onScroll);
+          if (onScrollEnd) element.removeEventListener("scrollend", onScrollEnd);
+          resolve();
+        };
+        onScrollEnd = () => window.setTimeout(finish, 0);
+        element.addEventListener("scroll", onScroll, { passive: true });
+        if ("onscrollend" in element) element.addEventListener("scrollend", onScrollEnd, { once: true });
+        timeoutId = window.setTimeout(finish, timeoutMs);
+        const tick = () => {
+          if (done) return;
+          const top = Number(element.scrollTop || 0);
+          if (Math.abs(top - lastTop) <= .5) {
+            stableFrames += 1;
+          } else {
+            stableFrames = 0;
+            lastTop = top;
+          }
+          if (performance.now() - start >= minWaitMs && stableFrames >= quietFrames) {
+            finish();
+            return;
+          }
+          rafId = window.requestAnimationFrame(tick);
+        };
+        rafId = window.requestAnimationFrame(tick);
+      });
+    }
     async function renderAfterLayout(pageNumber, options = {}) {
       await waitForLayoutFrames(2);
       scrollToPage(pageNumber);
@@ -4832,10 +5054,18 @@
       const anchorId = text(unit.anchor_id || unit.unit_id || unit.scope_ref);
       const scopeRef = text(unit.scope_ref || unit.unit_id || anchorId);
       if (!anchorId) return;
-      activeTranslationAnchor = anchorId;
+      const intentSeq = beginUserAnchorIntent(anchorId);
+      setStickyUserAnchor(anchorId);
       if (readerMode === "pdf") setReaderMode("compare");
       else refreshTranslationReader();
-      setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false });
+      const scrollPromise = Promise.resolve(setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false }));
+      persistLocalState();
+      scheduleReaderStateChanged(true);
+      scrollPromise
+        .then(() => waitForScrollSettled(translationScrollElement(), { timeoutMs: 2600, minWaitMs: 120, quietFrames: 6 }))
+        .then(() => waitForLayoutFrames(2))
+        .catch(() => {})
+        .finally(() => releaseUserAnchorIntent(anchorId, intentSeq));
       showTranslationUnitDock(anchorId);
       renderHighlights(page);
       const statusName = text(unit.status || (text(unit.translated_text) ? "translated" : "missing"));
@@ -4979,14 +5209,15 @@
       textCache.set(pageNumber, body);
       return body;
     }
-    function scrollToPage(pageNumber) {
+    function scrollToPage(pageNumber, options = {}) {
       const count = totalPages || knownPageCount(pageNumber);
       const next = Math.max(1, Math.min(count || 1, Number(pageNumber || 1)));
       currentPage = next;
       currentSelection = null;
-      const previousScrollBehavior = document.querySelector(".pr-viewer")?.style.scrollBehavior || "";
+      const viewer = document.querySelector(".pr-viewer");
+      const previousScrollBehavior = viewer?.style.scrollBehavior || "";
+      if (viewer && options.smooth === false) viewer.style.scrollBehavior = "auto";
       if (!pageElement(next)) {
-        const viewer = document.querySelector(".pr-viewer");
         if (viewer) viewer.style.scrollBehavior = "auto";
         renderDocumentSkeleton();
         setupIntersectionObserver();
@@ -4997,12 +5228,18 @@
         }
       }
       const page = pageElement(next);
-      if (page) page.scrollIntoView({ block: "start", behavior: "smooth" });
+      if (page) page.scrollIntoView({ block: "start", behavior: options.smooth === false ? "auto" : "smooth" });
       renderAround(next);
       renderSelectionBar();
       updatePageUi();
       scheduleViewportUpdate();
       requestReaderContext([next - 1, next, next + 1]);
+      if (viewer && options.smooth === false) window.setTimeout(() => { viewer.style.scrollBehavior = previousScrollBehavior; }, 30);
+      return waitForScrollSettled(viewer, {
+        timeoutMs: Number(options.timeoutMs || 4500),
+        minWaitMs: options.smooth === false ? 0 : 120,
+        quietFrames: options.smooth === false ? 2 : 8,
+      });
     }
     async function rerenderForScale() {
       const page = currentPage;
@@ -5053,25 +5290,30 @@
       const viewportAnchor = syncMuted ? "" : activeSegmentFromViewport();
       if (viewportAnchor) activeTranslationAnchor = viewportAnchor;
       updatePageUi();
+      const preserveTranslationScroll = syncMuted || readerMode === "compare";
+      let sideRefreshedTranslation = false;
       if (pageChanged || activeTab === "translation" || activeTab === "review") {
-        refreshSide({ preserveTranslationScroll: syncMuted || readerMode === "compare" });
+        refreshSide({ preserveTranslationScroll });
+        sideRefreshedTranslation = true;
       }
       if (pageChanged || activeLeftTab === "pages") refreshLeftRail();
-      refreshTranslationReader({ preserveScroll: syncMuted || readerMode === "compare" });
+      if (!sideRefreshedTranslation) refreshTranslationReader({ preserveScroll: preserveTranslationScroll });
       renderAround(primary);
       placeSelectionDock();
       const signature = `${primary}:${pages.join(",")}`;
       const changedSignature = signature !== lastViewportSignature;
-      if (changedSignature) {
+      if (changedSignature && !syncMuted) {
         lastViewportSignature = signature;
         persistLocalState();
+      } else if (changedSignature) {
+        lastViewportSignature = signature;
       }
       if (changedSignature && (emitPassiveEvents() || autoSaveProgress())) {
         emitAction("viewport_changed", { visible_pages: pages, primary_page: primary, page: primary, locator: `p. ${primary}` });
       }
       if (changedSignature) {
         requestReaderContext(pages);
-        if (!selectionIsActive()) scheduleReaderStateChanged(false);
+        if (!syncMuted && !selectionIsActive()) scheduleReaderStateChanged(false);
       }
       if (pageChanged && primary !== lastProgressPage && (emitPassiveEvents() || autoSaveProgress())) {
         lastProgressPage = primary;
@@ -5102,7 +5344,7 @@
       translationSourceVisible = settings().translation_source_visible != null
         ? truthySetting(settings().translation_source_visible, true)
         : typeof local.translation_source_visible === "boolean" ? local.translation_source_visible : true;
-      activeTranslationAnchor = text(settings().active_translation_anchor || local.active_translation_anchor || activeTranslationAnchor || "");
+      activeTranslationAnchor = activeTranslationAnchorFromState(local);
       debugOverlayActive = debugOverlayEnabled() && Boolean(local.debug_overlay_active || text(settings().translation_layout) === "overlay");
       readerMode = text(settings().reader_mode || local.reader_mode || readerMode || "pdf") || "pdf";
       activeTab = text(settings().active_tab || local.active_tab || activeTab || "notes") || "notes";
@@ -5153,7 +5395,16 @@
         pdfDocumentLoading = false;
         pdfDoc = loadedDoc;
         totalPages = pdfDoc.numPages || 1;
+        onRender.lastSignature = pdfSourceSignature();
         currentPage = Math.max(1, Math.min(initialPage(), totalPages));
+        const preserveViewState = (stickyUserAnchor || userAnchorLocked()) && document.getElementById("continuousDocument")
+          ? {
+            page: currentPage,
+            anchor: activeTranslationAnchor,
+            viewerTop: Number(document.getElementById("viewer")?.scrollTop || 0),
+            translationTop: Number(translationScrollElement()?.scrollTop || 0),
+          }
+          : null;
         const firstPage = await pdfDoc.getPage(1);
         const viewport = firstPage.getViewport({ scale: 1 });
         pageBaseSizes.set(1, { width: viewport.width, height: viewport.height });
@@ -5161,6 +5412,21 @@
         renderDocumentSkeleton();
         setupIntersectionObserver();
         await renderAfterLayout(currentPage, { force: true });
+        if (preserveViewState) {
+          currentPage = preserveViewState.page || currentPage;
+          updatePageUi();
+          if (preserveViewState.anchor) setActiveAnchor(preserveViewState.anchor, { jumpToPage: false, scrollTranslation: false, refresh: false });
+          const unit = preserveViewState.anchor ? buildAnchorIndex().get(preserveViewState.anchor) : null;
+          if (unit) {
+            await scrollToUnit(unit, { page: preserveViewState.page, targetPage: preserveViewState.page, smooth: false, timeoutMs: 1200 });
+          } else {
+            const viewer = document.getElementById("viewer");
+            if (viewer) viewer.scrollTop = preserveViewState.viewerTop;
+          }
+          const scroller = translationScrollElement();
+          if (scroller) scroller.scrollTop = preserveViewState.translationTop;
+          renderAround(currentPage, { force: true });
+        }
         debugState.lastLoadMs = performance.now() - startedAt;
       } catch (error) {
         if (seq !== loadSeq) return;
@@ -5253,12 +5519,10 @@
           throw new Error(message || response.statusText || "Reader payload failed");
         }
         const payload = await response.json();
-        await onRender({ data: { args: payload } });
+        await onRender({ data: { args: payload }, preserveView: options.preserveView === true });
         requestedPages.forEach((page) => requestedContextPages.delete(page));
         if (options.preserveView) {
           updatePageUi();
-          refreshSide();
-          refreshTranslationReader();
         }
       } finally {
         payloadLoading = false;
@@ -5281,7 +5545,10 @@
     }
     async function onRender(event) {
       try {
-        args = asObj(event.data.args);
+        const eventObj = asObj(event);
+        const dataObj = asObj(eventObj.data);
+        const preserveView = eventObj.preserveView === true || dataObj.preserveView === true;
+        args = asObj(dataObj.args);
         focusedAnnotationId = text(settings().focus_annotation_id || focusedAnnotationId);
         const sourceSignature = pdfSourceSignature();
         debugState.lastSourceSignature = sourceSignature;
@@ -5299,7 +5566,7 @@
           onRender.lastSignature = sourceSignature;
           await loadPdf();
         } else {
-          refreshForArgsUpdate();
+          refreshForArgsUpdate({ preserveTranslationScroll: preserveView });
         }
         refreshActionStatus();
         maybeStartPreparationTask();

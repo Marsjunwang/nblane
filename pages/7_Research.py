@@ -35,6 +35,7 @@ from nblane.core.research_papers import (
     auto_chunk_paper,
     build_reader_payload,
     create_chunk_from_annotation,
+    create_paper_library_node,
     create_paper_annotation,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
@@ -58,18 +59,28 @@ from nblane.core.research_papers import (
     paper_citation_diagnostics,
     paper_overview,
     paper_rows,
+    position_paper_library_node,
+    purge_paper_library_node,
+    remove_papers_from_node,
+    rename_paper_library_node,
+    reorder_paper_library_node,
+    restore_paper_library_node,
     save_paper_analysis,
     save_paper_annotations,
     save_paper_note,
     save_research_export,
     search_papers,
     text_hash,
+    trash_paper_library_node,
     translate_full_paper,
     translation_text_from_row,
     translation_rows_for_segments,
-    upsert_paper_library_node,
     upsert_paper_translations,
     validate_paper_library,
+)
+from nblane.paper_library_component import (
+    paper_library_component_available,
+    st_paper_library_tree,
 )
 from nblane.research_paper_reader_component.events import (
     ANNOTATION_CREATE,
@@ -624,9 +635,23 @@ def _source_label(inbox, source_id: str) -> str:
     return label
 
 
-def _node_options() -> dict[str, str]:
+def _node_options(*, include_unsorted: bool = True, include_trashed: bool = False) -> dict[str, str]:
+    tree = load_paper_library_tree(_pdir)
     paths = paper_library_paths(_pdir)
-    return {"": _l("unsorted_inbox", "Unsorted Inbox"), **paths}
+    options: dict[str, str] = {}
+    if include_unsorted:
+        options[""] = _l("unsorted_inbox", "Unsorted Inbox")
+    for node in sorted(tree.nodes, key=lambda item: (paths.get(item.id, item.title).lower(), item.order, item.id)):
+        if node.status == "trashed" and not include_trashed:
+            continue
+        options[node.id] = paths.get(node.id, node.title)
+    return options
+
+
+def _node_select_index(options: dict[str, str], wanted: str) -> int:
+    keys = list(options)
+    clean = str(wanted or "").strip()
+    return keys.index(clean) if clean in options else 0
 
 
 _LIBRARY_VIEW_LABELS = {
@@ -644,6 +669,30 @@ _LIBRARY_VIEW_LABELS = {
     "archived": "Archived",
     "discarded": "Discarded",
 }
+
+_LIBRARY_VIEW_GROUPS = (
+    ("library", "Library", ("all", "unsorted", "recent")),
+    (
+        "work_queue",
+        "Work Queue",
+        (
+            "reading",
+            "no_pdf",
+            "needs_extraction",
+            "claims_need_review",
+            "duplicate_risk",
+            "stale_translation",
+        ),
+    ),
+    ("system", "System", ("private", "reviewed", "archived", "discarded")),
+)
+
+_TECHNICAL_TAXONOMY_LABELS = (
+    ("topics", "Topics"),
+    ("methods", "Methods"),
+    ("datasets", "Datasets"),
+    ("benchmarks", "Benchmarks"),
+)
 
 
 def _paper_library_key(name: str) -> str:
@@ -768,9 +817,11 @@ def _paper_node_counts(rows: list[dict[str, object]]) -> dict[str, int]:
 
 def _paper_tree_buttons(tree, rows: list[dict[str, object]]) -> None:
     counts = _paper_node_counts(rows)
-    nodes = tree.by_id()
+    nodes = {node.id: node for node in tree.nodes if node.status != "trashed"}
     children: dict[str, list] = {}
     for node in tree.nodes:
+        if node.status == "trashed":
+            continue
         children.setdefault(node.parent_id or "", []).append(node)
 
     current_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
@@ -794,6 +845,313 @@ def _paper_tree_buttons(tree, rows: list[dict[str, object]]) -> None:
         st.caption(_l("tree_empty", "No library nodes yet."))
         return
     walk()
+
+
+def _render_library_view_button(
+    view_id: str,
+    fallback: str,
+    rows: list[dict[str, object]],
+    current_view: str,
+    current_node: str,
+) -> None:
+    count = _library_view_count(rows, view_id)
+    label = f"{_l(f'library_view_{view_id}', fallback)} ({count})"
+    button_type = "primary" if current_view == view_id and not current_node else "secondary"
+    if st.button(
+        label,
+        key=_paper_library_key(f"view:{view_id}"),
+        type=button_type,
+        use_container_width=True,
+    ):
+        st.session_state[_paper_library_key("view")] = view_id
+        st.session_state[_paper_library_key("node")] = ""
+        st.session_state.pop(_paper_library_key("detail"), None)
+        st.rerun()
+
+
+def _render_library_view_group(
+    group_id: str,
+    fallback: str,
+    view_ids: tuple[str, ...],
+    rows: list[dict[str, object]],
+    current_view: str,
+    current_node: str,
+) -> None:
+    st.markdown(f"**{_l(f'library_group_{group_id}', fallback)}**")
+    for view_id in view_ids:
+        _render_library_view_button(
+            view_id,
+            _LIBRARY_VIEW_LABELS.get(view_id, view_id),
+            rows,
+            current_view,
+            current_node,
+        )
+
+
+def _paper_collection_tree_items(tree, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    counts = _paper_node_counts(rows)
+    paths = paper_library_paths(_pdir)
+    children: dict[str, list] = {}
+    for node in tree.nodes:
+        if node.status == "trashed":
+            continue
+        children.setdefault(node.parent_id or "", []).append(node)
+
+    def walk(parent_id: str = "") -> list[dict[str, object]]:
+        out: list[dict[str, object]] = []
+        for node in sorted(children.get(parent_id, []), key=lambda item: (item.order, item.title.lower(), item.id)):
+            out.append(
+                {
+                    "id": node.id,
+                    "type": "collection",
+                    "title": node.title,
+                    "path": paths.get(node.id, node.title),
+                    "description": node.description,
+                    "count": counts.get(node.id, 0),
+                    "parent_id": node.parent_id,
+                    "color": node.color,
+                    "icon": node.icon,
+                    "children": walk(node.id),
+                }
+            )
+        return out
+
+    return [
+        {
+            "id": "collections:all",
+            "type": "collection_root",
+            "node_id": "",
+            "title": _l("clear_tree_filter", "All collections"),
+            "count": len(rows),
+            "children": walk(""),
+        }
+    ]
+
+
+def _paper_library_component_payload(
+    tree,
+    rows: list[dict[str, object]],
+    *,
+    current_view: str,
+    current_node: str,
+    selected_paper_ids: list[str],
+    papers: list[dict[str, object]] | None = None,
+    active_label: str = "",
+    detail_id: str = "",
+) -> dict[str, object]:
+    def view_items(view_ids: tuple[str, ...]) -> list[dict[str, object]]:
+        return [
+            {
+                "id": view_id,
+                "type": "view",
+                "title": _l(f"library_view_{view_id}", _LIBRARY_VIEW_LABELS.get(view_id, view_id)),
+                "count": _library_view_count(rows, view_id),
+            }
+            for view_id in view_ids
+        ]
+
+    return {
+        "active_view": current_view,
+        "active_node_id": current_node,
+        "active_label": active_label,
+        "detail_id": detail_id,
+        "selected_paper_ids": list(selected_paper_ids),
+        "papers": list(papers or []),
+        "sections": [
+            {
+                "id": "library",
+                "title": _l("library_group_library", "Library"),
+                "items": view_items(_LIBRARY_VIEW_GROUPS[0][2]),
+            },
+            {
+                "id": "collections",
+                "title": _l("collections", "Collections"),
+                "items": _paper_collection_tree_items(tree, rows),
+            },
+            {
+                "id": "technical_taxonomy",
+                "title": _l("technical_taxonomy", "Technical Taxonomy"),
+                "items": [
+                    {
+                        "id": f"technical:{taxonomy_id}",
+                        "type": "taxonomy",
+                        "title": _l(f"technical_taxonomy_{taxonomy_id}", fallback),
+                        "count": 0,
+                    }
+                    for taxonomy_id, fallback in _TECHNICAL_TAXONOMY_LABELS
+                ],
+            },
+            {
+                "id": "work_queue",
+                "title": _l("library_group_work_queue", "Work Queue"),
+                "items": view_items(_LIBRARY_VIEW_GROUPS[1][2]),
+            },
+            {
+                "id": "system",
+                "title": _l("library_group_system", "System"),
+                "items": view_items(_LIBRARY_VIEW_GROUPS[2][2]),
+            },
+        ],
+        "capabilities": {
+            "create_collection": True,
+            "rename_collection": True,
+            "move_collection": True,
+            "delete_collection": True,
+            "drop_papers": True,
+        },
+        "labels": {
+            "add_selected_here": _l("add_selected_here", "Add selected papers here"),
+            "cancel": _l("cancel", "Cancel"),
+            "collapse": _l("collapse", "Collapse"),
+            "collapse_all": _l("collapse_all", "Collapse all"),
+            "collection_actions": _l("collection_actions", "Collection actions"),
+            "collection_title": _l("collection_title", "Collection title"),
+            "delete_collection": _l("delete_collection", "Delete collection"),
+            "expand": _l("expand", "Expand"),
+            "expand_all": _l("expand_all", "Expand all"),
+            "move_collection": _l("move_collection", "Move collection"),
+            "move_down": _l("move_down", "Move down"),
+            "move_papers_to_collection": _l("move_papers_to_collection", "Move papers to collection"),
+            "move_papers_to_parent": _l("move_papers_to_parent", "Move papers to parent collection"),
+            "move_papers_to_unsorted": _l("move_papers_to_unsorted", "Move papers to Unsorted Inbox"),
+            "move_selected_here": _l("move_selected_here", "Move selected papers here"),
+            "move_up": _l("move_up", "Move up"),
+            "new_collection": _l("new_collection", "New collection"),
+            "new_subcollection": _l("new_subcollection", "New subcollection"),
+            "paper_policy": _l("paper_policy", "Paper policy"),
+            "parent_collection": _l("parent_collection", "Parent collection"),
+            "rename": _l("rename", "Rename"),
+            "save": _l("save", "Save"),
+            "search_collections": _l("search_collections", "Search collections"),
+            "selected_papers": _l("selected_papers", "{count} papers selected"),
+            "select_all": _l("select_all", "Select all"),
+            "clear_selection": _l("clear_selection", "Clear"),
+            "select_paper": _l("select_paper", "Select paper"),
+            "library_empty": _l("library_empty", "No papers match this view."),
+            "library_result_count": _l("paper_list_result_count", "{count} papers"),
+            "target_collection": _l("target_collection", "Target collection"),
+            "top_level": _l("top_level", "Top level"),
+        },
+    }
+
+
+def _handle_paper_library_component_event(event: dict[str, object] | None) -> None:
+    if not isinstance(event, dict):
+        return
+    action = str(event.get("action") or "")
+    if not action:
+        return
+    event_id = str(event.get("event_id") or "")
+    dedupe_key = _paper_library_key("component_last_event")
+    if event_id and st.session_state.get(dedupe_key) == event_id:
+        return
+    if event_id:
+        st.session_state[dedupe_key] = event_id
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+
+    def selected_ids() -> list[str]:
+        raw = payload.get("paper_ids") or st.session_state.get(_paper_library_key("bulk_select"), []) or []
+        return [str(item).strip() for item in raw if str(item).strip()]
+
+    try:
+        if action == "paper_library_select_view":
+            st.session_state[_paper_library_key("view")] = str(payload.get("view_id") or "all")
+            st.session_state[_paper_library_key("node")] = ""
+            st.session_state.pop(_paper_library_key("detail"), None)
+            st.rerun()
+        if action == "paper_library_select_collection":
+            st.session_state[_paper_library_key("view")] = "all"
+            st.session_state[_paper_library_key("node")] = str(payload.get("node_id") or "")
+            st.session_state.pop(_paper_library_key("detail"), None)
+            st.rerun()
+        if action == "paper_library_select_paper":
+            st.session_state[_paper_library_key("detail")] = str(payload.get("source_id") or "")
+            st.rerun()
+        if action == "paper_library_create_collection":
+            create_paper_library_node(
+                _pdir,
+                str(payload.get("title") or ""),
+                parent_id=str(payload.get("parent_id") or ""),
+            )
+        elif action == "paper_library_rename_collection":
+            rename_paper_library_node(
+                _pdir,
+                str(payload.get("node_id") or ""),
+                str(payload.get("title") or ""),
+            )
+        elif action == "paper_library_move_collection":
+            position_paper_library_node(
+                _pdir,
+                str(payload.get("node_id") or ""),
+                parent_id=str(payload.get("parent_id") or ""),
+            )
+        elif action == "paper_library_reorder_collection":
+            reorder_paper_library_node(
+                _pdir,
+                str(payload.get("node_id") or ""),
+                str(payload.get("direction") or "down"),
+            )
+        elif action == "paper_library_trash_collection":
+            assert_files_current([_sources_path])
+            trash_paper_library_node(
+                _pdir,
+                str(payload.get("node_id") or ""),
+                paper_policy=str(payload.get("paper_policy") or "move_to_parent"),
+            )
+            refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_purge_collection":
+            assert_files_current([_sources_path])
+            purge_paper_library_node(
+                _pdir,
+                str(payload.get("node_id") or ""),
+                paper_policy=str(payload.get("paper_policy") or "move_to_unsorted"),
+            )
+            refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_restore_collection":
+            restore_paper_library_node(_pdir, str(payload.get("node_id") or ""))
+        elif action == "paper_library_add_selected_papers_to_collection":
+            assert_files_current([_sources_path])
+            move_papers_to_node(
+                _pdir,
+                selected_ids(),
+                str(payload.get("node_id") or ""),
+                append=True,
+            )
+            refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_move_selected_papers_to_collection":
+            assert_files_current([_sources_path])
+            move_papers_to_node(
+                _pdir,
+                selected_ids(),
+                str(payload.get("node_id") or ""),
+                append=False,
+            )
+            refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_drop_papers_to_collection":
+            assert_files_current([_sources_path])
+            move_papers_to_node(
+                _pdir,
+                selected_ids(),
+                str(payload.get("node_id") or ""),
+                append=bool(payload.get("append")),
+            )
+            refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_remove_papers_from_collection":
+            assert_files_current([_sources_path])
+            remove_papers_from_node(
+                _pdir,
+                selected_ids(),
+                str(payload.get("node_id") or ""),
+            )
+            refresh_file_snapshots([_sources_path])
+        else:
+            return
+        stash_git_backup_results()
+        clear_web_cache()
+        st.success(ui["saved"])
+        st.rerun()
+    except Exception as exc:
+        st.error(str(exc))
 
 
 def _render_paper_library_styles() -> None:
@@ -1140,11 +1498,14 @@ def _render_paper_search(inbox) -> None:
                 )
             with st.form(f"paper_import_options:{selected}"):
                 node_options = _node_options()
+                default_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
                 node_ref = st.selectbox(
                     _l("library_location", "Library location"),
                     options=list(node_options),
+                    index=_node_select_index(node_options, default_node),
                     format_func=lambda ref: node_options.get(ref, ref),
                 )
+                child_collection = st.text_input(_l("new_child_collection", "New child collection"))
                 tags = st.text_input(ui["tags"])
                 visibility = st.selectbox(ui["visibility"], ["private", "public"], index=0)
                 status = st.selectbox(ui["status"], SOURCE_STATUSES, index=SOURCE_STATUSES.index("inbox"))
@@ -1176,12 +1537,19 @@ def _render_paper_search(inbox) -> None:
             if confirmed:
                 try:
                     _accept_latest_sources_for_additive_write()
+                    import_node_ref = node_ref
+                    if selected_ids and str(child_collection or "").strip():
+                        import_node_ref = create_paper_library_node(
+                            _pdir,
+                            child_collection,
+                            parent_id=node_ref,
+                        ).id
                     imported = import_paper_search_results(
                         _pdir,
                         result_dicts,
                         selected_ids,
                         {
-                            "library_node_refs": [node_ref] if node_ref else [],
+                            "library_node_refs": [import_node_ref] if import_node_ref else [],
                             "tags": _tags(tags),
                             "visibility": visibility,
                             "status": status,
@@ -1231,11 +1599,14 @@ def _render_paper_search(inbox) -> None:
             url = st.text_input(_l("url_or_doi", "URL / DOI / arXiv / PDF URL"))
             title_hint = st.text_input(_l("title_hint", "Title hint"))
             node_options = _node_options()
+            default_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
             node_ref = st.selectbox(
                 _l("library_location", "Library location"),
                 options=list(node_options),
+                index=_node_select_index(node_options, default_node),
                 format_func=lambda ref: node_options.get(ref, ref),
             )
+            child_collection = st.text_input(_l("new_child_collection", "New child collection"))
             tags = st.text_input(ui["tags"])
             visibility = st.selectbox(ui["visibility"], ["private", "public"], index=0)
             status = st.selectbox(ui["status"], SOURCE_STATUSES, index=SOURCE_STATUSES.index("inbox"))
@@ -1243,12 +1614,19 @@ def _render_paper_search(inbox) -> None:
         if submitted:
             try:
                 _accept_latest_sources_for_additive_write()
+                import_node_ref = node_ref
+                if str(child_collection or "").strip():
+                    import_node_ref = create_paper_library_node(
+                        _pdir,
+                        child_collection,
+                        parent_id=node_ref,
+                    ).id
                 source_id = import_paper_url(
                     _pdir,
                     url,
                     {
                         "title": title_hint,
-                        "library_node_refs": [node_ref] if node_ref else [],
+                        "library_node_refs": [import_node_ref] if import_node_ref else [],
                         "tags": _tags(tags),
                         "visibility": visibility,
                         "status": status,
@@ -1268,11 +1646,14 @@ def _render_paper_search(inbox) -> None:
             title = st.text_input(ui["title_label"])
             uploaded = st.file_uploader("PDF", type=["pdf"])
             node_options = _node_options()
+            default_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
             node_ref = st.selectbox(
                 _l("library_location", "Library location"),
                 options=list(node_options),
+                index=_node_select_index(node_options, default_node),
                 format_func=lambda ref: node_options.get(ref, ref),
             )
+            child_collection = st.text_input(_l("new_child_collection", "New child collection"))
             tags = st.text_input(ui["tags"])
             visibility = st.selectbox(ui["visibility"], ["private", "public"], index=0)
             submitted = st.form_submit_button(_l("upload_pdf", "Upload PDF"), type="primary")
@@ -1281,6 +1662,13 @@ def _render_paper_search(inbox) -> None:
                 if uploaded is None:
                     raise ValueError("Select a PDF first.")
                 _accept_latest_sources_for_additive_write()
+                import_node_ref = node_ref
+                if str(child_collection or "").strip():
+                    import_node_ref = create_paper_library_node(
+                        _pdir,
+                        child_collection,
+                        parent_id=node_ref,
+                    ).id
                 inbox = load_research_sources(selected)
                 source = add_research_source(
                     inbox,
@@ -1290,7 +1678,7 @@ def _render_paper_search(inbox) -> None:
                     tags=_tags(tags),
                     visibility=visibility,
                     origin="manual",
-                    library_node_refs=[node_ref] if node_ref else [],
+                    library_node_refs=[import_node_ref] if import_node_ref else [],
                 )
                 save_research_sources(selected, inbox)
                 import_paper_pdf(_pdir, source.id, uploaded.getvalue(), uploaded.name)
@@ -1361,46 +1749,234 @@ def _render_grobid_status_block(source=None) -> None:
 
 def _render_library_collection_manager(tree, node_options: dict[str, str]) -> None:
     with st.expander(_l("manage_collections", "Manage collections"), expanded=False):
+        paths = paper_library_paths(_pdir)
+        active_node_options = {node_id: label for node_id, label in node_options.items() if node_id}
+        node_counts = _paper_node_counts(paper_rows(_pdir, view="all"))
         if tree.nodes:
             st.dataframe(
                 [
                     {
-                        "id": node.id,
-                        "title": node.title,
-                        "parent_id": node.parent_id,
+                        "path": paths.get(node.id, node.title),
                         "description": node.description,
                         "status": node.status,
+                        "papers": node_counts.get(node.id, 0),
                     }
                     for node in tree.nodes
                 ],
                 use_container_width=True,
                 hide_index=True,
             )
-        with st.form(f"paper_library_node:{selected}"):
-            title = st.text_input(_l("node_title", "Node title"))
-            node_id = st.text_input(_l("node_id", "Node id"))
+        current_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
+        parent_options = {"": _l("top_level", "Top level"), **active_node_options}
+
+        st.markdown(f"**{_l('new_collection', 'New collection')}**")
+        with st.form(_paper_library_key("collection_create")):
+            default_parent = current_node if current_node in parent_options else ""
             parent_id = st.selectbox(
-                _l("parent_node", "Parent node"),
-                options=list(node_options),
-                format_func=lambda ref: node_options.get(ref, ref),
+                _l("parent_collection", "Parent collection"),
+                options=list(parent_options),
+                index=_node_select_index(parent_options, default_parent),
+                format_func=lambda ref: parent_options.get(ref, ref),
             )
-            description = st.text_area(ui["notes"], height=80)
-            submitted = st.form_submit_button(_l("save_node", "Save node"), type="primary")
-        if submitted:
+            title = st.text_input(_l("collection_title", "Collection title"))
+            c1, c2 = st.columns(2)
+            with c1:
+                icon = st.text_input(_l("collection_icon", "Icon"))
+            with c2:
+                color = st.text_input(_l("collection_color", "Color"))
+            description = st.text_area(ui["notes"], height=72)
+            create_submitted = st.form_submit_button(_l("create", "Create"), type="primary")
+        if create_submitted:
             try:
-                upsert_paper_library_node(
+                create_paper_library_node(
                     _pdir,
                     title,
-                    node_id=node_id,
                     parent_id=parent_id,
                     description=description,
+                    color=color,
+                    icon=icon,
                 )
                 stash_git_backup_results()
                 clear_web_cache()
-                st.success(ui["saved"])
+                st.success(_l("created", "Created: {id}").format(id=title))
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
+
+        if active_node_options:
+            st.markdown(f"**{_l('edit_collection', 'Edit collection')}**")
+            selected_node_id = st.selectbox(
+                _l("collection", "Collection"),
+                options=list(active_node_options),
+                index=_node_select_index(active_node_options, current_node),
+                format_func=lambda ref: active_node_options.get(ref, ref),
+                key=_paper_library_key("manage_selected_node"),
+            )
+            selected_node = tree.by_id().get(selected_node_id)
+            if selected_node is not None:
+                with st.form(_paper_library_key(f"collection_rename:{selected_node_id}")):
+                    next_title = st.text_input(
+                        _l("collection_title", "Collection title"),
+                        value=selected_node.title,
+                    )
+                    rename_submitted = st.form_submit_button(_l("rename", "Rename"), type="primary")
+                if rename_submitted:
+                    try:
+                        rename_paper_library_node(_pdir, selected_node_id, next_title)
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.success(ui["saved"])
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+                move_parent_options = {
+                    key: value
+                    for key, value in parent_options.items()
+                    if key != selected_node_id
+                }
+                with st.form(_paper_library_key(f"collection_move:{selected_node_id}")):
+                    next_parent = st.selectbox(
+                        _l("move_under", "Move under"),
+                        options=list(move_parent_options),
+                        index=_node_select_index(move_parent_options, selected_node.parent_id),
+                        format_func=lambda ref: move_parent_options.get(ref, ref),
+                    )
+                    move_submitted = st.form_submit_button(
+                        _l("move_collection", "Move collection"),
+                        type="secondary",
+                    )
+                if move_submitted:
+                    try:
+                        position_paper_library_node(_pdir, selected_node_id, parent_id=next_parent)
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.success(ui["saved"])
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+                r1, r2 = st.columns(2)
+                with r1:
+                    if st.button(
+                        _l("move_up", "Move up"),
+                        key=_paper_library_key(f"collection_up:{selected_node_id}"),
+                        icon=":material/arrow_upward:",
+                        use_container_width=True,
+                    ):
+                        try:
+                            reorder_paper_library_node(_pdir, selected_node_id, "up")
+                            stash_git_backup_results()
+                            clear_web_cache()
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+                with r2:
+                    if st.button(
+                        _l("move_down", "Move down"),
+                        key=_paper_library_key(f"collection_down:{selected_node_id}"),
+                        icon=":material/arrow_downward:",
+                        use_container_width=True,
+                    ):
+                        try:
+                            reorder_paper_library_node(_pdir, selected_node_id, "down")
+                            stash_git_backup_results()
+                            clear_web_cache()
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+                with st.form(_paper_library_key(f"collection_delete:{selected_node_id}")):
+                    delete_policy = st.selectbox(
+                        _l("paper_policy", "Paper policy"),
+                        options=["move_to_parent", "move_to_unsorted", "move_to_collection"],
+                        format_func=lambda value: {
+                            "move_to_parent": _l("move_papers_to_parent", "Move papers to parent collection"),
+                            "move_to_unsorted": _l("move_papers_to_unsorted", "Move papers to Unsorted Inbox"),
+                            "move_to_collection": _l("move_papers_to_collection", "Move papers to collection"),
+                        }.get(value, value),
+                    )
+                    policy_target = ""
+                    if delete_policy == "move_to_collection":
+                        target_options = {
+                            key: value
+                            for key, value in active_node_options.items()
+                            if key != selected_node_id
+                        }
+                        if target_options:
+                            policy_target = st.selectbox(
+                                _l("target_collection", "Target collection"),
+                                options=list(target_options),
+                                format_func=lambda ref: target_options.get(ref, ref),
+                            )
+                        else:
+                            st.caption(_l("no_target_collections", "No target collections."))
+                    confirmed = st.checkbox(_l("confirm_delete", "Confirm delete"))
+                    delete_submitted = st.form_submit_button(
+                        _l("delete_collection", "Delete collection"),
+                        type="secondary",
+                    )
+                if delete_submitted:
+                    if not confirmed:
+                        st.warning(_l("confirm_delete_required", "Confirm delete first."))
+                    elif delete_policy == "move_to_collection" and not policy_target:
+                        st.warning(_l("target_collection_required", "Choose a target collection first."))
+                    else:
+                        try:
+                            assert_files_current([_sources_path])
+                            policy = f"move_to:{policy_target}" if delete_policy == "move_to_collection" else delete_policy
+                            trash_paper_library_node(_pdir, selected_node_id, paper_policy=policy)
+                            refresh_file_snapshots([_sources_path])
+                            stash_git_backup_results()
+                            clear_web_cache()
+                            st.success(ui["saved"])
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+        trashed_nodes = [node for node in tree.nodes if node.status == "trashed"]
+        if trashed_nodes:
+            st.markdown(f"**{_l('collection_trash', 'Trash')}**")
+            trash_options = {node.id: paths.get(node.id, node.title) for node in trashed_nodes}
+            trashed_id = st.selectbox(
+                _l("collection", "Collection"),
+                options=list(trash_options),
+                format_func=lambda ref: trash_options.get(ref, ref),
+                key=_paper_library_key("trashed_node"),
+            )
+            t1, t2 = st.columns(2)
+            with t1:
+                if st.button(
+                    _l("restore", "Restore"),
+                    key=_paper_library_key(f"restore:{trashed_id}"),
+                    icon=":material/restore:",
+                    use_container_width=True,
+                ):
+                    try:
+                        restore_paper_library_node(_pdir, trashed_id)
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.success(ui["saved"])
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            with t2:
+                if st.button(
+                    _l("purge", "Permanently delete"),
+                    key=_paper_library_key(f"purge:{trashed_id}"),
+                    icon=":material/delete_forever:",
+                    use_container_width=True,
+                ):
+                    try:
+                        assert_files_current([_sources_path])
+                        purge_paper_library_node(_pdir, trashed_id, paper_policy="move_to_unsorted")
+                        refresh_file_snapshots([_sources_path])
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.success(ui["saved"])
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
 
         diagnostics = validate_paper_library(_pdir)
         if diagnostics:
@@ -1412,6 +1988,7 @@ def _render_library_collection_manager(tree, node_options: dict[str, str]) -> No
 def _render_library_bulk_actions(selected_rows: list[str], node_options: dict[str, str]) -> None:
     if not selected_rows:
         return
+    current_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
     with st.container(border=True):
         st.markdown(
             _l("bulk_selected_count", "**{count} selected**").format(count=len(selected_rows)),
@@ -1429,11 +2006,46 @@ def _render_library_bulk_actions(selected_rows: list[str], node_options: dict[st
                 _l("move_to_node", "Move to node"),
                 disabled=not selected_rows,
                 icon=":material/drive_file_move:",
+                key=_paper_library_key("bulk_move_to_node"),
                 use_container_width=True,
             ):
                 try:
                     assert_files_current([_sources_path])
                     move_papers_to_node(_pdir, selected_rows, bulk_node)
+                    refresh_file_snapshots([_sources_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            if st.button(
+                _l("add_to_node", "Add to node"),
+                disabled=not selected_rows or not bulk_node,
+                icon=":material/create_new_folder:",
+                key=_paper_library_key("bulk_add_to_node"),
+                use_container_width=True,
+            ):
+                try:
+                    assert_files_current([_sources_path])
+                    move_papers_to_node(_pdir, selected_rows, bulk_node, append=True)
+                    refresh_file_snapshots([_sources_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            if st.button(
+                _l("remove_from_current_collection", "Remove from current collection"),
+                disabled=not selected_rows or not current_node,
+                icon=":material/remove_circle:",
+                key=_paper_library_key("bulk_remove_from_current_node"),
+                use_container_width=True,
+            ):
+                try:
+                    assert_files_current([_sources_path])
+                    remove_papers_from_node(_pdir, selected_rows, current_node)
                     refresh_file_snapshots([_sources_path])
                     stash_git_backup_results()
                     clear_web_cache()
@@ -1487,6 +2099,70 @@ def _render_library_bulk_actions(selected_rows: list[str], node_options: dict[st
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
+
+
+def _filter_paper_library_rows(
+    rows: list[dict[str, object]],
+    *,
+    query: str,
+    sort_mode: str,
+) -> list[dict[str, object]]:
+    clean_query = str(query or "").strip().lower()
+    if clean_query:
+        rows = [
+            row
+            for row in rows
+            if clean_query
+            in " ".join(
+                [
+                    str(row.get("title") or ""),
+                    str(row.get("authors") or ""),
+                    str(row.get("published") or ""),
+                    str(row.get("venue") or ""),
+                    str(row.get("tree_path") or ""),
+                    str(row.get("summary") or ""),
+                    str(row.get("notes") or ""),
+                    " ".join(str(tag) for tag in row.get("tags", [])),
+                    " ".join(str(badge) for badge in row.get("badges", [])),
+                ]
+            ).lower()
+        ]
+    if sort_mode == "title":
+        return sorted(rows, key=lambda row: str(row.get("title") or "").lower())
+    if sort_mode == "status":
+        return sorted(rows, key=lambda row: (str(row.get("status") or ""), str(row.get("title") or "").lower()))
+    if sort_mode == "claims":
+        return sorted(rows, key=lambda row: int(row.get("claims_count") or 0), reverse=True)
+    if sort_mode == "added":
+        return sorted(rows, key=lambda row: str(getattr(row.get("source"), "captured_at", "") or ""), reverse=True)
+    return sorted(rows, key=lambda row: str(row.get("last_read") or ""), reverse=True)
+
+
+def _paper_component_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for row in rows:
+        source_id = str(row.get("id") or "")
+        if not source_id:
+            continue
+        out.append(
+            {
+                "id": source_id,
+                "title": str(row.get("title") or source_id),
+                "meta": _paper_primary_meta(row),
+                "summary": _short_text(row.get("summary") or row.get("notes"), 220),
+                "badges": [str(item) for item in row.get("badges", []) if str(item).strip()],
+                "tags": [str(item) for item in row.get("tags", []) if str(item).strip()],
+                "metrics": " · ".join(
+                    [
+                        f"{_l('annotations', 'Annotations')}: {row.get('annotations_count', 0)}",
+                        f"{ui['chunk_refs']}: {row.get('chunks_count', 0)}",
+                        f"{ui['research_claims']}: {row.get('claims_count', 0)}",
+                        f"{ui['research_citations']}: {row.get('citations_count', 0)}",
+                    ]
+                ),
+            }
+        )
+    return out
 
 
 def _render_paper_card(row: dict[str, object], *, active: bool) -> None:
@@ -1768,6 +2444,10 @@ def _render_paper_library(inbox) -> None:
     if current_view not in _LIBRARY_VIEW_LABELS:
         current_view = "all"
         st.session_state[_paper_library_key("view")] = current_view
+    active_node_ids = {node.id for node in tree.nodes if node.status != "trashed"}
+    if current_node and current_node not in active_node_ids:
+        current_node = ""
+        st.session_state[_paper_library_key("node")] = ""
 
     metric_cols = st.columns(5)
     metric_cols[0].metric(_l("papers_total", "Papers"), len(all_rows))
@@ -1776,35 +2456,151 @@ def _render_paper_library(inbox) -> None:
     metric_cols[3].metric(_l("needs_extraction", "Needs extraction"), _library_view_count(all_rows, "needs_extraction"))
     metric_cols[4].metric(_l("claims_need_review", "Claims review"), _library_view_count(all_rows, "claims_need_review"))
 
+    selected_paper_ids_for_tree = [
+        str(item)
+        for item in st.session_state.get(_paper_library_key("bulk_select"), []) or []
+        if str(item).strip()
+    ]
+    if paper_library_component_available():
+        wide, right = st.columns([0.70, 0.30], gap="large")
+        with wide:
+            toolbar = st.columns([2.2, 1])
+            with toolbar[0]:
+                query = st.text_input(
+                    _l("search_library", "Search title, author, tag, note..."),
+                    key=_paper_library_key("query"),
+                    label_visibility="collapsed",
+                    placeholder=_l("search_library", "Search title, author, tag, note..."),
+                )
+            with toolbar[1]:
+                sort_mode = st.selectbox(
+                    _l("sort", "Sort"),
+                    ["recent", "added", "title", "status", "claims"],
+                    format_func=lambda item: {
+                        "recent": _l("sort_recent", "Recently read"),
+                        "added": _l("sort_added", "Recently added"),
+                        "title": ui["title_label"],
+                        "status": ui["status"],
+                        "claims": ui["research_claims"],
+                    }.get(item, item),
+                    key=_paper_library_key("sort"),
+                    label_visibility="collapsed",
+                )
+            rows = _filter_paper_library_rows(
+                paper_rows(_pdir, view=current_view, node_id=current_node),
+                query=query,
+                sort_mode=sort_mode,
+            )
+            paper_ids = [str(row.get("id")) for row in rows]
+            detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
+            if detail_id not in paper_ids and paper_ids:
+                detail_id = paper_ids[0]
+                st.session_state[_paper_library_key("detail")] = detail_id
+            active_label = _LIBRARY_VIEW_LABELS.get(current_view, current_view)
+            if current_node:
+                active_label = node_options.get(current_node, current_node)
+            component_event = st_paper_library_tree(
+                payload=_paper_library_component_payload(
+                    tree,
+                    all_rows,
+                    current_view=current_view,
+                    current_node=current_node,
+                    selected_paper_ids=selected_paper_ids_for_tree,
+                    papers=_paper_component_rows(rows),
+                    active_label=active_label,
+                    detail_id=detail_id,
+                ),
+                key=_paper_library_key("workbench_component"),
+                height=820,
+            )
+            _handle_paper_library_component_event(component_event)
+            _render_library_collection_manager(tree, node_options)
+            with st.expander(_l("parser_status", "Parser status"), expanded=False):
+                _render_grobid_status_block()
+
+        with right:
+            detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
+            by_id = inbox.by_id()
+            if not detail_id and rows:
+                detail_id = str(rows[0].get("id") or "")
+                st.session_state[_paper_library_key("detail")] = detail_id
+            source = by_id.get(detail_id)
+            if source is None:
+                st.info(_l("select_paper_detail_hint", "Select a paper to see details and actions."))
+                return
+            detail_row = next(
+                (row for row in all_rows if str(row.get("id")) == detail_id),
+                next((row for row in rows if str(row.get("id")) == detail_id), {}),
+            )
+            _render_paper_detail_panel(inbox, source, detail_row, node_options)
+        return
+
     left, middle, right = st.columns([0.23, 0.47, 0.30], gap="large")
     with left:
-        st.markdown(f"**{_l('smart_views', 'Smart Views')}**")
-        for view_id, fallback in _LIBRARY_VIEW_LABELS.items():
-            count = _library_view_count(all_rows, view_id)
-            label = f"{_l(f'library_view_{view_id}', fallback)} ({count})"
-            button_type = "primary" if current_view == view_id and not current_node else "secondary"
+        if paper_library_component_available():
+            component_event = st_paper_library_tree(
+                payload=_paper_library_component_payload(
+                    tree,
+                    all_rows,
+                    current_view=current_view,
+                    current_node=current_node,
+                    selected_paper_ids=selected_paper_ids_for_tree,
+                ),
+                key=_paper_library_key("tree_component"),
+                height=760,
+            )
+            _handle_paper_library_component_event(component_event)
+            _render_library_collection_manager(tree, node_options)
+        else:
+            _render_library_view_group(
+                "library",
+                "Library",
+                _LIBRARY_VIEW_GROUPS[0][2],
+                all_rows,
+                current_view,
+                current_node,
+            )
+            st.divider()
+            st.markdown(f"**{_l('collections', 'Collections')}**")
             if st.button(
-                label,
-                key=_paper_library_key(f"view:{view_id}"),
-                type=button_type,
+                _l("clear_tree_filter", "All collections"),
+                key=_paper_library_key("clear_node"),
+                type="primary" if not current_node else "secondary",
                 use_container_width=True,
             ):
-                st.session_state[_paper_library_key("view")] = view_id
+                st.session_state[_paper_library_key("view")] = "all"
                 st.session_state[_paper_library_key("node")] = ""
                 st.session_state.pop(_paper_library_key("detail"), None)
                 st.rerun()
-        st.divider()
-        st.markdown(f"**{_l('collections', 'Collections')}**")
-        if st.button(
-            _l("clear_tree_filter", "All collections"),
-            key=_paper_library_key("clear_node"),
-            type="primary" if not current_node else "secondary",
-            use_container_width=True,
-        ):
-            st.session_state[_paper_library_key("node")] = ""
-            st.rerun()
-        _paper_tree_buttons(tree, all_rows)
-        _render_library_collection_manager(tree, node_options)
+            _paper_tree_buttons(tree, all_rows)
+            _render_library_collection_manager(tree, node_options)
+            st.divider()
+            st.markdown(f"**{_l('technical_taxonomy', 'Technical Taxonomy')}**")
+            for taxonomy_id, fallback in _TECHNICAL_TAXONOMY_LABELS:
+                st.button(
+                    f"{_l(f'technical_taxonomy_{taxonomy_id}', fallback)} (0)",
+                    key=_paper_library_key(f"taxonomy:{taxonomy_id}"),
+                    disabled=True,
+                    use_container_width=True,
+                )
+            st.divider()
+            _render_library_view_group(
+                "work_queue",
+                "Work Queue",
+                _LIBRARY_VIEW_GROUPS[1][2],
+                all_rows,
+                current_view,
+                current_node,
+            )
+            st.divider()
+            _render_library_view_group(
+                "system",
+                "System",
+                _LIBRARY_VIEW_GROUPS[2][2],
+                all_rows,
+                current_view,
+                current_node,
+            )
         with st.expander(_l("parser_status", "Parser status"), expanded=False):
             _render_grobid_status_block()
 

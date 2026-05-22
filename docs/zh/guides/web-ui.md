@@ -31,14 +31,35 @@ Reader 的 PDF 阅读器是 **Streamlit 主应用 + FastAPI Reader sidecar** 两
 Reader API 地址：
 
 ```bash
-# Terminal 1: Reader API
-PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
-  --host 127.0.0.1 --port 8502 --reload --reload-dir src
+# 在仓库根目录启动两个 tmux session。
+# 如果是重启，先清掉旧 session；不存在时会安全忽略。
+tmux kill-session -t nblane-reader-api 2>/dev/null || true
+tmux kill-session -t nblane-streamlit-ui 2>/dev/null || true
 
-# Terminal 2: Streamlit UI
-NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
-PYTHONPATH=src .venv/bin/streamlit run app.py \
-  --server.address=127.0.0.1 --server.port=8503 --server.headless=true
+# Reader API: http://127.0.0.1:8502
+tmux new-session -d -s nblane-reader-api -c "$PWD" \
+  'PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
+    --host 127.0.0.1 --port 8502 --reload --reload-dir src'
+
+# Streamlit UI: http://127.0.0.1:8503
+tmux new-session -d -s nblane-streamlit-ui -c "$PWD" \
+  'NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
+   PYTHONPATH=src .venv/bin/streamlit run app.py \
+    --server.address=127.0.0.1 --server.port=8503 --server.headless=true'
+```
+
+查看日志/进入进程：
+
+```bash
+tmux attach -t nblane-reader-api
+tmux attach -t nblane-streamlit-ui
+```
+
+在 tmux 中按 `Ctrl-b` 然后按 `d` 可 detach，服务会继续运行。停止服务：
+
+```bash
+tmux kill-session -t nblane-reader-api
+tmux kill-session -t nblane-streamlit-ui
 ```
 
 如果通过 SSH / IDE port forwarding 在浏览器访问，请同时转发 `8503` 和 `8502`，并把

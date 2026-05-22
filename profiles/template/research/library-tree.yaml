@@ -1,5 +1,7 @@
 # Paper library tree for {Name}
 # Tree nodes are taxonomy only; paper membership lives on source.library_node_refs.
+# The root is virtual: top-level nodes use parent_id: "".
+# Trashed nodes keep status: trashed plus trashed_from_* restore metadata.
 
 schema_version: "1.0"
 profile: "{Name}"

@@ -22,6 +22,7 @@ from nblane.core.research_papers import (
     build_reader_payload,
     build_paper_layout_units,
     build_paper_structure_units,
+    create_paper_library_node,
     create_reading_note_markdown,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
@@ -43,17 +44,25 @@ from nblane.core.research_papers import (
     paper_overview,
     paper_pdf_asset_path,
     paper_rows,
+    position_paper_library_node,
+    purge_paper_library_node,
     pymupdf_available,
     paper_citation_diagnostics,
     paper_source_diagnostics,
     reader_translation_structure_units,
+    remove_papers_from_node,
+    rename_paper_library_node,
+    reorder_paper_library_node,
     research_asset_root,
     render_paper_page_preview,
+    restore_paper_library_node,
     save_paper_pages,
     save_paper_segments,
     save_paper_structure_units,
     search_papers_with_codex,
+    set_paper_primary_node,
     text_hash,
+    trash_paper_library_node,
     translate_full_paper,
     upsert_paper_library_node,
     upsert_paper_translations,
@@ -187,6 +196,92 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(changed, ["source:paper:grounded"])
         self.assertEqual(tree.nodes[0].title, "Memory")
         self.assertEqual(source.library_node_refs, ["paper-node:vla-memory"])
+
+    def test_paper_library_tree_node_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                vla = create_paper_library_node(profile, "VLA")
+                memory = create_paper_library_node(profile, "Memory", parent_id=vla.id)
+                methods = create_paper_library_node(profile, "Methods", parent_id=vla.id)
+                renamed = rename_paper_library_node(profile, memory.id, "Working Memory")
+                reordered = reorder_paper_library_node(profile, methods.id, "up")
+                with self.assertRaisesRegex(ValueError, "descendant"):
+                    position_paper_library_node(profile, vla.id, parent_id=memory.id)
+                with self.assertRaisesRegex(ValueError, "itself"):
+                    position_paper_library_node(profile, memory.id, parent_id=memory.id)
+                positioned = position_paper_library_node(profile, memory.id, after_node_id=vla.id)
+
+            tree = load_paper_library_tree(profile)
+            nodes = tree.by_id()
+            memory_rows = paper_rows(profile, node_id=memory.id)
+
+        self.assertEqual(renamed.title, "Working Memory")
+        self.assertEqual(reordered.id, methods.id)
+        self.assertEqual(positioned.parent_id, "")
+        self.assertEqual(nodes[memory.id].parent_id, "")
+        self.assertLess(nodes[vla.id].order, nodes[memory.id].order)
+        self.assertEqual(nodes[methods.id].parent_id, vla.id)
+        self.assertEqual(memory_rows, [])
+
+    def test_paper_library_delete_policies_move_source_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                vla = create_paper_library_node(profile, "VLA")
+                memory = create_paper_library_node(profile, "Memory", parent_id=vla.id)
+                trash_me = create_paper_library_node(profile, "Temporary")
+                purge_me = create_paper_library_node(profile, "Purge Me")
+                move_papers_to_node(profile, ["source:paper:grounded"], memory.id)
+                trashed = trash_paper_library_node(profile, memory.id, paper_policy="move_to_parent")
+                source_after_trash = load_research_sources(profile).by_id()["source:paper:grounded"]
+                restored = restore_paper_library_node(profile, memory.id)
+                move_papers_to_node(profile, ["source:paper:grounded"], trash_me.id)
+                trash_paper_library_node(profile, trash_me.id, paper_policy="move_to_unsorted")
+                source_after_unsorted = load_research_sources(profile).by_id()["source:paper:grounded"]
+                move_papers_to_node(profile, ["source:paper:grounded"], purge_me.id)
+                purged = purge_paper_library_node(profile, purge_me.id, paper_policy="move_to_unsorted")
+
+            tree = load_paper_library_tree(profile)
+            source_after_purge = load_research_sources(profile).by_id()["source:paper:grounded"]
+            unsorted_rows = paper_rows(profile, view="unsorted")
+
+        self.assertEqual(trashed.status, "trashed")
+        self.assertEqual(source_after_trash.library_node_refs, [vla.id])
+        self.assertEqual(restored.status, "active")
+        self.assertEqual(source_after_unsorted.library_node_refs, [])
+        self.assertEqual(purged.id, purge_me.id)
+        self.assertNotIn(purge_me.id, tree.by_id())
+        self.assertEqual(source_after_purge.library_node_refs, [])
+        self.assertEqual([row["id"] for row in unsorted_rows], ["source:paper:grounded"])
+
+    def test_paper_library_primary_secondary_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                primary = create_paper_library_node(profile, "Primary")
+                secondary = create_paper_library_node(profile, "Secondary")
+                next_primary = create_paper_library_node(profile, "Next Primary")
+                move_papers_to_node(profile, ["source:paper:grounded"], primary.id)
+                move_papers_to_node(profile, ["source:paper:grounded"], secondary.id, append=True)
+                move_papers_to_node(profile, ["source:paper:grounded"], next_primary.id)
+                source_after_move = load_research_sources(profile).by_id()["source:paper:grounded"]
+                move_papers_to_node(profile, ["source:paper:grounded"], primary.id, append=True)
+                source_after_append = load_research_sources(profile).by_id()["source:paper:grounded"]
+                remove_papers_from_node(profile, ["source:paper:grounded"], secondary.id)
+                source_after_remove = load_research_sources(profile).by_id()["source:paper:grounded"]
+                updated = set_paper_primary_node(profile, "source:paper:grounded", primary.id)
+
+        self.assertEqual(source_after_move.library_node_refs, [next_primary.id, secondary.id])
+        self.assertEqual(source_after_append.library_node_refs, [next_primary.id, secondary.id, primary.id])
+        self.assertEqual(source_after_remove.library_node_refs, [next_primary.id, primary.id])
+        self.assertEqual(updated.library_node_refs, [primary.id])
 
     def test_paper_rows_support_library_workbench_views(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
