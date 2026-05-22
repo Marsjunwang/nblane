@@ -15,6 +15,7 @@ from nblane.core.ai import (
     draft_resume_for_job,
     recommend_research_sources,
     run_ai_action,
+    translate_paper_segments,
 )
 from nblane.core.ai.actions import AIActionRequest
 from nblane.core.ai.backends import (
@@ -215,6 +216,60 @@ class TestAIGateway(unittest.TestCase):
             )
 
         self.assertTrue(result.ok)
+        self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
+
+    def test_translate_paper_segments_can_use_profile_codex_backend(self) -> None:
+        """Paper translation can route through Codex when the profile asks for it."""
+
+        reply = """
+        {
+          "translations": [
+            {
+              "segment_id": "seg:1",
+              "source_hash": "sha256:abc",
+              "translated_text": "你好"
+            }
+          ],
+          "warnings": [],
+          "ref": "paper:1"
+        }
+        """
+        readonly = SimpleNamespace(
+            ok=True,
+            output=reply,
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        prefs = {
+            "ai": {
+                "paper": {
+                    "translation_backend": "codex",
+                    "translation_model": "gpt-5.1-codex",
+                }
+            }
+        }
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value=prefs),
+            patch("nblane.core.ai.gateway.record_activity_item", return_value=""),
+            patch("nblane.core.ai.gateway.append_ai_run"),
+            patch("nblane.core.codex_adapter.current_config", return_value=CodexConfig(model="default-codex")),
+            patch(
+                "nblane.core.codex_adapter.run_readonly_codex_prompt",
+                return_value=readonly,
+            ) as run,
+        ):
+            result = translate_paper_segments(
+                "alice",
+                "source:paper:1",
+                [{"segment_id": "seg:1", "text": "hello", "text_hash": "sha256:abc"}],
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "local_codex_readonly")
         self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
 
     def test_local_readonly_codex_invalid_json_falls_back_with_warning(self) -> None:

@@ -683,12 +683,44 @@ def extract_paper_figures(
                     )
                     if fallback_rect is not None:
                         candidates.append(("caption", caption_index, fallback_rect))
-                used_rects: list[dict[str, object]] = []
+                grouped: list[dict[str, object]] = []
+                by_caption: dict[str, dict[str, object]] = {}
                 for item_index, (kind, kind_index, raw_rect) in enumerate(candidates, start=1):
                     rect = _expanded_figure_rect(raw_rect, captions, page_width=page_width, page_height=page_height)
                     if rect is None:
                         continue
                     if _rect_area(rect) < max(900.0, page_width * page_height * 0.01):
+                        continue
+                    caption = _nearest_caption_text(rect, captions)
+                    group_key = f"caption:{caption.casefold()}" if caption else ""
+                    if group_key and group_key in by_caption:
+                        group = by_caption[group_key]
+                        rects = group.setdefault("rects", [])
+                        if isinstance(rects, list):
+                            rects.append(rect)
+                        if not group.get("kind") or group.get("kind") == "caption":
+                            group["kind"] = kind
+                            group["kind_index"] = kind_index
+                        continue
+                    group = {
+                        "kind": kind,
+                        "kind_index": kind_index,
+                        "caption": caption,
+                        "rects": [rect],
+                        "order": item_index,
+                    }
+                    grouped.append(group)
+                    if group_key:
+                        by_caption[group_key] = group
+
+                used_rects: list[dict[str, object]] = []
+                for item_index, group in enumerate(grouped, start=1):
+                    rect = _rect_union_payload(
+                        [row for row in group.get("rects") or [] if isinstance(row, dict)],
+                        page_width=page_width,
+                        page_height=page_height,
+                    )
+                    if rect is None:
                         continue
                     if any(
                         _rect_overlap_ratio(rect, used) > 0.72 or _rect_overlap_ratio(used, rect) > 0.72
@@ -705,7 +737,7 @@ def extract_paper_figures(
                     zoom = min(2.0, max(0.6, width_limit / max(1.0, float(rect.get("w") or 1))))
                     pixmap = pdf_page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip, alpha=False)
                     png_bytes = pixmap.tobytes("png")
-                    caption = _nearest_caption_text(rect, captions)
+                    caption = _clean_text(group.get("caption")) or _nearest_caption_text(rect, captions)
                     figure_id = f"figure:{source_slug(source_id)}:{page_number}:{item_index:03d}"
                     out.append(
                         {
@@ -713,8 +745,8 @@ def extract_paper_figures(
                             "anchor_id": figure_id,
                             "page": page_number,
                             "order": item_index,
-                            "kind": kind,
-                            "kind_index": kind_index,
+                            "kind": _clean_text(group.get("kind")) or "figure",
+                            "kind_index": int(group.get("kind_index") or item_index),
                             "caption": caption,
                             "source_text": caption,
                             "locator": f"p. {page_number}",
@@ -3909,6 +3941,8 @@ def _paper_structure_heading_kind(text: str, *, page: int, font_size: float, lay
         return "caption"
     if layout_kind in {"title", "authors", "affiliation", "table_cell", "figure_label", "symbol", "footnote"}:
         return layout_kind
+    if lower in _TABLE_OR_FIGURE_HEADINGS and len(clean.split()) <= 4:
+        return "table_cell"
     if re.fullmatch(r"\d+(?:\.\d+)*\.?", clean):
         return "heading_marker"
     numbered = re.match(r"^(\d+(?:\.\d+)*)\.?\s+(.+)$", clean)
@@ -4890,6 +4924,8 @@ def reader_translation_structure_units(units: list[PaperStructureUnit | dict]) -
         unit = item if isinstance(item, PaperStructureUnit) else PaperStructureUnit.from_dict(item)
         if unit is None or unit.kind not in allowed:
             continue
+        if _paper_structure_unit_is_translation_noise(unit):
+            continue
         if not unit.translatable and not unit.display_source:
             continue
         source_text = _clean_text(unit.text)
@@ -4914,6 +4950,18 @@ def reader_translation_structure_units(units: list[PaperStructureUnit | dict]) -
         )
         rows.append(row)
     return sorted(rows, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id"))))
+
+
+def _paper_structure_unit_is_translation_noise(unit: PaperStructureUnit) -> bool:
+    """Return True for figure/table fragments that should not enter translation."""
+
+    metadata = unit.metadata if isinstance(unit.metadata, dict) else {}
+    if _clean_text(metadata.get("table_id")):
+        return True
+    lower = " ".join(_clean_text(unit.text).lower().split()).strip(" .:")
+    if unit.kind in {"paragraph", "heading"} and lower in _TABLE_OR_FIGURE_HEADINGS and len(lower.split()) <= 4:
+        return True
+    return False
 
 
 def build_translation_units(
@@ -5118,7 +5166,7 @@ def build_reader_payload(
     page_models = _page_models_from_pdf(profile, source_id, context_pages)
     if not page_models:
         page_models = _page_models_from_layout_units(layout_units, context_pages)
-    figures = extract_paper_figures(profile, source_id, pages=context_pages, max_items=12, max_width=520)
+    figures = extract_paper_figures(profile, source_id, pages=context_pages, max_items=24, max_width=640)
     reader_layout_units = reader_translation_layout_units(layout_units)
     reader_structure_units = reader_translation_structure_units(
         [

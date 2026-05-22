@@ -117,6 +117,7 @@ def normalize_web_preferences(
                 "reply_lang": reply_lang,
             },
             "paper": {
+                "translation_backend": backend_value(paper.get("translation_backend")),
                 "translation_model": _clean_text(paper.get("translation_model")),
                 "deep_read_model": _clean_text(paper.get("deep_read_model")),
             },
@@ -140,6 +141,13 @@ def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         else:
             out[key] = copy.deepcopy(value)
     return out
+
+
+def backend_value(value: Any) -> str:
+    """Return a normalized non-secret AI backend preference."""
+
+    clean = _clean_text(value)
+    return clean if clean in _AI_BACKENDS else ""
 
 
 def _strip_secret_keys(value: Any) -> Any:

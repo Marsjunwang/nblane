@@ -59,6 +59,7 @@ class TestWebPreferences(unittest.TestCase):
                                 "reply_lang": "en",
                             },
                             "paper": {
+                                "translation_backend": "codex",
                                 "translation_model": "qwen-plus",
                                 "deep_read_model": "gpt-5.1-codex",
                             },
@@ -78,6 +79,7 @@ class TestWebPreferences(unittest.TestCase):
                 bob = load_web_preferences("bob")
 
         self.assertEqual(alice["ai"]["llm"]["provider"], "OpenAI")
+        self.assertEqual(alice["ai"]["paper"]["translation_backend"], "codex")
         self.assertEqual(alice["ai"]["paper"]["translation_model"], "qwen-plus")
         self.assertEqual(alice["ai"]["paper"]["deep_read_model"], "gpt-5.1-codex")
         self.assertEqual(alice["ai"]["kanban_backend"], "codex")

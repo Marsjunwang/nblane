@@ -2135,6 +2135,7 @@
               <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation">${esc(label("mode_translation"))}</button>
             </div>
             <div class="pr-actions">
+              <button class="pr-button" data-action="translateFull">${esc(label("translate_full_paper"))}</button>
               <button class="pr-button primary" data-action="analyzePaper">${esc(label("analyze_paper"))}</button>
               <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
@@ -2615,6 +2616,29 @@
           `).join("")}
         </div>
       `;
+    }
+    function translationQueueHtml(limit = 24) {
+      const pending = translationUnits()
+        .map((row) => asObj(row))
+        .filter((row) => row.translatable !== false)
+        .filter((row) => {
+          const statusName = text(row.status || (text(row.translated_text) ? "translated" : "missing"));
+          return ["missing", "stale", "failed"].includes(statusName);
+        })
+        .slice(0, limit);
+      if (!pending.length) return `<div class="pr-empty">${esc(label("translated"))}</div>`;
+      const statuses = ["failed", "stale", "missing"];
+      const sections = statuses.map((statusName) => {
+        const rows = pending.filter((row) => text(row.status || "missing") === statusName);
+        if (!rows.length) return "";
+        return `
+          <section class="pr-translation-section" data-section="${attr(statusName)}">
+            <div class="pr-translation-section-title">${esc(translationUnitStatusLabel(statusName))}</div>
+            ${rows.map((unit) => translationUnitHtml(unit)).join("")}
+          </section>
+        `;
+      }).filter(Boolean);
+      return `<div class="pr-translation-flow">${sections.join("")}</div>`;
     }
     function buildAnchorIndex() {
       const index = new Map();
@@ -3673,7 +3697,7 @@
           <button class="pr-button" data-translation-panel-retry>${esc(label("retry"))}</button>
         </div>
       `;
-      return `${summary}${translationFlowHtml()}`;
+      return `${summary}${translationQueueHtml()}`;
     }
     function pageFromLocator(value) {
       const match = text(value).match(/p\.\s*(\d+)/i) || text(value).match(/page\s*(\d+)/i);

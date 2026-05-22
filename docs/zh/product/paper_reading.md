@@ -54,8 +54,10 @@ Research 顶层仍是一个页面，不新增顶层导航。内部改成类似 O
 ```text
 Research
   Overview
-  Paper Search
   Paper Library
+    Find / Import Papers
+    Collections
+    Work Queue
   Reader
   Claims & Citations
   Synthesis / Export
@@ -118,7 +120,7 @@ public project proof、goal progress 不应该只依赖论文阅读 evidence。
 
 Overview 不提供复杂编辑表单，只提供进入主流程的快捷入口：
 
-- Search papers
+- Find papers in Library
 - Open Library
 - Continue reading
 - Review claims
@@ -126,7 +128,12 @@ Overview 不提供复杂编辑表单，只提供进入主流程的快捷入口�
 
 ### 2.2 Paper Search
 
-Paper Search 是“根据主题搜索论文”的主入口。推荐采用 **Codex-first**：
+Paper Search 不再作为顶层并列 tab，而是 Paper Library 里的 **Find / Import**
+工作流：用户在某个 collection 或 smart view 中发起搜索，结果先显示摘要和导入预览，
+确认后再写入 Paper Library。这样搜索行为天然带着当前资料库上下文，不会像一个
+独立框架悬在资料库之外。
+
+推荐采用 **Codex-first**：
 Codex 负责 agentic paper discovery，使用 web search / provider search / link
 checking 组合能力找到论文、核对 PDF 链接、整理导入建议；Codex 不可用时，再回退到
 provider API + LLM 轻量归一化。
@@ -296,7 +303,8 @@ Paper Library 是论文资料库，也是 **Paper Search 和 Reader 之间的桥
 
 - 树结构表达“这篇论文归档到哪里”。
 - 状态、标签、项目、目标、PDF 资产表达“这篇论文现在是什么情况”。
-- Paper Search 导入时可以直接归档到树上的特定位置。
+- Library 内的 Find / Import 搜索结果必须先展示摘要、相关性理由、PDF 状态和重复风险，
+  再由用户选择导入到树上的特定位置。
 - 树节点可以由用户手动创建，也可以由 Codex / LLM 根据论文标题、摘要、已有树结构
   生成建议。
 - Reader 只打开一个已经被 Library 管理好的 paper source。

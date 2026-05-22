@@ -60,6 +60,9 @@ function ContextMenu({ menu, payload, onClose, onAction }) {
   const item = menu.item || {};
   const type = nodeType(item);
   const id = nodeId(item);
+  const paperIds = asArray(menu.paperIds || (type === "paper" ? [id] : []))
+    .map(cleanText)
+    .filter(Boolean);
   const selectedCount = payload.selectedPaperIds.length;
   const canCollections = payload.capabilities.create_collection !== false;
   const canDropPapers = payload.capabilities.drop_papers !== false;
@@ -132,6 +135,65 @@ function ContextMenu({ menu, payload, onClose, onAction }) {
       () => onAction("dialog:delete", { node_id: id, title: nodeTitle(item), parent_id: cleanText(item.parent_id) }),
       payload.capabilities.delete_collection === false,
       true,
+    );
+  } else if (type === "paper") {
+    const activeNodeId = cleanText(payload.activeNodeId);
+    if (item.reader_url) {
+      addRow(
+        "open-reader",
+        label(payload.labels, "open_reader", "Open Reader"),
+        () => window.open(cleanText(item.reader_url), "_blank", "noopener,noreferrer"),
+      );
+    }
+    addRow(
+      "show-details",
+      label(payload.labels, "show_details", "Show details"),
+      () => onAction("emit", makeEvent("paper_library_select_paper", { source_id: id })),
+    );
+    rows.push({ key: "sep-paper-1", separator: true });
+    addRow(
+      "move-paper",
+      label(payload.labels, "move_to_collection", "Move to collection"),
+      () => onAction("dialog:paper-location", { mode: "move", paper_ids: paperIds }),
+      !canDropPapers || paperIds.length < 1,
+    );
+    addRow(
+      "add-paper",
+      label(payload.labels, "add_to_collection", "Add to collection"),
+      () => onAction("dialog:paper-location", { mode: "add", paper_ids: paperIds }),
+      !canDropPapers || paperIds.length < 1,
+    );
+    addRow(
+      "remove-paper",
+      label(payload.labels, "remove_from_current_collection", "Remove from current collection"),
+      () => onAction("emit", makeEvent("paper_library_remove_papers_from_collection", { node_id: activeNodeId, paper_ids: paperIds })),
+      !activeNodeId || paperIds.length < 1,
+    );
+    rows.push({ key: "sep-paper-2", separator: true });
+    addRow(
+      "mark-reading",
+      label(payload.labels, "mark_as_reading", "Mark as reading"),
+      () => onAction("emit", makeEvent("paper_library_update_papers_status", { paper_ids: paperIds, status: "reading" })),
+      paperIds.length < 1,
+    );
+    addRow(
+      "archive",
+      label(payload.labels, "archive", "Archive"),
+      () => onAction("emit", makeEvent("paper_library_update_papers_status", { paper_ids: paperIds, status: "archived" })),
+      paperIds.length < 1,
+    );
+    addRow(
+      "discard",
+      label(payload.labels, "discard", "Discard"),
+      () => onAction("emit", makeEvent("paper_library_update_papers_status", { paper_ids: paperIds, status: "discarded" })),
+      paperIds.length < 1,
+      true,
+    );
+    addRow(
+      "run-extraction",
+      label(payload.labels, "run_extraction", "Run extraction"),
+      () => onAction("emit", makeEvent("paper_library_run_extraction", { paper_ids: paperIds })),
+      paperIds.length < 1,
     );
   }
 
@@ -216,6 +278,16 @@ function Dialog({ dialog, payload, onClose, onEmit }) {
         node_id: dialog.node_id,
         paper_policy: paperPolicy,
       }));
+    } else if (dialog.kind === "paper-location") {
+      onEmit(makeEvent(
+        dialog.mode === "add"
+          ? "paper_library_add_selected_papers_to_collection"
+          : "paper_library_move_selected_papers_to_collection",
+        {
+          node_id: targetId,
+          paper_ids: asArray(dialog.paper_ids).map(cleanText).filter(Boolean),
+        },
+      ));
     }
     onClose();
   };
@@ -224,11 +296,15 @@ function Dialog({ dialog, payload, onClose, onEmit }) {
     rename: label(payload.labels, "rename", "Rename"),
     move: label(payload.labels, "move_collection", "Move collection"),
     delete: label(payload.labels, "delete_collection", "Delete collection"),
+    "paper-location": dialog.mode === "add"
+      ? label(payload.labels, "add_to_collection", "Add to collection")
+      : label(payload.labels, "move_to_collection", "Move to collection"),
   }[dialog.kind] || "";
   const disabled =
     (dialog.kind === "create" && !title.trim()) ||
     (dialog.kind === "rename" && !title.trim()) ||
-    (dialog.kind === "delete" && policy === "move_to_collection" && !targetId);
+    (dialog.kind === "delete" && policy === "move_to_collection" && !targetId) ||
+    (dialog.kind === "paper-location" && !targetId);
   return (
     <div className="paper-tree-dialog-backdrop" role="presentation">
       <div className="paper-tree-dialog" role="dialog" aria-modal="true">
@@ -277,6 +353,19 @@ function Dialog({ dialog, payload, onClose, onEmit }) {
             ) : null}
           </>
         ) : null}
+        {dialog.kind === "paper-location" ? (
+          <label className="paper-tree-field">
+            <span>{label(payload.labels, "target_collection", "Target collection")}</span>
+            <select value={targetId} onChange={(event) => setTargetId(event.target.value)} autoFocus>
+              <option value=""></option>
+              {parentOptions.map((option) => (
+                <option key={option.id || "__unsorted"} value={option.id}>
+                  {"  ".repeat(option.depth)}{option.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <div className="paper-tree-dialog-actions">
           <button type="button" onClick={onClose}>{label(payload.labels, "cancel", "Cancel")}</button>
           <button type="button" className="is-primary" disabled={disabled} onClick={submit}>
@@ -293,11 +382,13 @@ function TreeRow({
   depth,
   payload,
   expandedIds,
+  dragTarget,
   onToggle,
   onSelect,
   onMenu,
   onDropCollection,
   onDragStart,
+  onDragTarget,
 }) {
   const id = nodeId(item);
   const type = nodeType(item);
@@ -309,10 +400,26 @@ function TreeRow({
     ((type === "collection" || type === "collection_root") && payload.activeNodeId === cleanText(item.node_id ?? id));
   const count = item.count === undefined || item.count === null ? "" : cleanText(item.count);
   const draggable = type === "collection";
+  const droppable = type === "collection" || type === "collection_root";
+  const activeDropPosition = dragTarget?.id === id ? dragTarget.position : "";
+  const dropPositionForEvent = (event) => {
+    if (type === "collection_root") {
+      return "into";
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    if (y < rect.height * 0.28) {
+      return "before";
+    }
+    if (y > rect.height * 0.72) {
+      return "after";
+    }
+    return "into";
+  };
   return (
     <>
       <div
-        className={`paper-tree-row is-${type} ${isActive ? "is-active" : ""}`}
+        className={`paper-tree-row is-${type} ${isActive ? "is-active" : ""} ${activeDropPosition ? `is-drop-${activeDropPosition}` : ""}`}
         style={{ "--depth": depth }}
         draggable={draggable}
         onDragStart={(event) => {
@@ -324,17 +431,25 @@ function TreeRow({
           onDragStart(id);
         }}
         onDragOver={(event) => {
-          if (type === "collection" || type === "collection_root") {
+          if (droppable) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
+            onDragTarget({ id, position: dropPositionForEvent(event) });
+          }
+        }}
+        onDragLeave={() => {
+          if (droppable) {
+            onDragTarget(null);
           }
         }}
         onDrop={(event) => {
-          if (type !== "collection" && type !== "collection_root") {
+          if (!droppable) {
             return;
           }
           event.preventDefault();
-          onDropCollection(type === "collection_root" ? "" : id, event);
+          const position = dropPositionForEvent(event);
+          onDragTarget(null);
+          onDropCollection(type === "collection_root" ? "" : id, position, event);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -376,11 +491,13 @@ function TreeRow({
           depth={depth + 1}
           payload={payload}
           expandedIds={expandedIds}
+          dragTarget={dragTarget}
           onToggle={onToggle}
           onSelect={onSelect}
           onMenu={onMenu}
           onDropCollection={onDropCollection}
           onDragStart={onDragStart}
+          onDragTarget={onDragTarget}
         />
       )) : null}
     </>
@@ -391,12 +508,14 @@ function Section({
   section,
   payload,
   expanded,
+  dragTarget,
   onToggle,
   onSelect,
   onMenu,
   onDialog,
   onDropCollection,
   onDragStart,
+  onDragTarget,
 }) {
   const [open, setOpen] = useState(true);
   const items = asArray(section.items);
@@ -427,11 +546,13 @@ function Section({
               depth={0}
               payload={payload}
               expandedIds={expanded}
+              dragTarget={dragTarget}
               onToggle={onToggle}
               onSelect={onSelect}
               onMenu={onMenu}
               onDropCollection={onDropCollection}
               onDragStart={onDragStart}
+              onDragTarget={onDragTarget}
             />
           ))}
         </div>
@@ -446,6 +567,7 @@ function PaperList({
   setSelectedPaperIds,
   setDragPayload,
   emit,
+  onPaperMenu,
 }) {
   const papers = asArray(payload.papers);
   const selected = selectedPaperIds;
@@ -491,8 +613,13 @@ function PaperList({
             return (
               <article
                 key={paperId}
+                data-paper-id={paperId}
                 className={`paper-list-card ${isActive ? "is-active" : ""} ${isSelected ? "is-selected" : ""}`}
                 draggable
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onPaperMenu(event, paper, dragIds);
+                }}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
                   event.dataTransfer.setData("text/plain", dragIds.join("\n"));
@@ -540,6 +667,7 @@ function App() {
   const [menu, setMenu] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [dragPayload, setDragPayload] = useState(null);
+  const [dragTarget, setDragTarget] = useState(null);
   const payload = useMemo(() => normalizePayload(args.payload), [args.payload]);
   const activePayload = useMemo(
     () => ({ ...payload, selectedPaperIds: [...selectedPaperIds] }),
@@ -605,30 +733,38 @@ function App() {
       setDialog({ kind: kind.split(":", 2)[1], ...data });
     }
   };
-  const dropCollection = (parentId, event = null) => {
+  const dropCollection = (targetId, position = "into", event = null) => {
     if (!dragPayload) {
       return;
     }
     if (dragPayload.kind === "collection") {
-      if (!dragPayload.nodeId || dragPayload.nodeId === parentId) {
+      if (!dragPayload.nodeId || dragPayload.nodeId === targetId) {
         return;
       }
-      emit(makeEvent("paper_library_move_collection", {
+      const eventPayload = {
         node_id: dragPayload.nodeId,
-        parent_id: parentId,
-      }));
+      };
+      if (position === "before") {
+        eventPayload.before_node_id = targetId;
+      } else if (position === "after") {
+        eventPayload.after_node_id = targetId;
+      } else {
+        eventPayload.parent_id = targetId;
+      }
+      emit(makeEvent("paper_library_move_collection", eventPayload));
     } else if (dragPayload.kind === "papers") {
       const paperIds = asArray(dragPayload.paperIds).map(cleanText).filter(Boolean);
       if (!paperIds.length) {
         return;
       }
       emit(makeEvent("paper_library_drop_papers_to_collection", {
-        node_id: parentId,
+        node_id: targetId,
         paper_ids: paperIds,
         append: Boolean(dragPayload.append || event?.altKey || event?.shiftKey),
       }));
     }
     setDragPayload(null);
+    setDragTarget(null);
   };
 
   const liveSelectedCount = selectedPaperIds.size;
@@ -668,6 +804,7 @@ function App() {
             section={section}
             payload={activePayload}
             expanded={expanded}
+            dragTarget={dragTarget}
             onToggle={(id) => {
               const next = new Set(expanded);
               if (next.has(id)) {
@@ -682,6 +819,7 @@ function App() {
             onDialog={setDialog}
             onDropCollection={dropCollection}
             onDragStart={(nodeIdValue) => setDragPayload({ kind: "collection", nodeId: nodeIdValue })}
+            onDragTarget={setDragTarget}
           />
         ))}
       </div>
@@ -698,6 +836,12 @@ function App() {
             setSelectedPaperIds={setSelectedPaperIds}
             setDragPayload={setDragPayload}
             emit={emit}
+            onPaperMenu={(event, paper, paperIds) => setMenu({
+              item: { ...paper, type: "paper" },
+              paperIds,
+              x: event.clientX,
+              y: event.clientY,
+            })}
           />
         </div>
       ) : treePane}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import html
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -209,6 +210,7 @@ def _paper_ai_prefs() -> dict[str, str]:
     ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
     paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
     return {
+        "translation_backend": str(paper.get("translation_backend") or "").strip(),
         "translation_model": str(paper.get("translation_model") or "").strip(),
         "deep_read_model": str(paper.get("deep_read_model") or "").strip(),
     }
@@ -252,6 +254,26 @@ def _model_picker(label: str, pref_name: str, current: str, default_model: str) 
     return str(choice).strip()
 
 
+def _backend_picker(label: str, pref_name: str, current: str) -> str:
+    options = [_MODEL_DEFAULT, "llm", "codex"]
+    current = str(current or "").strip()
+    initial = current if current in {"llm", "codex"} else _MODEL_DEFAULT
+    choice = st.selectbox(
+        label,
+        options,
+        index=options.index(initial),
+        format_func=lambda value: (
+            _l("ai_config_use_default", "Use app default")
+            if value == _MODEL_DEFAULT
+            else "LLM"
+            if value == "llm"
+            else "Codex"
+        ),
+        key=f"paper_ai_config:{selected}:{pref_name}:choice",
+    )
+    return "" if choice == _MODEL_DEFAULT else str(choice).strip()
+
+
 def _effective_model_caption(label: str, configured: str, default_model: str) -> str:
     configured = str(configured or "").strip()
     default_model = str(default_model or "").strip()
@@ -266,22 +288,70 @@ def _effective_model_caption(label: str, configured: str, default_model: str) ->
     return f"{label}: {model}"
 
 
+def _effective_backend_caption(label: str, configured: str) -> str:
+    configured = str(configured or "").strip()
+    if configured == "codex":
+        value = "Codex"
+    elif configured == "llm":
+        value = "LLM"
+    else:
+        value = f"{_l('ai_config_use_default', 'Use app default')}: LLM"
+    return f"{label}: {value}"
+
+
+def _run_llm_availability_test(model: str) -> None:
+    if not llm_client.is_configured():
+        st.warning(_l("ai_config_llm_unconfigured", "LLM API key is not configured."))
+        return
+    reply = llm_client.chat(
+        "Return exactly OK. No prose.",
+        "OK",
+        temperature=0,
+        model=str(model or "").strip() or None,
+    )
+    if reply.startswith("LLM error:") or reply.startswith("AI features not configured"):
+        st.warning(reply)
+    else:
+        st.success(_l("ai_config_model_available", "Model test succeeded."))
+
+
+def _run_codex_availability_test(model: str) -> None:
+    cfg = codex_adapter.current_config(profile=selected)
+    if str(model or "").strip():
+        cfg = replace(cfg, model=str(model or "").strip())
+    result = codex_adapter.run_readonly_codex_prompt(
+        selected,
+        "Return exactly OK. Do not edit files.",
+        config=cfg,
+        timeout_seconds=min(float(cfg.timeout_seconds or 30.0), 30.0),
+    )
+    if result.ok:
+        st.success(_l("ai_config_model_available", "Model test succeeded."))
+    else:
+        st.warning(codex_adapter.readable_codex_error(result.error, result.stderr, result.output, result.stdout))
+
+
 def _render_ai_config_panel() -> None:
+    prefs = _paper_ai_prefs()
+    llm_default = str(llm_client.current_config(mask_key=True).get("model") or "").strip()
+    codex_cfg = codex_adapter.current_config(profile=selected)
+    codex_default = str(codex_cfg.model or "").strip() or llm_default
     with st.form(f"paper_ai_config_form:{selected}", border=False):
-        prefs = _paper_ai_prefs()
-        llm_default = str(llm_client.current_config(mask_key=True).get("model") or "").strip()
-        codex_default = str(codex_adapter.current_config(profile=selected).model or "").strip() or llm_default
         st.caption(
             _l(
                 "ai_config_caption",
-                "Choose paper-reading models. Leave a field on app default to follow the global sidebar/runtime configuration.",
+                "Choose paper-reading backends and models. Leave a field on app default to follow the global sidebar/runtime configuration.",
             )
         )
         default_bits = [
+            _effective_backend_caption(
+                _l("ai_config_translation_backend", "Translation backend"),
+                prefs["translation_backend"],
+            ),
             _effective_model_caption(
-                _l("ai_config_translation_model", "Current-page translation model"),
+                _l("ai_config_translation_model", "Translation model"),
                 prefs["translation_model"],
-                llm_default,
+                codex_default if prefs["translation_backend"] == "codex" else llm_default,
             ),
             _effective_model_caption(
                 _l("ai_config_deep_read_model", "DeepRead model"),
@@ -290,11 +360,17 @@ def _render_ai_config_panel() -> None:
             ),
         ]
         st.caption(" · ".join(default_bits))
+        translation_backend = _backend_picker(
+            _l("ai_config_translation_backend", "Translation backend"),
+            "translation_backend",
+            prefs["translation_backend"],
+        )
+        translation_backend_effective = translation_backend or prefs["translation_backend"] or "llm"
         translation_model = _model_picker(
-            _l("ai_config_translation_model", "Current-page translation model"),
+            _l("ai_config_translation_model", "Translation model"),
             "translation_model",
             prefs["translation_model"],
-            llm_default,
+            codex_default if translation_backend_effective == "codex" else llm_default,
         )
         deep_read_model = _model_picker(
             _l("ai_config_deep_read_model", "DeepRead model"),
@@ -308,6 +384,7 @@ def _render_ai_config_panel() -> None:
                 {
                     "ai": {
                         "paper": {
+                            "translation_backend": translation_backend,
                             "translation_model": translation_model,
                             "deep_read_model": deep_read_model,
                         }
@@ -316,6 +393,35 @@ def _render_ai_config_panel() -> None:
             )
             st.success(_l("ai_config_saved", "AI preferences saved."))
             st.rerun()
+    llm_cfg = llm_client.current_config(mask_key=True)
+    codex_status = codex_adapter.codex_status(replace(codex_cfg, timeout_seconds=min(float(codex_cfg.timeout_seconds or 8.0), 8.0)))
+    status_cols = st.columns(2)
+    with status_cols[0]:
+        st.caption(
+            f"LLM: {'configured' if llm_cfg.get('configured') else 'missing key'} · "
+            f"{llm_cfg.get('model') or _l('missing', 'missing')}"
+        )
+        if st.button(
+            _l("ai_config_test_llm", "Test LLM model"),
+            key=f"paper_ai_config:{selected}:test_llm",
+            use_container_width=True,
+        ):
+            _run_llm_availability_test(prefs["translation_model"] or llm_default)
+    with status_cols[1]:
+        codex_bits = [
+            "installed" if codex_status.installed else "missing",
+            "logged in" if codex_status.logged_in else "login unknown",
+            codex_cfg.model or _l("ai_config_use_default", "Use app default"),
+        ]
+        st.caption("Codex: " + " · ".join(codex_bits))
+        if codex_status.error:
+            st.caption(codex_status.error)
+        if st.button(
+            _l("ai_config_test_codex", "Test Codex model"),
+            key=f"paper_ai_config:{selected}:test_codex",
+            use_container_width=True,
+        ):
+            _run_codex_availability_test(prefs["deep_read_model"] or codex_cfg.model)
 
 
 def _status_label(status: str) -> str:
@@ -334,6 +440,26 @@ def _save_sources(inbox, message: str) -> None:
 def _accept_latest_sources_for_additive_write() -> None:
     """Let additive imports proceed after passive Reader progress writes."""
     refresh_file_snapshots([_sources_path])
+
+
+def _prepare_reader_artifacts_for_sources(source_ids: list[str]) -> dict[str, object]:
+    prepared: list[str] = []
+    warnings: list[str] = []
+    refreshed = load_research_sources(selected).by_id()
+    for source_id in source_ids:
+        source = refreshed.get(source_id)
+        if source is None or not (source.metadata or {}).get("pdf_asset_ref"):
+            continue
+        try:
+            ensure_paper_reading_artifacts(_pdir, source_id, prefer_grobid=True)
+            prepared.append(source_id)
+        except Exception as exc:
+            warnings.append(f"{source_id}: {exc}")
+    if prepared:
+        refresh_file_snapshots([_sources_path])
+        stash_git_backup_results()
+        clear_web_cache()
+    return {"prepared": prepared, "warnings": warnings}
 
 
 def _render_source_form(inbox, *, source=None, prefix: str) -> None:
@@ -609,7 +735,7 @@ def _render_workspace_overview(inbox) -> None:
     st.markdown(f"**{ui['research_primary_actions']}**")
     a1, a2, a3, a4, a5 = st.columns(5)
     with a1:
-        st.page_link("pages/7_Research.py", label=_l("search_papers", "Search papers"))
+        st.page_link("pages/7_Research.py", label=_l("find_papers_in_library", "Find papers in Library"))
     with a2:
         st.page_link("pages/7_Research.py", label=_l("open_library", "Open Library"))
     with a3:
@@ -1001,32 +1127,41 @@ def _paper_library_component_payload(
         },
         "labels": {
             "add_selected_here": _l("add_selected_here", "Add selected papers here"),
+            "add_to_collection": _l("add_to_collection", "Add to collection"),
+            "archive": _l("archive", "Archive"),
             "cancel": _l("cancel", "Cancel"),
             "collapse": _l("collapse", "Collapse"),
             "collapse_all": _l("collapse_all", "Collapse all"),
             "collection_actions": _l("collection_actions", "Collection actions"),
             "collection_title": _l("collection_title", "Collection title"),
             "delete_collection": _l("delete_collection", "Delete collection"),
+            "discard": _l("discard", "Discard"),
             "expand": _l("expand", "Expand"),
             "expand_all": _l("expand_all", "Expand all"),
+            "mark_as_reading": _l("mark_as_reading", "Mark as reading"),
             "move_collection": _l("move_collection", "Move collection"),
             "move_down": _l("move_down", "Move down"),
             "move_papers_to_collection": _l("move_papers_to_collection", "Move papers to collection"),
             "move_papers_to_parent": _l("move_papers_to_parent", "Move papers to parent collection"),
             "move_papers_to_unsorted": _l("move_papers_to_unsorted", "Move papers to Unsorted Inbox"),
             "move_selected_here": _l("move_selected_here", "Move selected papers here"),
+            "move_to_collection": _l("move_to_collection", "Move to collection"),
             "move_up": _l("move_up", "Move up"),
             "new_collection": _l("new_collection", "New collection"),
             "new_subcollection": _l("new_subcollection", "New subcollection"),
+            "open_reader": _l("open_reader", "Open Reader"),
             "paper_policy": _l("paper_policy", "Paper policy"),
             "parent_collection": _l("parent_collection", "Parent collection"),
+            "remove_from_current_collection": _l("remove_from_current_collection", "Remove from current collection"),
             "rename": _l("rename", "Rename"),
+            "run_extraction": _l("run_extraction", "Run extraction"),
             "save": _l("save", "Save"),
             "search_collections": _l("search_collections", "Search collections"),
             "selected_papers": _l("selected_papers", "{count} papers selected"),
             "select_all": _l("select_all", "Select all"),
             "clear_selection": _l("clear_selection", "Clear"),
             "select_paper": _l("select_paper", "Select paper"),
+            "show_details": _l("show_details", "Show details"),
             "library_empty": _l("library_empty", "No papers match this view."),
             "library_result_count": _l("paper_list_result_count", "{count} papers"),
             "target_collection": _l("target_collection", "Target collection"),
@@ -1084,6 +1219,8 @@ def _handle_paper_library_component_event(event: dict[str, object] | None) -> No
                 _pdir,
                 str(payload.get("node_id") or ""),
                 parent_id=str(payload.get("parent_id") or ""),
+                before_node_id=str(payload.get("before_node_id") or ""),
+                after_node_id=str(payload.get("after_node_id") or ""),
             )
         elif action == "paper_library_reorder_collection":
             reorder_paper_library_node(
@@ -1144,6 +1281,19 @@ def _handle_paper_library_component_event(event: dict[str, object] | None) -> No
                 str(payload.get("node_id") or ""),
             )
             refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_update_papers_status":
+            assert_files_current([_sources_path])
+            next_status = str(payload.get("status") or "")
+            if next_status not in SOURCE_STATUSES:
+                raise ValueError(f"Unknown source status: {next_status}")
+            current = load_research_sources(selected)
+            for source_id in selected_ids():
+                update_research_source(current, source_id, status=next_status)
+            save_research_sources(selected, current)
+            refresh_file_snapshots([_sources_path])
+        elif action == "paper_library_run_extraction":
+            for source_id in selected_ids():
+                ensure_paper_reading_artifacts(_pdir, source_id)
         else:
             return
         stash_git_backup_results()
@@ -1362,6 +1512,7 @@ def _result_rows(results: list[object]) -> list[dict[str, object]]:
             "link": (row.link_check or {}).get("status", "needs check"),
             "imported": row.imported_source_id,
             "warnings": " · ".join(_search_result_warnings(row, load_research_sources(selected))),
+            "abstract": _short_text(row.abstract, 260),
             "relevance": row.why_relevant,
             "tags": ", ".join(row.tags),
         }
@@ -1373,14 +1524,33 @@ def _search_state_key(name: str) -> str:
     return f"paper_search:{selected}:{name}"
 
 
-def _render_paper_search(inbox) -> None:
-    st.subheader(_l("paper_search", "Paper Search"))
+def _focus_library_import(imported_ids: list[str], node_ref: str) -> None:
+    clean_node = str(node_ref or "").strip()
+    st.session_state[_paper_library_key("view")] = "all" if clean_node else "unsorted"
+    st.session_state[_paper_library_key("node")] = clean_node
+    if imported_ids:
+        st.session_state[_paper_library_key("detail")] = imported_ids[0]
+        st.session_state[_search_state_key("results")] = []
+
+
+def _render_paper_search(inbox, *, embedded: bool = False) -> None:
+    node_options = _node_options()
+    current_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
+    default_location = node_options.get(current_node, _l("unsorted_inbox", "Unsorted Inbox"))
+    if not embedded:
+        st.subheader(_l("paper_search", "Paper Search"))
     st.caption(
         _l(
             "paper_search_caption",
-            "Search and import candidates. Results stay preview-only until you confirm import.",
+            "Search results stay preview-only, show abstracts first, and import into the selected Library location only after confirmation.",
         )
     )
+    if embedded:
+        st.caption(
+            _l("paper_search_library_default", "Default import location: {location}").format(
+                location=default_location
+            )
+        )
     prepare_notice_key = f"paper_reader_prepare_notice:{selected}"
     prepare_notice = st.session_state.pop(prepare_notice_key, "")
     if prepare_notice:
@@ -1519,6 +1689,11 @@ def _render_paper_search(inbox) -> None:
                     horizontal=True,
                     key=f"pdf_strategy:{selected}",
                 )
+                prepare_reader = st.checkbox(
+                    _l("prepare_reader_after_import", "Prepare Reader text after import"),
+                    value=True,
+                    disabled=pdf_strategy != _l("download_open_access_pdf", "Download open-access PDF"),
+                )
                 confirmed = st.form_submit_button(_l("import_selected", "Import selected"), type="primary")
             selected_results = [row for row in marked_results if row.candidate_id in set(selected_ids)]
             if pdf_strategy == _l("download_open_access_pdf", "Download open-access PDF"):
@@ -1561,6 +1736,7 @@ def _render_paper_search(inbox) -> None:
                     refresh_file_snapshots([_sources_path])
                     stash_git_backup_results()
                     clear_web_cache()
+                    _focus_library_import(imported, import_node_ref)
                     st.success(_l("imported_papers", "Imported papers: {ids}").format(ids=", ".join(imported) or "0"))
                     refreshed = load_research_sources(selected).by_id()
                     imported_pdf_assets = [
@@ -1576,10 +1752,22 @@ def _render_paper_search(inbox) -> None:
                         pdf_strategy == _l("download_open_access_pdf", "Download open-access PDF")
                         and imported_pdf_assets
                     ):
-                        st.session_state[prepare_notice_key] = _l(
-                            "reader_background_prepare_hint",
-                            "PDF assets are saved now; Reader will prepare text in the background when opened.",
-                        )
+                        if prepare_reader:
+                            with st.spinner(_l("prepare_reader_after_import", "Prepare Reader text after import")):
+                                prepare_summary = _prepare_reader_artifacts_for_sources(imported_pdf_assets)
+                            if prepare_summary["prepared"]:
+                                st.success(
+                                    _l("reader_artifacts_prepared", "Reader text prepared: {ids}").format(
+                                        ids=", ".join(prepare_summary["prepared"])
+                                    )
+                                )
+                            for warning in prepare_summary["warnings"]:
+                                st.warning(str(warning))
+                        else:
+                            st.session_state[prepare_notice_key] = _l(
+                                "reader_background_prepare_hint",
+                                "PDF assets are saved now; Reader will prepare text in the background when opened.",
+                            )
                     for source_id in imported:
                         source = refreshed.get(source_id)
                         metadata = source.metadata if source is not None else {}
@@ -1610,6 +1798,12 @@ def _render_paper_search(inbox) -> None:
             tags = st.text_input(ui["tags"])
             visibility = st.selectbox(ui["visibility"], ["private", "public"], index=0)
             status = st.selectbox(ui["status"], SOURCE_STATUSES, index=SOURCE_STATUSES.index("inbox"))
+            download_pdf = st.checkbox(_l("download_open_access_pdf", "Download open-access PDF"), value=True)
+            prepare_reader = st.checkbox(
+                _l("prepare_reader_after_import", "Prepare Reader text after import"),
+                value=True,
+                disabled=not download_pdf,
+            )
             submitted = st.form_submit_button(_l("import_url", "Import URL"), type="primary")
         if submitted:
             try:
@@ -1630,11 +1824,18 @@ def _render_paper_search(inbox) -> None:
                         "tags": _tags(tags),
                         "visibility": visibility,
                         "status": status,
+                        "download_pdf": download_pdf,
                     },
                 )
+                if download_pdf and prepare_reader:
+                    with st.spinner(_l("prepare_reader_after_import", "Prepare Reader text after import")):
+                        prepare_summary = _prepare_reader_artifacts_for_sources([source_id])
+                    for warning in prepare_summary["warnings"]:
+                        st.warning(str(warning))
                 refresh_file_snapshots([_sources_path])
                 stash_git_backup_results()
                 clear_web_cache()
+                _focus_library_import([source_id], import_node_ref)
                 st.success(ui["created"].format(id=source_id))
                 st.rerun()
             except Exception as exc:
@@ -1656,6 +1857,10 @@ def _render_paper_search(inbox) -> None:
             child_collection = st.text_input(_l("new_child_collection", "New child collection"))
             tags = st.text_input(ui["tags"])
             visibility = st.selectbox(ui["visibility"], ["private", "public"], index=0)
+            prepare_reader = st.checkbox(
+                _l("prepare_reader_after_import", "Prepare Reader text after import"),
+                value=True,
+            )
             submitted = st.form_submit_button(_l("upload_pdf", "Upload PDF"), type="primary")
         if submitted:
             try:
@@ -1682,14 +1887,21 @@ def _render_paper_search(inbox) -> None:
                 )
                 save_research_sources(selected, inbox)
                 import_paper_pdf(_pdir, source.id, uploaded.getvalue(), uploaded.name)
+                if prepare_reader:
+                    with st.spinner(_l("prepare_reader_after_import", "Prepare Reader text after import")):
+                        prepare_summary = _prepare_reader_artifacts_for_sources([source.id])
+                    for warning in prepare_summary["warnings"]:
+                        st.warning(str(warning))
                 refresh_file_snapshots([_sources_path])
                 stash_git_backup_results()
                 clear_web_cache()
+                _focus_library_import([source.id], import_node_ref)
                 st.success(ui["created"].format(id=source.id))
-                st.session_state[prepare_notice_key] = _l(
-                    "reader_background_prepare_hint",
-                    "PDF assets are saved now; Reader will prepare text in the background when opened.",
-                )
+                if not prepare_reader:
+                    st.session_state[prepare_notice_key] = _l(
+                        "reader_background_prepare_hint",
+                        "PDF assets are saved now; Reader will prepare text in the background when opened.",
+                    )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -2152,6 +2364,7 @@ def _paper_component_rows(rows: list[dict[str, object]]) -> list[dict[str, objec
                 "summary": _short_text(row.get("summary") or row.get("notes"), 220),
                 "badges": [str(item) for item in row.get("badges", []) if str(item).strip()],
                 "tags": [str(item) for item in row.get("tags", []) if str(item).strip()],
+                "reader_url": _reader_view_url(source_id) if getattr(row.get("source"), "metadata", {}).get("pdf_asset_ref") else "",
                 "metrics": " · ".join(
                     [
                         f"{_l('annotations', 'Annotations')}: {row.get('annotations_count', 0)}",
@@ -2402,9 +2615,56 @@ def _render_paper_detail_panel(
                 "structured_extracted_at": source.metadata.get("structured_extracted_at", ""),
             }
         )
+        artifact_actions = st.columns(3)
+        with artifact_actions[0]:
+            if st.button(
+                _l("extract_pages", "Extract pages"),
+                key=_paper_library_key(f"detail_extract_pages:{source.id}"),
+                disabled=not source.metadata.get("pdf_asset_ref"),
+                use_container_width=True,
+            ):
+                try:
+                    extract_paper_pages(_pdir, source.id)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with artifact_actions[1]:
+            if st.button(
+                _l("extract_segments", "Extract segments"),
+                key=_paper_library_key(f"detail_extract_segments:{source.id}"),
+                disabled=not source.metadata.get("pdf_asset_ref"),
+                use_container_width=True,
+            ):
+                try:
+                    extract_paper_segments(_pdir, source.id)
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with artifact_actions[2]:
+            if st.button(
+                _l("run_structured_extraction", "Run structured extraction"),
+                key=_paper_library_key(f"detail_structured:{source.id}"),
+                disabled=not source.metadata.get("pdf_asset_ref"),
+                use_container_width=True,
+            ):
+                try:
+                    extract_paper_segments(_pdir, source.id, backend="grobid")
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(ui["saved"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
         warnings = source.metadata.get("structured_extraction_warnings") or source.metadata.get("text_extraction_warnings") or []
         for warning in warnings:
             st.warning(str(warning))
+        _render_grobid_status_block(source)
     with detail_tabs[2]:
         st.code(
             yaml.dump(
@@ -2455,6 +2715,13 @@ def _render_paper_library(inbox) -> None:
     metric_cols[2].metric(_l("pdf_missing", "PDF missing"), _library_view_count(all_rows, "no_pdf"))
     metric_cols[3].metric(_l("needs_extraction", "Needs extraction"), _library_view_count(all_rows, "needs_extraction"))
     metric_cols[4].metric(_l("claims_need_review", "Claims review"), _library_view_count(all_rows, "claims_need_review"))
+
+    search_results_open = bool(st.session_state.get(_search_state_key("results")) or [])
+    with st.expander(
+        _l("find_import_papers", "Find and import papers"),
+        expanded=search_results_open,
+    ):
+        _render_paper_search(inbox, embedded=True)
 
     selected_paper_ids_for_tree = [
         str(item)
@@ -3303,7 +3570,7 @@ def _handle_reader_component_event(
             else:
                 message = result.message or _l(
                     "visible_page_translation_no_text",
-                    "No extracted text is available for the visible page yet. Try Extract pages in Reader diagnostics.",
+                    "No extracted text is available for the visible page yet. Use Paper Library > Artifacts to run extraction.",
                 )
                 st.warning(message)
                 _set_reader_action_status(source_id, action, "error", message)
@@ -3522,44 +3789,33 @@ def _render_paper_reader(inbox) -> None:
             -idx,
         ),
     )
-    source_id = st.selectbox(
-        ui["source_id"],
-        options=[source.id for source in papers],
-        index=default_index,
-        format_func=lambda sid: _source_label(inbox, sid),
-        key=f"paper_reader_source:{selected}",
-    )
+    reader_source_key = f"paper_reader_source:{selected}"
+    paper_ids = [source.id for source in papers]
+    remembered_source_id = str(st.session_state.get(reader_source_key, "") or "")
+    if remembered_source_id not in paper_ids:
+        st.session_state[reader_source_key] = papers[default_index].id
+    with st.expander(_l("change_reader_paper", "Change Reader paper"), expanded=False):
+        source_id = st.selectbox(
+            ui["source_id"],
+            options=paper_ids,
+            index=paper_ids.index(st.session_state[reader_source_key]),
+            format_func=lambda sid: _source_label(inbox, sid),
+            key=reader_source_key,
+        )
+    source_id = str(st.session_state.get(reader_source_key, source_id) or source_id)
+    st.session_state[_paper_library_key("detail")] = source_id
     source = inbox.by_id().get(source_id)
     if source is None:
         return
-    artifact_status: dict[str, object] = {}
     existing_pages = load_paper_pages(_pdir, source_id)
     existing_segments = load_paper_segments(_pdir, source_id)
     if source.metadata.get("pdf_asset_ref") and (not existing_pages or not existing_segments):
         st.info(
             _l(
                 "reader_artifacts_missing",
-                "Reader text artifacts are not extracted yet. The PDF can open now; extract when you need search, translation, and segment-aware notes.",
+                "Reader text artifacts are not extracted yet. The PDF can open now; Reader will prepare them automatically, or use Paper Library > Artifacts to run extraction manually.",
             )
         )
-        if st.button(_l("extract_reader_artifacts", "Extract reader text"), type="primary"):
-            try:
-                artifact_status = ensure_paper_reading_artifacts(_pdir, source_id)
-                inbox = load_research_sources(selected)
-                source = inbox.by_id().get(source_id) or source
-                stash_git_backup_results()
-                clear_web_cache()
-                st.success(ui["saved"])
-                st.rerun()
-            except Exception as exc:
-                st.warning(_l("reading_artifacts_failed", "Reading artifacts could not be prepared: {error}").format(error=exc))
-        if not existing_pages:
-            artifact_status = {
-                "ready": False,
-                "status": "missing",
-                "pages": 0,
-                "segments": len(existing_segments),
-            }
     status_bits = [
         f"PDF: {'yes' if source.metadata.get('pdf_asset_ref') else 'missing'}",
         f"{_l('pages', 'Pages')}: {source.metadata.get('page_count', '') or '?'}",
@@ -3577,57 +3833,11 @@ def _render_paper_reader(inbox) -> None:
             "PDF Reader is the primary surface when a PDF asset is attached; diagnostics and text fallback stay out of the reading path.",
         )
     )
-    if artifact_status.get("warnings"):
+    artifact_warnings = source.metadata.get("structured_extraction_warnings") or source.metadata.get("text_extraction_warnings") or []
+    if artifact_warnings:
         with st.expander(_l("reader_artifact_warnings", "Reader preparation warnings"), expanded=False):
-            for warning in artifact_status.get("warnings") or []:
+            for warning in artifact_warnings:
                 st.warning(str(warning))
-
-    with st.expander(_l("reader_diagnostics", "Reader diagnostics"), expanded=False):
-        _render_grobid_status_block(source)
-        actions = st.columns(4)
-        with actions[0]:
-            if st.button(_l("extract_pages", "Extract pages"), disabled=not source.metadata.get("pdf_asset_ref")):
-                try:
-                    extract_paper_pages(_pdir, source_id)
-                    stash_git_backup_results()
-                    clear_web_cache()
-                    st.success(ui["saved"])
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-        with actions[1]:
-            if st.button(_l("extract_segments", "Extract segments"), disabled=not source.metadata.get("pdf_asset_ref")):
-                try:
-                    extract_paper_segments(_pdir, source_id)
-                    stash_git_backup_results()
-                    clear_web_cache()
-                    st.success(ui["saved"])
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-        with actions[2]:
-            if st.button(
-                _l("run_structured_extraction", "Run structured extraction"),
-                disabled=not source.metadata.get("pdf_asset_ref"),
-            ):
-                try:
-                    extract_paper_segments(_pdir, source_id, backend="grobid")
-                    stash_git_backup_results()
-                    clear_web_cache()
-                    st.success(ui["saved"])
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-        with actions[3]:
-            if st.button(_l("auto_chunk", "Auto chunk")):
-                try:
-                    chunks = auto_chunk_paper(_pdir, source_id)
-                    stash_git_backup_results()
-                    clear_web_cache()
-                    st.success(_l("created_chunks", "Created chunks: {count}").format(count=len(chunks)))
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
     if source.metadata.get("pdf_asset_ref"):
         try:
             token = mint_reader_token(user.id, selected, source_id)
@@ -4650,10 +4860,9 @@ with _head_goal:
 
 inbox = load_research_sources(selected)
 
-tab_overview, tab_search, tab_library, tab_reader, tab_claims, tab_export, tab_advanced = st.tabs(
+tab_overview, tab_library, tab_reader, tab_claims, tab_export, tab_advanced = st.tabs(
     [
         _l("overview", "Overview"),
-        _l("paper_search", "Paper Search"),
         _l("paper_library", "Paper Library"),
         _l("reader", "Reader"),
         ui["claims_citations"],
@@ -4664,9 +4873,6 @@ tab_overview, tab_search, tab_library, tab_reader, tab_claims, tab_export, tab_a
 
 with tab_overview:
     _render_workspace_overview(inbox)
-
-with tab_search:
-    _render_paper_search(inbox)
 
 with tab_library:
     _render_paper_library(inbox)

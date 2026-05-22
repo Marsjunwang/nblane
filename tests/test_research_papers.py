@@ -211,6 +211,8 @@ class TestResearchPapers(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "itself"):
                     position_paper_library_node(profile, memory.id, parent_id=memory.id)
                 positioned = position_paper_library_node(profile, memory.id, after_node_id=vla.id)
+                dataset = create_paper_library_node(profile, "Datasets")
+                before = position_paper_library_node(profile, dataset.id, before_node_id=vla.id)
 
             tree = load_paper_library_tree(profile)
             nodes = tree.by_id()
@@ -219,6 +221,8 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(renamed.title, "Working Memory")
         self.assertEqual(reordered.id, methods.id)
         self.assertEqual(positioned.parent_id, "")
+        self.assertEqual(before.parent_id, "")
+        self.assertLess(nodes[dataset.id].order, nodes[vla.id].order)
         self.assertEqual(nodes[memory.id].parent_id, "")
         self.assertLess(nodes[vla.id].order, nodes[memory.id].order)
         self.assertEqual(nodes[methods.id].parent_id, vla.id)
@@ -1047,6 +1051,49 @@ class TestResearchPapers(unittest.TestCase):
         self.assertIn("dataset for future development", text)
         self.assertNotIn("datasetforfuturedevelopment", text)
 
+    def test_reader_translation_structure_units_filters_table_fragments(self) -> None:
+        source_id = "source:paper:grounded"
+        units = [
+            PaperStructureUnit(
+                unit_id="psu:paper:1:00001:body",
+                source_id=source_id,
+                kind="paragraph",
+                page_start=1,
+                page_end=1,
+                order=1,
+                text="A real paragraph about the robot dataset.",
+                text_hash=text_hash("A real paragraph about the robot dataset."),
+                translatable=True,
+            ),
+            PaperStructureUnit(
+                unit_id="psu:paper:1:00002:depth",
+                source_id=source_id,
+                kind="heading",
+                page_start=1,
+                page_end=1,
+                order=2,
+                text="Depth",
+                text_hash=text_hash("Depth"),
+                translatable=True,
+            ),
+            PaperStructureUnit(
+                unit_id="psu:paper:1:00003:cell",
+                source_id=source_id,
+                kind="paragraph",
+                page_start=1,
+                page_end=1,
+                order=3,
+                text="Action Seq.",
+                text_hash=text_hash("Action Seq."),
+                translatable=True,
+                metadata={"table_id": "table:1"},
+            ),
+        ]
+
+        rows = reader_translation_structure_units(units)
+
+        self.assertEqual([row["source_text"] for row in rows], ["A real paragraph about the robot dataset."])
+
     def test_build_paper_structure_units_orders_two_columns_without_cross_column_merge(self) -> None:
         if not pymupdf_available():
             self.skipTest("PyMuPDF is not available")
@@ -1269,6 +1316,38 @@ class TestResearchPapers(unittest.TestCase):
         self.assertGreater(rect["h"], 0)
         self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
         self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
+
+    def test_extract_paper_figures_groups_subfigures_by_caption(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=260, height=320)
+        pix_left = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 18, 12), 0)
+        pix_left.clear_with(0xDDDDDD)
+        pix_right = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 18, 12), 0)
+        pix_right.clear_with(0xBBBBBB)
+        page.insert_image(fitz.Rect(30, 70, 110, 150), stream=pix_left.tobytes("png"))
+        page.insert_image(fitz.Rect(145, 70, 225, 150), stream=pix_right.tobytes("png"))
+        page.insert_text((42, 178), "Figure 2. Two coordinated panels.", fontsize=10)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, pdf_bytes, "subfigures.pdf")
+            figures = extract_paper_figures(profile, source_id, pages={1}, max_items=4, max_width=260)
+
+        self.assertEqual(len(figures), 1)
+        self.assertIn("Figure 2", figures[0]["caption"])
+        self.assertGreater(figures[0]["rect"]["w"], 180)
 
     def test_build_reader_payload_filters_old_layout_cache_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

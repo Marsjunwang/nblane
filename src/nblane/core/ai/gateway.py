@@ -230,6 +230,7 @@ def translate_paper_segments(
     """Typed helper for ``research.paper_translate``."""
 
     model_override = _clean_model(model) or _paper_ai_model(profile, "translation_model")
+    preferred_backend = _paper_ai_backend(profile, "translation_backend")
     return run_ai_action(
         "research.paper_translate",
         {
@@ -240,6 +241,7 @@ def translate_paper_segments(
         },
         profile=profile,
         context_refs=context_refs or [source_id],
+        preferred_backend=preferred_backend or None,
         require_review=require_review,
     )
 
@@ -538,6 +540,26 @@ def _paper_ai_model(profile: str, key: str) -> str:
     ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
     paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
     return str(paper.get(key) or "").strip()
+
+
+def _paper_ai_backend(profile: str, key: str) -> str:
+    """Return the AI Action backend name for a profile-scoped paper preference."""
+
+    clean_profile = str(profile or "").strip()
+    if not clean_profile:
+        return ""
+    try:
+        prefs = load_web_preferences(clean_profile)
+    except Exception:
+        return ""
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
+    backend = str(paper.get(key) or "").strip()
+    if backend == "codex":
+        return "local_codex_readonly"
+    if backend == "llm":
+        return "direct_llm"
+    return ""
 
 
 def _reply_language_value(value: str | None) -> str:
