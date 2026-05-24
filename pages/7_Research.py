@@ -180,7 +180,6 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
-    kanban_ai_backend_key,
     select_profile,
     stash_git_backup_results,
 )
@@ -293,22 +292,6 @@ _AI_CONFIG_GROUPS = (
                 "research.paper_compare_codex",
                 "Paper compare",
                 "Compare multiple imported papers.",
-            ),
-        ),
-    ),
-    (
-        "kanban",
-        "Kanban",
-        (
-            (
-                "kanban.task_alignment",
-                "Task alignment",
-                "Clarify underspecified Kanban cards before drafting.",
-            ),
-            (
-                "kanban.subtasks",
-                "Subtask drafts",
-                "Generate reviewable subtasks for a Kanban card.",
             ),
         ),
     ),
@@ -639,15 +622,12 @@ def _legacy_ai_patch(actions: dict[str, dict[str, str]]) -> dict[str, object]:
         str(deep_read.get("codex_model") or "").strip()
         or str(search.get("codex_model") or "").strip()
     )
-    kanban_subtasks = actions.get("kanban.subtasks", {})
-    kanban_backend = str(kanban_subtasks.get("backend") or "").strip()
     return {
         "paper": {
             "translation_backend": translation_backend,
             "translation_model": translation_model,
             "deep_read_model": deep_read_model,
         },
-        "kanban_backend": kanban_backend,
     }
 
 
@@ -720,11 +700,12 @@ def _render_ai_config_panel() -> None:
                     }
                 },
             )
-            kanban_backend = str(legacy_patch.get("kanban_backend") or "").strip()
-            if kanban_backend:
-                st.session_state[kanban_ai_backend_key(selected)] = kanban_backend
             st.success(_l("ai_config_saved", "AI preferences saved."))
             st.rerun()
+
+
+def _render_research_help() -> None:
+    st.markdown(_l("research_help_body", ""))
 
 
 def _status_label(status: str) -> str:
@@ -7798,7 +7779,7 @@ def _render_connector_import_next_actions() -> None:
             st.caption(
                 _l(
                     "connector_non_paper_review_hint",
-                    "Non-paper imports stay in the Source Inbox queue on this Advanced Connectors tab.",
+                    "Non-paper imports stay in the Source Inbox queue on the Inbox & Connectors tab.",
                 )
             )
         elif not pdf_ready:
@@ -8085,9 +8066,20 @@ with _head_l:
     st.caption(ui["page_context_line"])
     _render_research_sidecar_status()
 with _head_goal:
-    _goal_col, _ai_col = st.columns([4, 2], gap="small", vertical_alignment="center")
+    _goal_col, _help_col, _ai_col = st.columns(
+        [4, 2, 2],
+        gap="small",
+        vertical_alignment="center",
+    )
     with _goal_col:
         render_current_goal_strip(selected, compact=True, align="right")
+    with _help_col:
+        with st.popover(
+            _l("page_help_short", "Guide"),
+            key=f"research_help_popover:{selected}",
+            use_container_width=False,
+        ):
+            _render_research_help()
     with _ai_col:
         with st.popover(
             _l("ai_config_short", "AI"),
@@ -8104,7 +8096,7 @@ tab_overview, tab_library, tab_claims, tab_export, tab_advanced = st.tabs(
         _l("paper_library", "Paper Library"),
         ui["claims_citations"],
         _l("synthesis_export", "Synthesis / Export"),
-        _l("advanced_connectors", "Advanced Connectors"),
+        _l("inbox_connectors", "Inbox & Connectors"),
     ]
 )
 

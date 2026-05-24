@@ -446,6 +446,8 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 ### 5.3 Evidence Review（`pages/2_Evidence_Review.py`）
 
+详细使用说明见 [Evidence Review 使用说明](evidence-review.md)。
+
 - **审阅队列** — 承接看板 Done -> Evidence 的候选流，人工选择后才写入
   `evidence-pool.yaml` 和必要的 `skill-tree.yaml` 引用。
 - **Claim Studio** — 从 Project / Goal / Skill / All Evidence / Manual 范围生成
@@ -509,6 +511,8 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 ### 5.8 Review（`pages/8_Review.py`）
 
+详细使用说明见 [Review 使用说明](review.md)。
+
 - 从周 / 阶段窗口生成 `evidence`、`next_action`、`public_draft` 候选，以及只读
   `method_note`。
 - 生成候选只读；保存所选会写入 `agent-activity.yaml` 的 pending 队列。
@@ -529,6 +533,8 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 - Codex 配置不在本页编辑；统一使用侧栏 **AI / LLM -> 配置 Codex**。
 
 ### 5.10 Research Workspace（`pages/7_Research.py`）
+
+详细使用说明见 [Research 使用说明](research.md)。
 
 - **Source Inbox** 继续接收网页、论文、repo、书籍、手动链接和 Home capture；写入
   `research/sources.yaml`，不会直接写 evidence、skill status 或公开输出。
@@ -554,7 +560,7 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
   Markdown、BibTeX、RIS、CSL JSON，并可创建带 `related_sources` /
   `related_research_claims` / `related_citations` 的 blog draft、project update 和
   resume bullet candidate；三类候选共用同一套 manifest gate。
-- **Connectors** 管理 `research/connectors.yaml`，支持 arXiv、Semantic Scholar、
+- **Inbox & Connectors** 管理来源收件箱和 `research/connectors.yaml`，支持 arXiv、Semantic Scholar、
   GitHub 自动导入；dry-run/manual candidate import 可明确落到 Source Inbox、
   collection 或 metadata only。X/Twitter 与小红书第一版走手动导入或官方授权边界。
   配置文件不保存 token、cookie 或 API key。

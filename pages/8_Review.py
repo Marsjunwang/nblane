@@ -128,12 +128,22 @@ def _show_result(result) -> None:
         st.warning(warning)
 
 
+def _render_review_help() -> None:
+    st.markdown(ui.get("review_help_body", ""))
+
+
 _head_l, _head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")
 with _head_l:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
+    with st.popover(
+        ui.get("page_help_short", "Guide"),
+        key=f"review_help_popover:{selected}",
+        use_container_width=True,
+    ):
+        _render_review_help()
 
 presets = {
     ui["preset_current_week"]: "current_week",

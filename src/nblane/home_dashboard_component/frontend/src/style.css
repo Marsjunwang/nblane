@@ -66,6 +66,7 @@ button {
 .hd-canvas-panel,
 .hd-canvas-embed,
 .hd-canvas-summary,
+.hd-inline-goal-editor,
 .hd-inspector,
 .hd-workbench,
 .hd-standalone-top {
@@ -355,6 +356,28 @@ button {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.hd-inline-goal-editor {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.hd-inline-goal-editor > header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.hd-inline-goal-editor h3 {
+  color: var(--hd-ink);
+  font-size: 19px;
+  line-height: 1.28;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
 }
 
 .hd-today-strip {

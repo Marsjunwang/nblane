@@ -783,6 +783,12 @@ def _render_codex_sidebar_entry(profile: str, u: dict[str, str]) -> None:
         u.get("codex_profile_config", "Profile Codex config for {profile}: `{path}`")
         .format(profile=profile, path=codex_adapter.profile_config_path(profile))
     )
+    st.caption(
+        u.get(
+            "codex_scope_hint",
+            "Auth and CLI config are shared for this deployment; profile config only stores non-secret preferences.",
+        )
+    )
     _render_codex_install_buttons(profile, u, key_prefix="sidebar")
     if st.button(
         u.get("codex_configure", "Configure Codex"),
@@ -815,6 +821,12 @@ def render_codex_config_dialog_if_open(profile: str) -> None:
 
 
 def _render_codex_config_dialog_body(profile: str, u: dict[str, str]) -> None:
+    st.caption(
+        u.get(
+            "codex_scope_hint",
+            "Auth and CLI config are shared for this deployment; profile config only stores non-secret preferences.",
+        )
+    )
     tabs = st.tabs(
         [
             u.get("codex_status_tab", "Status"),

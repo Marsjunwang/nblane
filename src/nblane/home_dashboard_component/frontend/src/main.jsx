@@ -2961,6 +2961,37 @@ function Dashboard({ args }) {
   };
 
   const useDailyGraphHero = !args.standalone && !args.embed;
+  const inlineGoal = goalEditor?.mode === "edit" ? goalById(payload, goalEditor.goalId) : null;
+  const inlineGoalEditor = !readOnlyCanvas && useDailyGraphHero && goalEditor?.mode && (
+    goalEditor.mode === "create" || inlineGoal
+  ) ? (
+    <section className="hd-inline-goal-editor" data-section="goal-editor">
+      <header>
+        <div>
+          <span className="hd-eyebrow">
+            {goalEditor.mode === "create"
+              ? label(payload.ui, "dashboard_add_active_goal", "Add Active Goal")
+              : label(payload.ui, "dashboard_goal_edit_inline", "Edit goal")}
+          </span>
+          <h3>
+            {goalEditor.mode === "create"
+              ? label(payload.ui, "goal_create_title", "Create goal")
+              : goalDisplay(inlineGoal, payload.ui).title}
+          </h3>
+        </div>
+        <button className="hd-ghost" type="button" data-action="close-goal-form" onClick={() => setGoalEditor(null)}>
+          {label(payload.ui, "cancel", "Cancel")}
+        </button>
+      </header>
+      <GoalForm
+        payload={payload}
+        goal={goalEditor.mode === "create" ? { editor: emptyGoalEditor() } : inlineGoal}
+        mode={goalEditor.mode}
+        onCancel={() => setGoalEditor(null)}
+        onEmit={emit}
+      />
+    </section>
+  ) : null;
   const canvasSurface = useDailyGraphHero ? (
     <GraphHeroPanel
       payload={payload}
@@ -3040,10 +3071,11 @@ function Dashboard({ args }) {
         onEmit={emit}
         onCreateGoal={() => setGoalEditor({ mode: "create" })}
         onSelectGoal={selectGoal}
-        canEditGoals={!canvasEmbed && !readOnlyCanvas}
-        canSelectGoals={!canvasEmbed}
+        canEditGoals={!readOnlyCanvas}
+        canSelectGoals={!readOnlyCanvas}
         showToday={!useDailyGraphHero}
       />
+      {inlineGoalEditor}
 
       {args.standalone ? (
         <>

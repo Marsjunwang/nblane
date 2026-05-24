@@ -1649,13 +1649,31 @@ def ensure_paper_reading_artifacts(
     structure_backend = _clean_text(metadata.get("structure_backend"))
     structured_warnings = _clean_list(metadata.get("structured_extraction_warnings"))
     rect_count = sum(1 for segment in segments if segment.rects)
+    structure_rect_count = 0
+    structure_anchor_warnings: list[str] = []
+    if structure_backend == "grobid" and segments and rect_count == 0:
+        try:
+            structure_rect_count = sum(
+                1
+                for unit in build_paper_structure_units(profile, source_id)
+                if unit.rects
+            )
+        except Exception as exc:
+            structure_anchor_warnings.append(
+                f"Layout structure anchor check failed: {exc}"
+            )
     coordinate_summary = {
         "segments_with_rects": rect_count,
         "segments_without_rects": max(0, len(segments) - rect_count),
+        "structure_units_with_rects": structure_rect_count,
     }
-    coordinate_warnings: list[str] = []
+    coordinate_warnings: list[str] = structure_anchor_warnings
     if structure_backend == "grobid" and segments:
-        if rect_count == 0:
+        if rect_count == 0 and structure_rect_count > 0:
+            coordinate_warnings.append(
+                "GROBID returned structured text without segment coordinates; Reader will use layout-grounded structure anchors for navigation and translation overlays."
+            )
+        elif rect_count == 0:
             coordinate_warnings.append(
                 "GROBID returned structured text without PDF coordinates; Reader navigation will fall back to page-level anchors."
             )

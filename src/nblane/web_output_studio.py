@@ -1508,6 +1508,7 @@ def _rerun_with_blog_layout(
     state: dict,
 ) -> None:
     _persist_blog_layout_state(selected, slug, state)
+    _remember_output_studio_tab(selected, "blog")
     st.rerun()
 
 
@@ -1982,6 +1983,24 @@ _BLOG_EVENT_DEDUPE_ACTIONS = {
     "save_post",
     "publish_request",
 }
+
+
+_OUTPUT_STUDIO_TAB_KEYS = {
+    "output_studio",
+    "profile",
+    "blog",
+    "resume",
+    "curation",
+}
+
+
+def _output_studio_active_tab_key(selected: str) -> str:
+    return f"output_studio_active_tab:{selected}"
+
+
+def _remember_output_studio_tab(selected: str, tab_key: str) -> None:
+    if tab_key in _OUTPUT_STUDIO_TAB_KEYS:
+        st.session_state[_output_studio_active_tab_key(selected)] = tab_key
 
 
 def _blog_shell_event_dedupe_key(selected: str, slug: str) -> str:
@@ -3379,6 +3398,7 @@ def _save_blog_editor(
         ui=ui,
     )
     _blog_shell_clear_draft(selected, parse_blog_post(post_path).slug)
+    _remember_output_studio_tab(selected, "blog")
     st.rerun()
 
 
@@ -3575,6 +3595,8 @@ def _render_blog_react_shell_fragment(
         action,
     ):
         return True
+    if action:
+        _remember_output_studio_tab(selected, "blog")
     event_layout = event.get("layout_state")
     if isinstance(event_layout, dict):
         _persist_blog_layout_state(selected, latest_post.slug, event_layout)
@@ -5026,6 +5048,7 @@ def _render_blog_article_panel(
                 st.session_state[f"blog_post_slug_select:{selected}"] = parse_blog_post(path).slug
                 stash_git_backup_results()
                 clear_web_cache()
+                _remember_output_studio_tab(selected, "blog")
                 st.rerun()
             st.warning(ui["title_label"])
 
@@ -5044,6 +5067,7 @@ def _render_blog_article_panel(
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(str(path))
+                _remember_output_studio_tab(selected, "blog")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -5089,6 +5113,7 @@ def _render_blog_article_panel(
                 stash_git_backup_results()
                 clear_web_cache()
                 st.success(str(path))
+                _remember_output_studio_tab(selected, "blog")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -5112,6 +5137,7 @@ def _render_blog_article_panel(
             stash_git_backup_results()
             clear_web_cache()
             st.success(str(path))
+            _remember_output_studio_tab(selected, "blog")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -6501,14 +6527,24 @@ def main() -> None:
     for file_path in required_paths:
         ensure_file_snapshot(file_path)
 
+    tab_specs = [
+        ("output_studio", ui["output_studio"]),
+        ("profile", ui["profile"]),
+        ("blog", ui["blog"]),
+        ("resume", ui["resume"]),
+        ("curation", ui["curation"]),
+    ]
+    remembered_tab = str(
+        st.session_state.get(_output_studio_active_tab_key(selected)) or ""
+    )
+    default_tab_label = next(
+        (label for key, label in tab_specs if key == remembered_tab),
+        None,
+    )
     tab_output, tab_profile, tab_blog, tab_resume, tab_curation = st.tabs(
-        [
-            ui["output_studio"],
-            ui["profile"],
-            ui["blog"],
-            ui["resume"],
-            ui["curation"],
-        ]
+        [label for _key, label in tab_specs],
+        default=default_tab_label,
+        key=f"output_studio_tabs:{selected}",
     )
 
     with tab_output:

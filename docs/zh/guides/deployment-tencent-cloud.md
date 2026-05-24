@@ -59,6 +59,38 @@ nblane auth hash-password
 - `role: member`：只能访问自己的 `profile`，以及 `teams` 列表中允许的团队。
 - `teams: ["*"]`：允许访问所有团队。
 
+## 更新代码与依赖
+
+生产环境升级代码后，先同步 Python 依赖，再重启两个服务。尤其是使用
+`ALL_PROXY=socks5://...`、`HTTPS_PROXY=socks5://...` 或 mihomo/clash SOCKS
+出口时，必须安装 `httpx[socks]`，否则 LLM / Reader / Research 的外部请求会报：
+
+```text
+Using SOCKS proxy, but the 'socksio' package is not installed.
+```
+
+本仓库已把 `httpx[socks]` 写入 `pyproject.toml` 和 `requirements.txt`。生产更新时执行：
+
+```bash
+cd /srv/nblane-app
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python - <<'PY'
+import socksio
+print("socksio ok")
+PY
+sudo systemctl restart nblane-reader nblane
+```
+
+如果使用 `uv sync` 管理虚拟环境，也要在重启前完成 sync；不要只复制代码而跳过依赖同步。
+
+端口职责保持固定：
+
+- `8501`：Streamlit 主应用，负责 Dashboard、Evidence Review、Research、Output Studio、Blog 编辑等可写页面。
+- `8502`：FastAPI sidecar，负责 Reader、Paper Library standalone、Dashboard Canvas/Paper Library iframe 等长任务和只读/半只读前端。
+
+因此 Blog 侧边栏、Dashboard 添加目标、Evidence Review 保存等写入操作仍应发生在 `8501`
+主应用中；`8502` 只提供 sidecar 能力，不应作为这些页面的独立写入口。
+
 ## systemd
 
 示例服务文件 `/etc/systemd/system/nblane.service`：

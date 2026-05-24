@@ -66,6 +66,11 @@ from nblane.core.project_board_sync import (
 )
 from nblane.core.review_actions import record_writeback_activity
 from nblane.core.sync import write_generated_blocks
+from nblane.core.web_preferences import (
+    AI_ACTION_DEFAULT_BACKENDS,
+    load_web_preferences,
+    update_web_preferences,
+)
 from nblane.web_auth import require_login
 from nblane.web_cache import (
     clear_web_cache,
@@ -83,6 +88,7 @@ from nblane.web_shared import (
     render_git_backup_notices,
     render_llm_unavailable,
     kanban_ai_backend,
+    kanban_ai_backend_key,
     select_profile,
     stash_git_backup_results,
 )
@@ -147,6 +153,140 @@ def _review_status_label(value: str) -> str:
 
 def _public_readiness_label(value: str) -> str:
     return _label("public_readiness", value)
+
+
+def _ai_action_prefs() -> dict[str, dict[str, str]]:
+    prefs = load_web_preferences(selected)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    out: dict[str, dict[str, str]] = {}
+    for action_name in ("kanban.task_alignment", "kanban.subtasks"):
+        action = (
+            actions.get(action_name)
+            if isinstance(actions.get(action_name), dict)
+            else {}
+        )
+        out[action_name] = {
+            "backend": str(action.get("backend") or "").strip(),
+            "llm_model": str(action.get("llm_model") or "").strip(),
+            "codex_model": str(action.get("codex_model") or "").strip(),
+        }
+    return out
+
+
+def _backend_label(value: str) -> str:
+    return {
+        "llm": ui.get("kb_ai_backend_llm", "LLM"),
+        "codex": ui.get("kb_ai_backend_codex", "Codex"),
+    }.get(value, value)
+
+
+def _action_model_value(config: dict[str, str], backend: str) -> str:
+    return str(
+        config.get("codex_model" if backend == "codex" else "llm_model") or ""
+    ).strip()
+
+
+def _action_model_patch(
+    config: dict[str, str],
+    backend: str,
+    model: str,
+) -> dict[str, str]:
+    patched = dict(config)
+    patched["backend"] = backend
+    patched["codex_model" if backend == "codex" else "llm_model"] = str(
+        model or ""
+    ).strip()
+    return patched
+
+
+def _render_evidence_ai_config_panel() -> None:
+    actions = _ai_action_prefs()
+    current_backend = kanban_ai_backend(selected)
+    llm_default = str(
+        llm_client.current_config(mask_key=True).get("model") or ""
+    ).strip()
+    with st.form(f"evidence_ai_config_form:{selected}", border=False):
+        st.caption(
+            ui.get(
+                "evidence_ai_config_caption",
+                "Configure AI actions for this Evidence Review page.",
+            )
+        )
+        backend = st.selectbox(
+            ui.get("evidence_ai_backend", "Evidence AI engine"),
+            ["llm", "codex"],
+            index=0 if current_backend != "codex" else 1,
+            format_func=_backend_label,
+            help=ui.get("evidence_ai_backend_help", ""),
+        )
+        model_placeholder = (
+            ui.get("evidence_ai_codex_model_placeholder", "Codex CLI default")
+            if backend == "codex"
+            else llm_default or ui.get("ai_config_use_default", "Use app default")
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            subtasks_model = st.text_input(
+                ui.get("evidence_ai_subtasks_model", "Done -> evidence model"),
+                value=_action_model_value(actions["kanban.subtasks"], backend),
+                placeholder=model_placeholder,
+                help=ui.get(
+                    "evidence_ai_subtasks_help",
+                    "Generate reviewable evidence drafts from selected Done tasks.",
+                ),
+            )
+        with c2:
+            alignment_model = st.text_input(
+                ui.get("evidence_ai_alignment_model", "Task alignment model"),
+                value=_action_model_value(actions["kanban.task_alignment"], backend),
+                placeholder=model_placeholder,
+                help=ui.get(
+                    "evidence_ai_alignment_help",
+                    "Clarify underspecified Kanban cards before drafting.",
+                ),
+            )
+        if st.form_submit_button(
+            ui.get("save", "Save"),
+            type="primary",
+            use_container_width=True,
+        ):
+            next_actions = {
+                "kanban.subtasks": _action_model_patch(
+                    actions["kanban.subtasks"],
+                    backend,
+                    subtasks_model,
+                ),
+                "kanban.task_alignment": _action_model_patch(
+                    actions["kanban.task_alignment"],
+                    backend,
+                    alignment_model,
+                ),
+            }
+            update_web_preferences(
+                selected,
+                {
+                    "ai": {
+                        "kanban_backend": backend,
+                        "actions": next_actions,
+                    }
+                },
+            )
+            st.session_state[kanban_ai_backend_key(selected)] = backend
+            st.success(
+                ui.get("evidence_ai_config_saved", "Evidence AI preferences saved.")
+            )
+            st.rerun()
+    default_backend = AI_ACTION_DEFAULT_BACKENDS.get("kanban.subtasks", "llm")
+    st.caption(
+        ui.get("evidence_ai_default_hint", "App default: {backend}").format(
+            backend=_backend_label(default_backend)
+        )
+    )
+
+
+def _render_evidence_review_help() -> None:
+    st.markdown(ui.get("evidence_help_body", ""))
 
 
 def _confidence_label(value: str) -> str:
@@ -1714,6 +1854,21 @@ with head_l:
     st.caption(ui["page_context_line"])
 with head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
+    _help_col, _ai_col = st.columns(2, gap="small")
+    with _help_col:
+        with st.popover(
+            ui.get("page_help_short", "Guide"),
+            key=f"evidence_help_popover:{selected}",
+            use_container_width=True,
+        ):
+            _render_evidence_review_help()
+    with _ai_col:
+        with st.popover(
+            ui.get("evidence_ai_short", "Evidence AI"),
+            key=f"evidence_ai_config_popover:{selected}",
+            use_container_width=True,
+        ):
+            _render_evidence_ai_config_panel()
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric(

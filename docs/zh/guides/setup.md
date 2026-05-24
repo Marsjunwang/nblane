@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-05-24
 source_of_truth: true
 ---
 
@@ -29,6 +29,7 @@ pip install -e .
 | `pyyaml` | Profile / Schema / Team YAML 解析 |
 | `streamlit` | Web UI |
 | `openai` | LLM 客户端（兼容 OpenAI 接口） |
+| `httpx[socks]` | LLM / Reader / Research 通过 SOCKS 代理访问外部服务时需要；会安装 `socksio` |
 | `Pillow` | 博客 / 视觉预览的图片缩略图生成 |
 | `python-dotenv` | `.env` 文件加载 |
 | `pandas` | Web UI 数据处理 |
@@ -114,6 +115,255 @@ nblane codex install --upgrade        # 执行 npm i -g @openai/codex@latest
 ```bash
 codex login
 ```
+
+### 可选：安装 mihomo 代理
+
+国内服务器在下载 GitHub release、arXiv PDF、Playwright 浏览器或访问部分海外
+LLM / 论文源时可能很慢。可以安装
+[MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo/releases) 作为本机代理，
+再让终端和生产 systemd 服务走 `127.0.0.1:7890`。
+
+订阅地址通常包含 token，应按密钥处理，不要写进公开仓库、截图或提交记录。下面用
+`<SUB_URL>` 表示你的订阅 URL。
+
+#### 1. 安装 mihomo core
+
+到 mihomo Releases 选择当前系统架构对应的包。下面是 Ubuntu/Linux x86_64 示例；
+版本号可按 Releases 页面替换成最新稳定版：
+
+```bash
+cd /tmp
+curl -LO https://github.com/MetaCubeX/mihomo/releases/download/v1.19.25/mihomo-linux-amd64-v1.19.25.gz
+gzip -d mihomo-linux-amd64-v1.19.25.gz
+chmod +x mihomo-linux-amd64-v1.19.25
+sudo mv mihomo-linux-amd64-v1.19.25 /usr/local/bin/mihomo
+mihomo -v
+```
+
+如果 GitHub 直连不可用，可以先在本地下载对应资产，再上传到服务器；只要最终
+`/usr/local/bin/mihomo` 可执行即可。
+
+#### 2. 写入 mihomo 配置
+
+```bash
+mkdir -p ~/.config/mihomo
+nano ~/.config/mihomo/config.yaml
+```
+
+基础配置：
+
+```yaml
+mixed-port: 7890
+allow-lan: false
+bind-address: 127.0.0.1
+
+mode: rule
+log-level: info
+ipv6: true
+
+external-controller: 127.0.0.1:9090
+secret: "change-this-secret"
+external-ui: ui
+external-ui-name: metacubexd
+external-ui-url: "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+unified-delay: true
+tcp-concurrent: true
+
+proxy-providers:
+  subscription:
+    type: http
+    url: "<SUB_URL>"
+    path: ./proxy_providers/subscription.yaml
+    proxy: DIRECT
+    header:
+      User-Agent:
+        - clash.meta
+    interval: 3600
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+      timeout: 5000
+      lazy: true
+      expected-status: 204
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    use:
+      - subscription
+    proxies:
+      - AUTO
+      - DIRECT
+
+  - name: AUTO
+    type: url-test
+    use:
+      - subscription
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    timeout: 5000
+
+  - name: GLOBAL
+    type: select
+    proxies:
+      - PROXY
+      - AUTO
+      - DIRECT
+
+rules:
+  - DOMAIN-SUFFIX,localhost,DIRECT
+  - DOMAIN-SUFFIX,local,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY
+```
+
+如果订阅站返回“网络环境存在风险，请关闭网络代理后再获取订阅配置”一类提示，可在
+`header` 下临时增加订阅站要求的头，例如：
+
+```yaml
+    header:
+      User-Agent:
+        - clash.meta
+      X-Forwarded-For:
+        - 114.114.114.114
+```
+
+这是订阅站自己的风控兼容项；只有确认需要时再加。
+
+#### 3. 准备 GeoIP 数据库
+
+上面的 `GEOIP,CN,DIRECT` 需要 `Country.mmdb`。如果服务器直连 GitHub 很慢，可先
+启动不含 `GEOIP,CN,DIRECT` 的配置，让代理跑起来，再通过代理下载：
+
+```bash
+curl --fail -L -x http://127.0.0.1:7890 \
+  https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb \
+  -o ~/.config/mihomo/Country.mmdb
+```
+
+没有 `Country.mmdb` 时，mihomo 可能会在启动或校验阶段尝试下载数据库并卡住。
+可以先删掉 `GEOIP,CN,DIRECT`，等数据库放好后再恢复。
+
+#### 4. 用 systemd 启动 mihomo
+
+用户级 systemd 服务示例：
+
+```bash
+mkdir -p ~/.config/systemd/user
+nano ~/.config/systemd/user/mihomo.service
+```
+
+```ini
+[Unit]
+Description=mihomo proxy service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mihomo -d %h/.config/mihomo
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=default.target
+```
+
+启用并检查：
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now mihomo.service
+systemctl --user status mihomo.service
+ss -ltnp | grep -E ':(7890|9090)\b'
+```
+
+如果希望用户退出 SSH 后服务仍继续运行：
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+#### 5. 配置终端代理
+
+把下面内容追加到 `~/.bashrc`，新开的 shell 会自动使用 mihomo：
+
+```bash
+# mihomo proxy
+export http_proxy="http://127.0.0.1:7890"
+export https_proxy="http://127.0.0.1:7890"
+export all_proxy="socks5://127.0.0.1:7890"
+export HTTP_PROXY="$http_proxy"
+export HTTPS_PROXY="$https_proxy"
+export ALL_PROXY="$all_proxy"
+export no_proxy="localhost,127.0.0.1,::1,*.local"
+export NO_PROXY="$no_proxy"
+```
+
+当前 shell 立刻生效：
+
+```bash
+source ~/.bashrc
+```
+
+验证：
+
+```bash
+curl -x http://127.0.0.1:7890 https://www.gstatic.com/generate_204 -I
+curl -x http://127.0.0.1:7890 https://github.com -I
+curl -x http://127.0.0.1:7890 https://api.ipify.org
+```
+
+注意：`ping` 使用 ICMP，不会走 `http_proxy` / `https_proxy` / SOCKS 代理。
+因此 `curl https://www.google.com` 能通而 `ping www.google.com` 不通是正常的，
+不代表 mihomo 没工作。
+
+#### 6. 让生产 systemd 服务走代理
+
+终端 `.bashrc` 只影响交互式 shell，已经运行的 `nblane.service` 和
+`nblane-reader.service` 不会自动继承这些变量。生产部署需要给 systemd service
+添加 drop-in：
+
+```bash
+sudo install -d /etc/systemd/system/nblane.service.d
+sudo install -d /etc/systemd/system/nblane-reader.service.d
+sudo tee /etc/systemd/system/nblane.service.d/10-proxy.conf >/dev/null <<'EOF'
+[Service]
+Environment="http_proxy=http://127.0.0.1:7890"
+Environment="https_proxy=http://127.0.0.1:7890"
+Environment="all_proxy=socks5://127.0.0.1:7890"
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="ALL_PROXY=socks5://127.0.0.1:7890"
+Environment="no_proxy=localhost,127.0.0.1,::1,*.local"
+Environment="NO_PROXY=localhost,127.0.0.1,::1,*.local"
+EOF
+sudo cp /etc/systemd/system/nblane.service.d/10-proxy.conf \
+  /etc/systemd/system/nblane-reader.service.d/10-proxy.conf
+sudo systemctl daemon-reload
+sudo systemctl restart nblane-reader.service nblane.service
+```
+
+确认新进程已拿到代理环境：
+
+```bash
+pid=$(systemctl show -p MainPID --value nblane-reader.service)
+sudo sh -c "tr '\0' '\n' < /proc/$pid/environ" | grep -i proxy
+```
+
+如果 Paper Reading Studio 下载 arXiv PDF 很慢，优先检查生产进程环境，而不是只刷新
+浏览器页面。页面刷新只能重拉前端状态；PDF 下载实际发生在后端服务进程里。
 
 ## LLM 配置
 

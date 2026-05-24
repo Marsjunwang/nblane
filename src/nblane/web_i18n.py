@@ -127,6 +127,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_session_only": (
             "Auth stays in Codex CLI; nblane only stores non-secret NBLANE_CODEX_* settings."
         ),
+        "codex_scope_hint": (
+            "Auth and CLI config are shared for this deployment; profile config only stores non-secret preferences."
+        ),
         "kb_ai_backend": "Kanban AI Engine",
         "kb_ai_backend_help": (
             "Choose the engine used by Kanban AI actions. Codex uses the "
@@ -138,9 +141,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_configure": "Configure Codex",
         "codex_config_dialog_title": "Codex Configuration",
         "codex_status_tab": "Status",
-        "codex_api_key_tab": "API Key",
-        "codex_cli_config_tab": "CLI Config",
-        "codex_profile_config_tab": "Profile Config",
+        "codex_api_key_tab": "Shared API Key",
+        "codex_cli_config_tab": "Shared CLI Config",
+        "codex_profile_config_tab": "Profile Preferences",
         "codex_dialog_close": "Close",
         "codex_current_profile": "Current profile: `{profile}`",
         "codex_web_home": "Codex home: `{path}`",
@@ -311,6 +314,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_session_only": (
             "认证仍由 Codex CLI 管理；nblane 只保存非密钥的 NBLANE_CODEX_* 设置。"
         ),
+        "codex_scope_hint": (
+            "认证与 CLI 配置属于当前部署共享范围；当前 Profile 只保存非密钥偏好。"
+        ),
         "kb_ai_backend": "看板 AI 引擎",
         "kb_ai_backend_help": (
             "选择看板 AI 动作使用的引擎。Codex 使用本地 Codex CLI 的只读模式。"
@@ -321,9 +327,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_configure": "配置 Codex",
         "codex_config_dialog_title": "Codex 配置",
         "codex_status_tab": "状态",
-        "codex_api_key_tab": "API Key",
-        "codex_cli_config_tab": "CLI 配置",
-        "codex_profile_config_tab": "Profile 配置",
+        "codex_api_key_tab": "全局 API Key",
+        "codex_cli_config_tab": "全局 CLI 配置",
+        "codex_profile_config_tab": "当前 Profile 偏好",
         "codex_dialog_close": "关闭",
         "codex_current_profile": "当前 profile：`{profile}`",
         "codex_web_home": "Codex home：`{path}`",
@@ -408,24 +414,24 @@ _COMMON: dict[str, dict[str, str]] = {
         "goal_presence_agent_context_on": "已进入 Agent 上下文",
         "goal_presence_agent_context_off": "未进入 Agent 上下文",
         "sidebar_nav_title": "工作区",
-        "sidebar_nav_home_group": "首页 Home",
-        "sidebar_nav_work_group": "工作 Work",
-        "sidebar_nav_growth_group": "成长 Growth",
-        "sidebar_nav_output_group": "输出 Output",
-        "sidebar_nav_team_group": "团队 Team",
-        "sidebar_nav_dashboard": "每日仪表盘 Dashboard",
-        "sidebar_nav_kanban": "看板 Kanban",
-        "sidebar_nav_project_board": "项目看板 Project",
-        "sidebar_nav_evidence_review": "证据审阅 Evidence",
-        "sidebar_nav_research": "研究工作台 Research",
-        "sidebar_nav_skill_map": "技能地图 Skill Map",
-        "sidebar_nav_gap": "差距分析 Gap",
-        "sidebar_nav_review": "复盘 Review",
-        "sidebar_nav_health": "档案体检 Health",
+        "sidebar_nav_home_group": "首页",
+        "sidebar_nav_work_group": "工作",
+        "sidebar_nav_growth_group": "成长",
+        "sidebar_nav_output_group": "输出",
+        "sidebar_nav_team_group": "团队",
+        "sidebar_nav_dashboard": "每日仪表盘",
+        "sidebar_nav_kanban": "看板",
+        "sidebar_nav_project_board": "项目看板",
+        "sidebar_nav_evidence_review": "证据审阅",
+        "sidebar_nav_research": "研究工作台",
+        "sidebar_nav_skill_map": "技能地图",
+        "sidebar_nav_gap": "差距分析",
+        "sidebar_nav_review": "复盘",
+        "sidebar_nav_health": "档案体检",
         "sidebar_nav_agent_activity": "Agent 活动",
-        "sidebar_nav_public": "输出工作台 Studio",
-        "sidebar_nav_public_build": "公开构建 Build",
-        "sidebar_nav_team": "团队视图 Team",
+        "sidebar_nav_public": "输出工作台",
+        "sidebar_nav_public_build": "公开构建",
+        "sidebar_nav_team": "团队视图",
     },
 }
 
@@ -922,6 +928,34 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
             "Review Done work, evidence-pool rows, skill links, and "
             "strength risks before skill status becomes a claim."
         ),
+        "page_help_short": "Guide",
+        "evidence_ai_short": "Evidence AI",
+        "evidence_ai_config_caption": (
+            "These settings only affect Evidence Review actions for the active profile: "
+            "Done-to-evidence drafting and Kanban task understanding."
+        ),
+        "evidence_ai_backend": "Evidence AI engine",
+        "evidence_ai_backend_help": (
+            "LLM uses the global AI / LLM runtime. Codex uses the shared service-level "
+            "Codex CLI in read-only mode."
+        ),
+        "evidence_ai_subtasks_model": "Done -> evidence model",
+        "evidence_ai_subtasks_help": "Generate reviewable evidence drafts from selected Done tasks.",
+        "evidence_ai_alignment_model": "Task alignment model",
+        "evidence_ai_alignment_help": "Clarify underspecified Kanban cards before drafting.",
+        "evidence_ai_codex_model_placeholder": "Codex CLI default",
+        "evidence_ai_config_saved": "Evidence AI preferences saved.",
+        "evidence_ai_default_hint": "App default: {backend}",
+        "evidence_help_body": (
+            "### Evidence Review workflow\n\n"
+            "1. **Done Queue / Housekeeping**: select completed Kanban tasks, generate a reviewable evidence draft, then apply only the rows you trust.\n"
+            "2. **Claim Studio**: turn reviewed evidence into reusable public claims by project, goal, skill, all evidence, or manual selection.\n"
+            "3. **Evidence Pool**: edit evidence rows, strength, confidence, review status, and public readiness.\n"
+            "4. **Skill Links**: link active evidence to skill nodes so status upgrades stay grounded.\n"
+            "5. **Project / Experience Refs**: connect evidence to project cases, experience cases, and research sources.\n"
+            "6. **Status Risks**: check solid/expert skills whose evidence strength is too weak before publishing or upgrading claims.\n\n"
+            "AI never writes directly without a preview/apply step on this page."
+        ),
         "save_pool": "Save evidence pool",
         "saved_pool": "Saved evidence-pool.yaml.",
         "saved_pool_synced": "Saved evidence-pool.yaml and synced SKILL.md.",
@@ -1113,6 +1147,34 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "page_context_line": (
             "审阅 Done 工作、evidence-pool 条目、技能关联与强度风险，"
             "避免 skill status 变成没有证据支撑的 claim。"
+        ),
+        "page_help_short": "使用说明",
+        "evidence_ai_short": "证据 AI",
+        "evidence_ai_config_caption": (
+            "这些设置只影响当前 profile 的 Evidence Review 动作："
+            "Done 到证据草案，以及看板任务理解。"
+        ),
+        "evidence_ai_backend": "证据 AI 引擎",
+        "evidence_ai_backend_help": (
+            "LLM 使用全局 AI / LLM 运行时；Codex 使用当前部署共享的 service-level "
+            "Codex CLI 只读模式。"
+        ),
+        "evidence_ai_subtasks_model": "Done → 证据模型",
+        "evidence_ai_subtasks_help": "从所选 Done 任务生成可审阅的 evidence 草案。",
+        "evidence_ai_alignment_model": "任务理解模型",
+        "evidence_ai_alignment_help": "在生成草案前，澄清描述不完整的看板任务。",
+        "evidence_ai_codex_model_placeholder": "Codex CLI 默认模型",
+        "evidence_ai_config_saved": "证据 AI 配置已保存。",
+        "evidence_ai_default_hint": "应用默认：{backend}",
+        "evidence_help_body": (
+            "### Evidence Review 使用流程\n\n"
+            "1. **Done 队列 / 整理**：选择已完成的 Kanban 任务，生成可审阅的 evidence 草案，只应用你确认可信的条目。\n"
+            "2. **Claim Studio**：从已审阅 evidence 按项目、目标、技能、全部证据或手动选择生成可复用公开 claim。\n"
+            "3. **Evidence Pool**：维护 evidence 条目的强度、置信度、审阅状态、公开准备度和引用。\n"
+            "4. **技能关联**：把活跃 evidence 绑定到技能节点，避免 skill status 没有证据支撑。\n"
+            "5. **项目 / 经历引用**：把 evidence 关联到项目案例、经历案例和 Research sources。\n"
+            "6. **状态风险**：发布或升级前检查 solid/expert 技能是否缺少足够强的 evidence。\n\n"
+            "本页 AI 只生成候选，必须经过预览和人工应用才会写入文件。"
         ),
         "save_pool": "保存证据池",
         "saved_pool": "已保存 evidence-pool.yaml。",
@@ -3221,6 +3283,16 @@ _REVIEW: dict[str, dict[str, str]] = {
             "Turn weekly or stage review inputs into evidence, next action, "
             "and public draft candidates."
         ),
+        "page_help_short": "Guide",
+        "review_help_body": (
+            "### Review workflow\n\n"
+            "1. Pick a time window and generate candidates from activity, Done tasks, learning, and inbox signals.\n"
+            "2. In **Evidence candidates**, save selected rows to Activity for traceability or apply them into the evidence pool. Leave crystallization on when the source Done tasks are covered.\n"
+            "3. In **Next action candidates**, save or apply only the queue items you want to carry forward.\n"
+            "4. In **Public draft candidates**, create draft blog posts; this page never publishes them.\n"
+            "5. Use **Method notes** and **Agent Activity** to audit how the candidates were derived.\n\n"
+            "Review is a candidate generator. File writes are explicit and selected-row based."
+        ),
         "preset": "Window",
         "preset_current_week": "Current week",
         "preset_previous_week": "Previous week",
@@ -3257,6 +3329,16 @@ _REVIEW: dict[str, dict[str, str]] = {
         "title": "Review",
         "page_context_line": (
             "把周复盘或阶段复盘整理成 evidence、next action 和 public draft 候选。"
+        ),
+        "page_help_short": "使用说明",
+        "review_help_body": (
+            "### Review 使用流程\n\n"
+            "1. 选择时间窗口，从 activity、Done 任务、学习记录和 inbox 信号生成候选。\n"
+            "2. 在 **Evidence 候选** 中，可先保存到 Activity 留痕，也可把确认过的条目应用到证据池；来源 Done 已覆盖时保留 crystallized 标记。\n"
+            "3. 在 **Next action 候选** 中，只保存或应用你决定继续推进的队列项。\n"
+            "4. 在 **Public draft 候选** 中创建 draft blog；本页不会发布内容。\n"
+            "5. 用 **Method notes** 和 **Agent Activity** 审计候选来源和写入记录。\n\n"
+            "Review 是候选生成器；所有文件写入都需要显式选择并应用。"
         ),
         "preset": "时间窗口",
         "preset_current_week": "本周",
@@ -3450,11 +3532,13 @@ _RESEARCH: dict[str, dict[str, str]] = {
         "page_context_line": (
             "Capture sources, read them into claims/citations, then promote only reviewed candidates."
         ),
+        "page_help_short": "Guide",
         "source_inbox": "Source Inbox",
         "reading_room": "Reading Room",
         "claims_citations": "Claims & Citations",
         "synthesis_drafts": "Synthesis Drafts",
         "connectors": "Connectors",
+        "inbox_connectors": "Inbox & Connectors",
         "ai_config": "Research AI Config",
         "ai_config_short": "Research AI",
         "ai_config_caption": (
@@ -3466,6 +3550,15 @@ _RESEARCH: dict[str, dict[str, str]] = {
         "ai_config_custom_model": "Custom model",
         "ai_config_overrides_default": "overrides default",
         "ai_config_saved": "AI preferences saved.",
+        "research_help_body": (
+            "### Research workflow\n\n"
+            "1. **Overview**: start with the action queue for reading, extraction, citation, privacy, and synthesis blockers.\n"
+            "2. **Paper Library**: import papers, attach PDFs, open Reader, run extraction, translate, annotate, and create paper claims.\n"
+            "3. **Claims & Citations**: review research claims and citations before promoting anything to evidence or output.\n"
+            "4. **Synthesis / Export**: assemble reviewed claims into draft exports, blog candidates, or project updates.\n"
+            "5. **Inbox & Connectors**: capture manual sources, preview evidence candidates, and configure connector discovery. Connector configs do not store secrets.\n\n"
+            "Research claims are source-aware working claims. Promotion to Evidence Review or public output remains candidate-first."
+        ),
         "workspace_overview": "Workspace overview",
         "sources_total": "Sources",
         "sources_private": "Private",
@@ -3673,11 +3766,13 @@ _RESEARCH: dict[str, dict[str, str]] = {
         "page_title": "Research · nblane",
         "title": "研究工作台",
         "page_context_line": "外部资料先沉淀为 source-aware claim / citation；审阅后再进入 evidence 或公开输出。",
+        "page_help_short": "使用说明",
         "source_inbox": "来源收件箱",
         "reading_room": "阅读室",
         "claims_citations": "断言与引用",
         "synthesis_drafts": "综合草稿",
         "connectors": "连接器",
+        "inbox_connectors": "收件箱与连接器",
         "ai_config": "Research AI 配置",
         "ai_config_short": "研究 AI",
         "ai_config_caption": "这些设置只影响当前 profile 的 Research AI 动作：论文搜索、翻译、Reader 和 DeepRead。其他页面保留自己的页面级 AI 设置。",
@@ -3687,6 +3782,15 @@ _RESEARCH: dict[str, dict[str, str]] = {
         "ai_config_custom_model": "自定义模型",
         "ai_config_overrides_default": "覆盖默认",
         "ai_config_saved": "AI 配置已保存。",
+        "research_help_body": (
+            "### Research 使用流程\n\n"
+            "1. **概览**：先看行动队列，处理阅读、解析、引用、隐私和综合导出的阻塞项。\n"
+            "2. **论文库**：导入论文、补 PDF、打开 Reader、运行解析、翻译、标注，并生成论文 claim。\n"
+            "3. **断言与引用**：先审阅 research claims 和 citations，再推进到 evidence 或输出。\n"
+            "4. **综合 / 导出**：把已审阅 claims 组织成综合草稿、博客候选或项目更新。\n"
+            "5. **收件箱与连接器**：手动捕捉 sources、预览 evidence 候选、配置连接器发现；连接器配置不保存 token、cookie 或 API key。\n\n"
+            "Research claim 是带来源的工作断言；进入 Evidence Review 或公开输出前仍然必须走候选和人工确认。"
+        ),
         "workspace_overview": "工作台概览",
         "sources_total": "来源 Sources",
         "sources_private": "私有 Private",

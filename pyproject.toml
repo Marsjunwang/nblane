@@ -17,6 +17,7 @@ dependencies = [
     "streamlit>=1.56",
     "streamlit-crepe>=0.1.5",
     "openai>=1.30",
+    "httpx[socks]>=0.28",
     "Pillow>=10",
     "PyMuPDF>=1.24",
     "pypdf>=5",
