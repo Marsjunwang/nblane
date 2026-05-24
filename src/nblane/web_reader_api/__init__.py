@@ -130,28 +130,181 @@ def _local_user() -> auth_core.User:
     )
 
 
-def _paper_library_user(profile: str) -> auth_core.User:
+def _truthy_env(name: str) -> bool | None:
+    raw = os.getenv(name, "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off", "none"}:
+        return False
+    return None
+
+
+def _auth_cookie_secure(request: Request) -> bool:
+    explicit = _truthy_env("NBLANE_AUTH_COOKIE_SECURE")
+    if explicit is not None:
+        return explicit
+    return False
+
+
+def _auth_cookie_max_age(exp: int) -> int:
+    return max(0, int(exp) - int(time.time()))
+
+
+def _set_auth_session_cookie(
+    response: Response,
+    request: Request,
+    user_id: str,
+    *,
+    ttl_seconds: int = 12 * 3600,
+) -> None:
+    token = auth_core.mint_auth_session_token(user_id, ttl_seconds=ttl_seconds)
+    claims = auth_core.verify_auth_session_token(token)
+    max_age = _auth_cookie_max_age(claims.exp) if claims else ttl_seconds
+    response.set_cookie(
+        auth_core.AUTH_SESSION_COOKIE_NAME,
+        token,
+        max_age=max_age,
+        path="/",
+        httponly=True,
+        secure=_auth_cookie_secure(request),
+        samesite="lax",
+    )
+
+
+def _delete_auth_session_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        auth_core.AUTH_SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=_auth_cookie_secure(request),
+        samesite="lax",
+    )
+
+
+def _load_auth_user(user_id: str) -> auth_core.User:
+    if not auth_core.auth_configured():
+        if user_id and user_id != "local":
+            return auth_core.User(
+                id=user_id,
+                display_name=user_id,
+                password_hash="",
+                role="admin",
+                teams=("*",),
+            )
+        return _local_user()
+    try:
+        users = auth_core.load_users()
+    except auth_core.AuthConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    user = users.get(str(user_id or "").strip())
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid auth session")
+    return user
+
+
+def _verify_auth_token(token: str, *, expected_kind: str) -> auth_core.AuthSessionClaims | None:
+    try:
+        return auth_core.verify_auth_session_token(token, expected_kind=expected_kind)
+    except auth_core.AuthConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _auth_user_from_request(request: Request) -> auth_core.User:
+    if not auth_core.auth_configured():
+        return _local_user()
+    cookie = request.cookies.get(auth_core.AUTH_SESSION_COOKIE_NAME, "")
+    if cookie:
+        claims = _verify_auth_token(cookie, expected_kind=auth_core.AUTH_SESSION_KIND)
+        if claims is not None:
+            return _load_auth_user(claims.user_id)
+    handoff = (
+        request.query_params.get("auth_handoff", "")
+        or request.query_params.get("handoff", "")
+    )
+    if handoff:
+        claims = _verify_auth_token(handoff, expected_kind=auth_core.AUTH_HANDOFF_KIND)
+        if claims is not None:
+            user = _load_auth_user(claims.user_id)
+            request.state.nblane_auth_handoff_user_id = user.id
+            return user
+    raise HTTPException(status_code=401, detail="auth session required")
+
+
+def _apply_handoff_cookie(response: Response, request: Request) -> None:
+    user_id = str(getattr(request.state, "nblane_auth_handoff_user_id", "") or "").strip()
+    if user_id:
+        _set_auth_session_cookie(response, request, user_id)
+
+
+def _safe_auth_next(next_url: str) -> str:
+    clean = str(next_url or "").strip()
+    if not clean:
+        return "/auth/session-ok"
+    if clean.startswith("/") and not clean.startswith("//"):
+        return clean
+    return "/auth/session-ok"
+
+
+@app.get("/auth/session")
+async def auth_session(request: Request, token: str = "", next: str = ""):
+    return _auth_session_response(request, token, next)
+
+
+@app.post("/auth/session")
+async def auth_session_post(request: Request, token: str = Form(""), next: str = Form("")):
+    return _auth_session_response(request, token, next)
+
+
+def _auth_session_response(request: Request, token: str, next: str = "") -> Response:
+    claims = _verify_auth_token(token, expected_kind=auth_core.AUTH_HANDOFF_KIND)
+    if claims is None:
+        raise HTTPException(status_code=401, detail="invalid auth handoff")
+    user = _load_auth_user(claims.user_id)
+    if next:
+        response: Response = RedirectResponse(_safe_auth_next(next), status_code=303)
+    else:
+        response = Response(
+            "<!doctype html><html><body>ok</body></html>",
+            media_type="text/html",
+        )
+    _set_auth_session_cookie(response, request, user.id)
+    return response
+
+
+@app.get("/auth/session-ok")
+async def auth_session_ok():
+    return Response(
+        "<!doctype html><html><body>nblane sidecar ok</body></html>",
+        media_type="text/html",
+        headers={"X-Nblane-Sidecar": "reader-api"},
+    )
+
+
+@app.get("/auth/logout")
+async def auth_logout(request: Request):
+    response = Response("<!doctype html><html><body>signed out</body></html>", media_type="text/html")
+    _delete_auth_session_cookie(response, request)
+    return response
+
+
+def _paper_library_user(profile: str, request: Request) -> auth_core.User:
     clean = str(profile or "").strip()
     if not clean:
         raise HTTPException(status_code=400, detail="profile is required")
-    if not auth_core.auth_configured():
-        return _local_user()
-    # Paper Library standalone auth will later share the Streamlit login session.
-    # Until then, production auth deployments should keep using the Streamlit
-    # entrypoint or Reader token flows.
-    raise HTTPException(status_code=401, detail="paper library session required")
+    user = _auth_user_from_request(request)
+    if not auth_core.can_access_profile(user, clean):
+        raise HTTPException(status_code=403, detail="profile forbidden")
+    return user
 
 
-def _paper_library_profile_dir(profile: str) -> Path:
+def _paper_library_profile_dir(profile: str, request: Request) -> Path:
     try:
         path = profile_dir(profile)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="profile not found") from exc
     if not path.exists():
         raise HTTPException(status_code=404, detail="profile not found")
-    user = _paper_library_user(profile)
-    if not auth_core.can_access_profile(user, profile):
-        raise HTTPException(status_code=403, detail="profile forbidden")
+    _paper_library_user(profile, request)
     return path
 
 
@@ -160,7 +313,7 @@ def _default_profile_name() -> str:
     return profiles[0] if profiles else ""
 
 
-def _dashboard_profile_dir(profile: str) -> Path:
+def _dashboard_profile_dir(profile: str, request: Request) -> Path:
     clean = str(profile or "").strip()
     if not clean:
         raise HTTPException(status_code=400, detail="profile is required")
@@ -170,9 +323,7 @@ def _dashboard_profile_dir(profile: str) -> Path:
         raise HTTPException(status_code=404, detail="profile not found") from exc
     if not path.exists():
         raise HTTPException(status_code=404, detail="profile not found")
-    user = _paper_library_user(clean)
-    if not auth_core.can_access_profile(user, clean):
-        raise HTTPException(status_code=403, detail="profile forbidden")
+    _paper_library_user(clean, request)
     return path
 
 
@@ -573,9 +724,9 @@ async def paper_library_view(request: Request, profile: str = ""):
     if not clean_profile:
         clean_profile = _default_profile_name()
     if clean_profile:
-        _paper_library_profile_dir(clean_profile)
+        _paper_library_profile_dir(clean_profile, request)
     assets = _paper_library_assets()
-    return TEMPLATES.TemplateResponse(
+    response = TEMPLATES.TemplateResponse(
         request,
         "paper_library.html",
         {
@@ -584,15 +735,17 @@ async def paper_library_view(request: Request, profile: str = ""):
             "styles": assets["styles"],
         },
     )
+    _apply_handoff_cookie(response, request)
+    return response
 
 
 @app.get("/dashboard")
 async def dashboard_view(request: Request, profile: str = "", embed: str = ""):
     clean_profile = str(profile or "").strip() or _default_profile_name()
     if clean_profile:
-        _dashboard_profile_dir(clean_profile)
+        _dashboard_profile_dir(clean_profile, request)
     assets = _home_dashboard_assets()
-    return TEMPLATES.TemplateResponse(
+    response = TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
         {
@@ -607,12 +760,14 @@ async def dashboard_view(request: Request, profile: str = "", embed: str = ""):
             "embed_json": json.dumps(str(embed or "").strip().lower() in {"1", "true", "yes"}, ensure_ascii=False),
         },
     )
+    _apply_handoff_cookie(response, request)
+    return response
 
 
 @app.get("/api/dashboard/payload")
-async def dashboard_payload_endpoint(profile: str = ""):
+async def dashboard_payload_endpoint(request: Request, profile: str = ""):
     clean_profile = str(profile or "").strip() or _default_profile_name()
-    _dashboard_profile_dir(clean_profile)
+    _dashboard_profile_dir(clean_profile, request)
     ai_payload = {
         "configured": llm_client.is_configured(),
         "label": llm_client.model_label() if llm_client.is_configured() else "",
@@ -653,6 +808,7 @@ async def paper_library_asset(file_name: str):
 
 @app.get("/api/research/{profile}/paper-library")
 async def paper_library_payload(
+    request: Request,
     profile: str,
     view: str = "all",
     node_id: str = "",
@@ -664,7 +820,8 @@ async def paper_library_payload(
     return_to: str = "",
     return_url: str = "",
 ):
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
@@ -677,17 +834,17 @@ async def paper_library_payload(
         action=action,
         return_to=return_to,
         return_url=_paper_library_return_url(return_to, return_url),
-        user_id=_paper_library_user(profile).id,
+        user_id=user.id,
         reader_base="",
     )
     return JSONResponse({"ok": True, "payload": payload})
 
 
 def _paper_library_event_response(
-    profile: str,
     profile_path: Path,
     body: dict[str, object],
     result: object,
+    user_id: str,
 ) -> dict[str, object]:
     state = body.get("state") if isinstance(body.get("state"), dict) else {}
     next_state = result.next
@@ -709,7 +866,7 @@ def _paper_library_event_response(
         action=action,
         return_to=return_to,
         return_url=_paper_library_return_url(return_to, return_url),
-        user_id=_paper_library_user(profile).id,
+        user_id=user_id,
         reader_base="",
     )
     return {"ok": True, "result": result.to_dict(), "payload": payload}
@@ -718,7 +875,8 @@ def _paper_library_event_response(
 @app.post("/api/research/{profile}/paper-library/events")
 async def paper_library_events(request: Request, profile: str):
     _same_origin_mutation(request)
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     body = await _json_body(request)
     try:
         result = await asyncio.to_thread(handle_paper_library_event, profile_path, body)
@@ -726,7 +884,7 @@ async def paper_library_events(request: Request, profile: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result.ok:
         return JSONResponse(result.to_dict(), status_code=400)
-    response = await asyncio.to_thread(_paper_library_event_response, profile, profile_path, body, result)
+    response = await asyncio.to_thread(_paper_library_event_response, profile_path, body, result, user.id)
     return JSONResponse(response)
 
 
@@ -819,7 +977,8 @@ def _paper_library_event_progress_callback(job_id: str) -> Callable[[dict[str, o
 @app.post("/api/research/{profile}/paper-library/events/jobs")
 async def paper_library_event_start_job(request: Request, profile: str):
     _same_origin_mutation(request)
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     body = await _json_body(request)
     action = _clean_text(body.get("action"))
     if not action:
@@ -886,7 +1045,7 @@ async def paper_library_event_start_job(request: Request, profile: str):
                     _finished_monotonic=time.monotonic(),
                 )
                 return
-            response = _paper_library_event_response(profile, profile_path, dict(body), result)
+            response = _paper_library_event_response(profile_path, dict(body), result, user.id)
         except Exception as exc:
             _update_paper_library_event_job(
                 job_id,
@@ -921,7 +1080,8 @@ async def paper_library_event_start_job(request: Request, profile: str):
 
 
 @app.get("/api/research/{profile}/paper-library/events/jobs/{job_id}")
-async def paper_library_event_job_status(profile: str, job_id: str):
+async def paper_library_event_job_status(request: Request, profile: str, job_id: str):
+    _paper_library_profile_dir(profile, request)
     with _PAPER_LIBRARY_EVENT_JOBS_LOCK:
         job = _PAPER_LIBRARY_EVENT_JOBS.get(job_id)
         if not job or job.get("profile") != profile:
@@ -932,13 +1092,12 @@ async def paper_library_event_job_status(profile: str, job_id: str):
 
 
 def _paper_library_search_response(
-    profile: str,
+    profile_path: Path,
     body: dict[str, object],
     *,
     progress: Callable[[dict[str, object]], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> dict[str, object]:
-    profile_path = _paper_library_profile_dir(profile)
     query = _clean_text(body.get("query"))
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
@@ -1198,14 +1357,16 @@ def _paper_library_search_progress_callback(job_id: str) -> Callable[[dict[str, 
 @app.post("/api/research/{profile}/paper-library/search")
 async def paper_library_search(request: Request, profile: str):
     _same_origin_mutation(request)
+    profile_path = _paper_library_profile_dir(profile, request)
     body = await _json_body(request)
-    result = await asyncio.to_thread(_paper_library_search_response, profile, body)
+    result = await asyncio.to_thread(_paper_library_search_response, profile_path, body)
     return JSONResponse(result)
 
 
 @app.post("/api/research/{profile}/paper-library/search/jobs")
 async def paper_library_search_start_job(request: Request, profile: str):
     _same_origin_mutation(request)
+    profile_path = _paper_library_profile_dir(profile, request)
     body = await _json_body(request)
     if not _clean_text(body.get("query")):
         raise HTTPException(status_code=400, detail="query is required")
@@ -1251,7 +1412,7 @@ async def paper_library_search_start_job(request: Request, profile: str):
         )
         try:
             result = _paper_library_search_response(
-                profile,
+                profile_path,
                 dict(body),
                 progress=_paper_library_search_progress_callback(job_id),
                 cancel_event=cancel_event,
@@ -1325,7 +1486,8 @@ async def paper_library_search_start_job(request: Request, profile: str):
 
 
 @app.get("/api/research/{profile}/paper-library/search/jobs/{job_id}")
-async def paper_library_search_job_status(profile: str, job_id: str):
+async def paper_library_search_job_status(request: Request, profile: str, job_id: str):
+    _paper_library_profile_dir(profile, request)
     with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
         job = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
         if not job or job.get("profile") != profile:
@@ -1337,6 +1499,7 @@ async def paper_library_search_job_status(profile: str, job_id: str):
 
 @app.get("/api/research/{profile}/paper-library/search/jobs/{job_id}/stream")
 async def paper_library_search_job_stream(request: Request, profile: str, job_id: str):
+    _paper_library_profile_dir(profile, request)
     with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
         job = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
         if not job or job.get("profile") != profile:
@@ -1400,6 +1563,7 @@ async def paper_library_search_job_stream(request: Request, profile: str, job_id
 @app.post("/api/research/{profile}/paper-library/search/jobs/{job_id}/cancel")
 async def paper_library_search_job_cancel(request: Request, profile: str, job_id: str):
     _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
     with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
         job = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
         if not job or job.get("profile") != profile:
@@ -1479,7 +1643,8 @@ def _paper_library_import_upload_pdf(
 @app.post("/api/research/{profile}/paper-library/import")
 async def paper_library_import(request: Request, profile: str):
     _same_origin_mutation(request)
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     body = await _json_body(request)
     candidates = body.get("candidates") or body.get("results") or []
     if not isinstance(candidates, list):
@@ -1520,7 +1685,7 @@ async def paper_library_import(request: Request, profile: str):
         current_node=node_id,
         sort_mode="recent",
         detail_id=detail_id,
-        user_id=_paper_library_user(profile).id,
+        user_id=user.id,
         reader_base="",
     )
     return JSONResponse(
@@ -1537,7 +1702,8 @@ async def paper_library_import(request: Request, profile: str):
 @app.post("/api/research/{profile}/paper-library/import-url")
 async def paper_library_import_url(request: Request, profile: str):
     _same_origin_mutation(request)
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     body = await _json_body(request)
     url = _clean_text(body.get("url") or body.get("paper_url"))
     if not url:
@@ -1575,7 +1741,7 @@ async def paper_library_import_url(request: Request, profile: str):
         current_node=node_id,
         sort_mode="recent",
         detail_id=source_id,
-        user_id=_paper_library_user(profile).id,
+        user_id=user.id,
         reader_base="",
     )
     return JSONResponse(
@@ -1591,12 +1757,13 @@ async def paper_library_import_url(request: Request, profile: str):
 
 
 @app.get("/api/research/{profile}/papers/{source_id}")
-async def paper_library_paper(profile: str, source_id: str):
-    profile_path = _paper_library_profile_dir(profile)
+async def paper_library_paper(request: Request, profile: str, source_id: str):
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     payload = build_paper_library_payload(
         profile_path,
         detail_id=source_id,
-        user_id=_paper_library_user(profile).id,
+        user_id=user.id,
         reader_base="",
     )
     detail = payload.get("detail") if isinstance(payload.get("detail"), dict) else {}
@@ -1606,9 +1773,9 @@ async def paper_library_paper(profile: str, source_id: str):
 
 
 @app.post("/api/research/{profile}/papers/{source_id}/reader-token")
-async def paper_library_reader_token(profile: str, source_id: str):
-    _paper_library_profile_dir(profile)
-    user = _paper_library_user(profile)
+async def paper_library_reader_token(request: Request, profile: str, source_id: str):
+    _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     token = mint_reader_token(user.id, profile, source_id)
     return JSONResponse(
         {
@@ -1631,7 +1798,8 @@ async def paper_library_upload_pdf(
     tags: str = Form(""),
 ):
     _same_origin_mutation(request)
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     filename = _clean_text(file.filename) or "paper.pdf"
     try:
         payload = await file.read()
@@ -1661,7 +1829,7 @@ async def paper_library_upload_pdf(
         sort_mode="recent",
         detail_id=source_id,
         focus="artifacts",
-        user_id=_paper_library_user(profile).id,
+        user_id=user.id,
         reader_base="",
     )
     return JSONResponse(
@@ -1683,7 +1851,8 @@ async def paper_library_pdf_upload(
     file: UploadFile = File(...),
 ):
     _same_origin_mutation(request)
-    profile_path = _paper_library_profile_dir(profile)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     filename = _clean_text(file.filename) or "paper.pdf"
     try:
         payload = await file.read()
@@ -1707,7 +1876,7 @@ async def paper_library_pdf_upload(
         current_view="all",
         detail_id=source_id,
         focus="artifacts",
-        user_id=_paper_library_user(profile).id,
+        user_id=user.id,
         reader_base="",
     )
     return JSONResponse(

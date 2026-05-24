@@ -51,6 +51,20 @@ class ReaderTokenClaims:
     exp: int
 
 
+@dataclass(frozen=True)
+class AuthSessionClaims:
+    """Verified claims for a browser-wide Web auth session token."""
+
+    user_id: str
+    exp: int
+    kind: str
+
+
+AUTH_SESSION_COOKIE_NAME = "nblane_auth_session"
+AUTH_SESSION_KIND = "auth_session"
+AUTH_HANDOFF_KIND = "auth_handoff"
+
+
 def auth_file_path() -> Path | None:
     """Return configured auth file path, if auth is enabled."""
     raw = os.getenv("NBLANE_AUTH_FILE", "").strip()
@@ -130,6 +144,96 @@ def _reader_token_signature(payload_b64: str) -> str:
         hashlib.sha256,
     ).digest()
     return _b64(digest)
+
+
+def _auth_session_token_secret() -> bytes:
+    raw = os.getenv("NBLANE_AUTH_SESSION_SECRET", "").strip()
+    if raw:
+        return raw.encode("utf-8")
+    return _reader_token_secret()
+
+
+def _auth_session_token_signature(payload_b64: str) -> str:
+    digest = hmac.new(
+        _auth_session_token_secret(),
+        payload_b64.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return _b64(digest)
+
+
+def _signed_auth_payload(user_id: str, *, kind: str, ttl_seconds: int) -> str:
+    clean_user = str(user_id or "").strip()
+    clean_kind = str(kind or "").strip()
+    if not clean_user or not clean_kind:
+        raise ValueError("auth session token needs user_id and kind")
+    now = int(time.time())
+    payload = {
+        "user_id": clean_user,
+        "kind": clean_kind,
+        "iat": now,
+        "exp": now + max(30, int(ttl_seconds or 0)),
+    }
+    payload_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    payload_b64 = _b64(payload_json)
+    return f"{payload_b64}.{_auth_session_token_signature(payload_b64)}"
+
+
+def mint_auth_session_token(user_id: str, ttl_seconds: int = 12 * 3600) -> str:
+    """Mint a signed browser session token shared by Streamlit and FastAPI."""
+
+    return _signed_auth_payload(user_id, kind=AUTH_SESSION_KIND, ttl_seconds=ttl_seconds)
+
+
+def mint_auth_handoff_token(user_id: str, ttl_seconds: int = 120) -> str:
+    """Mint a short-lived token Streamlit can hand to the sidecar to set a cookie."""
+
+    return _signed_auth_payload(user_id, kind=AUTH_HANDOFF_KIND, ttl_seconds=ttl_seconds)
+
+
+def verify_auth_session_token(
+    token: str,
+    *,
+    expected_kind: str = AUTH_SESSION_KIND,
+) -> AuthSessionClaims | None:
+    """Verify a signed Web auth session token, or return ``None``."""
+
+    raw = str(token or "").strip()
+    if not raw or "." not in raw:
+        return None
+    payload_b64, signature = raw.rsplit(".", 1)
+    if not payload_b64 or not signature:
+        return None
+    try:
+        expected = _auth_session_token_signature(payload_b64)
+    except AuthConfigError:
+        raise
+    except Exception:
+        return None
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        payload = json.loads(_unb64(payload_b64).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    user_id = str(payload.get("user_id") or "").strip()
+    kind = str(payload.get("kind") or "").strip()
+    try:
+        exp = int(payload.get("exp") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not user_id or not kind or exp < int(time.time()):
+        return None
+    if kind != str(expected_kind or "").strip():
+        return None
+    return AuthSessionClaims(user_id=user_id, exp=exp, kind=kind)
 
 
 def mint_reader_token(

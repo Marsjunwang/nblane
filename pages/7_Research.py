@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import html
+import json
 import re
 import time
 import urllib.request
@@ -169,7 +170,7 @@ from nblane.core.research_workspace import (
     verify_research_citations,
 )
 from nblane.core.public_site import create_blog_draft
-from nblane.web_auth import require_login
+from nblane.web_auth import require_login, sidecar_auth_handoff_token
 from nblane.web_cache import clear_web_cache
 from nblane.web_i18n import research_ui
 from nblane.web_shared import (
@@ -2154,6 +2155,26 @@ def _paper_library_key(name: str) -> str:
     return f"paper_library:{selected}:{name}"
 
 
+def _sidecar_base_for_same_origin_mode() -> str:
+    """Resolve ``NBLANE_READER_API_BASE=0`` into a browser-facing sidecar base."""
+
+    try:
+        current_url = str(getattr(st.context, "url", "") or "").strip()
+    except Exception:
+        current_url = ""
+    if current_url:
+        parsed = urlparse(current_url)
+        host = (parsed.hostname or "").strip().lower()
+        if parsed.scheme in {"http", "https"} and host in {"localhost", "127.0.0.1"}:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            sidecar_port = {8501: 8502, 8503: 8502, 18503: 18502}.get(port)
+            if sidecar_port:
+                return f"{parsed.scheme}://{parsed.hostname}:{sidecar_port}"
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    return os.getenv("NBLANE_STREAMLIT_BASE_URL", "").strip().rstrip("/")
+
+
 def _reader_api_base() -> str:
     """Return the sidecar base used for Paper Library and Reader links."""
     raw = (
@@ -2162,7 +2183,7 @@ def _reader_api_base() -> str:
         or "http://127.0.0.1:8502"
     )
     if raw.lower() in {"0", "false", "off", "none"}:
-        return ""
+        return _sidecar_base_for_same_origin_mode()
     return raw.rstrip("/")
 
 
@@ -2270,6 +2291,41 @@ def _paper_library_workspace_status(workspace_url: str) -> tuple[bool | None, st
             headers={"User-Agent": "nblane-paper-library-runtime-check/1.0"},
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200))
+            marker = str(response.headers.get("X-Nblane-Sidecar") or "").strip()
+            body = response.read(256).decode("utf-8", errors="ignore")
+            ok = 200 <= status < 400 and (
+                marker == "reader-api" or "nblane sidecar ok" in body
+            )
+            message = "" if ok else f"unexpected sidecar health response: HTTP {status}".strip()
+    except Exception as exc:
+        ok = False
+        message = str(exc)
+    st.session_state[cache_key] = {"checked_at": now, "ok": ok, "message": message}
+    return ok, message
+
+
+def _paper_library_sidecar_status() -> tuple[bool | None, str]:
+    base = _reader_api_base()
+    if not base:
+        return None, ""
+    health_url = f"{base}/auth/session-ok"
+    try:
+        timeout = max(0.1, float(os.getenv("NBLANE_PAPER_LIBRARY_HEALTH_TIMEOUT", "2.5")))
+    except ValueError:
+        timeout = 2.5
+    cache_key = _paper_library_key(f"sidecar_status:{health_url}")
+    now = time.time()
+    cached = st.session_state.get(cache_key)
+    if isinstance(cached, dict) and now - float(cached.get("checked_at", 0)) < 15:
+        return bool(cached.get("ok")), str(cached.get("message") or "")
+    try:
+        request = urllib.request.Request(
+            health_url,
+            method="GET",
+            headers={"User-Agent": "nblane-paper-library-sidecar-check/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             ok = 200 <= int(getattr(response, "status", 200)) < 400
             message = "" if ok else f"HTTP {getattr(response, 'status', '')}".strip()
     except Exception as exc:
@@ -2281,9 +2337,7 @@ def _paper_library_workspace_status(workspace_url: str) -> tuple[bool | None, st
 
 def _paper_library_sidecar_unavailable() -> tuple[bool, str]:
     """Return whether browser-facing 8502 links should be paused."""
-    if not _reader_api_base():
-        return False, ""
-    ok, message = _paper_library_workspace_status(_paper_library_workspace_url())
+    ok, message = _paper_library_sidecar_status()
     return ok is False, message
 
 
@@ -2350,10 +2404,12 @@ def _render_research_sidecar_status() -> None:
             )
         )
         return
-    workspace_url = _paper_library_workspace_url()
-    ok, message = _paper_library_workspace_status(workspace_url)
+    ok, message = _paper_library_sidecar_status()
     env_base = os.getenv("NBLANE_READER_API_BASE", "").strip()
     origin = (
+        _l("same_origin", "same-origin")
+        if env_base.strip().lower() in {"0", "false", "off", "none"}
+        else
         _l("configured", "configured")
         if env_base
         else _l("auto_detected", "auto-detected")
@@ -2375,7 +2431,47 @@ def _render_research_sidecar_status() -> None:
     )
 
 
+def _render_authenticated_iframe(src: str, *, token: str, height: int, scrolling: bool) -> None:
+    base = _reader_api_base()
+    auth_url = f"{base}/auth/session" if base else "/auth/session"
+    escaped_auth_url = html.escape(auth_url, quote=True)
+    src_json = json.dumps(src).replace("</", "<\\/")
+    escaped_token = html.escape(token, quote=True)
+    frame_height = max(100, int(height or 800) - 2)
+    wrapper = f"""
+<!doctype html>
+<html>
+  <body style="margin:0;overflow:hidden">
+    <iframe name="nblaneAuthTarget" title="nblane auth" style="display:none;width:0;height:0;border:0"></iframe>
+    <form id="nblaneAuthForm" action="{escaped_auth_url}" method="post" target="nblaneAuthTarget" style="display:none">
+      <input type="hidden" name="token" value="{escaped_token}">
+    </form>
+    <iframe id="nblaneContentFrame" title="nblane" style="width:100%;height:{frame_height}px;border:0" loading="eager"></iframe>
+    <script>
+      const content = document.getElementById("nblaneContentFrame");
+      const form = document.getElementById("nblaneAuthForm");
+      let loaded = false;
+      const loadContent = () => {{
+        if (loaded || !content) return;
+        loaded = true;
+        content.src = {src_json};
+      }};
+      const target = document.querySelector('iframe[name="nblaneAuthTarget"]');
+      if (target) target.addEventListener("load", loadContent, {{ once: true }});
+      if (form) form.submit();
+      window.setTimeout(loadContent, 1200);
+    </script>
+  </body>
+</html>
+"""
+    st.components.v1.html(wrapper, height=height, scrolling=scrolling)
+
+
 def _render_iframe(src: str, *, height: int, scrolling: bool) -> None:
+    token = sidecar_auth_handoff_token(user)
+    if token:
+        _render_authenticated_iframe(src, token=token, height=height, scrolling=scrolling)
+        return
     if hasattr(st, "iframe"):
         st.iframe(src, height=height)
     else:
@@ -4349,7 +4445,7 @@ def _render_paper_library(inbox) -> None:
     workspace_ok: bool | None = None
     workspace_message = ""
     if runtime != "streamlit_component":
-        workspace_ok, workspace_message = _paper_library_workspace_status(_paper_library_workspace_url())
+        workspace_ok, workspace_message = _paper_library_sidecar_status()
     if invalid_runtime:
         st.warning(
             _l(

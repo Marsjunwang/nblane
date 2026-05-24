@@ -116,30 +116,32 @@ Ingest and full evidence editing remain **CLI / Web**.
 Run the Web UI from the repo root. The Research PDF Reader is served by the
 FastAPI sidecar; local development needs both the Reader API and Streamlit.
 
-Start the Reader API first, then start Streamlit with a browser-reachable
-`NBLANE_READER_API_BASE`:
+For ordinary local development, use the tmux helper:
 
 ```bash
-# Terminal 1
-PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
-  --host 127.0.0.1 --port 8502 --reload
+# Reader API 8502 + Streamlit 8503
+scripts/dev-web.sh
 
-# Terminal 2
-NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
-PYTHONPATH=src .venv/bin/streamlit run app.py \
-  --server.address=127.0.0.1 --server.port=8503 --server.headless=true
+# Short code debugging only; avoid reload for long search/translation jobs.
+scripts/dev-web.sh --reload
+
+# Parallel dev on a production host: Reader API 18502 + Streamlit 18503,
+# isolated .dev-data/.dev-assets, no production data writes.
+scripts/dev-web.sh --isolated
 ```
 
-When you view Streamlit through SSH / IDE port forwarding, forward both `8503`
-and `8502`, and set `NBLANE_READER_API_BASE` to the URL your browser can reach
-for port `8502`. If this variable is omitted without a reverse proxy, the
-iframe uses `/reader/view/...`; plain Streamlit will serve its own shell at that
-path, which looks like a blank Reader.
+When you view Streamlit through SSH / IDE port forwarding, forward both the
+Streamlit port and the sidecar port: `8503` + `8502` for ordinary local dev,
+or `18503` + `18502` for isolated dev. If `NBLANE_READER_API_BASE` points at a
+URL your browser cannot reach, Reader / Paper Library iframes can look blank.
 
-In production behind Caddy, leave `NBLANE_READER_API_BASE` unset and route
-`/reader/*` to the FastAPI sidecar. Translation is shown as a semantic flow by
-default; set `NBLANE_READER_DEBUG_OVERLAY=1` only when debugging the legacy PDF
-overlay renderer.
+Production should use systemd + Caddy rather than the dev tmux helper. Keep
+production ports bound to `127.0.0.1`, route sidecar paths through Caddy, and
+do not expose `8501`, `8502`, or GROBID `8070` directly. Translation is shown
+as a semantic flow by default; set `NBLANE_READER_DEBUG_OVERLAY=1` only when
+debugging the legacy PDF overlay renderer. See
+[Web UI guide](docs/zh/guides/web-ui.md) and
+[Tencent Cloud deployment](docs/zh/guides/deployment-tencent-cloud.md).
 
 Browser e2e tests use Playwright from the repo root. On a fresh machine, install
 the Node dev dependency and Chromium browser binary before running them:

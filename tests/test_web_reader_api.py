@@ -12,7 +12,12 @@ from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
-from nblane.core.auth import mint_reader_token
+from nblane.core.auth import (
+    AUTH_SESSION_COOKIE_NAME,
+    hash_password,
+    mint_auth_handoff_token,
+    mint_reader_token,
+)
 from nblane.core.paper_library_workspace import PaperLibraryEventResult
 from nblane.core.reader_actions import ReaderActionResult
 from nblane.core.research_papers import (
@@ -78,6 +83,24 @@ class TestWebReaderApi(unittest.TestCase):
                 [PaperPage(source_id=source_id, page=1, text="Page 1", text_hash=text_hash("Page 1"))],
             )
         return profile
+
+    def _auth_file(self, root: Path) -> Path:
+        path = root / "auth" / "users.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        password_hash = hash_password("secret", iterations=100_000, salt=b"0123456789abcdef")
+        path.write_text(
+            (
+                "users:\n"
+                "  alice:\n"
+                "    display_name: Alice\n"
+                f"    password_hash: {password_hash}\n"
+                "    role: member\n"
+                "    profiles:\n"
+                "      - alice\n"
+            ),
+            encoding="utf-8",
+        )
+        return path
 
     def _client(self, profile: Path) -> TestClient:
         patcher = patch("nblane.web_reader_api.profile_dir", return_value=profile)
@@ -440,6 +463,60 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(extracted.json()["payload"]["action"], "")
         self.assertEqual(reader_token.status_code, 200)
         self.assertIn("/reader/view/source%3Apaper%3Agrounded", reader_token.json()["reader_url"])
+
+    def test_paper_library_standalone_requires_auth_cookie_when_auth_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(
+                os.environ,
+                {
+                    "NBLANE_AUTH_FILE": str(self._auth_file(root)),
+                    "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                    "NBLANE_RESEARCH_ASSET_ROOT": str(root / "assets"),
+                },
+                clear=False,
+            ):
+                profile = self._profile(root)
+                client = self._client(profile)
+
+                page = client.get("/paper-library?profile=alice")
+                payload = client.get("/api/research/alice/paper-library")
+
+        self.assertEqual(page.status_code, 401)
+        self.assertEqual(payload.status_code, 401)
+
+    def test_paper_library_auth_handoff_sets_cookie_and_checks_profile_access(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(
+                os.environ,
+                {
+                    "NBLANE_AUTH_FILE": str(self._auth_file(root)),
+                    "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                    "NBLANE_RESEARCH_ASSET_ROOT": str(root / "assets"),
+                },
+                clear=False,
+            ):
+                profile = self._profile(root)
+                client = self._client(profile)
+                handoff = mint_auth_handoff_token("alice")
+
+                page = client.get(
+                    f"/paper-library?profile=alice&auth_handoff={quote(handoff, safe='')}"
+                )
+                payload = client.get("/api/research/alice/paper-library")
+                reader_token = client.post(
+                    "/api/research/alice/papers/source%3Apaper%3Agrounded/reader-token"
+                )
+                forbidden = client.get("/paper-library?profile=bob")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(AUTH_SESSION_COOKIE_NAME, page.headers.get("set-cookie", ""))
+        self.assertEqual(payload.status_code, 200)
+        self.assertEqual(payload.json()["payload"]["metrics"]["papers"], 1)
+        self.assertEqual(reader_token.status_code, 200)
+        self.assertIn("/reader/view/source%3Apaper%3Agrounded", reader_token.json()["reader_url"])
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_paper_library_search_and_import_require_pdf_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

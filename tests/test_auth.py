@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import yaml

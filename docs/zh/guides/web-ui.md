@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-23
+last_verified: 2026-05-24
 source_of_truth: true
 ---
 
@@ -38,11 +38,77 @@ npm_config_registry=https://registry.npmmirror.com npm install
 npm run test:e2e:install:cn
 ```
 
-### 1.1 本地启动 Research PDF Reader 和 Paper Library
+### 1.1 开发启动 Research PDF Reader 和 Paper Library
 
 Research 的 PDF Reader 和 Paper Library standalone 是 **Streamlit 主应用 + FastAPI sidecar** 两个进程。
-本地开发没有 Caddy 反向代理时，需要先启动 sidecar，并让 Streamlit iframe 指向浏览器能访问的
-sidecar 地址：
+开发环境不要使用生产的 systemd service；用 tmux 跑独立进程即可。生产通常占用
+`8501/8502/8070`，所以开发分两种模式：
+
+- **普通本机开发**：没有生产服务同机运行时，可继续使用 `8502/8503`。
+- **与生产同机并行调试**：使用 `18502/18503` 和 `.dev-data/.dev-assets`，避免写入
+  `/srv/nblane-data`、`/srv/nblane-assets` 或抢占生产 `8502`。
+
+推荐用脚本启动：
+
+```bash
+# 普通本机开发：Reader API 8502 + Streamlit 8503。
+scripts/dev-web.sh
+
+# 调试短任务时可启用 uvicorn reload；跑 Codex 搜索、translation/extraction 等长任务前关掉 reload。
+scripts/dev-web.sh --reload
+
+# 与生产服务同机并行开发：Reader API 18502 + Streamlit 18503，数据写入 .dev-data/.dev-assets。
+scripts/dev-web.sh --isolated
+
+# 同机并行开发 + reload。
+scripts/dev-web.sh --isolated --reload
+```
+
+脚本会创建/重启 tmux session：
+
+```text
+普通本机开发：nblane-reader-api / nblane-streamlit-ui
+同机隔离开发：nblane-dev-reader-api / nblane-dev-streamlit-ui
+```
+
+查看状态和停止：
+
+```bash
+scripts/dev-web.sh status
+scripts/dev-web.sh stop
+
+scripts/dev-web.sh --isolated status
+scripts/dev-web.sh --isolated stop
+```
+
+同机隔离开发第一次启动时，脚本会从 `profiles/template` 创建 `.dev-data/profiles/dev`，并复制
+`schemas/`、`teams/` 作为开发数据底座。之后所有 Web 保存、论文产物和 PDF asset 都写入：
+
+```text
+.dev-data/
+.dev-assets/research/
+```
+
+这两个目录已被 `.gitignore` 忽略。不要把生产的 `/srv/nblane-data` 直接作为开发
+`NBLANE_ROOT` 使用；需要复现生产问题时，先做快照，再同步到独立开发目录。
+
+如果需要在开发环境调试 GROBID，不要复用生产 `8070`。启动一个本机开发容器，把 host
+`18070` 映射到容器内 `8070`：
+
+```bash
+sudo docker rm -f nblane-dev-grobid 2>/dev/null || true
+sudo docker run -d --name nblane-dev-grobid --restart unless-stopped \
+  -p 127.0.0.1:18070:8070 \
+  grobid/grobid:0.9.0-crf
+
+curl http://127.0.0.1:18070/api/isalive
+scripts/dev-web.sh --isolated --grobid
+```
+
+不加 `--grobid` 时，开发脚本默认使用 PyMuPDF fallback，避免误连生产 GROBID。
+
+如果需要手动启动而不是用脚本，本地开发没有 Caddy 反向代理时，需要先启动 sidecar，并让
+Streamlit iframe 指向浏览器能访问的 sidecar 地址：
 
 ```bash
 # 在仓库根目录启动两个 tmux session。
@@ -62,16 +128,51 @@ tmux new-session -d -s nblane-streamlit-ui -c "$PWD" \
     --server.address=127.0.0.1 --server.port=8503 --server.headless=true'
 ```
 
-Paper Library 的 Codex 搜索和 Reader 长任务会在 `8502` 进程内保存 job 状态。默认启动不要加
+如果要手动启动同机隔离开发，把端口和数据目录一起换掉：
+
+```bash
+mkdir -p .dev-data/profiles .dev-data/schemas .dev-data/teams .dev-assets/research
+cp -a profiles/template .dev-data/profiles/template 2>/dev/null || true
+cp -a schemas/. .dev-data/schemas/
+cp -a teams/. .dev-data/teams/
+NBLANE_ROOT="$PWD/.dev-data" PYTHONPATH=src .venv/bin/nblane init dev 2>/dev/null || true
+
+tmux kill-session -t nblane-dev-reader-api 2>/dev/null || true
+tmux kill-session -t nblane-dev-streamlit-ui 2>/dev/null || true
+
+# Dev Research sidecar: http://127.0.0.1:18502
+tmux new-session -d -s nblane-dev-reader-api -c "$PWD" \
+  'NBLANE_ROOT=.dev-data \
+   NBLANE_RESEARCH_ASSET_ROOT=.dev-assets/research \
+   NBLANE_RESEARCH_STRUCTURE_BACKEND=pymupdf \
+   PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
+    --host 127.0.0.1 --port 18502'
+
+# Dev Streamlit UI: http://127.0.0.1:18503
+tmux new-session -d -s nblane-dev-streamlit-ui -c "$PWD" \
+  'NBLANE_ROOT=.dev-data \
+   NBLANE_READER_API_BASE=http://127.0.0.1:18502 \
+   NBLANE_DASHBOARD_CANVAS_BASE=http://127.0.0.1:18502 \
+   NBLANE_STREAMLIT_BASE_URL=http://127.0.0.1:18503 \
+   NBLANE_RESEARCH_ASSET_ROOT=.dev-assets/research \
+   NBLANE_RESEARCH_STRUCTURE_BACKEND=pymupdf \
+   PYTHONPATH=src .venv/bin/streamlit run app.py \
+    --server.address=127.0.0.1 --server.port=18503 --server.headless=true'
+```
+
+Paper Library 的 Codex 搜索和 Reader 长任务会在 sidecar 进程内保存 job 状态。默认启动不要加
 `--reload`；否则代码或产物变动触发 uvicorn reload 后，前端继续查询旧 job 可能得到
-`search job not found`。如果只是短时间调试代码，可临时把 sidecar 命令改成
-`--host 127.0.0.1 --port 8502 --reload --reload-dir src`；跑长搜索前建议重启回无 reload 模式。
+`search job not found`。如果只是短时间调试代码，可临时加
+`--reload --reload-dir src`；跑长搜索、translation/extraction 前建议重启回无 reload 模式。
 
 查看日志/进入进程：
 
 ```bash
 tmux attach -t nblane-reader-api
 tmux attach -t nblane-streamlit-ui
+
+tmux attach -t nblane-dev-reader-api
+tmux attach -t nblane-dev-streamlit-ui
 ```
 
 在 tmux 中按 `Ctrl-b` 然后按 `d` 可 detach，服务会继续运行。停止服务：
@@ -79,25 +180,35 @@ tmux attach -t nblane-streamlit-ui
 ```bash
 tmux kill-session -t nblane-reader-api
 tmux kill-session -t nblane-streamlit-ui
+
+tmux kill-session -t nblane-dev-reader-api
+tmux kill-session -t nblane-dev-streamlit-ui
 ```
 
-如果通过 SSH / IDE port forwarding 在浏览器访问，请同时转发 `8503` 和 `8502`，并把
-`NBLANE_READER_API_BASE` 设成浏览器能打开的 `8502` URL。
+如果通过 SSH / IDE port forwarding 在浏览器访问，请同时转发 Streamlit 和 sidecar 两个端口：
+普通本机开发转发 `8503` 和 `8502`；同机隔离开发转发 `18503` 和 `18502`。同时把
+`NBLANE_READER_API_BASE` 设成浏览器能打开的 sidecar URL。
 
 启动后常用入口：
 
 - Streamlit Research：`http://127.0.0.1:8503`
 - Paper Library standalone：`http://127.0.0.1:8502/paper-library?profile=<profile>`
 - PDF Reader：从 Paper Library 的 `Open Reader` 打开，或访问 `/reader/view/{source_id}`。
+- 同机隔离开发 Streamlit：`http://127.0.0.1:18503`
+- 同机隔离开发 Paper Library：`http://127.0.0.1:18502/paper-library?profile=dev`
 
 端口级自测可以先确认两个进程都活着：
 
 ```bash
 curl -i http://127.0.0.1:8503/_stcore/health
 curl -i 'http://127.0.0.1:8502/paper-library?profile=<profile>'
+
+curl -i http://127.0.0.1:18503/_stcore/health
+curl -i 'http://127.0.0.1:18502/paper-library?profile=dev'
 ```
 
-`Find and import papers` 的 Codex 搜索运行在 `8502` search job 上。前端不再固定提交
+`Find and import papers` 的 Codex 搜索运行在 sidecar search job 上；普通本机开发是 `8502`，
+同机隔离开发是 `18502`。前端不再固定提交
 `120s / 180s` 搜索时长；默认只提交 `Fast / Deep` 搜索深度，后端按 depth、limit 和环境变量计算
 adaptive budget。`Fast + limit=10` 默认会给 Codex 约 `180s`，避免正常 web search 因插件同步或
 网络抖动被 `75s` 误杀；如需更长或更短，可在 `Advanced` 手动填 `Codex max s`。页面优先通过
@@ -120,6 +231,7 @@ open-access PDF 时尝试下载。`Upload` 可直接选择本地 `.pdf`，创建
 并在导入后打开对应论文详情。已有论文详情页里的 `Upload PDF` 仍用于给当前 paper 补传/替换 PDF。
 
 如需用 API 直接验证 search job 与取消链路，可从同源端口发起请求：
+同机隔离开发时，把下面 URL 和 `Origin` 里的 `8502` 换成 `18502`。
 
 ```bash
 curl -X POST "http://127.0.0.1:8502/api/research/<profile>/paper-library/search/jobs" \
@@ -138,7 +250,7 @@ curl -X POST "http://127.0.0.1:8502/api/research/<profile>/paper-library/search/
 fallback；`provider_budget_seconds` 和 `provider_timeout_seconds` 控制 provider fallback 的预算。
 
 如果远程 PDF 下载很慢或失败，但你能在本地浏览器更快下载 PDF，可以在 Paper Library 详情页点击
-`Upload PDF`，直接选择本地 `.pdf` 文件上传到 `8502`。上传会复用同一套外部 PDF asset 存储，
+`Upload PDF`，直接选择本地 `.pdf` 文件上传到 sidecar。上传会复用同一套外部 PDF asset 存储，
 成功后立即写入 `pdf_asset_ref`、标记 `pdf_download_status=downloaded`，并启用 `Open Reader`。
 这适合 arXiv 等站点在服务器侧下载很慢、但浏览器侧访问正常的情况；后续 `Retry PDF` 仍可继续用于
 让服务器按远程 `open_access_pdf_url` 重试下载。
@@ -161,16 +273,29 @@ LLM 翻译已经失败；前端会继续等待后台 job。论文翻译 batch �
 `NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_CHARS`、`NBLANE_PAPER_TRANSLATION_LAYOUT_BATCH_CHARS`、
 `NBLANE_PAPER_TRANSLATION_SEGMENT_BATCH_CHARS`、`NBLANE_PAPER_TRANSLATION_PAGE_BATCH_CHARS` 或通用
 `NBLANE_PAPER_TRANSLATION_BATCH_CHARS` 覆盖字符预算。
-如果 `8502` 在长翻译中短暂断开，页面会显示重连倒计时并保留当前进度；如果 sidecar 重启导致内存 job
+如果 sidecar 在长翻译中短暂断开，页面会显示重连倒计时并保留当前进度；如果 sidecar 重启导致内存 job
 丢失，页面会刷新最新已保存产物，并提示再次点击 `Retry translation` 继续剩余单元。
 
 Paper Library 在 Streamlit Research 页中的入口由 `NBLANE_PAPER_LIBRARY_RUNTIME` 控制：
 
-- `fastapi_iframe`：默认值。把 `8502 /paper-library` 直接嵌入 Research 页，并保留新窗口打开入口。
-- `fastapi_link`：只显示 8502 工作台入口，旧 Streamlit 组件作为手动 fallback。
+- `fastapi_iframe`：默认值。把 sidecar `/paper-library` 直接嵌入 Research 页，并保留新窗口打开入口。
+- `fastapi_link`：只显示 sidecar 工作台入口，旧 Streamlit 组件作为手动 fallback。
 - `streamlit_component`：继续把旧 Streamlit component 作为主路径；适合 sidecar 不稳定时调试。
 
-如果设置了绝对 `NBLANE_READER_API_BASE` 且 `8502` 不可达，Research 页会提示、暂时禁用 Reader / Paper Library 跳转，并显示 Streamlit fallback。
+启用 `NBLANE_AUTH_FILE` 的部署中，8502 standalone 页面使用共享登录态：
+
+- Streamlit 登录成功后会 mint 一个短期 handoff token，并通过隐藏 POST 提交到 sidecar
+  `/auth/session`；sidecar 校验后设置 HttpOnly `nblane_auth_session` cookie。
+- `/paper-library`、`/dashboard`、`/api/research/*` 和 `/api/dashboard/*` 会读取该 cookie，
+  并继续按 `auth/users.yaml` 的 profile 权限做校验。没有 cookie 时会返回 `401 auth session required`。
+- 生产 Caddy 需要把 `/auth/*`、`/reader/*`、`/paper-library*`、`/dashboard*`、
+  `/api/research/*` 和 `/api/dashboard/*` 都反代到 `127.0.0.1:8502`。
+- 生产同源部署建议保持 `NBLANE_READER_API_BASE=0`，并使用
+  `NBLANE_PAPER_LIBRARY_RUNTIME=fastapi_iframe`；页面会把 `0` 解析成浏览器可访问的 sidecar：
+  正式域名访问时使用当前 origin（例如 `https://www.nblane.cloud`），通过 Caddy 命中 8502；
+  直连/端口转发 `localhost:8501` 时自动推导 `localhost:8502`。不要把 sidecar 暴露成另一个公网域名。
+
+如果设置了绝对 `NBLANE_READER_API_BASE` 且 sidecar 不可达，Research 页会提示、暂时禁用 Reader / Paper Library 跳转，并显示 Streamlit fallback。
 
 Reader 或 Paper Library 白屏的常见原因是只启动了 Streamlit，或者没有设置 `NBLANE_READER_API_BASE`。这时 iframe
 会请求相对路径 `/reader/view/...`；没有 Caddy 时这个路径会被 Streamlit 自己接住，
@@ -178,7 +303,7 @@ iframe 里加载的是另一个 Streamlit shell，而不是 Reader API，所以�
 
 另一个本地开发白屏原因是 sidecar 使用 `--reload` 监控了整个仓库。Reader 的 extract pages /
 extract segments 会写入 `profiles/` 下的论文产物；如果 uvicorn reload 监听整个仓库，提取时可能触发
-sidecar reload 或高 CPU 轮询，导致 `8502` 短暂无响应，iframe 看起来空白。调试短任务时可以使用
+sidecar reload 或高 CPU 轮询，导致 sidecar 短暂无响应，iframe 看起来空白。调试短任务时可以使用
 `--reload --reload-dir src`，让 sidecar 只监听代码目录；跑 Codex 搜索、translation/extraction
 等长任务时建议去掉 `--reload`，避免内存 job 在 reload 后丢失。
 
@@ -186,8 +311,10 @@ sidecar reload 或高 CPU 轮询，导致 `8502` 短暂无响应，iframe 看起
 `/reader/view/{source_id}` 对应的 FastAPI sidecar；Paper Library 的主工作台入口是
 `/paper-library?profile=<profile>`。
 
-生产部署如果已经用 Caddy 将 `/reader/*` 反代到 `127.0.0.1:8502`，则不要设置
-`NBLANE_READER_API_BASE`，保持同源路径即可。
+生产部署如果已经用 Caddy 将 `/auth/*`、`/reader/*`、`/paper-library*` 和 `/api/research/*`
+反代到 `127.0.0.1:8502`，可设置 `NBLANE_READER_API_BASE=0` 进入同源模式。若通过 SSH/IDE
+直连 `localhost:8501` 查看生产 Streamlit，也要同时转发 `8502`；否则页面会把 sidecar
+健康检查标为不可用，而不会再把 Streamlit 登录页误嵌进 Paper Library。
 
 普通阅读默认使用译文 flow 视图，不把译文贴回 PDF rect。当前页/可见页翻译会优先使用
 `paper-structure` 结构单元，并保留合并后的段落 rect，

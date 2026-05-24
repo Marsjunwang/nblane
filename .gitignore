@@ -10,6 +10,8 @@ build/
 .venv/
 .streamlit/
 node_modules/
+.dev-data/
+.dev-assets/
 !src/nblane/goal_presence_component/frontend/dist/
 !src/nblane/goal_presence_component/frontend/dist/**
 

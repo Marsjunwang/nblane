@@ -125,6 +125,8 @@ WorkingDirectory=/srv/nblane-app
 Environment=NBLANE_ROOT=/srv/nblane-data
 Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
 Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+Environment=NBLANE_CODEX_BIN=/home/nblane/.local/bin/codex
+Environment=NBLANE_CODEX_HOME=/home/nblane/.codex
 Environment=NBLANE_RESEARCH_PDF_BACKEND=pymupdf
 Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
 EnvironmentFile=-/srv/nblane-data/.env
@@ -147,6 +149,24 @@ sudo systemctl status nblane-reader
 Reader sidecar 是生产 PDF Reader 的唯一主路径；不要依赖旧的 Streamlit 静态组件路径。
 普通部署也不要开启 overlay 调试开关，只有排查 legacy PDF 贴图渲染时才临时设置
 `NBLANE_READER_DEBUG_OVERLAY=1`。
+
+如果 Paper Library 的 Codex 搜索需要走 `local_codex_readonly`，生产 systemd service
+必须能找到 Codex CLI。很多机器把 Codex 安装到 `~/.local/bin/codex`，但 systemd 默认
+`PATH` 通常不包含 `~/.local/bin`，会导致页面 trace 出现
+`codex_not_found: install Codex CLI first`。建议在 `nblane.service` 和
+`nblane-reader.service` 都显式配置：
+
+```ini
+Environment=NBLANE_CODEX_BIN=/home/nblane/.local/bin/codex
+Environment=NBLANE_CODEX_HOME=/home/nblane/.codex
+```
+
+实际路径按运行 service 的 Linux 用户调整。配置后可用同一用户检查：
+
+```bash
+sudo -u nblane /home/nblane/.local/bin/codex --version
+sudo -u nblane CODEX_HOME=/home/nblane/.codex /home/nblane/.local/bin/codex login status
+```
 
 ## HTTPS 反向代理
 
