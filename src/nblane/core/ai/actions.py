@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -19,6 +20,17 @@ class AIActionRequest:
     context_refs: list[str] = field(default_factory=list)
     preferred_backend: str | None = None
     require_review: bool = True
+    runtime_profile: str = ""
+    progress_callback: Callable[[dict[str, object]], None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    cancel_callback: Callable[[], bool] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)

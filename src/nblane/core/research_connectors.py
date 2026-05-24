@@ -245,6 +245,15 @@ def _http_get(url: str, *, headers: dict[str, str] | None = None, timeout: int =
         return response.read()
 
 
+def _request_timeout(config: dict[str, object], default: int = 20) -> int:
+    raw = config.get("provider_timeout_seconds") or config.get("timeout_seconds")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = float(default)
+    return max(1, min(int(value), 60))
+
+
 class ArxivAdapter(ConnectorAdapter):
     provider = "arxiv"
 
@@ -262,7 +271,10 @@ class ArxivAdapter(ConnectorAdapter):
                 "sortOrder": "descending",
             }
         )
-        payload = _http_get(f"https://export.arxiv.org/api/query?{encoded}")
+        payload = _http_get(
+            f"https://export.arxiv.org/api/query?{encoded}",
+            timeout=_request_timeout(config),
+        )
         return parse_arxiv_feed(payload)
 
 
@@ -285,7 +297,7 @@ class SemanticScholarAdapter(ConnectorAdapter):
                 + "?"
                 + urllib.parse.urlencode({"fields": fields})
             )
-            payload = json.loads(_http_get(url).decode("utf-8"))
+            payload = json.loads(_http_get(url, timeout=_request_timeout(config)).decode("utf-8"))
             return parse_semantic_scholar_payload(payload)
         encoded = urllib.parse.urlencode({"query": query, "limit": str(limit), "fields": fields})
         headers: dict[str, str] = {}
@@ -296,6 +308,7 @@ class SemanticScholarAdapter(ConnectorAdapter):
             _http_get(
                 f"https://api.semanticscholar.org/graph/v1/paper/search?{encoded}",
                 headers=headers,
+                timeout=_request_timeout(config),
             ).decode("utf-8")
         )
         return parse_semantic_scholar_payload(payload)
@@ -572,8 +585,13 @@ def _manual_items_from_config(provider: str, config: dict[str, object]) -> list[
             parsed = json.loads(stripped)
             rows = [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
         else:
-            reader = csv.DictReader(stripped.splitlines())
-            rows = [dict(row) for row in reader]
+            lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+            header = {part.strip().lower() for part in lines[0].split(",")} if lines else set()
+            if header.intersection({"title", "url", "link", "text", "summary"}):
+                reader = csv.DictReader(lines)
+                rows = [dict(row) for row in reader]
+            else:
+                rows = [{"title": line, "url": line, "external_id": line} for line in lines]
     items: list[ConnectorItem] = []
     for row in rows:
         title = _clean_text(row.get("title") or row.get("text") or row.get("summary"))
@@ -817,12 +835,7 @@ def _discover_connector_raw(
     return book, rows, row, adapter.discover(config), warnings
 
 
-def discover_connector_items(profile: str | Path, connector_id: str) -> dict[str, Any]:
-    """Preview connector discoveries without writing research source facts."""
-    profile_name = _profile_name(profile)
-    book, _rows, row, items, warnings = _discover_connector_raw(profile, connector_id)
-    provider = _clean_text(row.get("provider"))
-    inbox = load_research_sources(_profile_root(profile))
+def _preview_candidates(items: list[ConnectorItem], inbox: ResearchSourceInbox) -> list[dict[str, object]]:
     lookup = _source_fingerprint_lookup(inbox)
     candidates: list[dict[str, object]] = []
     for item in items:
@@ -847,12 +860,26 @@ def discover_connector_items(profile: str | Path, connector_id: str) -> dict[str
                 },
             }
         )
-    duplicate_count = sum(
+    return candidates
+
+
+def _duplicate_count(candidates: list[dict[str, object]]) -> int:
+    return sum(
         1
         for candidate in candidates
         for duplicate in [candidate.get("duplicate")]
         if isinstance(duplicate, dict) and bool(duplicate.get("is_duplicate"))
     )
+
+
+def discover_connector_items(profile: str | Path, connector_id: str) -> dict[str, Any]:
+    """Preview connector discoveries without writing research source facts."""
+    profile_name = _profile_name(profile)
+    book, _rows, row, items, warnings = _discover_connector_raw(profile, connector_id)
+    provider = _clean_text(row.get("provider"))
+    inbox = load_research_sources(_profile_root(profile))
+    candidates = _preview_candidates(items, inbox)
+    duplicate_count = _duplicate_count(candidates)
     return {
         "profile": profile_name,
         "connector_id": connector_id,
@@ -865,6 +892,33 @@ def discover_connector_items(profile: str | Path, connector_id: str) -> dict[str
         "candidates": candidates,
         "warnings": warnings,
         "connectors_updated": _clean_text(book.get("updated")),
+    }
+
+
+def preview_manual_connector_items(
+    profile: str | Path,
+    provider: str,
+    raw_items: object,
+) -> dict[str, Any]:
+    """Preview pasted URL, CSV, or JSON manual connector items."""
+    clean_provider = _clean_text(provider)
+    if clean_provider not in CONNECTOR_PROVIDERS:
+        raise ValueError(f"Unknown research connector provider: {provider}")
+    items = _manual_items_from_config(clean_provider, {"manual_items": raw_items})
+    candidates = _preview_candidates(items, load_research_sources(_profile_root(profile)))
+    duplicate_count = _duplicate_count(candidates)
+    return {
+        "profile": _profile_name(profile),
+        "connector_id": f"manual:{clean_provider}",
+        "provider": clean_provider,
+        "query": "manual",
+        "privacy_default": "private",
+        "discovered": len(items),
+        "importable": len(candidates) - duplicate_count,
+        "skipped": duplicate_count,
+        "candidates": candidates,
+        "warnings": [],
+        "manual": True,
     }
 
 
@@ -915,6 +969,8 @@ def import_connector_items(
         metadata = dict(kwargs.get("metadata") or {})
         metadata["connector_id"] = connector_id
         metadata["import_target_kind"] = target_kind
+        if target_kind == "metadata_only":
+            metadata["metadata_only"] = True
         kwargs["metadata"] = metadata
         source = add_research_source(inbox, **kwargs)
         result.imported += 1
@@ -936,6 +992,65 @@ def import_connector_items(
     }
     book["connectors"] = rows
     save_connectors(profile, book)
+    return result
+
+
+def import_manual_connector_items(
+    profile: str | Path,
+    provider: str,
+    raw_items: object,
+    item_fingerprints: object,
+    *,
+    target: dict[str, object] | None = None,
+    privacy_default: str = "private",
+) -> ConnectorSyncResult:
+    """Import selected pasted/manual connector items without a saved connector."""
+    clean_provider = _clean_text(provider)
+    if clean_provider not in CONNECTOR_PROVIDERS:
+        raise ValueError(f"Unknown research connector provider: {provider}")
+    selected = set(_clean_list(item_fingerprints))
+    result = ConnectorSyncResult(
+        profile=_profile_name(profile),
+        connector_id=f"manual:{clean_provider}",
+        provider=clean_provider,
+    )
+    if not selected:
+        result.warnings.append("No manual connector items were selected for import.")
+        return result
+    items = _manual_items_from_config(clean_provider, {"manual_items": raw_items})
+    result.discovered = len(items)
+    result.items = [item.to_dict() for item in items]
+    inbox = load_research_sources(_profile_root(profile))
+    lookup = _source_fingerprint_lookup(inbox)
+    clean_target = target if isinstance(target, dict) else {}
+    target_node = _clean_text(clean_target.get("node_id"))
+    target_kind = _clean_text(clean_target.get("kind")) or ("collection" if target_node else "source_inbox")
+    for item in items:
+        fingerprint = item.fingerprint()
+        if fingerprint not in selected:
+            continue
+        canonical = _canonical_url(item.url)
+        external_key = f"{item.provider}|{item.external_id}" if item.provider and item.external_id else ""
+        duplicate = lookup.get(fingerprint) or (lookup.get(canonical) if canonical else None) or (lookup.get(external_key) if external_key else None)
+        if duplicate is not None:
+            result.skipped += 1
+            continue
+        kwargs = item.to_source_kwargs(privacy_default=privacy_default)
+        if target_node:
+            kwargs["library_node_refs"] = [target_node]
+        metadata = dict(kwargs.get("metadata") or {})
+        metadata["import_target_kind"] = target_kind
+        if target_kind == "metadata_only":
+            metadata["metadata_only"] = True
+        kwargs["metadata"] = metadata
+        source = add_research_source(inbox, **kwargs)
+        result.imported += 1
+        result.imported_source_ids.append(source.id)
+        lookup[fingerprint] = {"source_id": source.id, "reason": "same_fingerprint"}
+        if canonical:
+            lookup[canonical] = {"source_id": source.id, "reason": "same_url"}
+    if result.imported:
+        save_research_sources(_profile_root(profile), inbox)
     return result
 
 
@@ -1076,11 +1191,13 @@ __all__ = [
     "ConnectorSyncResult",
     "discover_connector_items",
     "import_connector_items",
+    "import_manual_connector_items",
     "load_connectors",
     "parse_arxiv_feed",
     "parse_github_payload",
     "parse_semantic_scholar_payload",
     "parse_x_twitter_payload",
+    "preview_manual_connector_items",
     "save_connectors",
     "sync_connector",
     "sync_connectors",

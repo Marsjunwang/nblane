@@ -6,7 +6,7 @@ for persistence via ``learned_keywords.merge``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from nblane.core import llm as llm_client
 from nblane.core.jsonutil import extract_json_object
@@ -80,6 +80,8 @@ def route_task_to_nodes(
     task: str,
     schema_name: str,
     index: dict[str, dict],
+    *,
+    model: str | None = None,
 ) -> RouterOutcome:
     """Ask the LLM for node ids and optional keywords.
 
@@ -102,7 +104,7 @@ def route_task_to_nodes(
         "Allowed nodes (id: label):\n"
         f"{_catalog_lines(index)}\n"
     )
-    reply = llm_client.chat(system, user, temperature=0.2)
+    reply = llm_client.chat(system, user, temperature=0.2, model=model)
     if reply.startswith("LLM error:") or reply.startswith(
         "AI features not configured"
     ):
@@ -164,6 +166,8 @@ def route_task_to_nodes_codex(
     task: str,
     schema_name: str,
     index: dict[str, dict],
+    *,
+    model: str | None = None,
 ) -> RouterOutcome:
     """Ask local read-only Codex for node ids and optional keywords."""
 
@@ -193,7 +197,11 @@ def route_task_to_nodes_codex(
     )
     from nblane.core import codex_adapter
 
-    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    config = codex_adapter.current_config(profile=profile_name)
+    clean_model = str(model or "").strip()
+    if clean_model:
+        config = replace(config, model=clean_model)
+    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt, config=config)
     if not result.ok:
         return RouterOutcome(
             ok=False,

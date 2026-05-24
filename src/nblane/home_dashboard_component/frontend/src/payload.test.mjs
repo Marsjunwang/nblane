@@ -87,6 +87,12 @@ test("normalizes chart totals and quick links", () => {
           record_id: "g1",
           owner_path: "",
           is_primary: true,
+          summary: "Goal summary",
+          primary_action: {
+            id: "open_goal",
+            label: "Open goal",
+            event: { action: "navigate", payload: { path: "app.py" } },
+          },
         },
         {
           id: "skill:ros2_basics",
@@ -112,6 +118,19 @@ test("normalizes chart totals and quick links", () => {
         { source: "skill:ros2_basics", target: "evidence", suggested: true },
         { from: "goal:g1", to: "source:inbox", type: "contains", placeholder: true },
       ],
+      focus_path: ["goal:g1", "skill:ros2_basics"],
+      attention: {
+        counts: { evidence_pending: 2 },
+        nodes: [{ id: "source:inbox", reason: "Needs review", severity: "warning" }],
+      },
+      actions: [
+        {
+          id: "review_evidence",
+          node_id: "source:inbox",
+          label: "Review",
+          event: { action: "navigate", payload: { path: "pages/2_Evidence_Review.py" } },
+        },
+      ],
     },
   });
 
@@ -130,6 +149,8 @@ test("normalizes chart totals and quick links", () => {
   assert.equal(payload.sources.active_total, 2);
   assert.equal(payload.graph.nodes[0].recordId, "g1");
   assert.equal(payload.graph.nodes[0].isPrimary, true);
+  assert.equal(payload.graph.nodes[0].summary, "Goal summary");
+  assert.equal(payload.graph.nodes[0].primaryAction.event.action, "navigate");
   assert.equal(payload.graph.nodes[1].layer, "capability");
   assert.equal(payload.graph.nodes[1].implemented, true);
   assert.equal(payload.graph.nodes[2].placeholder, true);
@@ -139,6 +160,9 @@ test("normalizes chart totals and quick links", () => {
   assert.equal(payload.graph.edges[1].suggested, true);
   assert.equal(payload.graph.edges[0].relation, "supports");
   assert.equal(payload.graph.edges[2].placeholder, true);
+  assert.deepEqual(payload.graph.focusPath, ["goal:g1", "skill:ros2_basics"]);
+  assert.equal(payload.graph.attention.nodes[0].id, "source:inbox");
+  assert.equal(payload.graph.actions[0].event.payload.path, "pages/2_Evidence_Review.py");
 });
 
 test("private goal remains display-only and does not expose editor fields", () => {

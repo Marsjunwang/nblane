@@ -229,8 +229,8 @@ kanban:
 
 - `web-preferences.yaml` 不保存 API key、token、secret、password、authorization、cookie、`auth.json` 内容或 `config.toml` 原文。
 - `profiles/<name>/codex.yaml` 只保存 nblane 的非密钥 Codex 参数，例如 `bin_path`、`cloud_env_id`、`model`、`attempts`、`branch`、`timeout_seconds`。
-- Web 页面中的 Codex 使用 profile 专属 `CODEX_HOME`，默认根目录为 `~/.nblane/codex/profiles/`，目录名为 `<safe-profile>-<sha12>`；可用 `NBLANE_CODEX_HOME_ROOT` 覆盖根目录。
-- Web Codex 的 `auth.json` 和 `config.toml` 位于该 profile 专属 `CODEX_HOME` 下，不放入 `profiles/<name>/`，不会影响终端默认 `~/.codex`。
+- Web 页面中的 Codex 默认使用部署级 / 终端同款 `CODEX_HOME`（本地通常为 `~/.codex`，云上可用 `NBLANE_CODEX_HOME` 指向持久化目录）。
+- Web Codex 的 `auth.json` 和 `config.toml` 位于部署级 Codex home 下，不放入 `profiles/<name>/`。旧 profile 隔离 Codex home 只在显式 `NBLANE_CODEX_HOME_POLICY=profile` 或请求体 profile policy 时用于诊断/复现。
 
 ## 新增 / 规划中的契约
 

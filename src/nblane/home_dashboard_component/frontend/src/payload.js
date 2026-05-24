@@ -168,6 +168,14 @@ export function normalizeGraphNode(node) {
     locked: Boolean(source.locked),
     suggested: Boolean(source.suggested),
     isPrimary: Boolean(source.is_primary || source.isPrimary),
+    summary: cleanText(source.summary),
+    description: cleanText(source.description),
+    itemKind: cleanText(source.item_kind || source.itemKind),
+    meta: asObject(source.meta),
+    primaryAction: normalizeGraphAction(source.primary_action || source.primaryAction),
+    secondaryActions: asArray(source.secondary_actions || source.secondaryActions)
+      .map(normalizeGraphAction)
+      .filter((action) => action.id || action.event.action),
   };
 }
 
@@ -180,6 +188,38 @@ export function normalizeGraphEdge(edge) {
     relation: cleanText(source.relation, cleanText(source.type, "link")),
     placeholder: Boolean(source.placeholder),
     suggested: Boolean(source.suggested),
+  };
+}
+
+export function normalizeGraphAction(action) {
+  const source = asObject(action);
+  const event = asObject(source.event);
+  return {
+    id: cleanText(source.id),
+    nodeId: cleanText(source.node_id || source.nodeId),
+    label: cleanText(source.label),
+    severity: cleanText(source.severity),
+    event: {
+      action: cleanText(event.action),
+      payload: asObject(event.payload),
+    },
+  };
+}
+
+export function normalizeGraphAttention(attention) {
+  const source = asObject(attention);
+  return {
+    counts: normalizeCounts(source.counts),
+    nodes: asArray(source.nodes)
+      .map((item) => {
+        const row = asObject(item);
+        return {
+          id: cleanText(row.id),
+          reason: cleanText(row.reason),
+          severity: cleanText(row.severity),
+        };
+      })
+      .filter((item) => item.id),
   };
 }
 
@@ -306,12 +346,17 @@ export function normalizePayload(payload) {
       return {
         schemaVersion: cleanText(graph.schema_version || graph.schemaVersion),
         view: cleanText(graph.view),
+        contract: asObject(graph.contract),
         layers: normalizeGraphLayers(graph.layers, nodes),
         nodes,
         edges: asArray(graph.edges).map(normalizeGraphEdge).filter((edge) => edge.from && edge.to),
+        focusPath: asArray(graph.focus_path || graph.focusPath).map((item) => cleanText(item)).filter(Boolean),
+        attention: normalizeGraphAttention(graph.attention),
+        actions: asArray(graph.actions).map(normalizeGraphAction).filter((action) => action.id || action.event.action),
       };
     })(),
     quickLinks: asArray(source.quick_links).map(asObject).filter((link) => cleanText(link.path)),
+    canvasEmbed: asObject(source.canvas_embed || source.canvasEmbed),
     ai: asObject(source.ai),
     ui: asObject(source.ui),
   };

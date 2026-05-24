@@ -12,12 +12,14 @@ from nblane.core.research_connectors import (
     ConnectorItem,
     discover_connector_items,
     import_connector_items,
+    import_manual_connector_items,
     load_connectors,
     parse_arxiv_feed,
     parse_github_payload,
     parse_semantic_scholar_payload,
     sync_connector,
     upsert_connector,
+    preview_manual_connector_items,
 )
 from nblane.core.research_sources import load_research_sources
 
@@ -121,6 +123,17 @@ class TestResearchConnectors(unittest.TestCase):
         self.assertEqual(github[0].kind, "repo")
         self.assertIn("Python", github[0].tags)
 
+    def test_paper_adapters_honor_provider_timeout_config(self) -> None:
+        with patch(
+            "nblane.core.research_connectors._http_get",
+            return_value=b"""<?xml version='1.0' encoding='UTF-8'?><feed xmlns='http://www.w3.org/2005/Atom' />""",
+        ) as http_get:
+            from nblane.core.research_connectors import ArxivAdapter
+
+            ArxivAdapter().discover({"query": "vla memory", "limit": 1, "provider_timeout_seconds": 3})
+
+        self.assertEqual(http_get.call_args.kwargs["timeout"], 3)
+
     def test_dry_run_does_not_write_and_run_dedupes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = Path(tmp) / "alice"
@@ -210,6 +223,63 @@ class TestResearchConnectors(unittest.TestCase):
         self.assertEqual(saved["connectors"][0]["last_result"]["selected"], 1)
         self.assertNotIn("secret", serialized)
         self.assertNotIn("should-not-persist", sources_serialized)
+
+    def test_manual_preview_accepts_urls_csv_and_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            url_preview = preview_manual_connector_items(
+                profile,
+                "xiaohongshu",
+                "https://example.com/a\nhttps://example.com/b",
+            )
+            csv_preview = preview_manual_connector_items(
+                profile,
+                "x_twitter",
+                "title,url,summary\nTweet note,https://x.com/demo,Useful thread",
+            )
+            json_preview = preview_manual_connector_items(
+                profile,
+                "github",
+                '[{"title": "octo/manual", "url": "https://github.com/octo/manual", "kind": "repo"}]',
+            )
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                imported = import_manual_connector_items(
+                    profile,
+                    "xiaohongshu",
+                    "https://example.com/a\nhttps://example.com/b",
+                    [url_preview["candidates"][0]["fingerprint"]],
+                    target={"kind": "collection", "node_id": "paper-node:manual"},
+                )
+            sources = load_research_sources(profile)
+
+        self.assertEqual(url_preview["discovered"], 2)
+        self.assertEqual(url_preview["candidates"][0]["item"]["url"], "https://example.com/a")
+        self.assertEqual(csv_preview["candidates"][0]["item"]["title"], "Tweet note")
+        self.assertEqual(json_preview["candidates"][0]["item"]["kind"], "repo")
+        self.assertEqual(imported.imported, 1)
+        self.assertEqual(sources.sources[0].library_node_refs, ["paper-node:manual"])
+
+    def test_manual_import_can_target_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            raw = "title,url\nReading later,https://example.com/later"
+            preview = preview_manual_connector_items(profile, "xiaohongshu", raw)
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                result = import_manual_connector_items(
+                    profile,
+                    "xiaohongshu",
+                    raw,
+                    [preview["candidates"][0]["fingerprint"]],
+                    target={"kind": "metadata_only"},
+                )
+            source = load_research_sources(profile).sources[0]
+
+        self.assertEqual(result.imported, 1)
+        self.assertEqual(source.library_node_refs, [])
+        self.assertEqual(source.metadata["import_target_kind"], "metadata_only")
+        self.assertTrue(source.metadata["metadata_only"])
 
 
 if __name__ == "__main__":

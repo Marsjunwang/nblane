@@ -141,6 +141,26 @@ In production behind Caddy, leave `NBLANE_READER_API_BASE` unset and route
 default; set `NBLANE_READER_DEBUG_OVERLAY=1` only when debugging the legacy PDF
 overlay renderer.
 
+Browser e2e tests use Playwright from the repo root. On a fresh machine, install
+the Node dev dependency and Chromium browser binary before running them:
+
+```bash
+npm install
+npm run test:e2e:install
+npm run test:e2e
+```
+
+In mainland China, use npm and Playwright browser mirrors:
+
+```bash
+npm_config_registry=https://registry.npmmirror.com npm install
+npm run test:e2e:install:cn
+npm run test:e2e
+```
+
+The China mirror installer currently targets Linux x64 and downloads Chrome for
+Testing from `cdn.npmmirror.com/binaries/chrome-for-testing`.
+
 Core surfaces include **Home**, **Skill Tree**, **Gap Analysis**, **Kanban**,
 **Research Workspace**, **Output Studio**, **Public Build**, **Team View**,
 and **Profile Health**. Step-by-step usage:

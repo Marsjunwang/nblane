@@ -165,6 +165,7 @@ def chat(
     *,
     stream_callback: Callable[[str], None] | None = None,
     model: str | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Send a single-turn chat and return the reply text.
 
@@ -183,7 +184,7 @@ def chat(
         client = OpenAI(
             base_url=_BASE_URL,
             api_key=_API_KEY,
-            timeout=timeout_seconds(),
+            timeout=timeout or timeout_seconds(),
         )
         use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(
@@ -211,6 +212,7 @@ def chat_messages(
     stream: bool = False,
     stream_callback: Callable[[str], None] | None = None,
     model: str | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Multi-turn chat: *system* plus *messages* (user/assistant only).
 
@@ -240,7 +242,7 @@ def chat_messages(
         client = OpenAI(
             base_url=_BASE_URL,
             api_key=_API_KEY,
-            timeout=timeout_seconds(),
+            timeout=timeout or timeout_seconds(),
         )
         use_stream = stream or stream_callback is not None
         response = client.chat.completions.create(

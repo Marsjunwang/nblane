@@ -116,7 +116,7 @@ Team
 - **全局 Capture 入口**：捕获一条链接、笔记、学习记录或想法不应要求用户先找到正确页面；短期可从首页轻量 capture bar 起步，长期应成为全局入口。
 - **外部信息默认进入 Research / Capture**：小红书、X/Twitter 收藏、arXiv、Semantic Scholar、GitHub、网页、RSS 等外部资料先进入 Source Inbox 或 Capture Inbox；收藏、翻译和摘要不直接写 skill status、evidence 或 public output。
 - **Agent 写回审阅入口**：跨页面 AI/Agent 生成的候选、patch、状态更新和写回结果应有统一可审查入口，避免用户只能在各页面分散追踪。
-- **远程 Agent 执行默认进入审阅队列**：Codex、Claude Code、OpenCode、Cursor 等外部 Agent 可以协助完善项目，但其运行记录、触达文件、diff、候选写回必须进入 Agent Activity / Writeback Review；不能静默改事实源或公开层。Kanban 内的 Codex 例外地只作为可选只读 AI backend，替代原有看板 LLM 动作，不创建 patch handoff，并使用当前 profile 专属 Web `CODEX_HOME`。
+- **远程 Agent 执行默认进入审阅队列**：Codex、Claude Code、OpenCode、Cursor 等外部 Agent 可以协助完善项目，但其运行记录、触达文件、diff、候选写回必须进入 Agent Activity / Writeback Review；不能静默改事实源或公开层。Kanban 内的 Codex 例外地只作为可选只读 AI backend，替代原有看板 LLM 动作，不创建 patch handoff，并使用部署级 / 终端同款 Web `CODEX_HOME`。
 - **Team scope 硬提示**：Team View 的写入目标必须以 scope strip、色带或写入路径提示明确标出；个人 profile 只能作为 view-as / filter 上下文，不能被误解为团队数据 owner。
 
 ### 4.1 首页：Daily Dashboard
@@ -558,11 +558,11 @@ Goal
 - Evidence Review 已将 Claim Candidates 升级为 Claim Studio：从 project / goal / skill / all evidence / manual 范围生成候选，人工应用后写入 profile 级 `claims.yaml`，不创建顶层 Claims 页面，也不自动提升 skill status。
 - Evidence Review read model 已提供 accepted claims 的 evidence / skill / project / goal / experience / source / output 反查索引，供页面、Dashboard 和 Output Studio 使用；旧 `evidence-pool.yaml.claims` 只作为迁移前兼容 fallback。
 - Gap Analysis 已支持从手动输入、privacy-safe current goal、Doing / Queue kanban task 选择上下文；Kanban inline Gap 也会带入允许进入 agent context 的 current goal。
-- Kanban 已支持 **看板 AI 引擎**选择：原有 Gap 节点路由、拆子任务、任务理解和 Done -> evidence 可在普通 LLM 与本地只读 Codex 间切换；Codex 不需要看板内额外配置，不直接改项目或创建 patch candidate，并使用当前 profile 专属 Web `CODEX_HOME`。
+- Kanban 已支持 **看板 AI 引擎**选择：原有 Gap 节点路由、拆子任务、任务理解和 Done -> evidence 可在普通 LLM 与本地只读 Codex 间切换；Codex 不需要看板内额外配置，不直接改项目或创建 patch candidate，并使用部署级 / 终端同款 Web `CODEX_HOME`。
 - GapResult 已记录 source provenance 和 goal context 使用状态；展示和 CLI / LLM 格式化会显示来源，但不改变原有匹配结果结构。
 - Public Site / Output Studio 的 Blog front matter 已支持 `related_claims`；可从 accepted claims 生成 Blog 候选/草稿、project update 草稿和 resume bullet 候选，并在发布校验中检查 claim id、accepted 状态和 supporting evidence refs。
 - Review 已拆为独立页面：基于周 / 阶段窗口生成 evidence、next action、public draft 候选；Health 保持只读体检。
-- Agent Activity / Writeback Review 已有骨架：`agent-activity.yaml` 记录跨页面 candidate / patch / writeback 的 pending、applied、failed、dismissed 状态，Review 来源的 pending 候选可在 Activity 页应用；Activity 页可按 source page 分组，并支持从看板错误跳转高亮具体条目；Codex 配置入口统一迁移到侧边栏 **AI / LLM -> 配置 Codex** 大弹窗，可编辑当前 profile 专属 Web Codex home 下的 `config.toml`、该 home 下的 `auth.json` 登录状态，以及当前 profile 的 `codex.yaml`。
+- Agent Activity / Writeback Review 已有骨架：`agent-activity.yaml` 记录跨页面 candidate / patch / writeback 的 pending、applied、failed、dismissed 状态，Review 来源的 pending 候选可在 Activity 页应用；Activity 页可按 source page 分组，并支持从看板错误跳转高亮具体条目；Codex 配置入口统一迁移到侧边栏 **AI / LLM -> 配置 Codex** 大弹窗，可编辑部署级 Web Codex home 下的 `config.toml`、该 home 下的 `auth.json` 登录状态，以及当前 profile 的 `codex.yaml` 非密钥偏好。
 
 ### 6.6 P4 当前落地状态
 

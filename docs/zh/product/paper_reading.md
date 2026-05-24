@@ -1408,9 +1408,9 @@ Codex 不用于每次小段翻译。Codex 用于更强的搜索和长任务：
 - Code Link：如果论文关联 GitHub repo，分析论文方法与代码实现对应关系。
 - Next Reading Plan：根据已读论文和 gap 推荐下一批搜索 query。
 
-Codex 使用当前 profile 专属 Web Codex：
+Codex 默认使用部署级 / 终端同款 Web Codex：
 
-- 使用当前 profile 的 `CODEX_HOME`。
+- 使用 service-level `CODEX_HOME`（本地通常是 `~/.codex`，云上可用 `NBLANE_CODEX_HOME` 指向持久化目录）。
 - 只读 `codex exec`。
 - 不给 Codex 访问 PDF asset root 全目录。
 - Paper Search 场景只传 search context bundle：

@@ -6,14 +6,20 @@ Run with:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
+import os
 from pathlib import Path
 import re
+import time
+from urllib.parse import quote
+import urllib.request
 
 import yaml
 import streamlit as st
 
 from nblane.core import git_backup
+from nblane.core import codex_adapter
 from nblane.core.home_dashboard import (
     dashboard_payload as _dashboard_payload,
     dashboard_health_summary as _dashboard_health_summary,
@@ -24,6 +30,11 @@ from nblane.core.home_dashboard import (
 )
 from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
 from nblane.core import llm as llm_client
+from nblane.core.web_preferences import (
+    AI_ACTION_DEFAULT_BACKENDS,
+    load_web_preferences,
+    update_web_preferences,
+)
 from nblane.core.goals import (
     GOAL_STATUSES,
     GOAL_UI_VISIBILITIES,
@@ -92,6 +103,36 @@ from nblane.web_shared import (
 from nblane.web_auth import require_login
 
 ui: dict[str, str] = {}
+
+_DASHBOARD_AI_ACTIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "dashboard.goal_skill_match",
+        "dashboard_ai_action_goal_skill_match",
+        "dashboard_ai_action_goal_skill_match_help",
+    ),
+    (
+        "dashboard.graph_insights",
+        "dashboard_ai_action_graph_insights",
+        "dashboard_ai_action_graph_insights_help",
+    ),
+)
+_DASHBOARD_MODEL_DEFAULT = "__default__"
+_DASHBOARD_MODEL_CUSTOM = "__custom__"
+_DASHBOARD_BACKEND_DEFAULT = "__default__"
+_DASHBOARD_LLM_MODEL_SUGGESTIONS = (
+    "qwen3.6-plus",
+    "qwen-plus",
+    "qwen-max",
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "gpt-4o",
+    "gpt-4o-mini",
+)
+_DASHBOARD_CODEX_MODEL_SUGGESTIONS = (
+    "gpt-5.5",
+    "gpt-5.1-codex",
+    "gpt-5-codex",
+)
 
 
 def _sync_home_ui() -> None:
@@ -345,13 +386,552 @@ def dashboard_payload(profile: str) -> dict:
     ai_payload = {
         "configured": llm_client.is_configured(),
         "label": llm_client.model_label() if llm_client.is_configured() else "",
+        "actions": _dashboard_ai_action_payload(profile),
     }
-    return _dashboard_payload(
+    payload = _dashboard_payload(
         profile,
         ui=ui,
         ai=ai_payload,
         skill_alignment_candidates=_goal_skill_candidates_for_home(profile),
     )
+    canvas_base = _dashboard_canvas_base()
+    canvas_ok, _canvas_message = _dashboard_canvas_status(canvas_base, profile)
+    if canvas_base and canvas_ok is not False:
+        encoded_profile = quote(profile, safe="")
+        payload["canvas_embed"] = {
+            "url": f"{canvas_base}/dashboard?profile={encoded_profile}&embed=1&view=focus",
+            "standalone_url": f"{canvas_base}/dashboard?profile={encoded_profile}",
+        }
+    return payload
+
+
+def _dashboard_canvas_base() -> str:
+    """Return the 8502 Dashboard Canvas base URL used for embedded graph mode."""
+    raw = (
+        os.getenv("NBLANE_DASHBOARD_CANVAS_BASE", "").strip()
+        or os.getenv("NBLANE_READER_API_BASE", "").strip()
+        or "http://127.0.0.1:8502"
+    )
+    if raw.lower() in {"0", "false", "off", "none"}:
+        return ""
+    return raw.rstrip("/")
+
+
+def _dashboard_canvas_url(canvas_base: str, profile: str, *, embed: bool = False) -> str:
+    """Return the 8502 Dashboard Canvas URL for one profile."""
+    encoded_profile = quote(profile, safe="")
+    suffix = f"/dashboard?profile={encoded_profile}"
+    if embed:
+        suffix += "&embed=1&view=focus"
+    return f"{canvas_base.rstrip('/')}{suffix}"
+
+
+def _dashboard_canvas_status(
+    canvas_base: str,
+    profile: str,
+) -> tuple[bool | None, str]:
+    """Check whether the browser-facing 8502 Dashboard Canvas is reachable."""
+    if not canvas_base:
+        return None, ""
+    canvas_url = _dashboard_canvas_url(canvas_base, profile, embed=True)
+    try:
+        timeout = max(0.1, float(os.getenv("NBLANE_DASHBOARD_CANVAS_HEALTH_TIMEOUT", "2.0")))
+    except ValueError:
+        timeout = 2.0
+    cache_key = f"_dashboard_canvas_status:{canvas_url}"
+    now = time.time()
+    cached = st.session_state.get(cache_key)
+    if isinstance(cached, dict) and now - float(cached.get("checked_at", 0)) < 15:
+        return bool(cached.get("ok")), str(cached.get("message") or "")
+    try:
+        request = urllib.request.Request(
+            canvas_url,
+            method="GET",
+            headers={"User-Agent": "nblane-dashboard-canvas-check/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            ok = 200 <= int(getattr(response, "status", 200)) < 400
+            message = "" if ok else f"HTTP {getattr(response, 'status', '')}".strip()
+    except Exception as exc:
+        ok = False
+        message = str(exc)
+    st.session_state[cache_key] = {"checked_at": now, "ok": ok, "message": message}
+    return ok, message
+
+
+def _dashboard_ai_action_prefs(profile: str) -> dict[str, dict[str, str]]:
+    """Return Dashboard action AI preferences for one profile."""
+    prefs = load_web_preferences(profile)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    out: dict[str, dict[str, str]] = {}
+    for action_name, _label_key, _help_key in _DASHBOARD_AI_ACTIONS:
+        action = actions.get(action_name) if isinstance(actions.get(action_name), dict) else {}
+        out[action_name] = {
+            "backend": str(action.get("backend") or "").strip(),
+            "llm_model": str(action.get("llm_model") or "").strip(),
+            "codex_model": str(action.get("codex_model") or "").strip(),
+        }
+    return out
+
+
+def _dashboard_default_backend(action_name: str) -> str:
+    backend = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+    return backend if backend in {"llm", "codex"} else "llm"
+
+
+def _dashboard_backend_name(backend: str) -> str:
+    return "Codex" if backend == "codex" else "LLM"
+
+
+def _dashboard_effective_backend(action_name: str, config: dict[str, str]) -> str:
+    configured = str(config.get("backend") or "").strip()
+    return configured if configured in {"llm", "codex"} else _dashboard_default_backend(action_name)
+
+
+def _dashboard_effective_model(
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> str:
+    backend = _dashboard_effective_backend(action_name, config)
+    if backend == "codex":
+        return str(config.get("codex_model") or codex_default or "").strip()
+    return str(config.get("llm_model") or llm_default or "").strip()
+
+
+def _dashboard_effective_ai_config(profile: str, action_name: str) -> dict[str, str]:
+    """Return effective backend/model for one Dashboard AI action."""
+    prefs = _dashboard_ai_action_prefs(profile).get(action_name, {})
+    llm_default = str(llm_client.current_config(mask_key=True).get("model") or "").strip()
+    codex_default = str(codex_adapter.current_config(profile=profile).model or "").strip()
+    backend = _dashboard_effective_backend(action_name, prefs)
+    model = _dashboard_effective_model(
+        action_name,
+        prefs,
+        llm_default=llm_default,
+        codex_default=codex_default,
+    )
+    return {"backend": backend, "model": model}
+
+
+def _dashboard_ai_action_payload(profile: str) -> dict[str, dict[str, str]]:
+    """Return effective Dashboard AI config for React display/debugging."""
+    return {
+        action_name: {
+            **_dashboard_ai_action_prefs(profile).get(action_name, {}),
+            **{
+                f"effective_{key}": value
+                for key, value in _dashboard_effective_ai_config(profile, action_name).items()
+            },
+        }
+        for action_name, _label_key, _help_key in _DASHBOARD_AI_ACTIONS
+    }
+
+
+def _dashboard_ai_backend_label(value: str) -> str:
+    if value == "codex":
+        return _dashboard_backend_name(value)
+    if value == "llm":
+        return _dashboard_backend_name(value)
+    return ui["dashboard_ai_use_default"]
+
+
+def _dashboard_model_picker(
+    *,
+    label: str,
+    profile: str,
+    pref_name: str,
+    current: str,
+    default_model: str,
+    suggestions: tuple[str, ...],
+) -> str:
+    model_suggestions: list[str] = []
+    for value in (default_model, *suggestions):
+        clean = str(value or "").strip()
+        if clean and clean not in model_suggestions:
+            model_suggestions.append(clean)
+    current = str(current or "").strip()
+    options = [_DASHBOARD_MODEL_DEFAULT, *model_suggestions, _DASHBOARD_MODEL_CUSTOM]
+    if current and current not in model_suggestions:
+        initial = _DASHBOARD_MODEL_CUSTOM
+    elif current:
+        initial = current
+    else:
+        initial = _DASHBOARD_MODEL_DEFAULT
+    choice = st.selectbox(
+        label,
+        options,
+        index=options.index(initial),
+        format_func=lambda value: (
+            ui["dashboard_ai_use_default"]
+            if value == _DASHBOARD_MODEL_DEFAULT
+            else ui["dashboard_ai_custom_model"]
+            if value == _DASHBOARD_MODEL_CUSTOM
+            else value
+        ),
+        key=f"dashboard_ai:{profile}:{pref_name}:choice",
+    )
+    if choice == _DASHBOARD_MODEL_DEFAULT:
+        return ""
+    if choice == _DASHBOARD_MODEL_CUSTOM:
+        return st.text_input(
+            ui["dashboard_ai_custom_model"],
+            value=current if current and current not in model_suggestions else "",
+            key=f"dashboard_ai:{profile}:{pref_name}:custom",
+        ).strip()
+    return str(choice).strip()
+
+
+def _dashboard_backend_picker(
+    *,
+    label: str,
+    profile: str,
+    pref_name: str,
+    current: str,
+    default_backend: str,
+) -> str:
+    options = [_DASHBOARD_BACKEND_DEFAULT, "llm", "codex"]
+    current = str(current or "").strip()
+    initial = current if current in {"llm", "codex"} else _DASHBOARD_BACKEND_DEFAULT
+    choice = st.selectbox(
+        label,
+        options,
+        index=options.index(initial),
+        format_func=lambda value: (
+            f"{ui['dashboard_ai_use_default']} ({_dashboard_backend_name(default_backend)})"
+            if value == _DASHBOARD_BACKEND_DEFAULT
+            else _dashboard_backend_name(value)
+        ),
+        key=f"dashboard_ai:{profile}:{pref_name}:choice",
+    )
+    return "" if choice == _DASHBOARD_BACKEND_DEFAULT else str(choice).strip()
+
+
+def _dashboard_model_test_key(profile: str, backend: str, model: str, *, action_name: str) -> str:
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(profile or "profile")).strip("_")
+    safe_model = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(model or "default")).strip("_")
+    safe_action = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(action_name or "global")).strip("_")
+    return f"dashboard_ai:{safe_profile}:test:{safe_action or 'global'}:{backend}:{safe_model or 'default'}"
+
+
+def _dashboard_record_model_test(
+    profile: str,
+    backend: str,
+    model: str,
+    ok: bool,
+    latency: float,
+    message: str,
+    *,
+    action_name: str,
+) -> None:
+    st.session_state[_dashboard_model_test_key(profile, backend, model, action_name=action_name)] = {
+        "ok": bool(ok),
+        "latency": float(latency),
+        "message": str(message or "").strip()[:240],
+    }
+
+
+def _dashboard_model_test_summary(profile: str, backend: str, model: str, *, action_name: str) -> str:
+    result = st.session_state.get(
+        _dashboard_model_test_key(profile, backend, model, action_name=action_name)
+    )
+    if not isinstance(result, dict):
+        return ""
+    status = ui["dashboard_ai_available"] if result.get("ok") else ui["dashboard_ai_unavailable"]
+    latency = float(result.get("latency") or 0.0)
+    return f"{status}, {latency:.1f}s"
+
+
+def _dashboard_effective_action_caption(
+    profile: str,
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> str:
+    backend = _dashboard_effective_backend(action_name, config)
+    model = _dashboard_effective_model(
+        action_name,
+        config,
+        llm_default=llm_default,
+        codex_default=codex_default,
+    )
+    model_label = model or (
+        ui["dashboard_ai_codex_default"] if backend == "codex" else ui["dashboard_ai_missing"]
+    )
+    bits = [
+        ui["dashboard_ai_effective_backend"].format(backend=_dashboard_backend_name(backend)),
+        ui["dashboard_ai_effective_model"].format(model=model_label),
+    ]
+    test = _dashboard_model_test_summary(profile, backend, model, action_name=action_name)
+    if test:
+        bits.append(test)
+    return " · ".join(bits)
+
+
+def _dashboard_run_llm_availability_test(
+    profile: str,
+    model: str,
+    *,
+    action_name: str,
+) -> None:
+    started = time.perf_counter()
+    if not llm_client.is_configured():
+        message = ui["dashboard_ai_llm_unconfigured"]
+        _dashboard_record_model_test(
+            profile,
+            "llm",
+            model,
+            False,
+            time.perf_counter() - started,
+            message,
+            action_name=action_name,
+        )
+        st.warning(message)
+        return
+    reply = llm_client.chat(
+        "Return exactly OK. No prose.",
+        "OK",
+        temperature=0,
+        model=str(model or "").strip() or None,
+    )
+    latency = time.perf_counter() - started
+    if reply.startswith("LLM error:") or reply.startswith("AI features not configured"):
+        _dashboard_record_model_test(profile, "llm", model, False, latency, reply, action_name=action_name)
+        st.warning(reply)
+    else:
+        _dashboard_record_model_test(profile, "llm", model, True, latency, reply or "OK", action_name=action_name)
+        st.success(ui["dashboard_ai_model_available"].format(seconds=f"{latency:.1f}"))
+
+
+def _dashboard_run_codex_availability_test(
+    profile: str,
+    model: str,
+    *,
+    action_name: str,
+) -> None:
+    started = time.perf_counter()
+    codex_config = codex_adapter.current_config(profile=profile)
+    if str(model or "").strip():
+        codex_config = replace(codex_config, model=str(model or "").strip())
+    result = codex_adapter.run_readonly_codex_prompt(
+        profile,
+        "Return exactly OK. Do not edit files.",
+        config=codex_config,
+        timeout_seconds=min(float(codex_config.timeout_seconds or 30.0), 30.0),
+    )
+    latency = time.perf_counter() - started
+    if result.ok:
+        _dashboard_record_model_test(profile, "codex", model, True, latency, result.output or "OK", action_name=action_name)
+        st.success(ui["dashboard_ai_model_available"].format(seconds=f"{latency:.1f}"))
+    else:
+        message = codex_adapter.readable_codex_error(
+            result.error,
+            result.stderr,
+            result.output,
+            result.stdout,
+        )
+        _dashboard_record_model_test(profile, "codex", model, False, latency, message, action_name=action_name)
+        st.warning(message)
+
+
+def _dashboard_run_action_availability_test(
+    profile: str,
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> None:
+    backend = _dashboard_effective_backend(action_name, config)
+    model = _dashboard_effective_model(
+        action_name,
+        config,
+        llm_default=llm_default,
+        codex_default=codex_default,
+    )
+    if backend == "codex":
+        _dashboard_run_codex_availability_test(profile, model, action_name=action_name)
+    else:
+        _dashboard_run_llm_availability_test(profile, model, action_name=action_name)
+
+
+def _render_dashboard_action_config_row(
+    profile: str,
+    action_name: str,
+    label: str,
+    help_text: str,
+    current: dict[str, str],
+    *,
+    llm_default: str,
+    codex_default: str,
+) -> dict[str, str]:
+    default_backend = _dashboard_default_backend(action_name)
+    st.markdown(f"**{label}**")
+    st.caption(help_text)
+    cols = st.columns([1.05, 1.25, 1.25, 0.85], gap="small")
+    with cols[0]:
+        backend = _dashboard_backend_picker(
+            label=ui["dashboard_ai_backend"],
+            profile=profile,
+            pref_name=f"{action_name}:backend",
+            current=current.get("backend", ""),
+            default_backend=default_backend,
+        )
+    with cols[1]:
+        llm_model = _dashboard_model_picker(
+            label=ui["dashboard_ai_llm_model"],
+            profile=profile,
+            pref_name=f"{action_name}:llm_model",
+            current=current.get("llm_model", ""),
+            default_model=llm_default,
+            suggestions=_DASHBOARD_LLM_MODEL_SUGGESTIONS,
+        )
+    with cols[2]:
+        codex_model = _dashboard_model_picker(
+            label=ui["dashboard_ai_codex_model"],
+            profile=profile,
+            pref_name=f"{action_name}:codex_model",
+            current=current.get("codex_model", ""),
+            default_model=codex_default,
+            suggestions=_DASHBOARD_CODEX_MODEL_SUGGESTIONS,
+        )
+    with cols[3]:
+        st.caption(ui["dashboard_ai_test"])
+        test_clicked = st.form_submit_button(
+            ui["dashboard_ai_test_model"],
+            key=f"dashboard_ai:{profile}:{action_name}:test_model",
+            width="stretch",
+        )
+    next_config = {
+        "backend": backend,
+        "llm_model": llm_model,
+        "codex_model": codex_model,
+    }
+    st.caption(
+        _dashboard_effective_action_caption(
+            profile,
+            action_name,
+            next_config,
+            llm_default=llm_default,
+            codex_default=codex_default,
+        )
+    )
+    if test_clicked:
+        _dashboard_run_action_availability_test(
+            profile,
+            action_name,
+            next_config,
+            llm_default=llm_default,
+            codex_default=codex_default,
+        )
+    return next_config
+
+
+def _render_dashboard_ai_settings(profile: str) -> None:
+    """Render profile-scoped Dashboard AI preferences."""
+    prefs = _dashboard_ai_action_prefs(profile)
+    llm_cfg = llm_client.current_config(mask_key=True)
+    llm_default = str(llm_cfg.get("model") or "").strip()
+    codex_cfg = codex_adapter.current_config(profile=profile)
+    codex_default = str(codex_cfg.model or "").strip()
+    codex_status = codex_adapter.codex_status(
+        replace(
+            codex_cfg,
+            timeout_seconds=min(float(codex_cfg.timeout_seconds or 8.0), 8.0),
+        )
+    )
+    next_actions: dict[str, dict[str, str]] = {}
+
+    st.caption(ui["dashboard_ai_settings_caption"])
+    runtime_cols = st.columns(2)
+    with runtime_cols[0]:
+        st.caption(
+            ui["dashboard_ai_llm_status"].format(
+                status=ui["dashboard_ai_configured"]
+                if llm_cfg.get("configured")
+                else ui["dashboard_ai_missing_key"],
+                model=llm_default or ui["dashboard_ai_missing"],
+            )
+        )
+    with runtime_cols[1]:
+        codex_bits = [
+            ui["dashboard_ai_installed"] if codex_status.installed else ui["dashboard_ai_missing"],
+            ui["dashboard_ai_logged_in"] if codex_status.logged_in else ui["dashboard_ai_login_unknown"],
+            codex_default or ui["dashboard_ai_codex_default"],
+        ]
+        st.caption(ui["dashboard_ai_codex_status"].format(status=" · ".join(codex_bits)))
+        if codex_status.error:
+            st.caption(codex_status.error)
+
+    with st.form(f"dashboard_ai_settings_{profile}", border=False):
+        for action_name, label_key, help_key in _DASHBOARD_AI_ACTIONS:
+            current = prefs.get(action_name, {})
+            next_actions[action_name] = _render_dashboard_action_config_row(
+                profile,
+                action_name,
+                ui[label_key],
+                ui[help_key],
+                current,
+                llm_default=llm_default,
+                codex_default=codex_default,
+            )
+
+        if st.form_submit_button(ui["dashboard_ai_save"], type="primary", width="stretch"):
+            update_web_preferences(profile, {"ai": {"actions": next_actions}})
+            clear_web_cache()
+            st.success(ui["dashboard_ai_saved"])
+            st.rerun()
+
+
+def _test_dashboard_ai_action(profile: str, action_name: str) -> None:
+    """Run a tiny availability test for one Dashboard AI action."""
+    config = _dashboard_effective_ai_config(profile, action_name)
+    backend = config["backend"]
+    model = config["model"]
+    started = time.perf_counter()
+    if backend == "codex":
+        codex_config = codex_adapter.current_config(profile=profile)
+        if model:
+            codex_config = replace(codex_config, model=model)
+        result = codex_adapter.run_readonly_codex_prompt(
+            profile,
+            "Return exactly OK. Do not edit files.",
+            config=codex_config,
+            timeout_seconds=min(float(codex_config.timeout_seconds or 30.0), 30.0),
+        )
+        latency = time.perf_counter() - started
+        if result.ok:
+            st.success(ui["dashboard_ai_test_ok"].format(seconds=f"{latency:.1f}"))
+        else:
+            st.warning(
+                codex_adapter.readable_codex_error(
+                    result.error,
+                    result.stderr,
+                    result.output,
+                    result.stdout,
+                )
+            )
+        return
+
+    if not llm_client.is_configured():
+        render_llm_unavailable(ui)
+        return
+    reply = llm_client.chat(
+        "Return exactly OK. No prose.",
+        "OK",
+        temperature=0,
+        model=model or None,
+    )
+    latency = time.perf_counter() - started
+    if reply.startswith("LLM error:") or reply.startswith("AI features not configured"):
+        st.warning(reply)
+    else:
+        st.success(ui["dashboard_ai_test_ok"].format(seconds=f"{latency:.1f}"))
 
 
 def _render_goal_preview(goal: Goal) -> None:
@@ -875,7 +1455,8 @@ def _run_goal_skill_rule_match(profile: str, payload: dict) -> None:
 
 def _run_goal_skill_ai_match(profile: str, payload: dict) -> None:
     """Generate AI candidates and merge with pending rule candidates."""
-    if not llm_client.is_configured():
+    ai_config = _dashboard_effective_ai_config(profile, "dashboard.goal_skill_match")
+    if ai_config["backend"] != "codex" and not llm_client.is_configured():
         render_llm_unavailable(ui)
         return
     _book, goal = _goal_for_alignment_event(profile, payload)
@@ -892,6 +1473,8 @@ def _run_goal_skill_ai_match(profile: str, payload: dict) -> None:
         profile,
         goal,
         _north_star_context_for_alignment(profile),
+        backend=ai_config["backend"],
+        model=ai_config["model"],
     )
     merged = merge_goal_skill_candidates(rule_candidates, ai_candidates)
     _set_goal_skill_candidates(profile, goal.id, merged)
@@ -1796,13 +2379,64 @@ def _profile_context_open_requested(profile: str) -> bool:
     return bool(st.session_state.get(f"_open_profile_context_{profile}", False))
 
 
+def _render_dashboard_help() -> None:
+    """Render the Dashboard usage guide in a compact top-right surface."""
+    body = ui["dashboard_help_body"]
+    if hasattr(st, "popover"):
+        with st.popover(ui["dashboard_help_title"], width="stretch"):
+            st.markdown(body)
+            st.markdown(f"[{ui['dashboard_help_full_doc']}](docs/zh/guides/dashboard.md)")
+        return
+    with st.expander(ui["dashboard_help_title"], expanded=False):
+        st.markdown(body)
+
+
+def _render_dashboard_top_actions(profile: str) -> None:
+    """Render Dashboard help and AI settings controls."""
+    help_col, ai_col = st.columns(2, gap="small", vertical_alignment="top")
+    with help_col:
+        _render_dashboard_help()
+    with ai_col:
+        if hasattr(st, "popover"):
+            with st.popover(ui["dashboard_ai_settings_title"], width="stretch"):
+                _render_dashboard_ai_settings(profile)
+        else:
+            with st.expander(ui["dashboard_ai_settings_title"], expanded=False):
+                _render_dashboard_ai_settings(profile)
+    canvas_base = _dashboard_canvas_base()
+    if canvas_base:
+        canvas_ok, canvas_message = _dashboard_canvas_status(canvas_base, profile)
+        canvas_url = _dashboard_canvas_url(canvas_base, profile)
+        if canvas_ok is False:
+            st.button(
+                ui["dashboard_open_8502_canvas"],
+                width="stretch",
+                disabled=True,
+                help=(
+                    ui["dashboard_canvas_sidecar_link_disabled_help"]
+                    + (f" {canvas_message}" if canvas_message else "")
+                ),
+            )
+            st.caption(ui["dashboard_canvas_sidecar_unavailable"].format(base=canvas_base))
+        else:
+            st.link_button(
+                ui["dashboard_open_8502_canvas"],
+                canvas_url,
+                width="stretch",
+            )
+
+
 def _render_home_page() -> None:
     """Render the Daily Dashboard page."""
     _prepare_home_state()
 
-    st.title(ui["app_page_title"])
-    st.caption(ui["app_caption"].format(profile=selected))
-    st.caption(ui["page_context_line"])
+    title_col, action_col = st.columns([1, 0.34], vertical_alignment="top")
+    with title_col:
+        st.title(ui["app_page_title"])
+        st.caption(ui["app_caption"].format(profile=selected))
+        st.caption(ui["page_context_line"])
+    with action_col:
+        _render_dashboard_top_actions(selected)
 
     profile_context_requested = _profile_context_open_requested(selected)
     if profile_context_requested:
@@ -1820,10 +2454,6 @@ def _render_home_page() -> None:
     elif home_dashboard_event.get("action"):
         if _handle_home_dashboard_event(home_dashboard_event, selected):
             return
-
-    with st.expander(ui["home_nav_expander"], expanded=False):
-        st.caption(ui["home_nav_compact"])
-        st.markdown(ui["home_nav_detail"])
 
     _render_resume_ingest(selected)
 

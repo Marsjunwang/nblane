@@ -636,6 +636,11 @@ def _codex_profile_config_editor_text(profile: str) -> str:
     return codex_adapter.profile_config_template(profile)
 
 
+def _codex_effective_home(profile: str) -> Path:
+    cfg = codex_adapter.current_config(profile=profile or None)
+    return Path(str(cfg.codex_home or codex_adapter.codex_home())).expanduser()
+
+
 def _ensure_codex_cli_config_editor_state(profile: str) -> None:
     path = codex_adapter.codex_cli_config_path(profile=profile or None)
     text_key = _codex_cli_config_editor_key(
@@ -765,8 +770,8 @@ def _render_codex_sidebar_entry(profile: str, u: dict[str, str]) -> None:
         else u.get("codex_not_logged_in", "Codex login is not ready.")
     )
     st.caption(
-        u.get("codex_web_home", "Web Codex home: `{path}`").format(
-            path=codex_adapter.profile_codex_home(profile)
+        u.get("codex_web_home", "Codex home: `{path}`").format(
+            path=_codex_effective_home(profile)
         )
     )
     st.caption(
@@ -847,8 +852,8 @@ def _render_codex_status_tab(profile: str, u: dict[str, str]) -> None:
         .format(profile=profile, path=codex_adapter.profile_config_path(profile))
     )
     st.caption(
-        u.get("codex_web_home", "Web Codex home: `{path}`").format(
-            path=codex_adapter.profile_codex_home(profile)
+        u.get("codex_web_home", "Codex home: `{path}`").format(
+            path=_codex_effective_home(profile)
         )
     )
     st.caption(
@@ -864,9 +869,9 @@ def _render_codex_status_tab(profile: str, u: dict[str, str]) -> None:
     st.caption(
         u.get(
             "codex_terminal_hint",
-            "Terminal `codex` still uses default `~/.codex`; to reuse this profile, "
-            "run with `CODEX_HOME={path}`.",
-        ).format(path=codex_adapter.profile_codex_home(profile))
+            "Web Codex uses this service-level CODEX_HOME. Profile config below "
+            "only stores non-secret preferences such as model, cloud env, and timeout.",
+        ).format(path=_codex_effective_home(profile))
     )
     if status.installed:
         st.success(
@@ -906,8 +911,8 @@ def _render_codex_api_key_tab(profile: str, u: dict[str, str]) -> None:
     st.caption(
         u.get(
             "codex_profile_isolated_note",
-            "This logs in only the current profile's Web Codex home and does not "
-            "modify your terminal default ~/.codex.",
+            "Saving here logs in the shared service-level Codex home used by all "
+            "Codex actions in this deployment.",
         )
     )
     key = _codex_api_key_input_key(profile)
@@ -959,7 +964,8 @@ def _render_codex_cli_config_tab(profile: str, u: dict[str, str]) -> None:
     st.caption(
         u.get(
             "codex_cli_profile_scope_note",
-            "This config.toml belongs to the current profile's Web Codex home.",
+            "This config.toml belongs to the shared service-level Codex home. "
+            "Per-profile preferences live in codex.yaml.",
         )
     )
     if not path.exists():

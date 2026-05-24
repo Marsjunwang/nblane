@@ -5,72 +5,32 @@ from __future__ import annotations
 from typing import Any
 
 from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
+from nblane.core.growth_graph_contract import (
+    growth_graph_edge_types,
+    growth_graph_layers,
+    growth_graph_node_types,
+    growth_graph_payload as growth_graph_contract_payload,
+)
 from nblane.core.goals import Goal, GoalSkillLink, goal_for_ui
 
-WORKSPACE_GRAPH_LAYERS: tuple[str, ...] = (
-    "direction",
-    "objective",
-    "work_context",
-    "activity",
-    "source",
-    "evidence",
-    "claim",
-    "capability",
-    "output",
-    "feedback",
-    "governance",
-)
-
-WORKSPACE_GRAPH_NODE_TYPES: tuple[str, ...] = (
-    "north_star",
-    "goal",
-    "project_case",
-    "task",
-    "daily_work",
-    "research",
-    "agent_run",
-    "source",
-    "evidence_candidate",
-    "atomic_evidence",
-    "composite_evidence",
-    "claim",
-    "skill",
-    "gap",
-    "next_action",
-    "output",
-    "feedback",
-    "capacity",
-    "health",
-)
-
-WORKSPACE_GRAPH_EDGE_TYPES: tuple[str, ...] = (
-    "alignment",
-    "contains",
-    "generated_by",
-    "source_to_candidate",
-    "review",
-    "derives",
-    "supports",
-    "drives",
-    "produces",
-    "feedback",
-    "watches",
-)
+WORKSPACE_GRAPH_LAYERS: tuple[str, ...] = growth_graph_layers()
+WORKSPACE_GRAPH_NODE_TYPES: tuple[str, ...] = growth_graph_node_types()
+WORKSPACE_GRAPH_EDGE_TYPES: tuple[str, ...] = growth_graph_edge_types()
 
 
 def workspace_graph_layers() -> tuple[str, ...]:
     """Return the stable Growth Graph layer order."""
-    return WORKSPACE_GRAPH_LAYERS
+    return growth_graph_layers()
 
 
 def workspace_graph_node_types() -> tuple[str, ...]:
     """Return supported workspace graph node types."""
-    return WORKSPACE_GRAPH_NODE_TYPES
+    return growth_graph_node_types()
 
 
 def workspace_graph_edge_types() -> tuple[str, ...]:
     """Return supported workspace graph edge types."""
-    return WORKSPACE_GRAPH_EDGE_TYPES
+    return growth_graph_edge_types()
 
 
 def _ui_text(ui: dict[str, str] | None, key: str, fallback: str = "") -> str:
@@ -94,9 +54,13 @@ def _node(
     locked: bool = False,
     suggested: bool = False,
     is_primary: bool = False,
+    summary: str = "",
+    description: str = "",
+    primary_action: dict[str, object] | None = None,
+    secondary_actions: list[dict[str, object]] | None = None,
     **extra: object,
 ) -> dict[str, object]:
-    return {
+    node = {
         "id": id,
         "type": type,
         "layer": layer,
@@ -110,8 +74,17 @@ def _node(
         "locked": locked,
         "suggested": suggested,
         "is_primary": is_primary,
+        "summary": summary,
+        "description": description,
+        "primary_action": primary_action or {},
+        "secondary_actions": list(secondary_actions or []),
         **extra,
     }
+    if not node["primary_action"]:
+        action = _default_node_action(node)
+        if action:
+            node["primary_action"] = action
+    return node
 
 
 def _edge(
@@ -132,6 +105,68 @@ def _edge(
         "suggested": suggested,
         "placeholder": placeholder,
         **extra,
+    }
+
+
+def _navigate_action(
+    *,
+    id: str,
+    label: str,
+    path: str,
+    kind: str = "navigate",
+) -> dict[str, object]:
+    return {
+        "id": id,
+        "label": label,
+        "event": {
+            "action": "navigate" if kind == "navigate" else kind,
+            "payload": {"path": path},
+        },
+    }
+
+
+def _default_node_action(node: dict[str, object]) -> dict[str, object]:
+    owner_path = str(node.get("owner_path") or "")
+    if owner_path == "profile_context":
+        return {
+            "id": "open_profile_context",
+            "label": "Edit Profile Context",
+            "event": {
+                "action": "set_north_star_display_open_profile_context",
+                "payload": {},
+            },
+        }
+    if owner_path and node.get("implemented") is not False:
+        return _navigate_action(
+            id=f"open:{owner_path}",
+            label="Open",
+            path=owner_path,
+        )
+    return {}
+
+
+def _graph_action(
+    *,
+    id: str,
+    node_id: str,
+    label: str,
+    path: str = "",
+    action: str = "navigate",
+    payload: dict[str, object] | None = None,
+    severity: str = "",
+) -> dict[str, object]:
+    event_payload = dict(payload or {})
+    if path and "path" not in event_payload:
+        event_payload["path"] = path
+    return {
+        "id": id,
+        "node_id": node_id,
+        "label": label,
+        "severity": severity,
+        "event": {
+            "action": action,
+            "payload": event_payload,
+        },
     }
 
 
@@ -186,6 +221,62 @@ def _suggested_skill_nodes(skills: dict[str, Any]) -> list[dict[str, object]]:
             }
         )
     return out
+
+
+def _clean_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = [
+            item
+            for chunk in value.splitlines()
+            for item in chunk.split(",")
+        ]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def _clean_item_rows(value: object, *, limit: int = 120) -> list[dict[str, Any]]:
+    rows = value if isinstance(value, list) else []
+    out: list[dict[str, Any]] = []
+    for item in rows:
+        if isinstance(item, dict):
+            out.append(item)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _short_text(value: object, fallback: str = "", *, max_len: int = 92) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        text = fallback
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 1].rstrip()}..."
+
+
+def _private_label(
+    ui: dict[str, str] | None,
+    key: str,
+    fallback: str,
+    record_id: str = "",
+) -> str:
+    base = _ui_text(ui, key, fallback)
+    if not record_id:
+        return base
+    tail = record_id.rsplit(":", 1)[-1]
+    return f"{base} · {tail}" if tail else base
 
 
 def _dedupe_nodes(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -245,12 +336,16 @@ def workspace_graph_payload(
     health: dict[str, Any],
     sources: dict[str, Any] | None = None,
     projects: dict[str, Any] | None = None,
+    claims: dict[str, Any] | None = None,
     ui: dict[str, str] | None = None,
+    all_goals: list[Goal] | None = None,
     view: str = "context",
 ) -> dict[str, Any]:
     """Build a privacy-safe Growth Graph context payload."""
     nodes: list[dict[str, object]] = []
     edges: list[dict[str, object]] = []
+    graph_actions: list[dict[str, object]] = []
+    attention_nodes: list[dict[str, object]] = []
 
     if north_star.get("locked"):
         label = _ui_text(ui, "north_star_private_display", "Private North Star")
@@ -284,7 +379,7 @@ def workspace_graph_payload(
     )
 
     goal_node_ids: dict[str, str] = {}
-    shown_goals = [goal for goal in active_goals if goal.id]
+    shown_goals = [goal for goal in (all_goals or active_goals) if goal.id]
     if not shown_goals:
         nodes.append(
             _node(
@@ -512,6 +607,22 @@ def workspace_graph_payload(
             implemented=source_implemented,
             placeholder=not source_implemented,
             suggested=not source_implemented,
+            primary_action=_navigate_action(
+                id="review_source_inbox" if source_active else "capture_source_inbox",
+                label=(
+                    _ui_text(ui, "dashboard_action_review_source", "Review source")
+                    if source_active
+                    else _ui_text(ui, "dashboard_action_capture_source", "Capture source")
+                ),
+                path="pages/7_Research.py",
+            ),
+            secondary_actions=[
+                _navigate_action(
+                    id="open_research",
+                    label=_ui_text(ui, "dashboard_open_research", "Open Research"),
+                    path="pages/7_Research.py",
+                )
+            ],
         )
     )
     edges.append(_edge(primary_node_id, "source:inbox", "contains"))
@@ -521,6 +632,44 @@ def workspace_graph_payload(
         edges.append(
             _edge(activity_id, "source:inbox", "generated_by", placeholder=True, suggested=True)
         )
+
+    source_node_by_ref: dict[str, str] = {}
+    source_items = _clean_item_rows(source_summary.get("items"), limit=120)
+    for source in source_items:
+        source_id = str(source.get("id") or "").strip()
+        if not source_id:
+            continue
+        node_id = source_id if source_id != "source:inbox" else f"source:item:{len(source_node_by_ref) + 1}"
+        source_node_by_ref[source_id] = node_id
+        private = str(source.get("visibility") or "private") == "private"
+        nodes.append(
+            _node(
+                id=node_id,
+                type="source",
+                layer="source",
+                label=(
+                    _private_label(ui, "dashboard_private_source", "Private source", source_id)
+                    if private
+                    else _short_text(source.get("title"), source_id)
+                ),
+                metric=str(source.get("kind") or source.get("origin") or ""),
+                record_id=source_id,
+                status=str(source.get("status") or ""),
+                locked=private,
+                owner_path="pages/7_Research.py",
+                summary="" if private else _short_text(source.get("summary"), max_len=180),
+                item_kind="source",
+            )
+        )
+        edges.append(_edge("source:inbox", node_id, "contains"))
+        for goal_ref in _clean_string_list(source.get("goal_refs")):
+            goal_node_id = goal_node_ids.get(goal_ref)
+            if goal_node_id:
+                edges.append(_edge(goal_node_id, node_id, "contains"))
+        for project_ref in _clean_string_list(source.get("project_refs")):
+            project_node_id = project_node_by_id.get(project_ref)
+            if project_node_id:
+                edges.append(_edge(project_node_id, node_id, "contains"))
 
     candidate_count = int(pending.get("done_uncrystallized_count") or 0)
     unlinked_count = int(pending.get("unlinked_count") or 0)
@@ -605,28 +754,148 @@ def workspace_graph_payload(
             if source_by_project.get(node_id):
                 edges.append(_edge(node_id, "source:inbox", "contains"))
 
+    evidence_node_by_ref: dict[str, str] = {}
+    evidence_items = _clean_item_rows(pending.get("evidence_rows"), limit=160)
+    for evidence in evidence_items:
+        evidence_id = str(evidence.get("id") or "").strip()
+        if not evidence_id:
+            continue
+        node_id = f"atomic_evidence:{evidence_id}"
+        evidence_node_by_ref[evidence_id] = node_id
+        private = str(evidence.get("public_readiness") or "private") == "private"
+        review_status = str(evidence.get("review_status") or "")
+        nodes.append(
+            _node(
+                id=node_id,
+                type="atomic_evidence",
+                layer="evidence",
+                label=(
+                    _private_label(ui, "dashboard_private_evidence", "Private evidence", evidence_id)
+                    if private
+                    else _short_text(evidence.get("title"), evidence_id)
+                ),
+                metric=str(evidence.get("strength") or evidence.get("type") or ""),
+                record_id=evidence_id,
+                status=review_status or str(evidence.get("confidence") or ""),
+                locked=private,
+                owner_path=EVIDENCE_REVIEW_PAGE,
+                summary="" if private else _short_text(evidence.get("summary"), max_len=220),
+                item_kind="evidence",
+            )
+        )
+        edges.append(_edge("atomic_evidence:pool", node_id, "contains"))
+        if review_status != "reviewed":
+            edges.append(_edge("evidence_candidate:pending", node_id, "review", suggested=True))
+        for source_ref in _clean_string_list(evidence.get("source_refs")):
+            source_node_id = source_node_by_ref.get(source_ref)
+            if source_node_id:
+                edges.append(_edge(source_node_id, node_id, "source_to_candidate"))
+        for project_ref in _clean_string_list(evidence.get("project_refs")):
+            project_node_id = project_node_by_id.get(project_ref)
+            if project_node_id:
+                edges.append(_edge(project_node_id, node_id, "supports"))
+
+    for source in source_items:
+        source_id = str(source.get("id") or "").strip()
+        source_node_id = source_node_by_ref.get(source_id)
+        if not source_node_id:
+            continue
+        for evidence_ref in _clean_string_list(source.get("evidence_refs")):
+            evidence_node_id = evidence_node_by_ref.get(evidence_ref)
+            if evidence_node_id:
+                edges.append(_edge(source_node_id, evidence_node_id, "source_to_candidate"))
+
+    claim_summary = claims or {}
+    accepted_claims = int(claim_summary.get("accepted_count") or 0)
+    draft_claims = int(claim_summary.get("draft_count") or 0)
+    needs_refresh_claims = int(claim_summary.get("needs_refresh_count") or 0)
+    claim_node_id = "claim:accepted" if accepted_claims or draft_claims else "claim:planned"
     nodes.append(
         _node(
-            id="claim:planned",
+            id=claim_node_id,
             type="claim",
             layer="claim",
             label=_ui_text(ui, "dashboard_node_claim", "Claims"),
-            metric=_ui_text(ui, "dashboard_placeholder_metric", "planned"),
-            status="planned",
-            implemented=False,
-            placeholder=True,
-            suggested=True,
+            metric=(
+                str(accepted_claims)
+                if accepted_claims or draft_claims
+                else _ui_text(ui, "dashboard_placeholder_metric", "planned")
+            ),
+            status=(
+                "risk"
+                if needs_refresh_claims
+                else "draft"
+                if draft_claims
+                else "accepted"
+                if accepted_claims
+                else "planned"
+            ),
+            owner_path=EVIDENCE_REVIEW_PAGE,
+            implemented=bool(accepted_claims or draft_claims),
+            placeholder=not bool(accepted_claims or draft_claims),
+            suggested=not bool(accepted_claims or draft_claims),
+            summary=_ui_text(
+                ui,
+                "dashboard_claim_summary",
+                "Claims translate reviewed evidence into skill and output assertions.",
+            ),
         )
     )
     edges.append(
         _edge(
             "composite_evidence:planned",
-            "claim:planned",
+            claim_node_id,
             "supports",
             placeholder=True,
             suggested=True,
         )
     )
+
+    claim_node_by_ref: dict[str, str] = {}
+    claim_items = _clean_item_rows(claim_summary.get("items"), limit=140)
+    for claim in claim_items:
+        claim_id = str(claim.get("id") or "").strip()
+        if not claim_id:
+            continue
+        node_id = f"claim:item:{claim_id}"
+        claim_node_by_ref[claim_id] = node_id
+        private = str(claim.get("public_readiness") or "private") == "private"
+        nodes.append(
+            _node(
+                id=node_id,
+                type="claim",
+                layer="claim",
+                label=(
+                    _private_label(ui, "dashboard_private_claim", "Private claim", claim_id)
+                    if private
+                    else _short_text(claim.get("text"), claim_id, max_len=82)
+                ),
+                metric=str(claim.get("type") or ""),
+                record_id=claim_id,
+                status=str(claim.get("refresh_status") or claim.get("status") or ""),
+                locked=private,
+                owner_path=EVIDENCE_REVIEW_PAGE,
+                summary="" if private else _short_text(claim.get("text"), max_len=220),
+                item_kind="claim",
+            )
+        )
+        edges.append(_edge(claim_node_id, node_id, "contains"))
+        for evidence_ref in _clean_string_list(claim.get("evidence_refs")):
+            evidence_node_id = evidence_node_by_ref.get(evidence_ref)
+            if evidence_node_id:
+                edges.append(_edge(evidence_node_id, node_id, "supports"))
+        for source_ref in _clean_string_list(claim.get("source_refs")):
+            source_node_id = source_node_by_ref.get(source_ref)
+            if source_node_id:
+                edges.append(_edge(source_node_id, node_id, "source_to_candidate"))
+        for project_ref in _clean_string_list(claim.get("project_refs")):
+            project_node_id = project_node_by_id.get(project_ref)
+            if project_node_id:
+                edges.append(_edge(project_node_id, node_id, "supports"))
+        for goal_ref in _clean_string_list(claim.get("goal_refs")):
+            goal_node_id = goal_node_ids.get(goal_ref)
+            if goal_node_id:
+                edges.append(_edge(goal_node_id, node_id, "supports"))
 
     skill_nodes: dict[str, dict[str, object]] = {}
     for goal_obj in shown_goals:
@@ -649,6 +918,24 @@ def workspace_graph_payload(
             goal_node_id = goal_node_ids.get(goal_obj.id)
             if goal_node_id:
                 edges.append(_edge(goal_node_id, skill_node_id, "drives"))
+    for item in _clean_item_rows(skills.get("items"), limit=180):
+        skill_id = str(item.get("id") or "").strip()
+        if not skill_id:
+            continue
+        skill_node_id = f"skill:{skill_id}"
+        skill_nodes.setdefault(
+            skill_node_id,
+            _node(
+                id=skill_node_id,
+                type="skill",
+                layer="capability",
+                label=str(item.get("label") or skill_id),
+                metric=str(item.get("category") or ""),
+                record_id=skill_id,
+                status=str(item.get("status") or ""),
+                owner_path="pages/1_Skill_Tree.py",
+            ),
+        )
     if not skill_nodes:
         for idx, item in enumerate(_suggested_skill_nodes(skills)[:4]):
             node_id = f"skill:suggested:{idx}"
@@ -679,9 +966,32 @@ def workspace_graph_payload(
         )
         edges.append(_edge(primary_node_id, node_id, "drives", suggested=True))
     nodes.extend(skill_nodes.values())
+    skill_node_by_ref = {
+        str(node.get("record_id") or "").strip(): node_id
+        for node_id, node in skill_nodes.items()
+        if str(node.get("record_id") or "").strip()
+    }
+
+    for evidence in evidence_items:
+        evidence_node_id = evidence_node_by_ref.get(str(evidence.get("id") or "").strip())
+        if not evidence_node_id:
+            continue
+        for skill_ref in _clean_string_list(evidence.get("skill_refs")):
+            skill_node_id = skill_node_by_ref.get(skill_ref) or f"skill:{skill_ref}"
+            if skill_node_id in skill_nodes:
+                edges.append(_edge(evidence_node_id, skill_node_id, "supports"))
+
+    for claim in claim_items:
+        claim_node_id_for_item = claim_node_by_ref.get(str(claim.get("id") or "").strip())
+        if not claim_node_id_for_item:
+            continue
+        for skill_ref in _clean_string_list(claim.get("skill_refs")):
+            skill_node_id = skill_node_by_ref.get(skill_ref) or f"skill:{skill_ref}"
+            if skill_node_id in skill_nodes:
+                edges.append(_edge(claim_node_id_for_item, skill_node_id, "supports"))
 
     for node_id in list(skill_nodes)[:4]:
-        edges.append(_edge("claim:planned", node_id, "supports", placeholder=True, suggested=True))
+        edges.append(_edge(claim_node_id, node_id, "supports", placeholder=claim_node_id == "claim:planned", suggested=True))
         edges.append(_edge("atomic_evidence:pool", node_id, "supports"))
 
     gap_count = int(skills.get("evidence_risk_count") or 0) + len(
@@ -725,8 +1035,56 @@ def workspace_graph_payload(
             owner_path="pages/6_Output_Studio.py",
         )
     )
-    edges.append(_edge("claim:planned", "output", "produces", placeholder=True, suggested=True))
+    edges.append(_edge(claim_node_id, "output", "produces", placeholder=claim_node_id == "claim:planned", suggested=True))
     edges.append(_edge("atomic_evidence:pool", "output", "produces"))
+
+    output_node_by_ref: dict[str, str] = {}
+    output_items = [
+        *(_clean_item_rows(public.get("items"), limit=80)),
+        *(_clean_item_rows(public.get("project_items"), limit=80)),
+    ]
+    for output_item in output_items:
+        output_id = str(output_item.get("id") or "").strip()
+        if not output_id:
+            continue
+        node_id = f"output:item:{output_id}"
+        output_node_by_ref[output_id] = node_id
+        nodes.append(
+            _node(
+                id=node_id,
+                type="output",
+                layer="output",
+                label=_short_text(output_item.get("title"), output_id),
+                metric=str(output_item.get("kind") or ""),
+                record_id=output_id,
+                status=str(output_item.get("status") or ""),
+                owner_path="pages/6_Output_Studio.py",
+                summary=_short_text(output_item.get("summary"), max_len=220),
+                item_kind=str(output_item.get("kind") or "output"),
+            )
+        )
+        edges.append(_edge("output", node_id, "contains"))
+        for evidence_ref in _clean_string_list(output_item.get("evidence_refs")):
+            evidence_node_id = evidence_node_by_ref.get(evidence_ref)
+            if evidence_node_id:
+                edges.append(_edge(evidence_node_id, node_id, "produces"))
+        for claim_ref in _clean_string_list(output_item.get("claim_refs")):
+            claim_item_node_id = claim_node_by_ref.get(claim_ref)
+            if claim_item_node_id:
+                edges.append(_edge(claim_item_node_id, node_id, "produces"))
+        for skill_ref in _clean_string_list(output_item.get("skill_refs")):
+            skill_node_id = skill_node_by_ref.get(skill_ref) or f"skill:{skill_ref}"
+            if skill_node_id in skill_nodes:
+                edges.append(_edge(skill_node_id, node_id, "supports"))
+
+    for claim in claim_items:
+        claim_item_node_id = claim_node_by_ref.get(str(claim.get("id") or "").strip())
+        if not claim_item_node_id:
+            continue
+        for output_ref in _clean_string_list(claim.get("output_refs")):
+            output_item_node_id = output_node_by_ref.get(output_ref)
+            if output_item_node_id:
+                edges.append(_edge(claim_item_node_id, output_item_node_id, "produces"))
 
     nodes.append(
         _node(
@@ -788,7 +1146,7 @@ def workspace_graph_payload(
         "evidence_candidate:pending",
         "atomic_evidence:pool",
         "composite_evidence:planned",
-        "claim:planned",
+        claim_node_id,
         "output",
     ):
         edges.append(_edge("health", watch_id, "watches", suggested=True))
@@ -796,14 +1154,121 @@ def workspace_graph_payload(
         edges.append(_edge(node_id, "capacity:planned", "supports", suggested=True))
     edges.append(_edge("capacity:planned", "north_star", "supports", placeholder=True, suggested=True))
 
+    graph_actions.extend(
+        [
+            _graph_action(
+                id="capture_source",
+                node_id="source:inbox",
+                label=_ui_text(ui, "dashboard_capture_submit", "Capture"),
+                action="noop",
+                payload={"section": "capture"},
+            ),
+            _graph_action(
+                id="review_evidence",
+                node_id="evidence_candidate:pending",
+                label=_ui_text(ui, "quick_evidence_review", "Evidence Review"),
+                path=EVIDENCE_REVIEW_PAGE,
+            ),
+            _graph_action(
+                id="review_claims",
+                node_id=claim_node_id,
+                label=_ui_text(ui, "quick_evidence_review", "Evidence Review"),
+                path=EVIDENCE_REVIEW_PAGE,
+            ),
+            _graph_action(
+                id="open_gap",
+                node_id="gap:risk",
+                label=_ui_text(ui, "quick_gap", "Gap Analysis"),
+                path="pages/2_Gap_Analysis.py",
+            ),
+            _graph_action(
+                id="open_output",
+                node_id="output",
+                label=_ui_text(ui, "quick_public_site", "Output Studio"),
+                path="pages/6_Output_Studio.py",
+            ),
+        ]
+    )
+    attention_counts = {
+        "sources_active": source_active,
+        "evidence_pending": candidate_count + atomic_attention_count,
+        "claims_ready": draft_claims + needs_refresh_claims,
+        "skill_risks": gap_count,
+        "output_opportunities": int(public.get("draft_total", 0) or 0),
+        "health_risks": health_error + health_warning,
+    }
+    if source_active:
+        attention_nodes.append(
+            {
+                "id": "source:inbox",
+                "reason": _ui_text(ui, "dashboard_source_to_evidence_hint", "Captured sources need review."),
+                "severity": "info",
+            }
+        )
+    if candidate_count or atomic_attention_count:
+        attention_nodes.append(
+            {
+                "id": "evidence_candidate:pending",
+                "reason": _ui_text(ui, "dashboard_pending_evidence_title", "Evidence to organize"),
+                "severity": "warning",
+            }
+        )
+    if draft_claims or needs_refresh_claims:
+        attention_nodes.append(
+            {
+                "id": claim_node_id,
+                "reason": _ui_text(ui, "dashboard_node_claim", "Claims"),
+                "severity": "warning" if needs_refresh_claims else "info",
+            }
+        )
+    if gap_count:
+        attention_nodes.append(
+            {
+                "id": "gap:risk",
+                "reason": _ui_text(ui, "dashboard_gap_risk_title", "Gap risk"),
+                "severity": "warning",
+            }
+        )
+    if health_error or health_warning:
+        attention_nodes.append(
+            {
+                "id": "health",
+                "reason": _ui_text(ui, "dashboard_health_title", "Health"),
+                "severity": "error" if health_error else "warning",
+            }
+        )
+
     nodes = _dedupe_nodes(nodes)
     edges = _filter_edges(edges, nodes)
+    focus_path = [
+        node_id
+        for node_id in (
+            "north_star",
+            primary_node_id,
+            project_node_ids[0] if project_node_ids else "",
+            "source:inbox",
+            "evidence_candidate:pending",
+            "atomic_evidence:pool",
+            claim_node_id,
+            next(iter(skill_nodes), ""),
+            "output",
+            "health",
+        )
+        if node_id
+    ]
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "view": view,
-        "layers": list(WORKSPACE_GRAPH_LAYERS),
+        "contract": growth_graph_contract_payload(),
+        "layers": list(workspace_graph_layers()),
         "nodes": nodes,
         "edges": edges,
+        "focus_path": focus_path,
+        "attention": {
+            "counts": attention_counts,
+            "nodes": attention_nodes,
+        },
+        "actions": graph_actions,
     }
 
 

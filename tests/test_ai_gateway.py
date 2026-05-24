@@ -89,6 +89,7 @@ class TestAIGateway(unittest.TestCase):
             payload={
                 "source_id": "source:paper:1",
                 "ai_model": "qwen-plus",
+                "model_timeout_seconds": 11,
                 "segments": [
                     {
                         "segment_id": "seg:1",
@@ -109,6 +110,44 @@ class TestAIGateway(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(chat.call_args.kwargs["model"], "qwen-plus")
+        self.assertEqual(chat.call_args.kwargs["timeout"], 11.0)
+
+    def test_translate_paper_segments_sets_long_translation_timeout(self) -> None:
+        """Full-paper translation batches should not inherit short UI polling limits."""
+
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value={}),
+            patch("nblane.core.ai.gateway.run_ai_action") as run,
+        ):
+            run.return_value = SimpleNamespace(ok=True)
+            translate_paper_segments(
+                "alice",
+                "source:paper:1",
+                [{"segment_id": "seg:1", "text": "hello", "text_hash": "sha256:abc"}],
+                require_review=False,
+            )
+
+        payload = run.call_args.args[1]
+        self.assertEqual(payload["model_timeout_seconds"], 180.0)
+
+    def test_translate_paper_segments_honors_timeout_override(self) -> None:
+        """Callers can still tune one paper translation request explicitly."""
+
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value={}),
+            patch("nblane.core.ai.gateway.run_ai_action") as run,
+        ):
+            run.return_value = SimpleNamespace(ok=True)
+            translate_paper_segments(
+                "alice",
+                "source:paper:1",
+                [{"segment_id": "seg:1", "text": "hello", "text_hash": "sha256:abc"}],
+                model_timeout_seconds=240,
+                require_review=False,
+            )
+
+        payload = run.call_args.args[1]
+        self.assertEqual(payload["model_timeout_seconds"], 240)
 
     def test_local_readonly_codex_backend_registered_for_paper_actions(self) -> None:
         """Paper Codex actions default to local read-only Codex, not handoff."""
@@ -142,6 +181,9 @@ class TestAIGateway(unittest.TestCase):
               "title": "Memory for Vision-Language-Action Models",
               "url": "https://example.com/paper",
               "provider_refs": ["semantic_scholar:abc"],
+              "abstract": "The paper studies memory for embodied agents.",
+              "ai_summary": "A plain-language overview for triage.",
+              "explanation_links": [{"title": "Explainer", "url": "https://example.com/explainer"}],
               "reason": "Relevant memory architecture."
             }
           ],
@@ -172,13 +214,81 @@ class TestAIGateway(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.backend, "local_codex_readonly")
         self.assertEqual(result.structured["results"][0]["title"], "Memory for Vision-Language-Action Models")  # type: ignore[index]
+        self.assertEqual(result.structured["results"][0]["ai_summary"], "A plain-language overview for triage.")  # type: ignore[index]
         self.assertIn("Verify venue.", result.warnings)
         prompt = run.call_args.args[1]
         self.assertIn("Codex is read-only", prompt)
+        self.assertIn("explanation_links", prompt)
         self.assertIn("Do not edit files", prompt)
         self.assertIn("Do not generate patches", prompt)
         self.assertIn("Do not write profile facts", prompt)
         self.assertIn("Return one JSON object only", prompt)
+        self.assertIn("Stop as soon as you have up to", prompt)
+        self.assertIn("arXiv APIs", prompt)
+        self.assertIn("user's query language", prompt)
+        self.assertTrue(run.call_args.kwargs["enable_search"])
+        self.assertEqual(run.call_args.kwargs["reasoning_effort"], "medium")
+
+    def test_paper_search_codex_uses_terminal_codex_home_by_default(self) -> None:
+        """Paper search should match the terminal/plugin Codex environment by default."""
+
+        readonly = SimpleNamespace(
+            ok=True,
+            output='{"query":"VLA","results":[],"warnings":[],"ref":"search"}',
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex --search exec --sandbox read-only -",
+        )
+        with (
+            patch("nblane.core.codex_adapter.current_config", return_value=CodexConfig()) as current_config,
+            patch("nblane.core.codex_adapter.run_readonly_codex_prompt", return_value=readonly) as run,
+        ):
+            result = run_ai_action(
+                "research.paper_search_codex",
+                {"query": "vla最新论文", "reply_language": "zh"},
+                profile="",
+                runtime_profile="alice",
+                require_review=False,
+        )
+
+        self.assertTrue(result.ok)
+        current_config.assert_called_once_with(
+            profile="alice",
+            codex_home_policy="default",
+        )
+        self.assertIn("Use Chinese", run.call_args.args[1])
+
+    def test_paper_search_codex_can_opt_into_profile_codex_home(self) -> None:
+        """The older profile-isolated Codex home remains available explicitly."""
+
+        readonly = SimpleNamespace(
+            ok=True,
+            output='{"query":"VLA","results":[],"warnings":[],"ref":"search"}',
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex --search exec --sandbox read-only -",
+        )
+        with (
+            patch("nblane.core.codex_adapter.current_config", return_value=CodexConfig()) as current_config,
+            patch("nblane.core.codex_adapter.run_readonly_codex_prompt", return_value=readonly),
+        ):
+            result = run_ai_action(
+                "research.paper_search_codex",
+                {"query": "vla最新论文", "codex_home_policy": "profile"},
+                profile="",
+                runtime_profile="alice",
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        current_config.assert_called_once_with(
+            profile="alice",
+            codex_home_policy="profile",
+        )
 
     def test_local_readonly_codex_backend_passes_model_override(self) -> None:
         """DeepRead can use a profile-selected Codex model."""
@@ -219,6 +329,47 @@ class TestAIGateway(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
+
+    def test_local_readonly_codex_backend_passes_timeout_override(self) -> None:
+        """UI actions can cap read-only Codex latency before fallback."""
+
+        readonly = SimpleNamespace(
+            ok=True,
+            output='{"query":"VLA memory","results":[],"warnings":[],"ref":"search"}',
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with patch(
+            "nblane.core.codex_adapter.run_readonly_codex_prompt",
+            return_value=readonly,
+        ) as run:
+            events: list[dict[str, object]] = []
+            progress_callback = events.append
+            cancelled = False
+            result = run_ai_action(
+                "research.paper_search_codex",
+                {
+                    "query": "VLA memory",
+                    "codex_timeout_seconds": 7,
+                    "codex_idle_timeout_seconds": 3,
+                    "codex_reasoning_effort": "xhigh",
+                },
+                profile="",
+                require_review=False,
+                progress_callback=progress_callback,
+                cancel_callback=lambda: cancelled,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(run.call_args.kwargs["timeout_seconds"], 7.0)
+        self.assertEqual(run.call_args.kwargs["idle_timeout_seconds"], 3.0)
+        self.assertIs(run.call_args.kwargs["progress_callback"], progress_callback)
+        self.assertIsNotNone(run.call_args.kwargs["cancel_check"])
+        self.assertTrue(run.call_args.kwargs["enable_search"])
+        self.assertEqual(run.call_args.kwargs["reasoning_effort"], "xhigh")
 
     def test_translate_paper_segments_can_use_profile_codex_backend(self) -> None:
         """Paper translation can route through Codex when the profile asks for it."""

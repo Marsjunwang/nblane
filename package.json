@@ -1,0 +1,13 @@
+{
+  "name": "nblane",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e:install:cn": "bash scripts/install-playwright-chromium-cn.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
+  }
+}

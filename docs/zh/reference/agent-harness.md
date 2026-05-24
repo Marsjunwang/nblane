@@ -126,11 +126,11 @@ Agent Activity；nblane 不会调用 `codex cloud apply`，不会自动修改本
 
 每个 profile 可用 `profiles/<name>/codex.yaml` 保存自己的 Codex Cloud env、
 branch、attempts 和 model override。Web 中的侧边栏 **AI / LLM** 提供
-**配置 Codex** 大弹窗，可编辑当前 profile 专属 Web Codex home 下的
+**配置 Codex** 大弹窗，可编辑部署级 / 终端同款 Web Codex home 下的
 `config.toml`，也可打开并编辑当前 profile 的 `codex.yaml`；profile 配置文件不保存
 token 或 API key。API key/auth 由 Codex CLI 管理，Web 只通过
-`codex login --with-api-key` 写入该 profile 专属 `auth.json`，不会改写终端默认
-`~/.codex`。
+`codex login --with-api-key` 写入部署级 `auth.json`。云上建议用
+`NBLANE_CODEX_HOME` 指向持久化 service-level Codex home。
 
 Kanban 页面不再提供单独的 Codex 配置或 handoff 面板；侧边栏 **AI / LLM**
 中的 **看板 AI 引擎** 选择器控制看板使用普通 LLM 还是 Codex。选择 `Codex`

@@ -30,9 +30,22 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Rank by relevance to the goal and explain uncertainty."
     ),
     "research.paper_search_codex": (
-        "Find paper candidates for import. Return only candidates with "
-        "checkable URL, DOI, or provider refs, and include warnings for "
-        "anything unverified."
+        "Find paper candidates for import. Do not limit discovery to a fixed "
+        "provider list; any reputable source is acceptable when the candidate "
+        "has a direct downloadable PDF URL. Return only candidates with "
+        "pdf_url or open_access_pdf_url, and include warnings for anything "
+        "unverified. Use payload query_variants when present; expand ambiguous "
+        "acronyms, for example VLA in robotics usually means "
+        "Vision-Language-Action. Prefer fresh source pages such as arXiv, "
+        "OpenReview, project pages, and publisher PDF pages over metadata-only "
+        "search results. Treat personal profile context, if present, as optional "
+        "post-search rerank/classification context, never as a retrieval "
+        "constraint. Each result should support triage reading: "
+        "include abstract when available, ai_summary in the user's language, "
+        "why_relevant, and explanation_links for trustworthy explainer pages "
+        "such as Zhihu, Xiaohongshu, blogs, videos, or project pages when "
+        "they can be verified. Use an empty explanation_links list rather "
+        "than inventing links."
     ),
     "research.paper_translate": (
         "Translate only the supplied paper translation units. A segment_id may "
@@ -118,12 +131,17 @@ def prompt_for_action(
     if spec.name == "kanban.subtasks":
         return _kanban_subtasks_prompt(request, spec, prompt_id)
 
+    reply_language = (
+        request.payload.get("reply_language")
+        if spec.name == "research.paper_search_codex"
+        else None
+    )
     system = "\n".join(
         [
             "You are the nblane AI Gateway.",
             "You receive business payloads, not free-form user prompts.",
             "Return only the requested output contract.",
-            _reply_language_instruction(),
+            _reply_language_instruction(reply_language),
             "All writebacks are review-first candidates unless stated otherwise.",
             _ACTION_INSTRUCTIONS.get(
                 spec.name,

@@ -759,9 +759,11 @@ class TestReaderActions(unittest.TestCase):
 
         self.assertEqual(summary["segments_selected"], 3)
         self.assertEqual(summary["updated"], 3)
-        self.assertEqual(len(progress), 2)
-        self.assertEqual(progress[0]["batches_completed"], 1)
-        self.assertEqual(progress[0]["segments_processed"], 2)
+        self.assertEqual(len(progress), 3)
+        self.assertEqual(progress[0]["batches_completed"], 0)
+        self.assertEqual(progress[0]["segments_processed"], 0)
+        self.assertEqual(progress[1]["batches_completed"], 1)
+        self.assertEqual(progress[1]["segments_processed"], 2)
         self.assertEqual(progress[-1]["batches_completed"], 2)
         self.assertEqual(progress[-1]["segments_processed"], 3)
 

@@ -39,6 +39,9 @@ def test_workspace_graph_empty_profile_returns_full_layer_skeleton() -> None:
     assert nodes["project_case:planned"]["layer"] == "work_context"
     assert nodes["source:inbox"]["layer"] == "source"
     assert nodes["source:inbox"]["placeholder"] is True
+    assert nodes["source:inbox"]["primary_action"]["label"] == "Capture source"
+    assert nodes["source:inbox"]["primary_action"]["event"]["payload"]["path"] == "pages/7_Research.py"
+    assert nodes["source:inbox"]["secondary_actions"][0]["label"] == "Open Research"
     assert nodes["evidence_candidate:pending"]["layer"] == "evidence"
     assert nodes["claim:planned"]["layer"] == "claim"
     assert nodes["skill:lit"]["layer"] == "capability"
@@ -164,6 +167,8 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
     assert nodes["project:secret"]["layer"] == "work_context"
     assert nodes["project:secret"]["owner_path"] == "pages/11_Project_Board.py"
     assert nodes["source:inbox"]["owner_path"] == "pages/7_Research.py"
+    assert nodes["source:inbox"]["primary_action"]["label"] == "Review source"
+    assert nodes["source:inbox"]["secondary_actions"][0]["id"] == "open_research"
     assert nodes["evidence_candidate:pending"]["metric"] == "1"
     assert nodes["atomic_evidence:pool"]["metric"] == "2"
     assert (

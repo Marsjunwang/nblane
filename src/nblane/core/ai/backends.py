@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
+from datetime import date
 from typing import Any
 
 from nblane.core import llm
@@ -51,6 +52,12 @@ class DirectLLMBackend:
             prompt.user,
             temperature=spec.temperature,
             model=_model_override(request.payload),
+            timeout=_positive_float_override(
+                request.payload,
+                "model_timeout_seconds",
+                "llm_timeout_seconds",
+                "timeout_seconds",
+            ),
         )
         if raw.startswith("LLM error:") or raw.startswith(
             "AI features not configured"
@@ -247,14 +254,36 @@ class LocalReadonlyCodexBackend:
         codex_prompt = _readonly_codex_prompt(request, spec, prompt.system, prompt.user)
         from nblane.core import codex_adapter
 
-        config = None
+        codex_profile = request.runtime_profile or request.profile
+        enable_search = request.action == "research.paper_search_codex"
+        codex_home_policy = _codex_home_policy(request.payload)
+        config = codex_adapter.current_config(
+            profile=codex_profile or None,
+            codex_home_policy=codex_home_policy,
+        )
         model = _model_override(request.payload, "codex_model", "deep_read_model", "ai_model")
+        timeout_seconds = _positive_float_override(
+            request.payload,
+            "codex_timeout_seconds",
+            "timeout_seconds",
+        )
         if model:
-            config = replace(codex_adapter.current_config(profile=request.profile), model=model)
+            config = replace(config, model=model)
+        reasoning_effort = _codex_reasoning_effort_override(request.payload) if enable_search else ""
         result = codex_adapter.run_readonly_codex_prompt(
-            request.profile,
+            codex_profile,
             codex_prompt,
             config=config,
+            timeout_seconds=timeout_seconds,
+            enable_search=enable_search,
+            reasoning_effort=reasoning_effort,
+            progress_callback=request.progress_callback,
+            cancel_check=request.cancel_callback,
+            idle_timeout_seconds=_positive_float_override(
+                request.payload,
+                "codex_idle_timeout_seconds",
+                "idle_timeout_seconds",
+            ),
         )
         raw = result.output
         warnings = _merge_warning_texts(getattr(result, "warnings", []) or [])
@@ -319,6 +348,9 @@ def _readonly_codex_prompt(
 ) -> str:
     """Combine an AI Action prompt with Codex read-only operating bounds."""
 
+    if request.action == "research.paper_search_codex":
+        return _readonly_codex_paper_search_prompt(request, system_prompt)
+
     schema = json.dumps(spec.schema or {}, ensure_ascii=False, indent=2)
     return "\n\n".join(
         [
@@ -354,6 +386,84 @@ def _readonly_codex_prompt(
     )
 
 
+def _readonly_codex_paper_search_prompt(request: AIActionRequest, system_prompt: str) -> str:
+    """Build a compact live-search prompt for PDF-ready paper discovery."""
+
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
+    try:
+        limit = max(1, min(int(payload.get("limit") or filters.get("limit") or 5), 10))
+    except (TypeError, ValueError):
+        limit = 5
+    query = _clean_text(payload.get("query"))
+    query_variants = _list_payload(payload, "query_variants")
+    compact_payload = {
+        "query": query,
+        "query_variants": query_variants,
+        "limit": limit,
+        "year_from": _clean_text(filters.get("year_from")),
+        "year_to": _clean_text(filters.get("year_to")),
+        "require_pdf": True,
+        "current_date": date.today().isoformat(),
+        "codex_reasoning_effort": _codex_reasoning_effort_override(payload),
+        "codex_search_depth": _clean_text(payload.get("codex_search_depth")) or "quick",
+        "profile_context_policy": _clean_text(payload.get("profile_context_policy")) or "not_sent_for_discovery",
+    }
+    return "\n\n".join(
+        [
+            (
+                "You are Codex used inside nblane Paper Reading Studio as a "
+                "local read-only advanced LLM with live web search."
+            ),
+            "\n".join(
+                [
+                    "Boundaries:",
+                    "- Codex is read-only.",
+                    "- Do not edit files.",
+                    "- Do not generate patches.",
+                    "- Do not run code-changing commands.",
+                    "- You may run read-only commands such as python/curl to query arXiv APIs, search pages, and inspect web results.",
+                    "- Do not write profile facts.",
+                    "- Return one JSON object only, no markdown.",
+                ]
+            ),
+            (
+                "Task: use web search immediately to find PDF-ready paper candidates. "
+                f"Stop as soon as you have up to {limit} strong candidates. Do not do an exhaustive survey."
+            ),
+            (
+                "Search behavior: start with query_variants. If the query contains Chinese intent "
+                "words such as 最新论文, translate the intent before searching. For latest/recent "
+                "requests, search arXiv/OpenReview/project pages by submission date when possible, "
+                "then verify that candidates are robotics/embodied-AI papers. "
+                "If VLA is ambiguous, robotics VLA normally means Vision-Language-Action; avoid "
+                "astronomy Very Large Array unless the user asks for astronomy."
+            ),
+            (
+                "Acceptance rules: include only papers with a direct downloadable pdf_url. "
+                "Do not limit discovery to a fixed provider. Prefer arXiv, OpenReview, "
+                "publisher PDFs, author project pages, and verified paper pages."
+            ),
+            (
+                "For each result, include title, year when known, canonical_url, pdf_url, "
+                "why_relevant, ai_summary, and explanation_links. Write ai_summary and "
+                "why_relevant in the user's query language. explanation_links may include "
+                "verified project pages, blogs, videos, Zhihu, Xiaohongshu, or other "
+                "trustworthy explainers; use an empty list rather than inventing links."
+            ),
+            "Return this strict JSON shape only:",
+            (
+                '{"query":"","results":[{"title":"","year":"","canonical_url":"","pdf_url":"",'
+                '"doi":"","arxiv_id":"","provider_refs":[],"abstract":"","ai_summary":"",'
+                '"why_relevant":"","explanation_links":[{"title":"","url":"","source":""}]}],'
+                '"warnings":[],"ref":"paper_search"}'
+            ),
+            "Compact search payload:\n" + json.dumps(compact_payload, ensure_ascii=False, indent=2),
+            "System instruction summary:\n" + _clean_text(system_prompt),
+        ]
+    )
+
+
 def _merge_warning_texts(*values: object) -> list[str]:
     """Normalize warnings without retaining duplicate long blobs."""
 
@@ -384,6 +494,69 @@ def _model_override(payload: dict[str, Any], *keys: str) -> str:
         if value:
             return value
     return ""
+
+
+def _positive_float_override(payload: dict[str, Any], *keys: str) -> float | None:
+    """Return an optional positive float override from a business payload."""
+
+    for key in keys:
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            clean = float(value)
+        except (TypeError, ValueError):
+            continue
+        if clean > 0:
+            return clean
+    return None
+
+
+def _codex_reasoning_effort_override(payload: dict[str, Any]) -> str:
+    """Return the requested Codex reasoning effort for paper search."""
+
+    clean = _clean_text(
+        payload.get("codex_reasoning_effort")
+        or payload.get("reasoning_effort")
+    ).lower()
+    if clean in {"low", "medium", "high", "xhigh"}:
+        return clean
+    depth = _clean_text(
+        payload.get("codex_search_depth")
+        or payload.get("search_depth")
+        or payload.get("codex_depth")
+    ).lower()
+    if depth in {"deep", "xhigh", "thorough", "careful"}:
+        return "xhigh"
+    for key in ("codex_deep_search", "deep_search"):
+        value = payload.get(key)
+        if isinstance(value, bool) and value:
+            return "xhigh"
+        if _clean_text(value).lower() in {"1", "true", "yes", "on"}:
+            return "xhigh"
+    return "medium"
+
+
+def _codex_home_policy(payload: dict[str, Any]) -> str:
+    """Return which Codex home read-only live search should use."""
+
+    clean = _clean_text(
+        payload.get("codex_home_policy")
+        or payload.get("codex_home_mode")
+        or payload.get("code_home_policy")
+    ).lower()
+    if not clean:
+        import os
+
+        clean = _clean_text(
+            os.getenv("NBLANE_CODEX_HOME_POLICY")
+            or os.getenv("NBLANE_PAPER_SEARCH_CODEX_HOME_POLICY")
+        ).lower()
+    if clean in {"profile", "isolated", "profile_isolated", "web_profile"}:
+        return "profile"
+    if clean in {"default", "global", "terminal", "terminal_default", "shared"}:
+        return "default"
+    return "default"
 
 
 def default_backends() -> dict[str, object]:
@@ -476,6 +649,9 @@ def fallback_structured(
                     "url": url,
                     "doi": doi,
                     "provider_refs": _merge_refs(item.get("provider_refs"), ref),
+                    "abstract": _clean_text(item.get("abstract") or item.get("summary")),
+                    "ai_summary": _clean_text(item.get("ai_summary") or item.get("plain_language_summary")),
+                    "explanation_links": item.get("explanation_links") if isinstance(item.get("explanation_links"), list) else [],
                     "reason": "Provided search candidate; verify URL/DOI before import.",
                 }
             )

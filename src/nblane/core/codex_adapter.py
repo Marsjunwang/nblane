@@ -15,11 +15,14 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from queue import Empty, Queue
+from threading import Thread
+from typing import Any, Callable
 
 import yaml
 
@@ -51,6 +54,8 @@ _DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_LOCAL_SANDBOX = "workspace-write"
 _DEFAULT_LOCAL_WORKTREE_ROOT = Path("/tmp/nblane-codex-runs")
 _DEFAULT_PROFILE_CODEX_HOME_ROOT = "~/.nblane/codex/profiles"
+_CODEX_HOME_POLICY_DEFAULT = "default"
+_CODEX_HOME_POLICY_PROFILE = "profile"
 _READONLY_SANDBOX = "read-only"
 _MAX_LOCAL_OUTPUT_CHARS = 50_000
 _MAX_LOCAL_DIFF_CHARS = 200_000
@@ -68,6 +73,7 @@ _SECRET_CONFIG_KEY_RE = re.compile(
 _RUNTIME_OVERRIDES: dict[str, str | int | float] = {}
 
 _CODEX_ENV_KEYS = (
+    "NBLANE_CODEX_HOME",
     "NBLANE_CODEX_BIN",
     "NBLANE_CODEX_CLOUD_ENV_ID",
     "NBLANE_CODEX_MODEL",
@@ -237,6 +243,9 @@ def readable_codex_error(*values: object, limit: int = 500) -> str:
     text = _sanitize(text)
     if not text:
         return "codex_readonly_failed"
+    timeout_match = re.search(r"command_timeout[^.\n]*", text, flags=re.IGNORECASE)
+    if timeout_match:
+        return shorten(timeout_match.group(0))
     for line in text.splitlines():
         clean = clean_text(line)
         if "ERROR:" not in clean:
@@ -320,8 +329,16 @@ def current_config(
     profile: str | None = None,
     *,
     include_runtime: bool = True,
+    codex_home_policy: str | None = None,
 ) -> CodexConfig:
-    """Return Codex config from runtime overrides, environment, and defaults."""
+    """Return Codex config from runtime overrides, environment, and defaults.
+
+    ``profile`` still selects profile-owned non-secret preferences from
+    ``profiles/<name>/codex.yaml``.  The Codex CLI home is deployment-level by
+    default so Web, terminal, plugin, Kanban, Paper Library, and local agent
+    runs share the same warmed, trusted Codex runtime.  The older
+    profile-isolated home is available only when explicitly requested.
+    """
 
     profile_values = _profile_config_values(profile)
     runtime_home = (
@@ -329,8 +346,13 @@ def current_config(
         if include_runtime
         else ""
     )
-    profile_home = str(profile_codex_home(profile)).strip() if profile else ""
-    default_home = runtime_home or profile_home
+    policy = _codex_home_policy(codex_home_policy)
+    profile_home = (
+        str(profile_codex_home(profile)).strip()
+        if profile and policy == _CODEX_HOME_POLICY_PROFILE
+        else ""
+    )
+    default_home = runtime_home or profile_home or str(codex_home())
     return CodexConfig(
         bin_path=str(
             _codex_value(
@@ -422,14 +444,19 @@ def install_command(*, upgrade: bool = False) -> str:
 
 
 def codex_home() -> Path:
-    """Return the Codex CLI home directory used for local CLI files."""
+    """Return the service-level Codex CLI home used by nblane.
 
-    raw = os.getenv("CODEX_HOME") or "~/.codex"
+    ``NBLANE_CODEX_HOME`` is nblane's deployment-level override.  ``CODEX_HOME``
+    remains supported so local development follows the normal Codex CLI
+    convention.  If neither is set, Codex's default ``~/.codex`` is used.
+    """
+
+    raw = os.getenv("NBLANE_CODEX_HOME") or os.getenv("CODEX_HOME") or "~/.codex"
     return Path(raw).expanduser()
 
 
 def profile_codex_home(profile: str | None) -> Path:
-    """Return the profile-isolated Codex home used by the Web UI."""
+    """Return the legacy profile-isolated Codex home for diagnostics."""
 
     clean_profile = str(profile or "").strip()
     root = Path(
@@ -447,10 +474,11 @@ def _codex_home_from_config(
     *,
     profile: str | None = None,
     config: CodexConfig | None = None,
+    codex_home_policy: str | None = None,
 ) -> Path:
     if config is not None and str(config.codex_home or "").strip():
         return Path(str(config.codex_home)).expanduser()
-    if profile:
+    if profile and _codex_home_policy(codex_home_policy) == _CODEX_HOME_POLICY_PROFILE:
         return profile_codex_home(profile)
     return codex_home()
 
@@ -459,6 +487,7 @@ def codex_auth_path(
     profile: str | None = None,
     *,
     config: CodexConfig | None = None,
+    codex_home_policy: str | None = None,
 ) -> Path:
     """Return the Codex CLI auth file path.
 
@@ -466,17 +495,32 @@ def codex_auth_path(
     delegating to ``codex login --with-api-key``; it does not display raw auth.
     """
 
-    return _codex_home_from_config(profile=profile, config=config) / CODEX_AUTH_FILENAME
+    return (
+        _codex_home_from_config(
+            profile=profile,
+            config=config,
+            codex_home_policy=codex_home_policy,
+        )
+        / CODEX_AUTH_FILENAME
+    )
 
 
 def codex_cli_config_path(
     profile: str | None = None,
     *,
     config: CodexConfig | None = None,
+    codex_home_policy: str | None = None,
 ) -> Path:
     """Return the Codex CLI ``config.toml`` path."""
 
-    return _codex_home_from_config(profile=profile, config=config) / CODEX_CLI_CONFIG_FILENAME
+    return (
+        _codex_home_from_config(
+            profile=profile,
+            config=config,
+            codex_home_policy=codex_home_policy,
+        )
+        / CODEX_CLI_CONFIG_FILENAME
+    )
 
 
 def codex_cli_config_template() -> str:
@@ -493,10 +537,15 @@ def load_codex_cli_config_text(
     profile: str | None = None,
     *,
     config: CodexConfig | None = None,
+    codex_home_policy: str | None = None,
 ) -> str:
     """Load editable Codex CLI ``config.toml`` text or a template."""
 
-    path = codex_cli_config_path(profile=profile, config=config)
+    path = codex_cli_config_path(
+        profile=profile,
+        config=config,
+        codex_home_policy=codex_home_policy,
+    )
     if path.exists():
         return path.read_text(encoding="utf-8")
     return codex_cli_config_template()
@@ -517,11 +566,16 @@ def save_codex_cli_config_text(
     profile: str | None = None,
     *,
     config: CodexConfig | None = None,
+    codex_home_policy: str | None = None,
 ) -> Path:
     """Persist raw editable Codex CLI config without git backup."""
 
     validate_codex_cli_config_text(text)
-    path = codex_cli_config_path(profile=profile, config=config)
+    path = codex_cli_config_path(
+        profile=profile,
+        config=config,
+        codex_home_policy=codex_home_policy,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_name(f"{path.name}.nblane.bak")
@@ -758,6 +812,7 @@ def save_config_to_env(
     cfg = config or current_config()
     path = env_path or _ENV_FILE
     values = {
+        "NBLANE_CODEX_HOME": cfg.codex_home,
         "NBLANE_CODEX_BIN": cfg.bin_path,
         "NBLANE_CODEX_CLOUD_ENV_ID": cfg.cloud_env_id,
         "NBLANE_CODEX_MODEL": cfg.model,
@@ -1039,6 +1094,11 @@ def run_readonly_codex_prompt(
     config: CodexConfig | None = None,
     cwd: Path | None = None,
     timeout_seconds: float | None = None,
+    enable_search: bool = False,
+    reasoning_effort: str = "",
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    idle_timeout_seconds: float | None = None,
 ) -> CodexReadonlyResult:
     """Run ``codex exec`` as a read-only planning helper.
 
@@ -1058,10 +1118,14 @@ def run_readonly_codex_prompt(
 
     with tempfile.TemporaryDirectory(prefix="nblane-codex-readonly-") as tmp:
         last_message_path = Path(tmp) / "last-message.txt"
+        args_prefix = [binary]
+        if enable_search:
+            args_prefix.append("--search")
         args = [
-            binary,
+            *args_prefix,
             "exec",
             *_codex_config_args(cfg),
+            *_codex_reasoning_args(reasoning_effort),
             "--cd",
             str(cwd or REPO_ROOT),
             "--sandbox",
@@ -1073,12 +1137,24 @@ def run_readonly_codex_prompt(
             str(last_message_path),
             "-",
         ]
-        result = _run(
-            args,
-            timeout=timeout_seconds or cfg.timeout_seconds,
-            stdin=str(prompt or ""),
-            env=_codex_command_env(cfg),
-        )
+        runner_timeout = timeout_seconds or cfg.timeout_seconds
+        if progress_callback is not None or cancel_check is not None or idle_timeout_seconds:
+            result = _run_streaming(
+                args,
+                timeout=runner_timeout,
+                stdin=str(prompt or ""),
+                env=_codex_command_env(cfg),
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+                idle_timeout_seconds=idle_timeout_seconds,
+            )
+        else:
+            result = _run(
+                args,
+                timeout=runner_timeout,
+                stdin=str(prompt or ""),
+                env=_codex_command_env(cfg),
+            )
         warnings: list[str] = []
         stdout, stdout_truncated = _truncate_text(
             result.stdout,
@@ -1357,6 +1433,314 @@ def parse_diff_changed_paths(diff_text: str) -> list[str]:
     return paths
 
 
+def _run_streaming(
+    args: list[str],
+    *,
+    timeout: float,
+    cwd: Path | None = None,
+    stdin: str | None = None,
+    env: dict[str, str] | None = None,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    idle_timeout_seconds: float | None = None,
+) -> CodexCommandResult:
+    command = _display_command(args)
+    started = time.monotonic()
+
+    def emit(event: dict[str, object]) -> None:
+        if progress_callback is None:
+            return
+        payload = {
+            **event,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+        }
+        try:
+            progress_callback(payload)
+        except Exception:
+            pass
+
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=cwd or REPO_ROOT,
+            env=env,
+            stdin=subprocess.PIPE if stdin is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError as exc:
+        return CodexCommandResult(
+            ok=False,
+            command=command,
+            returncode=127,
+            error=f"command_not_found: {exc}",
+        )
+    except OSError as exc:
+        return CodexCommandResult(
+            ok=False,
+            command=command,
+            returncode=1,
+            error=f"command_error: {exc}",
+        )
+
+    emit({"event": "command_started", "phase": "codex", "message": "Codex process started."})
+
+    if stdin is not None and process.stdin is not None:
+        try:
+            process.stdin.write(stdin)
+            process.stdin.close()
+        except OSError:
+            pass
+
+    output_queue: Queue[tuple[str, str]] = Queue()
+
+    def read_stream(name: str, stream: Any) -> None:
+        if stream is None:
+            return
+        try:
+            for line in iter(stream.readline, ""):
+                output_queue.put((name, line))
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+    stdout_thread = Thread(target=read_stream, args=("stdout", process.stdout), daemon=True)
+    stderr_thread = Thread(target=read_stream, args=("stderr", process.stderr), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    last_activity = time.monotonic()
+    timed_out = False
+    idle_timed_out = False
+    cancelled = False
+
+    def progress_output_payload(stream_name: str, clean_line: str) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "event": "output",
+            "phase": "codex",
+            "stream": stream_name,
+            "message": clean_line[:240],
+            "output_kind": "log",
+        }
+        lower = clean_line.casefold()
+        if lower.startswith("web search:"):
+            detail = clean_line.split(":", 1)[1].strip()
+            message = "Searching the web."
+            if detail:
+                message = (
+                    f"Opening web result: {detail[:200]}"
+                    if re.match(r"https?://", detail, flags=re.IGNORECASE)
+                    else f"Searching web: {detail[:200]}"
+                )
+            payload.update(
+                {
+                    "phase": "codex_search",
+                    "message": message,
+                    "output_kind": "web_search",
+                    "detail": detail[:500],
+                }
+            )
+            return payload
+        if stream_name != "stderr" and clean_line.startswith("{") and '"results"' in clean_line and '"query"' in clean_line:
+            payload.update(
+                {
+                    "phase": "codex_synthesis",
+                    "message": "Codex returned structured candidates; parsing and ranking them.",
+                    "output_kind": "structured_result",
+                }
+            )
+            return payload
+        if stream_name == "stderr" and clean_line.startswith("{") and '"results"' in clean_line and '"query"' in clean_line:
+            payload.update({"message": "Codex CLI is starting.", "output_kind": "startup", "visible": False})
+            return payload
+        if stream_name == "stderr" and (
+            clean_line in {"{", "}", "[", "]", "codex"}
+            or clean_line.startswith('"')
+            or clean_line.startswith(
+                (
+                    "You are the nblane AI Gateway.",
+                    "You receive business payloads",
+                    "Return only the requested output contract.",
+                    "Use English for all natural-language field values",
+                    "All writebacks are review-first candidates",
+                    "Find paper candidates for import.",
+                )
+            )
+        ):
+            payload.update({"message": "Codex CLI is starting.", "output_kind": "startup", "visible": False})
+            return payload
+        if clean_line.startswith("warning: Codex could not find bubblewrap"):
+            payload.update(
+                {
+                    "message": "Codex sandbox warning; using bundled fallback.",
+                    "output_kind": "setup_warning",
+                    "visible": False,
+                }
+            )
+            return payload
+        if (
+            "codex_core_plugins" in lower
+            or "curated plugin" in lower
+            or "codex_file_watcher" in lower
+            or "fatal: early eof" in lower
+            or "git_binary=\"git\"" in lower
+            or ("plugin" in lower and (" warn " in lower or "failed" in lower or "error=" in lower))
+        ):
+            payload.update(
+                {
+                    "message": "Codex plugin cache warning; search continues.",
+                    "output_kind": "plugin_warning",
+                }
+            )
+            return payload
+        if clean_line == "tokens used" or re.fullmatch(r"[\d,]+", clean_line):
+            payload.update({"message": "Codex reported token usage.", "output_kind": "usage", "visible": False})
+            return payload
+        if (
+            clean_line in {"--------", "user", "assistant"}
+            or clean_line.startswith("OpenAI Codex ")
+            or clean_line.startswith(
+                (
+                    "workdir:",
+                    "model:",
+                    "provider:",
+                    "approval:",
+                    "sandbox:",
+                    "reasoning effort:",
+                    "reasoning summaries:",
+                    "session id:",
+                    "Boundaries:",
+                    "Task:",
+                    "Acceptance rules:",
+                    "Return this strict JSON shape",
+                    "Compact search payload:",
+                    "System instruction summary:",
+                )
+            )
+            or clean_line.startswith("- ")
+        ):
+            payload.update({"message": "Codex CLI is starting.", "output_kind": "startup", "visible": False})
+            return payload
+        return payload
+
+    def append_output(stream_name: str, line: str) -> None:
+        nonlocal last_activity
+        sanitized = _sanitize(line)
+        if stream_name == "stderr":
+            stderr_parts.append(sanitized)
+        else:
+            stdout_parts.append(sanitized)
+        clean_line = " ".join(sanitized.split())
+        if not clean_line:
+            return
+        last_activity = time.monotonic()
+        emit(progress_output_payload(stream_name, clean_line))
+
+    def drain_available() -> None:
+        while True:
+            try:
+                stream_name, line = output_queue.get_nowait()
+            except Empty:
+                return
+            append_output(stream_name, line)
+
+    def stop_process() -> None:
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        except OSError:
+            pass
+
+    while True:
+        try:
+            stream_name, line = output_queue.get(timeout=0.15)
+        except Empty:
+            stream_name = ""
+            line = ""
+        if stream_name:
+            append_output(stream_name, line)
+
+        returncode = process.poll()
+        if returncode is not None:
+            drain_available()
+            break
+
+        now = time.monotonic()
+        if cancel_check is not None:
+            try:
+                cancelled = bool(cancel_check())
+            except Exception:
+                cancelled = False
+            if cancelled:
+                emit({"event": "cancelled", "phase": "codex", "message": "Codex search cancellation requested."})
+                stop_process()
+                break
+        if timeout > 0 and now - started >= timeout:
+            timed_out = True
+            emit({"event": "timeout", "phase": "codex", "message": f"Codex exceeded {timeout:g}s."})
+            stop_process()
+            break
+        if idle_timeout_seconds and idle_timeout_seconds > 0 and now - last_activity >= idle_timeout_seconds:
+            idle_timed_out = True
+            emit(
+                {
+                    "event": "idle_timeout",
+                    "phase": "codex",
+                    "message": f"Codex had no output for {idle_timeout_seconds:g}s.",
+                }
+            )
+            stop_process()
+            break
+
+    drain_available()
+    stdout_thread.join(timeout=1)
+    stderr_thread.join(timeout=1)
+    drain_available()
+    returncode = process.poll()
+    if returncode is None:
+        returncode = 124 if timed_out or idle_timed_out else 130 if cancelled else 1
+    stdout = _sanitize("".join(stdout_parts))
+    stderr = _sanitize("".join(stderr_parts))
+    if cancelled:
+        error = "command_cancelled"
+    elif timed_out:
+        error = f"command_timeout: exceeded {timeout:g}s"
+    elif idle_timed_out:
+        error = f"command_idle_timeout: no output for {idle_timeout_seconds:g}s"
+    else:
+        error = "" if returncode == 0 else _summarize_error(stdout, stderr)
+    emit(
+        {
+            "event": "command_finished",
+            "phase": "codex",
+            "status": "ok" if returncode == 0 and not error else "failed",
+            "message": "Codex finished search; parsing and ranking candidates." if returncode == 0 and not error else error,
+            "returncode": returncode,
+        }
+    )
+    return CodexCommandResult(
+        ok=returncode == 0 and not error,
+        command=command,
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        error=error,
+    )
+
+
 def _run(
     args: list[str],
     *,
@@ -1622,6 +2006,13 @@ def _codex_config_args(config: CodexConfig) -> list[str]:
     return args
 
 
+def _codex_reasoning_args(reasoning_effort: str) -> list[str]:
+    clean = str(reasoning_effort or "").strip().lower()
+    if clean not in {"low", "medium", "high", "xhigh"}:
+        return []
+    return ["-c", f"model_reasoning_effort={json.dumps(clean)}"]
+
+
 def _display_command(args: list[str]) -> str:
     display: list[str] = []
     for index, arg in enumerate(args):
@@ -1664,6 +2055,17 @@ def _coerce_float(value: object, default: float, *, minimum: float) -> float:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, parsed)
+
+
+def _codex_home_policy(value: object = None) -> str:
+    clean = str(
+        value
+        or os.getenv("NBLANE_CODEX_HOME_POLICY")
+        or ""
+    ).strip().lower()
+    if clean in {"profile", "isolated", "profile_isolated", "web_profile"}:
+        return _CODEX_HOME_POLICY_PROFILE
+    return _CODEX_HOME_POLICY_DEFAULT
 
 
 def _config_from_mapping(data: dict[str, Any]) -> dict[str, Any]:

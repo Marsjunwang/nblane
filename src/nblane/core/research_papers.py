@@ -17,12 +17,17 @@ import base64
 import contextlib
 import difflib
 import hashlib
+from html import unescape
+from html.parser import HTMLParser
 import io
 import json
 import math
 import os
 import re
+import shutil
+import subprocess
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -92,12 +97,33 @@ PAPER_STRUCTURE_BODY_EXCLUDED_KINDS = (
     "figure_label",
     "table_cell",
 )
-PAPER_SEARCH_PROVIDERS = ("arxiv", "semantic_scholar")
+PAPER_SEARCH_PROVIDERS = ("arxiv_html", "arxiv", "semantic_scholar")
 NO_LLM_TRANSLATION_WARNING = "No LLM translation backend produced text."
 PDF_MAX_BYTES_DEFAULT = 75 * 1024 * 1024
+PDF_DOWNLOAD_TIMEOUT_SECONDS_DEFAULT = 45.0
+PDF_DOWNLOAD_IDLE_TIMEOUT_SECONDS_DEFAULT = 10.0
+PDF_DOWNLOAD_CHUNK_BYTES = 32 * 1024
+GROBID_FULLTEXT_TIMEOUT_SECONDS_DEFAULT = 120.0
+GROBID_RETRY_COOLDOWN_SECONDS_DEFAULT = 24 * 60 * 60
+PAPER_TRANSLATION_BATCH_SIZE_DEFAULT = 12
+PAPER_STRUCTURE_TRANSLATION_BATCH_SIZE_DEFAULT = 12
+PAPER_LAYOUT_TRANSLATION_BATCH_SIZE_DEFAULT = 12
+PAPER_PAGE_TRANSLATION_BATCH_SIZE_DEFAULT = 4
+PAPER_TRANSLATION_BATCH_CHARS_DEFAULT = 9000
+PAPER_PAGE_TRANSLATION_BATCH_CHARS_DEFAULT = 12000
+PAPER_TRANSLATION_INCLUDE_REFERENCES_ENV = "NBLANE_PAPER_TRANSLATION_INCLUDE_REFERENCES"
+PAPER_REFERENCE_SECTION_LABELS = {
+    "references",
+    "bibliography",
+    "works cited",
+    "literature cited",
+    "参考文献",
+    "參考文獻",
+}
 PAPER_DIAGNOSTIC_BADGES = {
     "grobid_unavailable": "GROBID unavailable",
     "needs_structured_extraction": "Needs structured extraction",
+    "fallback_extraction": "Fallback ready",
     "stale_translation": "Stale translation",
     "citation_broken": "Citation broken",
     "private_source": "Private source",
@@ -106,6 +132,7 @@ PAPER_DIAGNOSTIC_BADGES = {
 PAPER_DIAGNOSTIC_SEVERITIES = {
     "grobid_unavailable": "warning",
     "needs_structured_extraction": "warning",
+    "fallback_extraction": "info",
     "stale_translation": "warning",
     "citation_broken": "error",
     "private_source": "info",
@@ -115,6 +142,19 @@ PAPER_DIAGNOSTIC_SEVERITIES = {
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _timestamp_from_iso(value: object) -> float:
+    text = _clean_text(value)
+    if not text:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 def _today() -> str:
@@ -153,6 +193,28 @@ def _clean_mapping(value: object) -> dict[str, object]:
         if clean:
             out[clean] = copy.deepcopy(item)
     return out
+
+
+def _clean_bool(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    clean = _clean_text(value).lower()
+    if clean in {"1", "true", "yes", "on"}:
+        return True
+    if clean in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _url_looks_like_pdf(url: object) -> bool:
+    clean = _clean_text(url)
+    if not clean:
+        return False
+    parsed = urllib.parse.urlparse(clean)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    path = parsed.path.lower()
+    return path.endswith(".pdf") or (parsed.netloc.lower().endswith("arxiv.org") and path.startswith("/pdf/"))
 
 
 def _choice(value: object, options: tuple[str, ...], default: str) -> str:
@@ -306,6 +368,24 @@ def _max_pdf_bytes() -> int:
         return max(1024, int(raw))
     except ValueError:
         return PDF_MAX_BYTES_DEFAULT
+
+
+def _pdf_download_timeout_seconds() -> float:
+    raw = os.getenv("NBLANE_PAPER_PDF_DOWNLOAD_TIMEOUT_SECONDS", "").strip()
+    configured = _positive_float(raw) if raw else None
+    return configured if configured is not None else PDF_DOWNLOAD_TIMEOUT_SECONDS_DEFAULT
+
+
+def _pdf_download_idle_timeout_seconds() -> float:
+    raw = os.getenv("NBLANE_PAPER_PDF_DOWNLOAD_IDLE_TIMEOUT_SECONDS", "").strip()
+    configured = _positive_float(raw) if raw else None
+    return configured if configured is not None else PDF_DOWNLOAD_IDLE_TIMEOUT_SECONDS_DEFAULT
+
+
+def _format_download_progress(total: int, expected: int | None) -> str:
+    if expected and expected > 0:
+        return f"{total}/{expected} bytes"
+    return f"{total} bytes"
 
 
 def _validate_pdf_bytes(file_bytes: bytes) -> None:
@@ -473,6 +553,8 @@ def import_paper_pdf(
     )
     metadata = asset.to_metadata()
     metadata["pdf_imported_at"] = _now()
+    metadata["pdf_download_status"] = "downloaded"
+    metadata["pdf_download_error"] = ""
     _update_source_metadata(profile, source_id, metadata)
     return asset
 
@@ -490,11 +572,28 @@ def download_paper_pdf(profile: str | Path, source_id: str, pdf_url: str) -> Pap
         method="GET",
     )
     max_bytes = _max_pdf_bytes()
-    with urllib.request.urlopen(request, timeout=30) as response:
+    timeout_seconds = _pdf_download_timeout_seconds()
+    idle_timeout_seconds = _pdf_download_idle_timeout_seconds()
+    socket_timeout = max(1.0, min(idle_timeout_seconds, timeout_seconds))
+    started = time.monotonic()
+    expected_bytes: int | None = None
+    with urllib.request.urlopen(request, timeout=socket_timeout) as response:
+        content_length = _clean_text(response.headers.get("content-length"))
+        try:
+            expected_bytes = int(content_length) if content_length else None
+        except ValueError:
+            expected_bytes = None
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = response.read(1024 * 128)
+            elapsed = time.monotonic() - started
+            if elapsed > timeout_seconds:
+                progress = _format_download_progress(total, expected_bytes)
+                raise TimeoutError(
+                    f"PDF download exceeded {timeout_seconds:.0f}s after {progress}; "
+                    "try again later or increase NBLANE_PAPER_PDF_DOWNLOAD_TIMEOUT_SECONDS."
+                )
+            chunk = response.read(PDF_DOWNLOAD_CHUNK_BYTES)
             if not chunk:
                 break
             total += len(chunk)
@@ -503,6 +602,134 @@ def download_paper_pdf(profile: str | Path, source_id: str, pdf_url: str) -> Pap
             chunks.append(chunk)
     filename = Path(parsed.path).name or f"{source_slug(source_id)}.pdf"
     return import_paper_pdf(profile, source_id, b"".join(chunks), filename, pdf_url=clean_url)
+
+
+def _source_pdf_download_url(source: ResearchSource, override_url: str = "") -> str:
+    metadata = source.metadata or {}
+    return _clean_text(
+        override_url
+        or metadata.get("open_access_pdf_url")
+        or metadata.get("pdf_url")
+        or (source.url if _clean_text(source.url).lower().endswith(".pdf") else "")
+    )
+
+
+def ensure_paper_pdf_downloaded(
+    profile: str | Path,
+    source_id: str,
+    *,
+    pdf_url: str = "",
+    error_prefix: str = "PDF download failed",
+) -> dict[str, object]:
+    """Download a source's open-access PDF and persist a user-visible status."""
+
+    _, source = _source_by_id(profile, source_id)
+    clean_source_id = _clean_text(source_id)
+    existing_asset_ref = _clean_text((source.metadata or {}).get("pdf_asset_ref"))
+    if existing_asset_ref:
+        existing_path: Path | None = None
+        try:
+            existing_path = _asset_path(profile, existing_asset_ref)
+        except ValueError:
+            existing_path = None
+        if existing_path is not None and existing_path.is_file() and existing_path.stat().st_size > 0:
+            _update_source_metadata(
+                profile,
+                clean_source_id,
+                {
+                    "pdf_download_status": "downloaded",
+                    "pdf_download_error": "",
+                },
+            )
+            return {
+                "source_id": clean_source_id,
+                "status": "downloaded",
+                "asset_ref": existing_asset_ref,
+                "byte_size": existing_path.stat().st_size,
+                "page_count": (source.metadata or {}).get("page_count", ""),
+                "existing": True,
+            }
+    clean_url = _source_pdf_download_url(source, pdf_url)
+    attempted_at = _now()
+    if not clean_url:
+        message = "No open-access PDF URL is recorded for this paper."
+        _update_source_metadata(
+            profile,
+            clean_source_id,
+            {
+                "pdf_download_status": "skipped_no_pdf_url",
+                "pdf_download_attempted_at": attempted_at,
+                "pdf_download_error": message,
+            },
+        )
+        return {
+            "source_id": clean_source_id,
+            "status": "skipped_no_pdf_url",
+            "pdf_url": "",
+            "error": message,
+        }
+    if bool((source.metadata or {}).get("needs_link_check")):
+        message = "PDF download skipped because the link still needs checking."
+        _update_source_metadata(
+            profile,
+            clean_source_id,
+            {
+                "pdf_download_status": "skipped_needs_link_check",
+                "pdf_download_attempted_at": attempted_at,
+                "pdf_download_error": message,
+            },
+        )
+        return {
+            "source_id": clean_source_id,
+            "status": "skipped_needs_link_check",
+            "pdf_url": clean_url,
+            "error": message,
+        }
+    _update_source_metadata(
+        profile,
+        clean_source_id,
+        {
+            "pdf_download_status": "downloading",
+            "pdf_download_attempted_at": attempted_at,
+            "pdf_download_error": "",
+        },
+    )
+    try:
+        asset = download_paper_pdf(profile, clean_source_id, clean_url)
+    except Exception as exc:
+        message = f"{error_prefix}: {exc}"
+        _update_source_metadata(
+            profile,
+            clean_source_id,
+            {
+                "pdf_download_status": "failed",
+                "pdf_download_attempted_at": _now(),
+                "pdf_download_error": message,
+            },
+        )
+        return {
+            "source_id": clean_source_id,
+            "status": "failed",
+            "pdf_url": clean_url,
+            "error": message,
+        }
+    _update_source_metadata(
+        profile,
+        clean_source_id,
+        {
+            "pdf_download_status": "downloaded",
+            "pdf_download_attempted_at": _now(),
+            "pdf_download_error": "",
+        },
+    )
+    return {
+        "source_id": clean_source_id,
+        "status": "downloaded",
+        "pdf_url": clean_url,
+        "asset_ref": asset.asset_ref,
+        "byte_size": asset.byte_size,
+        "page_count": asset.page_count,
+    }
 
 
 def load_paper_pdf_bytes(profile: str | Path, source_id: str) -> bytes:
@@ -1166,6 +1393,7 @@ def extract_paper_segments(
         raise ValueError(f"Unknown paper segment extraction backend: {backend}")
     warnings: list[str] = []
     grobid_status: dict[str, object] = {}
+    grobid_failure = ""
     if clean_backend in {"auto", "grobid"}:
         grobid_status = grobid_readiness()
     if clean_backend in {"auto", "grobid"} and grobid_status.get("available"):
@@ -1186,12 +1414,16 @@ def extract_paper_segments(
                         "structured_extraction_warnings": [],
                         "grobid_status": "available",
                         "grobid_available": True,
+                        "grobid_last_error": "",
+                        "grobid_last_failed_at": "",
+                        "grobid_failure_pdf_sha256": "",
                     },
                 )
                 return segments
             warnings.append("GROBID returned no usable segments; used page-text fallback.")
         except Exception as exc:
-            warnings.append(f"GROBID extraction failed: {exc}")
+            grobid_failure = f"GROBID extraction failed: {exc}"
+            warnings.append(grobid_failure)
     elif clean_backend in {"auto", "grobid"}:
         message = _clean_text(grobid_status.get("message")) or "GROBID unavailable; used page-text fallback."
         warnings.append(message)
@@ -1208,6 +1440,10 @@ def extract_paper_segments(
         "structured_extraction_warnings": warnings
         or ["GROBID unavailable or returned no usable segments; used page-text fallback."],
     }
+    if grobid_failure:
+        metadata["grobid_last_error"] = grobid_failure
+        metadata["grobid_last_failed_at"] = _now()
+        metadata["grobid_failure_pdf_sha256"] = _paper_pdf_fingerprint(_source_by_id(profile, source_id)[1])
     if grobid_status:
         metadata["grobid_status"] = _clean_text(grobid_status.get("status")) or (
             "available" if grobid_status.get("available") else "unavailable"
@@ -1291,6 +1527,7 @@ def ensure_paper_reading_artifacts(
     source_id: str,
     *,
     prefer_grobid: bool = True,
+    force_grobid: bool = False,
     target_lang: str = "",
     progress_callback: Any | None = None,
 ) -> dict[str, object]:
@@ -1316,6 +1553,8 @@ def ensure_paper_reading_artifacts(
             {
                 "phase": phase,
                 "label": label,
+                "message": label,
+                "source_id": source_id,
                 "current": current,
                 "total": total,
                 "saved": saved,
@@ -1341,8 +1580,23 @@ def ensure_paper_reading_artifacts(
     segments = load_paper_segments(profile, source_id)
     marker = _clean_text(source_metadata.get("reading_artifacts_pdf_sha256"))
     pdf_changed = bool(marker and pdf_fingerprint and marker != pdf_fingerprint)
+    current_structure_backend = _clean_text(source_metadata.get("structure_backend"))
+    skip_recent_grobid_failure = bool(
+        prefer_grobid
+        and not force_grobid
+        and current_structure_backend
+        and current_structure_backend != "grobid"
+        and pages
+        and segments
+        and not pdf_changed
+        and _metadata_has_recent_grobid_failure(source_metadata, pdf_fingerprint)
+    )
     needs_pages = not pages or pdf_changed
-    needs_segments = not segments or pdf_changed
+    needs_segments = (
+        not segments
+        or pdf_changed
+        or bool(prefer_grobid and current_structure_backend != "grobid" and not skip_recent_grobid_failure)
+    )
     warnings: list[str] = []
 
     if needs_pages:
@@ -1354,12 +1608,25 @@ def ensure_paper_reading_artifacts(
 
     _, source = _source_by_id(profile, source_id)
     source_metadata = dict(source.metadata or {})
+    if skip_recent_grobid_failure and not needs_pages:
+        emit_progress(
+            "fallback_ready",
+            "Using current fallback text; recent GROBID failure was not retried.",
+            2,
+            saved=len(segments),
+        )
     if needs_segments:
-        configured_grobid = bool(_clean_text(os.getenv("NBLANE_GROBID_URL")))
-        segment_backend = "grobid" if prefer_grobid and configured_grobid else "fallback"
+        segment_backend = "grobid" if prefer_grobid else "fallback"
+        segment_label = "Saving fallback text..."
+        if segment_backend == "grobid":
+            segment_label = (
+                "Forcing GROBID full-text upgrade..."
+                if force_grobid
+                else "Running GROBID full-text extraction..."
+            )
         emit_progress(
             "running_grobid" if segment_backend == "grobid" else "saving_segments",
-            "Running GROBID..." if segment_backend == "grobid" else "Saving fallback text...",
+            segment_label,
             2,
             saved=len(segments),
         )
@@ -1498,6 +1765,11 @@ def grobid_available(url: str | None = None) -> bool:
     return bool(grobid_readiness(url).get("available"))
 
 
+def _grobid_fulltext_timeout_seconds() -> float:
+    configured = _positive_float(os.getenv("NBLANE_GROBID_FULLTEXT_TIMEOUT_SECONDS"))
+    return configured if configured is not None else GROBID_FULLTEXT_TIMEOUT_SECONDS_DEFAULT
+
+
 def process_grobid_fulltext(profile: str | Path, source_id: str) -> GrobidDocument:
     """Call GROBID ``processFulltextDocument`` for one paper PDF."""
 
@@ -1533,7 +1805,7 @@ def process_grobid_fulltext(profile: str | Path, source_id: str) -> GrobidDocume
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with urllib.request.urlopen(request, timeout=_grobid_fulltext_timeout_seconds()) as response:
         tei = response.read().decode("utf-8", errors="replace")
     return GrobidDocument(source_id=source_id, tei_xml=tei, generated_at=_now())
 
@@ -4920,7 +5192,11 @@ def build_paper_structure_units(
     return units
 
 
-def reader_translation_structure_units(units: list[PaperStructureUnit | dict]) -> list[dict[str, object]]:
+def reader_translation_structure_units(
+    units: list[PaperStructureUnit | dict],
+    *,
+    include_references: bool | None = True,
+) -> list[dict[str, object]]:
     """Return structure units that belong in the normal Reader translation flow."""
 
     rows: list[dict[str, object]] = []
@@ -4930,6 +5206,8 @@ def reader_translation_structure_units(units: list[PaperStructureUnit | dict]) -
         if unit is None or unit.kind not in allowed:
             continue
         if _paper_structure_unit_is_translation_noise(unit):
+            continue
+        if _paper_structure_unit_is_reference_section(unit) and not _paper_translation_include_references(include_references):
             continue
         if not unit.translatable and not unit.display_source:
             continue
@@ -4967,6 +5245,50 @@ def _paper_structure_unit_is_translation_noise(unit: PaperStructureUnit) -> bool
     if unit.kind in {"paragraph", "heading"} and lower in _TABLE_OR_FIGURE_HEADINGS and len(lower.split()) <= 4:
         return True
     return False
+
+
+def _truthy_env(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _paper_translation_include_references(value: bool | None = None) -> bool:
+    if value is not None:
+        return bool(value)
+    return _truthy_env(os.environ.get(PAPER_TRANSLATION_INCLUDE_REFERENCES_ENV))
+
+
+def _paper_reference_section_label(value: object) -> str:
+    clean = " ".join(_clean_text(value).split()).strip(" .:-").lower()
+    if not clean:
+        return ""
+    clean = re.sub(r"^(?:\d+(?:\.\d+)*|[ivxlcdm]+)\s*[\.\)]?\s*", "", clean, flags=re.IGNORECASE)
+    return clean.strip(" .:-")
+
+
+def _paper_section_path_is_reference_section(section_path: object, *, heading_text: object = "") -> bool:
+    labels = [_paper_reference_section_label(part) for part in _clean_list(section_path)]
+    if _clean_text(heading_text):
+        labels.append(_paper_reference_section_label(heading_text))
+    for label_text in labels:
+        if not label_text:
+            continue
+        if label_text in PAPER_REFERENCE_SECTION_LABELS:
+            return True
+        if label_text.startswith("references"):
+            return True
+        if label_text.startswith("bibliography"):
+            return True
+    return False
+
+
+def _paper_structure_unit_is_reference_section(unit: PaperStructureUnit) -> bool:
+    heading_text = unit.text if unit.kind == "heading" else ""
+    return _paper_section_path_is_reference_section(unit.section_path, heading_text=heading_text)
+
+
+def _paper_segment_is_reference_section(segment: PaperSegment) -> bool:
+    heading_text = segment.text if _clean_text(segment.kind).lower() == "heading" else ""
+    return _paper_section_path_is_reference_section(segment.section_path, heading_text=heading_text)
 
 
 def build_translation_units(
@@ -5534,14 +5856,108 @@ def _blank_translation_backend_warning(ai_result: object, translations: list[dic
     return ""
 
 
+def _positive_int(value: object) -> int | None:
+    try:
+        clean = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return clean if clean > 0 else None
+
+
+def _paper_translation_batch_size(scope: str, requested: object = None) -> int:
+    explicit = _positive_int(requested)
+    if explicit is not None:
+        return max(1, min(50, explicit))
+    clean_scope = _clean_text(scope).lower()
+    env_key = {
+        "structure": "NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_SIZE",
+        "layout": "NBLANE_PAPER_TRANSLATION_LAYOUT_BATCH_SIZE",
+        "page": "NBLANE_PAPER_TRANSLATION_PAGE_BATCH_SIZE",
+        "segment": "NBLANE_PAPER_TRANSLATION_SEGMENT_BATCH_SIZE",
+    }.get(clean_scope, "")
+    configured = _positive_int(os.getenv(env_key)) if env_key else None
+    if configured is None:
+        configured = _positive_int(os.getenv("NBLANE_PAPER_TRANSLATION_BATCH_SIZE"))
+    default = {
+        "structure": PAPER_STRUCTURE_TRANSLATION_BATCH_SIZE_DEFAULT,
+        "layout": PAPER_LAYOUT_TRANSLATION_BATCH_SIZE_DEFAULT,
+        "page": PAPER_PAGE_TRANSLATION_BATCH_SIZE_DEFAULT,
+    }.get(clean_scope, PAPER_TRANSLATION_BATCH_SIZE_DEFAULT)
+    return max(1, min(50, configured if configured is not None else default))
+
+
+def _paper_translation_batch_char_limit(scope: str) -> int:
+    clean_scope = _clean_text(scope).lower()
+    env_key = {
+        "structure": "NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_CHARS",
+        "layout": "NBLANE_PAPER_TRANSLATION_LAYOUT_BATCH_CHARS",
+        "page": "NBLANE_PAPER_TRANSLATION_PAGE_BATCH_CHARS",
+        "segment": "NBLANE_PAPER_TRANSLATION_SEGMENT_BATCH_CHARS",
+    }.get(clean_scope, "")
+    configured = _positive_int(os.getenv(env_key)) if env_key else None
+    if configured is None:
+        configured = _positive_int(os.getenv("NBLANE_PAPER_TRANSLATION_BATCH_CHARS"))
+    default = PAPER_PAGE_TRANSLATION_BATCH_CHARS_DEFAULT if clean_scope == "page" else PAPER_TRANSLATION_BATCH_CHARS_DEFAULT
+    return max(1200, min(60000, configured if configured is not None else default))
+
+
+def _paper_translation_payload_text(value: object) -> str:
+    if isinstance(value, PaperSegment):
+        return _clean_text(value.text)
+    if isinstance(value, dict):
+        return _clean_text(value.get("source_text") or value.get("text"))
+    return ""
+
+
+def _paper_translation_batches(
+    items: list[dict[str, object]],
+    scope: str,
+    requested_batch_size: object = None,
+) -> list[list[dict[str, object]]]:
+    clean_batch_size = _paper_translation_batch_size(scope, requested_batch_size)
+    char_limit = _paper_translation_batch_char_limit(scope)
+    batches: list[list[dict[str, object]]] = []
+    current: list[dict[str, object]] = []
+    current_chars = 0
+    for item in items:
+        item_chars = max(1, len(_paper_translation_payload_text(item)))
+        if current and (len(current) >= clean_batch_size or current_chars + item_chars > char_limit):
+            batches.append(current)
+            current = []
+            current_chars = 0
+        current.append(item)
+        current_chars += item_chars
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _persist_translation_batch(
+    profile: str | Path,
+    source_id: str,
+    rows: list[dict[str, object]],
+    persisted_count: int,
+    warnings: list[str],
+) -> int:
+    if len(rows) <= persisted_count:
+        return persisted_count
+    try:
+        upsert_paper_translations(profile, source_id, rows[persisted_count:])
+    except Exception as exc:
+        warnings.append(f"Saving translation batch failed: {exc}")
+        return persisted_count
+    return len(rows)
+
+
 def translate_full_paper(
     profile: str | Path,
     source_id: str,
     target_lang: str = "zh",
     mode: str = "missing_or_stale",
-    batch_size: int = 20,
+    batch_size: int | None = None,
     *,
     scope_strategy: str = "segment",
+    include_references: bool | None = None,
     ai_profile: str | None = None,
     require_review: bool = True,
     progress_callback: Any | None = None,
@@ -5561,10 +5977,8 @@ def translate_full_paper(
         clean_scope_strategy = "auto"
     if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
         raise ValueError(f"Unknown full-paper translation mode: {mode}")
-    try:
-        clean_batch_size = max(1, min(50, int(batch_size or 20)))
-    except (TypeError, ValueError):
-        clean_batch_size = 20
+    requested_batch_size = _positive_int(batch_size)
+    clean_include_references = _paper_translation_include_references(include_references)
 
     segments = load_paper_segments(profile, source_id)
     if not segments:
@@ -5572,7 +5986,10 @@ def translate_full_paper(
         segments = load_paper_segments(profile, source_id)
     pages = load_paper_pages(profile, source_id)
     structure_units = (
-        reader_translation_structure_units(build_paper_structure_units(profile, source_id))
+        reader_translation_structure_units(
+            build_paper_structure_units(profile, source_id),
+            include_references=clean_include_references,
+        )
         if clean_scope_strategy in {"auto", "structure"}
         else []
     )
@@ -5611,17 +6028,33 @@ def translate_full_paper(
 
         warnings: list[str] = []
         accepted_rows: list[dict[str, object]] = []
+        persisted_count = 0
         unit_payloads = [_layout_unit_translation_payload(unit, source_id=source_id) for unit in selected_units]
         unit_map: dict[str, dict[str, object]] = {}
         for unit, payload in zip(selected_units, unit_payloads, strict=False):
             unit_map[_clean_text(payload.get("segment_id"))] = unit
             unit_map[_clean_text(payload.get("scope_ref"))] = unit
-        batches = [
-            unit_payloads[index : index + clean_batch_size]
-            for index in range(0, len(unit_payloads), clean_batch_size)
-        ]
+        batches = _paper_translation_batches(unit_payloads, positioned_scope_type, requested_batch_size)
         batches_completed = 0
         units_processed = 0
+        if progress_callback is not None:
+            try:
+                progress_callback(
+                    {
+                        "source_id": source_id,
+                        "target_lang": clean_lang,
+                        "mode": clean_mode,
+                        "scope": positioned_scope_type,
+                        "batches": len(batches),
+                        "batches_completed": batches_completed,
+                        "segments_selected": len(selected_units),
+                        "segments_processed": units_processed,
+                        "updated": len(accepted_rows),
+                        "warnings": len(warnings),
+                    }
+                )
+            except Exception as exc:
+                warnings.append(f"Progress callback failed: {exc}")
         if batches:
             from nblane.core.ai.gateway import translate_paper_segments
 
@@ -5638,6 +6071,24 @@ def translate_full_paper(
                     warnings.append(f"Translation batch failed: {exc}")
                     batches_completed += 1
                     units_processed += len(batch)
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(
+                                {
+                                    "source_id": source_id,
+                                    "target_lang": clean_lang,
+                                    "mode": clean_mode,
+                                    "scope": positioned_scope_type,
+                                    "batches": len(batches),
+                                    "batches_completed": batches_completed,
+                                    "segments_selected": len(selected_units),
+                                    "segments_processed": units_processed,
+                                    "updated": len(accepted_rows),
+                                    "warnings": len(warnings),
+                                }
+                            )
+                        except Exception as callback_exc:
+                            warnings.append(f"Progress callback failed: {callback_exc}")
                     continue
                 warnings.extend(str(warning) for warning in result.warnings)
                 if result.error:
@@ -5687,6 +6138,13 @@ def translate_full_paper(
                             "status": _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
                         }
                     )
+                persisted_count = _persist_translation_batch(
+                    profile,
+                    source_id,
+                    accepted_rows,
+                    persisted_count,
+                    warnings,
+                )
                 batches_completed += 1
                 units_processed += len(batch)
                 if progress_callback is not None:
@@ -5707,8 +6165,13 @@ def translate_full_paper(
                         )
                     except Exception as exc:
                         warnings.append(f"Progress callback failed: {exc}")
-        if accepted_rows:
-            upsert_paper_translations(profile, source_id, accepted_rows)
+        persisted_count = _persist_translation_batch(
+            profile,
+            source_id,
+            accepted_rows,
+            persisted_count,
+            warnings,
+        )
         final_translations = load_paper_translations(profile, source_id)
         counts = _layout_translation_status_counts(
             layout_units,
@@ -5721,6 +6184,7 @@ def translate_full_paper(
             "target_lang": clean_lang,
             "mode": clean_mode,
             "scope": positioned_scope_type,
+            "include_references": clean_include_references,
             "segments_total": len([unit for unit in layout_units if bool(unit.get("translatable", True))]),
             "segments_selected": len(selected_units),
             "batches": len(batches),
@@ -5762,6 +6226,7 @@ def translate_full_paper(
 
         warnings: list[str] = []
         accepted_rows: list[dict[str, object]] = []
+        persisted_count = 0
         page_map: dict[str, PaperPage] = {}
         page_payloads: list[dict[str, object]] = []
         for page_row in selected_pages:
@@ -5783,12 +6248,27 @@ def translate_full_paper(
             page_map[synthetic_id] = page_row
             page_map[payload["scope_ref"]] = page_row
             page_payloads.append(payload)
-        batches = [
-            page_payloads[index : index + clean_batch_size]
-            for index in range(0, len(page_payloads), clean_batch_size)
-        ]
+        batches = _paper_translation_batches(page_payloads, "page", requested_batch_size)
         batches_completed = 0
         pages_processed = 0
+        if progress_callback is not None:
+            try:
+                progress_callback(
+                    {
+                        "source_id": source_id,
+                        "target_lang": clean_lang,
+                        "mode": clean_mode,
+                        "scope": "page",
+                        "batches": len(batches),
+                        "batches_completed": batches_completed,
+                        "segments_selected": len(selected_pages),
+                        "segments_processed": pages_processed,
+                        "updated": len(accepted_rows),
+                        "warnings": len(warnings),
+                    }
+                )
+            except Exception as exc:
+                warnings.append(f"Progress callback failed: {exc}")
         if batches:
             from nblane.core.ai.gateway import translate_paper_segments
 
@@ -5805,6 +6285,24 @@ def translate_full_paper(
                     warnings.append(f"Translation batch failed: {exc}")
                     batches_completed += 1
                     pages_processed += len(batch)
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(
+                                {
+                                    "source_id": source_id,
+                                    "target_lang": clean_lang,
+                                    "mode": clean_mode,
+                                    "scope": "page",
+                                    "batches": len(batches),
+                                    "batches_completed": batches_completed,
+                                    "segments_selected": len(selected_pages),
+                                    "segments_processed": pages_processed,
+                                    "updated": len(accepted_rows),
+                                    "warnings": len(warnings),
+                                }
+                            )
+                        except Exception as callback_exc:
+                            warnings.append(f"Progress callback failed: {callback_exc}")
                     continue
                 warnings.extend(str(warning) for warning in result.warnings)
                 if result.error:
@@ -5865,6 +6363,13 @@ def translate_full_paper(
                             "status": _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
                         }
                     )
+                persisted_count = _persist_translation_batch(
+                    profile,
+                    source_id,
+                    accepted_rows,
+                    persisted_count,
+                    warnings,
+                )
                 batches_completed += 1
                 pages_processed += len(batch)
                 if progress_callback is not None:
@@ -5885,8 +6390,13 @@ def translate_full_paper(
                         )
                     except Exception as exc:
                         warnings.append(f"Progress callback failed: {exc}")
-        if accepted_rows:
-            upsert_paper_translations(profile, source_id, accepted_rows)
+        persisted_count = _persist_translation_batch(
+            profile,
+            source_id,
+            accepted_rows,
+            persisted_count,
+            warnings,
+        )
         final_translations = load_paper_translations(profile, source_id)
         counts = _page_translation_status_counts(pages, final_translations, target_lang=clean_lang)
         return {
@@ -5894,6 +6404,7 @@ def translate_full_paper(
             "target_lang": clean_lang,
             "mode": clean_mode,
             "scope": "page",
+            "include_references": clean_include_references,
             "segments_total": len(pages),
             "segments_selected": len(selected_pages),
             "batches": len(batches),
@@ -5910,8 +6421,13 @@ def translate_full_paper(
         for row in translations
         if row.segment_id and row.target_lang == clean_lang
     }
+    translation_segments = [
+        segment
+        for segment in segments
+        if clean_include_references or not _paper_segment_is_reference_section(segment)
+    ]
     selected_segments: list[PaperSegment] = []
-    for segment in segments:
+    for segment in translation_segments:
         existing = existing_by_segment.get(segment.segment_id)
         is_current = _translation_is_current(existing, segment, clean_lang)
         is_stale = existing is not None and not is_current
@@ -5926,13 +6442,30 @@ def translate_full_paper(
 
     warnings: list[str] = []
     accepted_rows: list[dict[str, object]] = []
+    persisted_count = 0
     segment_map = {segment.segment_id: segment for segment in selected_segments}
-    batches = [
-        selected_segments[index : index + clean_batch_size]
-        for index in range(0, len(selected_segments), clean_batch_size)
-    ]
+    segment_payloads = [segment.to_dict() for segment in selected_segments]
+    batches = _paper_translation_batches(segment_payloads, "segment", requested_batch_size)
     batches_completed = 0
     segments_processed = 0
+    if progress_callback is not None:
+        try:
+            progress_callback(
+                {
+                    "source_id": source_id,
+                    "target_lang": clean_lang,
+                    "mode": clean_mode,
+                    "scope": "segment",
+                    "batches": len(batches),
+                    "batches_completed": batches_completed,
+                    "segments_selected": len(selected_segments),
+                    "segments_processed": segments_processed,
+                    "updated": len(accepted_rows),
+                    "warnings": len(warnings),
+                }
+            )
+        except Exception as exc:
+            warnings.append(f"Progress callback failed: {exc}")
     if batches:
         from nblane.core.ai.gateway import translate_paper_segments
 
@@ -5941,7 +6474,7 @@ def translate_full_paper(
                 result = translate_paper_segments(
                     ai_profile if ai_profile is not None else _profile_name(profile),
                     source_id,
-                    [segment.to_dict() for segment in batch],
+                    batch,
                     target_lang=clean_lang,
                     require_review=require_review,
                 )
@@ -6026,6 +6559,13 @@ def translate_full_paper(
                         "status": _choice(row.get("status"), PAPER_TRANSLATION_STATUSES, "translated"),
                     }
                 )
+            persisted_count = _persist_translation_batch(
+                profile,
+                source_id,
+                accepted_rows,
+                persisted_count,
+                warnings,
+            )
             batches_completed += 1
             segments_processed += len(batch)
             if progress_callback is not None:
@@ -6046,16 +6586,22 @@ def translate_full_paper(
                 except Exception as exc:
                     warnings.append(f"Progress callback failed: {exc}")
 
-    if accepted_rows:
-        upsert_paper_translations(profile, source_id, accepted_rows)
+    persisted_count = _persist_translation_batch(
+        profile,
+        source_id,
+        accepted_rows,
+        persisted_count,
+        warnings,
+    )
     final_translations = load_paper_translations(profile, source_id)
-    counts = _translation_status_counts(segments, final_translations, target_lang=clean_lang)
+    counts = _translation_status_counts(translation_segments, final_translations, target_lang=clean_lang)
     return {
         "source_id": source_id,
         "target_lang": clean_lang,
         "mode": clean_mode,
         "scope": "segment",
-        "segments_total": len(segments),
+        "include_references": clean_include_references,
+        "segments_total": len(translation_segments),
         "segments_selected": len(selected_segments),
         "batches": len(batches),
         "updated": len(accepted_rows),
@@ -6782,6 +7328,8 @@ class PaperSearchResult:
     open_access_pdf: bool = False
     provider_refs: list[str] = field(default_factory=list)
     why_relevant: str = ""
+    ai_summary: str = ""
+    explanation_links: list[dict[str, str]] = field(default_factory=list)
     link_check: dict[str, object] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     suggested_library_nodes: list[dict[str, object]] = field(default_factory=list)
@@ -6799,6 +7347,10 @@ class PaperSearchResult:
         title = _clean_text(data.get("title"))
         if not title:
             return None
+        canonical_url = _clean_text(data.get("canonical_url") or data.get("url"))
+        pdf_url = _clean_text(data.get("pdf_url") or data.get("open_access_pdf_url"))
+        if not pdf_url and _url_looks_like_pdf(canonical_url):
+            pdf_url = canonical_url
         citation_count = data.get("citation_count") or data.get("citations")
         try:
             citation_value = int(citation_count) if citation_count not in (None, "") else None
@@ -6813,11 +7365,18 @@ class PaperSearchResult:
             doi=_clean_text(data.get("doi")),
             arxiv_id=_clean_text(data.get("arxiv_id")),
             semantic_scholar_id=_clean_text(data.get("semantic_scholar_id") or data.get("paper_id")),
-            canonical_url=_clean_text(data.get("canonical_url") or data.get("url")),
-            pdf_url=_clean_text(data.get("pdf_url") or data.get("open_access_pdf_url")),
-            open_access_pdf=bool(data.get("open_access_pdf") or data.get("pdf_url") or data.get("open_access_pdf_url")),
+            canonical_url=canonical_url,
+            pdf_url=pdf_url,
+            open_access_pdf=bool(data.get("open_access_pdf") or pdf_url),
             provider_refs=_clean_list(data.get("provider_refs") or data.get("providers")),
             why_relevant=_clean_text(data.get("why_relevant") or data.get("reason")),
+            ai_summary=_clean_text(
+                data.get("ai_summary")
+                or data.get("ai_overview")
+                or data.get("plain_language_summary")
+                or data.get("llm_summary")
+            ),
+            explanation_links=_paper_explanation_links(data.get("explanation_links") or data.get("reading_links") or data.get("explainers")),
             link_check=_clean_mapping(data.get("link_check")),
             warnings=_clean_list(data.get("warnings")),
             suggested_library_nodes=[
@@ -6864,6 +7423,8 @@ class PaperSearchResult:
             "open_access_pdf": bool(self.open_access_pdf),
             "provider_refs": list(self.provider_refs),
             "why_relevant": self.why_relevant,
+            "ai_summary": self.ai_summary,
+            "explanation_links": copy.deepcopy(self.explanation_links),
             "link_check": copy.deepcopy(self.link_check),
             "warnings": list(self.warnings),
             "suggested_library_nodes": copy.deepcopy(self.suggested_library_nodes),
@@ -6887,8 +7448,40 @@ class PaperSearchResult:
             "open_access_pdf_url": self.pdf_url,
             "provider_refs": list(self.provider_refs),
             "needs_link_check": bool(self.needs_link_check),
+            "why_relevant": self.why_relevant,
+            "ai_summary": self.ai_summary,
+            "explanation_links": copy.deepcopy(self.explanation_links),
         }
         return {key: value for key, value in data.items() if value not in ("", [], None)}
+
+
+def _paper_explanation_links(value: object) -> list[dict[str, str]]:
+    raw_items = value if isinstance(value, list) else []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if isinstance(item, str):
+            url = _clean_text(item)
+            title = url
+            source = ""
+            summary = ""
+        elif isinstance(item, dict):
+            url = _clean_text(item.get("url") or item.get("link"))
+            title = _clean_text(item.get("title") or item.get("name") or url)
+            source = _clean_text(item.get("source") or item.get("site") or item.get("platform"))
+            summary = _clean_text(item.get("summary") or item.get("note") or item.get("why"))
+        else:
+            continue
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        row = {"url": url, "title": title or url}
+        if source:
+            row["source"] = source
+        if summary:
+            row["summary"] = summary
+        out.append(row)
+    return out[:6]
 
 
 def _canonical_url(url: str) -> str:
@@ -6905,6 +7498,794 @@ def _canonical_url(url: str) -> str:
 def _published_year(value: str) -> str:
     match = re.search(r"(19|20)\d{2}", _clean_text(value))
     return match.group(0) if match else ""
+
+
+def _search_debug(debug: dict[str, Any] | None) -> dict[str, Any] | None:
+    if debug is None:
+        return None
+    debug.setdefault("steps", [])
+    debug.setdefault("warnings", [])
+    return debug
+
+
+def _append_search_warning(debug: dict[str, Any] | None, warning: str) -> None:
+    target = _search_debug(debug)
+    clean = _clean_text(warning)
+    if target is None or not clean:
+        return
+    warnings = target.setdefault("warnings", [])
+    if clean not in warnings:
+        warnings.append(clean)
+
+
+def _append_search_step(debug: dict[str, Any] | None, step: dict[str, object]) -> None:
+    target = _search_debug(debug)
+    if target is None:
+        return
+    clean_step = {key: value for key, value in step.items() if value not in ("", [], None)}
+    target.setdefault("steps", []).append(clean_step)
+    progress = target.get("_progress_callback")
+    if callable(progress):
+        try:
+            progress({"event": "step", "step": clean_step})
+        except Exception:
+            pass
+
+
+def _int_filter(value: object) -> int | None:
+    clean = _clean_text(value)
+    if not re.fullmatch(r"(19|20)\d{2}", clean):
+        return None
+    return int(clean)
+
+
+def _paper_search_year_range(filters: dict | None) -> tuple[int | None, int | None]:
+    filters = filters or {}
+    year_from = _int_filter(filters.get("year_from"))
+    year_to = _int_filter(filters.get("year_to"))
+    if year_from is not None and year_to is not None and year_from > year_to:
+        year_from, year_to = year_to, year_from
+    return year_from, year_to
+
+
+def _paper_search_time_left(filters: dict | None, default: float) -> float:
+    deadline = (filters or {}).get("_deadline_monotonic")
+    try:
+        deadline_value = float(deadline)
+    except (TypeError, ValueError):
+        return max(0.1, default)
+    return max(0.0, min(default, deadline_value - time.monotonic()))
+
+
+def _paper_search_cancelled(filters: dict | None = None, debug: dict[str, Any] | None = None) -> bool:
+    callback = (filters or {}).get("_cancel_check")
+    if not callable(callback):
+        target = _search_debug(debug)
+        callback = target.get("_cancel_check") if target is not None else None
+    if not callable(callback):
+        return False
+    try:
+        return bool(callback())
+    except Exception:
+        return False
+
+
+def _copy_paper_search_filters(filters: dict | None) -> dict[str, Any]:
+    copied: dict[str, Any] = {}
+    for key, value in (filters or {}).items():
+        if str(key).startswith("_") or callable(value):
+            copied[key] = value
+        else:
+            copied[key] = copy.deepcopy(value)
+    return copied
+
+
+def _paper_search_result_matches_year(result: PaperSearchResult, filters: dict | None) -> bool:
+    year_from, year_to = _paper_search_year_range(filters)
+    if year_from is None and year_to is None:
+        return True
+    year = _int_filter(result.year)
+    if year is None:
+        return False
+    if year_from is not None and year < year_from:
+        return False
+    if year_to is not None and year > year_to:
+        return False
+    return True
+
+
+def _paper_search_query_variants(query: str, filters: dict | None = None) -> list[str]:
+    """Return a small ordered set of practical paper-search query variants."""
+
+    clean = " ".join(_clean_text(query).split())
+    if not clean:
+        return []
+    variants: list[str] = []
+
+    def add(value: str) -> None:
+        value = " ".join(_clean_text(value).split())
+        if value and value.lower() not in {item.lower() for item in variants}:
+            variants.append(value)
+
+    core = _paper_search_query_core(clean)
+    lowered = clean.lower()
+    mentions_vla = _paper_search_mentions_vla(clean)
+    mentions_memory = "memory" in lowered or "mem" in lowered or "记忆" in clean
+    wants_recent = _paper_search_recent_requested(clean)
+    wants_survey = _paper_search_survey_requested(clean)
+    if mentions_vla and mentions_memory:
+        add("MemoryVLA")
+        add('"Vision-Language-Action" memory robot')
+        add("VLA memory robotic manipulation")
+        add("vla memory robot")
+        add(core)
+        if core.lower() != clean.lower():
+            add(clean)
+    elif mentions_vla:
+        if core and core.lower() not in {"vla", "vlas"}:
+            add(core)
+            replaced = _paper_search_replace_standalone_vla(core)
+            if replaced.lower() != core.lower():
+                add(replaced)
+        add("vision language action robotics manipulation")
+        if wants_recent:
+            add("Vision-Language-Action robot manipulation latest")
+        add("VLA robot manipulation")
+        if core.lower() != clean.lower():
+            add(clean)
+    else:
+        add(core)
+        if wants_recent:
+            add(f"{core} latest")
+            add(f"{core} recent papers")
+        if wants_survey:
+            add(f"{core} survey")
+        if core.lower() != clean.lower():
+            add(clean)
+    explicit = _clean_list((filters or {}).get("query_variants"))
+    for item in explicit:
+        add(item)
+    return variants[:6]
+
+
+def _paper_search_mentions_vla(query: str) -> bool:
+    lowered = _clean_text(query).lower()
+    return any(
+        term in lowered
+        for term in ("vla", "vlas", "vision-language-action", "vision language action")
+    )
+
+
+def _paper_search_recent_requested(query: str) -> bool:
+    lowered = _clean_text(query).lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "最新",
+            "近期",
+            "近年",
+            "最近",
+            "新近",
+            "latest",
+            "recent",
+            "newest",
+            "state of the art",
+            "sota",
+        )
+    )
+
+
+def _paper_search_survey_requested(query: str) -> bool:
+    lowered = _clean_text(query).lower()
+    return any(marker in lowered for marker in ("综述", "survey", "review", "overview"))
+
+
+def _paper_search_query_core(query: str) -> str:
+    """Strip UI/search-intent words that hurt scholarly provider search."""
+
+    clean = " ".join(_clean_text(query).split())
+    if not clean:
+        return ""
+    core = clean
+    for phrase in (
+        "最新论文",
+        "最新文献",
+        "近期论文",
+        "近年论文",
+        "最近论文",
+        "论文推荐",
+        "推荐论文",
+    ):
+        core = core.replace(phrase, " ")
+    for phrase in ("论文", "文献", "文章", "最新", "近期", "近年", "最近", "新近", "推荐", "搜索", "搜一下", "查找", "找"):
+        core = core.replace(phrase, " ")
+    core = re.sub(
+        r"(?i)\b(latest|recent|newest|new|paper|papers|publication|publications|recommend|recommendations?|find|search)\b",
+        " ",
+        core,
+    )
+    core = re.sub(r"\s+", " ", core).strip(" ,，。;；:：")
+    return core or clean
+
+
+def _paper_search_replace_standalone_vla(query: str) -> str:
+    return re.sub(
+        r"(?i)(?<![A-Za-z0-9])vlas?(?![A-Za-z0-9])",
+        "Vision-Language-Action",
+        _clean_text(query),
+    )
+
+
+def _paper_search_normalized_terms(query: str) -> list[str]:
+    return [
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9-]{1,}", _clean_text(query).lower())
+        if term not in {"the", "and", "with", "for", "from", "paper", "papers"}
+    ]
+
+
+def _paper_search_relevance_score(result: PaperSearchResult, query: str) -> float:
+    title = result.title.lower()
+    body = " ".join(
+        [
+            result.abstract,
+            " ".join(result.tags),
+            " ".join(result.fields_of_study),
+            " ".join(result.provider_refs),
+        ]
+    ).lower()
+    query_terms = _paper_search_normalized_terms(query)
+    score = 0.0
+    for term in query_terms:
+        if term in title:
+            score += 5.0
+        if term in body:
+            score += 1.0
+    if _clean_text(query).lower() and _clean_text(query).lower() in title:
+        score += 4.0
+    lowered_query = _clean_text(query).lower()
+    if "vla" in lowered_query and "memory" in lowered_query:
+        if "memory" in title:
+            score += 5.0
+        if "vla" in title or "vision-language-action" in title or "vision language action" in title:
+            score += 5.0
+        if any(
+            marker in " ".join([title, body])
+            for marker in (
+                "vision-language-action",
+                "vision language action",
+                "robot",
+                "robotic",
+                "manipulation",
+                "embodied",
+                "vla model",
+                "vlas",
+            )
+        ):
+            score += 10.0
+        if any(marker in " ".join([title, body]) for marker in ("integrin", "cd4", "t cell", "hiv provirus")):
+            score -= 12.0
+    if result.pdf_url:
+        score += 2.0
+    if "arxiv" in result.provider_refs:
+        score += 1.0
+    year = _int_filter(result.year)
+    if year is not None:
+        score += min(max(year - 2000, 0), 40) / 100.0
+        if _paper_search_recent_requested(query):
+            current_year = date.today().year
+            if year >= current_year:
+                score += 5.0
+            elif year == current_year - 1:
+                score += 3.0
+            elif year == current_year - 2:
+                score += 1.0
+    return score
+
+
+def _paper_search_reason_is_generic(value: str) -> bool:
+    clean = _clean_text(value)
+    if not clean:
+        return True
+    lowered = clean.rstrip(".").lower()
+    return lowered in {
+        "matched provider search query",
+        "manual url / doi import candidate",
+        "provided search candidate; verify url/doi before import",
+    } or lowered.startswith("matched arxiv web search query:")
+
+
+def _paper_search_provider_label(result: PaperSearchResult) -> str:
+    labels: list[str] = []
+    raw_refs = [*result.provider_refs, result.canonical_url, result.pdf_url]
+    for ref in raw_refs:
+        clean = _clean_text(ref).lower()
+        label = ""
+        if "arxiv" in clean:
+            label = "arXiv"
+        elif "openreview" in clean:
+            label = "OpenReview"
+        elif "openalex" in clean:
+            label = "OpenAlex"
+        elif "semantic" in clean or "s2orc" in clean:
+            label = "Semantic Scholar"
+        elif "doi.org" in clean or result.doi:
+            label = "DOI"
+        elif clean.startswith("http"):
+            parsed = urllib.parse.urlparse(clean)
+            label = parsed.netloc.removeprefix("www.")
+        elif clean:
+            label = clean.split(":", 1)[0].replace("_", " ").title()
+        if label and label not in labels:
+            labels.append(label)
+    return ", ".join(labels[:2])
+
+
+def _paper_search_selection_reason(result: PaperSearchResult, query: str) -> str:
+    query_text = _clean_text(query)
+    lowered_query = query_text.lower()
+    haystack = " ".join(
+        [
+            result.title,
+            result.abstract,
+            " ".join(result.tags),
+            " ".join(result.fields_of_study),
+            " ".join(result.provider_refs),
+        ]
+    ).lower()
+    title = result.title.lower()
+    matches: list[str] = []
+
+    def add_match(label: str) -> None:
+        if label and label not in matches:
+            matches.append(label)
+
+    if "vla" in lowered_query or "vision-language-action" in lowered_query or "vision language action" in lowered_query:
+        if any(marker in haystack for marker in ("vla", "vision-language-action", "vision language action")):
+            add_match("VLA/Vision-Language-Action")
+    if "memory" in lowered_query or "mem" in lowered_query:
+        if "memory" in haystack or re.search(r"\bmem[a-z0-9-]*\b", title):
+            add_match("memory")
+    if any(marker in lowered_query for marker in ("robot", "manipulation", "vla")):
+        if any(marker in haystack for marker in ("robot", "robotic", "manipulation", "embodied")):
+            add_match("robotics/manipulation")
+    for term in _paper_search_normalized_terms(query_text):
+        if term in {"vla", "memory", "mem"}:
+            continue
+        if term in title:
+            add_match(f"{term} in the title")
+        elif term in haystack:
+            add_match(term)
+        if len(matches) >= 4:
+            break
+
+    details: list[str] = []
+    if matches:
+        details.append("the title/abstract matches " + ", ".join(matches[:4]))
+    elif query_text:
+        details.append(f"it matches the search intent for '{query_text}'")
+    else:
+        details.append("it has importable paper metadata")
+    if result.year:
+        details.append(f"it is marked as a {result.year} paper")
+    provider_label = _paper_search_provider_label(result)
+    if result.pdf_url or _url_looks_like_pdf(result.canonical_url):
+        pdf_detail = "a direct PDF is available"
+        if provider_label:
+            pdf_detail += f" via {provider_label}"
+        details.append(pdf_detail)
+    elif provider_label:
+        details.append(f"the source is {provider_label}")
+    return "Selected for this query because " + "; ".join(details) + "."
+
+
+def _paper_link_source_label(url: str, fallback: str = "") -> str:
+    parsed = urllib.parse.urlparse(_clean_text(url))
+    host = parsed.netloc.lower().removeprefix("www.")
+    if not host:
+        return fallback
+    labels = {
+        "arxiv.org": "arXiv",
+        "doi.org": "DOI",
+        "openreview.net": "OpenReview",
+        "github.com": "GitHub",
+        "zhihu.com": "Zhihu",
+        "xiaohongshu.com": "Xiaohongshu",
+        "bilibili.com": "Bilibili",
+        "youtube.com": "YouTube",
+        "youtu.be": "YouTube",
+    }
+    for marker, label in labels.items():
+        if host == marker or host.endswith(f".{marker}"):
+            return label
+    return fallback or host
+
+
+def _paper_search_explanation_links_for_result(result: PaperSearchResult) -> list[dict[str, str]]:
+    links = _paper_explanation_links(result.explanation_links)
+    seen = {_canonical_url(_clean_text(row.get("url"))) for row in links}
+
+    def add(url: str, title: str, source: str = "", summary: str = "") -> None:
+        clean_url = _clean_text(url)
+        key = _canonical_url(clean_url)
+        if not clean_url or key in seen:
+            return
+        seen.add(key)
+        row = {"url": clean_url, "title": title or clean_url}
+        if source:
+            row["source"] = source
+        if summary:
+            row["summary"] = summary
+        links.append(row)
+
+    canonical_url = _clean_text(result.canonical_url)
+    pdf_url = _clean_text(result.pdf_url)
+    if canonical_url and not _url_looks_like_pdf(canonical_url):
+        source = _paper_link_source_label(canonical_url, "Paper page")
+        title = "arXiv abstract" if source == "arXiv" else "Paper page"
+        add(canonical_url, title, source, "Source page with abstract, metadata, and related references.")
+    if result.doi:
+        add(f"https://doi.org/{result.doi}", "Publisher / DOI page", "DOI", "Publisher landing page resolved from the DOI.")
+    if pdf_url and not links:
+        source = _paper_link_source_label(pdf_url, "PDF")
+        add(pdf_url, "Direct PDF", source, "Direct PDF for reading when no separate explainer page is available.")
+    return links[:6]
+
+
+def _enrich_paper_search_results(rows: list[PaperSearchResult], query: str) -> list[PaperSearchResult]:
+    for row in rows:
+        if _paper_search_reason_is_generic(row.why_relevant):
+            row.why_relevant = _paper_search_selection_reason(row, query)
+        row.explanation_links = _paper_search_explanation_links_for_result(row)
+        row.candidate_id = row.candidate_id or row.fingerprint()[:16]
+    return rows
+
+
+def _dedupe_paper_search_results(rows: list[PaperSearchResult]) -> list[PaperSearchResult]:
+    out: list[PaperSearchResult] = []
+    seen: set[str] = set()
+    for row in rows:
+        keys = [
+            row.doi.lower(),
+            row.arxiv_id.lower(),
+            row.semantic_scholar_id.lower(),
+            _canonical_url(row.canonical_url),
+            _canonical_url(row.pdf_url),
+            row.fingerprint(),
+        ]
+        key = next((item for item in keys if item), row.fingerprint())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def _filter_paper_search_results(
+    rows: list[PaperSearchResult],
+    filters: dict | None,
+    *,
+    debug: dict[str, Any] | None = None,
+) -> list[PaperSearchResult]:
+    filtered: list[PaperSearchResult] = []
+    dropped_no_pdf = 0
+    dropped_year = 0
+    for row in rows:
+        if bool((filters or {}).get("has_open_access_pdf")) and not _paper_search_result_has_downloadable_pdf(row):
+            dropped_no_pdf += 1
+            continue
+        if not _paper_search_result_matches_year(row, filters):
+            dropped_year += 1
+            continue
+        filtered.append(row)
+    target = _search_debug(debug)
+    if target is not None:
+        dropped = target.setdefault("dropped", {})
+        dropped["no_pdf"] = int(dropped.get("no_pdf") or 0) + dropped_no_pdf
+        dropped["year"] = int(dropped.get("year") or 0) + dropped_year
+    return filtered
+
+
+def _squash_html_text(value: object) -> str:
+    clean = unescape(_clean_text(value))
+    clean = re.sub(r"\s+", " ", clean)
+    clean = re.sub(r"\s+-\s+", "-", clean)
+    clean = re.sub(r"\s+([:;,.)\]])", r"\1", clean)
+    clean = re.sub(r"([(])\s+", r"\1", clean)
+    clean = clean.replace(" Abstract :", "").replace("Abstract :", "")
+    clean = clean.replace("\u25bd More", "").replace("\u25b3 Less", "")
+    return clean.strip()
+
+
+def _absolute_arxiv_url(url: str) -> str:
+    return urllib.parse.urljoin("https://arxiv.org", _clean_text(url))
+
+
+def _arxiv_id_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(_clean_text(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] in {"abs", "pdf"}:
+        return parts[1].removesuffix(".pdf")
+    return ""
+
+
+class _ArxivSearchHTMLParser(HTMLParser):
+    """Small structured parser for arXiv search result pages."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict[str, object]] = []
+        self._current: dict[str, object] | None = None
+        self._capture_stack: list[tuple[str, str]] = []
+        self._author_parts: list[str] = []
+        self._tag_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_dict = {key: value or "" for key, value in attrs}
+        classes = set(_clean_text(attrs_dict.get("class")).split())
+        if tag == "li" and "arxiv-result" in classes:
+            self._current = {
+                "title_parts": [],
+                "abstract_parts": [],
+                "authors": [],
+                "tags": [],
+                "submitted_parts": [],
+                "canonical_url": "",
+                "pdf_url": "",
+                "arxiv_id": "",
+            }
+            self._capture_stack = []
+            return
+        if self._current is None:
+            return
+        href = _absolute_arxiv_url(attrs_dict.get("href", "")) if tag == "a" else ""
+        arxiv_id = _arxiv_id_from_url(href)
+        if arxiv_id:
+            if "/abs/" in urllib.parse.urlparse(href).path and not self._current.get("canonical_url"):
+                self._current["canonical_url"] = href
+                self._current["arxiv_id"] = arxiv_id
+            if "/pdf/" in urllib.parse.urlparse(href).path:
+                self._current["pdf_url"] = href
+                self._current["arxiv_id"] = self._current.get("arxiv_id") or arxiv_id
+        if tag == "p" and "title" in classes:
+            self._capture_stack.append(("title", tag))
+            return
+        if tag == "p" and "authors" in classes:
+            self._capture_stack.append(("authors_block", tag))
+            return
+        if tag == "a" and self._capture_active("authors_block"):
+            self._author_parts = []
+            self._capture_stack.append(("author", tag))
+            return
+        if tag == "span" and "tag" in classes:
+            self._tag_parts = []
+            self._capture_stack.append(("tag", tag))
+            return
+        if tag == "span" and "abstract-full" in classes:
+            self._capture_stack.append(("abstract", tag))
+            return
+        if tag == "p" and "is-size-7" in classes and "comments" not in classes:
+            self._capture_stack.append(("submitted", tag))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "li" and self._current is not None:
+            self._finish_current()
+            self._current = None
+            self._capture_stack = []
+            return
+        if self._current is None or not self._capture_stack:
+            return
+        name, capture_tag = self._capture_stack[-1]
+        if capture_tag != tag:
+            return
+        self._capture_stack.pop()
+        if name == "author":
+            author = _squash_html_text(" ".join(self._author_parts))
+            authors = self._current.setdefault("authors", [])
+            if author and isinstance(authors, list) and author not in authors:
+                authors.append(author)
+            self._author_parts = []
+        elif name == "tag":
+            tag_text = _squash_html_text(" ".join(self._tag_parts))
+            tags = self._current.setdefault("tags", [])
+            if tag_text and isinstance(tags, list) and tag_text not in tags:
+                tags.append(tag_text)
+            self._tag_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current is None:
+            return
+        if self._capture_active("title"):
+            self._current.setdefault("title_parts", []).append(data)
+        if self._capture_active("abstract"):
+            self._current.setdefault("abstract_parts", []).append(data)
+        if self._capture_active("submitted"):
+            self._current.setdefault("submitted_parts", []).append(data)
+        if self._capture_active("author"):
+            self._author_parts.append(data)
+        if self._capture_active("tag"):
+            self._tag_parts.append(data)
+
+    def _capture_active(self, name: str) -> bool:
+        return any(item[0] == name for item in self._capture_stack)
+
+    def _finish_current(self) -> None:
+        if self._current is None:
+            return
+        title = _squash_html_text(" ".join(self._current.get("title_parts") or []))
+        canonical_url = _clean_text(self._current.get("canonical_url"))
+        pdf_url = _clean_text(self._current.get("pdf_url"))
+        arxiv_id = _clean_text(self._current.get("arxiv_id")) or _arxiv_id_from_url(canonical_url)
+        if not pdf_url and arxiv_id:
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+        if not title or not arxiv_id:
+            return
+        submitted = _squash_html_text(" ".join(self._current.get("submitted_parts") or []))
+        self.results.append(
+            {
+                "title": title,
+                "canonical_url": canonical_url or f"https://arxiv.org/abs/{arxiv_id}",
+                "pdf_url": pdf_url,
+                "arxiv_id": arxiv_id,
+                "authors": list(self._current.get("authors") or []),
+                "abstract": _squash_html_text(" ".join(self._current.get("abstract_parts") or [])),
+                "year": _published_year(submitted),
+                "tags": list(self._current.get("tags") or []),
+                "submitted": submitted,
+            }
+        )
+
+
+def _parse_arxiv_search_html(payload: str, *, source_query: str = "") -> list[PaperSearchResult]:
+    parser = _ArxivSearchHTMLParser()
+    parser.feed(payload or "")
+    rows: list[PaperSearchResult] = []
+    for item in parser.results:
+        arxiv_id = _clean_text(item.get("arxiv_id"))
+        tags = _clean_list(item.get("tags"))
+        submitted = _clean_text(item.get("submitted"))
+        year = _published_year(submitted)
+        v1_match = re.search(r"\bv1\b[^.;]*(19|20)\d{2}", submitted, flags=re.IGNORECASE)
+        if v1_match:
+            year = re.search(r"(19|20)\d{2}", v1_match.group(0)).group(0)  # type: ignore[union-attr]
+        rows.append(
+            PaperSearchResult(
+                title=_clean_text(item.get("title")),
+                authors=_clean_list(item.get("authors")),
+                year=year or _clean_text(item.get("year")),
+                venue="arXiv",
+                abstract=_clean_text(item.get("abstract")),
+                arxiv_id=arxiv_id,
+                canonical_url=_clean_text(item.get("canonical_url")) or f"https://arxiv.org/abs/{arxiv_id}",
+                pdf_url=_clean_text(item.get("pdf_url")) or f"https://arxiv.org/pdf/{arxiv_id}",
+                open_access_pdf=True,
+                provider_refs=["arxiv", "arxiv_html"],
+                why_relevant=f"Matched arXiv web search query: {source_query}",
+                tags=[*tags, "arxiv"],
+                fields_of_study=tags,
+            )
+        )
+    return rows
+
+
+def _fetch_arxiv_search_html(query: str, *, timeout: float = 8.0, max_bytes: int = 180_000) -> str:
+    encoded = urllib.parse.urlencode(
+        {
+            "query": query,
+            "searchtype": "all",
+            "source": "header",
+        }
+    )
+    url = f"https://arxiv.org/search/?{encoded}"
+    curl = shutil.which("curl")
+    if curl:
+        timeout = max(1.0, float(timeout))
+        try:
+            completed = subprocess.run(
+                [
+                    curl,
+                    "-sS",
+                    "-L",
+                    "--max-time",
+                    f"{timeout:.2f}",
+                    "--connect-timeout",
+                    f"{min(timeout, 4.0):.2f}",
+                    "--user-agent",
+                    "nblane-paper-library/1.0",
+                    url,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout + 1.0,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(f"arXiv web search exceeded {timeout:.1f}s") from exc
+        if completed.stdout:
+            return completed.stdout[:max_bytes].decode("utf-8", errors="replace")
+        if completed.returncode:
+            raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "nblane-paper-library/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read(max_bytes).decode("utf-8", errors="replace")
+
+
+def _search_arxiv_html(
+    query_variants: list[str],
+    limit: int,
+    filters: dict | None,
+    *,
+    debug: dict[str, Any] | None = None,
+) -> list[PaperSearchResult]:
+    rows: list[PaperSearchResult] = []
+    timeout = _positive_float((filters or {}).get("web_timeout_seconds"))
+    timeout = timeout or _positive_float((filters or {}).get("provider_timeout_seconds")) or 8.0
+    for variant in query_variants[:3]:
+        timeout_left = _paper_search_time_left(filters, timeout)
+        if timeout_left <= 0:
+            _append_search_warning(debug, "arxiv_html stopped because the provider search budget was exhausted.")
+            break
+        started = time.monotonic()
+        try:
+            payload = _fetch_arxiv_search_html(variant, timeout=timeout_left)
+            parsed = _parse_arxiv_search_html(payload, source_query=variant)
+        except Exception as exc:
+            warning = f"arxiv_html failed for {variant}: {type(exc).__name__}: {exc}"
+            _append_search_warning(debug, warning)
+            _append_search_step(
+                debug,
+                {
+                    "stage": "arxiv_html",
+                    "query": variant,
+                    "ok": False,
+                    "elapsed_ms": int((time.monotonic() - started) * 1000),
+                    "warning": warning,
+                },
+            )
+            continue
+        accepted = _filter_paper_search_results(parsed, filters, debug=debug)
+        rows.extend(accepted)
+        _append_search_step(
+            debug,
+            {
+                "stage": "arxiv_html",
+                "query": variant,
+                "ok": True,
+                "raw_count": len(parsed),
+                "accepted_count": len(accepted),
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+        if len(_dedupe_paper_search_results(rows)) >= limit:
+            break
+    return rows
+
+
+def _preferred_ai_backend_from_filters(filters: dict | None) -> str | None:
+    clean = _clean_text(
+        (filters or {}).get("preferred_backend")
+        or (filters or {}).get("ai_backend")
+        or (filters or {}).get("model_backend")
+    ).lower()
+    if clean in {"codex", "local_codex_readonly"}:
+        return "local_codex_readonly"
+    if clean in {"model", "llm", "direct_llm"}:
+        return "direct_llm"
+    return None
+
+
+def _paper_search_uses_profile_context(filters: dict | None) -> bool:
+    filters = filters or {}
+    return _clean_bool(
+        filters.get("use_profile_context")
+        or filters.get("include_profile_context")
+        or filters.get("personalize_with_profile")
+        or filters.get("profile_context"),
+        False,
+    )
 
 
 def _paper_result_from_connector(item: object) -> PaperSearchResult | None:
@@ -6947,9 +8328,10 @@ def _paper_result_from_connector(item: object) -> PaperSearchResult | None:
 
 def search_papers(
     query: str,
-    providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
+    providers: tuple[str, ...] = PAPER_SEARCH_PROVIDERS,
     limit: int = 10,
     filters: dict | None = None,
+    debug: dict[str, Any] | None = None,
 ) -> list[PaperSearchResult]:
     """Search provider APIs and return import candidates without writing files."""
 
@@ -6959,24 +8341,97 @@ def search_papers(
     from nblane.core.research_connectors import ADAPTERS
 
     rows: list[PaperSearchResult] = []
-    for provider in providers:
+    filters = _copy_paper_search_filters(filters)
+    budget_seconds = _positive_float(filters.get("provider_budget_seconds"))
+    if budget_seconds is not None and "_deadline_monotonic" not in filters:
+        filters["_deadline_monotonic"] = time.monotonic() + budget_seconds
+    variants = _paper_search_query_variants(clean_query, filters)
+    target_debug = _search_debug(debug)
+    if target_debug is not None:
+        target_debug["query_variants"] = variants
+        target_debug["year_from"] = _clean_text(filters.get("year_from"))
+        target_debug["year_to"] = _clean_text(filters.get("year_to"))
+    provider_order = _clean_list(providers) or list(PAPER_SEARCH_PROVIDERS)
+    for provider in provider_order:
+        if _paper_search_cancelled(filters, debug):
+            _append_search_warning(debug, "Paper search was cancelled.")
+            break
+        if _paper_search_time_left(filters, 1.0) <= 0:
+            _append_search_warning(debug, "Provider search stopped because the request budget was exhausted.")
+            break
         clean_provider = _clean_text(provider)
-        if clean_provider not in PAPER_SEARCH_PROVIDERS:
+        if clean_provider in {"arxiv_html", "arxiv_web"}:
+            rows.extend(_search_arxiv_html(variants, max(1, int(limit or 10)), filters, debug=debug))
+            rows = _dedupe_paper_search_results(rows)
+            if len(rows) >= max(1, int(limit or 10)):
+                break
             continue
         adapter = ADAPTERS.get(clean_provider)
         if adapter is None:
+            _append_search_step(
+                debug,
+                {
+                    "stage": "provider",
+                    "provider": clean_provider,
+                    "ok": False,
+                    "warning": "provider adapter is not configured",
+                },
+            )
             continue
-        config = {"query": clean_query, "limit": max(1, min(int(limit or 10), 50))}
-        if filters:
-            config.update(copy.deepcopy(filters))
+        provider_query = variants[0] if variants else clean_query
+        config = {
+            "query": provider_query,
+            "query_variants": variants,
+            "original_query": clean_query,
+            "limit": max(1, min(int(limit or 10), 50)),
+        }
+        config.update(_copy_paper_search_filters(filters))
+        provider_timeout = _positive_float(config.get("provider_timeout_seconds"))
+        if provider_timeout is not None:
+            config["provider_timeout_seconds"] = max(1.0, _paper_search_time_left(filters, provider_timeout))
+        started = time.monotonic()
         try:
             items = adapter.discover(config)
-        except Exception:
+        except Exception as exc:
+            warning = f"{clean_provider} failed: {type(exc).__name__}: {exc}"
+            _append_search_warning(debug, warning)
+            _append_search_step(
+                debug,
+                {
+                    "stage": "provider",
+                    "provider": clean_provider,
+                    "query": provider_query,
+                    "ok": False,
+                    "elapsed_ms": int((time.monotonic() - started) * 1000),
+                    "warning": warning,
+                },
+            )
             continue
+        accepted = 0
         for item in items:
             result = _paper_result_from_connector(item)
-            if result is not None:
+            if result is not None and _filter_paper_search_results([result], filters, debug=debug):
                 rows.append(result)
+                accepted += 1
+        _append_search_step(
+            debug,
+            {
+                "stage": "provider",
+                "provider": clean_provider,
+                "query": provider_query,
+                "ok": True,
+                "raw_count": len(items),
+                "accepted_count": accepted,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+    rows = _dedupe_paper_search_results(rows)
+    rows = _filter_paper_search_results(rows, filters, debug=debug)
+    rows.sort(key=lambda row: _paper_search_relevance_score(row, clean_query), reverse=True)
+    rows = _enrich_paper_search_results(rows, clean_query)
+    if target_debug is not None:
+        target_debug["provider_order"] = provider_order
+        target_debug["raw_candidate_count"] = len(rows)
     return rows[: max(1, int(limit or 10))]
 
 
@@ -6986,14 +8441,17 @@ def search_papers_with_codex(
     *,
     filters: dict | None = None,
     context_refs: dict | list[str] | None = None,
+    debug: dict[str, Any] | None = None,
 ) -> list[PaperSearchResult]:
     """Run Codex-first paper discovery through AI Gateway, falling back to providers."""
 
     refs = []
-    if isinstance(context_refs, list):
-        refs = _clean_list(context_refs)
-    elif isinstance(context_refs, dict):
-        refs = _clean_list(context_refs.get("context_refs"))
+    include_profile_context = _paper_search_uses_profile_context(filters)
+    if include_profile_context:
+        if isinstance(context_refs, list):
+            refs = _clean_list(context_refs)
+        elif isinstance(context_refs, dict):
+            refs = _clean_list(context_refs.get("context_refs"))
     from nblane.core.ai.gateway import run_ai_action
 
     search_context = _paper_search_context_bundle(
@@ -7001,23 +8459,76 @@ def search_papers_with_codex(
         query,
         filters or {},
         context_refs=context_refs,
+        include_profile_context=include_profile_context,
     )
+    target_debug = _search_debug(debug)
+    if target_debug is not None:
+        target_debug["query_variants"] = search_context.get("query_variants") or []
+        target_debug["profile_context_used"] = include_profile_context
+        target_debug["codex_home_policy"] = search_context.get("codex_home_policy") or "default"
+    progress_callback = target_debug.get("_progress_callback") if target_debug is not None else None
+    if not callable(progress_callback):
+        progress_callback = None
+    cancel_callback = (filters or {}).get("_cancel_check")
+    if not callable(cancel_callback):
+        cancel_callback = target_debug.get("_cancel_check") if target_debug is not None else None
+    if not callable(cancel_callback):
+        cancel_callback = None
+    started = time.monotonic()
     result = run_ai_action(
         "research.paper_search_codex",
         search_context,
-        profile=profile,
+        profile=_profile_name(profile) if include_profile_context else "",
+        runtime_profile=_profile_name(profile),
         context_refs=refs,
+        preferred_backend=_preferred_ai_backend_from_filters(filters),
         require_review=True,
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
     )
     candidates: list[PaperSearchResult] = []
     structured = result.structured if isinstance(result.structured, dict) else {}
     for row in structured.get("results") or structured.get("candidates") or []:
         candidate = PaperSearchResult.from_dict(row)
-        if candidate is not None and _paper_search_result_has_import_ref(candidate):
+        if (
+            candidate is not None
+            and _paper_search_result_has_downloadable_pdf(candidate)
+            and _paper_search_result_matches_year(candidate, filters)
+        ):
             candidates.append(candidate)
+    _append_search_step(
+        debug,
+        {
+            "stage": "ai",
+            "backend": getattr(result, "backend", ""),
+            "run_id": getattr(result, "run_id", ""),
+            "ok": bool(getattr(result, "ok", False)),
+            "raw_count": len(structured.get("results") or structured.get("candidates") or []),
+            "accepted_count": len(candidates),
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "warnings": _clean_list(getattr(result, "warnings", [])) or _clean_list(structured.get("warnings")),
+            "error": _clean_text(getattr(result, "error", "")),
+        },
+    )
+    for warning in _clean_list(getattr(result, "warnings", [])) + _clean_list(structured.get("warnings")):
+        _append_search_warning(debug, warning)
+    if _paper_search_cancelled(filters, debug) or _clean_text(getattr(result, "error", "")) == "command_cancelled":
+        _append_search_warning(debug, "Codex paper search was cancelled before fallback.")
+        return []
     if candidates:
-        return candidates
-    return search_papers(query, tuple((filters or {}).get("providers") or PAPER_SEARCH_PROVIDERS), int((filters or {}).get("limit") or 10), filters)
+        candidates = _dedupe_paper_search_results(candidates)
+        candidates.sort(key=lambda row: _paper_search_relevance_score(row, query), reverse=True)
+        return _enrich_paper_search_results(candidates, query)
+    fallback_filters = _copy_paper_search_filters(filters)
+    fallback_filters["has_open_access_pdf"] = True
+    rows = search_papers(
+        query,
+        tuple(fallback_filters.get("providers") or PAPER_SEARCH_PROVIDERS),
+        int(fallback_filters.get("limit") or 10),
+        fallback_filters,
+        debug=debug,
+    )
+    return _enrich_paper_search_results(rows, query)
 
 
 def _paper_search_context_bundle(
@@ -7026,25 +8537,144 @@ def _paper_search_context_bundle(
     filters: dict[str, Any],
     *,
     context_refs: dict | list[str] | None = None,
+    include_profile_context: bool = False,
 ) -> dict[str, Any]:
-    """Build the compact prompt payload for local read-only Codex search."""
+    """Build the compact retrieval payload for local read-only Codex search."""
 
+    codex_reasoning_effort = _paper_search_codex_reasoning_effort(filters)
+    codex_search_depth = "deep" if codex_reasoning_effort == "xhigh" else _paper_search_codex_depth(filters)
+    public_filters = {
+        key: copy.deepcopy(value)
+        for key, value in filters.items()
+        if not str(key).startswith("_") and not callable(value)
+    }
     payload: dict[str, Any] = {
         "query": _clean_text(query),
-        "filters": copy.deepcopy(filters),
-        "providers": _clean_list(filters.get("providers")) or list(PAPER_SEARCH_PROVIDERS),
+        "filters": public_filters,
+        "providers": _clean_list(filters.get("providers")),
+        "query_variants": _paper_search_query_variants(query, filters),
+        "provider_policy": "any_source_with_downloadable_pdf",
+        "required_import_ref": "direct_pdf_url",
+        "profile_context_used": bool(include_profile_context),
+        "profile_context_policy": (
+            "available_for_optional_rerank"
+            if include_profile_context
+            else "not_sent_for_discovery"
+        ),
+        "codex_reasoning_effort": codex_reasoning_effort,
+        "codex_search_depth": codex_search_depth,
+        "codex_home_policy": _paper_search_codex_home_policy(filters),
+        "reply_language": _paper_search_reply_language(query, filters),
+        "search_strategy": [
+            "Prefer Codex/model discovery for fresh web results.",
+            "Use the query_variants list to expand acronyms and avoid provider drift.",
+            "If VLA means robotics, treat it as Vision-Language-Action unless the payload says otherwise.",
+            "For latest/recent requests, check submitted-date sorted sources such as arXiv API when possible.",
+            "Return direct arXiv PDF links when arXiv papers match.",
+            "Do not use personal profile data as a retrieval constraint.",
+            "Stop as soon as enough strong PDF-ready candidates are found.",
+        ],
     }
-    if isinstance(context_refs, dict):
+    timeout_seconds = _positive_float(filters.get("codex_timeout_seconds"))
+    if timeout_seconds is not None:
+        payload["codex_timeout_seconds"] = timeout_seconds
+    model_timeout_seconds = _positive_float(filters.get("model_timeout_seconds"))
+    if model_timeout_seconds is not None:
+        payload["model_timeout_seconds"] = model_timeout_seconds
+        payload["llm_timeout_seconds"] = model_timeout_seconds
+    if include_profile_context and isinstance(context_refs, dict):
         payload["context_refs"] = _clean_list(context_refs.get("context_refs"))
         payload["project_refs"] = _clean_list(context_refs.get("project_refs"))
         payload["goal_refs"] = _clean_list(context_refs.get("goal_refs"))
-    elif isinstance(context_refs, list):
+    elif include_profile_context and isinstance(context_refs, list):
         payload["context_refs"] = _clean_list(context_refs)
     else:
         payload["context_refs"] = []
-    payload["already_imported"] = _paper_search_imported_refs(profile)
-    payload["library_tree_hint"] = _paper_search_library_tree_hint(profile)
+    if include_profile_context:
+        payload["already_imported"] = _paper_search_imported_refs(profile)
+        payload["library_tree_hint"] = _paper_search_library_tree_hint(profile)
     return payload
+
+
+def _paper_search_codex_reasoning_effort(filters: dict[str, Any]) -> str:
+    clean = _clean_text(
+        filters.get("codex_reasoning_effort")
+        or filters.get("reasoning_effort")
+    ).lower()
+    if clean in {"low", "medium", "high", "xhigh"}:
+        return clean
+    if _paper_search_codex_depth(filters) == "deep":
+        return "xhigh"
+    return "medium"
+
+
+def _paper_search_codex_depth(filters: dict[str, Any]) -> str:
+    clean = _clean_text(
+        filters.get("codex_search_depth")
+        or filters.get("search_depth")
+        or filters.get("codex_depth")
+    ).lower()
+    if clean in {"deep", "xhigh", "thorough", "careful"}:
+        return "deep"
+    if _clean_bool(filters.get("codex_deep_search"), False) or _clean_bool(filters.get("deep_search"), False):
+        return "deep"
+    return "quick"
+
+
+def _paper_search_codex_home_policy(filters: dict[str, Any]) -> str:
+    clean = _clean_text(
+        filters.get("codex_home_policy")
+        or filters.get("codex_home_mode")
+        or os.getenv("NBLANE_CODEX_HOME_POLICY")
+        or os.getenv("NBLANE_PAPER_SEARCH_CODEX_HOME_POLICY")
+    ).lower()
+    if clean in {"profile", "isolated", "profile_isolated", "web_profile"}:
+        return "profile"
+    if clean in {"default", "global", "terminal", "terminal_default", "shared"}:
+        return "default"
+    return "default"
+
+
+def _paper_search_reply_language(query: str, filters: dict[str, Any]) -> str:
+    clean = _clean_text(filters.get("reply_language") or filters.get("reply_lang")).lower()
+    if clean in {"en", "zh"}:
+        return clean
+    return "zh" if re.search(r"[\u4e00-\u9fff]", _clean_text(query)) else ""
+
+
+def _positive_float(value: object) -> float | None:
+    try:
+        clean = float(value)
+    except (TypeError, ValueError):
+        return None
+    return clean if clean > 0 else None
+
+
+def _grobid_retry_cooldown_seconds() -> float:
+    configured = _positive_float(os.getenv("NBLANE_GROBID_RETRY_COOLDOWN_SECONDS"))
+    return configured if configured is not None else float(GROBID_RETRY_COOLDOWN_SECONDS_DEFAULT)
+
+
+def _metadata_has_recent_grobid_failure(metadata: dict[str, object], pdf_fingerprint: str) -> bool:
+    cooldown = _grobid_retry_cooldown_seconds()
+    if cooldown <= 0:
+        return False
+    failure_pdf = _clean_text(metadata.get("grobid_failure_pdf_sha256"))
+    if failure_pdf and pdf_fingerprint and failure_pdf != pdf_fingerprint:
+        return False
+    warnings = " ".join(_clean_list(metadata.get("structured_extraction_warnings"))).casefold()
+    last_error = _clean_text(metadata.get("grobid_last_error")).casefold()
+    marker = f"{warnings} {last_error}"
+    if not any(token in marker for token in ("grobid extraction failed", "grobid unavailable", "timed out")):
+        return False
+    failed_at = (
+        _timestamp_from_iso(metadata.get("grobid_last_failed_at"))
+        or _timestamp_from_iso(metadata.get("structured_extracted_at"))
+        or _timestamp_from_iso(metadata.get("reading_artifacts_ready_at"))
+    )
+    if failed_at <= 0:
+        return True
+    return (time.time() - failed_at) < cooldown
 
 
 def _paper_search_imported_refs(profile: str | Path) -> list[dict[str, str]]:
@@ -7094,17 +8724,16 @@ def _paper_search_library_tree_hint(profile: str | Path) -> list[dict[str, str]]
     return rows
 
 
-def _paper_search_result_has_import_ref(result: PaperSearchResult) -> bool:
-    """Return True when a search candidate has a checkable import reference."""
+def _paper_search_result_has_downloadable_pdf(result: PaperSearchResult) -> bool:
+    """Return True when a search candidate carries a direct PDF download URL."""
 
-    return bool(
-        result.canonical_url
-        or result.pdf_url
-        or result.doi
-        or result.arxiv_id
-        or result.semantic_scholar_id
-        or result.provider_refs
-    )
+    return bool(result.pdf_url or _url_looks_like_pdf(result.canonical_url))
+
+
+def _paper_search_result_has_import_ref(result: PaperSearchResult) -> bool:
+    """Backward-compatible alias for the current PDF-first import policy."""
+
+    return _paper_search_result_has_downloadable_pdf(result)
 
 
 def check_paper_links(results: list[PaperSearchResult | dict]) -> list[PaperSearchResult]:
@@ -7169,7 +8798,8 @@ def import_paper_url(profile: str | Path, url: str, options: dict) -> str:
     title = _clean_text((options or {}).get("title") or (options or {}).get("title_hint"))
     if title:
         result.title = title
-    imported = import_paper_search_results(profile, [result.to_dict()], [result.candidate_id], options)
+    row = result.to_dict()
+    imported = import_paper_search_results(profile, [row], [_clean_text(row.get("candidate_id"))], options)
     if not imported:
         raise ValueError("Paper URL was not imported, likely because it is a duplicate.")
     return imported[0]
@@ -7299,37 +8929,12 @@ def import_paper_search_results(
                 continue
             pdf_url = _clean_text((source.metadata or {}).get("open_access_pdf_url"))
             if pdf_url:
-                if bool((source.metadata or {}).get("needs_link_check")):
-                    _update_source_metadata(
-                        profile,
-                        source_id,
-                        {
-                            "pdf_download_status": "skipped_needs_link_check",
-                            "pdf_download_attempted_at": _now(),
-                            "pdf_download_error": "PDF download skipped because the link still needs checking.",
-                        },
-                    )
-                    continue
-                try:
-                    download_paper_pdf(profile, source_id, pdf_url)
-                    _update_source_metadata(
-                        profile,
-                        source_id,
-                        {
-                            "pdf_download_status": "downloaded",
-                            "pdf_download_attempted_at": _now(),
-                        },
-                    )
-                except Exception as exc:
-                    _update_source_metadata(
-                        profile,
-                        source_id,
-                        {
-                            "pdf_download_status": "failed",
-                            "pdf_download_attempted_at": _now(),
-                            "pdf_download_error": f"PDF download failed during import: {exc}",
-                        },
-                    )
+                ensure_paper_pdf_downloaded(
+                    profile,
+                    source_id,
+                    pdf_url=pdf_url,
+                    error_prefix="PDF download failed during import",
+                )
     return imported
 
 
@@ -7390,10 +8995,7 @@ def _needs_structured_extraction(source: ResearchSource, segments: list[PaperSeg
     metadata = source.metadata or {}
     if source.kind != "paper" or not metadata.get("pdf_asset_ref"):
         return False
-    backend = _clean_text(metadata.get("structure_backend"))
-    if backend == "grobid" and segments:
-        return False
-    return True
+    return not bool(segments)
 
 
 def _metadata_has_grobid_unavailable(metadata: dict[str, object]) -> bool:
@@ -7409,27 +9011,51 @@ def paper_source_diagnostics(
     source_id: str,
     *,
     grobid_status: dict[str, object] | None = None,
+    inbox: ResearchSourceInbox | None = None,
+    source: ResearchSource | None = None,
+    workspace_diagnostics: list[str] | None = None,
+    library_diagnostics: list[str] | None = None,
+    duplicate_risk_refs: dict[str, list[str]] | None = None,
 ) -> dict[str, object]:
     """Return display-ready diagnostics and badges for one paper source."""
 
-    inbox, source = _source_by_id(profile, source_id)
+    if inbox is None:
+        inbox = load_research_sources(_profile_root(profile))
+    if source is None:
+        source = inbox.by_id().get(source_id)
+    if source is None:
+        inbox, source = _source_by_id(profile, source_id)
     metadata = source.metadata or {}
     segments = load_paper_segments(profile, source.id) if source.kind == "paper" else []
     translations = load_paper_translations(profile, source.id) if source.kind == "paper" else []
     stale_translations = [row for row in translations if row.status == "stale"]
+    all_workspace_diagnostics = (
+        workspace_diagnostics
+        if workspace_diagnostics is not None
+        else validate_research_workspace(_profile_root(profile))
+    )
+    all_library_diagnostics = (
+        library_diagnostics
+        if library_diagnostics is not None
+        else validate_paper_library(profile)
+    )
     workspace_diagnostics = [
         item
-        for item in validate_research_workspace(_profile_root(profile))
+        for item in all_workspace_diagnostics
         if source.id in item
     ]
     library_diagnostics = [
-        item for item in validate_paper_library(profile) if source.id in item
+        item for item in all_library_diagnostics if source.id in item
     ]
     citation_diagnostics = [
         *workspace_diagnostics,
         *paper_citation_diagnostics(profile, source.id),
     ]
-    duplicate_refs = _duplicate_risk_refs(inbox).get(source.id, [])
+    duplicate_refs = (
+        duplicate_risk_refs
+        if duplicate_risk_refs is not None
+        else _duplicate_risk_refs(inbox)
+    ).get(source.id, [])
     needs_structured = _needs_structured_extraction(source, segments)
     badges: list[str] = []
     badge_details: list[dict[str, str]] = []
@@ -7449,6 +9075,20 @@ def paper_source_diagnostics(
             badge_details,
             "needs_structured_extraction",
             detail="No GROBID structured segments are available for this PDF.",
+        )
+    structure_backend = _clean_text(metadata.get("structure_backend"))
+    if not needs_structured and segments and structure_backend and structure_backend != "grobid":
+        fallback_detail = (
+            "Reader text is ready from the PDF fallback extractor; GROBID upgrade is optional."
+        )
+        last_error = _clean_text(metadata.get("grobid_last_error"))
+        if last_error:
+            fallback_detail = f"{fallback_detail} Last GROBID attempt: {last_error}"
+        _append_badge(
+            badges,
+            badge_details,
+            "fallback_extraction",
+            detail=fallback_detail,
         )
     if (
         grobid_status is not None
@@ -7552,6 +9192,9 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
     claims = load_research_claims(_profile_root(profile))
     citations = load_research_citations(_profile_root(profile))
     chunks = load_chunks(_profile_root(profile))
+    workspace_diagnostics = validate_research_workspace(_profile_root(profile))
+    library_diagnostics = validate_paper_library(profile)
+    duplicate_risk_refs = _duplicate_risk_refs(inbox)
     claim_counts: dict[str, int] = {}
     citation_counts: dict[str, int] = {}
     chunk_counts: dict[str, int] = {}
@@ -7571,9 +9214,24 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
         if view != "other" and not is_paper:
             continue
         metadata = source.metadata or {}
+        pdf_download_status = _clean_text(metadata.get("pdf_download_status"))
+        pdf_download_error = _clean_text(metadata.get("pdf_download_error"))
+        open_access_pdf_url = _clean_text(metadata.get("open_access_pdf_url") or metadata.get("pdf_url"))
         annotations = load_paper_annotations(profile, source.id) if is_paper else []
         translations = load_paper_translations(profile, source.id) if is_paper else []
-        diagnostics = paper_source_diagnostics(profile, source.id) if is_paper else {"badges": []}
+        diagnostics = (
+            paper_source_diagnostics(
+                profile,
+                source.id,
+                inbox=inbox,
+                source=source,
+                workspace_diagnostics=workspace_diagnostics,
+                library_diagnostics=library_diagnostics,
+                duplicate_risk_refs=duplicate_risk_refs,
+            )
+            if is_paper
+            else {"badges": []}
+        )
         stale = any(row.status == "stale" for row in translations)
         refs = list(source.library_node_refs)
         row = {
@@ -7586,6 +9244,10 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             "venue": _clean_text(metadata.get("venue")),
             "tags": list(source.tags),
             "url": source.url or _clean_text(metadata.get("canonical_url") or metadata.get("pdf_url")),
+            "open_access_pdf_url": open_access_pdf_url,
+            "pdf_download_status": pdf_download_status,
+            "pdf_download_error": pdf_download_error,
+            "pdf_download_attempted_at": _clean_text(metadata.get("pdf_download_attempted_at")),
             "summary": source.summary or _clean_text(metadata.get("abstract")),
             "notes": source.notes,
             "has_pdf": bool(metadata.get("pdf_asset_ref")),
@@ -7610,9 +9272,12 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             badges.append("Stale translation")
         if source.visibility == "private":
             badges.append("Private source")
-        if _clean_text(metadata.get("pdf_download_status")) in {
+        if pdf_download_status == "downloading":
+            badges.append("PDF downloading")
+        if pdf_download_status in {
             "failed",
             "skipped_needs_link_check",
+            "skipped_no_pdf_url",
         }:
             badges.append("PDF download warning")
         if source.reading.claim_candidates or source.status == "candidate_ready":
@@ -7632,8 +9297,10 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
         elif view == "no_pdf":
             match = is_paper and not row["has_pdf"]
         elif view in {"needs_extraction", "ready_to_parse"}:
-            match = is_paper and bool(row["has_pdf"]) and (
-                not row["chunks_count"] or PAPER_DIAGNOSTIC_BADGES["needs_structured_extraction"] in badge_set
+            match = (
+                is_paper
+                and bool(row["has_pdf"])
+                and PAPER_DIAGNOSTIC_BADGES["needs_structured_extraction"] in badge_set
             )
         elif view in {"claims_need_review", "review_queue"}:
             match = source.status == "candidate_ready" or "AI candidates" in badge_set
@@ -8143,11 +9810,11 @@ def format_research_citations(
     *,
     format: str,
 ) -> str:
-    """Format research citations as BibTeX or Markdown without writing files."""
+    """Format research citations without writing files."""
 
     clean_format = _clean_text(format).lower()
-    if clean_format not in {"bibtex", "markdown", "md"}:
-        raise ValueError("Citation export format must be bibtex or markdown.")
+    if clean_format not in {"bibtex", "markdown", "md", "ris", "csl", "csl-json", "csl_json"}:
+        raise ValueError("Citation export format must be bibtex, markdown, ris, or csl-json.")
     sources = load_research_sources(_profile_root(profile)).by_id()
     citations = {citation.id: citation for citation in load_research_citations(_profile_root(profile))}
     selected_refs = _clean_list(refs)
@@ -8180,6 +9847,79 @@ def format_research_citations(
             ]
             entries.append("@article{" + key + ",\n" + ",\n".join(field_lines) + "\n}")
         return "\n\n".join(entries).strip() + ("\n" if entries else "")
+    if clean_format == "ris":
+        entries = []
+        for citation in selected:
+            source = sources.get(citation.source_id)
+            if source is None:
+                continue
+            metadata = source.metadata or {}
+            lines = ["TY  - JOUR"]
+            if source.title:
+                lines.append(f"TI  - {source.title}")
+            for author in source.authors:
+                lines.append(f"AU  - {author}")
+            year = _published_year(source.published)
+            if year:
+                lines.append(f"PY  - {year}")
+            venue = _clean_text(metadata.get("venue"))
+            if venue:
+                lines.append(f"JO  - {venue}")
+            doi = _clean_text(metadata.get("doi"))
+            if doi:
+                lines.append(f"DO  - {doi}")
+            if source.url:
+                lines.append(f"UR  - {source.url}")
+            if citation.locator:
+                lines.append(f"SP  - {citation.locator}")
+            if citation.quote:
+                lines.append(f"N1  - {citation.quote}")
+            lines.append("ER  -")
+            entries.append("\n".join(lines))
+        return "\n\n".join(entries).strip() + ("\n" if entries else "")
+    if clean_format in {"csl", "csl-json", "csl_json"}:
+        rows = []
+        seen: set[str] = set()
+        for citation in selected:
+            source = sources.get(citation.source_id)
+            if source is None:
+                continue
+            year = _published_year(source.published)
+            key = _bibtex_key(source, year)
+            if key in seen:
+                key = f"{key}-{len(seen) + 1}"
+            seen.add(key)
+            metadata = source.metadata or {}
+            row: dict[str, object] = {
+                "id": key,
+                "type": "article-journal" if source.kind == "paper" else "webpage",
+                "title": source.title,
+            }
+            authors = []
+            for author in source.authors:
+                parts = [part for part in author.split() if part]
+                if len(parts) >= 2:
+                    authors.append({"given": " ".join(parts[:-1]), "family": parts[-1]})
+                elif author:
+                    authors.append({"literal": author})
+            if authors:
+                row["author"] = authors
+            if year:
+                row["issued"] = {"date-parts": [[int(year)]]}
+            doi = _clean_text(metadata.get("doi"))
+            venue = _clean_text(metadata.get("venue"))
+            if doi:
+                row["DOI"] = doi
+            if venue:
+                row["container-title"] = venue
+            if source.url:
+                row["URL"] = source.url
+            if citation.locator or citation.quote:
+                row["note"] = " ".join(
+                    part for part in [citation.locator, citation.quote] if part
+                )
+            rows.append(row)
+        return json.dumps(rows, ensure_ascii=False, indent=2) + ("\n" if rows else "")
     lines = ["# Research Bibliography", ""]
     for citation in selected:
         source = sources.get(citation.source_id)
@@ -8202,7 +9942,13 @@ def save_research_export(
     """Persist an explicit user-requested paper export."""
 
     clean_format = _clean_text(format).lower()
-    ext = "bib" if clean_format == "bibtex" else "md"
+    ext = {
+        "bibtex": "bib",
+        "ris": "ris",
+        "csl": "json",
+        "csl-json": "json",
+        "csl_json": "json",
+    }.get(clean_format, "md")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = _research_root(profile) / PAPER_EXPORTS_DIRNAME / f"{_slug(prefix, fallback='export')}-{timestamp}.{ext}"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -8266,6 +10012,89 @@ def create_reading_note_markdown(
             lines.append(f"- {citation.locator or citation.id}: {citation.quote or citation.bibliography}")
         lines.append("")
     lines.extend(["## Boundary", "", "Paper-reading evidence is weak evidence until reviewed against real project or goal facts."])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def create_reading_note_pack_markdown(
+    profile: str | Path,
+    source_ids: object,
+    *,
+    claim_refs: object = None,
+    chunk_refs: object = None,
+    citation_refs: object = None,
+    title: str = "Research Reading Note Pack",
+) -> str:
+    """Build a multi-source Markdown reading note pack with scoped refs."""
+
+    clean_sources = _clean_list(source_ids)
+    if not clean_sources:
+        raise ValueError("Reading note pack needs at least one source.")
+    profile_path = _profile_root(profile)
+    sources = load_research_sources(profile_path).by_id()
+    missing = [ref for ref in clean_sources if ref not in sources]
+    if missing:
+        raise ValueError(f"Unknown research sources: {', '.join(missing)}")
+    chunks = load_chunks(profile_path)
+    claims = load_research_claims(profile_path)
+    citations = load_research_citations(profile_path)
+    wanted_claims = set(_clean_list(claim_refs))
+    wanted_chunks = set(_clean_list(chunk_refs))
+    wanted_citations = set(_clean_list(citation_refs))
+    chunks_by_id = {chunk.id: chunk for chunk in chunks}
+    lines = [
+        f"# {_clean_text(title) or 'Research Reading Note Pack'}",
+        "",
+        "## Sources",
+        "",
+    ]
+    for source_id in clean_sources:
+        source = sources[source_id]
+        lines.append(f"- {source.title} (`{source.id}`)")
+    lines.extend(["", "---", ""])
+    for index, source_id in enumerate(clean_sources, start=1):
+        source_chunk_refs = [
+            chunk.id
+            for chunk in chunks
+            if chunk.source_id == source_id
+            and (not wanted_chunks or chunk.id in wanted_chunks)
+        ]
+        source_claim_refs = [
+            claim.id
+            for claim in claims
+            if (
+                source_id in claim.source_refs
+                or any(
+                    chunk_ref in chunks_by_id
+                    and chunks_by_id[chunk_ref].source_id == source_id
+                    for chunk_ref in claim.chunk_refs
+                )
+            )
+            and (not wanted_claims or claim.id in wanted_claims)
+        ]
+        source_citation_refs = [
+            citation.id
+            for citation in citations
+            if (
+                citation.source_id == source_id
+                or (
+                    citation.chunk_id in chunks_by_id
+                    and chunks_by_id[citation.chunk_id].source_id == source_id
+                )
+            )
+            and (not wanted_citations or citation.id in wanted_citations)
+        ]
+        note = create_reading_note_markdown(
+            profile_path,
+            source_id,
+            claim_refs=source_claim_refs,
+            chunk_refs=source_chunk_refs,
+            citation_refs=source_citation_refs,
+        )
+        lines.append(f"## {index}. {sources[source_id].title}")
+        lines.append("")
+        lines.append(note.strip())
+        if index < len(clean_sources):
+            lines.extend(["", "---", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -8334,10 +10163,12 @@ __all__ = [
     "create_chunk_from_annotation",
     "create_paper_annotation",
     "create_reading_note_markdown",
+    "create_reading_note_pack_markdown",
     "delete_paper_pdf_asset",
     "delete_paper_reader_artifacts",
     "delete_paper_record",
     "download_paper_pdf",
+    "ensure_paper_pdf_downloaded",
     "ensure_paper_reading_artifacts",
     "extract_paper_figures",
     "extract_paper_page_text_layer",

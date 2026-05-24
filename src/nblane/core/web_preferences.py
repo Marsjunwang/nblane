@@ -34,6 +34,8 @@ AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "research.paper_claim_extract": "llm",
     "research.paper_deep_read_codex": "codex",
     "research.paper_compare_codex": "codex",
+    "dashboard.goal_skill_match": "llm",
+    "dashboard.graph_insights": "llm",
     "kanban.task_alignment": "llm",
     "kanban.subtasks": "llm",
 }

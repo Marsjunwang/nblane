@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from nblane.commands.codex import cmd_codex_install
+from nblane.core import codex_adapter
 from nblane.core.agent_tasks import (
     create_agent_task,
     load_agent_tasks,
@@ -130,8 +131,8 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertTrue(alice.name.startswith("alice-smith-"))
         self.assertNotEqual(alice, bob)
 
-    def test_current_config_sets_profile_codex_home_only_when_profile_supplied(self) -> None:
-        """Profile configs get Web Codex home; legacy global config stays global."""
+    def test_current_config_uses_service_codex_home_by_default(self) -> None:
+        """Profiles keep config preferences but share the service Codex home."""
 
         with tempfile.TemporaryDirectory() as tmp:
             with (
@@ -144,12 +145,21 @@ class TestCodexAdapter(unittest.TestCase):
                 ),
             ):
                 self.assertEqual(codex_home(), Path(tmp) / "global")
-                self.assertEqual(current_config(include_runtime=False).codex_home, "")
+                self.assertEqual(
+                    Path(current_config(include_runtime=False).codex_home),
+                    Path(tmp) / "global",
+                )
                 cfg = current_config(profile="alice", include_runtime=False)
+                isolated = current_config(
+                    profile="alice",
+                    include_runtime=False,
+                    codex_home_policy="profile",
+                )
                 expected = profile_codex_home("alice")
 
-        self.assertEqual(Path(cfg.codex_home), expected)
-        self.assertIn("alice-", Path(cfg.codex_home).name)
+        self.assertEqual(Path(cfg.codex_home), Path(tmp) / "global")
+        self.assertEqual(Path(isolated.codex_home), expected)
+        self.assertIn("alice-", Path(isolated.codex_home).name)
 
     def test_missing_codex_cli_config_loads_valid_template(self) -> None:
         """A missing config.toml starts from a valid editable TOML template."""
@@ -218,13 +228,19 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertNotIn(secret, result.output)
         self.assertNotIn(secret, result.command)
 
-    def test_login_with_profile_config_sets_codex_home_env(self) -> None:
-        """Web login writes only to the current profile's Codex home."""
+    def test_login_with_profile_config_uses_service_codex_home_env(self) -> None:
+        """Web login writes to the shared service-level Codex home."""
 
         secret = "sk-test123456789"
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch.dict("os.environ", {"NBLANE_CODEX_HOME_ROOT": tmp}),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "NBLANE_CODEX_HOME": str(Path(tmp) / "service"),
+                        "NBLANE_CODEX_HOME_ROOT": str(Path(tmp) / "profiles"),
+                    },
+                ),
                 patch("nblane.core.codex_adapter.shutil.which", return_value="/bin/codex"),
                 patch(
                     "nblane.core.codex_adapter.subprocess.run",
@@ -232,7 +248,7 @@ class TestCodexAdapter(unittest.TestCase):
                 ) as run,
             ):
                 cfg = current_config(profile="alice", include_runtime=False)
-                expected = profile_codex_home("alice")
+                expected = Path(tmp) / "service"
                 result = login_with_api_key(secret, config=cfg)
 
         kwargs = run.call_args.kwargs
@@ -241,12 +257,18 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertEqual(kwargs["env"]["CODEX_HOME"], str(expected))
         self.assertNotIn(secret, run.call_args.args[0])
 
-    def test_codex_status_uses_profile_codex_home_env(self) -> None:
-        """Status probes run against the profile Web Codex home."""
+    def test_codex_status_uses_service_codex_home_env(self) -> None:
+        """Status probes run against the shared service-level Codex home."""
 
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch.dict("os.environ", {"NBLANE_CODEX_HOME_ROOT": tmp}),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "NBLANE_CODEX_HOME": str(Path(tmp) / "service"),
+                        "NBLANE_CODEX_HOME_ROOT": str(Path(tmp) / "profiles"),
+                    },
+                ),
                 patch("nblane.core.codex_adapter.shutil.which", return_value="/bin/codex"),
                 patch(
                     "nblane.core.codex_adapter.subprocess.run",
@@ -256,7 +278,7 @@ class TestCodexAdapter(unittest.TestCase):
                     ],
                 ) as run,
             ):
-                expected = profile_codex_home("alice")
+                expected = Path(tmp) / "service"
                 status = codex_status(current_config(profile="alice", include_runtime=False))
 
         self.assertTrue(status.installed)
@@ -266,18 +288,48 @@ class TestCodexAdapter(unittest.TestCase):
                 str(expected),
             )
 
-    def test_profile_cli_config_text_uses_profile_codex_home(self) -> None:
-        """Web config.toml editor reads and writes only the profile Codex home."""
+    def test_profile_cli_config_text_uses_service_codex_home_by_default(self) -> None:
+        """Web config.toml editor reads and writes the shared Codex home."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(
+                "os.environ",
+                {
+                    "NBLANE_CODEX_HOME": str(Path(tmp) / "service"),
+                    "NBLANE_CODEX_HOME_ROOT": str(Path(tmp) / "profiles"),
+                },
+            ):
+                saved = save_codex_cli_config_text(
+                    'model = "gpt-5.1-codex"',
+                    profile="alice",
+                )
+                expected = Path(tmp) / "service" / "config.toml"
+                loaded = load_codex_cli_config_text(profile="alice")
+                bob_path = codex_cli_config_path(profile="bob")
+
+        self.assertEqual(saved, expected)
+        self.assertEqual(loaded, 'model = "gpt-5.1-codex"\n')
+        self.assertEqual(bob_path, expected)
+
+    def test_profile_cli_config_text_can_use_legacy_profile_codex_home(self) -> None:
+        """The old profile-isolated Codex home remains available explicitly."""
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict("os.environ", {"NBLANE_CODEX_HOME_ROOT": tmp}):
                 saved = save_codex_cli_config_text(
                     'model = "gpt-5.1-codex"',
                     profile="alice",
+                    codex_home_policy="profile",
                 )
                 expected = profile_codex_home("alice") / "config.toml"
-                loaded = load_codex_cli_config_text(profile="alice")
-                bob_path = codex_cli_config_path(profile="bob")
+                loaded = load_codex_cli_config_text(
+                    profile="alice",
+                    codex_home_policy="profile",
+                )
+                bob_path = codex_cli_config_path(
+                    profile="bob",
+                    codex_home_policy="profile",
+                )
 
         self.assertEqual(saved, expected)
         self.assertEqual(loaded, 'model = "gpt-5.1-codex"\n')
@@ -401,6 +453,100 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertNotIn("worktree", " ".join(map(str, args)))
         self.assertEqual(captured["env"].get("CODEX_HOME"), tmp)
 
+    def test_readonly_codex_prompt_can_enable_search_and_xhigh_reasoning(self) -> None:
+        """Paper search can opt into native Codex web search and deeper reasoning."""
+
+        captured: dict[str, object] = {}
+
+        def fake_run(args, *, timeout, cwd=None, stdin=None, env=None):
+            command = " ".join(str(arg) for arg in args)
+            captured["args"] = list(args)
+            output_path = Path(args[args.index("--output-last-message") + 1])
+            output_path.write_text('{"ok": true}', encoding="utf-8")
+            return CodexCommandResult(True, command, 0)
+
+        with (
+            patch("nblane.core.codex_adapter.shutil.which", return_value="/bin/codex"),
+            patch("nblane.core.codex_adapter._run", side_effect=fake_run),
+        ):
+            result = run_readonly_codex_prompt(
+                "alice",
+                "Search for papers.",
+                config=CodexConfig(),
+                enable_search=True,
+                reasoning_effort="xhigh",
+            )
+
+        args = captured["args"]
+        self.assertTrue(result.ok)
+        self.assertEqual(args[:3], ["/bin/codex", "--search", "exec"])
+        self.assertIn("model_reasoning_effort=\"xhigh\"", args)
+
+    def test_streaming_run_reports_output_progress(self) -> None:
+        """Long Codex helpers can surface process output before completion."""
+
+        events: list[dict[str, object]] = []
+
+        result = codex_adapter._run_streaming(
+            [
+                "/bin/sh",
+                "-c",
+                "printf 'web search: VLA steering\\n' >&2; "
+                "printf '{\"query\":\"VLA steering\",\"results\":[]}\\n'; "
+                "printf 'two\\n' >&2",
+            ],
+            timeout=5,
+            progress_callback=events.append,
+        )
+
+        self.assertTrue(result.ok)
+        self.assertIn('"results"', result.stdout)
+        self.assertIn("two", result.stderr)
+        self.assertTrue(any(event.get("event") == "output" for event in events))
+        self.assertTrue(any(event.get("output_kind") == "web_search" for event in events))
+        self.assertTrue(any(event.get("output_kind") == "structured_result" for event in events))
+        self.assertFalse(any(event.get("stream") == "stderr" and "web search:" in event.get("message", "") for event in events))
+        self.assertTrue(any(event.get("event") == "command_finished" for event in events))
+
+    def test_streaming_run_hides_codex_prompt_echo_noise(self) -> None:
+        """Prompt echoes and setup noise should not dominate Paper Library progress."""
+
+        events: list[dict[str, object]] = []
+
+        result = codex_adapter._run_streaming(
+            [
+                "/bin/sh",
+                "-c",
+                "printf 'You are the nblane AI Gateway.\\n' >&2; "
+                "printf '}\\n' >&2; "
+                "printf 'warning: Codex could not find bubblewrap on PATH\\n' >&2; "
+                "printf 'fatal: early EOF git_binary=\"git\"\\n' >&2; "
+                "printf 'web search: https://arxiv.org/abs/2605.13403\\n' >&2",
+            ],
+            timeout=5,
+            progress_callback=events.append,
+        )
+
+        self.assertTrue(result.ok)
+        visible_messages = [event.get("message", "") for event in events if event.get("visible") is not False]
+        self.assertFalse(any("You are the nblane AI Gateway" in message for message in visible_messages))
+        self.assertFalse(any(message == "}" for message in visible_messages))
+        self.assertFalse(any("bubblewrap" in message for message in visible_messages))
+        self.assertTrue(any(event.get("output_kind") == "plugin_warning" for event in events))
+        self.assertTrue(any(event.get("output_kind") == "web_search" for event in events))
+
+    def test_streaming_run_can_cancel_process(self) -> None:
+        """Cancellation requests stop a running Codex process."""
+
+        result = codex_adapter._run_streaming(
+            ["/bin/sh", "-c", "sleep 5"],
+            timeout=10,
+            cancel_check=lambda: True,
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error, "command_cancelled")
+
     def test_readable_codex_error_prefers_provider_error_json(self) -> None:
         """Codex stderr banners should not hide the actual provider error."""
 
@@ -420,6 +566,16 @@ class TestCodexAdapter(unittest.TestCase):
         )
 
         self.assertEqual(message, "端点/codex未配置模型qwen-plus")
+
+    def test_readable_codex_error_prefers_timeout_over_plugin_warning(self) -> None:
+        """Remote plugin warnings should not hide the real timeout cause."""
+
+        message = readable_codex_error(
+            "command_timeout: exceeded 60s",
+            "authentication required to sync remote plugins; api key auth is not supported",
+        )
+
+        self.assertEqual(message, "command_timeout: exceeded 60s")
 
     def test_profile_config_template_is_valid_yaml(self) -> None:
         """Missing codex.yaml can start from a valid editable template."""

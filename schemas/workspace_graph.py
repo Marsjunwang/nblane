@@ -98,7 +98,7 @@ class WorkspaceGraphPayload(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     view: str = "context"
     layers: list[WorkspaceGraphLayer] = Field(default_factory=list)
     nodes: list[WorkspaceGraphNode] = Field(default_factory=list)
@@ -108,4 +108,3 @@ class WorkspaceGraphPayload(BaseModel):
 def graph_to_dict(graph: WorkspaceGraphPayload) -> dict[str, Any]:
     """Dump a graph payload with JSON-safe aliases."""
     return graph.model_dump(mode="json", by_alias=True, exclude_none=True)
-

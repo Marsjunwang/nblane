@@ -6,10 +6,11 @@ import os
 import html
 import re
 import time
+import urllib.request
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 import streamlit as st
 import yaml
@@ -36,19 +37,21 @@ from nblane.core.web_preferences import (
 from nblane.core.paper_library_workspace import (
     build_paper_library_payload,
     handle_paper_library_event,
+    resolve_paper_library_runtime,
 )
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperSearchResult,
     _paper_search_imported_refs,
     _paper_search_library_tree_hint,
-    _paper_search_result_has_import_ref,
+    _paper_search_result_has_downloadable_pdf,
     auto_chunk_paper,
     build_reader_payload,
     create_chunk_from_annotation,
     create_paper_library_node,
     create_paper_annotation,
     create_reading_note_markdown,
+    create_reading_note_pack_markdown,
     ensure_paper_reading_artifacts,
     extract_paper_pages,
     extract_paper_segments,
@@ -130,26 +133,40 @@ from nblane.core.research_connectors import (
     CONNECTOR_PROVIDERS,
     discover_connector_items,
     import_connector_items,
+    import_manual_connector_items,
     load_connectors,
+    preview_manual_connector_items,
     sync_connector,
     upsert_connector,
 )
 from nblane.core.research_workspace import (
+    RESEARCH_CLAIM_TYPES,
     RESEARCH_CHUNK_KINDS,
     build_research_claim_review_payload,
+    build_research_export_payload,
     build_research_export_manifest,
     build_research_overview_payload,
+    build_synthesis_draft_review,
     create_chunk,
     create_citation,
+    create_citation_from_chunk,
     draft_synthesis_from_claims,
     load_chunks,
     load_research_citations,
     load_research_claims,
     load_research_drafts,
+    merge_duplicate_research_claims,
+    patch_research_claim,
     research_claim_to_evidence_candidate,
     research_draft_to_blog_candidate,
+    research_draft_to_project_update_candidate,
+    research_draft_to_resume_bullet_candidates,
+    research_output_project_options,
+    request_citation_for_claim,
+    update_research_claim_links,
     update_research_claim_status,
     upsert_research_claim,
+    verify_research_citations,
 )
 from nblane.core.public_site import create_blog_draft
 from nblane.web_auth import require_login
@@ -957,125 +974,1105 @@ def _render_candidate_preview(inbox) -> None:
     )
 
 
+def _render_research_overview_styles() -> None:
+    st.markdown(
+        """
+<style>
+:root {
+  --ro-ink: #12201d;
+  --ro-muted: #435854;
+  --ro-subtle: #647571;
+  --ro-line: #c8d4cf;
+  --ro-paper: #ffffff;
+  --ro-soft: #f6f8f7;
+  --ro-accent: #176b5c;
+  --ro-accent-strong: #0f4f43;
+  --ro-accent-soft: #ddf2ec;
+  --ro-risk-soft: #fff4d8;
+  --ro-risk-line: rgba(146, 64, 14, .38);
+}
+div[data-testid="stPopover"] button {
+  min-width: 4.2rem;
+}
+div[data-testid="stPopover"] button p {
+  white-space: nowrap;
+}
+div[data-testid="stButton"] button:disabled {
+  opacity: 1;
+  border-color: #d6dfdb;
+  background: #f7f9f8;
+  color: #657672;
+}
+div[data-testid="stButton"] button:disabled p {
+  color: #657672;
+}
+.ro-command-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, .9fr);
+  gap: 12px;
+  align-items: stretch;
+  margin: 0 0 14px;
+}
+.ro-command-main,
+.ro-safety-panel,
+.ro-panel,
+.ro-card {
+  border: 1px solid var(--ro-line);
+  border-radius: 8px;
+  background: var(--ro-paper);
+}
+.ro-command-main,
+.ro-safety-panel,
+.ro-panel {
+  padding: 13px 15px;
+}
+.ro-kicker {
+  color: var(--ro-subtle);
+  font-size: .74rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+.ro-title {
+  margin: 3px 0 6px;
+  color: var(--ro-ink);
+  font-size: 1.28rem;
+  font-weight: 860;
+  line-height: 1.2;
+}
+.ro-copy {
+  margin: 0;
+  color: var(--ro-muted);
+  font-size: .86rem;
+  line-height: 1.45;
+}
+.ro-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.ro-stage {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--ro-line);
+  border-radius: 8px;
+  background: var(--ro-soft);
+}
+.ro-stage.is-hot {
+  border-color: rgba(33, 104, 91, .35);
+  background: var(--ro-accent-soft);
+}
+.ro-stage.is-warn {
+  border-color: var(--ro-risk-line);
+  background: var(--ro-risk-soft);
+}
+.ro-stage-label {
+  overflow: hidden;
+  color: var(--ro-subtle);
+  font-size: .7rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ro-stage-value {
+  margin-top: 4px;
+  color: var(--ro-ink);
+  font-size: 1.38rem;
+  font-weight: 860;
+  line-height: 1;
+}
+.ro-stage-note {
+  min-height: 27px;
+  margin-top: 6px;
+  color: var(--ro-muted);
+  font-size: .74rem;
+  line-height: 1.25;
+}
+.ro-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 9px;
+  color: var(--ro-ink);
+  font-size: .98rem;
+  font-weight: 850;
+}
+.ro-section-title small {
+  color: var(--ro-subtle);
+  font-size: .74rem;
+  font-weight: 730;
+}
+.ro-queue-grid,
+.ro-queue-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ro-queue-chip {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--ro-line);
+  border-radius: 8px;
+  background: var(--ro-soft);
+}
+.ro-queue-chip.is-live {
+  border-color: rgba(33, 104, 91, .28);
+  background: #f3faf7;
+}
+.ro-queue-chip.is-risk {
+  border-color: var(--ro-risk-line);
+  background: var(--ro-risk-soft);
+}
+.ro-queue-chip strong {
+  display: block;
+  overflow: hidden;
+  color: var(--ro-ink);
+  font-size: .84rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ro-queue-chip span {
+  display: block;
+  margin-top: 5px;
+  color: var(--ro-muted);
+  font-size: .77rem;
+}
+.ro-queue-tile {
+  display: grid;
+  min-width: 0;
+  min-height: 82px;
+  padding: 10px 11px;
+  border: 1px solid var(--ro-line);
+  border-radius: 8px;
+  background: var(--ro-paper);
+  color: var(--ro-ink) !important;
+  gap: 5px;
+  text-decoration: none !important;
+}
+.ro-queue-tile:hover {
+  border-color: rgba(23, 107, 92, .42);
+  background: #f3faf7;
+}
+.ro-queue-tile.is-live {
+  border-color: rgba(23, 107, 92, .36);
+  background: #f3faf7;
+}
+.ro-queue-tile.is-risk {
+  border-color: var(--ro-risk-line);
+  background: var(--ro-risk-soft);
+}
+.ro-queue-tile.is-disabled {
+  background: #f7f9f8;
+  color: #586a66 !important;
+  cursor: default;
+}
+.ro-queue-tile-title {
+  overflow: hidden;
+  color: inherit;
+  font-size: .85rem;
+  font-weight: 830;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ro-queue-tile-count {
+  color: var(--ro-ink);
+  font-size: 1.1rem;
+  font-weight: 860;
+  line-height: 1.05;
+}
+.ro-queue-tile-caption,
+.ro-queue-tile-action {
+  color: var(--ro-muted);
+  font-size: .76rem;
+  line-height: 1.25;
+}
+.ro-queue-tile-action {
+  font-weight: 760;
+}
+.ro-queue-tile.is-disabled .ro-queue-tile-count,
+.ro-queue-tile.is-disabled .ro-queue-tile-caption,
+.ro-queue-tile.is-disabled .ro-queue-tile-action {
+  color: #657672;
+}
+.ro-action,
+.ro-card {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 9px;
+}
+.ro-action {
+  padding: 0;
+  margin-bottom: 6px;
+  background: transparent;
+}
+.ro-card {
+  padding: 11px 12px;
+}
+.ro-card-title {
+  color: var(--ro-ink);
+  font-size: .94rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+.ro-card-meta {
+  color: var(--ro-muted);
+  font-size: .78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.ro-card-body {
+  color: #2f403c;
+  font-size: .84rem;
+  line-height: 1.45;
+}
+.ro-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 1px 7px;
+  margin: 0 4px 4px 0;
+  border: 1px solid rgba(49, 51, 63, .14);
+  border-radius: 999px;
+  background: rgba(49, 51, 63, .055);
+  color: rgba(31, 41, 55, .86);
+  font-size: .72rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+.ro-badge-ok {
+  border-color: rgba(22, 163, 74, .22);
+  background: rgba(22, 163, 74, .09);
+  color: rgb(22, 101, 52);
+}
+.ro-badge-warn {
+  border-color: rgba(245, 158, 11, .32);
+  background: rgba(245, 158, 11, .12);
+  color: rgb(146, 64, 14);
+}
+.ro-badge-alert {
+  border-color: rgba(220, 38, 38, .24);
+  background: rgba(220, 38, 38, .08);
+  color: rgb(153, 27, 27);
+}
+.ro-empty {
+  padding: 12px;
+  border: 1px dashed var(--ro-line);
+  border-radius: 8px;
+  background: var(--ro-soft);
+  color: var(--ro-muted);
+  font-size: .86rem;
+  line-height: 1.45;
+}
+.ro-empty strong {
+  color: var(--ro-ink);
+}
+@media (max-width: 980px) {
+  .ro-command-strip { grid-template-columns: minmax(0, 1fr); }
+  .ro-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ro-queue-grid,
+  .ro-queue-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .ro-flow,
+  .ro-queue-grid,
+  .ro-queue-tiles { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _overview_notice_key() -> str:
+    return f"research_overview_notice:{selected}"
+
+
+def _set_overview_notice(message: str) -> None:
+    st.session_state[_overview_notice_key()] = str(message or "")
+
+
+def _pop_overview_notice() -> str:
+    return str(st.session_state.pop(_overview_notice_key(), "") or "")
+
+
+def _overview_badge(label: object, tone: str = "neutral") -> str:
+    clean = html.escape(str(label or "").strip())
+    if not clean:
+        return ""
+    safe_tone = tone if tone in {"neutral", "ok", "warn", "alert"} else "neutral"
+    return f'<span class="ro-badge ro-badge-{safe_tone}">{clean}</span>'
+
+
+def _overview_badge_tone(label: object) -> str:
+    text = str(label or "").casefold()
+    if any(part in text for part in ("missing", "broken", "failed", "private", "risk", "缺失", "断裂", "失败", "私有", "风险")):
+        return "alert"
+    if any(part in text for part in ("warning", "stale", "duplicate", "needs", "警告", "过期", "重复", "需要")):
+        return "warn"
+    if any(part in text for part in ("ready", "pdf", "promoted", "reviewed", "就绪", "已推进", "已审阅")):
+        return "ok"
+    return "neutral"
+
+
+def _overview_localized_badge(label: object) -> str:
+    text = str(label or "").strip()
+    if not text:
+        return ""
+    mapping = {
+        "Unsorted": _l("badge_unsorted", "Unsorted"),
+        "PDF ready": _l("badge_pdf_ready", "PDF ready"),
+        "PDF missing": _l("pdf_missing", "PDF missing"),
+        "Stale translation": _l("badge_stale_translation", "Stale translation"),
+        "Private source": _l("badge_private_source", "Private source"),
+        "Needs structured extraction": _l("badge_needs_structured_extraction", "Needs structured extraction"),
+        "GROBID unavailable": _l("badge_grobid_unavailable", "GROBID unavailable"),
+        "Fallback extraction": _l("badge_fallback_extraction", "Fallback extraction"),
+        "Duplicate risk": _l("duplicate_risk", "Duplicate risk"),
+        "AI candidates": _l("ai_candidates", "AI candidates"),
+        "ready": _l("ready", "Ready"),
+        "risk": _l("risk", "Risk"),
+    }
+    return mapping.get(text, text)
+
+
+def _overview_badges(labels: list[object], *, limit: int = 5) -> str:
+    clean_labels = [label for label in labels if str(label or "").strip()]
+    rendered = [
+        _overview_badge(_overview_localized_badge(label), _overview_badge_tone(label))
+        for label in clean_labels[:limit]
+    ]
+    if len(clean_labels) > limit:
+        rendered.append(_overview_badge(f"+{len(clean_labels) - limit}"))
+    return " ".join(item for item in rendered if item)
+
+
+def _overview_stage(label: str, value: object, note: str = "", tone: str = "") -> str:
+    classes = ["ro-stage"]
+    if tone:
+        classes.append(f"is-{tone}")
+    return (
+        f'<div class="{" ".join(classes)}">'
+        f'<div class="ro-stage-label">{html.escape(label)}</div>'
+        f'<div class="ro-stage-value">{html.escape(str(value))}</div>'
+        f'<div class="ro-stage-note">{html.escape(note)}</div>'
+        "</div>"
+    )
+
+
+def _overview_queue_chip(label: str, count: object, detail: str = "", tone: str = "") -> str:
+    classes = ["ro-queue-chip"]
+    if tone:
+        classes.append(f"is-{tone}")
+    suffix = f" · {detail}" if detail else ""
+    return (
+        f'<div class="{" ".join(classes)}">'
+        f"<strong>{html.escape(label)}</strong>"
+        f"<span>{html.escape(str(count))}{html.escape(suffix)}</span>"
+        "</div>"
+    )
+
+
+def _overview_queue_tile(
+    *,
+    label: str,
+    count: int,
+    caption: str,
+    action: str,
+    url: str,
+    tone: str = "",
+    view: str = "",
+    disabled: bool = False,
+) -> str:
+    classes = ["ro-queue-tile"]
+    if tone:
+        classes.append(f"is-{tone}")
+    if count <= 0 or disabled:
+        classes.append("is-disabled")
+    tag = "a" if count > 0 and url and not disabled else "div"
+    href = f' href="{html.escape(url, quote=True)}" rel="noopener noreferrer"' if tag == "a" else ""
+    data_view = html.escape(view or "", quote=True)
+    return (
+        f'<{tag} class="{" ".join(classes)}" data-overview-queue="{data_view}"{href}>'
+        f'<div class="ro-queue-tile-title">{html.escape(label)}</div>'
+        f'<div class="ro-queue-tile-count">{html.escape(str(count))}</div>'
+        f'<div class="ro-queue-tile-caption">{html.escape(caption)}</div>'
+        f'<div class="ro-queue-tile-action">{html.escape(action)}</div>'
+        f"</{tag}>"
+    )
+
+
+def _overview_card_html(
+    title: object,
+    meta: object = "",
+    body: object = "",
+    badges: list[object] | None = None,
+    *,
+    action: bool = False,
+) -> str:
+    cls = "ro-action" if action else "ro-card"
+    parts = [f'<div class="{cls}">']
+    parts.append(f'<div class="ro-card-title">{html.escape(str(title or ""))}</div>')
+    if meta:
+        parts.append(f'<div class="ro-card-meta">{html.escape(str(meta))}</div>')
+    if body:
+        parts.append(f'<div class="ro-card-body">{html.escape(_short_text(body, 260))}</div>')
+    if badges:
+        parts.append(f"<div>{_overview_badges(list(badges))}</div>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _overview_status_label(status: object) -> str:
+    clean = str(status or "").strip()
+    if not clean:
+        return ""
+    return _l(f"status_{clean}", clean.replace("_", " ").title())
+
+
+def _overview_action_label(action: dict[str, object]) -> str:
+    kind = str(action.get("kind") or "")
+    source_count = len(action.get("source_refs") or [])
+    claim_count = len(action.get("claim_refs") or [])
+    citation_count = len(action.get("citation_refs") or [])
+    draft_count = len(action.get("draft_refs") or [])
+    action_count = action.get("count")
+    if isinstance(action_count, int):
+        source_count = claim_count = citation_count = draft_count = action_count
+    if kind == "continue_reading":
+        return _l("overview_action_continue_reading", "Continue reading {count} source(s)").format(count=source_count)
+    if kind == "review_claims":
+        return _l("overview_action_review_claims", "Review {count} ready research claim(s)").format(count=claim_count)
+    if kind == "fix_citations":
+        return _l("overview_action_fix_citations", "Fix {count} citation warning(s)").format(count=citation_count)
+    if kind == "review_private_publish_risk":
+        return _l("overview_action_private_risk", "Review {count} private source risk(s)").format(count=source_count)
+    if kind == "review_drafts":
+        return _l("overview_action_review_drafts", "Review {count} synthesis draft(s)").format(count=draft_count)
+    if kind == "import_sources":
+        return _l("overview_action_import_sources", "Import papers, repos, or web sources")
+    return str(action.get("label") or kind or _l("next_action", "Next action"))
+
+
+def _overview_risk_label(kind: object) -> str:
+    clean = str(kind or "risk").strip()
+    mapping = {
+        "private_publish_risk": _l("risk_private_publish", "Private publish risk"),
+        "broken_citations": _l("risk_broken_citations", "Broken citations"),
+    }
+    return mapping.get(clean, clean.replace("_", " ").title())
+
+
+def _overview_risk_action_label(action: object) -> str:
+    clean = str(action or "").strip()
+    mapping = {
+        "open_export_gate": _l("risk_open_export_gate", "Open export gate"),
+        "open_citation_inspector": _l("risk_open_citation_inspector", "Open citation inspector"),
+    }
+    return mapping.get(clean, clean.replace("_", " ").title())
+
+
+def _focus_paper_library_view(view: str, *, detail_id: str = "", node_id: str = "") -> None:
+    st.session_state[_paper_library_key("view")] = view or "all"
+    st.session_state[_paper_library_key("node")] = node_id
+    if detail_id:
+        st.session_state[_paper_library_key("detail")] = detail_id
+    else:
+        st.session_state.pop(_paper_library_key("detail"), None)
+
+
+def _focus_claim_review(*, source_id: str = "", status: str = "", queue: str = "") -> None:
+    if source_id:
+        st.session_state[f"research_cc_source:{selected}"] = source_id
+    st.session_state[f"research_claim_status_filter:{selected}"] = status
+    st.session_state[f"research_claim_queue_filter:{selected}"] = queue
+
+
+def _first_source_ref(action: dict[str, object], source_ids: set[str]) -> str:
+    for ref in action.get("source_refs") or []:
+        clean = str(ref or "").strip()
+        if clean in source_ids:
+            return clean
+    return ""
+
+
+def _render_overview_action_card(
+    action: dict[str, object],
+    *,
+    source_ids: set[str],
+    row_by_id: dict[str, dict[str, object]],
+) -> None:
+    kind = str(action.get("kind") or "")
+    label = _overview_action_label(action)
+    source_ref = _first_source_ref(action, source_ids)
+    meta_bits = []
+    if source_ref:
+        meta_bits.append(source_ref)
+    if action.get("claim_refs"):
+        meta_bits.append(f"{ui['research_claims']}: {len(action.get('claim_refs') or [])}")
+    if action.get("citation_refs"):
+        meta_bits.append(f"{ui['research_citations']}: {len(action.get('citation_refs') or [])}")
+    if action.get("draft_refs"):
+        meta_bits.append(f"{ui['synthesis_drafts']}: {len(action.get('draft_refs') or [])}")
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    secondary_targets = [item for item in action.get("secondary_targets") or [] if isinstance(item, dict)]
+    paper_target = next(
+        (item for item in secondary_targets if str(item.get("surface") or "") == "paper_library"),
+        target if str(target.get("surface") or "") == "paper_library" else {},
+    )
+    paper_url = _paper_library_target_url(paper_target, fallback_detail_id=source_ref)
+
+    with st.container(border=True):
+        st.markdown(
+            _overview_card_html(label, " · ".join(meta_bits), action=True),
+            unsafe_allow_html=True,
+        )
+        b1, b2, b3 = st.columns(3)
+        if kind == "continue_reading":
+            row = row_by_id.get(source_ref, {})
+            with b1:
+                if row.get("has_pdf") and source_ref:
+                    _render_sidecar_link_button(
+                        _l("open_reader", "Open Reader"),
+                        _reader_view_url(source_ref),
+                        key=f"overview_reader_link:{selected}:{source_ref}",
+                        icon=":material/menu_book:",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                else:
+                    st.button(
+                        _l("open_reader", "Open Reader"),
+                        disabled=True,
+                        key=f"overview_reader_link_disabled:{selected}:{source_ref}",
+                        icon=":material/menu_book:",
+                        use_container_width=True,
+                    )
+            with b2:
+                _render_sidecar_link_button(
+                    _l("open_in_paper_library", "Open in Library"),
+                    paper_url or _paper_library_workspace_url(detail_id=source_ref, return_to="overview"),
+                    key=f"overview_open_library:{selected}:{kind}:{source_ref}",
+                    icon=":material/library_books:",
+                    use_container_width=True,
+                )
+        elif kind == "review_claims":
+            with b1:
+                if st.button(
+                    _l("focus_ready_claims", "Focus ready claims"),
+                    key=f"overview_focus_ready_claims:{selected}",
+                    icon=":material/rule:",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    _focus_claim_review(source_id=source_ref, status="ready", queue="ready")
+                    _set_overview_notice(_l("claims_focus_saved", "Claims review is focused on ready claims."))
+                    st.rerun()
+            with b2:
+                _render_sidecar_link_button(
+                    _l("open_source_library", "Open source"),
+                    paper_url or (
+                        _paper_library_workspace_url(
+                            view="claims_need_review",
+                            detail_id=source_ref,
+                            focus="claims",
+                            action="review_claims",
+                            return_to="overview",
+                        )
+                    ),
+                    key=f"overview_review_claims_source:{selected}:{source_ref}",
+                    icon=":material/library_books:",
+                    use_container_width=True,
+                )
+        elif kind == "fix_citations":
+            with b1:
+                if st.button(
+                    _l("focus_quote_warnings", "Focus quote warnings"),
+                    key=f"overview_focus_quote_warning:{selected}",
+                    icon=":material/plagiarism:",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    _focus_claim_review(source_id=source_ref, queue="quote_warning")
+                    _set_overview_notice(_l("citations_focus_saved", "Citation inspector is focused on quote warnings."))
+                    st.rerun()
+            with b2:
+                _render_sidecar_link_button(
+                    _l("open_source_library", "Open source"),
+                    paper_url or _paper_library_workspace_url(
+                        detail_id=source_ref,
+                        focus="claims",
+                        action="fix_citations",
+                        return_to="overview",
+                    ),
+                    key=f"overview_fix_citations_source:{selected}:{source_ref}",
+                    icon=":material/library_books:",
+                    use_container_width=True,
+                )
+        elif kind in {"review_private_publish_risk", "review_drafts"}:
+            with b1:
+                if st.button(
+                    _l("focus_export_gate", "Focus export gate"),
+                    key=f"overview_focus_export:{selected}:{kind}",
+                    icon=":material/policy:",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    st.session_state[f"research_export_focus:{selected}"] = kind
+                    _set_overview_notice(_l("export_focus_saved", "Export gate focus updated."))
+                    st.rerun()
+            with b2:
+                _render_sidecar_link_button(
+                    _l("open_paper_library_workspace", "Open Paper Library"),
+                    paper_url or _paper_library_workspace_url(
+                        detail_id=source_ref,
+                        focus="safety",
+                        action="review_visibility",
+                        return_to="overview",
+                    ),
+                    key=f"overview_export_library:{selected}:{kind}:{source_ref}",
+                    icon=":material/library_books:",
+                    use_container_width=True,
+                )
+        elif kind == "import_sources":
+            with b1:
+                _render_sidecar_link_button(
+                    _l("open_paper_library_workspace", "Open Paper Library"),
+                    paper_url or _paper_library_workspace_url(view="unsorted", return_to="overview"),
+                    key=f"overview_import_sources_library:{selected}",
+                    icon=":material/library_books:",
+                    type="primary",
+                    use_container_width=True,
+                )
+            with b2:
+                if st.button(
+                    _l("focus_connector_inbox", "Connector inbox"),
+                    key=f"overview_focus_connectors:{selected}",
+                    icon=":material/hub:",
+                    use_container_width=True,
+                ):
+                    st.session_state[f"research_advanced_focus:{selected}"] = "connectors"
+                    _set_overview_notice(_l("connector_focus_saved", "Connector inbox focus updated."))
+                    st.rerun()
+
+
 def _render_workspace_overview(inbox) -> None:
+    _render_research_overview_styles()
     overview = paper_overview(_pdir)
     command = build_research_overview_payload(_pdir)
     connector_rows = list(load_connectors(_pdir).get("connectors") or [])
     enabled_connectors = [row for row in connector_rows if bool(row.get("enabled", True))]
-
-    st.subheader(_l("research_command_center", "Research Command Center"))
+    all_paper_rows = paper_rows(_pdir, view="all")
+    row_by_id = {str(row.get("id") or ""): row for row in all_paper_rows}
+    source_ids = {source.id for source in inbox.sources}
     funnel = command.get("funnel_counts") or {}
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric(_l("research_sources", "Sources"), funnel.get("sources", 0))
-    c2.metric(_l("papers_reading", "Reading"), funnel.get("reading", 0))
-    c3.metric(_l("chunks", "Chunks"), funnel.get("chunks", 0))
-    c4.metric(_l("claims_ready", "Claims ready"), funnel.get("claims_ready", 0))
-    c5.metric(_l("citations", "Citations"), funnel.get("citations", 0))
-    c6.metric(_l("synthesis_drafts", "Drafts"), funnel.get("drafts", 0))
-
     action_rows = list(command.get("next_actions") or [])
-    if action_rows:
-        st.markdown(f"**{_l('next_actions', 'Next actions')}**")
-        for action in action_rows[:5]:
-            with st.container(border=True):
-                label = str(action.get("label") or action.get("kind") or "")
-                st.markdown(f"**{label}**")
-                kind = str(action.get("kind") or "")
-                target_tab = str(action.get("target_tab") or "")
-                source_refs = [str(ref) for ref in action.get("source_refs") or []]
-                if source_refs:
-                    st.caption(", ".join(source_refs))
-                if kind == "continue_reading" and source_refs:
-                    if st.button(
-                        _l("continue_reading", "Continue reading"),
-                        key=f"overview_continue_reading:{selected}:{source_refs[0]}",
-                        icon=":material/menu_book:",
-                    ):
-                        st.session_state[f"paper_reader_source:{selected}"] = source_refs[0]
-                        st.rerun()
-                elif target_tab == "export":
-                    st.caption(_l("open_synthesis_export_tab", "Open Synthesis / Export to review this queue."))
-                elif target_tab == "claims":
-                    st.caption(_l("open_claims_tab", "Open Claims & Citations to review this queue."))
-                elif target_tab == "advanced_connectors":
-                    st.caption(_l("open_connectors_tab", "Open Advanced Connectors to import sources."))
-    else:
-        st.caption(_l("no_research_actions", "No research actions need attention."))
-
     risk_rows = list(command.get("risks") or [])
-    if risk_rows:
-        with st.expander(_l("research_risks", "Research risks"), expanded=True):
-            for risk in risk_rows:
-                refs = ", ".join(str(ref) for ref in risk.get("refs") or [])
-                st.warning(f"{risk.get('kind')}: {refs}")
 
-    st.subheader(_l("paper_reading_pipeline", "Reading Pipeline"))
-    p1, p2, p3, p4, p5, p6 = st.columns(6)
-    p1.metric(_l("papers_total", "Papers total"), overview["papers_total"])
-    p2.metric(_l("papers_reading", "Reading"), overview["reading"])
-    p3.metric(_l("papers_annotated", "Annotated"), overview["annotated"])
-    p4.metric(_l("papers_candidate_ready", "Candidate ready"), overview["candidate_ready"])
-    p5.metric(_l("papers_archived", "Archived"), overview["archived"])
-    p6.metric(ui["connectors_enabled"], len(enabled_connectors))
+    notice = _pop_overview_notice()
+    if notice:
+        st.success(notice)
 
-    st.subheader(_l("review_queue", "Review Queue"))
-    r1, r2, r3 = st.columns(3)
-    r1.metric(_l("ready_research_claims", "Ready research claims"), overview["ready_research_claims"])
-    r2.metric(_l("promoted_research_claims", "Promoted research claims"), overview["promoted_research_claims"])
-    r3.metric(_l("ai_candidates", "AI candidates"), overview["ai_candidates"])
-
-    st.subheader(_l("integrity_publish_safety", "Integrity & Publish Safety"))
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric(_l("private_public_sources", "Private / public"), f"{overview['private_sources']} / {overview['public_sources']}")
-    s2.metric(_l("citation_broken", "Citation broken"), overview["citation_broken"])
-    s3.metric(_l("private_publish_risk", "Private publish risk"), overview["private_publish_risk"])
-    s4.metric(_l("stale_translation_warning", "Stale translations"), overview["stale_translation_warning"])
-
-    st.caption(
-        _l(
-            "paper_evidence_boundary",
-            "Paper-reading evidence proves reading, quoting, and understanding; project or goal claims still need real project evidence before public use.",
-        )
-    )
-    st.caption(ui["claim_boundary_hint"])
-
-    recent = overview.get("recent_papers") or []
-    if recent:
-        st.markdown(f"**{_l('recent_papers', 'Recent papers')}**")
-        st.dataframe(
+    private_public = f"{overview['private_sources']} / {overview['public_sources']}"
+    safety_badges = [
+        _overview_badge(f"{_l('private_public_sources', 'Private / public')}: {private_public}", "warn" if overview["private_sources"] else "neutral"),
+        _overview_badge(f"{_l('citation_broken', 'Citation broken')}: {overview['citation_broken']}", "alert" if overview["citation_broken"] else "ok"),
+        _overview_badge(f"{_l('private_publish_risk', 'Private publish risk')}: {overview['private_publish_risk']}", "alert" if overview["private_publish_risk"] else "ok"),
+        _overview_badge(f"{_l('stale_translation_warning', 'Stale translations')}: {overview['stale_translation_warning']}", "warn" if overview["stale_translation_warning"] else "ok"),
+    ]
+    st.markdown(
+        "".join(
             [
-                {
-                    "title": row.get("title"),
-                    "status": row.get("status"),
-                    "tree_path": row.get("tree_path"),
-                    "last_read": row.get("last_read"),
-                }
-                for row in recent
-            ],
-            use_container_width=True,
-            hide_index=True,
+                '<div class="ro-command-strip">',
+                '<div class="ro-command-main">',
+                f'<div class="ro-kicker">{html.escape(_l("research_workspace", "Research Workspace"))}</div>',
+                f'<div class="ro-title">{html.escape(_l("research_command_center", "Research Command Center"))}</div>',
+                f'<p class="ro-copy">{html.escape(_l("research_command_center_caption", "Sources, reading state, review queues, and export safety in one workspace."))}</p>',
+                '<div class="ro-flow">',
+                _overview_stage(_l("research_sources", "Sources"), funnel.get("sources", 0), _l("source_inbox", "Source Inbox")),
+                _overview_stage(_l("papers_reading", "Reading"), funnel.get("reading", 0), _l("reader", "Reader"), "hot" if funnel.get("reading") else ""),
+                _overview_stage(_l("extracted", "Extracted"), overview["annotated"], _l("chunks_annotations", "Chunks / annotations")),
+                _overview_stage(_l("claims_ready", "Claims ready"), funnel.get("claims_ready", 0), _l("review_queue", "Review queue"), "hot" if funnel.get("claims_ready") else ""),
+                _overview_stage(
+                    _l("citations", "Citations"),
+                    funnel.get("citations", 0),
+                    _l("warnings_count", "{count} warnings").format(count=overview["citation_broken"]),
+                    "warn" if overview["citation_broken"] else "",
+                ),
+                _overview_stage(_l("synthesis_drafts", "Drafts"), funnel.get("drafts", 0), _l("synthesis_export", "Synthesis / Export")),
+                "</div>",
+                "</div>",
+                '<div class="ro-safety-panel">',
+                f'<div class="ro-section-title">{html.escape(_l("integrity_publish_safety", "Integrity & Publish Safety"))}</div>',
+                "<div>",
+                " ".join(safety_badges),
+                "</div>",
+                f'<p class="ro-copy">{html.escape(ui["claim_boundary_hint"])}</p>',
+                "</div>",
+                "</div>",
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
+
+    q_reading = _library_view_count(all_paper_rows, "reading")
+    q_missing_pdf = _library_view_count(all_paper_rows, "no_pdf")
+    q_needs_extraction = _library_view_count(all_paper_rows, "needs_extraction")
+    q_claims_need_review = _library_view_count(all_paper_rows, "claims_need_review")
+    q_duplicate = _library_view_count(all_paper_rows, "duplicate_risk")
+    q_stale = _library_view_count(all_paper_rows, "stale_translation")
+    q_private = _library_view_count(all_paper_rows, "private")
+    q_recent = _library_view_count(all_paper_rows, "recent")
+    queue_fallback = {
+        "reading": {
+            "label": _l("reading", "Reading"),
+            "count": q_reading,
+            "caption": _l("reader", "Reader"),
+            "action": _l("overview_queue_continue_reading", "Continue reading"),
+            "tone": "live" if q_reading else "",
+        },
+        "needs_extraction": {
+            "label": _l("needs_extraction", "Needs extraction"),
+            "count": q_needs_extraction,
+            "caption": _l("parser_status", "Parser status"),
+            "action": _l("overview_queue_run_extraction", "Run extraction"),
+            "tone": "risk" if q_needs_extraction else "",
+        },
+        "no_pdf": {
+            "label": _l("pdf_missing", "PDF missing"),
+            "count": q_missing_pdf,
+            "caption": _l("paper_library", "Paper Library"),
+            "action": _l("overview_queue_attach_pdf", "Attach PDF"),
+            "tone": "risk" if q_missing_pdf else "",
+        },
+        "claims_need_review": {
+            "label": _l("claims_need_review", "Claims review"),
+            "count": q_claims_need_review,
+            "caption": _l("ai_candidates", "AI candidates"),
+            "action": _l("overview_queue_review_candidates", "Review candidates"),
+            "tone": "live" if q_claims_need_review else "",
+        },
+        "duplicate_risk": {
+            "label": _l("duplicate_risk", "Duplicate risk"),
+            "count": q_duplicate,
+            "caption": _l("metadata_review", "Metadata review"),
+            "action": _l("overview_queue_deduplicate", "Deduplicate"),
+            "tone": "risk" if q_duplicate else "",
+        },
+        "stale_translation": {
+            "label": _l("stale_translation_warning", "Stale translations"),
+            "count": q_stale,
+            "caption": _l("translation", "Translation"),
+            "action": _l("overview_queue_refresh_translations", "Refresh translations"),
+            "tone": "risk" if q_stale else "",
+        },
+        "private": {
+            "label": _l("private_sources", "Private sources"),
+            "count": q_private,
+            "caption": _l("visibility", "Visibility"),
+            "action": _l("overview_queue_review_visibility", "Review visibility"),
+            "tone": "risk" if q_private else "",
+        },
+        "recent": {
+            "label": _l("recent_papers", "Recent"),
+            "count": q_recent,
+            "caption": _l("paper_library", "Paper Library"),
+            "action": _l("overview_queue_open_recent", "Open recent"),
+            "tone": "live" if q_recent else "",
+        },
+    }
+    queue_rows = []
+    for row in command.get("work_queues") or []:
+        if not isinstance(row, dict):
+            continue
+        view = str(row.get("id") or "")
+        fallback = queue_fallback.get(view, {})
+        queue_rows.append(
+            {
+                "label": str(fallback.get("label") or row.get("label") or view),
+                "view": view,
+                "count": int(row.get("count") or fallback.get("count") or 0),
+                "caption": str(fallback.get("caption") or row.get("caption") or ""),
+                "action": str(fallback.get("action") or _l("open_in_paper_library", "Open in Library")),
+                "tone": str(fallback.get("tone") or row.get("severity") or ""),
+                "target": row.get("target") if isinstance(row.get("target"), dict) else {},
+            }
         )
+    if not queue_rows:
+        queue_rows = [
+            {"view": view, "target": {}, **values}
+            for view, values in queue_fallback.items()
+        ]
+    sidecar_unavailable, _sidecar_message = _paper_library_sidecar_unavailable()
+    queue_tiles = []
+    for row in queue_rows:
+        label = str(row.get("label") or "")
+        view = str(row.get("view") or "")
+        count = int(row.get("count") or 0)
+        target = row.get("target") if isinstance(row.get("target"), dict) else {}
+        target_url = _paper_library_target_url(target, fallback_detail_id="")
+        queue_tiles.append(
+            _overview_queue_tile(
+                label=label,
+                count=count,
+                caption=str(row.get("caption") or ""),
+                action=str(row.get("action") or ""),
+                url=target_url or _paper_library_workspace_url(view=view, return_to="overview"),
+                tone=str(row.get("tone") or ""),
+                view=view,
+                disabled=sidecar_unavailable,
+            )
+        )
+    st.markdown(
+        "".join(
+            [
+                '<div class="ro-panel">',
+                f'<div class="ro-section-title">{html.escape(_l("work_queues", "Work queues"))}<small>{html.escape(_l("paper_library", "Paper Library"))} / {html.escape(ui["claims_citations"])}</small></div>',
+                '<div class="ro-queue-tiles">',
+                "".join(queue_tiles),
+                "</div>",
+                "</div>",
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
 
-    diagnostics = []
-    diagnostics.extend(overview.get("citation_diagnostics") or [])
-    diagnostics.extend(overview.get("private_publish_risk_refs") or [])
-    if diagnostics:
-        with st.expander(_l("integrity_details", "Integrity details")):
-            for item in diagnostics:
-                st.warning(str(item))
+    left, center, right = st.columns([1.05, 1.35, 1.1], gap="medium")
+    with left:
+        st.markdown(
+            f'<div class="ro-section-title">{html.escape(_l("next_actions", "Next actions"))}<small>{len(action_rows)}</small></div>',
+            unsafe_allow_html=True,
+        )
+        if action_rows:
+            for action in action_rows[:5]:
+                _render_overview_action_card(action, source_ids=source_ids, row_by_id=row_by_id)
+        else:
+            st.markdown(
+                f'<div class="ro-empty">{html.escape(_l("no_research_actions", "No research actions need attention."))}</div>',
+                unsafe_allow_html=True,
+            )
 
-    st.markdown(f"**{ui['research_primary_actions']}**")
-    a1, a2, a3, a4, a5 = st.columns(5)
-    with a1:
-        st.page_link("pages/7_Research.py", label=_l("find_papers_in_library", "Find papers in Library"))
-    with a2:
-        st.page_link("pages/7_Research.py", label=_l("open_library", "Open Library"))
-    with a3:
-        st.page_link("pages/7_Research.py", label=_l("continue_reading", "Continue reading"))
-    with a4:
-        st.page_link("pages/7_Research.py", label=_l("review_claims", "Review claims"))
-    with a5:
-        st.page_link("pages/7_Research.py", label=_l("export_citations", "Export citations"))
+        st.markdown(
+            f'<div class="ro-section-title">{html.escape(_l("discovery_updates", "Discovery updates"))}<small>{len(enabled_connectors)} {html.escape(ui["connectors_enabled"])}</small></div>',
+            unsafe_allow_html=True,
+        )
+        provider_bits = []
+        for provider in CONNECTOR_PROVIDERS:
+            provider_rows = [row for row in connector_rows if str(row.get("provider") or "") == provider]
+            last = max(provider_rows, key=lambda row: str(row.get("last_run") or ""), default={})
+            last_result = last.get("last_result") if isinstance(last.get("last_result"), dict) else {}
+            imported = int(last_result.get("imported") or 0)
+            skipped = int(last_result.get("skipped") or 0)
+            status = str(last.get("status") or "").strip()
+            provider_bits.append(
+                _overview_queue_chip(
+                    provider,
+                    _l("overview_imported_count", "{count} imported").format(count=imported),
+                    (
+                        _l("overview_skipped_count", "{count} skipped").format(count=skipped)
+                        if skipped
+                        else _l(f"connector_status_{status or 'idle'}", status or _l("connector_status_idle", "idle"))
+                    ),
+                    "live" if imported else "",
+                )
+            )
+        st.markdown(
+            '<div class="ro-queue-grid">' + "".join(provider_bits) + "</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            _l("focus_connector_inbox", "Connector inbox"),
+            key=f"overview_connectors_button:{selected}",
+            icon=":material/hub:",
+            use_container_width=True,
+        ):
+            st.session_state[f"research_advanced_focus:{selected}"] = "connectors"
+            _set_overview_notice(_l("connector_focus_saved", "Connector inbox focus updated."))
+            st.rerun()
+
+    with center:
+        st.markdown(
+            f'<div class="ro-section-title">{html.escape(_l("recent_work", "Recent work"))}<small>{html.escape(_l("paper_library", "Paper Library"))}</small></div>',
+            unsafe_allow_html=True,
+        )
+        recent = sorted(
+            all_paper_rows,
+            key=lambda row: str(row.get("last_read") or ""),
+            reverse=True,
+        )[:5]
+        if recent:
+            for row in recent:
+                source_id = str(row.get("id") or "")
+                meta = " · ".join(
+                    str(part)
+                    for part in [
+                        _overview_status_label(row.get("status")),
+                        row.get("tree_path"),
+                        row.get("last_read"),
+                    ]
+                    if part
+                )
+                metrics = [
+                    f"{_l('chunks', 'Chunks')}: {row.get('chunks_count', 0)}",
+                    f"{ui['research_claims']}: {row.get('claims_count', 0)}",
+                    f"{ui['research_citations']}: {row.get('citations_count', 0)}",
+                ]
+                st.markdown(
+                    _overview_card_html(
+                        row.get("title") or source_id,
+                        meta,
+                        " · ".join(metrics),
+                        list(row.get("badges") or []),
+                    ),
+                    unsafe_allow_html=True,
+                )
+                actions = st.columns([1, 1, 1])
+                with actions[0]:
+                    if row.get("has_pdf"):
+                        _render_sidecar_link_button(
+                            _l("open_reader", "Open Reader"),
+                            _reader_view_url(source_id),
+                            key=f"overview_recent_reader:{selected}:{source_id}",
+                            icon=":material/menu_book:",
+                            use_container_width=True,
+                        )
+                    else:
+                        st.button(
+                            _l("open_reader", "Open Reader"),
+                            key=f"overview_recent_reader_disabled:{selected}:{source_id}",
+                            disabled=True,
+                            icon=":material/menu_book:",
+                            use_container_width=True,
+                        )
+                with actions[1]:
+                    _render_sidecar_link_button(
+                        _l("open_in_paper_library", "Open in Library"),
+                        _paper_library_workspace_url(
+                            detail_id=source_id,
+                            focus="reading" if row.get("status") == "reading" else "metadata",
+                            action="open_reader" if row.get("has_pdf") else "review_metadata",
+                            return_to="overview",
+                        ),
+                        key=f"overview_recent_library:{selected}:{source_id}",
+                        icon=":material/library_books:",
+                        use_container_width=True,
+                    )
+                with actions[2]:
+                    if st.button(
+                        _l("focus_claims", "Claims"),
+                        key=f"overview_recent_claims:{selected}:{source_id}",
+                        disabled=not bool(row.get("claims_count") or row.get("citations_count")),
+                        icon=":material/rule:",
+                        use_container_width=True,
+                    ):
+                        _focus_claim_review(source_id=source_id)
+                        _set_overview_notice(_l("claims_focus_saved", "Claims review focus updated."))
+                        st.rerun()
+        else:
+            st.markdown(
+                f'<div class="ro-empty">{html.escape(_l("recent_work_empty", "No recent paper reading yet."))}</div>',
+                unsafe_allow_html=True,
+            )
+
+    with right:
+        st.markdown(
+            f'<div class="ro-section-title">{html.escape(_l("ready_to_review", "Ready to review"))}<small>{html.escape(ui["claims_citations"])}</small></div>',
+            unsafe_allow_html=True,
+        )
+        claim_rows = load_research_claims(_pdir)
+        ready_claims = [claim for claim in claim_rows if claim.status == "ready"]
+        chunk_map = {chunk.id: chunk for chunk in load_chunks(_pdir)}
+        if ready_claims:
+            for claim in ready_claims[:4]:
+                refs = []
+                for ref in claim.source_refs:
+                    if ref not in refs:
+                        refs.append(ref)
+                for chunk_ref in claim.chunk_refs:
+                    chunk = chunk_map.get(chunk_ref)
+                    if chunk is not None and chunk.source_id not in refs:
+                        refs.append(chunk.source_id)
+                st.markdown(
+                    _overview_card_html(
+                        claim.id,
+                        " · ".join([claim.type, f"confidence={claim.confidence}", ", ".join(refs[:2])]),
+                        claim.text,
+                        ["ready", *claim.warnings[:2]],
+                    ),
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    _l("review_claim", "Review claim"),
+                    key=f"overview_ready_claim:{selected}:{claim.id}",
+                    icon=":material/rule:",
+                    use_container_width=True,
+                ):
+                    _focus_claim_review(source_id=refs[0] if refs else "", status="ready", queue="ready")
+                    _set_overview_notice(_l("claims_focus_saved", "Claims review is focused on ready claims."))
+                    st.rerun()
+            if len(ready_claims) > 4:
+                st.caption(_l("more_claims_hidden", "{count} more claim(s) hidden by this compact view.").format(count=len(ready_claims) - 4))
+        else:
+            st.markdown(
+                (
+                    '<div class="ro-empty">'
+                    f'<strong>{html.escape(_l("claims_empty", "No claims yet."))}</strong><br>'
+                    f'{html.escape(_l("claims_empty_next_step", "Run extraction in Paper Library, then create claim candidates from the Reader."))}'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+            seed_view = "needs_extraction" if q_needs_extraction else "all"
+            seed_action = "run_extraction" if q_needs_extraction else "review_claims"
+            if all_paper_rows:
+                _render_sidecar_link_button(
+                    _l("prepare_claim_candidates", "Prepare claim candidates"),
+                    _paper_library_workspace_url(
+                        view=seed_view,
+                        focus="artifacts" if q_needs_extraction else "claims",
+                        action=seed_action,
+                        return_to="overview",
+                    ),
+                    key=f"overview_prepare_claim_candidates:{selected}:{seed_view}:{seed_action}",
+                    icon=":material/auto_fix_high:",
+                    use_container_width=True,
+                )
+
+        st.markdown(
+            f'<div class="ro-section-title">{html.escape(_l("risk_queue", "Risk queue"))}<small>{len(risk_rows)}</small></div>',
+            unsafe_allow_html=True,
+        )
+        if risk_rows:
+            for risk in risk_rows:
+                refs = [str(ref) for ref in risk.get("refs") or [] if str(ref)]
+                st.markdown(
+                    _overview_card_html(
+                        _overview_risk_label(risk.get("kind") or "risk"),
+                        ", ".join(refs[:4]),
+                        _overview_risk_action_label(risk.get("action") or ""),
+                        ["risk"],
+                    ),
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f'<div class="ro-empty">{html.escape(_l("risk_queue_empty", "No publish blockers in the current research queue."))}</div>',
+                unsafe_allow_html=True,
+            )
+        if st.button(
+            _l("focus_export_gate", "Focus export gate"),
+            key=f"overview_export_gate_button:{selected}",
+            icon=":material/policy:",
+            disabled=not bool(risk_rows),
+            use_container_width=True,
+        ):
+            st.session_state[f"research_export_focus:{selected}"] = "risk_queue"
+            _set_overview_notice(_l("export_focus_saved", "Export gate focus updated."))
+            st.rerun()
 
 
 def _paper_sources(inbox) -> list:
@@ -1157,9 +2154,44 @@ def _paper_library_key(name: str) -> str:
     return f"paper_library:{selected}:{name}"
 
 
+def _reader_api_base() -> str:
+    """Return the sidecar base used for Paper Library and Reader links."""
+    raw = (
+        os.getenv("NBLANE_READER_API_BASE", "").strip()
+        or os.getenv("NBLANE_PAPER_LIBRARY_BASE", "").strip()
+        or "http://127.0.0.1:8502"
+    )
+    if raw.lower() in {"0", "false", "off", "none"}:
+        return ""
+    return raw.rstrip("/")
+
+
+def _research_overview_url() -> str:
+    """Return the browser-facing Research Overview URL for 8502 back links."""
+
+    explicit = os.getenv("NBLANE_RESEARCH_OVERVIEW_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    try:
+        current_url = str(getattr(st.context, "url", "") or "").strip()
+    except Exception:
+        current_url = ""
+    if current_url:
+        parsed = urlparse(current_url)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            path = parsed.path if parsed.path.strip("/") else "/Research"
+            return f"{parsed.scheme}://{parsed.netloc}{path}"
+        if current_url.startswith("/") and not current_url.startswith("//"):
+            return current_url.split("?", 1)[0].split("#", 1)[0] or "/Research"
+    base = os.getenv("NBLANE_STREAMLIT_BASE_URL", "").strip().rstrip("/")
+    if base:
+        return f"{base}/Research"
+    return "/Research"
+
+
 def _reader_view_url(source_id: str) -> str:
     token = mint_reader_token(user.id, selected, source_id)
-    base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+    base = _reader_api_base()
     encoded_source = quote(source_id, safe="")
     encoded_token = quote(token, safe="")
     path = f"/reader/view/{encoded_source}?token={encoded_token}"
@@ -1173,21 +2205,181 @@ def _paper_library_workspace_url(
     query: str = "",
     sort: str = "",
     detail_id: str = "",
+    focus: str = "",
+    action: str = "",
+    return_to: str = "",
+    return_url: str = "",
 ) -> str:
-    base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+    base = _reader_api_base()
     params = {"profile": selected}
+    clean_return_to = str(return_to or "").strip()
+    clean_return_url = str(return_url or "").strip()
+    if clean_return_to == "overview" and not clean_return_url:
+        clean_return_url = _research_overview_url()
     optional = {
         "view": view,
         "node_id": node_id,
         "query": query,
         "sort": sort,
         "detail_id": detail_id,
+        "focus": focus,
+        "action": action,
+        "return_to": clean_return_to,
+        "return_url": clean_return_url,
     }
     params.update(
         {key: str(value).strip() for key, value in optional.items() if str(value or "").strip()}
     )
     path = f"/paper-library?{urlencode(params)}"
     return f"{base}{path}" if base else path
+
+
+def _paper_library_target_url(target: dict[str, object], *, fallback_detail_id: str = "") -> str:
+    if not isinstance(target, dict) or str(target.get("surface") or "") != "paper_library":
+        return ""
+    return _paper_library_workspace_url(
+        view=str(target.get("view") or ""),
+        node_id=str(target.get("node_id") or ""),
+        query=str(target.get("query") or ""),
+        sort=str(target.get("sort") or ""),
+        detail_id=str(target.get("detail_id") or fallback_detail_id or ""),
+        focus=str(target.get("focus") or ""),
+        action=str(target.get("action") or ""),
+        return_to=str(target.get("return_to") or "overview"),
+        return_url=str(target.get("return_url") or ""),
+    )
+
+
+def _paper_library_workspace_status(workspace_url: str) -> tuple[bool | None, str]:
+    parsed = urlparse(workspace_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None, ""
+    try:
+        timeout = max(0.1, float(os.getenv("NBLANE_PAPER_LIBRARY_HEALTH_TIMEOUT", "2.5")))
+    except ValueError:
+        timeout = 2.5
+    cache_key = _paper_library_key(f"workspace_status:{workspace_url}")
+    now = time.time()
+    cached = st.session_state.get(cache_key)
+    if isinstance(cached, dict) and now - float(cached.get("checked_at", 0)) < 15:
+        return bool(cached.get("ok")), str(cached.get("message") or "")
+    try:
+        request = urllib.request.Request(
+            workspace_url,
+            method="GET",
+            headers={"User-Agent": "nblane-paper-library-runtime-check/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            ok = 200 <= int(getattr(response, "status", 200)) < 400
+            message = "" if ok else f"HTTP {getattr(response, 'status', '')}".strip()
+    except Exception as exc:
+        ok = False
+        message = str(exc)
+    st.session_state[cache_key] = {"checked_at": now, "ok": ok, "message": message}
+    return ok, message
+
+
+def _paper_library_sidecar_unavailable() -> tuple[bool, str]:
+    """Return whether browser-facing 8502 links should be paused."""
+    if not _reader_api_base():
+        return False, ""
+    ok, message = _paper_library_workspace_status(_paper_library_workspace_url())
+    return ok is False, message
+
+
+def _paper_library_sidecar_disabled_help(message: str = "") -> str:
+    help_text = _l(
+        "paper_library_sidecar_link_disabled_help",
+        "Start or forward the 8502 Paper Library sidecar to use this link.",
+    )
+    if message:
+        help_text = f"{help_text} {message}"
+    return help_text
+
+
+def _render_sidecar_link_button(
+    label: str,
+    url: str,
+    *,
+    key: str | None = None,
+    icon: str | None = None,
+    type: str = "secondary",
+    use_container_width: bool | None = None,
+    width: str = "content",
+    help: str | None = None,
+    disabled: bool = False,
+) -> None:
+    unavailable, message = _paper_library_sidecar_unavailable()
+    is_disabled = disabled or unavailable
+    help_text = help or (_paper_library_sidecar_disabled_help(message) if unavailable else None)
+    try:
+        st.link_button(
+            label,
+            url,
+            key=key,
+            icon=icon,
+            type=type,
+            use_container_width=use_container_width,
+            width=width,
+            help=help_text,
+            disabled=is_disabled,
+        )
+    except Exception:
+        if is_disabled:
+            st.button(
+                label,
+                key=key,
+                icon=icon,
+                type=type,
+                use_container_width=use_container_width,
+                width=width,
+                help=help_text,
+                disabled=True,
+            )
+        else:
+            st.caption(f"{_l('paper_library_workspace_url', 'Workspace')}: `{url}`")
+
+
+def _render_research_sidecar_status() -> None:
+    base = _reader_api_base()
+    if not base:
+        st.warning(
+            _l(
+                "research_sidecar_disabled",
+                "Paper Library sidecar links are disabled; Reader and 8502 workspace buttons will use relative URLs.",
+            )
+        )
+        return
+    workspace_url = _paper_library_workspace_url()
+    ok, message = _paper_library_workspace_status(workspace_url)
+    env_base = os.getenv("NBLANE_READER_API_BASE", "").strip()
+    origin = (
+        _l("configured", "configured")
+        if env_base
+        else _l("auto_detected", "auto-detected")
+    )
+    if ok is False:
+        st.warning(
+            _l(
+                "research_sidecar_unavailable",
+                "8502 Paper Library sidecar is not reachable; Reader and Paper Library links are temporarily disabled for {base}.",
+            ).format(base=base)
+            + (f" `{message}`" if message else "")
+        )
+        return
+    st.caption(
+        _l(
+            "research_sidecar_connected",
+            "Paper Library sidecar: {origin} · {base}",
+        ).format(origin=origin, base=base)
+    )
+
+
+def _render_iframe(src: str, *, height: int, scrolling: bool) -> None:
+    if hasattr(st, "iframe"):
+        st.iframe(src, height=height)
+    else:
+        st.components.v1.iframe(src, height=height, scrolling=scrolling)
 
 
 def _short_text(value: object, limit: int = 160) -> str:
@@ -1707,7 +2899,7 @@ def _search_result_warnings(result: PaperSearchResult, inbox) -> list[str]:
     if link_status and link_status not in {"ok", "200"}:
         warnings.append(f"Link check: {link_status}.")
     if not result.open_access_pdf:
-        warnings.append("No open-access PDF URL; import metadata first or upload a local PDF.")
+        warnings.append("No downloadable PDF URL; import metadata first or upload a local PDF.")
 
     title_key = _normalized_title(result.title)
     for source in _paper_sources(inbox):
@@ -1790,6 +2982,153 @@ def _render_search_result_details(results: list[PaperSearchResult], inbox) -> No
                 st.write(result.abstract)
 
 
+def _search_result_meta_line(result: PaperSearchResult) -> str:
+    parts = []
+    if result.year:
+        parts.append(result.year)
+    if result.venue:
+        parts.append(result.venue)
+    if result.authors:
+        parts.append(_short_text(", ".join(result.authors[:4]), 140))
+    if result.provider_refs:
+        parts.append(_short_text(", ".join(result.provider_refs), 120))
+    if result.citation_count is not None:
+        parts.append(f"{_l('citations', 'Citations')}: {result.citation_count}")
+    return " · ".join(parts)
+
+
+def _search_result_external_links(result: PaperSearchResult) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    if result.canonical_url:
+        links.append((_l("paper_page", "Paper page"), result.canonical_url))
+    if result.pdf_url:
+        links.append(("PDF", result.pdf_url))
+    if result.doi:
+        links.append(("DOI", f"https://doi.org/{result.doi}"))
+    if result.arxiv_id:
+        links.append(("arXiv", f"https://arxiv.org/abs/{result.arxiv_id}"))
+    return links
+
+
+def _search_result_link_html(title: str, url: str, *, source: str = "", summary: str = "") -> str:
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme not in {"http", "https"}:
+        return ""
+    clean_title = html.escape(str(title or url))
+    clean_url = html.escape(str(url or ""))
+    clean_source = html.escape(str(source or ""))
+    clean_summary = html.escape(_short_text(summary, 180))
+    source_part = f'<span style="color:#6b7280;"> · {clean_source}</span>' if clean_source else ""
+    summary_part = f'<div style="color:#4b5563;font-size:.86rem;line-height:1.4;margin-top:2px;">{clean_summary}</div>' if clean_summary else ""
+    return (
+        '<div style="margin:4px 0;">'
+        f'<a href="{clean_url}" target="_blank" rel="noreferrer">{clean_title}</a>'
+        f"{source_part}{summary_part}</div>"
+    )
+
+
+def _render_search_result_cards(
+    results: list[PaperSearchResult],
+    inbox,
+    *,
+    mode: str,
+) -> list[str]:
+    selected_ids: list[str] = []
+    st.markdown(f"**{_l('search_triage_results', 'Triage candidates')}**")
+    st.caption(
+        _l(
+            "search_triage_hint",
+            "Read the abstract, AI overview, and explainer links first; select only the papers you want to import.",
+        )
+    )
+    for index, result in enumerate(results, start=1):
+        warnings = _search_result_warnings(result, inbox)
+        imported = bool(result.imported_source_id)
+        key = _search_state_key(f"select:{result.candidate_id}")
+        with st.container(border=True):
+            select_col, body_col = st.columns([0.18, 1.82], gap="medium")
+            with select_col:
+                picked = st.checkbox(
+                    _l("select_to_import_short", "Import"),
+                    key=key,
+                    disabled=imported,
+                )
+                if picked and not imported:
+                    selected_ids.append(result.candidate_id)
+            with body_col:
+                st.markdown(f"**{index}. {result.title or result.candidate_id}**")
+                meta_line = _search_result_meta_line(result)
+                if meta_line:
+                    st.caption(meta_line)
+                badge_bits = []
+                if result.open_access_pdf:
+                    badge_bits.append("PDF ready")
+                if imported:
+                    badge_bits.append(f"Imported: {result.imported_source_id}")
+                if result.tags:
+                    badge_bits.extend(result.tags[:4])
+                if result.fields_of_study:
+                    badge_bits.extend(result.fields_of_study[:3])
+                if badge_bits:
+                    st.caption(" · ".join(str(item) for item in badge_bits if str(item).strip()))
+
+                if result.ai_summary:
+                    st.markdown(f"**{_l('ai_summary', 'AI overview')}**")
+                    st.write(result.ai_summary)
+                if result.why_relevant:
+                    st.markdown(f"**{_l('why_relevant', 'Why it matters')}**")
+                    st.write(result.why_relevant)
+                if result.abstract:
+                    st.markdown(f"**{_l('abstract', 'Abstract')}**")
+                    st.write(_short_text(result.abstract, 900))
+                    if len(result.abstract) > 900:
+                        with st.expander(_l("full_abstract", "Full abstract"), expanded=False):
+                            st.write(result.abstract)
+
+                if result.explanation_links:
+                    st.markdown(f"**{_l('explainer_links', 'Explainer links')}**")
+                    rendered_links = [
+                        _search_result_link_html(
+                            str(link.get("title") or link.get("url") or ""),
+                            str(link.get("url") or ""),
+                            source=str(link.get("source") or ""),
+                            summary=str(link.get("summary") or ""),
+                        )
+                        for link in result.explanation_links
+                        if str(link.get("url") or "").strip()
+                    ]
+                    st.markdown(
+                        "\n".join(item for item in rendered_links if item),
+                        unsafe_allow_html=True,
+                    )
+                elif mode == "Codex Search":
+                    st.caption(_l("explainer_links_empty", "No verified explainer links returned for this candidate."))
+
+                external_links = _search_result_external_links(result)
+                if external_links:
+                    link_cols = st.columns(min(4, len(external_links)))
+                    for offset, (title, url) in enumerate(external_links[:4]):
+                        with link_cols[offset]:
+                            try:
+                                st.link_button(title, url, use_container_width=True)
+                            except Exception:
+                                st.caption(f"{title}: {url}")
+                if warnings:
+                    with st.expander(_l("search_result_warnings", "Warnings and raw metadata"), expanded=False):
+                        for warning in warnings:
+                            st.warning(warning)
+                        st.code(
+                            yaml.dump(
+                                result.to_dict(),
+                                allow_unicode=True,
+                                default_flow_style=False,
+                                sort_keys=False,
+                            ),
+                            language="yaml",
+                        )
+    return selected_ids
+
+
 def _result_rows(results: list[object]) -> list[dict[str, object]]:
     marked = _marked_search_results(results)
     return [
@@ -1806,7 +3145,9 @@ def _result_rows(results: list[object]) -> list[dict[str, object]]:
             "imported": row.imported_source_id,
             "warnings": " · ".join(_search_result_warnings(row, load_research_sources(selected))),
             "abstract": _short_text(row.abstract, 260),
+            "ai_summary": _short_text(row.ai_summary, 220),
             "relevance": row.why_relevant,
+            "explainers": len(row.explanation_links),
             "tags": ", ".join(row.tags),
         }
         for row in marked
@@ -1863,11 +3204,20 @@ def _render_paper_search(inbox, *, embedded: bool = False) -> None:
     if mode in {"Codex Search", "Provider Search"}:
         with st.form(f"paper_search_form:{selected}"):
             query = st.text_input(_l("query", "Query"), placeholder="VLA memory")
-            providers = st.multiselect(
-                _l("providers", "Providers"),
-                options=list(PAPER_SEARCH_PROVIDERS),
-                default=list(PAPER_SEARCH_PROVIDERS),
-            )
+            if mode == "Provider Search":
+                providers = st.multiselect(
+                    _l("providers", "Providers"),
+                    options=list(PAPER_SEARCH_PROVIDERS),
+                    default=list(PAPER_SEARCH_PROVIDERS),
+                )
+            else:
+                providers = []
+                st.caption(
+                    _l(
+                        "codex_search_pdf_policy",
+                        "Codex can use any source/provider; only candidates with a downloadable PDF URL are shown.",
+                    )
+                )
             c1, c2, c3 = st.columns(3)
             with c1:
                 limit = st.number_input(_l("limit", "Limit"), min_value=1, max_value=50, value=10)
@@ -1875,7 +3225,11 @@ def _render_paper_search(inbox, *, embedded: bool = False) -> None:
                 year_from = st.text_input(_l("year_from", "Year from"))
             with c3:
                 year_to = st.text_input(_l("year_to", "Year to"))
-            only_pdf = st.checkbox(_l("has_open_access_pdf", "Has open-access PDF"), value=False)
+            only_pdf = st.checkbox(
+                _l("has_open_access_pdf", "Has downloadable PDF"),
+                value=mode == "Codex Search",
+                disabled=mode == "Codex Search",
+            )
             exclude_imported = st.checkbox(_l("exclude_imported", "Exclude already imported"), value=True)
             project_refs = st.text_area(ui["project_refs"], height=68)
             goal_refs = st.text_area(ui["goal_refs"], height=68)
@@ -1899,13 +3253,33 @@ def _render_paper_search(inbox, *, embedded: bool = False) -> None:
                         "goal_refs": _text_lines(goal_refs),
                         "already_imported": _paper_search_imported_refs(_pdir),
                         "library_tree_hint": _paper_search_library_tree_hint(_pdir),
+                        "triage_fields": [
+                            "abstract",
+                            "ai_summary",
+                            "why_relevant",
+                            "explanation_links",
+                        ],
+                        "explanation_link_sources": [
+                            "Zhihu",
+                            "Xiaohongshu",
+                            "blog",
+                            "video",
+                            "project page",
+                            "author page",
+                        ],
+                        "instructions": (
+                            "Return paper candidates for coarse reading from any reputable source/provider. "
+                            "Only include results with a direct downloadable PDF URL in pdf_url or open_access_pdf_url. "
+                            "For each result, include abstract if available, a concise AI overview in the user's language, "
+                            "why it matters for the query, and verified explainer links when available. Do not invent explainer links."
+                        ),
                     },
                 )
                 raw = result.structured if isinstance(result.structured, dict) else {}
                 candidates = []
                 for row in raw.get("results", []):
                     item = PaperSearchResult.from_dict(row)
-                    if item is None or not _paper_search_result_has_import_ref(item):
+                    if item is None or not _paper_search_result_has_downloadable_pdf(item):
                         continue
                     candidates.append(item.to_dict())
                 if not candidates:
@@ -1921,7 +3295,7 @@ def _render_paper_search(inbox, *, embedded: bool = False) -> None:
                                 "Codex returned no structured papers; using provider search fallback.",
                             )
                         )
-                    candidates = [row.to_dict() for row in search_papers(query, tuple(providers), int(limit), filters)]
+                    candidates = [row.to_dict() for row in search_papers(query, tuple(providers or PAPER_SEARCH_PROVIDERS), int(limit), filters)]
                 for warning in result.warnings:
                     st.warning(str(warning))
             else:
@@ -1939,26 +3313,20 @@ def _render_paper_search(inbox, *, embedded: bool = False) -> None:
         if results:
             marked_results = _marked_search_results(results)
             result_dicts = [row.to_dict() for row in marked_results]
-            st.dataframe(_result_rows(result_dicts), use_container_width=True, hide_index=True)
-            _render_search_result_details(marked_results, inbox)
-            selected_ids = st.multiselect(
-                _l("select_to_import", "Select to import"),
-                options=[row.candidate_id for row in marked_results],
-                format_func=lambda cid: next(
-                    (row.title or cid for row in marked_results if row.candidate_id == cid),
-                    cid,
-                ),
-            )
-            with st.expander(_l("selected_yaml_preview", "Selected YAML preview"), expanded=bool(selected_ids)):
-                st.code(
-                    yaml.dump(
-                        [row.to_dict() for row in marked_results if row.candidate_id in set(selected_ids)],
-                        allow_unicode=True,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    ),
-                    language="yaml",
-                )
+            selected_ids = _render_search_result_cards(marked_results, inbox, mode=mode)
+            with st.expander(_l("compact_table", "Compact table"), expanded=False):
+                st.dataframe(_result_rows(result_dicts), use_container_width=True, hide_index=True)
+            if selected_ids:
+                with st.expander(_l("selected_metadata_preview", "Selected metadata preview"), expanded=False):
+                    st.code(
+                        yaml.dump(
+                            [row.to_dict() for row in marked_results if row.candidate_id in set(selected_ids)],
+                            allow_unicode=True,
+                            default_flow_style=False,
+                            sort_keys=False,
+                        ),
+                        language="yaml",
+                    )
             with st.form(f"paper_import_options:{selected}"):
                 node_options = _node_options()
                 default_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
@@ -2207,7 +3575,7 @@ def _render_grobid_status_block(source=None) -> None:
             st.info(
                 _l(
                     "grobid_not_configured",
-                    "NBLANE_GROBID_URL is not configured; structured extraction will use PyMuPDF fallback.",
+                    "NBLANE_GROBID_URL is not configured; structured extraction will try the local GROBID default and fall back if unavailable.",
                 )
             )
             if source is not None:
@@ -2645,10 +4013,12 @@ def _filter_paper_library_rows(
 
 def _paper_component_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
+    sidecar_unavailable, _sidecar_message = _paper_library_sidecar_unavailable()
     for row in rows:
         source_id = str(row.get("id") or "")
         if not source_id:
             continue
+        has_pdf = bool(getattr(row.get("source"), "metadata", {}).get("pdf_asset_ref"))
         out.append(
             {
                 "id": source_id,
@@ -2657,7 +4027,7 @@ def _paper_component_rows(rows: list[dict[str, object]]) -> list[dict[str, objec
                 "summary": _short_text(row.get("summary") or row.get("notes"), 220),
                 "badges": [str(item) for item in row.get("badges", []) if str(item).strip()],
                 "tags": [str(item) for item in row.get("tags", []) if str(item).strip()],
-                "reader_url": _reader_view_url(source_id) if getattr(row.get("source"), "metadata", {}).get("pdf_asset_ref") else "",
+                "reader_url": _reader_view_url(source_id) if has_pdf and not sidecar_unavailable else "",
                 "metrics": " · ".join(
                     [
                         f"{_l('annotations', 'Annotations')}: {row.get('annotations_count', 0)}",
@@ -2703,7 +4073,7 @@ def _render_paper_card(row: dict[str, object], *, active: bool) -> None:
 """,
         unsafe_allow_html=True,
     )
-    a1, a2, a3 = st.columns([1, 1, 1.2])
+    a1, a2 = st.columns(2)
     with a1:
         if st.button(
             _l("details", "Details"),
@@ -2716,15 +4086,13 @@ def _render_paper_card(row: dict[str, object], *, active: bool) -> None:
             st.rerun()
     with a2:
         if getattr(source, "metadata", {}).get("pdf_asset_ref"):
-            try:
-                st.link_button(
-                    _l("open_reader", "Open Reader"),
-                    _reader_view_url(source_id),
-                    icon=":material/menu_book:",
-                    use_container_width=True,
-                )
-            except Exception as exc:
-                st.caption(str(exc))
+            _render_sidecar_link_button(
+                _l("open_reader", "Open Reader"),
+                _reader_view_url(source_id),
+                key=_paper_library_key(f"reader_link:{source_id}"),
+                icon=":material/menu_book:",
+                use_container_width=True,
+            )
         else:
             st.button(
                 _l("open_reader", "Open Reader"),
@@ -2733,16 +4101,6 @@ def _render_paper_card(row: dict[str, object], *, active: bool) -> None:
                 icon=":material/menu_book:",
                 use_container_width=True,
             )
-    with a3:
-        if st.button(
-            _l("send_to_reader_tab", "Use in Reader tab (fallback)"),
-            key=_paper_library_key(f"use_reader:{source_id}"),
-            icon=":material/ads_click:",
-            use_container_width=True,
-        ):
-            st.session_state[f"paper_reader_source:{selected}"] = source_id
-            st.session_state[_paper_library_key("detail")] = source_id
-            st.success(_l("reader_tab_selected", "Selected for the Reader tab."))
 
 
 def _render_paper_detail_panel(
@@ -2782,16 +4140,14 @@ def _render_paper_detail_panel(
     q1, q2 = st.columns(2)
     with q1:
         if source.metadata.get("pdf_asset_ref"):
-            try:
-                st.link_button(
-                    _l("open_reader", "Open Reader"),
-                    _reader_view_url(source.id),
-                    icon=":material/menu_book:",
-                    type="primary",
-                    use_container_width=True,
-                )
-            except Exception as exc:
-                st.caption(str(exc))
+            _render_sidecar_link_button(
+                _l("open_reader", "Open Reader"),
+                _reader_view_url(source.id),
+                key=_paper_library_key(f"detail_reader_link:{source.id}"),
+                icon=":material/menu_book:",
+                type="primary",
+                use_container_width=True,
+            )
         else:
             st.button(
                 _l("open_reader", "Open Reader"),
@@ -2800,17 +4156,6 @@ def _render_paper_detail_panel(
                 use_container_width=True,
             )
     with q2:
-        if st.button(
-            _l("continue_in_reader_tab", "Reader tab (fallback)"),
-            key=_paper_library_key(f"detail_reader_tab:{source.id}"),
-            icon=":material/ads_click:",
-            use_container_width=True,
-        ):
-            st.session_state[f"paper_reader_source:{selected}"] = source.id
-            st.success(_l("reader_tab_selected", "Selected for the Reader tab."))
-
-    q3, q4 = st.columns(2)
-    with q3:
         if st.button(
             _l("run_extraction", "Run extraction"),
             key=_paper_library_key(f"extract:{source.id}"),
@@ -2826,7 +4171,8 @@ def _render_paper_detail_panel(
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
-    with q4:
+    q3, _ = st.columns(2)
+    with q3:
         if st.button(
             _l("auto_chunk", "Auto chunk"),
             key=_paper_library_key(f"auto_chunk:{source.id}"),
@@ -2987,16 +4333,71 @@ def _render_paper_library(inbox) -> None:
             "Organize papers into collections, continue reading, and move each source through extraction, claims, and review.",
         )
     )
-    workspace_url = _paper_library_workspace_url()
-    try:
-        st.link_button(
-            _l("open_paper_library_workspace", "Open Paper Library Workspace"),
-            workspace_url,
-            icon=":material/open_in_new:",
-            use_container_width=False,
+    current_view = str(st.session_state.get(_paper_library_key("view"), "all") or "all")
+    current_node = str(st.session_state.get(_paper_library_key("node"), "") or "")
+    query = str(st.session_state.get(_paper_library_key("query"), "") or "")
+    sort_mode = str(st.session_state.get(_paper_library_key("sort"), "recent") or "recent")
+    detail_id = str(st.session_state.get(_paper_library_key("detail"), "") or "")
+    workspace_url = _paper_library_workspace_url(
+        view=current_view if current_view != "all" else "",
+        node_id=current_node,
+        query=query,
+        sort=sort_mode if sort_mode != "recent" else "",
+        detail_id=detail_id,
+    )
+    runtime, invalid_runtime = resolve_paper_library_runtime()
+    workspace_ok: bool | None = None
+    workspace_message = ""
+    if runtime != "streamlit_component":
+        workspace_ok, workspace_message = _paper_library_workspace_status(_paper_library_workspace_url())
+    if invalid_runtime:
+        st.warning(
+            _l(
+                "paper_library_runtime_invalid",
+                "Unknown Paper Library runtime; using 8502 link mode.",
+            )
+            + f" `{invalid_runtime}`"
         )
-    except Exception:
-        st.caption(f"{_l('paper_library_workspace_url', 'Workspace')}: `{workspace_url}`")
+
+    _render_sidecar_link_button(
+        _l("open_paper_library_workspace", "Open Paper Library Workspace"),
+        workspace_url,
+        key=f"paper_library_open_workspace:{selected}",
+        icon=":material/open_in_new:",
+        disabled=workspace_ok is False,
+    )
+
+    if workspace_ok is False:
+        st.warning(
+            _l(
+                "paper_library_workspace_unavailable",
+                "8502 Paper Library is not reachable right now; using the Streamlit fallback below.",
+            )
+            + (f" `{workspace_message}`" if workspace_message else "")
+        )
+
+    if runtime == "fastapi_iframe" and workspace_ok is not False:
+        _render_iframe(workspace_url, height=1100, scrolling=True)
+        return
+
+    if runtime == "streamlit_component":
+        _render_paper_library_streamlit_component(inbox)
+        return
+
+    show_fallback = workspace_ok is False or st.toggle(
+        _l("paper_library_fallback", "Show Streamlit Paper Library fallback"),
+        value=False,
+        key=_paper_library_key("show_streamlit_fallback"),
+    )
+    if show_fallback:
+        try:
+            with st.container(border=True):
+                _render_paper_library_streamlit_component(inbox, include_import=True)
+        except TypeError:
+            _render_paper_library_streamlit_component(inbox, include_import=True)
+
+
+def _render_paper_library_streamlit_component(inbox, *, include_import: bool = True) -> None:
     _render_paper_library_styles()
 
     all_rows = paper_rows(_pdir, view="all")
@@ -3019,12 +4420,13 @@ def _render_paper_library(inbox) -> None:
     metric_cols[3].metric(_l("needs_extraction", "Needs extraction"), _library_view_count(all_rows, "needs_extraction"))
     metric_cols[4].metric(_l("claims_need_review", "Claims review"), _library_view_count(all_rows, "claims_need_review"))
 
-    search_results_open = bool(st.session_state.get(_search_state_key("results")) or [])
-    with st.expander(
-        _l("find_import_papers", "Find and import papers"),
-        expanded=search_results_open,
-    ):
-        _render_paper_search(inbox, embedded=True)
+    if include_import:
+        search_results_open = bool(st.session_state.get(_search_state_key("results")) or [])
+        with st.expander(
+            _l("find_import_papers", "Find and import papers"),
+            expanded=search_results_open,
+        ):
+            _render_paper_search(inbox, embedded=True)
 
     selected_paper_ids_for_tree = [
         str(item)
@@ -3063,7 +4465,7 @@ def _render_paper_library(inbox) -> None:
             selected_paper_ids=selected_paper_ids_for_tree,
             detail_id=str(st.session_state.get(_paper_library_key("detail"), "") or ""),
             user_id=user.id,
-            reader_base=os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/"),
+            reader_base="" if _paper_library_sidecar_unavailable()[0] else _reader_api_base(),
         )
         if payload.get("detail_id"):
             st.session_state[_paper_library_key("detail")] = str(payload.get("detail_id") or "")
@@ -4065,19 +5467,14 @@ def _render_paper_reader(inbox) -> None:
         st.info(_l("reader_no_paper_selected", "No paper selected. Open Paper Library to choose a paper to read."))
         actions = st.columns([1.2, 1.2, 3])
         with actions[0]:
-            try:
-                st.link_button(
-                    _l("open_paper_library", "Open Paper Library"),
-                    _paper_library_workspace_url(),
-                    icon=":material/library_books:",
-                    type="primary",
-                    use_container_width=True,
-                )
-            except Exception:
-                st.caption(
-                    f"{_l('paper_library_workspace_url', 'Workspace')}: "
-                    f"`{_paper_library_workspace_url()}`"
-                )
+            _render_sidecar_link_button(
+                _l("open_paper_library", "Open Paper Library"),
+                _paper_library_workspace_url(),
+                key=f"paper_reader_open_library:{selected}",
+                icon=":material/library_books:",
+                type="primary",
+                use_container_width=True,
+            )
         recent_rows = sorted(
             paper_rows(_pdir, view="recent"),
             key=lambda row: str(row.get("last_read") or ""),
@@ -4127,18 +5524,13 @@ def _render_paper_reader(inbox) -> None:
         st.markdown(f"**{source.title}**")
         st.caption(f"`{source_id}`")
     with library_action:
-        try:
-            st.link_button(
-                _l("open_in_library", "Open in Library"),
-                _paper_library_workspace_url(detail_id=source_id),
-                icon=":material/library_books:",
-                use_container_width=True,
-            )
-        except Exception:
-            st.caption(
-                f"{_l('paper_library_workspace_url', 'Workspace')}: "
-                f"`{_paper_library_workspace_url(detail_id=source_id)}`"
-            )
+        _render_sidecar_link_button(
+            _l("open_in_library", "Open in Library"),
+            _paper_library_workspace_url(detail_id=source_id),
+            key=f"paper_reader_open_source_library:{selected}:{source_id}",
+            icon=":material/library_books:",
+            use_container_width=True,
+        )
     st.caption(" · ".join(status_bits))
     st.caption(
         _l(
@@ -4151,19 +5543,29 @@ def _render_paper_reader(inbox) -> None:
         with st.expander(_l("reader_artifact_warnings", "Reader preparation warnings"), expanded=False):
             for warning in artifact_warnings:
                 st.warning(str(warning))
-    if source.metadata.get("pdf_asset_ref"):
+    sidecar_unavailable, sidecar_message = _paper_library_sidecar_unavailable()
+    if source.metadata.get("pdf_asset_ref") and not sidecar_unavailable:
         try:
             token = mint_reader_token(user.id, selected, source_id)
         except Exception as exc:
             st.error(str(exc))
             return
-        base = os.getenv("NBLANE_READER_API_BASE", "").strip().rstrip("/")
+        base = _reader_api_base()
         encoded_source = quote(source_id, safe="")
         encoded_token = quote(token, safe="")
         iframe_src = f"{base}/reader/view/{encoded_source}?token={encoded_token}" if base else f"/reader/view/{encoded_source}?token={encoded_token}"
-        st.components.v1.iframe(iframe_src, height=1200, scrolling=False)
+        _render_iframe(iframe_src, height=1200, scrolling=False)
         return
-    st.info(_l("pdf_missing", "No PDF asset is attached; using text-mode Reader."))
+    if source.metadata.get("pdf_asset_ref"):
+        st.warning(
+            _l(
+                "reader_sidecar_unavailable_fallback",
+                "PDF Reader is temporarily unavailable because the 8502 sidecar cannot be reached. Showing text-mode Reader fallback.",
+            )
+            + (f" `{sidecar_message}`" if sidecar_message else "")
+        )
+    else:
+        st.info(_l("pdf_missing", "No PDF asset is attached; using text-mode Reader."))
 
     pages, segments, annotations, translations_tab, ai_tab, claims_tab = st.tabs(
         [
@@ -4552,6 +5954,7 @@ def _render_reading_room(inbox) -> None:
         if st.button(
             ui["create_evidence_candidate"],
             disabled=patch is None,
+            key=f"reading_room_create_evidence:{selected}:{source.id}",
         ):
             try:
                 assert_files_current([_sources_path, _pdir / "evidence-pool.yaml"])
@@ -4581,14 +5984,18 @@ def _render_claims_citations(inbox) -> None:
     if not inbox.sources:
         st.caption(ui["empty_status"])
         return
+    source_options = [source.id for source in inbox.sources]
+    source_key = f"research_cc_source:{selected}"
+    if str(st.session_state.get(source_key) or "") not in source_options:
+        st.session_state.pop(source_key, None)
     source_id = st.selectbox(
         ui["source_id"],
-        options=[source.id for source in inbox.sources],
+        options=source_options,
         format_func=lambda sid: next(
             (source.title or source.id for source in inbox.sources if source.id == sid),
             sid,
         ),
-        key=f"research_cc_source:{selected}",
+        key=source_key,
     )
     source = inbox.by_id().get(source_id)
     if source is None:
@@ -4599,15 +6006,23 @@ def _render_claims_citations(inbox) -> None:
     claim_rows = load_research_claims(_pdir)
     claim_ids = [claim.id for claim in claim_rows]
     citation_rows = load_research_citations(_pdir)
+    status_options = ["", "draft", "ready", "promoted", "dismissed"]
+    status_key = f"research_claim_status_filter:{selected}"
+    if str(st.session_state.get(status_key) or "") not in status_options:
+        st.session_state.pop(status_key, None)
     status_filter = st.selectbox(
         _l("claim_status_filter", "Claim status filter"),
-        options=["", "draft", "ready", "promoted", "dismissed"],
+        options=status_options,
         format_func=lambda value: _l("all_statuses", "All statuses") if not value else value,
-        key=f"research_claim_status_filter:{selected}",
+        key=status_key,
     )
+    queue_options = ["", "missing_citation", "quote_warning", "ready", "promoted"]
+    queue_key = f"research_claim_queue_filter:{selected}"
+    if str(st.session_state.get(queue_key) or "") not in queue_options:
+        st.session_state.pop(queue_key, None)
     queue_filter = st.selectbox(
         _l("claim_queue_filter", "Review queue"),
-        options=["", "missing_citation", "quote_warning", "ready", "promoted"],
+        options=queue_options,
         format_func=lambda value: {
             "": _l("all_queues", "All queues"),
             "missing_citation": _l("missing_citation", "Missing citation"),
@@ -4615,7 +6030,7 @@ def _render_claims_citations(inbox) -> None:
             "ready": _l("ready_claims", "Ready claims"),
             "promoted": _l("promoted_claims", "Promoted claims"),
         }.get(value, value),
-        key=f"research_claim_queue_filter:{selected}",
+        key=queue_key,
     )
     review = build_research_claim_review_payload(
         _pdir,
@@ -4631,6 +6046,142 @@ def _render_claims_citations(inbox) -> None:
     m3.metric(ui["research_citations"], summary.get("citations", 0))
     m4.metric(_l("missing_citation", "Missing citation"), summary.get("missing_citation_claims", 0))
     m5.metric(_l("quote_warnings", "Quote warnings"), summary.get("quote_warnings", 0))
+
+    claim_cards = list(review.get("claim_cards") or [])
+    ready_batch_options = [
+        str(card.get("id") or "")
+        for card in claim_cards
+        if card.get("status") in {"draft", "ready"}
+    ]
+    if ready_batch_options:
+        with st.expander(_l("claim_bulk_review", "Bulk claim review"), expanded=False):
+            bulk_claims = st.multiselect(
+                _l("selected_claims", "Selected claims"),
+                options=ready_batch_options,
+                default=[str(card.get("id") or "") for card in claim_cards if card.get("status") == "ready"],
+                format_func=lambda cid: next(
+                    (
+                        f"{cid} - {str(card.get('text') or '')[:90]}"
+                        for card in claim_cards
+                        if str(card.get("id") or "") == cid
+                    ),
+                    cid,
+                ),
+                key=f"research_claim_bulk:{selected}:{source_id}:{status_filter}:{queue_filter}",
+            )
+            bulk_citation_refs = []
+            for card in claim_cards:
+                if str(card.get("id") or "") in set(bulk_claims):
+                    bulk_citation_refs.extend(str(ref) for ref in card.get("citation_refs") or [] if str(ref))
+            b1, b2, b3 = st.columns(3)
+            with b1:
+                if st.button(
+                    _l("verify_selected_quotes", "Verify selected quotes"),
+                    disabled=not bulk_citation_refs,
+                    key=f"research_claim_bulk_verify:{selected}:{source_id}",
+                    use_container_width=True,
+                ):
+                    checks = verify_research_citations(_pdir, bulk_citation_refs)
+                    st.session_state[f"research_claim_bulk_checks:{selected}:{source_id}"] = checks
+            with b2:
+                if st.button(
+                    _l("mark_selected_ready", "Mark selected ready"),
+                    disabled=not bulk_claims,
+                    key=f"research_claim_bulk_ready:{selected}:{source_id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        assert_files_current([_research_claims_path])
+                        for claim_id in bulk_claims:
+                            update_research_claim_status(_pdir, claim_id, "ready")
+                        refresh_file_snapshots([_research_claims_path])
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            with b3:
+                preview_rows = []
+                for claim_id in bulk_claims:
+                    try:
+                        preview_rows.append(
+                            {
+                                "claim_id": claim_id,
+                                "candidate": research_claim_to_evidence_candidate(_pdir, claim_id),
+                            }
+                        )
+                    except Exception as exc:
+                        preview_rows.append({"claim_id": claim_id, "warning": str(exc)})
+                if preview_rows:
+                    with st.popover(_l("bulk_promote_preview", "Promote preview"), use_container_width=True):
+                        st.code(
+                            yaml.dump(preview_rows, allow_unicode=True, default_flow_style=False, sort_keys=False),
+                            language="yaml",
+                        )
+            checks = st.session_state.get(f"research_claim_bulk_checks:{selected}:{source_id}")
+            if isinstance(checks, dict):
+                st.caption(
+                    _l(
+                        "bulk_quote_check_summary",
+                        "{ok}/{total} selected citation quote check(s) passed.",
+                    ).format(ok=checks.get("ok", 0), total=checks.get("total", 0))
+                )
+                for check in checks.get("checks") or []:
+                    if check.get("ok"):
+                        st.success(str(check.get("message") or check.get("citation_id")))
+                    else:
+                        st.warning(str(check.get("message") or check.get("citation_id")))
+
+    duplicate_groups = list(review.get("duplicate_claim_groups") or [])
+    if duplicate_groups:
+        with st.expander(_l("duplicate_claims", "Duplicate claims"), expanded=True):
+            st.warning(
+                _l(
+                    "duplicate_claims_hint",
+                    "These claims have the same normalized text. Merge refs before promotion.",
+                )
+            )
+            for index, group in enumerate(duplicate_groups):
+                refs = [str(ref) for ref in group.get("claim_refs") or [] if str(ref)]
+                if len(refs) < 2:
+                    continue
+                with st.form(f"research_merge_duplicate:{selected}:{source_id}:{index}"):
+                    st.write(str(group.get("text") or ""))
+                    primary_ref = st.selectbox(
+                        _l("primary_claim", "Primary claim"),
+                        refs,
+                        key=f"research_duplicate_primary:{selected}:{source_id}:{index}",
+                    )
+                    duplicate_refs = st.multiselect(
+                        _l("duplicates_to_merge", "Duplicates to merge"),
+                        [ref for ref in refs if ref != primary_ref],
+                        default=[ref for ref in refs if ref != primary_ref],
+                        key=f"research_duplicate_refs:{selected}:{source_id}:{index}",
+                    )
+                    merge_note = st.text_input(
+                        _l("merge_rationale", "Merge rationale"),
+                        value=_l("duplicate_merge_default", "Merged during source claim review."),
+                        key=f"research_duplicate_note:{selected}:{source_id}:{index}",
+                    )
+                    merge_submitted = st.form_submit_button(
+                        _l("merge_duplicate_claims", "Merge duplicate claims"),
+                        disabled=not duplicate_refs or not merge_note.strip(),
+                    )
+                if merge_submitted:
+                    try:
+                        assert_files_current([_research_claims_path])
+                        merge_duplicate_research_claims(
+                            _pdir,
+                            primary_ref,
+                            duplicate_refs,
+                            rationale=merge_note,
+                        )
+                        refresh_file_snapshots([_research_claims_path])
+                        stash_git_backup_results()
+                        clear_web_cache()
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
 
     evidence_col, claim_col, citation_col = st.columns([1.15, 1.9, 1.35], gap="medium")
     with evidence_col:
@@ -4656,7 +6207,6 @@ def _render_claims_citations(inbox) -> None:
 
     with claim_col:
         st.markdown(f"**{_l('research_claim_review', 'Research claim review')}**")
-        claim_cards = list(review.get("claim_cards") or [])
         if claim_cards:
             for claim_card in claim_cards:
                 claim_id = str(claim_card.get("id") or "")
@@ -4684,6 +6234,172 @@ def _render_claims_citations(inbox) -> None:
                         ]
                     )
                     st.caption(refs_line)
+                    with st.expander(_l("edit_claim_card", "Edit claim and links"), expanded=False):
+                        claim_type_options = list(RESEARCH_CLAIM_TYPES)
+                        claim_confidence_options = ["low", "medium", "high"]
+                        with st.form(f"research_claim_patch:{selected}:{claim_id}"):
+                            patch_text = st.text_area(
+                                ui["research_claim_text"],
+                                value=str(claim_card.get("text") or ""),
+                                height=90,
+                                key=f"research_claim_patch_text:{selected}:{claim_id}",
+                            )
+                            p1, p2, p3 = st.columns(3)
+                            with p1:
+                                patch_type = st.selectbox(
+                                    ui["research_claim_type"],
+                                    claim_type_options,
+                                    index=claim_type_options.index(str(claim_card.get("type") or "learning"))
+                                    if str(claim_card.get("type") or "learning") in claim_type_options
+                                    else claim_type_options.index("learning"),
+                                    key=f"research_claim_patch_type:{selected}:{claim_id}",
+                                )
+                            with p2:
+                                patch_confidence = st.selectbox(
+                                    _l("confidence", "Confidence"),
+                                    claim_confidence_options,
+                                    index=claim_confidence_options.index(str(claim_card.get("confidence") or "medium"))
+                                    if str(claim_card.get("confidence") or "medium") in claim_confidence_options
+                                    else claim_confidence_options.index("medium"),
+                                    key=f"research_claim_patch_confidence:{selected}:{claim_id}",
+                                )
+                            with p3:
+                                patch_human_note = st.checkbox(
+                                    ui["human_note"],
+                                    value=bool(claim_card.get("human_note")),
+                                    key=f"research_claim_patch_human:{selected}:{claim_id}",
+                                )
+                            patch_warnings = st.text_area(
+                                _l("warnings", "Warnings"),
+                                value="\n".join(str(item) for item in claim_card.get("warnings") or []),
+                                height=64,
+                                key=f"research_claim_patch_warnings:{selected}:{claim_id}",
+                            )
+                            patch_rationale = st.text_area(
+                                ui["rationale"],
+                                value=str(claim_card.get("rationale") or ""),
+                                height=72,
+                                key=f"research_claim_patch_rationale:{selected}:{claim_id}",
+                            )
+                            patch_submitted = st.form_submit_button(ui["save"], type="primary")
+                        if patch_submitted:
+                            try:
+                                assert_files_current([_research_claims_path])
+                                patch_research_claim(
+                                    _pdir,
+                                    claim_id,
+                                    text=patch_text,
+                                    type=patch_type,
+                                    confidence=patch_confidence,
+                                    warnings=patch_warnings,
+                                    rationale=patch_rationale,
+                                    human_note=patch_human_note,
+                                )
+                                refresh_file_snapshots([_research_claims_path])
+                                stash_git_backup_results()
+                                clear_web_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
+
+                        with st.form(f"research_claim_links:{selected}:{claim_id}"):
+                            next_chunk_refs = st.multiselect(
+                                _l("link_chunk", "Linked chunks"),
+                                options=chunk_ids,
+                                default=[str(ref) for ref in claim_card.get("chunk_refs") or [] if str(ref) in chunk_ids],
+                                key=f"research_claim_links_chunks:{selected}:{claim_id}",
+                            )
+                            next_citation_refs = st.multiselect(
+                                _l("link_citation", "Linked citations"),
+                                options=[citation.id for citation in citation_rows],
+                                default=[
+                                    str(ref)
+                                    for ref in claim_card.get("citation_refs") or []
+                                    if str(ref) in {citation.id for citation in citation_rows}
+                                ],
+                                key=f"research_claim_links_citations:{selected}:{claim_id}",
+                            )
+                            links_submitted = st.form_submit_button(
+                                _l("save_claim_links", "Save links"),
+                                help=_l(
+                                    "save_claim_links_help",
+                                    "Removing a selection unlinks it from this claim.",
+                                ),
+                            )
+                        if links_submitted:
+                            try:
+                                assert_files_current([_research_claims_path])
+                                update_research_claim_links(
+                                    _pdir,
+                                    claim_id,
+                                    chunk_refs=next_chunk_refs,
+                                    citation_refs=next_citation_refs,
+                                    mode="replace",
+                                )
+                                refresh_file_snapshots([_research_claims_path])
+                                stash_git_backup_results()
+                                clear_web_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
+
+                        chunk_choices = [chunk.id for chunk in source_chunks]
+                        if chunk_choices:
+                            with st.form(f"research_claim_citation_chunk:{selected}:{claim_id}"):
+                                cite_chunk = st.selectbox(
+                                    _l("citation_chunk", "Citation chunk"),
+                                    options=chunk_choices,
+                                    index=chunk_choices.index(str((claim_card.get("chunk_refs") or [""])[0]))
+                                    if str((claim_card.get("chunk_refs") or [""])[0]) in chunk_choices
+                                    else 0,
+                                    key=f"research_claim_cite_chunk:{selected}:{claim_id}",
+                                )
+                                cite_quote = st.text_area(
+                                    ui["citation_quote"],
+                                    height=62,
+                                    help=_l(
+                                        "citation_quote_default",
+                                        "Leave blank to use the selected chunk text as the quote.",
+                                    ),
+                                    key=f"research_claim_cite_quote:{selected}:{claim_id}",
+                                )
+                                create_from_chunk = st.form_submit_button(
+                                    _l("create_citation_from_chunk", "Create citation from chunk"),
+                                )
+                            if create_from_chunk:
+                                try:
+                                    assert_files_current([_research_claims_path, _research_citations_path])
+                                    create_citation_from_chunk(
+                                        _pdir,
+                                        claim_id,
+                                        cite_chunk,
+                                        quote=cite_quote,
+                                    )
+                                    refresh_file_snapshots([_research_claims_path, _research_citations_path])
+                                    stash_git_backup_results()
+                                    clear_web_cache()
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(str(exc))
+                        with st.form(f"research_claim_request_citation:{selected}:{claim_id}"):
+                            request_note = st.text_input(
+                                _l("citation_request_note", "Citation request note"),
+                                value=_l("citation_request_default", "Bind a stronger citation before public use."),
+                                key=f"research_claim_request_note:{selected}:{claim_id}",
+                            )
+                            request_submitted = st.form_submit_button(
+                                _l("request_citation", "Request citation"),
+                            )
+                        if request_submitted:
+                            try:
+                                assert_files_current([_research_claims_path])
+                                request_citation_for_claim(_pdir, claim_id, note=request_note)
+                                refresh_file_snapshots([_research_claims_path])
+                                stash_git_backup_results()
+                                clear_web_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
                     if claim_card.get("citation_status") == "missing":
                         st.warning(_l("claim_missing_citation_warning", "This claim has no citation yet. Bind a citation before public use."))
                     elif claim_card.get("quote_status") == "warning":
@@ -4765,10 +6481,16 @@ def _render_claims_citations(inbox) -> None:
                             except Exception as exc:
                                 st.error(str(exc))
                     with a3:
+                        dismiss_note = st.text_input(
+                            _l("dismiss_rationale", "Dismiss rationale"),
+                            key=f"research_claim_dismiss_note:{selected}:{claim_id}",
+                            placeholder=_l("dismiss_rationale_placeholder", "Why is this claim dismissed?"),
+                            label_visibility="collapsed",
+                        )
                         if st.button(
                             _l("dismiss", "Dismiss"),
                             key=f"research_claim_dismiss:{selected}:{claim_id}",
-                            disabled=claim_card.get("status") == "dismissed",
+                            disabled=claim_card.get("status") == "dismissed" or not dismiss_note.strip(),
                             icon=":material/do_not_disturb_on:",
                             use_container_width=True,
                         ):
@@ -4778,7 +6500,7 @@ def _render_claims_citations(inbox) -> None:
                                     _pdir,
                                     claim_id,
                                     "dismissed",
-                                    note="Dismissed from Research claim review board.",
+                                    note=dismiss_note,
                                 )
                                 refresh_file_snapshots([_research_claims_path])
                                 stash_git_backup_results()
@@ -4818,6 +6540,27 @@ def _render_claims_citations(inbox) -> None:
                         st.write(citation.get("quote"))
                     if citation.get("locator") or citation.get("bibliography"):
                         st.caption(f"{citation.get('locator') or ''} · {citation.get('bibliography') or ''}")
+                    locate_source = str(citation.get("source_id") or "")
+                    locate_chunk = str(citation.get("chunk_id") or "")
+                    locate_cols = st.columns(2)
+                    with locate_cols[0]:
+                        if locate_source:
+                            _render_sidecar_link_button(
+                                _l("locate_source", "Locate source"),
+                                _paper_library_workspace_url(
+                                    detail_id=locate_source,
+                                    focus="claims",
+                                    action="fix_citation",
+                                    return_to="overview",
+                                ),
+                                key=f"citation_locate_source:{selected}:{locate_source}:{locate_chunk}",
+                                use_container_width=True,
+                            )
+                    with locate_cols[1]:
+                        st.caption(
+                            _l("locator_label", "Locator")
+                            + f": {citation.get('locator') or locate_chunk or '-'}"
+                        )
             if len(citation_cards) > 10:
                 st.caption(_l("more_citations_hidden", "{count} more citation(s) hidden by this compact view.").format(count=len(citation_cards) - 10))
         else:
@@ -5077,16 +6820,157 @@ def _render_claims_citations(inbox) -> None:
             st.caption(ui["citations_empty"])
 
 
+def _research_candidate_manifest(profile: Path, candidate: dict) -> dict:
+    return build_research_export_manifest(
+        profile,
+        source_refs=list(candidate.get("related_sources") or []),
+        claim_refs=list(candidate.get("related_research_claims") or []),
+        citation_refs=list(candidate.get("related_citations") or []),
+    )
+
+
+def _render_research_candidate_manifest(profile: Path, candidate: dict, key_prefix: str) -> tuple[dict, list[dict]]:
+    try:
+        manifest = _research_candidate_manifest(profile, candidate)
+    except Exception as exc:
+        st.warning(str(exc))
+        return {}, [{"kind": "manifest_error", "ref": str(exc)}]
+    blockers = list(manifest.get("blockers") or [])
+    with st.expander(_l("candidate_manifest", "Candidate manifest"), expanded=bool(blockers)):
+        if blockers:
+            for blocker in blockers:
+                kind = str(blocker.get("kind") or "")
+                ref = str(blocker.get("ref") or "")
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    st.warning(f"{kind}: {ref}")
+                with c2:
+                    if kind == "private_source" and ref:
+                        _render_sidecar_link_button(
+                            _l("review_visibility", "Review visibility"),
+                            _paper_library_workspace_url(
+                                detail_id=ref,
+                                focus="safety",
+                                action="review_visibility",
+                                return_to="overview",
+                            ),
+                            key=f"{key_prefix}:review_visibility:{selected}:{ref}",
+                            use_container_width=True,
+                        )
+                    elif kind == "broken_citation":
+                        if st.button(
+                            _l("fix_citation", "Fix citation"),
+                            key=f"{key_prefix}:fix_citation:{ref}",
+                            use_container_width=True,
+                        ):
+                            st.session_state[f"research_claim_queue_filter:{selected}"] = "quote_warning"
+                            st.info(_l("fix_citation_hint", "Open Claims & Citations to review quote warnings."))
+                    elif kind == "unpromoted_research_claim":
+                        if st.button(
+                            _l("promote_claim", "Promote claim"),
+                            key=f"{key_prefix}:promote_claim:{ref}",
+                            use_container_width=True,
+                        ):
+                            st.session_state[f"research_claim_status_filter:{selected}"] = "ready"
+                            st.info(_l("promote_claim_hint", "Open Claims & Citations to preview and promote claims."))
+        else:
+            st.success(_l("candidate_manifest_clear", "No provenance blockers for this candidate."))
+        if st.checkbox(
+            _l("show_manifest_yaml", "Show manifest YAML"),
+            value=False,
+            key=f"{key_prefix}:manifest_yaml",
+        ):
+            st.code(
+                yaml.dump(
+                    {
+                        key: value
+                        for key, value in manifest.items()
+                        if key not in {"sources", "claims", "citations"}
+                    },
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                ),
+                language="yaml",
+            )
+    return manifest, blockers
+
+
 def _render_synthesis_drafts() -> None:
     st.subheader(_l("synthesis_export", "Synthesis / Export"))
     citation_rows = load_research_citations(_pdir)
     chunk_rows = load_chunks(_pdir)
     claim_rows_all = load_research_claims(_pdir)
-    paper_ids = [source.id for source in _paper_sources(load_research_sources(selected))]
+    source_book = load_research_sources(selected)
+    source_ids = [source.id for source in source_book.sources]
+    node_options = _node_options(include_unsorted=False)
+    goal_options = sorted({ref for source in source_book.sources for ref in source.goal_refs})
+    tag_options = sorted({tag for source in source_book.sources for tag in source.tags})
+
+    with st.expander(_l("export_scope", "Export scope"), expanded=False):
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            scope_node = st.selectbox(
+                _l("collection", "Collection"),
+                options=["", *node_options],
+                format_func=lambda ref: _l("all_collections", "All collections") if not ref else node_options.get(ref, ref),
+                key=f"research_export_scope_node:{selected}",
+            )
+            scope_goals = st.multiselect(
+                _l("goal_refs", "Goal refs"),
+                options=goal_options,
+                key=f"research_export_scope_goals:{selected}",
+            )
+        with s2:
+            scope_source_statuses = st.multiselect(
+                _l("source_statuses", "Source statuses"),
+                options=list(SOURCE_STATUSES),
+                key=f"research_export_scope_source_status:{selected}",
+            )
+            scope_claim_statuses = st.multiselect(
+                _l("claim_statuses", "Claim statuses"),
+                options=["draft", "ready", "promoted", "dismissed"],
+                key=f"research_export_scope_claim_status:{selected}",
+            )
+        with s3:
+            scope_tags = st.multiselect(
+                _l("tags_label", "Tags"),
+                options=tag_options,
+                key=f"research_export_scope_tags:{selected}",
+            )
+            scope_sources = st.multiselect(
+                _l("manual_sources", "Manual sources"),
+                options=source_ids,
+                format_func=lambda sid: _source_label(source_book, sid),
+                key=f"research_export_scope_sources:{selected}",
+            )
+    export_scope = {
+        "library_node_refs": [scope_node] if scope_node else [],
+        "goal_refs": scope_goals,
+        "source_statuses": scope_source_statuses,
+        "claim_statuses": scope_claim_statuses,
+        "tags": scope_tags,
+        "source_refs": scope_sources,
+    }
+    scope_active = any(value for value in export_scope.values())
+    scoped_export = build_research_export_payload(_pdir, scope=export_scope)
+    scoped_selection = scoped_export.get("selection") if isinstance(scoped_export.get("selection"), dict) else {}
+    if scope_active:
+        st.caption(
+            _l(
+                "export_scope_summary",
+                "Scope selected {sources} source(s), {claims} claim(s), and {citations} citation(s).",
+            ).format(
+                sources=len(scoped_selection.get("source_refs") or []),
+                claims=len(scoped_selection.get("claim_refs") or []),
+                citations=len(scoped_selection.get("citation_refs") or []),
+            )
+        )
     with st.expander(_l("export_citations", "Export citations"), expanded=False):
         citation_refs = st.multiselect(
             ui["research_citations"],
             options=[citation.id for citation in citation_rows],
+            default=list(scoped_selection.get("citation_refs") or []) if scope_active else [],
             format_func=lambda cid: next(
                 (
                     f"{cid} · {citation.locator or citation.source_id}"
@@ -5096,16 +6980,27 @@ def _render_synthesis_drafts() -> None:
                 cid,
             ),
         )
-        export_format = st.radio("Format", ["markdown", "bibtex"], horizontal=True)
+        export_format = st.radio("Format", ["markdown", "bibtex", "ris", "csl-json"], horizontal=True)
+        export_citation_refs = citation_refs or (
+            list(scoped_selection.get("citation_refs") or [])
+            if scope_active
+            else []
+        )
         try:
-            export_body = format_research_citations(
-                _pdir,
-                citation_refs,
-                format=export_format,
+            export_body = (
+                ""
+                if scope_active and not export_citation_refs
+                else format_research_citations(
+                    _pdir,
+                    export_citation_refs,
+                    format=export_format,
+                )
             )
             export_manifest = build_research_export_manifest(
                 _pdir,
-                citation_refs=citation_refs,
+                citation_refs=export_citation_refs,
+                claim_refs=list(scoped_selection.get("claim_refs") or []) if scope_active else [],
+                source_refs=list(scoped_selection.get("source_refs") or []) if scope_active else [],
             )
         except Exception as exc:
             export_body = ""
@@ -5129,20 +7024,80 @@ def _render_synthesis_drafts() -> None:
                 e4.metric(_l("publish_blockers", "Publish blockers"), len(blockers))
                 if blockers:
                     for blocker in blockers:
-                        st.warning(f"{blocker.get('kind')}: {blocker.get('ref')}")
-                st.code(
-                    yaml.dump(
-                        {
-                            key: value
-                            for key, value in export_manifest.items()
-                            if key not in {"sources", "claims", "citations"}
-                        },
-                        allow_unicode=True,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    ),
-                    language="yaml",
+                        kind = str(blocker.get("kind") or "")
+                        ref = str(blocker.get("ref") or "")
+                        warning_col, action_col = st.columns([3, 1])
+                        with warning_col:
+                            st.warning(f"{kind}: {ref}")
+                        with action_col:
+                            if kind == "private_source" and ref:
+                                _render_sidecar_link_button(
+                                    _l("review_visibility", "Review visibility"),
+                                    _paper_library_workspace_url(
+                                        detail_id=ref,
+                                        focus="safety",
+                                        action="review_visibility",
+                                        return_to="overview",
+                                    ),
+                                    key=f"export_review_visibility:{selected}:{ref}",
+                                    use_container_width=True,
+                                )
+                            elif kind == "broken_citation":
+                                if st.button(
+                                    _l("fix_citation", "Fix citation"),
+                                    key=f"export_fix_citation:{selected}:{ref}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state[f"research_claim_queue_filter:{selected}"] = "quote_warning"
+                                    st.info(_l("fix_citation_hint", "Open Claims & Citations to review quote warnings."))
+                            elif kind == "unpromoted_research_claim":
+                                if st.button(
+                                    _l("promote_claim", "Promote claim"),
+                                    key=f"export_promote_claim:{selected}:{ref}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state[f"research_claim_status_filter:{selected}"] = "ready"
+                                    st.info(_l("promote_claim_hint", "Open Claims & Citations to preview and promote claims."))
+                provenance_tabs = st.tabs(
+                    [
+                        _l("sources", "Sources"),
+                        ui["research_claims"],
+                        ui["research_citations"],
+                        _l("manifest_yaml", "Manifest YAML"),
+                    ]
                 )
+                with provenance_tabs[0]:
+                    source_rows = list(export_manifest.get("sources") or [])
+                    if source_rows:
+                        st.dataframe(source_rows, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption(_l("sources_empty", "No sources selected."))
+                with provenance_tabs[1]:
+                    claim_rows_manifest = list(export_manifest.get("claims") or [])
+                    if claim_rows_manifest:
+                        st.dataframe(claim_rows_manifest, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption(ui["claims_empty"])
+                with provenance_tabs[2]:
+                    citation_rows_manifest = list(export_manifest.get("citations") or [])
+                    if citation_rows_manifest:
+                        st.dataframe(citation_rows_manifest, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption(ui["citations_empty"])
+                with provenance_tabs[3]:
+                    st.code(
+                        yaml.dump(
+                            {
+                                key: value
+                                for key, value in export_manifest.items()
+                                if key not in {"sources", "claims", "citations"}
+                            },
+                            allow_unicode=True,
+                            default_flow_style=False,
+                            sort_keys=False,
+                        ),
+                        language="yaml",
+                    )
         if export_body:
             st.text_area(
                 _l("export_preview", "Export preview"),
@@ -5153,7 +7108,7 @@ def _render_synthesis_drafts() -> None:
             st.download_button(
                 _l("download_export", "Download export"),
                 data=export_body,
-                file_name=f"research-citations.{ 'bib' if export_format == 'bibtex' else 'md' }",
+                file_name=f"research-citations.{ {'bibtex': 'bib', 'ris': 'ris', 'csl-json': 'json'}.get(export_format, 'md') }",
             )
             save_private_export = not private_refs or st.checkbox(
                 _l("confirm_private_export_save", "Confirm saving export with private sources"),
@@ -5174,61 +7129,109 @@ def _render_synthesis_drafts() -> None:
                     st.error(str(exc))
 
     with st.expander(_l("reading_note_export", "Reading note export"), expanded=False):
-        note_source = st.selectbox(
-            ui["source_id"],
-            options=paper_ids,
-            format_func=lambda sid: _source_label(load_research_sources(selected), sid),
-            key=f"reading_note_source:{selected}",
-        ) if paper_ids else ""
+        scoped_note_defaults = [
+            ref for ref in scoped_selection.get("source_refs") or []
+            if ref in source_ids
+        ] if scope_active else []
+        note_sources = st.multiselect(
+            _l("note_sources", "Note sources"),
+            options=source_ids,
+            default=scoped_note_defaults,
+            format_func=lambda sid: _source_label(source_book, sid),
+            key=f"reading_note_sources:{selected}",
+        ) if source_ids else []
+        note_source_set = set(note_sources)
         note_claims = st.multiselect(
             ui["research_claims"],
             options=[claim.id for claim in claim_rows_all],
+            default=[
+                claim.id
+                for claim in claim_rows_all
+                if claim.id in set(scoped_selection.get("claim_refs") or [])
+            ] if scope_active else [],
             key=f"reading_note_claims:{selected}",
         )
         note_chunks = st.multiselect(
             ui["chunk_refs"],
-            options=[chunk.id for chunk in chunk_rows if not note_source or chunk.source_id == note_source],
+            options=[chunk.id for chunk in chunk_rows if not note_source_set or chunk.source_id in note_source_set],
             key=f"reading_note_chunks:{selected}",
         )
         note_citations = st.multiselect(
             ui["citations"],
-            options=[citation.id for citation in citation_rows if not note_source or citation.source_id == note_source],
+            options=[citation.id for citation in citation_rows if not note_source_set or citation.source_id in note_source_set],
+            default=[
+                citation.id
+                for citation in citation_rows
+                if citation.id in set(scoped_selection.get("citation_refs") or [])
+                and (not note_source_set or citation.source_id in note_source_set)
+            ] if scope_active else [],
             key=f"reading_note_citations:{selected}",
         )
-        if note_source:
-            note_body = create_reading_note_markdown(
+        if note_sources:
+            if len(note_sources) == 1:
+                note_body = create_reading_note_markdown(
+                    _pdir,
+                    note_sources[0],
+                    claim_refs=note_claims,
+                    chunk_refs=note_chunks,
+                    citation_refs=note_citations,
+                )
+            else:
+                note_body = create_reading_note_pack_markdown(
+                    _pdir,
+                    note_sources,
+                    claim_refs=note_claims,
+                    chunk_refs=note_chunks,
+                    citation_refs=note_citations,
+                )
+            note_manifest = build_research_export_manifest(
                 _pdir,
-                note_source,
+                source_refs=note_sources,
                 claim_refs=note_claims,
-                chunk_refs=note_chunks,
                 citation_refs=note_citations,
             )
             st.text_area(
                 ui["body"],
                 value=note_body,
                 height=240,
-                key=f"reading_note_body:{selected}:{note_source}",
+                key=f"reading_note_body:{selected}:{'-'.join(note_sources)}",
             )
             n1, n2 = st.columns(2)
             with n1:
                 st.download_button(
                     _l("download_note", "Download note"),
                     data=note_body,
-                    file_name=f"{note_source.replace(':', '-')}-reading-note.md",
+                    file_name=(
+                        f"{note_sources[0].replace(':', '-')}-reading-note.md"
+                        if len(note_sources) == 1
+                        else "research-reading-note-pack.md"
+                    ),
                 )
             with n2:
                 if st.button(_l("save_note", "Save note")):
                     try:
-                        path = save_paper_note(
-                            _pdir,
-                            note_source,
-                            note_body,
-                            metadata={
-                                "claim_refs": note_claims,
-                                "chunk_refs": note_chunks,
-                                "citation_refs": note_citations,
-                            },
-                        )
+                        if len(note_sources) == 1:
+                            path = save_paper_note(
+                                _pdir,
+                                note_sources[0],
+                                note_body,
+                                metadata={
+                                    "claim_refs": note_claims,
+                                    "chunk_refs": note_chunks,
+                                    "citation_refs": note_citations,
+                                },
+                            )
+                        else:
+                            path = save_research_export(
+                                _pdir,
+                                note_body,
+                                format="markdown",
+                                prefix="reading-note-pack",
+                                manifest={
+                                    **note_manifest,
+                                    "chunk_refs": note_chunks,
+                                },
+                            )
                         stash_git_backup_results()
                         clear_web_cache()
                         st.success(str(path))
@@ -5295,91 +7298,576 @@ def _render_synthesis_drafts() -> None:
         key=f"research_blog_draft:{selected}",
     )
     try:
-        candidate = research_draft_to_blog_candidate(_pdir, draft_id)
-        candidate_manifest = build_research_export_manifest(
-            _pdir,
-            source_refs=list(candidate.get("related_sources") or []),
-            claim_refs=list(candidate.get("related_research_claims") or []),
-            citation_refs=list(candidate.get("related_citations") or []),
-        )
-        st.subheader(ui["blog_candidate_preview"])
-        st.code(
-            yaml.dump(
-                {key: value for key, value in candidate.items() if key != "body"},
-                allow_unicode=True,
-                default_flow_style=False,
-                sort_keys=False,
-            ),
-            language="yaml",
-        )
-        st.text_area(
-            ui["body"],
-            value=str(candidate.get("body") or ""),
-            height=240,
-            disabled=True,
-            key=f"blog_candidate_body:{selected}:{draft_id}",
-        )
-        blog_blockers = list(candidate_manifest.get("blockers") or [])
-        with st.expander(_l("blog_candidate_manifest", "Blog candidate manifest"), expanded=bool(blog_blockers)):
-            if blog_blockers:
-                for blocker in blog_blockers:
-                    st.warning(f"{blocker.get('kind')}: {blocker.get('ref')}")
+        draft_review = build_synthesis_draft_review(_pdir, draft_id)
+        with st.expander(_l("synthesis_review", "Synthesis coverage review"), expanded=True):
+            coverage = draft_review.get("coverage") or {}
+            c1, c2, c3 = st.columns(3)
+            c1.metric(ui["research_claims"], coverage.get("claims", 0))
+            c2.metric(_l("sources_total", "Sources"), coverage.get("sources", 0))
+            c3.metric(ui["research_citations"], coverage.get("citations", 0))
+            argument_map = list(draft_review.get("argument_map") or [])
+            if argument_map:
+                st.dataframe(argument_map, use_container_width=True, hide_index=True)
+            warnings = draft_review.get("warnings") if isinstance(draft_review.get("warnings"), dict) else {}
+            for claim_ref in warnings.get("missing_citation_claim_refs") or []:
+                st.warning(
+                    _l(
+                        "synthesis_missing_claim_citation",
+                        "Claim {claim_id} is in this draft without a linked citation.",
+                    ).format(claim_id=claim_ref)
+                )
+            for citation_ref in warnings.get("broken_citation_refs") or []:
+                st.warning(
+                    _l(
+                        "synthesis_broken_citation",
+                        "Citation {citation_id} needs quote review before public use.",
+                    ).format(citation_id=citation_ref)
+                )
+    except Exception as exc:
+        st.warning(str(exc))
+    st.subheader(_l("output_candidates", "Output Candidates"))
+    blog_tab, project_tab, resume_tab = st.tabs(
+        [
+            _l("blog_candidate", "Blog Draft"),
+            _l("project_update_candidate", "Project Update"),
+            _l("resume_bullet_candidate", "Resume Bullet"),
+        ]
+    )
+    with blog_tab:
+        try:
+            candidate = research_draft_to_blog_candidate(_pdir, draft_id)
             st.code(
                 yaml.dump(
-                    {
-                        key: value
-                        for key, value in candidate_manifest.items()
-                        if key not in {"sources", "claims", "citations"}
-                    },
+                    {key: value for key, value in candidate.items() if key != "body"},
                     allow_unicode=True,
                     default_flow_style=False,
                     sort_keys=False,
                 ),
                 language="yaml",
             )
-    except Exception as exc:
-        candidate = None
-        candidate_manifest = {}
-        blog_blockers = []
-        st.warning(str(exc))
-    confirm_candidate_blockers = not blog_blockers or st.checkbox(
-        _l(
-            "confirm_blog_candidate_blockers",
-            "Create draft anyway; I will fix private, unpromoted, or broken refs before public use.",
-        ),
-        value=False,
-        key=f"research_blog_candidate_blockers:{selected}:{draft_id}",
-    )
-    if st.button(
-        ui["create_blog_draft"],
-        disabled=candidate is None or not confirm_candidate_blockers,
-    ):
-        try:
-            path = create_blog_draft(
-                selected,
-                title=str(candidate.get("title") or draft_id),
-                body=str(candidate.get("body") or ""),
-                tags=list(candidate.get("tags") or []),
-                summary=str(candidate.get("summary") or ""),
-                related_evidence=list(candidate.get("related_evidence") or []),
-                related_kanban=list(candidate.get("related_kanban") or []),
-                related_claims=list(candidate.get("related_claims") or []),
-                related_sources=list(candidate.get("related_sources") or []),
-                related_research_claims=list(candidate.get("related_research_claims") or []),
-                related_citations=list(candidate.get("related_citations") or []),
+            st.text_area(
+                ui["body"],
+                value=str(candidate.get("body") or ""),
+                height=240,
+                disabled=True,
+                key=f"blog_candidate_body:{selected}:{draft_id}",
             )
-            stash_git_backup_results()
-            clear_web_cache()
-            st.success(str(path))
+            _, blog_blockers = _render_research_candidate_manifest(
+                _pdir,
+                candidate,
+                f"blog_candidate:{selected}:{draft_id}",
+            )
         except Exception as exc:
-            st.error(str(exc))
+            candidate = None
+            blog_blockers = []
+            st.warning(str(exc))
+        confirm_candidate_blockers = not blog_blockers or st.checkbox(
+            _l(
+                "confirm_blog_candidate_blockers",
+                "Create draft anyway; I will fix private, unpromoted, or broken refs before public use.",
+            ),
+            value=False,
+            key=f"research_blog_candidate_blockers:{selected}:{draft_id}",
+        )
+        if st.button(
+            ui["create_blog_draft"],
+            disabled=candidate is None or not confirm_candidate_blockers,
+            key=f"create_blog_draft:{selected}:{draft_id}",
+        ):
+            try:
+                path = create_blog_draft(
+                    selected,
+                    title=str(candidate.get("title") or draft_id),
+                    body=str(candidate.get("body") or ""),
+                    tags=list(candidate.get("tags") or []),
+                    summary=str(candidate.get("summary") or ""),
+                    related_evidence=list(candidate.get("related_evidence") or []),
+                    related_kanban=list(candidate.get("related_kanban") or []),
+                    related_claims=list(candidate.get("related_claims") or []),
+                    related_sources=list(candidate.get("related_sources") or []),
+                    related_research_claims=list(candidate.get("related_research_claims") or []),
+                    related_citations=list(candidate.get("related_citations") or []),
+                )
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(str(path))
+            except Exception as exc:
+                st.error(str(exc))
+    with project_tab:
+        try:
+            project_options = research_output_project_options(_pdir)
+            project_labels = {
+                row["id"]: f"{row.get('title') or row['id']} ({row['id']})"
+                for row in project_options
+            }
+            project_id = st.selectbox(
+                _l("project_update_project", "Project"),
+                options=["", *project_labels],
+                format_func=lambda ref: _l("project_update_no_project", "No project selected") if not ref else project_labels.get(ref, ref),
+                key=f"project_update_candidate_project:{selected}:{draft_id}",
+            )
+            project_candidate = research_draft_to_project_update_candidate(
+                _pdir,
+                draft_id,
+                project_id=project_id,
+            )
+            st.code(
+                yaml.dump(
+                    {key: value for key, value in project_candidate.items() if key != "body"},
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                ),
+                language="yaml",
+            )
+            st.text_area(
+                ui["body"],
+                value=str(project_candidate.get("body") or ""),
+                height=220,
+                disabled=True,
+                key=f"project_update_candidate_body:{selected}:{draft_id}:{project_id}",
+            )
+            _render_research_candidate_manifest(
+                _pdir,
+                project_candidate,
+                f"project_update_candidate:{selected}:{draft_id}:{project_id or 'none'}",
+            )
+        except Exception as exc:
+            st.warning(str(exc))
+    with resume_tab:
+        try:
+            bullets = research_draft_to_resume_bullet_candidates(_pdir, draft_id)
+            for index, bullet in enumerate(bullets, start=1):
+                st.markdown(f"**{index}.** {bullet.get('text') or ''}")
+                st.code(
+                    yaml.dump(
+                        {key: value for key, value in bullet.items() if key != "text"},
+                        allow_unicode=True,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                    language="yaml",
+                )
+                _render_research_candidate_manifest(
+                    _pdir,
+                    bullet,
+                    f"resume_bullet_candidate:{selected}:{draft_id}:{index}",
+                )
+        except Exception as exc:
+            st.warning(str(exc))
+
+
+def _render_connector_candidate_picker(
+    preview: dict[str, object],
+    *,
+    key_prefix: str,
+) -> tuple[list[str], str, str]:
+    st.subheader(_l("connector_inbox", "Connector Inbox"))
+    p1, p2, p3 = st.columns(3)
+    p1.metric(_l("discovered", "Discovered"), preview.get("discovered", 0))
+    p2.metric(_l("importable", "Importable"), preview.get("importable", 0))
+    p3.metric(_l("duplicates", "Duplicates"), preview.get("skipped", 0))
+    for warning in preview.get("warnings") or []:
+        st.warning(str(warning))
+
+    node_options = _node_options(include_unsorted=False)
+    metadata_only_ref = "__metadata_only__"
+    target_options = {
+        "": _l("source_inbox", "Source Inbox"),
+        metadata_only_ref: _l("metadata_only", "Metadata only"),
+        **node_options,
+    }
+    target_value = st.selectbox(
+        _l("connector_import_target", "Import target"),
+        options=list(target_options),
+        format_func=lambda ref: target_options.get(ref, ref),
+        key=f"{key_prefix}:target",
+    )
+    target_node = "" if target_value == metadata_only_ref else target_value
+    target_kind = (
+        "metadata_only"
+        if target_value == metadata_only_ref
+        else "collection"
+        if target_node
+        else "source_inbox"
+    )
+    selected_fingerprints: list[str] = []
+    for index, candidate in enumerate(preview.get("candidates") or []):
+        if not isinstance(candidate, dict):
+            continue
+        item = candidate.get("item") if isinstance(candidate.get("item"), dict) else {}
+        duplicate = candidate.get("duplicate") if isinstance(candidate.get("duplicate"), dict) else {}
+        fingerprint = str(candidate.get("fingerprint") or "")
+        with st.container(border=True):
+            head, pick = st.columns([4, 1], vertical_alignment="center")
+            with head:
+                st.markdown(f"**{item.get('title') or fingerprint}**")
+                st.caption(
+                    " · ".join(
+                        str(value)
+                        for value in [
+                            item.get("provider"),
+                            item.get("kind"),
+                            item.get("published"),
+                            item.get("url"),
+                        ]
+                        if value
+                    )
+                )
+                if item.get("summary"):
+                    st.write(_short_text(item.get("summary"), 320))
+                if duplicate.get("is_duplicate"):
+                    st.warning(
+                        _l(
+                            "connector_duplicate",
+                            "Duplicate candidate: {reason} -> {source_id}",
+                        ).format(
+                            reason=duplicate.get("reason") or "duplicate",
+                            source_id=duplicate.get("existing_source_id") or "",
+                        )
+                    )
+            with pick:
+                selected_candidate = st.checkbox(
+                    _l("import_candidate", "Import"),
+                    value=bool(candidate.get("selected")) and not bool(duplicate.get("is_duplicate")),
+                    disabled=bool(duplicate.get("is_duplicate")) or not fingerprint,
+                    key=f"{key_prefix}:candidate:{index}",
+                )
+            if selected_candidate and fingerprint:
+                selected_fingerprints.append(fingerprint)
+    return selected_fingerprints, target_node, target_kind
+
+
+def _connector_import_result_key() -> str:
+    return f"research_connector_import_result:{selected}"
+
+
+def _remember_connector_import_result(
+    result,
+    *,
+    provider: str,
+    target_node: str,
+    target_kind: str,
+) -> None:
+    if not result.imported_source_ids:
+        return
+    st.session_state[_connector_import_result_key()] = {
+        "provider": provider,
+        "target_node": target_node,
+        "target_kind": target_kind,
+        "imported": int(result.imported),
+        "skipped": int(result.skipped),
+        "source_ids": [str(source_id) for source_id in result.imported_source_ids if str(source_id)],
+    }
+
+
+def _render_connector_import_next_actions() -> None:
+    state = st.session_state.get(_connector_import_result_key())
+    if not isinstance(state, dict):
+        return
+    source_ids = [str(source_id) for source_id in state.get("source_ids") or [] if str(source_id)]
+    source_map = load_research_sources(selected).by_id()
+    imported = [source_map[source_id] for source_id in source_ids if source_id in source_map]
+    if not imported:
+        st.session_state.pop(_connector_import_result_key(), None)
+        return
+
+    papers = [source for source in imported if source.kind == "paper"]
+    pdf_ready = [source for source in papers if (source.metadata or {}).get("pdf_asset_ref")]
+    first_paper = papers[0] if papers else None
+    first_pdf = pdf_ready[0] if pdf_ready else None
+    target_node = str(state.get("target_node") or "")
+    target_kind = str(state.get("target_kind") or ("collection" if target_node else "source_inbox"))
+    review_url = (
+        _paper_library_workspace_url(node_id=target_node, detail_id=first_paper.id)
+        if target_node and first_paper
+        else _paper_library_workspace_url(view="unsorted", detail_id=first_paper.id)
+        if first_paper
+        else ""
+    )
+
+    try:
+        container = st.container(border=True)
+    except TypeError:
+        container = st.container()
+    with container:
+        st.success(
+            _l(
+                "connector_import_next_actions",
+                "Imported {imported} source(s). Continue with the imported queue below.",
+            ).format(imported=state.get("imported") or len(imported))
+        )
+        st.caption(
+            " · ".join(
+                part
+                for part in [
+                    str(state.get("provider") or ""),
+                    (
+                        _l("metadata_only", "Metadata only")
+                        if target_kind == "metadata_only"
+                        else _l("connector_target_collection", "Collection target")
+                        if target_node
+                        else _l("source_inbox", "Source Inbox")
+                    ),
+                    (
+                        _l("connector_skipped_count", "Skipped {skipped}").format(skipped=state.get("skipped"))
+                        if state.get("skipped")
+                        else ""
+                    ),
+                ]
+                if part
+            )
+        )
+        for source in imported[:4]:
+            st.write(f"- **{source.title or source.id}** `{source.id}`")
+        if len(imported) > 4:
+            st.caption(_l("connector_more_imports", "And {count} more imported source(s).").format(count=len(imported) - 4))
+
+        a1, a2, a3, a4, a5 = st.columns(5)
+        with a1:
+            if first_paper:
+                _render_sidecar_link_button(
+                    _l("open_in_paper_library", "Open in Paper Library"),
+                    _paper_library_workspace_url(node_id=target_node, detail_id=first_paper.id),
+                    key=f"connector_open_library:{selected}:{first_paper.id}:{target_node}",
+                    icon=":material/library_books:",
+                    type="primary",
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    _l("open_in_paper_library", "Open in Paper Library"),
+                    disabled=True,
+                    key=f"connector_open_library_disabled:{selected}",
+                    use_container_width=True,
+                )
+        with a2:
+            if review_url:
+                _render_sidecar_link_button(
+                    _l("review_imported_sources", "Review imported"),
+                    review_url,
+                    key=f"connector_review_imported:{selected}:{first_paper.id if first_paper else ''}:{target_node}",
+                    icon=":material/rule:",
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    _l("review_imported_sources", "Review imported"),
+                    disabled=True,
+                    key=f"connector_review_imported_disabled:{selected}",
+                    use_container_width=True,
+                )
+        with a3:
+            if first_pdf:
+                _render_sidecar_link_button(
+                    _l("open_reader", "Open Reader"),
+                    _reader_view_url(first_pdf.id),
+                    key=f"connector_open_reader:{selected}:{first_pdf.id}",
+                    icon=":material/menu_book:",
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    _l("open_reader", "Open Reader"),
+                    disabled=True,
+                    key=f"connector_open_reader_disabled:{selected}",
+                    use_container_width=True,
+                )
+        with a4:
+            if st.button(
+                _l("run_extraction", "Run extraction"),
+                key=f"connector_prepare_reader:{selected}:{':'.join(source_ids[:3])}",
+                disabled=not pdf_ready,
+                icon=":material/auto_fix_high:",
+                use_container_width=True,
+            ):
+                result = _prepare_reader_artifacts_for_sources([source.id for source in pdf_ready])
+                st.success(
+                    _l("connector_prepared_sources", "Prepared Reader artifacts for {count} source(s).").format(
+                        count=len(result.get("prepared") or [])
+                    )
+                )
+                for warning in result.get("warnings") or []:
+                    st.warning(str(warning))
+        with a5:
+            if st.button(
+                _l("dismiss", "Dismiss"),
+                key=f"connector_import_next_actions_dismiss:{selected}",
+                icon=":material/close:",
+                use_container_width=True,
+            ):
+                st.session_state.pop(_connector_import_result_key(), None)
+                st.rerun()
+        if not papers:
+            st.caption(
+                _l(
+                    "connector_non_paper_review_hint",
+                    "Non-paper imports stay in the Source Inbox queue on this Advanced Connectors tab.",
+                )
+            )
+        elif not pdf_ready:
+            st.caption(
+                _l(
+                    "connector_pdf_needed_hint",
+                    "Reader and extraction actions appear after an imported paper has a local PDF asset.",
+                )
+            )
+
+
+def _render_connector_provider_cards(rows: list[dict[str, object]]) -> None:
+    st.markdown(f"**{_l('connector_provider_status', 'Provider status')}**")
+    columns = st.columns(3)
+    for index, provider in enumerate(CONNECTOR_PROVIDERS):
+        provider_rows = [row for row in rows if str(row.get("provider") or "") == provider]
+        latest = max(
+            provider_rows,
+            key=lambda row: str(row.get("last_run") or ""),
+            default={},
+        )
+        last_result = latest.get("last_result") if isinstance(latest.get("last_result"), dict) else {}
+        with columns[index % len(columns)]:
+            with st.container(border=True):
+                st.markdown(f"**{provider}**")
+                if not provider_rows:
+                    st.caption(_l("connector_provider_unconfigured", "No saved automation connector."))
+                else:
+                    enabled_count = sum(1 for row in provider_rows if bool(row.get("enabled", True)))
+                    st.caption(
+                        _l(
+                            "connector_provider_configured",
+                            "{configured} configured · {enabled} enabled",
+                        ).format(configured=len(provider_rows), enabled=enabled_count)
+                    )
+                    s1, s2 = st.columns(2)
+                    s1.metric(_l("status", "Status"), str(latest.get("status") or "idle"))
+                    s2.metric(_l("last_imported", "Imported"), last_result.get("imported", 0))
+                    st.caption(
+                        " · ".join(
+                            part
+                            for part in [
+                                f"{_l('last_run', 'Last run')}: {latest.get('last_run') or '-'}",
+                                f"{_l('skipped', 'Skipped')}: {last_result.get('skipped', 0)}",
+                            ]
+                            if part
+                        )
+                    )
+                    if last_result.get("error"):
+                        st.warning(str(last_result.get("error")))
+                if provider in {"x_twitter", "xiaohongshu"}:
+                    st.caption(
+                        _l(
+                            "connector_manual_provider_hint",
+                            "Manual import remains available when automation is unavailable.",
+                        )
+                    )
+
+
+def _render_connector_run_history(rows: list[dict[str, object]]) -> None:
+    history = []
+    for row in rows:
+        last_result = row.get("last_result") if isinstance(row.get("last_result"), dict) else {}
+        history.append(
+            {
+                "id": row.get("id"),
+                "provider": row.get("provider"),
+                "status": row.get("status") or "idle",
+                "last_run": row.get("last_run") or "",
+                "discovered": last_result.get("discovered", 0),
+                "imported": last_result.get("imported", 0),
+                "skipped": last_result.get("skipped", 0),
+                "selected": last_result.get("selected", ""),
+                "warnings": "; ".join(str(item) for item in last_result.get("warnings") or []),
+                "error": last_result.get("error") or "",
+            }
+        )
+    if not history:
+        return
+    with st.expander(_l("connector_run_history", "Connector run history"), expanded=False):
+        st.dataframe(history, use_container_width=True, hide_index=True)
 
 
 def _render_connectors() -> None:
     st.subheader(ui["connectors"])
     st.caption(ui["connectors_caption"])
-    book = load_connectors(_pdir)
-    rows = list(book.get("connectors") or [])
+    rows = list(load_connectors(_pdir).get("connectors") or [])
+    _render_connector_provider_cards(rows)
+    _render_connector_run_history(rows)
+    _render_connector_import_next_actions()
+    manual_key = f"research_manual_connector_preview:{selected}"
+    with st.expander(_l("manual_connector_import", "Manual connector import"), expanded=False):
+        with st.form(f"research_manual_connector:{selected}"):
+            manual_provider = st.selectbox(
+                ui["connector_provider"],
+                CONNECTOR_PROVIDERS,
+                key=f"research_manual_connector_provider:{selected}",
+            )
+            manual_privacy = st.selectbox(
+                ui["privacy_default"],
+                ["private", "public"],
+                key=f"research_manual_connector_privacy:{selected}",
+            )
+            manual_raw = st.text_area(
+                _l("manual_connector_items", "Paste URLs, CSV, or JSON list"),
+                height=120,
+                key=f"research_manual_connector_raw:{selected}",
+            )
+            manual_preview = st.form_submit_button(_l("preview", "Preview"), type="primary")
+        if manual_preview:
+            try:
+                st.session_state[manual_key] = {
+                    "provider": manual_provider,
+                    "privacy": manual_privacy,
+                    "raw": manual_raw,
+                    "preview": preview_manual_connector_items(_pdir, manual_provider, manual_raw),
+                }
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+        manual_state = st.session_state.get(manual_key)
+        if isinstance(manual_state, dict) and isinstance(manual_state.get("preview"), dict):
+            selected_manual, manual_target, manual_target_kind = _render_connector_candidate_picker(
+                manual_state["preview"],
+                key_prefix=f"research_manual_connector_picker:{selected}",
+            )
+            if st.button(
+                _l("import_selected_connector_items", "Import selected"),
+                type="primary",
+                disabled=not selected_manual,
+                key=f"research_manual_connector_import:{selected}",
+            ):
+                try:
+                    assert_files_current([_sources_path])
+                    result = import_manual_connector_items(
+                        _pdir,
+                        str(manual_state.get("provider") or manual_provider),
+                        manual_state.get("raw") or "",
+                        selected_manual,
+                        privacy_default=str(manual_state.get("privacy") or "private"),
+                        target={
+                            "kind": manual_target_kind,
+                            "node_id": manual_target,
+                        },
+                    )
+                    _remember_connector_import_result(
+                        result,
+                        provider=str(manual_state.get("provider") or manual_provider),
+                        target_node=manual_target,
+                        target_kind=manual_target_kind,
+                    )
+                    refresh_file_snapshots([_sources_path])
+                    stash_git_backup_results()
+                    clear_web_cache()
+                    st.success(
+                        _l(
+                            "connector_imported_count",
+                            "Imported {imported} candidate(s); skipped {skipped}.",
+                        ).format(imported=result.imported, skipped=result.skipped)
+                    )
+                    st.session_state.pop(manual_key, None)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+    rows = list(load_connectors(_pdir).get("connectors") or [])
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True)
     else:
@@ -5452,66 +7940,10 @@ def _render_connectors() -> None:
     preview = st.session_state.get(preview_key)
     if not isinstance(preview, dict):
         return
-    st.subheader(_l("connector_inbox", "Connector Inbox"))
-    p1, p2, p3 = st.columns(3)
-    p1.metric(_l("discovered", "Discovered"), preview.get("discovered", 0))
-    p2.metric(_l("importable", "Importable"), preview.get("importable", 0))
-    p3.metric(_l("duplicates", "Duplicates"), preview.get("skipped", 0))
-    for warning in preview.get("warnings") or []:
-        st.warning(str(warning))
-
-    node_options = _node_options(include_unsorted=False)
-    target_options = {"": _l("source_inbox", "Source Inbox"), **node_options}
-    target_node = st.selectbox(
-        _l("connector_import_target", "Import target"),
-        options=list(target_options),
-        format_func=lambda ref: target_options.get(ref, ref),
-        key=f"research_connector_import_target:{selected}:{picked}",
+    selected_fingerprints, target_node, target_kind = _render_connector_candidate_picker(
+        preview,
+        key_prefix=f"research_connector_picker:{selected}:{picked}",
     )
-    selected_fingerprints: list[str] = []
-    for index, candidate in enumerate(preview.get("candidates") or []):
-        if not isinstance(candidate, dict):
-            continue
-        item = candidate.get("item") if isinstance(candidate.get("item"), dict) else {}
-        duplicate = candidate.get("duplicate") if isinstance(candidate.get("duplicate"), dict) else {}
-        fingerprint = str(candidate.get("fingerprint") or "")
-        with st.container(border=True):
-            head, pick = st.columns([4, 1], vertical_alignment="center")
-            with head:
-                st.markdown(f"**{item.get('title') or fingerprint}**")
-                st.caption(
-                    " · ".join(
-                        str(value)
-                        for value in [
-                            item.get("provider"),
-                            item.get("kind"),
-                            item.get("published"),
-                            item.get("url"),
-                        ]
-                        if value
-                    )
-                )
-                if item.get("summary"):
-                    st.write(_short_text(item.get("summary"), 320))
-                if duplicate.get("is_duplicate"):
-                    st.warning(
-                        _l(
-                            "connector_duplicate",
-                            "Duplicate candidate: {reason} -> {source_id}",
-                        ).format(
-                            reason=duplicate.get("reason") or "duplicate",
-                            source_id=duplicate.get("existing_source_id") or "",
-                        )
-                    )
-            with pick:
-                selected_candidate = st.checkbox(
-                    _l("import_candidate", "Import"),
-                    value=bool(candidate.get("selected")) and not bool(duplicate.get("is_duplicate")),
-                    disabled=bool(duplicate.get("is_duplicate")) or not fingerprint,
-                    key=f"research_connector_candidate:{selected}:{picked}:{index}",
-                )
-            if selected_candidate and fingerprint:
-                selected_fingerprints.append(fingerprint)
 
     if st.button(
         _l("import_selected_connector_items", "Import selected"),
@@ -5526,9 +7958,15 @@ def _render_connectors() -> None:
                 picked,
                 selected_fingerprints,
                 target={
-                    "kind": "collection" if target_node else "source_inbox",
+                    "kind": target_kind,
                     "node_id": target_node,
                 },
+            )
+            _remember_connector_import_result(
+                result,
+                provider=str(preview.get("provider") or picked),
+                target_node=target_node,
+                target_kind=target_kind,
             )
             refresh_file_snapshots([_sources_path, _research_connectors_path])
             stash_git_backup_results()
@@ -5549,26 +7987,25 @@ _head_l, _head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")
 with _head_l:
     st.title(ui["title"])
     st.caption(ui["page_context_line"])
+    _render_research_sidecar_status()
 with _head_goal:
     _goal_col, _ai_col = st.columns([4, 2], gap="small", vertical_alignment="center")
     with _goal_col:
         render_current_goal_strip(selected, compact=True, align="right")
     with _ai_col:
         with st.popover(
-            _l("ai_config", "AI Config"),
+            _l("ai_config_short", "AI"),
             key=f"research_ai_config_popover:{selected}",
-            icon=":material/tune:",
-            use_container_width=True,
+            use_container_width=False,
         ):
             _render_ai_config_panel()
 
 inbox = load_research_sources(selected)
 
-tab_overview, tab_library, tab_reader, tab_claims, tab_export, tab_advanced = st.tabs(
+tab_overview, tab_library, tab_claims, tab_export, tab_advanced = st.tabs(
     [
         _l("overview", "Overview"),
         _l("paper_library", "Paper Library"),
-        _l("reader", "Reader"),
         ui["claims_citations"],
         _l("synthesis_export", "Synthesis / Export"),
         _l("advanced_connectors", "Advanced Connectors"),
@@ -5580,9 +8017,6 @@ with tab_overview:
 
 with tab_library:
     _render_paper_library(inbox)
-
-with tab_reader:
-    _render_paper_reader(inbox)
 
 with tab_claims:
     _render_claims_citations(inbox)

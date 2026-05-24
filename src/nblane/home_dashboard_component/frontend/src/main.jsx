@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Background,
@@ -9,6 +9,8 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import ForceGraph3D from "react-force-graph-3d";
+import * as THREE from "three";
 
 import "./style.css";
 import {
@@ -24,6 +26,7 @@ import {
   confirmGoalSkillLinksEvent,
   createGoalSubmitEvent,
   editGoalSubmitEvent,
+  makeEvent,
   manualGoalSkillLinkEvent,
   navigationEvent,
   openProfileContextEvent,
@@ -32,13 +35,10 @@ import {
   setPrimaryGoalEvent,
 } from "./events.js";
 
-const ForceGraph3D = lazy(() => import("react-force-graph-3d"));
-
 const READY = "streamlit:componentReady";
 const SET_VALUE = "streamlit:setComponentValue";
 const SET_HEIGHT = "streamlit:setFrameHeight";
 const RENDER = "streamlit:render";
-const GRAPH_HEIGHT = 438;
 const SKILL_RING_SIZE = 132;
 const SKILL_RING_STROKE = 12;
 const SKILL_RING_RADIUS = 52;
@@ -65,6 +65,37 @@ const NODE_COLORS = {
   capacity: "#68716f",
   health: "#68716f",
 };
+
+const EDGE_COLORS = {
+  alignment: "#7a5ac4",
+  contains: "#71827d",
+  generated_by: "#b7822b",
+  source_to_candidate: "#b35a34",
+  review: "#6b4fb3",
+  derives: "#8b6f20",
+  supports: "#256b5d",
+  drives: "#2f6fed",
+  produces: "#b35a34",
+  feedback: "#2f9e73",
+  watches: "#9f1d1d",
+  link: "#60716b",
+};
+
+const EDGE_WIDTHS = {
+  alignment: 1.35,
+  contains: 1.1,
+  generated_by: 1.25,
+  source_to_candidate: 1.55,
+  review: 1.45,
+  derives: 1.35,
+  supports: 1.7,
+  drives: 1.75,
+  produces: 1.55,
+  feedback: 1.45,
+  watches: 1.1,
+};
+
+const GRAPH_3D_MIN_HEIGHT = 520;
 
 const FALLBACK_LAYERS = [
   "direction",
@@ -101,7 +132,48 @@ const SKILL_STATUS_META = [
   { key: "locked", color: "#a2afb9", fallback: "Locked" },
 ];
 
+const EXPLORE_LANES = [
+  {
+    key: "direction",
+    labelKey: "dashboard_explore_lane_direction",
+    fallback: "Direction",
+    layers: ["direction", "objective"],
+    types: ["north_star", "goal"],
+  },
+  {
+    key: "work_source",
+    labelKey: "dashboard_explore_lane_work_source",
+    fallback: "Work / Source",
+    layers: ["work_context", "activity", "source"],
+    types: ["project_case", "task", "daily_work", "research", "agent_run", "source"],
+  },
+  {
+    key: "evidence_claim",
+    labelKey: "dashboard_explore_lane_evidence_claim",
+    fallback: "Evidence / Claim",
+    layers: ["evidence", "claim"],
+    types: ["evidence", "evidence_candidate", "atomic_evidence", "composite_evidence", "claim"],
+  },
+  {
+    key: "skill_gap",
+    labelKey: "dashboard_explore_lane_skill_gap",
+    fallback: "Skill / Gap",
+    layers: ["capability", "governance"],
+    types: ["skill", "gap", "next_action", "capacity", "health"],
+  },
+  {
+    key: "output_feedback",
+    labelKey: "dashboard_explore_lane_output_feedback",
+    fallback: "Output / Feedback",
+    layers: ["output", "feedback"],
+    types: ["output", "feedback"],
+  },
+];
+
 function sendBack(type, payload) {
+  if (window.parent === window) {
+    return;
+  }
   window.parent.postMessage({ isStreamlitMessage: true, type, ...payload }, "*");
 }
 
@@ -124,6 +196,125 @@ function initStreamlitBridge(onRender) {
   window.setTimeout(() => setFrameHeight(), 0);
 }
 
+function standaloneConfig() {
+  const config = window.__NBLANE_DASHBOARD_STANDALONE__;
+  return config && typeof config === "object" ? config : null;
+}
+
+function standaloneTargetUrl(path, streamlitBase = "") {
+  const clean = cleanText(path);
+  if (!clean) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(clean)) {
+    return clean;
+  }
+  const base = cleanText(streamlitBase, "http://127.0.0.1:8503").replace(/\/+$/, "");
+  return `${base}/${clean.replace(/^\/+/, "")}`;
+}
+
+const DASHBOARD_VIEW_MODES = new Set(["focus", "canvas", "attention", "3d"]);
+const READ_ONLY_ACTIONS = new Set(["navigate", "set_north_star_display_open_profile_context"]);
+
+function initialDashboardViewMode(args) {
+  if (typeof window !== "undefined") {
+    const requested = cleanText(new URLSearchParams(window.location.search).get("view"));
+    if (DASHBOARD_VIEW_MODES.has(requested)) {
+      return requested;
+    }
+  }
+  return args?.standalone && !args?.embed ? "3d" : "focus";
+}
+
+function urlSearchParam(name) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return cleanText(new URLSearchParams(window.location.search).get(name));
+}
+
+function initialDashboardNodeId() {
+  return urlSearchParam("node");
+}
+
+function dashboardNodeUrl(url, nodeId, view = "3d") {
+  const cleanUrl = cleanText(url);
+  const cleanNode = cleanText(nodeId);
+  if (!cleanUrl || !cleanNode) {
+    return cleanUrl;
+  }
+  try {
+    const parsed = new URL(cleanUrl, typeof window !== "undefined" ? window.location.href : "http://127.0.0.1");
+    parsed.searchParams.set("view", cleanText(view, "3d"));
+    parsed.searchParams.set("node", cleanNode);
+    return parsed.toString();
+  } catch {
+    const separator = cleanUrl.includes("?") ? "&" : "?";
+    return `${cleanUrl}${separator}view=${encodeURIComponent(cleanText(view, "3d"))}&node=${encodeURIComponent(cleanNode)}`;
+  }
+}
+
+function canEmitInReadOnly(actionName) {
+  return READ_ONLY_ACTIONS.has(cleanText(actionName));
+}
+
+function canRenderGraphAction(action, readOnly = false) {
+  const actionName = cleanText(action?.event?.action);
+  if (!actionName || actionName === "noop") {
+    return false;
+  }
+  return !readOnly || canEmitInReadOnly(actionName);
+}
+
+function graphActionKey(action) {
+  const event = action?.event || {};
+  const payload = event.payload || {};
+  return [
+    cleanText(action?.id),
+    cleanText(event.action),
+    cleanText(payload.path),
+    cleanText(payload.section),
+  ].join("|");
+}
+
+function nodeActionBundle(payload, node, readOnly = false) {
+  const nodeActions = [
+    node?.primaryAction,
+    ...asArray(node?.secondaryActions),
+  ].filter((action) => canRenderGraphAction(action, readOnly));
+  const graphActions = asArray(payload?.graph?.actions)
+    .filter((action) => cleanText(action.nodeId) === cleanText(node?.id))
+    .filter((action) => canRenderGraphAction(action, readOnly));
+  const deduped = [];
+  const seen = new Set();
+  [...graphActions, ...nodeActions].forEach((action) => {
+    const key = graphActionKey(action);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    deduped.push(action);
+  });
+  const fallbackPrimary = nodeActions[0] || null;
+  const specificPrimary = graphActions[0] || fallbackPrimary;
+  const primary = specificPrimary || null;
+  const primaryKey = primary ? graphActionKey(primary) : "";
+  const secondary = deduped.filter((action) => graphActionKey(action) !== primaryKey);
+  return { primary, secondary };
+}
+
+function dashboardCanvasEmbed(payload) {
+  const embed = payload?.canvasEmbed || payload?.canvas_embed || {};
+  const url = cleanText(embed.url);
+  if (!url) {
+    return null;
+  }
+  return {
+    url,
+    standaloneUrl: cleanText(embed.standaloneUrl || embed.standalone_url, url.replace(/([?&])embed=1(&?)/, "$1").replace(/[?&]$/, "")),
+  };
+}
+
 function label(ui, key, fallback) {
   return cleanText(ui?.[key], fallback || key);
 }
@@ -144,6 +335,15 @@ function linkPayload(link) {
     score: Math.max(0, Number(link.score) || 0),
     rationale: cleanText(link.rationale),
   };
+}
+
+function graphActionEvent(action) {
+  const event = action?.event || {};
+  const actionName = cleanText(event.action);
+  if (!actionName || actionName === "noop") {
+    return null;
+  }
+  return makeEvent(actionName, event.payload || {});
 }
 
 function translatedNodeType(ui, type) {
@@ -252,6 +452,10 @@ function isConcreteNode(node) {
   return Boolean(node) && node.implemented !== false && !node.placeholder;
 }
 
+function isPlaceholderNode(node) {
+  return Boolean(node?.placeholder || node?.implemented === false);
+}
+
 function graphInsight(payload) {
   const total = payload.graph.nodes.length;
   const realCount = payload.graph.nodes.filter(isConcreteNode).length;
@@ -265,6 +469,13 @@ function graphInsight(payload) {
 }
 
 function preferredNode(payload) {
+  const nodesById = new Map(payload.graph.nodes.map((node) => [node.id, node]));
+  const attentionNode = asArray(payload.graph.attention.nodes)
+    .map((item) => nodesById.get(item.id))
+    .find((node) => node && (isConcreteNode(node) || node.primaryAction?.event?.action));
+  if (attentionNode) {
+    return attentionNode;
+  }
   const goalIds = new Set(asArray(payload.activeGoals).map((goal) => goal.id).filter(Boolean));
   const realNodes = payload.graph.nodes.filter(isConcreteNode);
   return (
@@ -277,6 +488,139 @@ function preferredNode(payload) {
     ) ||
     realNodes[0] ||
     null
+  );
+}
+
+function quickLink(payload, id, fallbackPath, fallbackLabel) {
+  return (
+    asArray(payload.quickLinks).find((link) => cleanText(link.id) === id) ||
+    {
+      id,
+      path: fallbackPath,
+      label: fallbackLabel || id,
+    }
+  );
+}
+
+function dashboardMetrics(payload) {
+  const doing = asArray(payload.kanban.doing);
+  const evidenceCandidates = Number(payload.pendingEvidence.done_uncrystallized_count || 0);
+  const unlinkedAtomic = Number(payload.pendingEvidence.unlinked_count || 0);
+  const needsReview = Number(payload.pendingEvidence.needs_review_count || 0);
+  const statusRisk = Number(payload.pendingEvidence.status_risk_count || 0);
+  const evidenceAttention = evidenceCandidates + unlinkedAtomic + needsReview + statusRisk;
+  const gapRisk = Number(payload.skills.evidence_risk_count || 0) + asArray(payload.skills.target_learning_locked).length;
+  const outputDrafts = Number(payload.charts.public.draft) || 0;
+  const healthAlerts = Number(payload.charts.health.error || 0) + Number(payload.charts.health.warning || 0);
+  return {
+    doing,
+    doingTotal: Number(payload.kanban.doing_total || 0) || doing.length,
+    evidenceCandidates,
+    unlinkedAtomic,
+    needsReview,
+    statusRisk,
+    evidenceAttention,
+    gapRisk,
+    outputDrafts,
+    published: Number(payload.charts.public.published) || 0,
+    healthAlerts,
+    sourceActive: Number(payload.sources.active_total || 0),
+  };
+}
+
+function actionQueueItems(payload) {
+  const ui = payload.ui;
+  const metrics = dashboardMetrics(payload);
+  const kanban = quickLink(payload, "kanban", "pages/3_Kanban.py", label(ui, "quick_kanban", "Kanban"));
+  const evidence = quickLink(payload, "evidence_review", "pages/2_Evidence_Review.py", label(ui, "quick_evidence_review", "Evidence Review"));
+  const gap = quickLink(payload, "gap", "pages/2_Gap_Analysis.py", label(ui, "quick_gap", "Gap Analysis"));
+  const output = quickLink(payload, "public_site", "pages/6_Output_Studio.py", label(ui, "quick_public_site", "Output Studio"));
+  return [
+    {
+      id: "evidence",
+      count: metrics.evidenceAttention,
+      eyebrow: label(ui, "dashboard_today_evidence_review", "Evidence review"),
+      title: metrics.evidenceAttention
+        ? label(ui, "dashboard_action_review_evidence", "Review evidence")
+        : label(ui, "dashboard_pending_evidence_empty", "No evidence waiting"),
+      detail: `${label(ui, "dashboard_done_uncrystallized", "Done not crystallized")}: ${metrics.evidenceCandidates} · ${label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: ${metrics.unlinkedAtomic}`,
+      why: metrics.evidenceAttention
+        ? label(ui, "dashboard_action_why_evidence", "Evidence queues are the highest-confidence next review work.")
+        : label(ui, "dashboard_action_why_clear", "No urgent queue is blocking the daily path."),
+      filter: `pending=${metrics.evidenceAttention}`,
+      path: evidence.path,
+      tone: metrics.evidenceAttention ? "warning" : "",
+    },
+    {
+      id: "focus",
+      count: metrics.doingTotal,
+      eyebrow: label(ui, "dashboard_today_current_focus", "Current focus"),
+      title: metrics.doingTotal
+        ? label(ui, "dashboard_action_open_focus", "Open current work")
+        : label(ui, "dashboard_doing_empty", "No Doing tasks yet."),
+      detail: metrics.doing.slice(0, 2).map((item) => cleanText(item.title)).filter(Boolean).join(" / ") || label(ui, "dashboard_action_open_kanban_hint", "Choose current work from Kanban."),
+      why: metrics.doingTotal
+        ? label(ui, "dashboard_action_why_focus", "Current Doing work keeps today's actions tied to the active goal.")
+        : label(ui, "dashboard_action_why_focus_empty", "Pick one active task before expanding the rest of the system."),
+      filter: `doing=${metrics.doingTotal}`,
+      path: kanban.path,
+      tone: metrics.doingTotal ? "" : "muted",
+    },
+    {
+      id: "gap",
+      count: metrics.gapRisk,
+      eyebrow: label(ui, "dashboard_today_gap_next_action", "Gap / Next action"),
+      title: metrics.gapRisk
+        ? label(ui, "dashboard_action_resolve_gap", "Resolve gap risk")
+        : label(ui, "dashboard_gap_risk_title", "Gap risk"),
+      detail: metrics.gapRisk
+        ? label(ui, "dashboard_gap_risk_title", "Gap risk")
+        : label(ui, "dashboard_action_gap_clear", "No urgent gap signal."),
+      why: metrics.gapRisk
+        ? label(ui, "dashboard_action_why_gap", "Gap risks can block the current goal if they stay unresolved.")
+        : label(ui, "dashboard_action_why_clear", "No urgent queue is blocking the daily path."),
+      filter: `gap=${metrics.gapRisk}`,
+      path: gap.path,
+      tone: metrics.gapRisk ? "warning" : "",
+    },
+    {
+      id: "output",
+      count: metrics.outputDrafts,
+      eyebrow: label(ui, "dashboard_today_output_feedback", "Output / Feedback"),
+      title: metrics.outputDrafts
+        ? label(ui, "dashboard_action_open_output", "Open output drafts")
+        : label(ui, "dashboard_action_draft_output", "Draft output"),
+      detail: `${label(ui, "dashboard_public_published", "Published")}: ${metrics.published}`,
+      why: metrics.outputDrafts
+        ? label(ui, "dashboard_action_why_output", "Drafts are ready to turn reviewed work into reusable output.")
+        : label(ui, "dashboard_action_why_output_empty", "Create an output only after the review queues have enough support."),
+      filter: `drafts=${metrics.outputDrafts}`,
+      path: output.path,
+      tone: metrics.outputDrafts ? "" : "muted",
+    },
+  ];
+}
+
+function TodayFocusStrip({ payload, onEmit }) {
+  const ui = payload.ui;
+  return (
+    <div className="hd-today-strip" aria-label={label(ui, "dashboard_today_focus_title", "Today focus")}>
+      {actionQueueItems(payload).map((item) => (
+        <button
+          key={item.id}
+          className={`hd-today-item ${item.tone || ""}`}
+          type="button"
+          data-action="navigate"
+          data-dashboard-action={`today:${item.id}`}
+          data-target={item.path}
+          onClick={() => onEmit(navigationEvent(item.path))}
+        >
+          <span>{item.eyebrow}</span>
+          <strong>{item.count}</strong>
+          <small>{item.title}</small>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -310,7 +654,7 @@ function skillSegments(counts, total) {
   });
 }
 
-function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
+function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, canEditGoals = true, canSelectGoals = true, showToday = true }) {
   const ui = payload.ui;
   const northStar = payload.northStar;
   const primary = goalDisplay(payload.primaryGoal, ui);
@@ -325,7 +669,7 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
   ].filter(Boolean);
 
   return (
-    <section className="hd-context-header">
+    <section className={showToday ? "hd-context-header" : "hd-context-header no-today"}>
       <div className="hd-context-main">
         <div className="hd-context-card hd-context-north">
           <span className="hd-eyebrow">{label(ui, "north_star_strip_title", "North Star")}</span>
@@ -351,37 +695,56 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal }) {
             </div>
           )}
         </div>
+
+        <div className="hd-context-goals">
+          <div className="hd-context-goals-head">
+            <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
+            <span className="hd-context-count">{activeGoals.length}</span>
+          </div>
+          <div className="hd-goal-rail">
+            {activeGoals.length ? activeGoals.map((goal) => {
+              const display = goalDisplay(goal, ui);
+              const className = `hd-goal-pill ${goal.isPrimary ? "primary" : ""}`;
+              const title = `${display.title} · ${goal.isPrimary ? label(ui, "dashboard_primary_goal", "Primary") : label(ui, `goal_status_${display.status}`, display.status || "active")}`;
+              return canSelectGoals ? (
+                <button
+                  key={goal.id || display.title}
+                  className={className}
+                  type="button"
+                  data-action="select-goal"
+                  data-goal-id={goal.id}
+                  title={title}
+                  onClick={() => onSelectGoal(goal.id)}
+                >
+                  <span className="hd-goal-pill-dot" />
+                  <strong>{display.title}</strong>
+                </button>
+              ) : (
+                <span
+                  key={goal.id || display.title}
+                  className={`${className} static`}
+                  data-action="goal-context"
+                  data-goal-id={goal.id}
+                  title={title}
+                >
+                  <span className="hd-goal-pill-dot" />
+                  <strong>{display.title}</strong>
+                </span>
+              );
+            }) : <span className="hd-empty-inline">{label(ui, "goal_no_current", "No current goal set.")}</span>}
+          </div>
+        </div>
       </div>
 
-      <div className="hd-context-goals">
-        <div className="hd-context-goals-head">
-          <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
-          <span className="hd-context-count">{activeGoals.length}</span>
-        </div>
-        <div className="hd-goal-rail">
-          {activeGoals.length ? activeGoals.map((goal) => {
-            const display = goalDisplay(goal, ui);
-            return (
-              <button
-                key={goal.id || display.title}
-                className={`hd-goal-pill ${goal.isPrimary ? "primary" : ""}`}
-                type="button"
-                title={`${display.title} · ${goal.isPrimary ? label(ui, "dashboard_primary_goal", "Primary") : label(ui, `goal_status_${display.status}`, display.status || "active")}`}
-                onClick={() => onSelectGoal(goal.id)}
-              >
-                <span className="hd-goal-pill-dot" />
-                <strong>{display.title}</strong>
-              </button>
-            );
-          }) : <span className="hd-empty-inline">{label(ui, "goal_no_current", "No current goal set.")}</span>}
-        </div>
-      </div>
+      {showToday ? <TodayFocusStrip payload={payload} onEmit={onEmit} /> : null}
 
       <div className="hd-context-actions">
-        <button className="hd-primary full" type="button" onClick={onCreateGoal}>
-          {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
-        </button>
-        <button className="hd-ghost full" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+        {canEditGoals ? (
+          <button className="hd-primary full" type="button" data-action="open-goal-form" onClick={onCreateGoal}>
+            {label(ui, "dashboard_add_active_goal", "Add goal")}
+          </button>
+        ) : null}
+        <button className="hd-ghost full" type="button" data-action="open-profile-context" onClick={() => onEmit(openProfileContextEvent())}>
           {label(ui, "north_star_edit_action", "Edit Profile Context")}
         </button>
       </div>
@@ -444,8 +807,203 @@ function canvasLayout(nodes, layers) {
   return positions;
 }
 
-function flowData(payload, hiddenLayers) {
-  const visibleNodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+function graphNodesForView(payload, hiddenLayers, viewMode) {
+  const baseNodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+  if (viewMode === "focus" && payload.graph.focusPath.length) {
+    const focusIds = new Set(payload.graph.focusPath);
+    return baseNodes.filter((node) => focusIds.has(node.id));
+  }
+  if (viewMode === "attention") {
+    const attentionIds = new Set(payload.graph.attention.nodes.map((node) => node.id));
+    payload.graph.focusPath.slice(0, 3).forEach((id) => attentionIds.add(id));
+    if (attentionIds.size) {
+      return baseNodes.filter((node) => attentionIds.has(node.id));
+    }
+  }
+  return baseNodes;
+}
+
+function graphAttentionIds(payload) {
+  return new Set(asArray(payload.graph.attention.nodes).map((item) => cleanText(item.id)).filter(Boolean));
+}
+
+function walkRelatedNodeIds(payload, selectedNodeId, direction) {
+  const selected = cleanText(selectedNodeId);
+  if (!selected) {
+    return new Set();
+  }
+  const ids = new Set([selected]);
+  const queue = [{ id: selected, depth: 0 }];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || current.depth >= 3) {
+      continue;
+    }
+    payload.graph.edges.forEach((edge) => {
+      const next = direction === "upstream" && edge.to === current.id
+        ? edge.from
+        : direction === "downstream" && edge.from === current.id
+          ? edge.to
+          : "";
+      if (!next || ids.has(next)) {
+        return;
+      }
+      ids.add(next);
+      queue.push({ id: next, depth: current.depth + 1 });
+    });
+  }
+  return ids;
+}
+
+function relatedNodeIds(payload, selectedNodeId, scope) {
+  const selected = cleanText(selectedNodeId);
+  if (scope === "upstream" || scope === "downstream") {
+    return walkRelatedNodeIds(payload, selected, scope);
+  }
+
+  const ids = new Set([
+    ...asArray(payload.graph.focusPath).map((id) => cleanText(id)).filter(Boolean),
+    ...graphAttentionIds(payload),
+  ]);
+  if (!selected) {
+    return ids.size ? ids : null;
+  }
+  ids.add(selected);
+  payload.graph.edges.forEach((edge) => {
+    if (edge.to === selected) {
+      ids.add(edge.from);
+    }
+    if (edge.from === selected) {
+      ids.add(edge.to);
+    }
+  });
+  return ids;
+}
+
+function exploreNodeScore(payload, node, selectedNodeId) {
+  const focusIndex = asArray(payload.graph.focusPath).indexOf(node.id);
+  const attentionIndex = asArray(payload.graph.attention.nodes).findIndex((item) => item.id === node.id);
+  let score = 0;
+  if (node.id === selectedNodeId) {
+    score += 1000;
+  }
+  if (focusIndex >= 0) {
+    score += 760 - focusIndex * 18;
+  }
+  if (attentionIndex >= 0) {
+    score += 720 - attentionIndex * 18;
+  }
+  if (isConcreteNode(node)) {
+    score += 120;
+  }
+  if (cleanText(node.primaryAction?.event?.action)) {
+    score += 80;
+  }
+  if (node.isPrimary) {
+    score += 60;
+  }
+  if (node.placeholder || node.implemented === false) {
+    score -= 45;
+  }
+  return score;
+}
+
+function sortedExploreNodes(payload, nodes, selectedNodeId) {
+  const layerOrder = graphLayers(payload);
+  return [...nodes].sort((a, b) => {
+    const scoreDiff = exploreNodeScore(payload, b, selectedNodeId) - exploreNodeScore(payload, a, selectedNodeId);
+    if (scoreDiff) {
+      return scoreDiff;
+    }
+    const layerDiff = layerOrder.indexOf(a.layer) - layerOrder.indexOf(b.layer);
+    if (layerDiff) {
+      return layerDiff;
+    }
+    return cleanText(a.label).localeCompare(cleanText(b.label));
+  });
+}
+
+function nodeMatchesExploreQuery(payload, node, query) {
+  const needle = cleanText(query).toLowerCase();
+  if (!needle) {
+    return true;
+  }
+  const haystack = [
+    node.id,
+    node.label,
+    node.metric,
+    node.status,
+    node.summary,
+    node.description,
+    node.recordId,
+    node.ownerPath,
+    node.type,
+    node.layer,
+    translatedNodeType(payload.ui, node.type),
+    layerLabel(payload.ui, node.layer),
+  ].map((item) => cleanText(item).toLowerCase()).join(" ");
+  return haystack.includes(needle);
+}
+
+function filterExploreNodes(payload, nodes, query, showPlaceholders) {
+  return nodes.filter((node) => {
+    if (!showPlaceholders && isPlaceholderNode(node)) {
+      return false;
+    }
+    return nodeMatchesExploreQuery(payload, node, query);
+  });
+}
+
+function groupedExploreNodes(payload, nodes) {
+  const layerOrder = graphLayers(payload);
+  const grouped = new Map();
+  nodes.forEach((node) => {
+    const layer = cleanText(node.layer, "activity");
+    if (!grouped.has(layer)) {
+      grouped.set(layer, []);
+    }
+    grouped.get(layer).push(node);
+  });
+  return [...grouped.entries()]
+    .sort(([a], [b]) => {
+      const aIndex = layerOrder.indexOf(a);
+      const bIndex = layerOrder.indexOf(b);
+      if (aIndex === -1 && bIndex === -1) {
+        return a.localeCompare(b);
+      }
+      if (aIndex === -1) {
+        return 1;
+      }
+      if (bIndex === -1) {
+        return -1;
+      }
+      return aIndex - bIndex;
+    })
+    .map(([layer, layerNodes]) => ({ layer, nodes: layerNodes }));
+}
+
+function graphExploreNodes(payload, hiddenLayers, selectedNodeId, scope) {
+  const baseNodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+  if (scope === "all") {
+    return sortedExploreNodes(payload, baseNodes, selectedNodeId);
+  }
+  const focusIds = new Set(payload.graph.focusPath);
+  const attentionIds = graphAttentionIds(payload);
+  const scopedIds = relatedNodeIds(payload, selectedNodeId, scope);
+  const firstPass = baseNodes.filter((node) => (
+    focusIds.has(node.id) ||
+    attentionIds.has(node.id) ||
+    isConcreteNode(node) ||
+    cleanText(node.primaryAction?.event?.action)
+  ));
+  const scoped = scopedIds
+    ? baseNodes.filter((node) => scopedIds.has(node.id) || node.id === selectedNodeId)
+    : firstPass;
+  return sortedExploreNodes(payload, scoped.length ? scoped : firstPass.length ? firstPass : baseNodes, selectedNodeId);
+}
+
+function flowData(payload, hiddenLayers, viewMode) {
+  const visibleNodes = graphNodesForView(payload, hiddenLayers, viewMode);
   const visibleLayers = graphLayers(payload).filter((layer) =>
     !hiddenLayers.has(layer) && visibleNodes.some((node) => node.layer === layer)
   );
@@ -494,20 +1052,7 @@ function flowData(payload, hiddenLayers) {
   return { nodes: [...layerNodes, ...graphNodes], edges };
 }
 
-function nodeWeight(node) {
-  if (node.type === "north_star") {
-    return 8;
-  }
-  if (node.type === "goal") {
-    return node.isPrimary ? 6.6 : 5.6;
-  }
-  if (node.type === "skill") {
-    return 5;
-  }
-  return 3.6;
-}
-
-function CanvasSetupBanner({ payload, insight, hiddenLayers, onEmit, onCreateGoal }) {
+function CanvasSetupBanner({ payload, insight, hiddenLayers, onEmit, onCreateGoal, readOnly = false }) {
   const ui = payload.ui;
   const missing = [];
   if (!payload.northStar.isSet) {
@@ -552,13 +1097,13 @@ function CanvasSetupBanner({ payload, insight, hiddenLayers, onEmit, onCreateGoa
 
       <div className="hd-canvas-banner-actions">
         {!payload.northStar.isSet ? (
-          <button className="hd-ghost" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+          <button className="hd-ghost" type="button" data-action="open-profile-context" onClick={() => onEmit(openProfileContextEvent())}>
             {label(ui, "north_star_edit_action", "Edit Profile Context")}
           </button>
         ) : null}
-        {payload.northStar.isSet && !payload.primaryGoal.isSet ? (
-          <button className="hd-primary" type="button" onClick={onCreateGoal}>
-            {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
+        {!readOnly && payload.northStar.isSet && !payload.primaryGoal.isSet ? (
+          <button className="hd-primary" type="button" data-action="open-goal-form" onClick={onCreateGoal}>
+            {label(ui, "dashboard_add_active_goal", "Add goal")}
           </button>
         ) : null}
       </div>
@@ -566,29 +1111,974 @@ function CanvasSetupBanner({ payload, insight, hiddenLayers, onEmit, onCreateGoa
   );
 }
 
-function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreateGoal, viewMode, setViewMode }) {
+function AttentionSummary({ payload, onSelectNode }) {
+  const ui = payload.ui;
+  const attention = payload.graph.attention;
+  if (!attention.nodes.length) {
+    return null;
+  }
+  return (
+    <div className="hd-attention-strip">
+      <span className="hd-eyebrow">{label(ui, "dashboard_attention_title", "Attention")}</span>
+      <div className="hd-attention-list">
+        {attention.nodes.map((item) => (
+          <button
+            key={item.id}
+            className={`hd-attention-chip ${item.severity || ""}`}
+            type="button"
+            data-action="select-node"
+            data-source="attention-chip"
+            data-node-id={item.id}
+            onClick={() => onSelectNode(item.id)}
+          >
+            <strong>{item.id}</strong>
+            <span>{item.reason}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FocusPathView({ payload, selectedNodeId, onSelectNode }) {
+  const ui = payload.ui;
+  const nodesById = new Map(payload.graph.nodes.map((node) => [node.id, node]));
+  const focusNodes = payload.graph.focusPath.map((id) => nodesById.get(id)).filter(Boolean);
+  if (!focusNodes.length) {
+    return (
+      <div className="hd-focus-path-wrap hd-canvas-surface-empty">
+        <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="hd-focus-path-wrap">
+      <div className="hd-focus-path">
+        {focusNodes.map((node, index) => (
+          <button
+            key={node.id}
+            className={[
+              "hd-focus-node",
+              `type-${node.type}`,
+              node.placeholder ? "placeholder" : "",
+              node.implemented === false ? "not-implemented" : "",
+              selectedNodeId === node.id ? "selected" : "",
+            ].filter(Boolean).join(" ")}
+            type="button"
+            data-action="select-node"
+            data-source="focus-path"
+            data-node-id={node.id}
+            onClick={() => onSelectNode(node.id)}
+          >
+            <span className="hd-focus-step">{String(index + 1).padStart(2, "0")}</span>
+            <span className="hd-focus-layer">{translatedNodeType(ui, node.type)}</span>
+            <strong>{node.label}</strong>
+            <small>{node.metric || node.status || layerLabel(ui, node.layer)}</small>
+            {node.primaryAction?.label ? (
+              <span className="hd-focus-cta">{node.primaryAction.label}</span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AttentionCanvasView({ payload, onSelectNode }) {
+  const ui = payload.ui;
+  const nodesById = new Map(payload.graph.nodes.map((node) => [node.id, node]));
+  const attention = payload.graph.attention.nodes
+    .map((item) => ({ ...item, node: nodesById.get(item.id) }))
+    .filter((item) => item.node);
+  if (!attention.length) {
+    return (
+      <div className="hd-attention-canvas hd-canvas-surface-empty">
+        <p className="hd-empty">{label(ui, "dashboard_pending_evidence_empty", "No attention items right now.")}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="hd-attention-canvas">
+      {attention.map((item) => (
+        <button
+          key={`${item.id}-${item.reason}`}
+          className={`hd-attention-card ${item.severity || ""}`}
+          type="button"
+          data-action="select-node"
+          data-source="attention-card"
+          data-node-id={item.id}
+          onClick={() => onSelectNode(item.id)}
+        >
+          <span>{translatedNodeType(ui, item.node.type)}</span>
+          <strong>{item.node.label}</strong>
+          <small>{item.reason}</small>
+          {item.node.primaryAction?.label ? <em>{item.node.primaryAction.label}</em> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function exploreLaneForNode(node) {
+  const layer = cleanText(node.layer);
+  const type = cleanText(node.type);
+  return (
+    EXPLORE_LANES.find((lane) => lane.types.includes(type)) ||
+    EXPLORE_LANES.find((lane) => lane.layers.includes(layer)) ||
+    EXPLORE_LANES[1]
+  );
+}
+
+function exploreEdgePath(edge) {
+  const from = edge.fromPosition;
+  const to = edge.toPosition;
+  if (Math.abs(from.x - to.x) < 1) {
+    const bend = Math.min(98, from.x + 10);
+    return `M ${from.x} ${from.y} C ${bend} ${from.y}, ${bend} ${to.y}, ${to.x} ${to.y}`;
+  }
+  const mid = (from.x + to.x) / 2;
+  return `M ${from.x} ${from.y} C ${mid} ${from.y}, ${mid} ${to.y}, ${to.x} ${to.y}`;
+}
+
+function exploreMapData(payload, nodes, selectedNodeId) {
+  const laneRecords = EXPLORE_LANES.map((lane) => ({
+    ...lane,
+    nodes: [],
+    visibleNodes: [],
+    moreCount: 0,
+    total: 0,
+  }));
+  const lanesByKey = new Map(laneRecords.map((lane) => [lane.key, lane]));
+  nodes.forEach((node) => {
+    const lane = lanesByKey.get(exploreLaneForNode(node).key) || laneRecords[1];
+    lane.nodes.push(node);
+  });
+
+  laneRecords.forEach((lane) => {
+    lane.nodes = sortedExploreNodes(payload, lane.nodes, selectedNodeId);
+    lane.total = lane.nodes.length;
+    const selectedNode = lane.nodes.find((node) => node.id === selectedNodeId);
+    let kept = lane.nodes.slice(0, 4);
+    if (selectedNode && !kept.some((node) => node.id === selectedNode.id)) {
+      kept = [selectedNode, ...lane.nodes.filter((node) => node.id !== selectedNode.id).slice(0, 3)];
+    }
+    lane.visibleNodes = kept;
+    lane.moreCount = Math.max(0, lane.nodes.length - kept.length);
+  });
+
+  const positionedNodes = [];
+  const positions = new Map();
+  const laneCount = laneRecords.length;
+  laneRecords.forEach((lane, laneIndex) => {
+    const count = Math.max(1, lane.visibleNodes.length);
+    const x = ((laneIndex + 0.5) / laneCount) * 100;
+    lane.visibleNodes.forEach((node, index) => {
+      const y = 18 + ((index + 1) / (count + 1)) * 70;
+      const position = { x, y };
+      positions.set(node.id, position);
+      positionedNodes.push({ node, lane, x, y });
+    });
+  });
+
+  const visibleIds = new Set(positionedNodes.map((item) => item.node.id));
+  const edges = payload.graph.edges
+    .filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
+    .map((edge, index) => ({
+      ...edge,
+      id: `${edge.from}-${edge.to}-${index}`,
+      fromPosition: positions.get(edge.from),
+      toPosition: positions.get(edge.to),
+      active: edge.from === selectedNodeId || edge.to === selectedNodeId,
+    }));
+
+  return { lanes: laneRecords, nodes: positionedNodes, edges };
+}
+
+function linkEndpointId(endpoint) {
+  if (endpoint && typeof endpoint === "object") {
+    return cleanText(endpoint.id);
+  }
+  return cleanText(endpoint);
+}
+
+function relationColor(relation) {
+  return EDGE_COLORS[cleanText(relation)] || EDGE_COLORS.link;
+}
+
+function graph3DSeedPosition(payload, node, index) {
+  const layers = graphLayers(payload);
+  const layerIndex = Math.max(0, layers.indexOf(node.layer));
+  const layerCount = Math.max(1, layers.length);
+  const angle = (layerIndex / layerCount) * Math.PI * 2;
+  const ring = 72 + (layerIndex % 4) * 18;
+  const typeOffset = cleanText(node.type).split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const local = ((index % 11) - 5) * 5.2;
+  return {
+    x: Math.cos(angle) * ring + local,
+    y: Math.sin(angle) * ring + ((index % 5) - 2) * 8,
+    z: (layerIndex - layerCount / 2) * 18 + ((typeOffset % 9) - 4) * 6,
+  };
+}
+
+function graph3DData(payload, nodes) {
+  const visibleIds = new Set(nodes.map((node) => node.id));
+  const links = payload.graph.edges
+    .filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
+    .map((edge, index) => ({
+      id: `${edge.from}-${edge.to}-${edge.type}-${index}`,
+      source: edge.from,
+      target: edge.to,
+      relation: edge.relation || edge.type,
+      type: edge.type,
+      suggested: edge.suggested,
+      placeholder: edge.placeholder,
+    }));
+  const degree = new Map();
+  links.forEach((link) => {
+    degree.set(link.source, (degree.get(link.source) || 0) + 1);
+    degree.set(link.target, (degree.get(link.target) || 0) + 1);
+  });
+  return {
+    nodes: nodes.map((node, index) => {
+      const seed = graph3DSeedPosition(payload, node, index);
+      const nodeDegree = degree.get(node.id) || 0;
+      return {
+        ...node,
+        ...seed,
+        group: node.layer,
+        color: nodeColor(node),
+        val: Math.max(
+          4,
+          5 + Math.min(10, nodeDegree) + (node.isPrimary ? 4 : 0) + (node.placeholder ? -1 : 0),
+        ),
+        degree: nodeDegree,
+      };
+    }),
+    links,
+  };
+}
+
+function graph3DSelectedLink(link, selectedNodeId) {
+  const source = linkEndpointId(link.source);
+  const target = linkEndpointId(link.target);
+  return Boolean(selectedNodeId && (source === selectedNodeId || target === selectedNodeId));
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function createLabelSprite(text, color, selected) {
+  const labelText = cleanText(text, "Node").slice(0, 36);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  const fontSize = selected ? 46 : 38;
+  const paddingX = selected ? 24 : 20;
+  const paddingY = selected ? 13 : 10;
+  ctx.font = `800 ${fontSize}px Inter, system-ui, sans-serif`;
+  const measured = Math.ceil(ctx.measureText(labelText).width);
+  canvas.width = Math.max(120, Math.min(620, measured + paddingX * 2));
+  canvas.height = fontSize + paddingY * 2;
+  ctx.font = `800 ${fontSize}px Inter, system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  drawRoundedRect(ctx, 0, 0, canvas.width, canvas.height, selected ? 24 : 20);
+  ctx.fillStyle = selected ? "rgba(255, 255, 255, .96)" : "rgba(255, 255, 255, .82)";
+  ctx.fill();
+  ctx.strokeStyle = selected ? color : "rgba(96, 113, 107, .32)";
+  ctx.lineWidth = selected ? 5 : 3;
+  ctx.stroke();
+  ctx.fillStyle = selected ? "#17211e" : "#24302c";
+  ctx.fillText(labelText, paddingX, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  if ("colorSpace" in texture && THREE.SRGBColorSpace) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    opacity: selected ? 1 : 0.86,
+  });
+  const sprite = new THREE.Sprite(material);
+  const scale = selected ? 8.8 : 9.6;
+  sprite.scale.set(canvas.width / scale, canvas.height / scale, 1);
+  sprite.position.set(0, selected ? -14 : -12, 0);
+  return sprite;
+}
+
+function nodeThreeObject(node, selectedNodeId) {
+  const selected = selectedNodeId === node.id;
+  const color = node.color || nodeColor(node);
+  const group = new THREE.Group();
+  const radius = Math.min(
+    selected ? 12.5 : 9.4,
+    Math.max(4.2, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 2.32 : 1.88)),
+  );
+  const geometry = node.placeholder || node.implemented === false
+    ? new THREE.OctahedronGeometry(radius, 1)
+    : new THREE.SphereGeometry(radius, 22, 18);
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: selected ? 0.28 : 0.08,
+    metalness: 0.16,
+    roughness: 0.42,
+    transparent: true,
+    opacity: node.placeholder || node.implemented === false ? 0.56 : 0.95,
+  });
+  group.add(new THREE.Mesh(geometry, material));
+  if (selected) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(radius * 1.42, Math.max(0.22, radius * 0.05), 10, 48),
+      new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.94 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    group.add(ring);
+  }
+  group.add(createLabelSprite(node.label || node.id, color, selected));
+  return group;
+}
+
+function focusGraphCamera(graph, node, duration = 700) {
+  if (!graph || !node) {
+    return;
+  }
+  const distance = 48;
+  const x = Number.isFinite(node.x) ? node.x : 0;
+  const y = Number.isFinite(node.y) ? node.y : 0;
+  const z = Number.isFinite(node.z) ? node.z : 0;
+  graph.cameraPosition(
+    { x: x + distance * 0.68, y: y + distance * 0.38, z: z + distance * 1.08 },
+    { x, y, z },
+    duration,
+  );
+}
+
+function connectedGraphNode(node) {
+  return (node?.degree || 0) > 0;
+}
+
+function fitGraphCamera(graph, duration = 700) {
+  graph?.zoomToFit?.(duration, 34, connectedGraphNode);
+}
+
+function graph3DLinkWidth(link, selectedNodeId) {
+  const base = EDGE_WIDTHS[link.relation] || 1.1;
+  if (graph3DSelectedLink(link, selectedNodeId)) {
+    return Math.max(1.35, base * 1.4);
+  }
+  return Math.max(0.45, base * 0.58);
+}
+
+function Graph3DLegend({ payload, graphData }) {
+  const ui = payload.ui;
+  const layers = graphLayers(payload).filter((layer) => graphData.nodes.some((node) => node.layer === layer));
+  const relations = [...new Set(graphData.links.map((link) => cleanText(link.relation, link.type)).filter(Boolean))].slice(0, 9);
+  return (
+    <div className="hd-graph3d-legend" aria-hidden="true">
+      <div className="hd-graph3d-legend-group">
+        {layers.map((layer) => (
+          <span key={layer}>
+            <i style={{ background: NODE_COLORS[graphData.nodes.find((node) => node.layer === layer)?.type] || "#68716f" }} />
+            {layerLabel(ui, layer)}
+          </span>
+        ))}
+      </div>
+      <div className="hd-graph3d-legend-group relations">
+        {relations.map((relation) => (
+          <span key={relation}>
+            <i style={{ background: relationColor(relation) }} />
+            {relation.replace(/_/g, " ")}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessage = "", minHeight = GRAPH_3D_MIN_HEIGHT, compact = false }) {
   const ui = payload.ui;
   const graphRef = useRef(null);
+  const wrapRef = useRef(null);
+  const [size, setSize] = useState({ width: 900, height: minHeight });
+  const graphData = useMemo(() => graph3DData(payload, nodes), [payload, nodes]);
+
+  useLayoutEffect(() => {
+    const element = wrapRef.current;
+    if (!element) {
+      return undefined;
+    }
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      const next = {
+        width: Math.max(320, Math.round(element.clientWidth || rect.width || 900)),
+        height: Math.max(minHeight, Math.round(element.clientHeight || rect.height || minHeight)),
+      };
+      graphRef.current?.width?.(next.width);
+      graphRef.current?.height?.(next.height);
+      element.querySelectorAll(".scene-container, .scene-container canvas").forEach((child) => {
+        child.style.setProperty("width", `${next.width}px`, "important");
+        child.style.setProperty("height", `${next.height}px`, "important");
+      });
+      setSize((current) => {
+        if (Math.abs(current.width - next.width) < 2 && Math.abs(current.height - next.height) < 2) {
+          return current;
+        }
+        return next;
+      });
+    };
+    update();
+    const rafs = [
+      window.requestAnimationFrame(update),
+      window.requestAnimationFrame(() => window.requestAnimationFrame(update)),
+    ];
+    const timers = [
+      window.setTimeout(update, 180),
+      window.setTimeout(update, 650),
+      window.setTimeout(update, 1400),
+    ];
+    const interval = window.setInterval(update, 250);
+    const stopInterval = window.setTimeout(() => window.clearInterval(interval), 2600);
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      rafs.forEach((id) => window.cancelAnimationFrame(id));
+      timers.forEach((id) => window.clearTimeout(id));
+      window.clearInterval(interval);
+      window.clearTimeout(stopInterval);
+    };
+  }, [minHeight]);
+
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) {
+      return;
+    }
+    graph.width?.(size.width);
+    graph.height?.(size.height);
+    window.setTimeout(() => fitGraphCamera(graph, 350), 80);
+  }, [size.width, size.height]);
+
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) {
+      return;
+    }
+    const charge = graph.d3Force?.("charge");
+    const link = graph.d3Force?.("link");
+    if (charge?.strength) {
+      charge.strength(-88);
+    }
+    if (link?.distance) {
+      link.distance((edge) => (edge.relation === "contains" ? 46 : edge.relation === "watches" ? 82 : 62));
+    }
+    window.setTimeout(() => fitGraphCamera(graph, 700), 220);
+    window.setTimeout(() => fitGraphCamera(graph, 500), 900);
+  }, [graphData]);
+
+  useEffect(() => {
+    const target = graphData.nodes.find((node) => node.id === selectedNodeId);
+    if (target) {
+      window.setTimeout(() => {
+        if (connectedGraphNode(target)) {
+          focusGraphCamera(graphRef.current, target);
+        } else {
+          fitGraphCamera(graphRef.current);
+        }
+      }, 80);
+    }
+  }, [graphData, selectedNodeId]);
+
+  if (!graphData.nodes.length) {
+    return (
+      <div className="hd-graph3d-stage hd-canvas-surface-empty">
+        <p className="hd-empty">{emptyMessage || label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={compact ? "hd-graph3d-stage compact" : "hd-graph3d-stage"} ref={wrapRef} data-testid="dashboard-3d-graph">
+      <div className="hd-graph3d-force">
+        <ForceGraph3D
+          ref={graphRef}
+          width={size.width}
+          height={size.height}
+          graphData={graphData}
+          backgroundColor="#f8fbfa"
+          nodeId="id"
+          nodeVal="val"
+          nodeLabel={(node) => `${node.label || node.id}\n${layerLabel(ui, node.layer)} · ${translatedNodeType(ui, node.type)}`}
+          nodeColor={(node) => node.color || nodeColor(node)}
+          nodeThreeObject={(node) => nodeThreeObject(node, selectedNodeId)}
+          nodeThreeObjectExtend={false}
+          nodeOpacity={0.92}
+          nodeResolution={18}
+          linkLabel={(link) => cleanText(link.relation, link.type).replace(/_/g, " ")}
+          linkColor={(link) => relationColor(link.relation || link.type)}
+          linkWidth={(link) => graph3DLinkWidth(link, selectedNodeId)}
+          linkOpacity={0.28}
+          linkCurvature={(link) => (link.relation === "watches" ? 0.2 : link.relation === "feedback" ? 0.16 : 0.04)}
+          linkDirectionalArrowLength={(link) => (link.placeholder ? 0 : 2.6)}
+          linkDirectionalArrowColor={(link) => relationColor(link.relation || link.type)}
+          linkDirectionalArrowRelPos={0.74}
+          linkDirectionalParticles={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 2 : ["drives", "supports", "produces", "source_to_candidate"].includes(link.relation) ? 1 : 0)}
+          linkDirectionalParticleSpeed={0.005}
+          linkDirectionalParticleWidth={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 1.85 : 0.95)}
+          linkDirectionalParticleColor={(link) => relationColor(link.relation || link.type)}
+          showNavInfo={false}
+          controlType="orbit"
+          rendererConfig={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
+          enableNodeDrag
+          cooldownTicks={100}
+          warmupTicks={24}
+          d3VelocityDecay={0.33}
+          onEngineStop={() => fitGraphCamera(graphRef.current, 450)}
+          onNodeClick={(node) => {
+            onSelectNode(node.id);
+            focusGraphCamera(graphRef.current, node);
+          }}
+          onBackgroundClick={() => fitGraphCamera(graphRef.current)}
+        />
+      </div>
+      <div className="hd-graph3d-toolbar">
+        <button type="button" data-action="graph-fit" onClick={() => fitGraphCamera(graphRef.current)}>
+          {label(ui, "dashboard_graph_fit", "Fit")}
+        </button>
+        <button
+          type="button"
+          data-action="graph-focus-selected"
+          disabled={!selectedNodeId}
+          onClick={() => {
+            const target = graphData.nodes.find((node) => node.id === selectedNodeId);
+            if (connectedGraphNode(target)) {
+              focusGraphCamera(graphRef.current, target);
+            } else {
+              fitGraphCamera(graphRef.current);
+            }
+          }}
+        >
+          {label(ui, "dashboard_graph_focus_selected", "Focus")}
+        </button>
+      </div>
+      <Graph3DLegend payload={payload} graphData={graphData} />
+    </div>
+  );
+}
+
+function ExploreMapView({ payload, nodes, selectedNodeId, onSelectNode }) {
+  const ui = payload.ui;
+  const map = useMemo(() => exploreMapData(payload, nodes, selectedNodeId), [payload, nodes, selectedNodeId]);
+  if (!map.nodes.length) {
+    return (
+      <div className="hd-explore-map-stage hd-canvas-surface-empty">
+        <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="hd-explore-map-stage" style={{ "--lane-count": map.lanes.length }}>
+      <div className="hd-explore-map-lanes" aria-hidden="true">
+        {map.lanes.map((lane) => (
+          <div key={lane.key} className={lane.total ? "hd-explore-map-lane" : "hd-explore-map-lane empty"}>
+            <span>{label(ui, lane.labelKey, lane.fallback)}</span>
+            <small>{lane.total}{lane.moreCount ? ` +${lane.moreCount}` : ""}</small>
+          </div>
+        ))}
+      </div>
+      <svg className="hd-explore-map-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <marker id="hd-explore-arrow" markerHeight="4" markerWidth="5" orient="auto" refX="4" refY="2">
+            <path d="M0,0 L4,2 L0,4 Z" />
+          </marker>
+        </defs>
+        {map.edges.map((edge) => (
+          <path
+            key={edge.id}
+            className={[
+              "hd-explore-map-link",
+              edge.active ? "active" : "",
+              edge.suggested || edge.placeholder ? "suggested" : "",
+            ].filter(Boolean).join(" ")}
+            d={exploreEdgePath(edge)}
+            markerEnd="url(#hd-explore-arrow)"
+          />
+        ))}
+      </svg>
+      <div className="hd-explore-map-nodes">
+        {map.nodes.map(({ node, x, y }) => (
+          <button
+            key={node.id}
+            className={[
+              "hd-explore-map-node",
+              `type-${node.type}`,
+              selectedNodeId === node.id ? "selected" : "",
+              node.placeholder ? "placeholder" : "",
+              node.implemented === false ? "not-implemented" : "",
+            ].filter(Boolean).join(" ")}
+            style={{ left: `${x}%`, top: `${y}%`, "--node-color": nodeColor(node) }}
+            type="button"
+            data-action="select-node"
+            data-source="explore-map"
+            data-node-id={node.id}
+            onClick={() => onSelectNode(node.id)}
+          >
+            <span className="hd-node-dot" style={{ background: nodeColor(node) }} />
+            <strong>{node.label}</strong>
+            <small>{translatedNodeType(ui, node.type)}</small>
+            {node.primaryAction?.label || node.metric || node.status ? (
+              <em>{node.primaryAction?.label || node.metric || node.status}</em>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExploreNodeList({
+  payload,
+  nodes,
+  selectedNodeId,
+  scope,
+  setScope,
+  query,
+  setQuery,
+  showPlaceholders,
+  setShowPlaceholders,
+  onSelectNode,
+}) {
+  const ui = payload.ui;
+  const orderedNodes = sortedExploreNodes(payload, nodes, selectedNodeId);
+  const groups = groupedExploreNodes(payload, orderedNodes);
+  return (
+    <aside className="hd-explore-panel">
+      <div>
+        <span className="hd-eyebrow">{label(ui, "dashboard_explore_title", "Explore")}</span>
+        <strong>{label(ui, "dashboard_explore_nodes", "Graph nodes")}</strong>
+        <small>{orderedNodes.length} {label(ui, "dashboard_explore_result_count", "shown")}</small>
+      </div>
+      <div className="hd-explore-scope">
+        {["all", "context", "upstream", "downstream"].map((item) => (
+          <button
+            key={item}
+            className={scope === item ? "active" : ""}
+            type="button"
+            data-action="explore-scope"
+            data-scope={item}
+            onClick={() => setScope(item)}
+          >
+            {label(ui, `dashboard_explore_${item}`, item)}
+          </button>
+        ))}
+      </div>
+      <label className="hd-explore-search">
+        <span>{label(ui, "dashboard_explore_search", "Search")}</span>
+        <input
+          value={query}
+          type="search"
+          data-action="explore-search"
+          placeholder={label(ui, "dashboard_explore_search_placeholder", "Node, layer, status")}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+        />
+      </label>
+      <label className="hd-explore-check">
+        <input
+          type="checkbox"
+          data-action="hide-placeholders"
+          checked={!showPlaceholders}
+          onChange={(event) => setShowPlaceholders(!event.currentTarget.checked)}
+        />
+        <span>{label(ui, "dashboard_explore_hide_placeholders", "Hide placeholders")}</span>
+      </label>
+      <div className="hd-explore-list">
+        {groups.length ? groups.map((group) => (
+          <div className="hd-explore-group" key={group.layer} data-layer={group.layer}>
+            <div className="hd-explore-group-title">
+              <span>{layerLabel(ui, group.layer)}</span>
+              <small>{group.nodes.length}</small>
+            </div>
+            {group.nodes.map((node) => (
+              <button
+                key={node.id}
+                className={[
+                  selectedNodeId === node.id ? "selected" : "",
+                  isPlaceholderNode(node) ? "placeholder" : "",
+                ].filter(Boolean).join(" ")}
+                type="button"
+                data-action="select-node"
+                data-source="explore-list"
+                data-node-id={node.id}
+                onClick={() => onSelectNode(node.id)}
+              >
+                <span className="hd-node-dot" style={{ background: nodeColor(node) }} />
+                <span>
+                  <strong>{node.label}</strong>
+                  <small>{translatedNodeType(ui, node.type)} · {node.metric || node.status || layerLabel(ui, node.layer)}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        )) : (
+          <p className="hd-empty">{label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}</p>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function EmbeddedCanvasFrame({ payload, embed, showHeader = true }) {
+  const ui = payload.ui;
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <section className={showHeader ? "hd-canvas-embed" : "hd-canvas-embed hd-canvas-embed-inline"} aria-label={label(ui, "dashboard_embedded_canvas_title", "Embedded canvas")}>
+      {showHeader ? (
+        <header>
+          <div>
+            <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
+            <h3>{label(ui, "dashboard_embedded_canvas_title", "Embedded canvas")}</h3>
+          </div>
+          {embed.standaloneUrl ? (
+            <a href={embed.standaloneUrl} target="_blank" rel="noreferrer" data-action="open-8502-canvas">
+              {label(ui, "dashboard_open_8502_canvas", "Open 8502 Canvas")}
+            </a>
+          ) : null}
+        </header>
+      ) : null}
+      <div className={loaded ? "hd-canvas-embed-frame loaded" : "hd-canvas-embed-frame"}>
+        {!loaded ? <span>{label(ui, "dashboard_graph_loading", "Loading graph...")}</span> : null}
+        <iframe
+          title={label(ui, "dashboard_embedded_canvas_title", "Embedded canvas")}
+          src={embed.url}
+          loading="eager"
+          onLoad={() => setLoaded(true)}
+        />
+      </div>
+    </section>
+  );
+}
+
+function CanvasSummaryPanel({ payload, embed }) {
+  const ui = payload.ui;
+  const [showEmbed, setShowEmbed] = useState(false);
+  const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
+  const focusNodes = payload.graph.focusPath.map((id) => nodesById.get(id)).filter(Boolean);
+  const attentionCount = asArray(payload.graph.attention.nodes).length;
+  const graphNodeCount = asArray(payload.graph.nodes).length;
+  const previewNodes = focusNodes.slice(0, 8);
+  return (
+    <section className="hd-canvas-summary" data-section="canvas-summary">
+      <header>
+        <div>
+          <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
+          <h3>{label(ui, "dashboard_canvas_summary_title", "Canvas summary")}</h3>
+          <p>{label(ui, "dashboard_canvas_summary_caption", "The daily dashboard keeps the big canvas folded until you need deeper graph exploration.")}</p>
+        </div>
+        {embed.standaloneUrl ? (
+          <a href={embed.standaloneUrl} target="_blank" rel="noreferrer" data-action="open-8502-canvas">
+            {label(ui, "dashboard_open_8502_canvas", "Open 8502 Canvas")}
+          </a>
+        ) : null}
+      </header>
+
+      <div className="hd-canvas-summary-body">
+        <div className="hd-canvas-summary-path" aria-label={label(ui, "dashboard_view_focus_path", "Focus Path")}>
+          {previewNodes.length ? previewNodes.map((node, index) => (
+            embed.standaloneUrl ? (
+              <a
+                key={node.id}
+                className={`type-${node.type} ${node.placeholder ? "placeholder" : ""}`}
+                href={dashboardNodeUrl(embed.standaloneUrl, node.id)}
+                target="_blank"
+                rel="noreferrer"
+                data-action="open-8502-node"
+                data-node-id={node.id}
+              >
+                <small>{String(index + 1).padStart(2, "0")} · {translatedNodeType(ui, node.type)}</small>
+                <strong>{node.label}</strong>
+              </a>
+            ) : (
+              <span key={node.id} className={`type-${node.type} ${node.placeholder ? "placeholder" : ""}`}>
+              <small>{String(index + 1).padStart(2, "0")} · {translatedNodeType(ui, node.type)}</small>
+              <strong>{node.label}</strong>
+              </span>
+            )
+          )) : (
+            <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+          )}
+        </div>
+        <div className="hd-canvas-summary-stats">
+          <span><strong>{focusNodes.length}</strong>{label(ui, "dashboard_view_focus_path", "Focus Path")}</span>
+          <span><strong>{attentionCount}</strong>{label(ui, "dashboard_attention_title", "Attention")}</span>
+          <span><strong>{graphNodeCount}</strong>{label(ui, "dashboard_explore_nodes", "Graph nodes")}</span>
+        </div>
+      </div>
+
+      <details
+        className="hd-canvas-embed-details"
+        onToggle={(event) => setShowEmbed(event.currentTarget.open)}
+      >
+        <summary data-action="load-embedded-canvas">
+          {label(ui, "dashboard_canvas_load_embed", "Load embedded canvas")}
+        </summary>
+        {showEmbed ? <EmbeddedCanvasFrame payload={payload} embed={embed} showHeader={false} /> : null}
+      </details>
+    </section>
+  );
+}
+
+function primaryDailyAction(payload) {
+  const items = actionQueueItems(payload);
+  return (
+    items.find((item) => item.tone === "warning" && Number(item.count) > 0) ||
+    items.find((item) => Number(item.count) > 0) ||
+    items[0] ||
+    null
+  );
+}
+
+function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }) {
+  const ui = payload.ui;
+  const [showEmbed, setShowEmbed] = useState(false);
+  const actions = actionQueueItems(payload);
+  const primaryAction = primaryDailyAction(payload);
+  const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
+  const selectedNode = nodesById.get(selectedNodeId) || preferredNode(payload);
+  const focusNodes = payload.graph.focusPath.map((id) => nodesById.get(id)).filter(Boolean);
+  const heroNodes = useMemo(() => {
+    const scoped = graphExploreNodes(payload, new Set(), selectedNodeId, "context");
+    const selected = nodesById.get(selectedNodeId);
+    const combined = selected && !scoped.some((node) => node.id === selected.id)
+      ? [selected, ...scoped]
+      : scoped;
+    return sortedExploreNodes(payload, combined, selectedNodeId).slice(0, 42);
+  }, [payload, nodesById, selectedNodeId]);
+
+  return (
+    <section className="hd-graph-hero" data-section="graph-hero">
+      <div className="hd-graph-hero-visual">
+        <header className="hd-graph-hero-header">
+          <div>
+            <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
+            <h3>{label(ui, "dashboard_graph_hero_title", "Live growth graph")}</h3>
+            <p>{label(ui, "dashboard_graph_hero_caption", "A compact 3D map of today’s goals, sources, evidence, skills, and outputs.")}</p>
+          </div>
+          {embed?.standaloneUrl ? (
+            <a href={dashboardNodeUrl(embed.standaloneUrl, selectedNode?.id || "")} target="_blank" rel="noreferrer" data-action="open-8502-canvas">
+              {label(ui, "dashboard_open_8502_canvas", "Open 8502 Canvas")}
+            </a>
+          ) : null}
+        </header>
+        <Graph3DView
+          payload={payload}
+          nodes={heroNodes}
+          selectedNodeId={selectedNode?.id || selectedNodeId}
+          onSelectNode={onSelectNode}
+          minHeight={340}
+          compact
+          emptyMessage={label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}
+        />
+      </div>
+
+      <aside className="hd-graph-hero-panel">
+        {primaryAction ? (
+          <button
+            className={`hd-hero-primary-action ${primaryAction.tone || ""}`}
+            type="button"
+            data-action="navigate"
+            data-dashboard-action={`hero:${primaryAction.id}`}
+            data-target={primaryAction.path}
+            onClick={() => onEmit(navigationEvent(primaryAction.path))}
+          >
+            <span>{label(ui, "dashboard_hero_start_here", "Start here")}</span>
+            <strong>{primaryAction.title}</strong>
+            <small>{primaryAction.why || primaryAction.detail}</small>
+            <em>{primaryAction.count}</em>
+          </button>
+        ) : null}
+
+        <div className="hd-hero-signal-grid" aria-label={label(ui, "dashboard_today_focus_title", "Today focus")}>
+          {actions.map((item) => (
+            <button
+              key={item.id}
+              className={`hd-hero-signal ${item.id === primaryAction?.id ? "active" : ""} ${item.tone || ""}`}
+              type="button"
+              data-action="navigate"
+              data-dashboard-action={`hero-signal:${item.id}`}
+              data-target={item.path}
+              onClick={() => onEmit(navigationEvent(item.path))}
+            >
+              <span>{item.eyebrow}</span>
+              <strong>{item.count}</strong>
+            </button>
+          ))}
+        </div>
+
+        <div className="hd-hero-node-card">
+          <span className="hd-eyebrow">{label(ui, "dashboard_graph_selected_node", "Selected node")}</span>
+          <strong>{selectedNode?.label || label(ui, "dashboard_explore_nodes", "Graph nodes")}</strong>
+          <p>{selectedNode?.summary || selectedNode?.metric || selectedNode?.status || label(ui, "dashboard_graph_3d_hint", "Click nodes to inspect the graph.")}</p>
+          {embed?.standaloneUrl && selectedNode?.id ? (
+            <a href={dashboardNodeUrl(embed.standaloneUrl, selectedNode.id)} target="_blank" rel="noreferrer" data-action="open-8502-node" data-node-id={selectedNode.id}>
+              {label(ui, "dashboard_graph_open_selected", "Open selected in 8502")}
+            </a>
+          ) : null}
+        </div>
+
+        <div className="hd-hero-stats">
+          <span><strong>{focusNodes.length}</strong>{label(ui, "dashboard_view_focus_path", "Focus Path")}</span>
+          <span><strong>{asArray(payload.graph.attention.nodes).length}</strong>{label(ui, "dashboard_attention_title", "Attention")}</span>
+          <span><strong>{payload.graph.nodes.length}</strong>{label(ui, "dashboard_explore_nodes", "Graph nodes")}</span>
+        </div>
+      </aside>
+
+      {embed?.url ? (
+        <details
+          className="hd-graph-hero-embed"
+          onToggle={(event) => setShowEmbed(event.currentTarget.open)}
+        >
+          <summary data-action="load-embedded-canvas">
+            {label(ui, "dashboard_canvas_load_embed", "Load embedded canvas")}
+          </summary>
+          {showEmbed ? <EmbeddedCanvasFrame payload={payload} embed={embed} showHeader={false} /> : null}
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreateGoal, viewMode, setViewMode, readOnly = false }) {
+  const ui = payload.ui;
   const [hiddenLayers, setHiddenLayers] = useState(() => new Set());
+  const [exploreScope, setExploreScope] = useState("all");
+  const [exploreQuery, setExploreQuery] = useState("");
+  const [showPlaceholders, setShowPlaceholders] = useState(true);
   const filterLayers = useMemo(() => graphLayers(payload), [payload]);
   const insight = useMemo(() => graphInsight(payload), [payload]);
-  const data = useMemo(() => flowData(payload, hiddenLayers), [payload, hiddenLayers]);
-  const graph3d = useMemo(() => {
-    const nodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    return {
-      nodes: nodes.map((node) => ({ ...node, name: node.label })),
-      links: payload.graph.edges
-        .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
-        .map((edge) => ({
-          source: edge.from,
-          target: edge.to,
-          suggested: edge.suggested,
-          placeholder: edge.placeholder,
-          relation: edge.relation,
-        })),
-    };
-  }, [payload, hiddenLayers]);
+  const data = useMemo(() => flowData(payload, hiddenLayers, viewMode), [payload, hiddenLayers, viewMode]);
+  const rawExploreNodes = useMemo(
+    () => graphExploreNodes(payload, hiddenLayers, selectedNodeId, exploreScope),
+    [payload, hiddenLayers, selectedNodeId, exploreScope],
+  );
+  const exploreNodes = useMemo(
+    () => filterExploreNodes(payload, rawExploreNodes, exploreQuery, showPlaceholders),
+    [payload, rawExploreNodes, exploreQuery, showPlaceholders],
+  );
 
   function toggleLayer(layer) {
     setHiddenLayers((current) => {
@@ -616,22 +2106,31 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
           <h3>{label(ui, "dashboard_graph_title", "Context Canvas")}</h3>
         </div>
         <div className="hd-segmented">
-          <button className={viewMode === "canvas" ? "active" : ""} type="button" onClick={() => setViewMode("canvas")}>
+          <button className={viewMode === "focus" ? "active" : ""} type="button" data-action="view-toggle" data-view="focus" onClick={() => setViewMode("focus")}>
+            {label(ui, "dashboard_view_focus_path", "Focus Path")}
+          </button>
+          <button className={viewMode === "canvas" ? "active" : ""} type="button" data-action="view-toggle" data-view="canvas" onClick={() => setViewMode("canvas")}>
             {label(ui, "dashboard_view_canvas", "2D Canvas")}
           </button>
-          <button className={viewMode === "3d" ? "active" : ""} type="button" onClick={() => setViewMode("3d")}>
+          <button className={viewMode === "attention" ? "active" : ""} type="button" data-action="view-toggle" data-view="attention" onClick={() => setViewMode("attention")}>
+            {label(ui, "dashboard_view_attention", "Attention")}
+          </button>
+          <button className={viewMode === "3d" ? "active" : ""} type="button" data-action="view-toggle" data-view="3d" onClick={() => setViewMode("3d")}>
             {label(ui, "dashboard_view_3d_graph", "3D Graph")}
           </button>
         </div>
       </header>
 
-      <div className="hd-canvas-toolbar">
+      <details className="hd-canvas-toolbar">
+        <summary>{label(ui, "dashboard_canvas_more_filters", "More filters")}</summary>
         <div className="hd-filter-row">
           {filterLayers.map((layer) => (
             <button
               key={layer}
               className={hiddenLayers.has(layer) ? "" : "active"}
               type="button"
+              data-action="filter-toggle"
+              data-layer={layer}
               onClick={() => toggleLayer(layer)}
             >
               {layerLabel(ui, layer)}
@@ -639,11 +2138,11 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
           ))}
         </div>
         {hiddenLayers.size ? (
-          <button className="hd-ghost hd-toolbar-reset" type="button" onClick={showAllLayers}>
+          <button className="hd-ghost hd-toolbar-reset" type="button" data-action="filter-reset" onClick={showAllLayers}>
             {label(ui, "dashboard_canvas_reset_filters", "Show all layers")}
           </button>
         ) : null}
-      </div>
+      </details>
 
       <CanvasSetupBanner
         payload={payload}
@@ -651,53 +2150,43 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
         hiddenLayers={hiddenLayers}
         onEmit={onEmit}
         onCreateGoal={onCreateGoal}
+        readOnly={readOnly}
       />
 
-      {viewMode === "3d" ? (
-        <div className="hd-graph3d">
-          <div className="hd-canvas-note">
-            {label(
-              ui,
-              "dashboard_graph_3d_hint",
-              "North Star flows through goals, work context, activity, sources, evidence, claims, capability, output, feedback, and governance.",
-            )}
-          </div>
+      <AttentionSummary payload={payload} onSelectNode={onSelectNode} />
+
+      {viewMode === "focus" ? (
+        <FocusPathView payload={payload} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
+      ) : viewMode === "attention" ? (
+        <AttentionCanvasView payload={payload} onSelectNode={onSelectNode} />
+      ) : viewMode === "3d" ? (
+        <div className="hd-explore-canvas">
           {allLayersHidden ? (
             <div className="hd-canvas-surface hd-canvas-surface-empty">
               <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
             </div>
           ) : (
-            <Suspense fallback={<p className="hd-empty hd-canvas-surface-empty">{label(ui, "dashboard_graph_loading", "Loading graph...")}</p>}>
-              <ForceGraph3D
-                ref={graphRef}
-                graphData={graph3d}
-                nodeLabel="label"
-                nodeColor={(node) => nodeColor(node)}
-                nodeVal={(node) => nodeWeight(node)}
-                nodeRelSize={5.3}
-                nodeResolution={24}
-                linkLabel="relation"
-                linkColor={(link) => (link.suggested || link.placeholder ? "rgba(104,113,111,.18)" : "rgba(37,107,93,.34)")}
-                linkWidth={(link) => (link.suggested || link.placeholder ? 1 : 1.5)}
-                linkOpacity={0.44}
-                linkDirectionalArrowLength={(link) => (link.suggested || link.placeholder ? 0 : 4)}
-                linkDirectionalArrowRelPos={0.98}
-                linkDirectionalArrowResolution={12}
-                linkDirectionalParticles={(link) => (link.suggested || link.placeholder ? 0 : 1)}
-                linkDirectionalParticleWidth={1.6}
-                linkDirectionalParticleResolution={10}
-                linkDirectionalParticleSpeed={0.0045}
-                backgroundColor="rgba(255,255,255,0)"
-                height={GRAPH_HEIGHT}
-                dagMode="lr"
-                dagLevelDistance={104}
-                cooldownTicks={42}
-                enableNodeDrag={false}
-                showNavInfo={false}
-                onEngineStop={() => graphRef.current?.zoomToFit?.(320, 40)}
-                onNodeClick={(node) => onSelectNode(node.id)}
+            <>
+              <Graph3DView
+                payload={payload}
+                nodes={exploreNodes}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={onSelectNode}
+                emptyMessage={label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}
               />
-            </Suspense>
+              <ExploreNodeList
+                payload={payload}
+                nodes={exploreNodes}
+                selectedNodeId={selectedNodeId}
+                scope={exploreScope}
+                setScope={setExploreScope}
+                query={exploreQuery}
+                setQuery={setExploreQuery}
+                showPlaceholders={showPlaceholders}
+                setShowPlaceholders={setShowPlaceholders}
+                onSelectNode={onSelectNode}
+              />
+            </>
           )}
         </div>
       ) : (
@@ -823,8 +2312,8 @@ function GoalForm({ payload, goal, mode, onCancel, onEmit }) {
       ) : null}
 
       <div className="hd-form-actions">
-        <button className="hd-ghost" type="button" onClick={onCancel}>{label(ui, "dashboard_goal_close_form", "Close")}</button>
-        <button className="hd-primary" type="submit">{label(ui, "goal_save", "Save goal")}</button>
+        <button className="hd-ghost" type="button" data-action="close-goal-form" onClick={onCancel}>{label(ui, "dashboard_goal_close_form", "Close")}</button>
+        <button className="hd-primary" type="submit" data-action={mode === "create" ? "create-goal" : "save-goal"}>{label(ui, "goal_save", "Save goal")}</button>
       </div>
     </form>
   );
@@ -846,10 +2335,10 @@ function GoalSkillAlignment({ payload, goalId, onEmit }) {
   return (
     <div className="hd-align-box">
       <div className="hd-align-actions">
-        <button className="hd-ghost" type="button" onClick={() => onEmit(requestGoalSkillRuleMatchEvent(goalId))}>
+        <button className="hd-ghost" type="button" data-action="goal-skill-rule-match" data-goal-id={goalId} onClick={() => onEmit(requestGoalSkillRuleMatchEvent(goalId))}>
           {label(ui, "skill_alignment_rule", "Rule match")}
         </button>
-        <button className="hd-ghost" type="button" disabled={!payload.ai?.configured} onClick={() => onEmit(requestGoalSkillAiMatchEvent(goalId))}>
+        <button className="hd-ghost" type="button" data-action="goal-skill-ai-match" data-goal-id={goalId} disabled={!payload.ai?.configured} onClick={() => onEmit(requestGoalSkillAiMatchEvent(goalId))}>
           {label(ui, "skill_alignment_ai", "AI match")}
         </button>
       </div>
@@ -886,7 +2375,7 @@ function GoalSkillAlignment({ payload, goalId, onEmit }) {
       ) : (
         <p className="hd-empty">{label(ui, "skill_alignment_no_candidates", "Run rule match or AI match to get candidates.")}</p>
       )}
-      <button className="hd-primary full" type="button" disabled={!selectedLinks.length} onClick={() => onEmit(confirmGoalSkillLinksEvent(goalId, selectedLinks.map(linkPayload)))}>
+      <button className="hd-primary full" type="button" data-action="confirm-goal-skill-links" data-goal-id={goalId} disabled={!selectedLinks.length} onClick={() => onEmit(confirmGoalSkillLinksEvent(goalId, selectedLinks.map(linkPayload)))}>
         {label(ui, "skill_alignment_confirm", "Confirm links")}
       </button>
       <div className="hd-manual-row">
@@ -894,7 +2383,7 @@ function GoalSkillAlignment({ payload, goalId, onEmit }) {
           <option value="">{label(ui, "skill_alignment_manual_label", "Manual add")}</option>
           {payload.skillAlignment.skillOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </select>
-        <button className="hd-ghost" type="button" disabled={!manualNodeId} onClick={() => onEmit(manualGoalSkillLinkEvent(goalId, manualNodeId))}>
+        <button className="hd-ghost" type="button" data-action="manual-goal-skill-link" data-goal-id={goalId} disabled={!manualNodeId} onClick={() => onEmit(manualGoalSkillLinkEvent(goalId, manualNodeId))}>
           {label(ui, "skill_alignment_manual_add", "Add")}
         </button>
       </div>
@@ -941,7 +2430,44 @@ function PlaceholderInspector({ payload, node, relations }) {
   );
 }
 
-function EmptyInspector({ payload, onEmit, onCreateGoal }) {
+function InspectorActionButton({ action, onEmit, primary = false, readOnly = false }) {
+  if (!canRenderGraphAction(action, readOnly)) {
+    return null;
+  }
+  const event = graphActionEvent(action);
+  if (!event) {
+    return null;
+  }
+  return (
+    <button
+      className={primary ? "hd-primary" : "hd-ghost"}
+      type="button"
+      data-action={cleanText(action.event.action)}
+      data-action-id={cleanText(action.id)}
+      data-node-id={cleanText(action.nodeId)}
+      onClick={() => onEmit(event)}
+    >
+      {cleanText(action.label, "Open")}
+    </button>
+  );
+}
+
+function NodeActionRow({ payload, node, onEmit, readOnly = false }) {
+  const { primary, secondary } = nodeActionBundle(payload, node, readOnly);
+  if (!primary && !secondary.length) {
+    return null;
+  }
+  return (
+    <div className="hd-action-row">
+      <InspectorActionButton action={primary} onEmit={onEmit} primary readOnly={readOnly} />
+      {secondary.slice(0, 3).map((action) => (
+        <InspectorActionButton key={action.id || action.label} action={action} onEmit={onEmit} readOnly={readOnly} />
+      ))}
+    </div>
+  );
+}
+
+function EmptyInspector({ payload, onEmit, onCreateGoal, readOnly = false }) {
   const ui = payload.ui;
   const missingNorthStar = !payload.northStar.isSet;
   const missingGoal = !payload.primaryGoal.isSet;
@@ -962,13 +2488,13 @@ function EmptyInspector({ payload, onEmit, onCreateGoal }) {
         </p>
         <div className="hd-action-row">
           {missingNorthStar ? (
-            <button className="hd-primary" type="button" onClick={() => onEmit(openProfileContextEvent())}>
+            <button className="hd-primary" type="button" data-action="open-profile-context" onClick={() => onEmit(openProfileContextEvent())}>
               {label(ui, "north_star_edit_action", "Edit Profile Context")}
             </button>
           ) : null}
-          {!missingNorthStar && missingGoal ? (
-            <button className="hd-primary" type="button" onClick={onCreateGoal}>
-              {label(ui, "dashboard_add_active_goal", "+ Active Goal")}
+          {!readOnly && !missingNorthStar && missingGoal ? (
+            <button className="hd-primary" type="button" data-action="open-goal-form" onClick={onCreateGoal}>
+              {label(ui, "dashboard_add_active_goal", "Add goal")}
             </button>
           ) : null}
         </div>
@@ -977,13 +2503,13 @@ function EmptyInspector({ payload, onEmit, onCreateGoal }) {
   );
 }
 
-function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, onEmit }) {
+function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, onEmit, readOnly = false }) {
   const ui = payload.ui;
   const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
   const selectedNode = selectedNodeId ? nodesById.get(selectedNodeId) || null : null;
   const relations = selectedNode ? nodeRelations(payload, selectedNode.id) : [];
 
-  if (goalEditor?.mode === "create") {
+  if (!readOnly && goalEditor?.mode === "create") {
     return (
       <aside className="hd-inspector">
         <header><span className="hd-eyebrow">{label(ui, "dashboard_add_active_goal", "Add Active Goal")}</span><h3>{label(ui, "goal_create_title", "Create goal")}</h3></header>
@@ -994,7 +2520,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
 
   const selectedGoalId = goalIdFromNode(selectedNode);
   const selectedGoal = goalById(payload, selectedGoalId);
-  if (goalEditor?.mode === "edit" && selectedGoal) {
+  if (!readOnly && goalEditor?.mode === "edit" && selectedGoal) {
     return (
       <aside className="hd-inspector">
         <header><span className="hd-eyebrow">{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</span><h3>{goalDisplay(selectedGoal, ui).title}</h3></header>
@@ -1004,7 +2530,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
   }
 
   if (!selectedNode) {
-    return <EmptyInspector payload={payload} onEmit={onEmit} onCreateGoal={() => setGoalEditor({ mode: "create" })} />;
+    return <EmptyInspector payload={payload} onEmit={onEmit} onCreateGoal={() => setGoalEditor({ mode: "create" })} readOnly={readOnly} />;
   }
 
   if (selectedNode.type === "goal" && selectedGoal) {
@@ -1023,15 +2549,19 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
         </div>
         <PlaceholderInspector payload={payload} node={selectedNode} relations={relations} />
         <p className="hd-inspector-summary">{cleanText(selectedGoal.editor?.summary || display.summary, label(ui, "goal_module_caption", "A stage goal for this profile."))}</p>
-        <div className="hd-action-row">
-          {!selectedGoal.locked ? <button className="hd-primary" type="button" onClick={() => setGoalEditor({ mode: "edit", goalId: selectedGoal.id })}>{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</button> : null}
-          {!selectedGoal.isPrimary ? <button className="hd-ghost" type="button" onClick={() => onEmit(setPrimaryGoalEvent(selectedGoal.id))}>{label(ui, "dashboard_set_primary", "Set primary")}</button> : null}
-          <button className="hd-ghost danger" type="button" onClick={() => onEmit(archiveGoalEvent(selectedGoal.id))}>{label(ui, "dashboard_archive_goal", "Archive")}</button>
-        </div>
-        {!selectedGoal.locked ? <GoalSkillAlignment payload={payload} goalId={selectedGoal.id} onEmit={onEmit} /> : null}
+        {!readOnly ? (
+          <div className="hd-action-row">
+            {!selectedGoal.locked ? <button className="hd-primary" type="button" data-action="open-goal-form" data-goal-id={selectedGoal.id} onClick={() => setGoalEditor({ mode: "edit", goalId: selectedGoal.id })}>{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</button> : null}
+            {!selectedGoal.isPrimary ? <button className="hd-ghost" type="button" data-action="set-primary-goal" data-goal-id={selectedGoal.id} onClick={() => onEmit(setPrimaryGoalEvent(selectedGoal.id))}>{label(ui, "dashboard_set_primary", "Set primary")}</button> : null}
+            <button className="hd-ghost danger" type="button" data-action="archive-goal" data-goal-id={selectedGoal.id} onClick={() => onEmit(archiveGoalEvent(selectedGoal.id))}>{label(ui, "dashboard_archive_goal", "Archive")}</button>
+          </div>
+        ) : null}
+        {!readOnly && !selectedGoal.locked ? <GoalSkillAlignment payload={payload} goalId={selectedGoal.id} onEmit={onEmit} /> : null}
       </aside>
     );
   }
+
+  const hasNodeAction = Boolean(nodeActionBundle(payload, selectedNode, readOnly).primary);
 
   return (
     <aside className="hd-inspector">
@@ -1047,20 +2577,25 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
       </div>
       <PlaceholderInspector payload={payload} node={selectedNode} relations={relations} />
       <p className="hd-inspector-summary">
-        {selectedNode.suggested || selectedNode.placeholder
+        {selectedNode.summary
+          ? selectedNode.summary
+          : selectedNode.suggested || selectedNode.placeholder
           ? label(ui, "skill_alignment_suggested", "suggested")
           : label(ui, "dashboard_inspector_node_hint", "Open the owner page for details.")}
       </p>
-      <div className="hd-action-row">
-        {selectedNode.ownerPath && selectedNode.ownerPath !== "profile_context" && selectedNode.implemented !== false ? (
-          <button className="hd-primary" type="button" onClick={() => onEmit(navigationEvent(selectedNode.ownerPath))}>{label(ui, "dashboard_open_section", "Open")}</button>
-        ) : null}
-        {selectedNode.ownerPath === "profile_context" && selectedNode.implemented !== false ? (
-          <button className="hd-primary" type="button" onClick={() => onEmit(openProfileContextEvent())}>{label(ui, "north_star_edit_action", "Edit Profile Context")}</button>
-        ) : null}
-      </div>
+      <NodeActionRow payload={payload} node={selectedNode} onEmit={onEmit} readOnly={readOnly} />
+      {!hasNodeAction ? (
+        <div className="hd-action-row">
+          {selectedNode.ownerPath && selectedNode.ownerPath !== "profile_context" && selectedNode.implemented !== false ? (
+            <button className="hd-primary" type="button" data-action="navigate" data-target={selectedNode.ownerPath} onClick={() => onEmit(navigationEvent(selectedNode.ownerPath))}>{label(ui, "dashboard_open_section", "Open")}</button>
+          ) : null}
+          {selectedNode.ownerPath === "profile_context" && selectedNode.implemented !== false ? (
+            <button className="hd-primary" type="button" data-action="open-profile-context" onClick={() => onEmit(openProfileContextEvent())}>{label(ui, "north_star_edit_action", "Edit Profile Context")}</button>
+          ) : null}
+        </div>
+      ) : null}
       {selectedNode.type === "skill" && selectedNode.implemented !== false ? (
-        <button className="hd-ghost full" type="button" onClick={() => onEmit(navigationEvent("pages/2_Gap_Analysis.py"))}>{label(ui, "quick_gap", "Gap Analysis")}</button>
+        <button className="hd-ghost full" type="button" data-action="navigate" data-target="pages/2_Gap_Analysis.py" onClick={() => onEmit(navigationEvent("pages/2_Gap_Analysis.py"))}>{label(ui, "quick_gap", "Gap Analysis")}</button>
       ) : null}
     </aside>
   );
@@ -1093,12 +2628,12 @@ function HomeCaptureForm({ payload, onEmit, className = "" }) {
             : label(ui, "dashboard_source_to_evidence_hint", "Captured sources stay in inbox until reviewed into evidence candidates.")}
         </p>
       </header>
-      <label>
-        {label(ui, "goal_field_title", "Title")}
-        <input name="title" required placeholder={label(ui, "dashboard_capture_title_placeholder", "What did you notice?")} />
-      </label>
       <input type="hidden" name="goal_id" value={currentGoalId} />
-      <div className="hd-form-row">
+      <div className="hd-capture-compact">
+        <label>
+          {label(ui, "goal_field_title", "Title")}
+          <input name="title" required placeholder={label(ui, "dashboard_capture_title_placeholder", "What did you notice?")} />
+        </label>
         <label>
           {label(ui, "dashboard_capture_type", "Type")}
           <select name="type" defaultValue="note">
@@ -1108,24 +2643,28 @@ function HomeCaptureForm({ payload, onEmit, className = "" }) {
             <option value="idea">{label(ui, "dashboard_capture_type_idea", "Idea")}</option>
           </select>
         </label>
+        <button className="hd-primary" type="submit" data-action="capture-source">{label(ui, "dashboard_capture_submit", "Capture")}</button>
+      </div>
+
+      <details className="hd-capture-more">
+        <summary>{label(ui, "dashboard_capture_more_fields", "More fields")}</summary>
         <label>
           {label(ui, "dashboard_capture_source", "Source URL or origin")}
           <input name="source" />
         </label>
-      </div>
-      <label>
-        {label(ui, "dashboard_capture_source", "Source URL or origin")}
-        <input name="source_url" type="url" />
-      </label>
-      <label>
-        {label(ui, "dashboard_capture_raw_text", "Note")}
-        <textarea name="raw_text" rows="4" />
-      </label>
-      <label>
-        {label(ui, "dashboard_capture_tags", "Tags")}
-        <input name="tags" placeholder="project/nblane, flow/learning" />
-      </label>
-      <button className="hd-primary full" type="submit">{label(ui, "dashboard_capture_submit", "Capture")}</button>
+        <label>
+          {label(ui, "dashboard_capture_source", "Source URL or origin")}
+          <input name="source_url" type="url" />
+        </label>
+        <label>
+          {label(ui, "dashboard_capture_raw_text", "Note")}
+          <textarea name="raw_text" rows="4" />
+        </label>
+        <label>
+          {label(ui, "dashboard_capture_tags", "Tags")}
+          <input name="tags" placeholder="project/nblane, flow/learning" />
+        </label>
+      </details>
     </form>
   );
 }
@@ -1238,16 +2777,44 @@ function HealthSummaryPanel({ payload, className = "" }) {
   );
 }
 
-function Workbench({ payload, onEmit }) {
+function ActionQueue({ payload, onEmit, className = "" }) {
   const ui = payload.ui;
-  const doing = asArray(payload.kanban.doing);
-  const evidenceCandidates = Number(payload.pendingEvidence.done_uncrystallized_count || 0);
-  const unlinkedAtomic = Number(payload.pendingEvidence.unlinked_count || 0);
-  const needsReview = Number(payload.pendingEvidence.needs_review_count || 0);
-  const statusRisk = Number(payload.pendingEvidence.status_risk_count || 0);
-  const evidenceAttention = evidenceCandidates + unlinkedAtomic + needsReview + statusRisk;
-  const gapRisk = Number(payload.skills.evidence_risk_count || 0) + asArray(payload.skills.target_learning_locked).length;
+  const queueClassName = ["hd-side-panel", "hd-action-queue", className].filter(Boolean).join(" ");
+  return (
+    <section className={queueClassName}>
+      <header>
+        <span className="hd-eyebrow">{label(ui, "dashboard_action_queue_title", "Action queue")}</span>
+        <strong>{label(ui, "dashboard_action_queue_title", "Action queue")}</strong>
+      </header>
+      <div className="hd-action-list">
+        {actionQueueItems(payload).map((item) => (
+          <button
+            key={item.id}
+            className={`hd-action-card ${item.tone || ""}`}
+            type="button"
+            data-action="navigate"
+            data-dashboard-action={`queue:${item.id}`}
+            data-target={item.path}
+            onClick={() => onEmit(navigationEvent(item.path))}
+          >
+            <span>{item.eyebrow}</span>
+            <strong>{item.title}</strong>
+            <small>{item.detail}</small>
+            <small className="hd-action-why">{item.why}</small>
+            <small className="hd-action-filter">{item.filter}</small>
+            <em>{item.count}</em>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Workbench({ payload, onEmit, readOnly = false }) {
+  const ui = payload.ui;
+  const metrics = dashboardMetrics(payload);
   const quickLinks = asArray(payload.quickLinks);
+  const urgentHealth = metrics.healthAlerts > 0;
 
   return (
     <section className="hd-workbench">
@@ -1259,57 +2826,63 @@ function Workbench({ payload, onEmit }) {
       </header>
 
       <div className="hd-workbench-layout">
-        <SkillProgressCard payload={payload} className="hd-workbench-skill" />
+        {!readOnly ? <HomeCaptureForm payload={payload} onEmit={onEmit} className="hd-workbench-capture" /> : null}
 
-        <HomeCaptureForm payload={payload} onEmit={onEmit} className="hd-workbench-capture" />
+        <ActionQueue payload={payload} onEmit={onEmit} className="hd-workbench-queue" />
+
+        {urgentHealth ? <HealthSummaryPanel payload={payload} className="hd-workbench-health urgent" /> : null}
 
         <article className="hd-summary-card hd-workbench-focus">
           <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
-          <strong>{payload.kanban.doing_total || doing.length || 0}</strong>
-          <p>{doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
+          <strong>{metrics.doingTotal}</strong>
+          <p>{metrics.doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
         </article>
 
         <article className="hd-summary-card hd-workbench-evidence">
           <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
-          <strong>{evidenceAttention}</strong>
+          <strong>{metrics.evidenceAttention}</strong>
           <p>
-            {label(ui, "dashboard_done_uncrystallized", "Done not crystallized")}: {evidenceCandidates}
+            {label(ui, "dashboard_done_uncrystallized", "Done not crystallized")}: {metrics.evidenceCandidates}
             {" · "}
-            {label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {unlinkedAtomic}
+            {label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {metrics.unlinkedAtomic}
             {" · "}
-            {label(ui, "dashboard_atomic_evidence_needs_review", "Needs review")}: {needsReview}
+            {label(ui, "dashboard_atomic_evidence_needs_review", "Needs review")}: {metrics.needsReview}
             {" · "}
-            {label(ui, "dashboard_atomic_evidence_status_risk", "Status risks")}: {statusRisk}
+            {label(ui, "dashboard_atomic_evidence_status_risk", "Status risks")}: {metrics.statusRisk}
           </p>
         </article>
 
         <article className="hd-summary-card hd-workbench-gap">
           <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
-          <strong>{gapRisk}</strong>
+          <strong>{metrics.gapRisk}</strong>
           <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
         </article>
 
         <article className="hd-summary-card hd-workbench-output">
           <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
-          <strong>{payload.charts.public.draft}</strong>
-          <p>{label(ui, "dashboard_public_published", "Published")}: {payload.charts.public.published}</p>
+          <strong>{metrics.outputDrafts}</strong>
+          <p>{label(ui, "dashboard_public_published", "Published")}: {metrics.published}</p>
         </article>
 
-        <section className="hd-side-panel hd-workbench-quick">
-          <header>
-            <span className="hd-eyebrow">{label(ui, "dashboard_quick_title", "Quick entries")}</span>
-            <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
-          </header>
-          <div className="hd-quick-grid">
-            {quickLinks.map((link) => (
-              <button key={link.path} className="hd-ghost" type="button" onClick={() => onEmit(navigationEvent(link.path))}>
-                {cleanText(link.label, link.id)}
-              </button>
-            ))}
-          </div>
+        <SkillProgressCard payload={payload} className="hd-workbench-skill" />
+
+        <section className={`hd-side-panel hd-workbench-quick ${urgentHealth ? "after-health" : ""}`}>
+          <details className="hd-quick-details">
+            <summary className="hd-quick-summary">
+              <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
+              <span>{quickLinks.length}</span>
+            </summary>
+            <div className="hd-quick-grid">
+              {quickLinks.map((link) => (
+                <button key={link.path} className="hd-ghost" type="button" data-action="navigate" data-target={link.path} onClick={() => onEmit(navigationEvent(link.path))}>
+                  {cleanText(link.label, link.id)}
+                </button>
+              ))}
+            </div>
+          </details>
         </section>
 
-        <HealthSummaryPanel payload={payload} className="hd-workbench-health" />
+        {!urgentHealth ? <HealthSummaryPanel payload={payload} className="hd-workbench-health secondary" /> : null}
       </div>
     </section>
   );
@@ -1317,21 +2890,59 @@ function Workbench({ payload, onEmit }) {
 
 function Dashboard({ args }) {
   const payload = useMemo(() => normalizePayload(args.payload || {}), [args]);
-  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const requestedNodeId = useMemo(() => initialDashboardNodeId(), []);
+  const [selectedNodeId, setSelectedNodeId] = useState(() => requestedNodeId);
   const [goalEditor, setGoalEditor] = useState(null);
-  const [viewMode, setViewMode] = useState("canvas");
+  const [viewMode, setViewMode] = useState(() => initialDashboardViewMode(args));
+  const canvasEmbed = useMemo(() => (!args.standalone ? dashboardCanvasEmbed(payload) : null), [args.standalone, payload]);
+  const readOnlyCanvas = Boolean(args.standalone);
 
   useEffect(() => {
     const availableIds = new Set(payload.graph.nodes.map((node) => node.id));
+    if (requestedNodeId && !availableIds.size && selectedNodeId === requestedNodeId) {
+      window.setTimeout(() => setFrameHeight(), 0);
+      return;
+    }
     const nextPreferred = preferredNode(payload);
-    const nextId = availableIds.has(selectedNodeId) ? selectedNodeId : cleanText(nextPreferred?.id);
+    const requestedAvailable = requestedNodeId && availableIds.has(requestedNodeId);
+    const nextId = availableIds.has(selectedNodeId)
+      ? selectedNodeId
+      : requestedAvailable
+      ? requestedNodeId
+      : cleanText(nextPreferred?.id);
     if (nextId !== selectedNodeId) {
       setSelectedNodeId(nextId);
     }
     window.setTimeout(() => setFrameHeight(), 0);
-  }, [payload, selectedNodeId]);
+  }, [payload, requestedNodeId, selectedNodeId]);
 
   function emit(event) {
+    if (args.standalone) {
+      const action = cleanText(event?.action);
+      const path = cleanText(event?.payload?.path);
+      if (action === "navigate" && path) {
+        const target = standaloneTargetUrl(path, args.streamlitBase);
+        if (args.embed && window.top && window.top !== window) {
+          window.top.location.href = target;
+        } else {
+          window.location.href = target;
+        }
+        return;
+      }
+      if (action === "set_north_star_display_open_profile_context") {
+        const target = standaloneTargetUrl("", args.streamlitBase) || cleanText(args.streamlitBase, "http://127.0.0.1:8503");
+        if (args.embed && window.top && window.top !== window) {
+          window.top.location.href = target;
+        } else {
+          window.location.href = target;
+        }
+        return;
+      }
+      if (!canEmitInReadOnly(action)) {
+        return;
+      }
+      return;
+    }
     setComponentValue(event);
     window.setTimeout(() => setFrameHeight(), 0);
   }
@@ -1344,46 +2955,155 @@ function Dashboard({ args }) {
     }
   }
 
+  const handleSelectNode = (nodeId) => {
+    setSelectedNodeId(nodeId);
+    setGoalEditor(null);
+  };
+
+  const useDailyGraphHero = !args.standalone && !args.embed;
+  const canvasSurface = useDailyGraphHero ? (
+    <GraphHeroPanel
+      payload={payload}
+      embed={canvasEmbed}
+      selectedNodeId={selectedNodeId}
+      onSelectNode={handleSelectNode}
+      onEmit={emit}
+    />
+  ) : (
+    <div className="hd-canvas-workbench">
+      <ContextCanvas
+        payload={payload}
+        selectedNodeId={selectedNodeId}
+        onSelectNode={handleSelectNode}
+        onEmit={emit}
+        onCreateGoal={() => setGoalEditor({ mode: "create" })}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        readOnly={readOnlyCanvas}
+      />
+      <InspectorPanel
+        payload={payload}
+        selectedNodeId={selectedNodeId}
+        goalEditor={goalEditor}
+        setGoalEditor={setGoalEditor}
+        onEmit={emit}
+        readOnly={readOnlyCanvas}
+      />
+    </div>
+  );
+
   return (
-    <main className="hd-shell">
+    <main className={args.embed ? "hd-shell hd-shell-embed" : "hd-shell"}>
+      {args.standalone && !args.embed ? (
+        <section className="hd-standalone-top">
+          <div>
+            <span className="hd-eyebrow">{label(payload.ui, "dashboard_graph_eyebrow", "Context")}</span>
+            <h1>Dashboard Canvas</h1>
+            <p>
+              {args.loading
+                ? label(payload.ui, "dashboard_graph_loading", "Loading graph...")
+                : args.error
+                ? args.error
+                : `${label(payload.ui, "profile", "Profile")}: ${payload.profile}`}
+            </p>
+          </div>
+          <a href={cleanText(args.streamlitBase, "http://127.0.0.1:8503")} data-action="open-8503">
+            {label(payload.ui, "dashboard_open_8503", "Open 8503")}
+          </a>
+        </section>
+      ) : null}
+      {args.embed ? (
+        <div className="hd-canvas-workbench hd-canvas-workbench-embed">
+          <ContextCanvas
+            payload={payload}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={handleSelectNode}
+            onEmit={emit}
+            onCreateGoal={() => setGoalEditor({ mode: "create" })}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+            readOnly={readOnlyCanvas}
+          />
+          <InspectorPanel
+            payload={payload}
+            selectedNodeId={selectedNodeId}
+            goalEditor={goalEditor}
+            setGoalEditor={setGoalEditor}
+            onEmit={emit}
+            readOnly={readOnlyCanvas}
+          />
+        </div>
+      ) : (
+        <>
       <ContextHeader
         payload={payload}
         onEmit={emit}
         onCreateGoal={() => setGoalEditor({ mode: "create" })}
         onSelectGoal={selectGoal}
+        canEditGoals={!canvasEmbed && !readOnlyCanvas}
+        canSelectGoals={!canvasEmbed}
+        showToday={!useDailyGraphHero}
       />
 
-      <div className="hd-canvas-workbench">
-        <ContextCanvas
-          payload={payload}
-          selectedNodeId={selectedNodeId}
-          onSelectNode={(nodeId) => {
-            setSelectedNodeId(nodeId);
-            setGoalEditor(null);
-          }}
-          onEmit={emit}
-          onCreateGoal={() => setGoalEditor({ mode: "create" })}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-        />
-        <InspectorPanel
-          payload={payload}
-          selectedNodeId={selectedNodeId}
-          goalEditor={goalEditor}
-          setGoalEditor={setGoalEditor}
-          onEmit={emit}
-        />
-      </div>
-
-      <Workbench payload={payload} onEmit={emit} />
+      {args.standalone ? (
+        <>
+          {canvasSurface}
+          <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} />
+        </>
+      ) : (
+        <>
+          {canvasSurface}
+          <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} />
+        </>
+      )}
+        </>
+      )}
     </main>
   );
 }
 
 function App() {
-  const [args, setArgs] = useState({ payload: {}, height: 900 });
+  const standalone = standaloneConfig();
+  const [args, setArgs] = useState({
+    payload: standalone?.payload || {},
+    height: 900,
+    standalone: Boolean(standalone),
+    embed: Boolean(standalone?.embed),
+    loading: Boolean(standalone && !standalone.payload),
+    error: "",
+    streamlitBase: cleanText(standalone?.streamlitBase, "http://127.0.0.1:8503"),
+  });
   useEffect(() => {
-    initStreamlitBridge(setArgs);
+    if (!standalone) {
+      initStreamlitBridge(setArgs);
+      return undefined;
+    }
+    if (standalone.payload) {
+      return undefined;
+    }
+    let cancelled = false;
+    const profile = cleanText(standalone.profile);
+    const endpoint = cleanText(standalone.payloadUrl, "/api/dashboard/payload");
+    const url = `${endpoint}${endpoint.includes("?") ? "&" : "?"}profile=${encodeURIComponent(profile)}`;
+    fetch(url)
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        if (!data?.ok) {
+          throw new Error(cleanText(data?.detail, "Failed to load dashboard payload"));
+        }
+        setArgs((current) => ({ ...current, payload: data.payload || {}, loading: false, error: "" }));
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setArgs((current) => ({ ...current, loading: false, error: error?.message || "Failed to load dashboard payload" }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   return <Dashboard args={args} />;
 }

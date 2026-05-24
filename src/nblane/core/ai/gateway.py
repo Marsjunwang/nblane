@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import os
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from nblane.core import llm
@@ -20,16 +21,22 @@ from nblane.core.web_preferences import (
 )
 
 
+PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS_DEFAULT = 180.0
+
+
 def run_ai_action(
     action_name: str,
     payload: dict[str, Any] | None = None,
     *,
     context: Mapping[str, Any] | str | None = None,
     profile: str | None = None,
+    runtime_profile: str | None = None,
     context_refs: list[str] | None = None,
     preferred_backend: str | None = None,
     require_review: bool | None = None,
     backends: dict[str, Any] | None = None,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+    cancel_callback: Callable[[], bool] | None = None,
 ) -> AIActionResult:
     """Run a registered AI Action through the selected backend.
 
@@ -61,6 +68,9 @@ def run_ai_action(
         context_refs=refs,
         preferred_backend=str(preferred).strip() if preferred else None,
         require_review=review,
+        runtime_profile=(runtime_profile if runtime_profile is not None else resolved_profile).strip(),
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
     )
     spec = get_action_spec(request.action)
     if spec is None:
@@ -233,6 +243,7 @@ def translate_paper_segments(
     *,
     target_lang: str = "zh",
     model: str | None = None,
+    model_timeout_seconds: float | None = None,
     context_refs: list[str] | None = None,
     require_review: bool = True,
 ) -> AIActionResult:
@@ -245,6 +256,11 @@ def translate_paper_segments(
             "source_id": source_id,
             "segments": segments,
             "target_lang": target_lang,
+            "model_timeout_seconds": (
+                model_timeout_seconds
+                if model_timeout_seconds is not None
+                else _paper_translation_model_timeout_seconds()
+            ),
         },
         model=model,
     )
@@ -691,6 +707,21 @@ def _normalize_context(
 
 def _clean_model(value: str | None) -> str:
     return str(value or "").strip()
+
+
+def _positive_float(value: object) -> float | None:
+    try:
+        clean = float(value)
+    except (TypeError, ValueError):
+        return None
+    return clean if clean > 0 else None
+
+
+def _paper_translation_model_timeout_seconds() -> float:
+    configured = _positive_float(os.getenv("NBLANE_PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS"))
+    if configured is not None:
+        return configured
+    return PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS_DEFAULT
 
 
 def _paper_ai_model(profile: str, key: str) -> str:

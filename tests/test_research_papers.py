@@ -18,6 +18,8 @@ from nblane.core.research_papers import (
     PaperSegment,
     PaperSearchResult,
     PaperStructureUnit,
+    _paper_search_query_variants,
+    _paper_translation_batches,
     _reader_outline_from_segments,
     build_reader_payload,
     build_paper_layout_units,
@@ -27,6 +29,8 @@ from nblane.core.research_papers import (
     create_reading_note_markdown,
     delete_paper_reader_artifacts,
     delete_paper_record,
+    download_paper_pdf,
+    ensure_paper_pdf_downloaded,
     ensure_paper_reading_artifacts,
     create_paper_annotation,
     extract_paper_figures,
@@ -60,9 +64,11 @@ from nblane.core.research_papers import (
     render_paper_page_preview,
     restore_paper_library_node,
     save_paper_pages,
+    create_reading_note_pack_markdown,
     save_research_export,
     save_paper_segments,
     save_paper_structure_units,
+    search_papers,
     search_papers_with_codex,
     set_paper_primary_node,
     text_hash,
@@ -72,8 +78,10 @@ from nblane.core.research_papers import (
     upsert_paper_translations,
 )
 from nblane.core.paper_library_workspace import (
+    PAPER_LIBRARY_RUNTIME_DEFAULT,
     build_paper_library_payload,
     handle_paper_library_event,
+    resolve_paper_library_runtime,
 )
 from nblane.core.research_sources import (
     ResearchSourceInbox,
@@ -120,6 +128,18 @@ class TestResearchPapers(unittest.TestCase):
         with patch("nblane.core.research_sources.git_backup.record_change"):
             save_research_sources(profile, inbox)
         return profile
+
+    def test_paper_library_runtime_flag_normalization(self) -> None:
+        self.assertEqual(PAPER_LIBRARY_RUNTIME_DEFAULT, "fastapi_iframe")
+        self.assertEqual(resolve_paper_library_runtime(""), (PAPER_LIBRARY_RUNTIME_DEFAULT, ""))
+        self.assertEqual(resolve_paper_library_runtime("fastapi_link"), ("fastapi_link", ""))
+        self.assertEqual(resolve_paper_library_runtime("fastapi-link"), ("fastapi_link", ""))
+        self.assertEqual(resolve_paper_library_runtime("fastapi"), ("fastapi_iframe", ""))
+        self.assertEqual(resolve_paper_library_runtime("iframe"), ("fastapi_iframe", ""))
+        self.assertEqual(resolve_paper_library_runtime("streamlit"), ("streamlit_component", ""))
+        self.assertEqual(resolve_paper_library_runtime("surprise"), (PAPER_LIBRARY_RUNTIME_DEFAULT, "surprise"))
+        with patch.dict(os.environ, {"NBLANE_PAPER_LIBRARY_RUNTIME": "component"}):
+            self.assertEqual(resolve_paper_library_runtime(), ("streamlit_component", ""))
 
     def test_pdf_asset_lives_outside_profile_and_updates_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,6 +322,18 @@ class TestResearchPapers(unittest.TestCase):
                 patch("nblane.core.research_papers.git_backup.record_change"),
                 patch("nblane.core.research_sources.git_backup.record_change"),
             ):
+                inbox = load_research_sources(profile)
+                update_research_source(
+                    inbox,
+                    "source:paper:grounded",
+                    summary="Fallback summary from imported search.",
+                    notes="User triage note.",
+                    metadata={
+                        "abstract": "This paper studies grounded claims through a compact abstract.",
+                        "why_relevant": "It matches the current evidence workflow.",
+                    },
+                )
+                save_research_sources(profile, inbox)
                 create_result = handle_paper_library_event(
                     profile,
                     {
@@ -324,6 +356,17 @@ class TestResearchPapers(unittest.TestCase):
                     profile,
                     current_node=node_id,
                     detail_id="source:paper:grounded",
+                    focus="artifacts",
+                    action="run_extraction",
+                    return_to="overview",
+                    return_url="http://127.0.0.1:8503/Research",
+                    user_id="local",
+                )
+                unsafe_payload = build_paper_library_payload(
+                    profile,
+                    detail_id="source:paper:grounded",
+                    return_to="overview",
+                    return_url="javascript:alert(1)",
                     user_id="local",
                 )
                 select_result = handle_paper_library_event(
@@ -384,6 +427,18 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(payload["papers"][0]["id"], "source:paper:grounded")
         self.assertEqual(payload["detail"]["source_id"], "source:paper:grounded")
         self.assertEqual(payload["detail"]["primary_node_id"], node_id)
+        self.assertEqual(payload["detail"]["abstract"], "This paper studies grounded claims through a compact abstract.")
+        self.assertEqual(payload["detail"]["reading_card"]["source"], "abstract")
+        self.assertEqual(payload["detail"]["reading_card"]["source_label"], "Abstract")
+        self.assertIn("grounded claims", payload["detail"]["reading_card"]["body"])
+        self.assertEqual(payload["detail"]["reading_card"]["why_relevant"], "It matches the current evidence workflow.")
+        self.assertEqual(payload["focus"], "artifacts")
+        self.assertEqual(payload["action"], "run_extraction")
+        self.assertEqual(payload["return_to"], "overview")
+        self.assertEqual(payload["return_url"], "http://127.0.0.1:8503/Research")
+        self.assertEqual(payload["deep_link"]["focus"], "artifacts")
+        self.assertEqual(payload["deep_link"]["return_url"], "http://127.0.0.1:8503/Research")
+        self.assertEqual(unsafe_payload["return_url"], "")
         self.assertEqual(select_result.next["detail_id"], "source:paper:grounded")
         self.assertEqual(reader_sync_result.next["reader_source_id"], "source:paper:grounded")
         self.assertEqual(reader_sync_result.next["detail_id"], "source:paper:grounded")
@@ -436,6 +491,153 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(discarded_payload["papers"][0]["status_label"], "Discarded")
         self.assertEqual(discarded_payload["detail"]["status_label"], "Discarded")
         self.assertIn("source:paper:grounded", [paper["id"] for paper in all_payload["papers"]])
+
+    def test_paper_library_rename_paper_updates_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_rename_paper",
+                        "payload": {
+                            "source_id": source_id,
+                            "title": "Renamed Grounded Paper",
+                        },
+                    },
+                )
+                payload = build_paper_library_payload(
+                    profile,
+                    detail_id=source_id,
+                    user_id="local",
+                )
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.changed["sources"], [source_id])
+        self.assertEqual(result.next["detail_id"], source_id)
+        self.assertEqual(result.message, "Renamed paper.")
+        self.assertEqual(source.title, "Renamed Grounded Paper")
+        self.assertEqual(payload["detail"]["title"], "Renamed Grounded Paper")
+        self.assertIn("Renamed Grounded Paper", [paper["title"] for paper in payload["papers"]])
+
+    def test_paper_library_run_extraction_reports_action_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={"pdf_asset_ref": "papers/demo.pdf", "pdf_sha256": "abc123"},
+            )
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                save_research_sources(profile, inbox)
+
+            def fake_pages(profile_arg, source_id_arg, *, backend="auto"):
+                pages = [PaperPage(source_id=source_id_arg, page=1, text="Page text.")]
+                save_paper_pages(profile_arg, source_id_arg, pages)
+                return pages
+
+            def fake_segments(profile_arg, source_id_arg, *, backend="auto"):
+                segments = [
+                    PaperSegment(
+                        segment_id="seg:source-paper-grounded:00001",
+                        source_id=source_id_arg,
+                        page=1,
+                        order=1,
+                        text="Page text.",
+                        text_hash=text_hash("Page text."),
+                    )
+                ]
+                save_paper_segments(profile_arg, source_id_arg, segments)
+                return segments
+
+            with (
+                patch("nblane.core.research_papers.extract_paper_pages", side_effect=fake_pages),
+                patch("nblane.core.research_papers.extract_paper_segments", side_effect=fake_segments),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_run_extraction",
+                        "payload": {"paper_ids": [source_id]},
+                        "state": {"action": "run_extraction"},
+                    },
+                )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.changed["sources"], [source_id])
+        self.assertIn("Extraction ready: 1 page(s), 1 segment(s).", result.message)
+        self.assertEqual(result.next["detail_id"], source_id)
+        self.assertEqual(result.next["focus"], "artifacts")
+        self.assertEqual(result.next["action"], "")
+        self.assertEqual(result.data["extraction_summaries"][0]["pages"], 1)
+        self.assertEqual(result.data["extraction_summaries"][0]["segments"], 1)
+
+    def test_paper_library_retry_translation_runs_extraction_then_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+
+            with (
+                patch(
+                    "nblane.core.paper_library_workspace.ensure_paper_reading_artifacts",
+                    return_value={
+                        "source_id": source_id,
+                        "ready": True,
+                        "status": "ready",
+                        "pages": 1,
+                        "segments": 2,
+                        "warnings": [],
+                    },
+                ) as ensure_mock,
+                patch(
+                    "nblane.core.paper_library_workspace.translate_full_paper",
+                    return_value={
+                        "source_id": source_id,
+                        "target_lang": "zh",
+                        "mode": "missing_or_stale",
+                        "scope": "structure",
+                        "updated": 2,
+                        "translated": 2,
+                        "missing": 0,
+                        "stale": 0,
+                        "failed": 0,
+                        "warnings": [],
+                    },
+                ) as translate_mock,
+            ):
+                progress: list[dict[str, object]] = []
+                result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_retry_translation",
+                        "payload": {"paper_ids": [source_id]},
+                    },
+                    progress_callback=progress.append,
+                )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.changed["sources"], [source_id])
+        self.assertEqual(result.changed["translations"], [source_id])
+        self.assertIn("Translation retry finished: updated 2 row(s); 0 stale remaining.", result.message)
+        self.assertEqual(result.next["detail_id"], source_id)
+        self.assertEqual(result.next["focus"], "translations")
+        self.assertEqual(result.next["action"], "")
+        self.assertEqual(result.data["translation_summaries"][0]["updated"], 2)
+        ensure_mock.assert_called_once()
+        translate_mock.assert_called_once()
+        self.assertEqual(translate_mock.call_args.kwargs["target_lang"], "zh")
+        self.assertEqual(translate_mock.call_args.kwargs["mode"], "missing_or_stale")
+        self.assertEqual(translate_mock.call_args.kwargs["scope_strategy"], "structure")
+        self.assertFalse(translate_mock.call_args.kwargs["require_review"])
+        self.assertEqual(translate_mock.call_args.kwargs["progress_callback"], progress.append)
+        self.assertEqual(progress[0]["phase"], "extraction")
+        self.assertEqual(progress[1]["phase"], "translation")
 
     def test_delete_paper_record_previews_and_preserves_assets_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
@@ -1343,6 +1545,149 @@ class TestResearchPapers(unittest.TestCase):
 
         self.assertEqual([row["source_text"] for row in rows], ["A real paragraph about the robot dataset."])
 
+    def test_reader_translation_structure_units_can_skip_references(self) -> None:
+        source_id = "source:paper:grounded"
+        body = PaperStructureUnit(
+            unit_id="psu:paper:1:00001:body",
+            source_id=source_id,
+            kind="paragraph",
+            page_start=1,
+            page_end=1,
+            order=1,
+            text="The method paragraph should be translated.",
+            text_hash=text_hash("The method paragraph should be translated."),
+            section_path=["Method"],
+            translatable=True,
+        )
+        reference = PaperStructureUnit(
+            unit_id="psu:paper:9:00099:ref",
+            source_id=source_id,
+            kind="paragraph",
+            page_start=9,
+            page_end=9,
+            order=99,
+            text="Smith, J.: A reference entry that should remain source-only.",
+            text_hash=text_hash("Smith, J.: A reference entry that should remain source-only."),
+            section_path=["References"],
+            translatable=True,
+        )
+
+        rows = reader_translation_structure_units([body, reference], include_references=False)
+        rows_with_references = reader_translation_structure_units([body, reference], include_references=True)
+
+        self.assertEqual([row["scope_ref"] for row in rows], [body.unit_id])
+        self.assertEqual([row["scope_ref"] for row in rows_with_references], [body.unit_id, reference.unit_id])
+
+    def test_paper_translation_batches_respect_count_and_character_budget(self) -> None:
+        rows = [
+            {"segment_id": f"seg:{index}", "text": "x" * size}
+            for index, size in enumerate([1000, 1000, 2600, 1000], start=1)
+        ]
+
+        with patch.dict(
+            os.environ,
+            {
+                "NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_SIZE": "3",
+                "NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_CHARS": "3000",
+            },
+            clear=False,
+        ):
+            batches = _paper_translation_batches(rows, "structure")
+
+        self.assertEqual([[row["segment_id"] for row in batch] for batch in batches], [["seg:1", "seg:2"], ["seg:3"], ["seg:4"]])
+
+    def test_translate_full_paper_can_include_references_on_request(self) -> None:
+        source_id = "source:paper:grounded"
+
+        def run_case(include_references: bool) -> tuple[dict[str, object], list[list[str]]]:
+            with tempfile.TemporaryDirectory() as tmp:
+                profile = self._profile(Path(tmp))
+                body = PaperStructureUnit(
+                    unit_id="psu:paper:1:00001:body",
+                    source_id=source_id,
+                    kind="paragraph",
+                    page_start=1,
+                    page_end=1,
+                    order=1,
+                    text="The method paragraph should be translated.",
+                    text_hash=text_hash("The method paragraph should be translated."),
+                    section_path=["Method"],
+                    translatable=True,
+                )
+                reference = PaperStructureUnit(
+                    unit_id="psu:paper:9:00099:ref",
+                    source_id=source_id,
+                    kind="paragraph",
+                    page_start=9,
+                    page_end=9,
+                    order=99,
+                    text="Smith, J.: A reference entry.",
+                    text_hash=text_hash("Smith, J.: A reference entry."),
+                    section_path=["References"],
+                    translatable=True,
+                )
+                with patch("nblane.core.research_papers.git_backup.record_change"):
+                    save_paper_segments(
+                        profile,
+                        source_id,
+                        [
+                            PaperSegment(
+                                segment_id="seg:dummy",
+                                source_id=source_id,
+                                page=1,
+                                order=1,
+                                text="Dummy segment keeps extraction from running.",
+                                text_hash=text_hash("Dummy segment keeps extraction from running."),
+                            )
+                        ],
+                    )
+                    save_paper_structure_units(profile, source_id, [body, reference])
+                seen_batches: list[list[str]] = []
+
+                def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+                    seen_batches.append([row["segment_id"] for row in batch])
+                    return SimpleNamespace(
+                        warnings=[],
+                        error="",
+                        structured={
+                            "translations": [
+                                {
+                                    "segment_id": row["segment_id"],
+                                    "source_hash": row["text_hash"],
+                                    "source_text": row["text"],
+                                    "target_lang": target_lang,
+                                    "translated_text": f"zh:{row['segment_id']}",
+                                }
+                                for row in batch
+                            ]
+                        },
+                    )
+
+                with (
+                    patch("nblane.core.ai.gateway.translate_paper_segments", side_effect=fake_translate),
+                    patch("nblane.core.research_papers.git_backup.record_change"),
+                ):
+                    summary = translate_full_paper(
+                        profile,
+                        source_id,
+                        target_lang="zh",
+                        mode="all",
+                        batch_size=20,
+                        scope_strategy="structure",
+                        include_references=include_references,
+                        ai_profile="",
+                        require_review=False,
+                    )
+                return summary, seen_batches
+
+        body_summary, body_batches = run_case(False)
+        full_summary, full_batches = run_case(True)
+
+        self.assertEqual(body_summary["segments_total"], 1)
+        self.assertEqual(body_batches, [["psu:paper:1:00001:body"]])
+        self.assertEqual(full_summary["segments_total"], 2)
+        self.assertEqual(full_batches, [["psu:paper:1:00001:body", "psu:paper:9:00099:ref"]])
+
     def test_build_paper_structure_units_orders_two_columns_without_cross_column_merge(self) -> None:
         if not pymupdf_available():
             self.skipTest("PyMuPDF is not available")
@@ -2198,6 +2543,69 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(by_segment[segments[1].segment_id].source_hash, segments[1].text_hash)
         self.assertEqual(by_segment[segments[2].segment_id].translated_text, f"zh:{segments[2].segment_id}")
 
+    def test_translate_full_paper_persists_each_successful_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:source-paper-grounded:{index:05d}",
+                    source_id=source_id,
+                    page=1,
+                    order=index,
+                    text=f"Batch passage {index}.",
+                    text_hash=text_hash(f"Batch passage {index}."),
+                )
+                for index in range(1, 4)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, segments)
+
+            calls = 0
+
+            def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    self.assertEqual(len(load_paper_translations(profile, source_id)), 2)
+                    raise RuntimeError("provider interrupted")
+                return SimpleNamespace(
+                    warnings=[],
+                    error="",
+                    structured={
+                        "translations": [
+                            {
+                                "segment_id": row["segment_id"],
+                                "source_hash": row["text_hash"],
+                                "source_text": row["text"],
+                                "target_lang": target_lang,
+                                "translated_text": f"zh:{row['segment_id']}",
+                            }
+                            for row in batch
+                        ]
+                    },
+                )
+
+            with (
+                patch("nblane.core.ai.gateway.translate_paper_segments", side_effect=fake_translate),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                summary = translate_full_paper(
+                    profile,
+                    source_id,
+                    target_lang="zh",
+                    mode="all",
+                    batch_size=2,
+                    ai_profile="",
+                    require_review=False,
+                )
+            translations = load_paper_translations(profile, source_id)
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(summary["updated"], 2)
+        self.assertEqual(len(translations), 2)
+        self.assertTrue(any("provider interrupted" in warning for warning in summary["warnings"]))
+
     def test_translate_full_paper_rejects_hash_mismatch_without_overwriting_current_translation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
@@ -2462,6 +2870,17 @@ class TestResearchPapers(unittest.TestCase):
                 "canonical_url": "https://example.com/a",
                 "pdf_url": "https://example.com/a.pdf",
                 "tags": ["vla"],
+                "abstract": "A compact abstract for triage.",
+                "why_relevant": "Matches the current collection.",
+                "ai_summary": "This is a plain-language overview for coarse reading.",
+                "explanation_links": [
+                    {
+                        "title": "知乎讲解",
+                        "url": "https://www.zhihu.com/question/demo",
+                        "source": "Zhihu",
+                        "summary": "Chinese explainer for the method.",
+                    }
+                ],
             }
             with patch("nblane.core.research_sources.git_backup.record_change"):
                 imported = import_paper_search_results(
@@ -2483,7 +2902,11 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(sources[imported[0]].visibility, "private")
         self.assertEqual(sources[imported[0]].status, "reading")
         self.assertEqual(sources[imported[0]].library_node_refs, ["paper-node:vla"])
+        self.assertEqual(sources[imported[0]].summary, "A compact abstract for triage.")
         self.assertEqual(sources[imported[0]].metadata["doi"], "10.1000/demo")
+        self.assertEqual(sources[imported[0]].metadata["why_relevant"], "Matches the current collection.")
+        self.assertEqual(sources[imported[0]].metadata["ai_summary"], "This is a plain-language overview for coarse reading.")
+        self.assertEqual(sources[imported[0]].metadata["explanation_links"][0]["source"], "Zhihu")
 
     def test_search_papers_with_codex_uses_structured_candidates_without_importing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2495,8 +2918,11 @@ class TestResearchPapers(unittest.TestCase):
                         {
                             "title": "Grounded Candidate",
                             "url": "https://example.com/grounded",
+                            "pdf_url": "https://example.com/grounded.pdf",
                             "doi": "10.1000/grounded",
-                            "provider_refs": ["semantic_scholar:grounded"],
+                            "provider_refs": ["openalex:grounded"],
+                            "ai_summary": "A concise search-time overview.",
+                            "explanation_links": [{"title": "Explainer", "url": "https://example.com/explainer"}],
                             "reason": "Matches the query.",
                         },
                     ],
@@ -2513,7 +2939,7 @@ class TestResearchPapers(unittest.TestCase):
                 rows = search_papers_with_codex(
                     profile,
                     "VLA memory",
-                    filters={"providers": ["semantic_scholar"], "limit": 5},
+                    filters={"providers": ["semantic_scholar"], "limit": 5, "codex_timeout_seconds": 8},
                     context_refs={
                         "context_refs": ["goal:vla"],
                         "project_refs": ["project:piper"],
@@ -2524,13 +2950,109 @@ class TestResearchPapers(unittest.TestCase):
 
         self.assertEqual([row.title for row in rows], ["Grounded Candidate"])
         self.assertEqual(rows[0].doi, "10.1000/grounded")
+        self.assertEqual(rows[0].pdf_url, "https://example.com/grounded.pdf")
+        self.assertEqual(rows[0].provider_refs, ["openalex:grounded"])
+        self.assertEqual(rows[0].ai_summary, "A concise search-time overview.")
+        self.assertEqual(rows[0].explanation_links[0]["title"], "Explainer")
         self.assertEqual(len(sources), 1)
         payload = run.call_args.args[1]
         self.assertEqual(payload["query"], "VLA memory")
+        self.assertEqual(payload["codex_timeout_seconds"], 8.0)
+        self.assertEqual(payload["codex_reasoning_effort"], "medium")
+        self.assertEqual(payload["codex_search_depth"], "quick")
+        self.assertEqual(payload["codex_home_policy"], "default")
+        self.assertFalse(payload["profile_context_used"])
+        self.assertEqual(payload["profile_context_policy"], "not_sent_for_discovery")
+        self.assertEqual(payload["context_refs"], [])
+        self.assertNotIn("project_refs", payload)
+        self.assertNotIn("goal_refs", payload)
+        self.assertNotIn("already_imported", payload)
+        self.assertNotIn("library_tree_hint", payload)
+        self.assertEqual(run.call_args.kwargs["profile"], "")
+        self.assertEqual(run.call_args.kwargs["runtime_profile"], profile.name)
+
+    def test_search_papers_with_codex_can_request_profile_codex_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            codex_result = SimpleNamespace(
+                structured={"results": [], "warnings": []},
+                warnings=[],
+                ok=True,
+                error="",
+            )
+            with (
+                patch("nblane.core.ai.gateway.run_ai_action", return_value=codex_result) as run,
+                patch("nblane.core.research_papers.search_papers", return_value=[]),
+            ):
+                search_papers_with_codex(
+                    profile,
+                    "vla最新论文",
+                    filters={"limit": 1, "codex_home_policy": "profile"},
+                )
+
+        payload = run.call_args.args[1]
+        self.assertEqual(payload["codex_home_policy"], "profile")
+        self.assertEqual(payload["reply_language"], "zh")
+
+    def test_paper_search_query_variants_translate_chinese_latest_vla_intent(self) -> None:
+        variants = _paper_search_query_variants("vla最新论文", {})
+
+        self.assertIn("vision language action robotics manipulation", variants)
+        self.assertIn("Vision-Language-Action robot manipulation latest", variants)
+        self.assertLess(
+            variants.index("vision language action robotics manipulation"),
+            variants.index("vla最新论文"),
+        )
+
+    def test_paper_search_query_variants_do_not_corrupt_openvla(self) -> None:
+        variants = _paper_search_query_variants("OpenVLA robot manipulation", {})
+
+        self.assertIn("OpenVLA robot manipulation", variants)
+        self.assertNotIn("OpenVision-Language-Action robot manipulation", variants)
+
+    def test_search_papers_with_codex_can_opt_into_profile_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            codex_result = SimpleNamespace(
+                structured={
+                    "results": [
+                        {
+                            "title": "Profile-Aware Candidate",
+                            "pdf_url": "https://example.com/profile-aware.pdf",
+                            "provider_refs": ["arxiv"],
+                        },
+                    ],
+                    "warnings": [],
+                },
+                warnings=[],
+                ok=True,
+                error="",
+            )
+            with patch(
+                "nblane.core.ai.gateway.run_ai_action",
+                return_value=codex_result,
+            ) as run:
+                rows = search_papers_with_codex(
+                    profile,
+                    "VLA memory",
+                    filters={"limit": 5, "use_profile_context": True},
+                    context_refs={
+                        "context_refs": ["goal:vla"],
+                        "project_refs": ["project:piper"],
+                        "goal_refs": ["goal:vla"],
+                    },
+                )
+
+        payload = run.call_args.args[1]
+        self.assertEqual([row.title for row in rows], ["Profile-Aware Candidate"])
+        self.assertTrue(payload["profile_context_used"])
+        self.assertEqual(payload["profile_context_policy"], "available_for_optional_rerank")
+        self.assertEqual(payload["context_refs"], ["goal:vla"])
         self.assertEqual(payload["project_refs"], ["project:piper"])
         self.assertEqual(payload["goal_refs"], ["goal:vla"])
         self.assertIn("already_imported", payload)
         self.assertIn("library_tree_hint", payload)
+        self.assertEqual(run.call_args.kwargs["profile"], profile.name)
 
     def test_search_papers_with_codex_falls_back_to_provider_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2545,6 +3067,7 @@ class TestResearchPapers(unittest.TestCase):
                 PaperSearchResult(
                     title="Provider Candidate",
                     canonical_url="https://example.com/provider",
+                    pdf_url="https://example.com/provider.pdf",
                     provider_refs=["arxiv"],
                 )
             ]
@@ -2568,6 +3091,104 @@ class TestResearchPapers(unittest.TestCase):
         provider_search.assert_called_once()
         self.assertEqual(provider_search.call_args.args[1], ("arxiv",))
         self.assertEqual(provider_search.call_args.args[2], 3)
+        self.assertTrue(provider_search.call_args.args[3]["has_open_access_pdf"])
+
+    def test_search_papers_filters_year_and_uses_arxiv_web_expansion(self) -> None:
+        html = """
+        <ol>
+          <li class="arxiv-result">
+            <p class="list-title is-inline-block">
+              <a href="https://arxiv.org/abs/2508.19236">arXiv:2508.19236</a>
+              <span>[<a href="https://arxiv.org/pdf/2508.19236">pdf</a>]</span>
+            </p>
+            <div class="tags is-inline-block">
+              <span class="tag is-small">cs.RO</span>
+              <span class="tag is-small">cs.CV</span>
+            </div>
+            <p class="title is-5 mathjax">
+              <span class="search-hit mathjax">MemoryVLA</span>: Perceptual-Cognitive Memory
+            </p>
+            <p class="authors">
+              <a href="/search/?searchtype=author&amp;query=Shi%2C+H">Hao Shi</a>,
+              <a href="/search/?searchtype=author&amp;query=Xie%2C+B">Bin Xie</a>
+            </p>
+            <p class="abstract mathjax">
+              <span class="abstract-full has-text-grey-dark mathjax">
+                Vision-Language-Action memory for robotic manipulation.
+              </span>
+            </p>
+            <p class="is-size-7"><span>Submitted</span> 26 August, 2025;</p>
+          </li>
+        </ol>
+        """
+        stale_provider = SimpleNamespace(
+            provider="semantic_scholar",
+            title="VLA-4 memory T cell paper",
+            url="https://example.com/medical",
+            authors=[],
+            published="2022",
+            summary="Integrin VLA memory T cells.",
+            tags=["semantic-scholar"],
+            metadata={"open_access_pdf_url": "https://example.com/medical.pdf"},
+            external_id="medical",
+        )
+        fake_adapter = SimpleNamespace(discover=lambda config: [stale_provider])
+        debug: dict[str, object] = {}
+
+        with (
+            patch.dict("nblane.core.research_connectors.ADAPTERS", {"semantic_scholar": fake_adapter}),
+            patch("nblane.core.research_papers._fetch_arxiv_search_html", return_value=html) as fetch_html,
+        ):
+            rows = search_papers(
+                "vla memory",
+                ("semantic_scholar", "arxiv_html"),
+                3,
+                {"year_from": "2025", "has_open_access_pdf": True, "provider_timeout_seconds": 2},
+                debug=debug,
+            )
+
+        self.assertEqual([row.title for row in rows], ["MemoryVLA: Perceptual-Cognitive Memory"])
+        self.assertEqual(rows[0].arxiv_id, "2508.19236")
+        self.assertEqual(rows[0].pdf_url, "https://arxiv.org/pdf/2508.19236")
+        self.assertIn("VLA/Vision-Language-Action", rows[0].why_relevant)
+        self.assertIn("direct PDF", rows[0].why_relevant)
+        self.assertEqual(rows[0].explanation_links[0]["source"], "arXiv")
+        self.assertIn("MemoryVLA", [call.args[0] for call in fetch_html.call_args_list])
+        self.assertEqual(debug["dropped"]["year"], 1)
+        self.assertTrue(any(step["stage"] == "arxiv_html" for step in debug["steps"]))
+
+    def test_search_papers_enriches_provider_candidates_for_triage(self) -> None:
+        provider_item = SimpleNamespace(
+            provider="openalex",
+            title="ReMem-VLA: Empowering Vision-Language-Action Model with Memory",
+            url="https://arxiv.org/abs/2502.00001",
+            authors=["Ada Chen"],
+            published="2025",
+            summary="A memory mechanism for Vision-Language-Action robotic manipulation.",
+            tags=["cs.RO"],
+            metadata={
+                "venue": "arXiv",
+                "open_access_pdf_url": "https://arxiv.org/pdf/2502.00001",
+            },
+            external_id="W2502",
+        )
+        fake_adapter = SimpleNamespace(discover=lambda config: [provider_item])
+
+        with patch.dict("nblane.core.research_connectors.ADAPTERS", {"openalex": fake_adapter}):
+            rows = search_papers(
+                "VLA memory",
+                ("openalex",),
+                3,
+                {"year_from": "2025", "has_open_access_pdf": True},
+            )
+
+        self.assertEqual([row.title for row in rows], [provider_item.title])
+        self.assertNotEqual(rows[0].why_relevant, "Matched provider search query.")
+        self.assertIn("VLA/Vision-Language-Action", rows[0].why_relevant)
+        self.assertIn("memory", rows[0].why_relevant)
+        self.assertIn("direct PDF", rows[0].why_relevant)
+        self.assertEqual(rows[0].explanation_links[0]["title"], "arXiv abstract")
+        self.assertEqual(rows[0].explanation_links[0]["source"], "arXiv")
 
     def test_import_pdf_download_skips_unchecked_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2589,6 +3210,129 @@ class TestResearchPapers(unittest.TestCase):
 
         self.assertEqual(source.metadata["pdf_download_status"], "skipped_needs_link_check")
         self.assertNotIn("pdf_asset_ref", source.metadata)
+
+    def test_import_pdf_download_failure_records_warning_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            result = {
+                "candidate_id": "candidate-slow-pdf",
+                "title": "Slow PDF",
+                "pdf_url": "https://example.com/slow.pdf",
+            }
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.download_paper_pdf", side_effect=TimeoutError("network too slow")),
+            ):
+                imported = import_paper_search_results(
+                    profile,
+                    [result],
+                    ["candidate-slow-pdf"],
+                    {"download_pdf": True},
+                )
+            source = load_research_sources(profile).by_id()[imported[0]]
+
+        self.assertEqual(source.metadata["pdf_download_status"], "failed")
+        self.assertIn("PDF download failed during import", source.metadata["pdf_download_error"])
+        self.assertNotIn("pdf_asset_ref", source.metadata)
+
+    def test_download_paper_pdf_uses_total_deadline_for_slow_streams(self) -> None:
+        class SlowResponse:
+            headers = {"content-length": "999999"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self, size: int) -> bytes:
+                return PDF_BYTES[: min(size, len(PDF_BYTES))]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "NBLANE_PAPER_PDF_DOWNLOAD_TIMEOUT_SECONDS": "1",
+                        "NBLANE_PAPER_PDF_DOWNLOAD_IDLE_TIMEOUT_SECONDS": "1",
+                    },
+                ),
+                patch("nblane.core.research_papers.urllib.request.urlopen", return_value=SlowResponse()),
+                patch("nblane.core.research_papers.time.monotonic", side_effect=[0.0, 0.0, 2.0]),
+            ):
+                with self.assertRaises(TimeoutError):
+                    download_paper_pdf(profile, "source:paper:grounded", "https://example.com/slow.pdf")
+
+    def test_paper_library_download_pdf_event_can_retry_existing_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                "source:paper:grounded",
+                metadata={"open_access_pdf_url": "https://example.com/retry.pdf"},
+            )
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                save_research_sources(profile, inbox)
+
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.download_paper_pdf", side_effect=TimeoutError("network too slow")),
+            ):
+                result = handle_paper_library_event(
+                    profile,
+                    {
+                        "action": "paper_library_download_pdf",
+                        "payload": {"paper_ids": ["source:paper:grounded"]},
+                    },
+                )
+            source = load_research_sources(profile).by_id()["source:paper:grounded"]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.next["action"], "attach_pdf")
+        self.assertEqual(source.metadata["pdf_download_status"], "failed")
+        self.assertTrue(result.warnings)
+
+    def test_pdf_download_retry_keeps_existing_local_asset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                asset = import_paper_pdf(
+                    profile,
+                    "source:paper:grounded",
+                    PDF_BYTES,
+                    "grounded.pdf",
+                    pdf_url="https://example.com/grounded.pdf",
+                )
+            inbox = load_research_sources(profile)
+            existing_metadata = dict(inbox.by_id()["source:paper:grounded"].metadata or {})
+            update_research_source(
+                inbox,
+                "source:paper:grounded",
+                metadata={
+                    **existing_metadata,
+                    "open_access_pdf_url": "https://example.com/grounded.pdf",
+                    "pdf_download_status": "failed",
+                    "pdf_download_error": "previous slow retry",
+                },
+            )
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                save_research_sources(profile, inbox)
+
+            with patch("nblane.core.research_papers.download_paper_pdf") as download:
+                summary = ensure_paper_pdf_downloaded(profile, "source:paper:grounded")
+            source = load_research_sources(profile).by_id()["source:paper:grounded"]
+
+        download.assert_not_called()
+        self.assertEqual(summary["status"], "downloaded")
+        self.assertEqual(summary["asset_ref"], asset.asset_ref)
+        self.assertEqual(source.metadata["pdf_download_status"], "downloaded")
+        self.assertEqual(source.metadata["pdf_download_error"], "")
 
     def test_grobid_tei_to_segments_and_bibliography(self) -> None:
         tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -2727,6 +3471,266 @@ class TestResearchPapers(unittest.TestCase):
         self.assertIn("GROBID unavailable", " ".join(source.metadata["structured_extraction_warnings"]))
         self.assertIn("GROBID unavailable", diagnostics["badges"])
 
+    def test_fallback_segments_clear_needs_structured_extraction_badge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "structure_backend": "pymupdf_fallback",
+                    "structured_extraction_warnings": ["GROBID unavailable in test"],
+                    "grobid_status": "unavailable",
+                    "grobid_available": False,
+                },
+            )
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_workspace.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:source-paper-grounded:00001",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Fallback paragraph.",
+                        )
+                    ],
+                )
+                create_chunk(profile, source_id, "Fallback paragraph.", locator="p. 1")
+
+            diagnostics = paper_source_diagnostics(profile, source_id)
+            needs_extraction_rows = paper_rows(profile, view="needs_extraction")
+
+        self.assertNotIn("Needs structured extraction", diagnostics["badges"])
+        self.assertIn("Fallback ready", diagnostics["badges"])
+        self.assertIn("GROBID unavailable", diagnostics["badges"])
+        self.assertNotIn(source_id, [row["id"] for row in needs_extraction_rows])
+
+    def test_run_extraction_upgrades_existing_fallback_segments_with_grobid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "pdf_sha256": "abc123",
+                    "reading_artifacts_pdf_sha256": "abc123",
+                    "structure_backend": "pymupdf_fallback",
+                },
+            )
+
+            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto"):
+                self.assertEqual(backend, "grobid")
+                segments = [
+                    PaperSegment(
+                        segment_id="seg:source-paper-grounded:00001",
+                        source_id=source_id_arg,
+                        page=1,
+                        order=1,
+                        text="GROBID paragraph.",
+                    )
+                ]
+                save_paper_segments(profile_arg, source_id_arg, segments)
+                source_inbox = load_research_sources(profile_arg)
+                update_research_source(
+                    source_inbox,
+                    source_id_arg,
+                    metadata={
+                        "structure_backend": "grobid",
+                        "structured_extraction_warnings": [],
+                        "grobid_status": "available",
+                        "grobid_available": True,
+                    },
+                )
+                save_research_sources(profile_arg, source_inbox)
+                return segments
+
+            with (
+                patch.dict(os.environ, {"NBLANE_GROBID_URL": ""}),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                save_paper_pages(profile, source_id, [PaperPage(source_id=source_id, page=1, text="Page text.")])
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:source-paper-grounded:00001",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Fallback paragraph.",
+                        )
+                    ],
+                )
+                with patch(
+                    "nblane.core.research_papers.extract_paper_segments",
+                    side_effect=fake_grobid_segments,
+                ) as extract_mock:
+                    result = ensure_paper_reading_artifacts(profile, source_id)
+
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(result["structure_backend"], "grobid")
+        self.assertEqual(source.metadata["structure_backend"], "grobid")
+        extract_mock.assert_called_once()
+
+    def test_run_extraction_skips_recent_grobid_timeout_when_fallback_is_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "pdf_sha256": "abc123",
+                    "reading_artifacts_pdf_sha256": "abc123",
+                    "reading_artifacts_status": "fallback",
+                    "structure_backend": "pymupdf_fallback",
+                    "structured_extracted_at": "2999-01-01T00:00:00+00:00",
+                    "structured_extraction_warnings": ["GROBID extraction failed: timed out"],
+                    "grobid_last_error": "GROBID extraction failed: timed out",
+                    "grobid_last_failed_at": "2999-01-01T00:00:00+00:00",
+                    "grobid_failure_pdf_sha256": "abc123",
+                },
+            )
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                save_paper_pages(profile, source_id, [PaperPage(source_id=source_id, page=1, text="Page text.")])
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:source-paper-grounded:00001",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Fallback paragraph.",
+                        )
+                    ],
+                )
+                progress: list[dict[str, object]] = []
+                with patch("nblane.core.research_papers.extract_paper_segments") as extract_mock:
+                    result = ensure_paper_reading_artifacts(
+                        profile,
+                        source_id,
+                        progress_callback=progress.append,
+                    )
+
+            diagnostics = paper_source_diagnostics(profile, source_id)
+            needs_extraction_rows = paper_rows(profile, view="needs_extraction")
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual(result["structure_backend"], "pymupdf_fallback")
+        self.assertEqual([row["phase"] for row in progress], ["fallback_ready", "done"])
+        extract_mock.assert_not_called()
+        self.assertIn("Fallback ready", diagnostics["badges"])
+        self.assertNotIn(source_id, [row["id"] for row in needs_extraction_rows])
+
+    def test_force_grobid_upgrade_bypasses_recent_timeout_cooldown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "pdf_sha256": "abc123",
+                    "reading_artifacts_pdf_sha256": "abc123",
+                    "reading_artifacts_status": "fallback",
+                    "structure_backend": "pymupdf_fallback",
+                    "structured_extraction_warnings": ["GROBID extraction failed: timed out"],
+                    "grobid_last_error": "GROBID extraction failed: timed out",
+                    "grobid_last_failed_at": "2999-01-01T00:00:00+00:00",
+                    "grobid_failure_pdf_sha256": "abc123",
+                },
+            )
+
+            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto"):
+                self.assertEqual(backend, "grobid")
+                segments = [
+                    PaperSegment(
+                        segment_id="seg:source-paper-grounded:00001",
+                        source_id=source_id_arg,
+                        page=1,
+                        order=1,
+                        text="GROBID paragraph.",
+                    )
+                ]
+                save_paper_segments(profile_arg, source_id_arg, segments)
+                source_inbox = load_research_sources(profile_arg)
+                update_research_source(
+                    source_inbox,
+                    source_id_arg,
+                    metadata={
+                        "structure_backend": "grobid",
+                        "structured_extraction_warnings": [],
+                        "grobid_status": "available",
+                        "grobid_available": True,
+                    },
+                )
+                save_research_sources(profile_arg, source_inbox)
+                return segments
+
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                save_paper_pages(profile, source_id, [PaperPage(source_id=source_id, page=1, text="Page text.")])
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:source-paper-grounded:00001",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Fallback paragraph.",
+                        )
+                    ],
+                )
+                with patch(
+                    "nblane.core.research_papers.extract_paper_segments",
+                    side_effect=fake_grobid_segments,
+                ) as extract_mock:
+                    result = ensure_paper_reading_artifacts(
+                        profile,
+                        source_id,
+                        force_grobid=True,
+                    )
+
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(result["structure_backend"], "grobid")
+        self.assertEqual(source.metadata["structure_backend"], "grobid")
+        extract_mock.assert_called_once()
+
     def test_structured_extraction_clears_stale_grobid_warnings_on_success(self) -> None:
         tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
           <text><body><div><head>Abstract</head><p>Structured segment.</p></div></body></text>
@@ -2803,6 +3807,8 @@ class TestResearchPapers(unittest.TestCase):
             overview = paper_overview(profile)
             bib = format_research_citations(profile, [citation.id], format="bibtex")
             md = format_research_citations(profile, [citation.id], format="markdown")
+            ris = format_research_citations(profile, [citation.id], format="ris")
+            csl = format_research_citations(profile, [citation.id], format="csl-json")
             note = create_reading_note_markdown(
                 profile,
                 "source:paper:grounded",
@@ -2833,6 +3839,10 @@ class TestResearchPapers(unittest.TestCase):
         self.assertIn("@article", bib)
         self.assertIn("Grounded Claims", bib)
         self.assertIn("Claims should cite chunks.", md)
+        self.assertIn("TY  - JOUR", ris)
+        self.assertIn("TI  - Grounded Claims", ris)
+        self.assertIn('"type": "article-journal"', csl)
+        self.assertIn('"title": "Grounded Claims"', csl)
         self.assertIn("## Chunks", note)
         self.assertIn("## Claims", note)
         self.assertIn("## Citations", note)
@@ -2841,6 +3851,53 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(manifest["export_file"], export_path.name)
         self.assertEqual(manifest["source_refs"], ["source:paper:grounded"])
         self.assertEqual(changed_paths, [export_path, manifest_path])
+
+    def test_reading_note_pack_collects_multiple_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            inbox = load_research_sources(profile)
+            add_research_source(
+                inbox,
+                "Second Paper",
+                source_id="source:paper:second",
+                kind="paper",
+                visibility="public",
+            )
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_workspace.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                first_chunk = create_chunk(
+                    profile,
+                    "source:paper:grounded",
+                    "Grounded first excerpt.",
+                )
+                second_chunk = create_chunk(
+                    profile,
+                    "source:paper:second",
+                    "Second excerpt.",
+                )
+                second_claim = upsert_research_claim(
+                    profile,
+                    "Second source claim.",
+                    source_refs=["source:paper:second"],
+                    chunk_refs=[second_chunk.id],
+                )
+
+            pack = create_reading_note_pack_markdown(
+                profile,
+                ["source:paper:grounded", "source:paper:second"],
+                chunk_refs=[first_chunk.id, second_chunk.id],
+                claim_refs=[second_claim.id],
+                title="Two Paper Pack",
+            )
+
+        self.assertIn("# Two Paper Pack", pack)
+        self.assertIn("Grounded Claims (`source:paper:grounded`)", pack)
+        self.assertIn("Second Paper (`source:paper:second`)", pack)
+        self.assertIn("Grounded first excerpt.", pack)
+        self.assertIn("Second source claim.", pack)
 
     def test_quote_mismatch_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

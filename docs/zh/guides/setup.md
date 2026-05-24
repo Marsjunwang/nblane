@@ -11,8 +11,8 @@ source_of_truth: true
 
 - Python >= 3.11
 - Git
-- Node.js >= 18 与 npm >= 9 仅在重新构建内置 Streamlit 前端组件时需要，
-  例如 Kanban 看板组件；如果要通过 nblane 安装 Codex CLI，也需要 npm。
+- Node.js >= 18 与 npm >= 9 仅在重新构建内置 Streamlit 前端组件、运行
+  Playwright 浏览器 e2e、或通过 nblane 安装 Codex CLI 时需要。
 
 ## 安装
 
@@ -34,6 +34,40 @@ pip install -e .
 | `pandas` | Web UI 数据处理 |
 
 如果只使用 CLI（不需要 Web UI 和 AI 功能），同样执行 `pip install -e .` 即可，所有依赖都很轻量。
+
+### 可选：浏览器 e2e 依赖
+
+仓库根目录的 `tests/e2e` 使用 Playwright。第一次运行浏览器 e2e 前，先安装
+Node 依赖和 Chromium 浏览器二进制：
+
+```bash
+npm install
+npm run test:e2e:install
+```
+
+国内网络环境建议改用镜像源。`npm` 包和 Playwright 浏览器二进制是两条下载链路，
+需要分别指定：
+
+```bash
+npm_config_registry=https://registry.npmmirror.com npm install
+npm run test:e2e:install:cn
+```
+
+`test:e2e:install:cn` 当前面向 Linux x64 开发机，会从
+`cdn.npmmirror.com/binaries/chrome-for-testing` 下载 Chrome for Testing /
+Headless Shell，并从 `cdn.npmmirror.com/binaries/playwright` 下载 ffmpeg。
+如需改成内网缓存地址，可设置 `NBLANE_CHROME_FOR_TESTING_MIRROR` 和
+`NBLANE_PLAYWRIGHT_BINARY_MIRROR`。
+
+安装完成后可运行：
+
+```bash
+npm run test:e2e
+```
+
+该步骤会把 Chromium 下载到本机 Playwright 缓存中，不会写入仓库。CI、全新机器
+或清空 `~/.cache/ms-playwright` 后都需要重新执行 `npm run test:e2e:install`
+或国内镜像版 `npm run test:e2e:install:cn`。
 
 ### 重新构建内置前端组件
 
@@ -109,14 +143,17 @@ nblane 读取以下环境变量：
 | `NBLANE_CODEX_ATTEMPTS` | `1` | Codex Cloud `--attempts`。 |
 | `NBLANE_CODEX_BRANCH` | *(空)* | Codex Cloud `--branch`；为空时使用当前/默认分支。 |
 | `NBLANE_CODEX_TIMEOUT_SECONDS` | `180` | nblane 等待 Codex CLI 命令的超时时间。 |
-| `NBLANE_CODEX_HOME_ROOT` | `~/.nblane/codex/profiles` | Web 中 profile 专属 Codex home 的根目录；每个 profile 会得到 `<safe-profile>-<sha12>` 子目录。 |
+| `NBLANE_CODEX_HOME` | `CODEX_HOME` 或 `~/.codex` | nblane 使用的部署级 Codex home；云上建议指向持久化目录。 |
+| `NBLANE_CODEX_HOME_POLICY` | `default` | Codex home 策略。默认 `default` 使用部署级 / 终端同款 home；仅诊断时可设 `profile` 使用旧 profile 隔离 home。 |
+| `NBLANE_CODEX_HOME_ROOT` | `~/.nblane/codex/profiles` | 旧 profile 隔离 Codex home 的根目录；只在 `NBLANE_CODEX_HOME_POLICY=profile` 或显式请求 profile policy 时使用。 |
 
 这些 `NBLANE_CODEX_*` 是全局默认值。每个 profile 也可以有自己的
 `profiles/<name>/codex.yaml`。Web 中可在侧边栏 **AI / LLM** 展开
-**配置 Codex** 大弹窗，编辑当前 profile 专属 Web Codex home 下的
-`config.toml`、通过 `codex login --with-api-key` 写入该 home 下的
-`auth.json`，并编辑当前 profile 的 `codex.yaml`。直接在终端运行 `codex`
-仍使用默认 `~/.codex`；Web 保存 API key 不会改写终端默认 Codex。读取优先级为：
+**配置 Codex** 大弹窗，编辑部署级 Codex home 下的 `config.toml`、通过
+`codex login --with-api-key` 写入该 home 下的 `auth.json`，并编辑当前
+profile 的 `codex.yaml`。本地默认会复用终端/插件的 `~/.codex`；云上建议用
+`NBLANE_CODEX_HOME` 指向一个持久化 service-level Codex home。profile 不是
+Codex home 隔离边界；用户/profile 隔离由 nblane 的数据与权限层承担。读取优先级为：
 
 ```text
 默认值 / .env -> profiles/<name>/codex.yaml -> 当前进程 runtime override

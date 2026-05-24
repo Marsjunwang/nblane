@@ -100,6 +100,8 @@ def ai_match_goal_to_skills(
     goal: Goal | None,
     north_star_context: str = "",
     *,
+    backend: str = "llm",
+    model: str = "",
     limit: int = 5,
 ) -> list[GoalSkillLink]:
     """Return AI-routed goal-skill candidates without persisting them."""
@@ -108,9 +110,24 @@ def ai_match_goal_to_skills(
     if not schema_name or not index or not match_text:
         return []
 
-    from nblane.core.gap_llm_router import route_task_to_nodes
+    from nblane.core.gap_llm_router import route_task_to_nodes, route_task_to_nodes_codex
 
-    outcome = route_task_to_nodes(match_text, schema_name, index)
+    if backend == "codex":
+        profile_name = profile.name if isinstance(profile, Path) else str(profile)
+        outcome = route_task_to_nodes_codex(
+            profile_name,
+            match_text,
+            schema_name,
+            index,
+            model=model or None,
+        )
+    else:
+        outcome = route_task_to_nodes(
+            match_text,
+            schema_name,
+            index,
+            model=model or None,
+        )
     if not outcome.ok:
         return []
 
@@ -132,7 +149,7 @@ def ai_match_goal_to_skills(
             GoalSkillLink(
                 node_id=node_id,
                 label=_label(index, node_id),
-                source="ai",
+                source="codex" if backend == "codex" else "ai",
                 score=max(1, limit - rank + 1),
                 rationale=rationale,
             )

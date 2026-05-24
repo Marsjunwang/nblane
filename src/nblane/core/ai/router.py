@@ -62,6 +62,7 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             properties={
                 "results": {"type": "array"},
                 "warnings": {"type": "array"},
+                "query": {"type": "string"},
                 "ref": {"type": "string"},
             },
         ),

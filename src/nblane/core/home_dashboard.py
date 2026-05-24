@@ -9,6 +9,7 @@ import yaml
 
 from nblane.core import io as io_facade
 from nblane.core import profile_health
+from nblane.core.claims import claims_with_refresh_status
 from nblane.core.evidence_review import (
     EVIDENCE_REVIEW_PAGE,
     build_evidence_review,
@@ -338,24 +339,26 @@ def dashboard_kanban_summary(profile: ProfileRef) -> dict:
         for task in done
         if not getattr(task, "crystallized", False)
     ]
+    doing_items = [
+        {
+            "title": task.title,
+            "id": task.id,
+            "blocked_by": task.blocked_by,
+            "tags": task.tags,
+            "started_on": task.started_on or "",
+            "project_id": task.project_id,
+            "milestone_id": task.milestone_id,
+        }
+        for task in doing
+    ]
     return {
         "error": error,
         "counts": {
             section: len(sections.get(section) or [])
             for section in KANBAN_SECTIONS
         },
-        "doing": [
-            {
-                "title": task.title,
-                "id": task.id,
-                "blocked_by": task.blocked_by,
-                "tags": task.tags,
-                "started_on": task.started_on or "",
-                "project_id": task.project_id,
-                "milestone_id": task.milestone_id,
-            }
-            for task in doing[:5]
-        ],
+        "doing": doing_items[:5],
+        "doing_items": doing_items,
         "doing_total": len(doing),
         "done_uncrystallized_count": len(pending_done),
         "done_uncrystallized": [
@@ -380,6 +383,7 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
             "evidence_risk_nodes": [],
             "target_skills": [],
             "target_learning_locked": [],
+            "items": [],
         }
 
     schema_name = str(tree_raw.get("schema", "") or "")
@@ -405,6 +409,19 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
         )
 
     targets, target_hits = _target_skill_hits(profile, tree_raw, index)
+    items: list[dict[str, str]] = []
+    for node in _as_list(tree_raw.get("nodes")):
+        if not isinstance(node, dict) or not node.get("id"):
+            continue
+        node_id = str(node.get("id") or "")
+        items.append(
+            {
+                "id": node_id,
+                "label": _node_label(index, node_id),
+                "status": str(node.get("status", "locked") or "locked"),
+                "category": str((index.get(node_id) or {}).get("category") or ""),
+            }
+        )
     return {
         "has_tree": True,
         "schema": schema_name,
@@ -416,6 +433,7 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
         "evidence_risk_nodes": risk_nodes[:5],
         "target_skills": targets,
         "target_learning_locked": target_hits[:5],
+        "items": items,
     }
 
 
@@ -425,6 +443,7 @@ def dashboard_pending_evidence_summary(profile: ProfileRef) -> dict:
     summary = review.get("summary") or {}
     return {
         "total_entries": int(summary.get("total_entries", 0) or 0),
+        "evidence_rows": list(review.get("evidence_rows") or []),
         "unlinked_count": int(summary.get("unlinked_count", 0) or 0),
         "unlinked": list(review.get("unlinked") or [])[:5],
         "needs_review_count": int(summary.get("needs_review_count", 0) or 0),
@@ -455,6 +474,7 @@ def dashboard_source_summary(profile: ProfileRef) -> dict:
             "active_total": 0,
             "status_counts": {},
             "active_titles": [],
+            "items": [],
         }
 
     status_counts: dict[str, int] = {}
@@ -480,6 +500,23 @@ def dashboard_source_summary(profile: ProfileRef) -> dict:
         "active_total": active_total,
         "status_counts": status_counts,
         "active_titles": active_titles[:5],
+        "items": [
+            {
+                "id": source.id,
+                "title": source.title,
+                "kind": source.kind,
+                "status": source.status,
+                "visibility": source.visibility,
+                "origin": source.origin,
+                "summary": source.summary,
+                "tags": list(source.tags),
+                "goal_refs": list(source.goal_refs),
+                "project_refs": list(source.project_refs),
+                "evidence_refs": list(source.evidence_refs),
+            }
+            for source in inbox.sources
+            if source.id
+        ],
     }
 
 
@@ -644,6 +681,90 @@ def dashboard_public_summary(profile: ProfileRef) -> dict:
         "build_pages": (
             len(list(output_dir.rglob("*.html"))) if output_dir.exists() else 0
         ),
+        "items": [
+            {
+                "id": str(item.get("id") or item.get("slug") or item.get("title") or f"output:{idx}"),
+                "title": str(item.get("title") or item.get("name") or item.get("id") or "Output"),
+                "status": str(item.get("status", "draft") or "draft"),
+                "summary": str(item.get("summary", "") or ""),
+                "kind": "output",
+                "evidence_refs": _clean_string_list(item.get("evidence_refs")),
+                "claim_refs": _clean_string_list(item.get("claim_refs")),
+                "skill_refs": _clean_string_list(item.get("skill_refs")),
+            }
+            for idx, item in enumerate(outputs)
+            if isinstance(item, dict)
+        ],
+        "project_items": [
+            {
+                "id": str(item.get("id") or item.get("slug") or item.get("title") or f"public_project:{idx}"),
+                "title": str(item.get("title") or item.get("name") or item.get("id") or "Public project"),
+                "status": str(item.get("status", "draft") or "draft"),
+                "summary": str(item.get("summary", "") or ""),
+                "kind": "public_project",
+                "evidence_refs": _clean_string_list(item.get("evidence_refs")),
+                "claim_refs": _clean_string_list(item.get("claim_refs")),
+                "skill_refs": _clean_string_list(item.get("skill_refs")),
+            }
+            for idx, item in enumerate(projects)
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def dashboard_claim_summary(profile: ProfileRef) -> dict:
+    """Return privacy-safe claim counts for the Home dashboard."""
+    try:
+        rows = claims_with_refresh_status(profile)
+    except OSError as exc:
+        return {
+            "error": str(exc),
+            "total": 0,
+            "accepted_count": 0,
+            "draft_count": 0,
+            "needs_refresh_count": 0,
+            "status_counts": {},
+            "refresh_status_counts": {},
+            "items": [],
+        }
+
+    status_counts: dict[str, int] = {}
+    refresh_counts: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "draft").strip() or "draft"
+        refresh = str(row.get("refresh_status") or "").strip()
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if refresh:
+            refresh_counts[refresh] = refresh_counts.get(refresh, 0) + 1
+    return {
+        "error": "",
+        "total": len(rows),
+        "accepted_count": int(status_counts.get("accepted", 0) or 0),
+        "draft_count": int(status_counts.get("draft", 0) or 0),
+        "needs_refresh_count": int(refresh_counts.get("needs_refresh", 0) or 0),
+        "status_counts": status_counts,
+        "refresh_status_counts": refresh_counts,
+        "items": [
+            {
+                "id": str(row.get("id") or ""),
+                "status": str(row.get("status") or "draft"),
+                "refresh_status": str(row.get("refresh_status") or ""),
+                "type": str(row.get("type") or ""),
+                "text": str(row.get("text") or ""),
+                "evidence_refs": _clean_string_list(row.get("evidence_refs")),
+                "skill_refs": _clean_string_list(row.get("skill_refs")),
+                "project_refs": _clean_string_list(row.get("project_refs")),
+                "goal_refs": _clean_string_list(row.get("goal_refs")),
+                "source_refs": _clean_string_list(row.get("source_refs")),
+                "output_refs": _clean_string_list(row.get("output_refs")),
+                "public_readiness": str(row.get("public_readiness") or "private"),
+                "confidence": str(row.get("confidence") or ""),
+            }
+            for row in rows
+            if isinstance(row, dict) and str(row.get("id") or "").strip()
+        ],
     }
 
 
@@ -1073,6 +1194,7 @@ def dashboard_payload(
     projects = dashboard_project_summary(profile)
     health = dashboard_health_summary(profile)
     public = dashboard_public_summary(profile)
+    claims = dashboard_claim_summary(profile)
     book = _goal_book(profile)
     primary = book.primary()
     primary_goal_id = primary.id if primary is not None else ""
@@ -1110,6 +1232,7 @@ def dashboard_payload(
         "pending_evidence": pending,
         "health": health,
         "public": public,
+        "claims": claims,
         "charts": {
             "skills": {
                 "counts": skills.get("counts", {}),
@@ -1128,6 +1251,11 @@ def dashboard_payload(
                 "draft": public.get("draft_total", 0),
                 "published": public.get("published_total", 0),
             },
+            "claims": {
+                "accepted": claims.get("accepted_count", 0),
+                "draft": claims.get("draft_count", 0),
+                "needs_refresh": claims.get("needs_refresh_count", 0),
+            },
         },
         "graph": workspace_graph_payload(
             north_star=north_star,
@@ -1139,9 +1267,11 @@ def dashboard_payload(
             pending=pending,
             sources=sources,
             projects=projects,
+            claims=claims,
             public=public,
             health=health,
             ui=ui,
+            all_goals=book.goals,
         ),
         "quick_links": _quick_links_payload(ui),
         "ai": dict(ai or {}),

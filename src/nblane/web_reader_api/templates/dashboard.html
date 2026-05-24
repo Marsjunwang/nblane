@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard Canvas · nblane</title>
+    {% for href in styles %}
+    <link rel="stylesheet" crossorigin href="{{ href }}" />
+    {% endfor %}
+    <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+      }
+
+      body {
+        background: linear-gradient(180deg, #fbfcfb, #f2f6f4);
+        margin: 0;
+      }
+
+      #root {
+        margin: 0 auto;
+        max-width: 1680px;
+        padding: 14px 16px 24px;
+      }
+
+      body.dashboard-embed {
+        background: transparent;
+      }
+
+      body.dashboard-embed #root {
+        max-width: none;
+        padding: 0;
+      }
+
+      @media (max-width: 760px) {
+        #root {
+          padding: 10px 8px 18px;
+        }
+      }
+    </style>
+  </head>
+  <body class="{% if embed_json == 'true' %}dashboard-embed{% endif %}">
+    <div id="root"></div>
+    <script>
+      window.__NBLANE_DASHBOARD_STANDALONE__ = {
+        profile: {{ profile_json | safe }},
+        payloadUrl: "/api/dashboard/payload",
+        streamlitBase: {{ streamlit_base_json | safe }},
+        embed: {{ embed_json | safe }}
+      };
+    </script>
+    {% for src in scripts %}
+    <script type="module" crossorigin src="{{ src }}"></script>
+    {% endfor %}
+  </body>
+</html>

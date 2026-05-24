@@ -16,6 +16,10 @@ test("normalizePayload keeps stable defaults", () => {
     query: "robot",
     sort_mode: "title",
     detail_id: "source:paper:a",
+    focus: "artifacts",
+    action: "run_extraction",
+    return_to: "overview",
+    return_url: "http://127.0.0.1:8503/Research",
     selected_paper_ids: ["a", "", "b"],
     papers: [{ id: "source:paper:a" }],
     detail: { id: "source:paper:a", title: "A" },
@@ -30,6 +34,10 @@ test("normalizePayload keeps stable defaults", () => {
   assert.equal(payload.query, "robot");
   assert.equal(payload.sortMode, "title");
   assert.equal(payload.detailId, "source:paper:a");
+  assert.equal(payload.focus, "artifacts");
+  assert.equal(payload.action, "run_extraction");
+  assert.equal(payload.returnTo, "overview");
+  assert.equal(payload.returnUrl, "http://127.0.0.1:8503/Research");
   assert.deepEqual(payload.selectedPaperIds, ["a", "b"]);
   assert.equal(payload.papers.length, 1);
   assert.equal(payload.detail.title, "A");

@@ -13,8 +13,10 @@ from urllib.parse import quote
 from fastapi.testclient import TestClient
 
 from nblane.core.auth import mint_reader_token
+from nblane.core.paper_library_workspace import PaperLibraryEventResult
 from nblane.core.reader_actions import ReaderActionResult
 from nblane.core.research_papers import (
+    PaperSearchResult,
     PaperPage,
     PaperSegment,
     create_paper_annotation,
@@ -346,7 +348,11 @@ class TestWebReaderApi(unittest.TestCase):
             client = self._client(profile)
 
             page = client.get("/paper-library?profile=alice")
-            payload = client.get("/api/research/alice/paper-library")
+            payload = client.get(
+                "/api/research/alice/paper-library"
+                "?detail_id=source%3Apaper%3Agrounded&focus=artifacts&action=run_extraction"
+                "&return_to=overview&return_url=http%3A%2F%2F127.0.0.1%3A8503%2FResearch"
+            )
             with (
                 patch("nblane.core.research_papers.git_backup.record_change"),
                 patch("nblane.core.research_sources.git_backup.record_change"),
@@ -375,6 +381,35 @@ class TestWebReaderApi(unittest.TestCase):
                             "node_id": node_id,
                             "detail_id": source_id,
                             "sort_mode": "recent",
+                            "focus": "artifacts",
+                            "action": "run_extraction",
+                            "return_to": "overview",
+                            "return_url": "http://127.0.0.1:8503/Research",
+                        },
+                    },
+                )
+            with patch(
+                "nblane.core.paper_library_workspace.ensure_paper_reading_artifacts",
+                return_value={
+                    "source_id": source_id,
+                    "ready": True,
+                    "status": "ready",
+                    "pages": 1,
+                    "segments": 3,
+                    "warnings": [],
+                },
+            ):
+                extracted = client.post(
+                    "/api/research/alice/paper-library/events",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_run_extraction",
+                        "payload": {"paper_ids": [source_id]},
+                        "state": {
+                            "view": "needs_extraction",
+                            "detail_id": source_id,
+                            "focus": "artifacts",
+                            "action": "run_extraction",
                         },
                     },
                 )
@@ -386,12 +421,565 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("NBLANE_PAPER_LIBRARY_BOOTSTRAP", page.text)
         self.assertEqual(payload.status_code, 200)
         self.assertEqual(payload.json()["payload"]["metrics"]["papers"], 1)
+        self.assertEqual(payload.json()["payload"]["focus"], "artifacts")
+        self.assertEqual(payload.json()["payload"]["action"], "run_extraction")
+        self.assertEqual(payload.json()["payload"]["return_to"], "overview")
+        self.assertEqual(payload.json()["payload"]["return_url"], "http://127.0.0.1:8503/Research")
         self.assertEqual(created.status_code, 200)
         self.assertEqual(moved.status_code, 200)
         self.assertEqual(moved.json()["payload"]["active_node_id"], node_id)
         self.assertEqual(moved.json()["payload"]["detail"]["primary_node_id"], node_id)
+        self.assertEqual(moved.json()["payload"]["focus"], "artifacts")
+        self.assertEqual(moved.json()["payload"]["action"], "run_extraction")
+        self.assertEqual(moved.json()["payload"]["return_to"], "overview")
+        self.assertEqual(moved.json()["payload"]["return_url"], "http://127.0.0.1:8503/Research")
+        self.assertEqual(extracted.status_code, 200)
+        self.assertIn("Extraction ready", extracted.json()["result"]["message"])
+        self.assertEqual(extracted.json()["result"]["data"]["extraction_summaries"][0]["segments"], 3)
+        self.assertEqual(extracted.json()["payload"]["focus"], "artifacts")
+        self.assertEqual(extracted.json()["payload"]["action"], "")
         self.assertEqual(reader_token.status_code, 200)
         self.assertIn("/reader/view/source%3Apaper%3Agrounded", reader_token.json()["reader_url"])
+
+    def test_paper_library_search_and_import_require_pdf_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            preflight = client.options(
+                "/api/research/alice/paper-library/search",
+                headers={
+                    "Origin": "null",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            missing_query = client.post(
+                "/api/research/alice/paper-library/search",
+                headers={"Origin": "null"},
+                json={"mode": "codex", "query": ""},
+            )
+            rows = [
+                PaperSearchResult(
+                    title="Portable PDF Candidate",
+                    canonical_url="https://example.com/paper",
+                    pdf_url="https://example.com/paper.pdf",
+                    provider_refs=["openalex:anything"],
+                    abstract="PDF-backed candidate from an arbitrary provider.",
+                ),
+                PaperSearchResult(
+                    title="Metadata Only Candidate",
+                    canonical_url="https://example.com/no-pdf",
+                    provider_refs=["semantic_scholar:metadata"],
+                ),
+            ]
+
+            self.assertEqual(preflight.status_code, 204)
+            self.assertEqual(preflight.headers["access-control-allow-origin"], "null")
+            self.assertEqual(missing_query.status_code, 400)
+            self.assertEqual(missing_query.headers["access-control-allow-origin"], "null")
+
+            with (
+                patch("nblane.web_reader_api.search_papers_with_codex", return_value=rows) as search,
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                found = client.post(
+                    "/api/research/alice/paper-library/search",
+                    headers={"Origin": "http://testserver"},
+                    json={"mode": "codex", "query": "robot memory", "limit": 10},
+                )
+                candidates = found.json()["candidates"]
+                imported = client.post(
+                    "/api/research/alice/paper-library/import",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "candidates": candidates,
+                        "selected_ids": [candidates[0]["candidate_id"]],
+                        "download_pdf": False,
+                    },
+                )
+            sources = load_research_sources(profile).by_id()
+
+        self.assertEqual(found.status_code, 200)
+        search.assert_called_once()
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_budget_mode"], "auto")
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_timeout_seconds"], 180.0)
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_idle_timeout_seconds"], 60.0)
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_reasoning_effort"], "medium")
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_search_depth"], "quick")
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_home_policy"], "default")
+        self.assertEqual(search.call_args.kwargs["filters"]["provider_timeout_seconds"], 4.0)
+        self.assertEqual([row["title"] for row in candidates], ["Portable PDF Candidate"])
+        self.assertEqual(candidates[0]["provider_refs"], ["openalex:anything"])
+        self.assertEqual(imported.status_code, 200)
+        imported_ids = imported.json()["imported"]
+        self.assertEqual(len(imported_ids), 1)
+        self.assertIn(imported_ids[0], sources)
+        self.assertEqual(sources[imported_ids[0]].metadata["open_access_pdf_url"], "https://example.com/paper.pdf")
+
+    def test_paper_library_import_reports_pdf_download_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            candidate = {
+                "candidate_id": "candidate-slow",
+                "title": "Slow Download Candidate",
+                "canonical_url": "https://example.com/slow",
+                "pdf_url": "https://example.com/slow.pdf",
+            }
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.download_paper_pdf", side_effect=TimeoutError("network too slow")),
+            ):
+                response = client.post(
+                    "/api/research/alice/paper-library/import",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "candidates": [candidate],
+                        "selected_ids": ["candidate-slow"],
+                        "download_pdf": True,
+                    },
+                )
+            body = response.json()
+            sources = load_research_sources(profile).by_id()
+            imported_id = body["imported"][0]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(body["warnings"])
+        self.assertIn("PDF needs attention", body["message"])
+        self.assertEqual(sources[imported_id].metadata["pdf_download_status"], "failed")
+
+    def test_paper_library_import_url_creates_manual_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                response = client.post(
+                    "/api/research/alice/paper-library/import-url",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "url": "https://arxiv.org/abs/2401.12345",
+                        "title": "Manual arXiv Paper",
+                        "status": "reading",
+                        "visibility": "private",
+                        "download_pdf": False,
+                    },
+                )
+            body = response.json()
+            source_id = body["source_id"]
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["imported"], [source_id])
+        self.assertEqual(body["payload"]["detail"]["source_id"], source_id)
+        self.assertEqual(source.title, "Manual arXiv Paper")
+        self.assertEqual(source.status, "reading")
+        self.assertEqual(source.url, "https://arxiv.org/abs/2401.12345")
+        self.assertEqual(source.metadata["open_access_pdf_url"], "https://arxiv.org/pdf/2401.12345")
+
+    def test_paper_library_upload_creates_paper_source_with_pdf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                response = client.post(
+                    "/api/research/alice/paper-library/upload",
+                    headers={"Origin": "http://testserver"},
+                    data={
+                        "title": "Local Upload Paper",
+                        "status": "reading",
+                        "visibility": "private",
+                    },
+                    files={"file": ("local-upload.pdf", PDF_BYTES, "application/pdf")},
+                )
+            body = response.json()
+            source_id = body["source_id"]
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["message"], "Uploaded and imported PDF.")
+        self.assertEqual(body["payload"]["detail"]["source_id"], source_id)
+        self.assertTrue(body["payload"]["detail"]["has_pdf"])
+        self.assertEqual(source.title, "Local Upload Paper")
+        self.assertEqual(source.status, "reading")
+        self.assertEqual(source.metadata["pdf_download_status"], "downloaded")
+        self.assertTrue(source.metadata["pdf_asset_ref"].endswith("local-upload.pdf"))
+
+    def test_paper_library_pdf_upload_attaches_local_file(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                response = client.post(
+                    f"/api/research/alice/papers/{quote(source_id, safe='')}/pdf-upload",
+                    headers={"Origin": "http://testserver"},
+                    files={"file": ("local-paper.pdf", PDF_BYTES, "application/pdf")},
+                )
+            body = response.json()
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["message"], "Uploaded PDF.")
+        self.assertTrue(body["payload"]["detail"]["has_pdf"])
+        self.assertEqual(source.metadata["pdf_download_status"], "downloaded")
+        self.assertEqual(source.metadata["pdf_download_error"], "")
+        self.assertTrue(source.metadata["pdf_asset_ref"].endswith("local-paper.pdf"))
+
+    def test_paper_library_codex_deep_search_uses_xhigh_and_auto_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            rows = [
+                PaperSearchResult(
+                    title="Deep PDF Candidate",
+                    canonical_url="https://example.com/deep",
+                    pdf_url="https://example.com/deep.pdf",
+                    provider_refs=["openreview"],
+                )
+            ]
+
+            with patch("nblane.web_reader_api.search_papers_with_codex", return_value=rows) as search:
+                found = client.post(
+                    "/api/research/alice/paper-library/search",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "mode": "codex",
+                        "query": "VLA steering",
+                        "limit": 5,
+                        "codex_search_depth": "deep",
+                    },
+                )
+
+        self.assertEqual(found.status_code, 200)
+        self.assertEqual(found.json()["codex_search_depth"], "deep")
+        self.assertEqual(found.json()["codex_reasoning_effort"], "xhigh")
+        self.assertEqual(found.json()["codex_home_policy"], "default")
+        self.assertEqual(found.json()["codex_budget_mode"], "auto")
+        self.assertEqual(found.json()["codex_timeout_seconds"], 220.0)
+        self.assertEqual(found.json()["codex_idle_timeout_seconds"], 90.0)
+        search.assert_called_once()
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_budget_mode"], "auto")
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_timeout_seconds"], 220.0)
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_reasoning_effort"], "xhigh")
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_search_depth"], "deep")
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_home_policy"], "default")
+
+    def test_paper_library_codex_search_can_request_profile_codex_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            with patch("nblane.web_reader_api.search_papers_with_codex", return_value=[]) as search:
+                found = client.post(
+                    "/api/research/alice/paper-library/search",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "mode": "codex",
+                        "query": "vla最新论文",
+                        "limit": 1,
+                        "codex_home_policy": "profile",
+                    },
+                )
+
+        self.assertEqual(found.status_code, 200)
+        self.assertEqual(found.json()["codex_home_policy"], "profile")
+        self.assertEqual(found.json()["reply_language"], "zh")
+        search.assert_called_once()
+        self.assertEqual(search.call_args.kwargs["filters"]["codex_home_policy"], "profile")
+        self.assertEqual(search.call_args.kwargs["filters"]["reply_language"], "zh")
+
+    def test_paper_library_search_job_reports_progress_and_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            rows = [
+                PaperSearchResult(
+                    title="Job PDF Candidate",
+                    canonical_url="https://example.com/job",
+                    pdf_url="https://example.com/job.pdf",
+                    provider_refs=["arxiv"],
+                )
+            ]
+
+            with patch("nblane.web_reader_api.search_papers_with_codex", return_value=rows) as search:
+                started = client.post(
+                    "/api/research/alice/paper-library/search/jobs",
+                    headers={"Origin": "http://testserver"},
+                    json={"mode": "codex", "query": "robot memory", "limit": 5},
+                )
+                job_id = started.json()["job_id"]
+                status = None
+                for _ in range(30):
+                    status = client.get(f"/api/research/alice/paper-library/search/jobs/{job_id}")
+                    if status.json()["job"]["status"] == "done":
+                        break
+                    time.sleep(0.05)
+
+        self.assertEqual(started.status_code, 200)
+        self.assertIsNotNone(status)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["job"]["status"], "done")
+        self.assertIn("elapsed_ms", status.json()["job"])
+        self.assertTrue(status.json()["job"]["events"])
+        self.assertTrue(any(event.get("event") == "phase" for event in status.json()["job"]["events"]))
+        self.assertEqual(status.json()["result"]["candidates"][0]["title"], "Job PDF Candidate")
+        search.assert_called_once()
+
+    def test_paper_library_search_job_stream_reports_progress_and_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            rows = [
+                PaperSearchResult(
+                    title="Stream PDF Candidate",
+                    canonical_url="https://example.com/stream",
+                    pdf_url="https://example.com/stream.pdf",
+                    provider_refs=["arxiv"],
+                )
+            ]
+
+            with patch("nblane.web_reader_api.search_papers_with_codex", return_value=rows):
+                started = client.post(
+                    "/api/research/alice/paper-library/search/jobs",
+                    headers={"Origin": "http://testserver"},
+                    json={"mode": "codex", "query": "robot memory", "limit": 5},
+                )
+                job_id = started.json()["job_id"]
+                chunks: list[str] = []
+                with client.stream(
+                    "GET",
+                    f"/api/research/alice/paper-library/search/jobs/{job_id}/stream",
+                ) as stream:
+                    self.assertEqual(stream.status_code, 200)
+                    self.assertIn("text/event-stream", stream.headers.get("content-type", ""))
+                    for text in stream.iter_text():
+                        chunks.append(text)
+                        if "event: result" in "".join(chunks):
+                            break
+
+        payload = "".join(chunks)
+        self.assertIn("event: job", payload)
+        self.assertIn("event: progress", payload)
+        self.assertIn("event: result", payload)
+        self.assertIn('"status":"done"', payload)
+        self.assertIn("Stream PDF Candidate", payload)
+
+    def test_paper_library_search_job_can_be_cancelled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+
+            def slow_search(_profile_path, _query, *, filters=None, **_kwargs):
+                cancel_check = (filters or {}).get("_cancel_check")
+                for _ in range(100):
+                    if callable(cancel_check) and cancel_check():
+                        return []
+                    time.sleep(0.02)
+                return []
+
+            with patch("nblane.web_reader_api.search_papers_with_codex", side_effect=slow_search):
+                started = client.post(
+                    "/api/research/alice/paper-library/search/jobs",
+                    headers={"Origin": "http://testserver"},
+                    json={"mode": "codex", "query": "robot memory", "limit": 5},
+                )
+                job_id = started.json()["job_id"]
+                cancelled = client.post(
+                    f"/api/research/alice/paper-library/search/jobs/{job_id}/cancel",
+                    headers={"Origin": "http://testserver"},
+                    json={},
+                )
+                status = None
+                for _ in range(30):
+                    status = client.get(f"/api/research/alice/paper-library/search/jobs/{job_id}")
+                    if status.json()["job"]["status"] == "cancelled":
+                        break
+                    time.sleep(0.05)
+
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertIsNotNone(status)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["job"]["status"], "cancelled")
+        self.assertTrue(any(event.get("event") == "cancel_requested" for event in status.json()["job"]["events"]))
+
+    def test_paper_library_event_job_reports_translation_progress_and_payload(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+
+            def fake_handle(profile_path, body, *, progress_callback=None):
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "phase": "translation",
+                            "source_id": source_id,
+                            "target_lang": "zh",
+                            "mode": "missing_or_stale",
+                            "scope": "structure",
+                            "batches": 2,
+                            "batches_completed": 1,
+                            "segments_selected": 4,
+                            "segments_processed": 2,
+                            "updated": 1,
+                            "warnings": 0,
+                        }
+                    )
+                    progress_callback(
+                        {
+                            "phase": "translation",
+                            "source_id": source_id,
+                            "target_lang": "zh",
+                            "mode": "missing_or_stale",
+                            "scope": "structure",
+                            "batches": 2,
+                            "batches_completed": 2,
+                            "segments_selected": 4,
+                            "segments_processed": 4,
+                            "updated": 2,
+                            "warnings": 1,
+                        }
+                    )
+                return PaperLibraryEventResult(
+                    message="Translation retry finished: updated 2 row(s); 0 stale remaining.",
+                    changed={"sources": [source_id], "translations": [source_id]},
+                    next={"detail_id": source_id, "focus": "translations", "action": ""},
+                    data={"translation_summaries": [{"updated": 2}]},
+                )
+
+            with patch("nblane.web_reader_api.handle_paper_library_event", side_effect=fake_handle) as handle:
+                started = client.post(
+                    "/api/research/alice/paper-library/events/jobs",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "action": "paper_library_retry_translation",
+                        "payload": {"paper_ids": [source_id]},
+                        "state": {"view": "all", "detail_id": source_id},
+                    },
+                )
+                job_id = started.json()["job_id"]
+                status = None
+                for _ in range(30):
+                    status = client.get(f"/api/research/alice/paper-library/events/jobs/{job_id}")
+                    if status.json()["job"]["status"] == "done":
+                        break
+                    time.sleep(0.05)
+
+        self.assertEqual(started.status_code, 200)
+        self.assertIsNotNone(status)
+        self.assertEqual(status.status_code, 200)
+        data = status.json()
+        self.assertEqual(data["job"]["status"], "done")
+        self.assertEqual(data["job"]["batches"], 2)
+        self.assertEqual(data["job"]["batches_completed"], 2)
+        self.assertEqual(data["job"]["segments_processed"], 4)
+        self.assertEqual(data["job"]["warning_count"], 1)
+        self.assertIn("elapsed_ms", data["job"])
+        self.assertEqual(data["result"]["result"]["message"], "Translation retry finished: updated 2 row(s); 0 stale remaining.")
+        self.assertEqual(data["result"]["payload"]["detail_id"], source_id)
+        handle.assert_called_once()
+        self.assertTrue(callable(handle.call_args.kwargs["progress_callback"]))
+
+    def test_dashboard_standalone_page_and_payload_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+
+            page = client.get("/dashboard?profile=alice")
+            payload = client.get("/api/dashboard/payload?profile=alice")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Dashboard Canvas", page.text)
+        self.assertEqual(payload.status_code, 200)
+        data = payload.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["payload"]["profile"], "alice")
+        self.assertIn("focus_path", data["payload"]["graph"])
+        self.assertIn("contract", data["payload"]["graph"])
 
     def test_paper_library_api_previews_and_deletes_paper_record(self) -> None:
         source_id = "source:paper:grounded"
