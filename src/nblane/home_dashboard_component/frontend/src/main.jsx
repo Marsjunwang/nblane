@@ -415,7 +415,19 @@ function goalById(payload, goalId) {
   if (!goalId) {
     return null;
   }
-  return asArray(payload.activeGoals).find((goal) => goal.id === goalId) || null;
+  const activeGoal = asArray(payload.activeGoals).find((goal) => goal.id === goalId);
+  if (activeGoal) {
+    return activeGoal;
+  }
+  const primaryId = primaryGoalId(payload);
+  if (primaryId && primaryId === goalId && payload.primaryGoal?.isSet) {
+    return {
+      ...payload.primaryGoal,
+      id: primaryId,
+      isPrimary: true,
+    };
+  }
+  return null;
 }
 
 function primaryGoalId(payload) {
@@ -654,10 +666,11 @@ function skillSegments(counts, total) {
   });
 }
 
-function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, canEditGoals = true, canSelectGoals = true, showToday = true }) {
+function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal, canEditGoals = true, canSelectGoals = true, showToday = true }) {
   const ui = payload.ui;
   const northStar = payload.northStar;
   const primary = goalDisplay(payload.primaryGoal, ui);
+  const primaryId = primaryGoalId(payload);
   const activeGoals = asArray(payload.activeGoals);
   const northStarText =
     northStar.locked || northStar.visibility === "private"
@@ -681,7 +694,20 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, canEditGoa
           </div>
         </div>
         <div className="hd-context-card hd-context-primary">
-          <span className="hd-eyebrow">{label(ui, "dashboard_primary_goal", "Primary goal")}</span>
+          <div className="hd-context-card-head">
+            <span className="hd-eyebrow">{label(ui, "dashboard_primary_goal", "Primary goal")}</span>
+            {canEditGoals && primaryId && !payload.primaryGoal.locked ? (
+              <button
+                className="hd-context-edit"
+                type="button"
+                data-action="open-goal-form"
+                data-goal-id={primaryId}
+                onClick={() => onEditGoal?.(primaryId)}
+              >
+                {label(ui, "dashboard_goal_edit_inline", "Edit goal")}
+              </button>
+            ) : null}
+          </div>
           <strong>{primary.title}</strong>
           {primary.summary ? (
             <p className="hd-context-copy">{primary.summary}</p>
@@ -2513,7 +2539,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
     return (
       <aside className="hd-inspector">
         <header><span className="hd-eyebrow">{label(ui, "dashboard_add_active_goal", "Add Active Goal")}</span><h3>{label(ui, "goal_create_title", "Create goal")}</h3></header>
-        <GoalForm payload={payload} goal={{ editor: emptyGoalEditor() }} mode="create" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
+        <GoalForm key="create-goal" payload={payload} goal={{ editor: emptyGoalEditor() }} mode="create" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
       </aside>
     );
   }
@@ -2524,7 +2550,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
     return (
       <aside className="hd-inspector">
         <header><span className="hd-eyebrow">{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</span><h3>{goalDisplay(selectedGoal, ui).title}</h3></header>
-        <GoalForm payload={payload} goal={selectedGoal} mode="edit" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
+        <GoalForm key={`edit-goal:${selectedGoal.id}`} payload={payload} goal={selectedGoal} mode="edit" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
       </aside>
     );
   }
@@ -2896,6 +2922,7 @@ function Dashboard({ args }) {
   const [viewMode, setViewMode] = useState(() => initialDashboardViewMode(args));
   const canvasEmbed = useMemo(() => (!args.standalone ? dashboardCanvasEmbed(payload) : null), [args.standalone, payload]);
   const readOnlyCanvas = Boolean(args.standalone);
+  const useDailyGraphHero = !args.standalone && !args.embed;
 
   useEffect(() => {
     const availableIds = new Set(payload.graph.nodes.map((node) => node.id));
@@ -2951,6 +2978,10 @@ function Dashboard({ args }) {
     const node = payload.graph.nodes.find((item) => item.type === "goal" && item.recordId === goalId);
     if (node) {
       setSelectedNodeId(node.id);
+    }
+    if (!readOnlyCanvas && useDailyGraphHero && goalById(payload, goalId)) {
+      setGoalEditor({ mode: "edit", goalId });
+    } else {
       setGoalEditor(null);
     }
   }
@@ -2960,7 +2991,6 @@ function Dashboard({ args }) {
     setGoalEditor(null);
   };
 
-  const useDailyGraphHero = !args.standalone && !args.embed;
   const inlineGoal = goalEditor?.mode === "edit" ? goalById(payload, goalEditor.goalId) : null;
   const inlineGoalEditor = !readOnlyCanvas && useDailyGraphHero && goalEditor?.mode && (
     goalEditor.mode === "create" || inlineGoal
@@ -2984,6 +3014,7 @@ function Dashboard({ args }) {
         </button>
       </header>
       <GoalForm
+        key={goalEditor.mode === "create" ? "create-goal" : `edit-goal:${inlineGoal?.id || ""}`}
         payload={payload}
         goal={goalEditor.mode === "create" ? { editor: emptyGoalEditor() } : inlineGoal}
         mode={goalEditor.mode}
@@ -3071,6 +3102,7 @@ function Dashboard({ args }) {
         onEmit={emit}
         onCreateGoal={() => setGoalEditor({ mode: "create" })}
         onSelectGoal={selectGoal}
+        onEditGoal={(goalId) => setGoalEditor({ mode: "edit", goalId })}
         canEditGoals={!readOnlyCanvas}
         canSelectGoals={!readOnlyCanvas}
         showToday={!useDailyGraphHero}

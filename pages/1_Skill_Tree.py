@@ -40,6 +40,7 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
     skill_status_emoji,
     stash_git_backup_results,
@@ -346,6 +347,11 @@ if tree is None:
             compact=True,
             align="right",
         )
+    render_page_help(
+        ui,
+        key=f"skill_tree_help_empty:{selected}",
+        docs_path="docs/zh/guides/skill-tree.md",
+    )
     st.error(
         ui["error_no_tree"].format(profile=selected)
     )
@@ -384,6 +390,11 @@ with _head_l:
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
 with _head_r:
+    render_page_help(
+        ui,
+        key=f"skill_tree_help:{selected}",
+        docs_path="docs/zh/guides/skill-tree.md",
+    )
     if st.button(
         ui["save_button"],
         type="primary",

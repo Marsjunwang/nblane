@@ -5556,6 +5556,7 @@ def build_reader_payload(
     for row in current_translation_rows:
         if row.target_lang != target_lang:
             continue
+        has_translated_text = bool(_clean_text(row.translated_text))
         scope_type = _clean_text(row.scope_type) or "segment"
         row_page = int(row.page or segment_pages.get(row.segment_id, 0))
         include_row = False
@@ -5574,7 +5575,7 @@ def build_reader_payload(
             include_row = row_page in context_page_set or row_page <= 0
         elif scope_type == "segment":
             include_row = False if prefer_layout_units else row_page in context_page_set or bool(row.segment_id and row.segment_id in segment_ids)
-        if include_row:
+        if include_row and has_translated_text:
             translations.append({**row.to_dict(), "page": row_page})
     page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
     positioned_units = reader_structure_units if prefer_structure_units else reader_layout_units
@@ -5870,8 +5871,26 @@ def _blank_translation_backend_warning(ai_result: object, translations: list[dic
     error = _clean_text(getattr(ai_result, "error", ""))
     marker = f"{backend} {' '.join(generated_by)} {warnings} {error}".lower()
     if "rule_fallback" in marker or "llm_api_key" in marker or "ai_not_configured" in marker:
-        return NO_LLM_TRANSLATION_WARNING
+        return _translation_backend_failure_message(marker)
     return ""
+
+
+def _translation_backend_failure_message(marker: str) -> str:
+    if "arrearage" in marker or "overdue-payment" in marker:
+        return (
+            f"{NO_LLM_TRANSLATION_WARNING} Provider rejected the request: "
+            "the configured LLM account appears to have overdue payment or arrears."
+        )
+    if "too many requests" in marker or " 429 " in marker:
+        return (
+            f"{NO_LLM_TRANSLATION_WARNING} Provider rejected the request: "
+            "rate limit or quota was reached."
+        )
+    if "llm_api_key" in marker or "ai_not_configured" in marker:
+        return (
+            f"{NO_LLM_TRANSLATION_WARNING} Configure an LLM API key/model before translating."
+        )
+    return NO_LLM_TRANSLATION_WARNING
 
 
 def _positive_int(value: object) -> int | None:

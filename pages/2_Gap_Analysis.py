@@ -34,6 +34,7 @@ from nblane.web_shared import (
     render_current_goal_strip,
     render_git_backup_notices,
     render_llm_unavailable,
+    render_page_help,
     select_profile,
     skill_status_emoji,
     stash_git_backup_results,
@@ -221,6 +222,11 @@ with _head_l:
     st.caption(ui["page_context_line"])
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
+render_page_help(
+    ui,
+    key=f"gap_help:{selected}",
+    docs_path="docs/zh/guides/gap-analysis.md",
+)
 
 tree_for_opts = load_skill_tree_raw(selected)
 schema_name_opts = (

@@ -97,6 +97,7 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_git_backup_notices,
     render_llm_unavailable,
+    render_page_help,
     select_profile,
     stash_git_backup_results,
 )
@@ -328,9 +329,10 @@ def _capture_home_research_source(profile: str, payload: dict) -> None:
     st.rerun()
 
 
-def _goal_form_key(profile: str, field: str) -> str:
-    """Stable widget key for the Home goal form."""
-    return f"home_goal_{profile}_{field}"
+def _goal_form_key(profile: str, field: str, goal_id: str = "") -> str:
+    """Stable widget key for the Home goal form scoped to one goal."""
+    scope = str(goal_id or "__current__").strip() or "__current__"
+    return f"home_goal_{profile}_{scope}_{field}"
 
 
 def _goal_default_id() -> str:
@@ -980,6 +982,7 @@ def _render_current_goal_module(profile: str) -> None:
     """Render the lightweight Current Goal editor on Home."""
     book = _goal_book_for_home(profile)
     goal = book.current()
+    goal_key_id = goal.id if goal is not None else _goal_default_id()
 
     with st.container():
         st.subheader(ui["goal_module_title"])
@@ -992,7 +995,7 @@ def _render_current_goal_module(profile: str) -> None:
             reveal_private = st.checkbox(
                 ui["goal_reveal_private"],
                 value=False,
-                key=_goal_form_key(profile, "reveal_private"),
+                key=_goal_form_key(profile, "reveal_private", goal_key_id),
             )
             if not reveal_private:
                 st.info(ui["goal_private_locked"])
@@ -1013,16 +1016,17 @@ def _render_current_goal_module(profile: str) -> None:
                 title="",
                 label="",
             )
-            with st.form(_goal_form_key(profile, "form")):
+            form_goal_id = existing.id or _goal_default_id()
+            with st.form(_goal_form_key(profile, "form", form_goal_id)):
                 title = st.text_input(
                     ui["goal_field_title"],
                     value=existing.title,
-                    key=_goal_form_key(profile, "title"),
+                    key=_goal_form_key(profile, "title", form_goal_id),
                 )
                 label = st.text_input(
                     ui["goal_field_label"],
                     value=existing.label,
-                    key=_goal_form_key(profile, "label"),
+                    key=_goal_form_key(profile, "label", form_goal_id),
                 )
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -1033,19 +1037,19 @@ def _render_current_goal_module(profile: str) -> None:
                         if existing.status in GOAL_STATUSES
                         else 0,
                         format_func=_goal_status_label,
-                        key=_goal_form_key(profile, "status"),
+                        key=_goal_form_key(profile, "status", form_goal_id),
                     )
                 with c2:
                     start = st.text_input(
                         ui["goal_field_start"],
                         value=existing.start,
-                        key=_goal_form_key(profile, "start"),
+                        key=_goal_form_key(profile, "start", form_goal_id),
                     )
                 with c3:
                     target = st.text_input(
                         ui["goal_field_target"],
                         value=existing.target,
-                        key=_goal_form_key(profile, "target"),
+                        key=_goal_form_key(profile, "target", form_goal_id),
                     )
                 ui_visibility = st.selectbox(
                     ui["goal_field_ui_visibility"],
@@ -1056,7 +1060,7 @@ def _render_current_goal_module(profile: str) -> None:
                     if existing.ui_visibility in GOAL_UI_VISIBILITIES
                     else 1,
                     format_func=_goal_visibility_label,
-                    key=_goal_form_key(profile, "ui_visibility"),
+                    key=_goal_form_key(profile, "ui_visibility", form_goal_id),
                 )
                 include_agent = st.checkbox(
                     ui["goal_field_agent_context"],
@@ -1065,59 +1069,59 @@ def _render_current_goal_module(profile: str) -> None:
                         and ui_visibility != "private"
                     ),
                     disabled=ui_visibility == "private",
-                    key=_goal_form_key(profile, "agent_context"),
+                    key=_goal_form_key(profile, "agent_context", form_goal_id),
                 )
                 _include_public = st.checkbox(
                     ui["goal_field_public_output"],
                     value=False,
                     disabled=True,
-                    key=_goal_form_key(profile, "public_output"),
+                    key=_goal_form_key(profile, "public_output", form_goal_id),
                 )
                 st.caption(ui["goal_public_disabled_caption"])
                 summary = st.text_area(
                     ui["goal_field_summary"],
                     value=existing.summary,
-                    key=_goal_form_key(profile, "summary"),
+                    key=_goal_form_key(profile, "summary", form_goal_id),
                 )
                 alignment = st.text_area(
                     ui["goal_field_alignment"],
                     value=existing.alignment,
-                    key=_goal_form_key(profile, "alignment"),
+                    key=_goal_form_key(profile, "alignment", form_goal_id),
                 )
                 target_skills = st.text_area(
                     ui["goal_field_target_skills"],
                     value=_goal_lines_text(existing.target_skills),
-                    key=_goal_form_key(profile, "target_skills"),
+                    key=_goal_form_key(profile, "target_skills", form_goal_id),
                 )
                 success_criteria = st.text_area(
                     ui["goal_field_success_criteria"],
                     value=_goal_lines_text(existing.success_criteria),
-                    key=_goal_form_key(profile, "success_criteria"),
+                    key=_goal_form_key(profile, "success_criteria", form_goal_id),
                 )
                 focus = st.text_area(
                     ui["goal_field_focus"],
                     value=_goal_lines_text(existing.focus),
-                    key=_goal_form_key(profile, "focus"),
+                    key=_goal_form_key(profile, "focus", form_goal_id),
                 )
                 evidence_refs = st.text_area(
                     ui["goal_field_evidence_refs"],
                     value=_goal_lines_text(existing.evidence_refs),
-                    key=_goal_form_key(profile, "evidence_refs"),
+                    key=_goal_form_key(profile, "evidence_refs", form_goal_id),
                 )
                 task_refs = st.text_area(
                     ui["goal_field_task_refs"],
                     value=_goal_lines_text(existing.task_refs),
-                    key=_goal_form_key(profile, "task_refs"),
+                    key=_goal_form_key(profile, "task_refs", form_goal_id),
                 )
                 output_refs = st.text_area(
                     ui["goal_field_output_refs"],
                     value=_goal_lines_text(existing.output_refs),
-                    key=_goal_form_key(profile, "output_refs"),
+                    key=_goal_form_key(profile, "output_refs", form_goal_id),
                 )
                 notes = st.text_area(
                     ui["goal_field_notes"],
                     value=existing.notes,
-                    key=_goal_form_key(profile, "notes"),
+                    key=_goal_form_key(profile, "notes", form_goal_id),
                 )
                 submitted = st.form_submit_button(
                     ui["goal_save"],
@@ -2381,14 +2385,13 @@ def _profile_context_open_requested(profile: str) -> bool:
 
 def _render_dashboard_help() -> None:
     """Render the Dashboard usage guide in a compact top-right surface."""
-    body = ui["dashboard_help_body"]
-    if hasattr(st, "popover"):
-        with st.popover(ui["dashboard_help_title"], width="stretch"):
-            st.markdown(body)
-            st.markdown(f"[{ui['dashboard_help_full_doc']}](docs/zh/guides/dashboard.md)")
-        return
-    with st.expander(ui["dashboard_help_title"], expanded=False):
-        st.markdown(body)
+    render_page_help(
+        ui,
+        body_key="dashboard_help_body",
+        label_key="dashboard_help_title",
+        key="dashboard_help",
+        docs_path="docs/zh/guides/dashboard.md",
+    )
 
 
 def _render_dashboard_top_actions(profile: str) -> None:

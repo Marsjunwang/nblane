@@ -227,6 +227,26 @@ button {
   border-top: 3px solid rgba(37, 107, 93, .78);
 }
 
+.hd-context-card-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.hd-context-edit {
+  background: var(--hd-paper);
+  border: 1px solid var(--hd-line);
+  border-radius: 10px;
+  color: var(--hd-ink);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 760;
+  min-height: 28px;
+  padding: 5px 8px;
+}
+
 .hd-context-card strong {
   display: -webkit-box;
   font-size: 17px;

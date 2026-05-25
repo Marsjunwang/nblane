@@ -83,6 +83,24 @@ sudo systemctl restart nblane-reader nblane
 
 如果使用 `uv sync` 管理虚拟环境，也要在重启前完成 sync；不要只复制代码而跳过依赖同步。
 
+Reader 全文翻译依赖长时间 LLM 调用。生产环境如通过 SOCKS 代理访问模型，建议保留默认的
+`NBLANE_STREAM_PAPER_TRANSLATION=1`，让 `research.paper_translate` 用流式响应收完整 JSON，
+避免长非流式响应在代理层一直无结果。大论文还应给 Reader 后台任务更长预算，例如在
+`nblane-reader.service` 的 drop-in 中设置：
+
+```ini
+[Service]
+Environment=NBLANE_READER_TASK_TIMEOUT_SECONDS=3600
+Environment=NBLANE_PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS=300
+```
+
+修改 systemd drop-in 后执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart nblane-reader
+```
+
 端口职责保持固定：
 
 - `8501`：Streamlit 主应用，负责 Dashboard、Evidence Review、Research、Output Studio、Blog 编辑等可写页面。
@@ -156,6 +174,8 @@ User=nblane
 WorkingDirectory=/srv/nblane-app
 Environment=NBLANE_ROOT=/srv/nblane-data
 Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
+Environment=UI_LANG=zh
+Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
 Environment=NBLANE_CODEX_BIN=/home/nblane/.local/bin/codex
 Environment=NBLANE_CODEX_HOME=/home/nblane/.codex
@@ -169,6 +189,10 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+Reader sidecar 不会继承 Streamlit service 的语言变量；`UI_LANG` 必须同时配置在
+`nblane.service` 和 `nblane-reader.service`，否则 Reader payload 里的按钮和提示会回到
+英文默认值。
 
 启动：
 

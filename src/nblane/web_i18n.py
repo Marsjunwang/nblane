@@ -102,6 +102,43 @@ _COMMON: dict[str, dict[str, str]] = {
             "These settings apply to this app session and are not "
             "written to disk."
         ),
+        "page_help_short": "Guide",
+        "page_help_docs_link": "[Open full guide]({path})",
+        "page_help_docs_open_inline": "Open full guide",
+        "page_help_docs_missing": "Full guide not found: {path}",
+        "ai_config_overview_title": "AI config map",
+        "ai_config_overview_caption": (
+            "This view separates deployment-wide runtime, page-level action preferences, "
+            "Codex scope, and candidate-first write gates."
+        ),
+        "ai_scope_global_llm": "Global LLM",
+        "ai_scope_page_actions": "Page actions",
+        "ai_scope_codex": "Codex",
+        "ai_scope_review_gate": "Review gate",
+        "ai_scope_ready": "ready",
+        "ai_scope_missing": "missing",
+        "ai_scope_overrides_count": "{count} override(s)",
+        "ai_scope_candidate_first": "candidate-first writes",
+        "ai_config_overview_llm_title": "Global LLM runtime",
+        "ai_config_overview_llm_line": "Base URL: {provider} · Model: {model}",
+        "ai_config_overview_llm_scope": (
+            "API keys are session/env scoped. Page actions only persist non-secret model/backend preferences."
+        ),
+        "ai_config_overview_codex_title": "Codex runtime",
+        "ai_config_overview_actions_title": "Page action preferences",
+        "ai_config_overview_col_page": "Page",
+        "ai_config_overview_col_action": "Action",
+        "ai_config_overview_col_backend": "Backend",
+        "ai_config_overview_col_model": "Model",
+        "ai_config_overview_col_source": "Source",
+        "ai_config_overview_default_model": "app default",
+        "ai_config_overview_profile_override": "profile override",
+        "ai_config_overview_app_default": "app default",
+        "ai_page_dashboard": "Dashboard",
+        "ai_page_evidence": "Evidence Review",
+        "ai_page_research": "Research",
+        "ai_page_kanban": "Kanban",
+        "ai_page_project": "Project Board",
         "codex_settings_title": "Codex",
         "codex_bin": "Codex binary",
         "codex_cloud_env_id": "Codex Cloud env id",
@@ -289,6 +326,42 @@ _COMMON: dict[str, dict[str, str]] = {
         "llm_configured": "AI 已启用：{label}",
         "llm_not_configured": "尚未设置 API key。",
         "llm_session_only": "这些设置只应用到当前页面会话，不会写入磁盘。",
+        "page_help_short": "使用说明",
+        "page_help_docs_link": "[打开完整说明]({path})",
+        "page_help_docs_open_inline": "打开完整说明",
+        "page_help_docs_missing": "未找到完整说明：{path}",
+        "ai_config_overview_title": "AI 配置地图",
+        "ai_config_overview_caption": (
+            "这里把部署级运行时、页面级动作偏好、Codex 生效范围和候选优先写入门槛分开显示。"
+        ),
+        "ai_scope_global_llm": "全局 LLM",
+        "ai_scope_page_actions": "页面动作",
+        "ai_scope_codex": "Codex",
+        "ai_scope_review_gate": "人工确认",
+        "ai_scope_ready": "可用",
+        "ai_scope_missing": "未就绪",
+        "ai_scope_overrides_count": "{count} 个覆盖",
+        "ai_scope_candidate_first": "候选优先写入",
+        "ai_config_overview_llm_title": "全局 LLM 运行时",
+        "ai_config_overview_llm_line": "Base URL：{provider} · 模型：{model}",
+        "ai_config_overview_llm_scope": (
+            "API key 只来自当前会话或环境变量；页面动作只保存非密钥的模型/后端偏好。"
+        ),
+        "ai_config_overview_codex_title": "Codex 运行时",
+        "ai_config_overview_actions_title": "页面动作偏好",
+        "ai_config_overview_col_page": "页面",
+        "ai_config_overview_col_action": "动作",
+        "ai_config_overview_col_backend": "后端",
+        "ai_config_overview_col_model": "模型",
+        "ai_config_overview_col_source": "来源",
+        "ai_config_overview_default_model": "应用默认",
+        "ai_config_overview_profile_override": "当前档案覆盖",
+        "ai_config_overview_app_default": "应用默认",
+        "ai_page_dashboard": "每日仪表盘",
+        "ai_page_evidence": "证据审阅",
+        "ai_page_research": "研究",
+        "ai_page_kanban": "看板",
+        "ai_page_project": "项目看板",
         "codex_settings_title": "Codex",
         "codex_bin": "Codex binary",
         "codex_cloud_env_id": "Codex Cloud env id",
@@ -306,16 +379,16 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_install": "安装",
         "codex_upgrade": "升级",
         "codex_save_env": "保存 Codex 设置到 .env",
-        "codex_save_profile": "保存到当前 profile",
+        "codex_save_profile": "保存到当前档案",
         "codex_saved_env": "Codex 设置已保存到 .env。",
-        "codex_saved_profile": "当前 profile 的 Codex 设置已保存。",
+        "codex_saved_profile": "当前档案的 Codex 设置已保存。",
         "codex_install_done": "Codex 安装命令已完成。",
         "codex_install_failed": "Codex 安装命令失败。",
         "codex_session_only": (
             "认证仍由 Codex CLI 管理；nblane 只保存非密钥的 NBLANE_CODEX_* 设置。"
         ),
         "codex_scope_hint": (
-            "认证与 CLI 配置属于当前部署共享范围；当前 Profile 只保存非密钥偏好。"
+            "认证与 CLI 配置属于当前部署共享范围；当前档案只保存非密钥偏好。"
         ),
         "kb_ai_backend": "看板 AI 引擎",
         "kb_ai_backend_help": (
@@ -329,9 +402,9 @@ _COMMON: dict[str, dict[str, str]] = {
         "codex_status_tab": "状态",
         "codex_api_key_tab": "全局 API Key",
         "codex_cli_config_tab": "全局 CLI 配置",
-        "codex_profile_config_tab": "当前 Profile 偏好",
+        "codex_profile_config_tab": "当前档案偏好",
         "codex_dialog_close": "关闭",
-        "codex_current_profile": "当前 profile：`{profile}`",
+        "codex_current_profile": "当前档案：`{profile}`",
         "codex_web_home": "Codex home：`{path}`",
         "codex_cli_config_path": "CLI 配置：`{path}`",
         "codex_auth_path": "认证文件：`{path}`",
@@ -345,10 +418,10 @@ _COMMON: dict[str, dict[str, str]] = {
         ),
         "codex_cli_profile_scope_note": (
             "这个 config.toml 属于当前部署共享的 service-level Codex home；"
-            "每个 profile 的非密钥偏好放在 codex.yaml。"
+            "每个档案的非密钥偏好放在 codex.yaml。"
         ),
         "codex_terminal_hint": (
-            "Web Codex 使用这个 service-level CODEX_HOME。下面的 Profile 配置"
+            "Web Codex 使用这个 service-level CODEX_HOME。下面的档案配置"
             "只保存 model、cloud env、timeout 等非密钥偏好。"
         ),
         "codex_api_key": "Codex API key",
@@ -443,6 +516,16 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
             "Internal project cases connect goals, tasks, sources, evidence, "
             "milestones, and outputs. Public projects still live in projects.yaml."
         ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Project Board workflow\n\n"
+            "1. Create internal project cases for work that connects goals, Kanban tasks, evidence, research sources, milestones, and outputs.\n"
+            "2. Keep project status private by default; public project pages still come from the public output layer.\n"
+            "3. Link tasks and evidence so Dashboard and Evidence Review can show ownership gaps.\n"
+            "4. Add milestones when a project has visible checkpoints. Milestones can own Kanban tasks without changing the task text.\n"
+            "5. Use the create-task action only for execution work you intend to track on Kanban.\n\n"
+            "This page writes project-board.yaml and may sync task ownership back to kanban.md."
+        ),
         "create_project": "Create project",
         "create_task": "Create Kanban task",
         "project_detail": "Project detail",
@@ -471,6 +554,34 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
         "field_source_refs": "Research sources",
         "field_experience_refs": "Experience cases",
         "field_output_refs": "Outputs",
+        "field_goal_refs_help": (
+            "Goals explain why the project exists and let Dashboard/Gap Analysis group work by objective."
+        ),
+        "field_task_refs_help": (
+            "Kanban tasks are execution ownership. Tasks linked from Kanban are synced back automatically."
+        ),
+        "field_evidence_refs_help": (
+            "Evidence rows are reviewed facts this project owns or produced. AI can suggest candidates, but saved links stay human-confirmed."
+        ),
+        "field_source_refs_help": (
+            "Research sources are papers, URLs, and imported material that belong to this project."
+        ),
+        "field_experience_refs_help": "Experience cases that support this project story.",
+        "field_output_refs_help": "Outputs or public drafts connected to this project.",
+        "project_refs_hint": (
+            "Links here are project ownership refs, not copied content. Model-suggested links should still be reviewed before saving."
+        ),
+        "project_ai_suggest_refs": "AI suggest refs",
+        "project_ai_suggest_help": (
+            "Ask the model to suggest goal, task, evidence, source, and output refs. Suggestions prefill the form but are not saved until you click Save project."
+        ),
+        "project_ai_suggest_running": "Suggesting project refs...",
+        "project_ai_suggest_applied": "Added {count} suggested ref(s) to the form. Review them before saving.",
+        "project_ai_suggest_none": "No new project refs were suggested.",
+        "project_ai_suggest_failed": "Project ref suggestion failed.",
+        "project_ai_suggest_summary": "{count} suggested ref(s) are staged in the form.",
+        "project_missing_reload": "Project `{id}` changed or was removed. The latest board was loaded; refresh before editing it again.",
+        "milestone_missing_reload": "Milestone `{id}` changed or was removed. Refresh before editing it again.",
         "field_target": "Target",
         "field_milestone": "Milestone",
         "task_title": "Task title",
@@ -503,13 +614,23 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
     },
     "zh": {
         "page_title": "项目看板 · nblane",
-        "title": "项目看板 Project Board",
+        "title": "项目看板",
         "page_context_line": (
             "内部项目案例连接目标、任务、资料、证据、里程碑和输出；公开项目仍由 "
             "projects.yaml 管理。"
         ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### 项目看板使用流程\n\n"
+            "1. 为需要跨目标、看板任务、证据、研究资料、里程碑和输出追踪的工作创建内部项目案例。\n"
+            "2. 内部项目默认服务于个人工作流；公开项目页仍由公开输出层管理。\n"
+            "3. 关联任务和证据后，首页与证据审阅才能识别项目归属缺口。\n"
+            "4. 项目有阶段节点时添加里程碑；里程碑可以承接看板任务，不必改写任务正文。\n"
+            "5. 只有准备进入执行流的事项才用「新建看板任务」。\n\n"
+            "本页会写入 project-board.yaml，并可能把任务归属同步回 kanban.md。"
+        ),
         "create_project": "新建项目",
-        "create_task": "新建 Kanban 任务",
+        "create_task": "新建看板任务",
         "project_detail": "项目详情",
         "milestones": "里程碑",
         "add_milestone": "新增里程碑",
@@ -518,7 +639,7 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
         "archive_project": "归档项目",
         "edit": "编辑",
         "saved": "已保存项目看板。",
-        "task_created": "已创建 Kanban 任务。",
+        "task_created": "已创建看板任务。",
         "empty_board": "还没有内部项目。",
         "empty_status": "这个状态下没有项目。",
         "select_project": "项目",
@@ -531,11 +652,39 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
         "field_summary": "摘要",
         "field_notes": "备注",
         "field_goal_refs": "目标",
-        "field_task_refs": "Kanban 任务",
-        "field_evidence_refs": "Evidence",
-        "field_source_refs": "Research sources",
-        "field_experience_refs": "Experience cases",
-        "field_output_refs": "Outputs",
+        "field_task_refs": "看板任务",
+        "field_evidence_refs": "证据",
+        "field_source_refs": "研究资料",
+        "field_experience_refs": "经历案例",
+        "field_output_refs": "输出",
+        "field_goal_refs_help": (
+            "目标说明这个项目服务于哪条阶段目标，用于首页和差距分析按目标归因。"
+        ),
+        "field_task_refs_help": (
+            "看板任务表示执行归属；从看板任务上选择项目后会自动同步回这里。"
+        ),
+        "field_evidence_refs_help": (
+            "证据是这个项目承担或产出的已审阅事实。模型可以建议候选，但保存的关联仍是人工确认后的归属。"
+        ),
+        "field_source_refs_help": (
+            "研究资料是属于这个项目的论文、URL 或导入材料。"
+        ),
+        "field_experience_refs_help": "支持这个项目叙事的经历案例。",
+        "field_output_refs_help": "与这个项目相关的输出或公开草稿。",
+        "project_refs_hint": (
+            "这里的关联表示项目归属，不会复制目标或证据正文；模型建议的关联也需要保存前确认。"
+        ),
+        "project_ai_suggest_refs": "AI 建议关联",
+        "project_ai_suggest_help": (
+            "让模型建议目标、任务、证据、资料和输出关联。建议只会预填表单，点击保存项目后才会写入。"
+        ),
+        "project_ai_suggest_running": "正在建议项目关联...",
+        "project_ai_suggest_applied": "已向表单加入 {count} 个建议关联，请确认后再保存。",
+        "project_ai_suggest_none": "没有新的项目关联建议。",
+        "project_ai_suggest_failed": "项目关联建议失败。",
+        "project_ai_suggest_summary": "表单中已暂存 {count} 个建议关联。",
+        "project_missing_reload": "项目 `{id}` 已变化或被移除。已读取最新看板，请刷新后再编辑。",
+        "milestone_missing_reload": "里程碑 `{id}` 已变化或被移除。请刷新后再编辑。",
         "field_target": "目标日期",
         "field_milestone": "里程碑",
         "task_title": "任务标题",
@@ -544,7 +693,7 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
         "id_help": "留空会自动生成 project:<slug>。",
         "milestone_id_help": "留空会自动生成 milestone:<slug>。",
         "title_required": "标题不能为空。",
-        "duplicate_milestone": "Milestone id 已存在：{id}",
+        "duplicate_milestone": "里程碑 id 已存在：{id}",
         "missing_ref": "缺失",
         "claimed_elsewhere_hint": (
             "{count} 个任务已属于其他项目，因此不会出现在这个选择器里。"
@@ -557,7 +706,7 @@ _PROJECT_BOARD: dict[str, dict[str, str]] = {
         "metric_unassigned_evidence": "未归属证据",
         "metric_current_goal_projects": "当前目标项目",
         "unassigned_evidence_hint": (
-            "{count} 条 reviewed evidence 尚未关联任何项目。"
+            "{count} 条已审阅证据尚未关联任何项目。"
         ),
         "status_active": "进行中",
         "status_paused": "暂停",
@@ -574,6 +723,16 @@ _GAP: dict[str, dict[str, str]] = {
         "page_context_line": (
             "Agent OS: map a task to your skill tree; use rules "
             "and optional AI to plan next steps with your coding agent."
+        ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Gap Analysis workflow\n\n"
+            "1. Describe the task as concretely as possible: target system, constraints, expected result, and unknowns.\n"
+            "2. Use rule matching for deterministic keyword coverage; enable AI routing when the task language does not match the schema well.\n"
+            "3. Include current goal context when the task should be interpreted through the active stage goal.\n"
+            "4. Read matched nodes and dependency closure before trusting the suggested next steps.\n"
+            "5. Apply skill status updates only after the task is actually completed and evidence exists.\n\n"
+            "This page is a planning lens. It should not replace Evidence Review."
         ),
         "task_label": "Task description",
         "task_placeholder": (
@@ -659,6 +818,16 @@ _GAP: dict[str, dict[str, str]] = {
             "Agent 操作系统：将任务映射到技能树；结合规则与可选 AI，"
             "为与编程 Agent 协作准备下一步。"
         ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### 差距分析使用流程\n\n"
+            "1. 尽量具体描述任务：目标系统、约束、期望结果和未知点。\n"
+            "2. 规则匹配适合可解释的关键词覆盖；当任务语言和技能 schema 不一致时，再开启 AI 首轮匹配。\n"
+            "3. 任务需要围绕当前阶段目标解释时，勾选 current goal 上下文。\n"
+            "4. 先看匹配节点和依赖闭包，再参考建议下一步。\n"
+            "5. 只有任务完成且证据存在后，才应用技能状态更新。\n\n"
+            "本页是规划视角，不替代证据审阅。"
+        ),
         "task_label": "任务描述",
         "task_placeholder": (
             "用自然语言描述你想做的任务，例如：\n"
@@ -739,6 +908,16 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
         "page_context_line": (
             "Private OS: edit structured skills, inline evidence, "
             "and the shared evidence pool for this profile."
+        ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Skill Tree workflow\n\n"
+            "1. Treat status as a claim about capability, not as a mood marker.\n"
+            "2. Add inline evidence for quick notes, or attach stable evidence-pool rows when the same proof supports several skills.\n"
+            "3. Use Evidence Review for stronger review status, confidence, project refs, and publish readiness.\n"
+            "4. Save writes skill-tree.yaml and refreshes generated SKILL.md blocks.\n"
+            "5. Check evidence risk warnings before raising a skill to solid or expert.\n\n"
+            "Skill status should move only when evidence can explain why."
         ),
         "error_no_tree": "skill-tree.yaml not found for '{profile}'.",
         "metric_expert": "🔵 Expert",
@@ -837,6 +1016,16 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
         "page_context_line": (
             "私人操作系统：编辑结构化技能、内联证据与本档案的共享证据池。"
         ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### 技能树使用流程\n\n"
+            "1. 把技能状态当作能力 claim，而不是当天心情或主观感觉。\n"
+            "2. 轻量记录可写入内联证据；同一证据支撑多个技能时，优先放入共享证据池并用 id 引用。\n"
+            "3. 证据强度、置信度、项目引用和公开准备度请在证据审阅里处理。\n"
+            "4. 点击保存会写入 skill-tree.yaml，并刷新 SKILL.md 中的生成块。\n"
+            "5. 将技能提升到扎实或专家前，先检查证据风险提示。\n\n"
+            "技能升级必须能被证据解释。"
+        ),
         "error_no_tree": "未找到「{profile}」的 skill-tree.yaml。",
         "metric_expert": "🔵 专家",
         "metric_solid": "🟢 扎实",
@@ -904,12 +1093,12 @@ _SKILL_TREE: dict[str, dict[str, str]] = {
         "pool_deleted_session": (
             "已从编辑区移除池条目；请点击**保存**以写入文件。"
         ),
-        "evidence_review_link": "打开 Evidence Review",
+        "evidence_review_link": "打开证据审阅",
         "evidence_signal_count": "{n} 条 evidence",
         "evidence_signal_strength": "强度：{strength}",
         "evidence_signal_review": "审阅：{status}",
         "evidence_signal_missing": "缺少 evidence",
-        "evidence_signal_risk": "Evidence 风险：{reason}",
+        "evidence_signal_risk": "证据风险：{reason}",
         "evidence_strength_unrated": "未评级",
         "evidence_strength_weak": "弱",
         "evidence_strength_medium": "中",
@@ -1142,100 +1331,100 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "merge_preview_tree": "Merged skill-tree preview",
     },
     "zh": {
-        "page_title": "Evidence Review · nblane",
-        "title": "Evidence Review",
+        "page_title": "证据审阅 · nblane",
+        "title": "证据审阅",
         "page_context_line": (
-            "审阅 Done 工作、evidence-pool 条目、技能关联与强度风险，"
-            "避免 skill status 变成没有证据支撑的 claim。"
+            "审阅已完成工作、证据池条目、技能关联与强度风险，"
+            "避免技能状态变成没有证据支撑的断言。"
         ),
         "page_help_short": "使用说明",
         "evidence_ai_short": "证据 AI",
         "evidence_ai_config_caption": (
-            "这些设置只影响当前 profile 的 Evidence Review 动作："
-            "Done 到证据草案，以及看板任务理解。"
+            "这些设置只影响当前档案的证据审阅动作："
+            "已完成任务到证据草案，以及看板任务理解。"
         ),
         "evidence_ai_backend": "证据 AI 引擎",
         "evidence_ai_backend_help": (
             "LLM 使用全局 AI / LLM 运行时；Codex 使用当前部署共享的 service-level "
             "Codex CLI 只读模式。"
         ),
-        "evidence_ai_subtasks_model": "Done → 证据模型",
-        "evidence_ai_subtasks_help": "从所选 Done 任务生成可审阅的 evidence 草案。",
+        "evidence_ai_subtasks_model": "已完成任务 → 证据模型",
+        "evidence_ai_subtasks_help": "从所选已完成任务生成可审阅的证据草案。",
         "evidence_ai_alignment_model": "任务理解模型",
         "evidence_ai_alignment_help": "在生成草案前，澄清描述不完整的看板任务。",
         "evidence_ai_codex_model_placeholder": "Codex CLI 默认模型",
         "evidence_ai_config_saved": "证据 AI 配置已保存。",
         "evidence_ai_default_hint": "应用默认：{backend}",
         "evidence_help_body": (
-            "### Evidence Review 使用流程\n\n"
-            "1. **Done 队列 / 整理**：选择已完成的 Kanban 任务，生成可审阅的 evidence 草案，只应用你确认可信的条目。\n"
-            "2. **Claim Studio**：从已审阅 evidence 按项目、目标、技能、全部证据或手动选择生成可复用公开 claim。\n"
-            "3. **Evidence Pool**：维护 evidence 条目的强度、置信度、审阅状态、公开准备度和引用。\n"
-            "4. **技能关联**：把活跃 evidence 绑定到技能节点，避免 skill status 没有证据支撑。\n"
-            "5. **项目 / 经历引用**：把 evidence 关联到项目案例、经历案例和 Research sources。\n"
-            "6. **状态风险**：发布或升级前检查 solid/expert 技能是否缺少足够强的 evidence。\n\n"
+            "### 证据审阅使用流程\n\n"
+            "1. **已完成队列 / 整理**：选择已完成的看板任务，生成可审阅的证据草案，只应用你确认可信的条目。\n"
+            "2. **断言工作台**：从已审阅证据按项目、目标、技能、全部证据或手动选择生成可复用公开断言。\n"
+            "3. **证据池**：维护证据条目的强度、置信度、审阅状态、公开准备度和引用。\n"
+            "4. **技能关联**：把活跃证据绑定到技能节点，避免技能状态没有证据支撑。\n"
+            "5. **项目 / 经历引用**：把证据关联到项目案例、经历案例和研究资料。\n"
+            "6. **状态风险**：发布或升级前检查扎实/专家技能是否缺少足够强的证据。\n\n"
             "本页 AI 只生成候选，必须经过预览和人工应用才会写入文件。"
         ),
         "save_pool": "保存证据池",
         "saved_pool": "已保存 evidence-pool.yaml。",
         "saved_pool_synced": "已保存 evidence-pool.yaml，并同步 SKILL.md。",
-        "metric_done_uncrystallized": "Done 未结晶",
+        "metric_done_uncrystallized": "已完成未结晶",
         "metric_unlinked": "未挂技能",
         "metric_needs_review": "待审阅",
         "metric_status_risk": "状态证据风险",
-        "tab_queue": "Done 队列 / 整理",
-        "tab_claims": "Claim Studio",
-        "tab_pool": "Evidence Pool",
+        "tab_queue": "已完成队列 / 整理",
+        "tab_claims": "断言工作台",
+        "tab_pool": "证据池",
         "tab_links": "技能关联",
         "tab_refs": "项目 / 经历引用",
         "tab_risks": "状态风险",
-        "done_queue_title": "Done -> evidence 候选",
-        "done_queue_empty": "没有等待 evidence review 的 Done 任务。",
-        "done_generate": "生成 Done -> evidence 草案",
-        "done_pick": "选择 Done 任务",
+        "done_queue_title": "已完成 -> 证据候选",
+        "done_queue_empty": "没有等待证据审阅的已完成任务。",
+        "done_generate": "生成已完成 -> 证据草案",
+        "done_pick": "选择已完成任务",
         "done_allow_status": "允许 AI 更新状态",
         "done_allow_status_help": (
             "关闭：只合并 evidence 与引用；有 evidence 的 locked 节点可变为 "
             "learning。开启：AI status 仍只允许升级，expert 不会被自动采信。"
         ),
-        "done_mark_crystallized": "应用后标记所选 Done 任务为已结晶",
-        "done_preview_source": "来源 Done 任务：{sources}",
+        "done_mark_crystallized": "应用后标记所选已完成任务为已结晶",
+        "done_preview_source": "来源已完成任务：{sources}",
         "done_no_ai": "未配置 AI。",
-        "done_spinner": "生成 evidence 草案中…",
+        "done_spinner": "生成证据草案中…",
         "done_apply_selected": "应用所选",
         "done_apply_all": "应用全部",
-        "done_applied": "已应用 evidence 草案。",
-        "done_housekeeping_title": "Done 整理",
+        "done_applied": "已应用证据草案。",
+        "done_housekeeping_title": "已完成任务整理",
         "done_housekeeping_caption": (
-            "在 evidence review 完成后，把 Done 任务批量归档或删除。"
+            "在证据审阅完成后，把已完成任务批量归档或删除。"
         ),
-        "done_housekeeping_pick": "选择 Done 任务",
-        "done_housekeeping_archive": "归档所选 Done 任务",
-        "done_housekeeping_delete": "删除所选 Done 任务",
+        "done_housekeeping_pick": "选择已完成任务",
+        "done_housekeeping_archive": "归档所选已完成任务",
+        "done_housekeeping_delete": "删除所选已完成任务",
         "done_housekeeping_confirm_archive": "确认归档所选",
         "done_housekeeping_confirm_delete": "确认删除所选",
         "done_housekeeping_uncrystallized_warning": (
-            "所选任务中包含未结晶 Done。只有确认它们不需要 Done -> evidence "
+            "所选任务中包含未结晶的已完成任务。只有确认它们不需要已完成任务 -> 证据 "
             "审阅时才建议归档或删除。"
         ),
         "done_housekeeping_confirm_uncrystallized": (
-            "我确认所选未结晶 Done 可能尚未生成 evidence"
+            "我确认所选未结晶已完成任务可能尚未生成证据"
         ),
-        "done_housekeeping_archived": "已归档 {n} 个 Done 任务。",
-        "done_housekeeping_deleted": "已删除 {n} 个 Done 任务。",
-        "done_housekeeping_empty": "没有可整理的 Done 任务。",
+        "done_housekeeping_archived": "已归档 {n} 个已完成任务。",
+        "done_housekeeping_deleted": "已删除 {n} 个已完成任务。",
+        "done_housekeeping_empty": "没有可整理的已完成任务。",
         "done_crystallized_label": "已结晶",
         "done_uncrystallized_label": "未结晶",
         "review_rows_title": "需要审阅的池条目",
-        "review_rows_empty": "没有需要审阅的 evidence 条目。",
-        "unlinked_rows_title": "未挂技能的 evidence",
-        "unlinked_rows_empty": "所有活跃 evidence 都已关联技能。",
-        "claim_candidates_title": "Evidence -> claim 候选",
-        "claim_studio_title": "Claim Studio",
+        "review_rows_empty": "没有需要审阅的证据条目。",
+        "unlinked_rows_title": "未挂技能的证据",
+        "unlinked_rows_empty": "所有活跃证据都已关联技能。",
+        "claim_candidates_title": "证据 -> 断言候选",
+        "claim_studio_title": "断言工作台",
         "claim_studio_intro": (
-            "从已审阅 evidence 按项目、目标、技能、全量证据或手动选择生成可复用的对外 claim。"
+            "从已审阅证据按项目、目标、技能、全量证据或手动选择生成可复用的对外断言。"
         ),
-        "claim_studio_caption": "Claims 保存于 {path}。",
+        "claim_studio_caption": "断言保存于 {path}。",
         "claim_tab_overview": "概览",
         "claim_tab_project": "按项目",
         "claim_tab_goal": "按目标",
@@ -1253,37 +1442,37 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "claim_metric_draft": "草稿",
         "claim_metric_refresh": "需刷新",
         "claim_metric_unsupported": "缺支撑",
-        "claim_refresh_statuses": "刷新 claim 状态",
-        "claim_refresh_empty": "没有需要刷新的 claim。",
-        "claim_legacy_warning": "evidence-pool.yaml 中仍有旧 claim。",
-        "claim_migrate_legacy": "迁移旧 claim",
-        "claim_migrated": "已迁移 {n} 条 claim。",
-        "claim_text": "Claim 文本",
-        "claim_status": "Claim 状态",
-        "claim_save": "保存 claim",
-        "claim_pick_evidence": "选择 evidence 条目",
-        "claim_generate": "生成 claim 候选",
-        "claim_candidates_empty": "暂无 claim 候选。",
-        "claim_existing_title": "已确认 claims",
-        "claim_candidates_preview": "Claim 候选预览",
-        "claim_adopt": "采纳 claim",
-        "claim_evidence_refs": "Evidence：{refs}",
+        "claim_refresh_statuses": "刷新断言状态",
+        "claim_refresh_empty": "没有需要刷新的断言。",
+        "claim_legacy_warning": "evidence-pool.yaml 中仍有旧断言。",
+        "claim_migrate_legacy": "迁移旧断言",
+        "claim_migrated": "已迁移 {n} 条断言。",
+        "claim_text": "断言文本",
+        "claim_status": "断言状态",
+        "claim_save": "保存断言",
+        "claim_pick_evidence": "选择证据条目",
+        "claim_generate": "生成断言候选",
+        "claim_candidates_empty": "暂无断言候选。",
+        "claim_existing_title": "已确认断言",
+        "claim_candidates_preview": "断言候选预览",
+        "claim_adopt": "采纳断言",
+        "claim_evidence_refs": "证据：{refs}",
         "claim_skill_refs": "技能：{refs}",
         "claim_public_readiness": "公开准备度：{value}",
         "claim_confidence": "置信度：{value}",
-        "claim_apply_selected": "应用 {n} 条已选 claim",
-        "claim_apply_empty": "没有可应用的 claim 候选。",
-        "claim_applied": "已应用 {n} 条 claim。",
-        "pool_add_title": "新增 evidence 条目",
-        "pool_edit_title": "编辑 evidence 条目",
-        "pool_empty": "尚无 evidence 条目。",
+        "claim_apply_selected": "应用 {n} 条已选断言",
+        "claim_apply_empty": "没有可应用的断言候选。",
+        "claim_applied": "已应用 {n} 条断言。",
+        "pool_add_title": "新增证据条目",
+        "pool_edit_title": "编辑证据条目",
+        "pool_empty": "尚无证据条目。",
         "pool_deprecate": "软下线",
-        "pool_deprecated": "已软下线 evidence 条目。",
-        "pool_add": "添加 evidence",
-        "pool_added": "已添加 evidence 条目。",
+        "pool_deprecated": "已软下线证据条目。",
+        "pool_add": "添加证据",
+        "pool_added": "已添加证据条目。",
         "pool_update": "更新条目",
-        "pool_updated": "已更新 evidence 条目。",
-        "pool_id": "Evidence id",
+        "pool_updated": "已更新证据条目。",
+        "pool_id": "证据 id",
         "pool_type": "类型",
         "pool_title": "标题",
         "pool_date": "日期",
@@ -1293,30 +1482,30 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "pool_confidence": "置信度",
         "pool_review_status": "审阅状态",
         "pool_public_readiness": "公开准备度",
-        "pool_source_refs": "Source refs（每行一项）",
-        "pool_project_refs": "Project refs",
-        "pool_experience_refs": "Experience refs",
+        "pool_source_refs": "来源引用（每行一项）",
+        "pool_project_refs": "项目引用",
+        "pool_experience_refs": "经历引用",
         "pool_replaced_by": "替代条目",
-        "pool_title_required": "Evidence 标题不能为空。",
-        "pool_id_exists": "Evidence id 已存在：{id}",
-        "link_title": "把 evidence 关联到技能",
-        "link_pick_evidence": "Evidence 条目",
+        "pool_title_required": "证据标题不能为空。",
+        "pool_id_exists": "证据 id 已存在：{id}",
+        "link_title": "把证据关联到技能",
+        "link_pick_evidence": "证据条目",
         "link_pick_skills": "技能",
         "link_button": "关联所选技能",
-        "link_done": "已把 evidence 关联到所选技能。",
-        "link_empty": "没有可关联的活跃 evidence 条目。",
+        "link_done": "已把证据关联到所选技能。",
+        "link_empty": "没有可关联的活跃证据条目。",
         "refs_options_title": "可关联对象",
         "refs_options_empty": "暂无记录。",
-        "refs_projects": "Project cases",
-        "refs_experiences": "Experience cases",
-        "refs_sources": "Research sources",
-        "refs_linker_title": "关联 evidence 到项目 / 经历 / 来源",
-        "refs_manual_source_refs": "Research Inbox 之外的手动 source refs",
+        "refs_projects": "项目案例",
+        "refs_experiences": "经历案例",
+        "refs_sources": "研究资料",
+        "refs_linker_title": "关联证据到项目 / 经历 / 来源",
+        "refs_manual_source_refs": "研究收件箱之外的手动来源引用",
         "refs_save": "保存引用",
-        "refs_saved": "已保存 evidence refs。",
-        "refs_evidence_missing": "未找到 evidence 条目。",
-        "refs_case_editor_title": "项目 / 经历 owner",
-        "refs_open_project_board": "打开项目看板 Project Board",
+        "refs_saved": "已保存证据引用。",
+        "refs_evidence_missing": "未找到证据条目。",
+        "refs_case_editor_title": "项目 / 经历归属",
+        "refs_open_project_board": "打开项目看板",
         "refs_case_id": "ID",
         "refs_project_title": "项目标题",
         "refs_experience_organization": "组织 / 公司",
@@ -1327,14 +1516,14 @@ _EVIDENCE_REVIEW: dict[str, dict[str, str]] = {
         "refs_visibility": "可见性",
         "refs_time_range": "时间范围",
         "refs_summary": "摘要",
-        "refs_goal_refs": "Goal refs",
-        "refs_task_refs": "Task refs",
-        "refs_output_refs": "Output refs",
+        "refs_goal_refs": "目标引用",
+        "refs_task_refs": "任务引用",
+        "refs_output_refs": "输出引用",
         "refs_notes": "备注",
-        "refs_add_project": "新增 project case",
-        "refs_add_experience": "新增 experience case",
-        "refs_case_saved": "已保存 case。",
-        "risk_empty": "没有 solid/expert 证据强度风险。",
+        "refs_add_project": "新增项目案例",
+        "refs_add_experience": "新增经历案例",
+        "refs_case_saved": "已保存案例。",
+        "risk_empty": "没有扎实/专家证据强度风险。",
         "open_skill_tree": "打开技能树",
         "strength_unrated": "未评级",
         "strength_weak": "弱",
@@ -1847,7 +2036,7 @@ _HOME: dict[str, dict[str, str]] = {
         "app_caption": (
             "当前档案：**{profile}** · "
             "数据以 YAML / Markdown 明文存储，"
-            "Git 是唯一的 source of truth。"
+            "Git 是唯一可信来源。"
         ),
         "dashboard_status_overview": "状态概览",
         "dashboard_metric_goal": "当前目标",
@@ -1857,23 +2046,23 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_goal_set": "已设置",
         "dashboard_goal_missing": "未设置",
         "dashboard_metric_skill_lit": "已点亮技能",
-        "dashboard_skill_progress_suffix": "solid / expert",
-        "dashboard_metric_doing": "Doing",
+        "dashboard_skill_progress_suffix": "扎实 / 专家",
+        "dashboard_metric_doing": "进行中",
         "dashboard_metric_pending_evidence": "待整理证据",
         "dashboard_metric_health": "健康 E/W/I",
-        "dashboard_metric_health_help": "来自 Profile Health 的错误 / 警告 / 信息数量。",
+        "dashboard_metric_health_help": "来自档案体检的错误 / 警告 / 信息数量。",
         "dashboard_public_not_initialized": (
-            "Public layer 尚未初始化；Dashboard 这里只提供入口。"
+            "公开层尚未初始化；首页这里只提供入口。"
         ),
-        "dashboard_doing_title": "本周 Doing",
-        "dashboard_doing_empty": "当前没有 Doing 任务。打开看板选择本周正在推进的工作。",
+        "dashboard_doing_title": "本周进行中",
+        "dashboard_doing_empty": "当前没有进行中任务。打开看板选择本周正在推进的工作。",
         "dashboard_doing_started": "开始于 {date}",
         "dashboard_doing_blocked": "阻塞：{blocked}",
         "dashboard_doing_more": "看板上还有 {n} 个 Doing 任务。",
-        "dashboard_pending_evidence_title": "待整理 evidence",
-        "dashboard_done_uncrystallized": "Done 未结晶",
+        "dashboard_pending_evidence_title": "待整理证据",
+        "dashboard_done_uncrystallized": "已完成但未结晶",
         "dashboard_unlinked_evidence": "未挂技能的证据",
-        "dashboard_needs_review_evidence": "待审阅 evidence",
+        "dashboard_needs_review_evidence": "待审阅证据",
         "dashboard_status_risk_evidence": "技能状态证据风险",
         "dashboard_pending_evidence_empty": "没有发现待整理证据。",
         "dashboard_health_title": "健康摘要",
@@ -1885,7 +2074,7 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_yes": "是",
         "dashboard_no": "否",
         "dashboard_output_title": "输出机会",
-        "dashboard_output_empty": "Public layer 暂无摘要。进入 Output Studio 初始化草稿。",
+        "dashboard_output_empty": "公开层暂无摘要。进入输出工作台初始化草稿。",
         "dashboard_public_drafts": "草稿",
         "dashboard_public_published": "已发布",
         "dashboard_public_visibility": "可见性",
@@ -1897,7 +2086,7 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_priority_goal_title": "当前目标",
         "dashboard_priority_work_title": "本周执行",
         "dashboard_priority_evidence_title": "待整理证据",
-        "dashboard_scope_title": "Scope / 当前范围",
+        "dashboard_scope_title": "当前范围",
         "dashboard_scope_profile": "档案",
         "dashboard_scope_goal": "目标",
         "dashboard_scope_ai": "AI",
@@ -1908,10 +2097,10 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_action_kanban": "打开看板",
         "dashboard_action_evidence": "整理证据",
         "dashboard_action_output": "生成输出",
-        "dashboard_canvas_section_title": "上下文画布 Context Canvas",
+        "dashboard_canvas_section_title": "上下文画布",
         "dashboard_canvas_section_caption": "稳定的每日摘要先显示，图谱画布在下方加载。",
         "dashboard_overview_map_title": "当前地图",
-        "dashboard_graph_eyebrow": "Context",
+        "dashboard_graph_eyebrow": "上下文",
         "dashboard_graph_title": "上下文画布",
         "dashboard_graph_goal_missing": "设置当前目标",
         "dashboard_graph_blocked": "阻塞",
@@ -1927,24 +2116,24 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_help_full_doc": "打开完整 Dashboard 使用说明",
         "dashboard_help_body": (
             "### 如何阅读 Dashboard\n\n"
-            "顶部卡片回答当前正在追求什么：North Star、主目标、活跃目标和当前工作。\n\n"
-            "画布遵循成长图谱：**Source** 是原始材料，**Evidence** 是可审查事实，"
-            "**Claim** 是解释和断言，**Skill** 是能力状态，**Output** 是公开或可复用表达。\n\n"
-            "用 **捕捉来源** 记录轻量笔记和链接。捕捉内容默认进入 Research 的私有 inbox；"
-            "不会自动变成 evidence，也不会自动改 skill status。\n\n"
-            "用 **Evidence Review** 处理 Done 任务、未链接证据、claim candidates 和状态风险。"
+            "顶部卡片回答当前正在追求什么：长期方向、主目标、活跃目标和当前工作。\n\n"
+            "画布遵循成长图谱：**来源** 是原始材料，**证据** 是可审查事实，"
+            "**断言** 是解释和结论，**技能** 是能力状态，**输出** 是公开或可复用表达。\n\n"
+            "用 **捕捉来源** 记录轻量笔记和链接。捕捉内容默认进入研究工作台的私有收件箱；"
+            "不会自动变成证据，也不会自动改技能状态。\n\n"
+            "用 **证据审阅** 处理已完成任务、未链接证据、claim 候选和状态风险。"
             "AI 可以生成候选和摘要，但事实确认仍需要人工审阅。\n\n"
-            "**Dashboard AI 设置**只影响 Dashboard 内的 goal-skill 匹配和图谱洞察。"
-            "Research 有自己的 Research AI 设置，用于论文搜索、翻译、Reader 和 DeepRead。\n\n"
-            "8503 负责安全的 profile 选择与写入；8502 sidecar 启动后可承载更高交互的 canvas 或 reader surface。"
+            "**本页 AI 设置**只影响首页内的目标-技能匹配和图谱洞察。"
+            "研究工作台有自己的研究 AI 设置，用于论文搜索、翻译、阅读器和深读。\n\n"
+            "8503 负责安全的档案选择与写入；8502 sidecar 启动后可承载更高交互的画布或阅读器界面。"
         ),
         "dashboard_ai_settings_title": "本页 AI 设置",
-        "dashboard_ai_settings_caption": "这些设置只影响当前 profile 的 Dashboard AI 动作。Research、Kanban 等页面保留自己的页面级 AI 设置；这里不会写入 API key。",
-        "dashboard_ai_action_goal_skill_match": "Goal-skill 匹配",
-        "dashboard_ai_action_goal_skill_match_help": "为目标建议 skill 节点。候选必须确认后才会保存。",
+        "dashboard_ai_settings_caption": "这些设置只影响当前档案的首页 AI 动作。研究、看板等页面保留自己的页面级 AI 设置；这里不会写入 API key。",
+        "dashboard_ai_action_goal_skill_match": "目标-技能匹配",
+        "dashboard_ai_action_goal_skill_match_help": "为目标建议技能节点。候选必须确认后才会保存。",
         "dashboard_ai_action_graph_insights": "图谱洞察",
         "dashboard_ai_action_graph_insights_help": "总结图谱风险和下一步，不直接修改文件。",
-        "dashboard_ai_backend": "Backend",
+        "dashboard_ai_backend": "后端",
         "dashboard_ai_llm_model": "LLM 模型",
         "dashboard_ai_codex_model": "Codex 模型",
         "dashboard_ai_use_default": "使用默认",
@@ -1952,7 +2141,7 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_ai_app_default": "应用默认",
         "dashboard_ai_codex_default": "Codex 默认",
         "dashboard_ai_effective": "实际使用：{backend} · {model}",
-        "dashboard_ai_effective_backend": "实际 backend：{backend}",
+        "dashboard_ai_effective_backend": "实际后端：{backend}",
         "dashboard_ai_effective_model": "实际模型：{model}",
         "dashboard_ai_test": "测试",
         "dashboard_ai_test_model": "测试模型",
@@ -1969,15 +2158,15 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_ai_llm_status": "LLM：{status} · {model}",
         "dashboard_ai_codex_status": "Codex：{status}",
         "dashboard_ai_save": "保存 AI 设置",
-        "dashboard_ai_saved": "Dashboard AI 设置已保存。",
-        "dashboard_ai_test_goal_skill_match": "测试 goal-skill 模型",
+        "dashboard_ai_saved": "首页 AI 设置已保存。",
+        "dashboard_ai_test_goal_skill_match": "测试目标-技能模型",
         "dashboard_ai_test_ok": "模型测试成功（{seconds}s）。",
-        "dashboard_open_8502_canvas": "打开 8502 Canvas",
-        "dashboard_canvas_sidecar_unavailable": "8502 Dashboard Canvas 当前不可达：{base}；已使用本地 Dashboard fallback。",
-        "dashboard_canvas_sidecar_link_disabled_help": "请先启动或转发 8502 Dashboard Canvas sidecar，再使用这个入口。",
+        "dashboard_open_8502_canvas": "打开 8502 画布",
+        "dashboard_canvas_sidecar_unavailable": "8502 画布当前不可达：{base}；已使用本地首页回退视图。",
+        "dashboard_canvas_sidecar_link_disabled_help": "请先启动或转发 8502 画布 sidecar，再使用这个入口。",
         "dashboard_embedded_canvas_title": "内嵌画布",
         "dashboard_canvas_summary_title": "画布摘要",
-        "dashboard_canvas_summary_caption": "日常首页先折叠大画布；需要深入探索图谱时再展开或打开 8502 Canvas。",
+        "dashboard_canvas_summary_caption": "日常首页先折叠大画布；需要深入探索图谱时再展开或打开 8502 画布。",
         "dashboard_canvas_load_embed": "加载内嵌画布",
         "dashboard_graph_hero_title": "实时成长图谱",
         "dashboard_graph_hero_caption": "用一张紧凑 3D 图把今天的目标、来源、证据、技能和输出串起来。",
@@ -1995,31 +2184,31 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_action_draft_output": "起草输出",
         "dashboard_action_review_source": "审阅来源",
         "dashboard_action_capture_source": "捕捉来源",
-        "dashboard_open_research": "打开 Research",
+        "dashboard_open_research": "打开研究工作台",
         "dashboard_action_why_evidence": "证据队列是当前最可靠的审阅入口。",
         "dashboard_action_why_clear": "没有紧急队列阻塞今日主路径。",
-        "dashboard_action_why_focus": "Doing 工作能把今日动作保持在当前目标上。",
+        "dashboard_action_why_focus": "进行中的工作能把今日动作保持在当前目标上。",
         "dashboard_action_why_focus_empty": "先选定一个活跃任务，再展开其他系统工作。",
         "dashboard_action_why_gap": "缺口风险如果不处理，会阻塞当前目标。",
         "dashboard_action_why_output": "草稿可以把已审阅工作转成可复用输出。",
         "dashboard_action_why_output_empty": "等审阅队列有足够支撑后再创建输出。",
         "dashboard_capture_more_fields": "更多字段",
         "dashboard_canvas_more_filters": "更多过滤",
-        "dashboard_claim_summary": "Claim 把已审阅 evidence 翻译成可复用的技能与输出断言。",
-        "north_star_strip_title": "North Star",
-        "north_star_empty": "尚未设置 North Star",
-        "north_star_empty_action": "填写 North Star",
+        "dashboard_claim_summary": "断言会把已审阅证据翻译成可复用的技能与输出结论。",
+        "north_star_strip_title": "长期方向",
+        "north_star_empty": "尚未设置长期方向",
+        "north_star_empty_action": "填写长期方向",
         "north_star_hidden_display": "已设置长期方向",
-        "north_star_private_display": "私密 North Star",
-        "north_star_edit_action": "编辑 Profile Context",
+        "north_star_private_display": "私密长期方向",
+        "north_star_edit_action": "编辑档案上下文",
         "north_star_visibility_visible": "完整显示",
         "north_star_visibility_discreet": "简略显示",
         "north_star_visibility_hidden": "隐藏明文",
         "north_star_visibility_private": "私密",
-        "skill_alignment_title": "Goal-Skill 关联",
+        "skill_alignment_title": "目标-技能关联",
         "skill_alignment_confirmed": "已确认关联",
         "skill_alignment_candidates": "候选关联",
-        "skill_alignment_no_links": "尚无已确认 skill links。",
+        "skill_alignment_no_links": "尚无已确认技能关联。",
         "skill_alignment_no_candidates": "运行规则匹配或 AI 匹配后选择候选。",
         "skill_alignment_rule": "规则匹配",
         "skill_alignment_ai": "AI 匹配",
@@ -2027,23 +2216,23 @@ _HOME: dict[str, dict[str, str]] = {
         "skill_alignment_manual_label": "手动添加",
         "skill_alignment_manual_add": "添加",
         "skill_alignment_suggested": "建议",
-        "skill_alignment_gap_hint": "关联到 locked/learning 节点时，建议进入差距分析。",
-        "goal_alignment_goal_missing": "未找到要关联技能的 goal。",
+        "skill_alignment_gap_hint": "关联到锁定/学习中节点时，建议进入差距分析。",
+        "goal_alignment_goal_missing": "未找到要关联技能的目标。",
         "goal_alignment_node_missing": "当前 schema 中没有这个技能节点。",
         "goal_alignment_candidates_ready": "已生成 {n} 个技能候选，请确认。",
-        "goal_alignment_links_saved": "Goal-skill 关联已保存。",
-        "goal_primary_saved": "Primary goal 已更新。",
-        "goal_archived": "Goal 已归档。",
+        "goal_alignment_links_saved": "目标-技能关联已保存。",
+        "goal_primary_saved": "主目标已更新。",
+        "goal_archived": "目标已归档。",
         "dashboard_add_active_goal": "添加目标",
         "dashboard_archive_goal": "归档",
         "dashboard_inspector_empty": "选择一个节点查看详情。",
-        "dashboard_inspector_node_hint": "进入 owner 页面查看完整内容。",
+        "dashboard_inspector_node_hint": "进入归属页面查看完整内容。",
         "dashboard_inspector_placeholder_hint": "这个区域仍是骨架状态，还没有对应的真实记录。",
         "dashboard_inspector_locked_hint": "该节点的私密或锁定细节已在当前视图隐藏。",
         "dashboard_inspector_owner_reserved": "搭建状态",
         "dashboard_placeholder_metric": "预留",
         "dashboard_inspector_setup_title": "先完成基础设置，或选择真实节点",
-        "dashboard_inspector_setup_hint": "当前图谱仍以骨架节点为主。建议先补 North Star，再设置当前目标。",
+        "dashboard_inspector_setup_hint": "当前图谱仍以骨架节点为主。建议先补长期方向，再设置当前目标。",
         "dashboard_today_current_focus": "当前焦点",
         "dashboard_today_capture_sources": "捕捉 / 来源",
         "dashboard_today_evidence_review": "证据审阅",
@@ -2057,7 +2246,7 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_capture_raw_text": "备注",
         "dashboard_capture_source": "来源 URL 或出处",
         "dashboard_capture_tags": "标签",
-        "dashboard_capture_goal": "Goal",
+        "dashboard_capture_goal": "目标",
         "dashboard_capture_type": "类型",
         "dashboard_capture_type_note": "笔记",
         "dashboard_capture_type_link": "链接",
@@ -2065,7 +2254,7 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_capture_type_idea": "想法",
         "dashboard_source_inbox_title": "来源收件箱",
         "dashboard_source_inbox_empty": "还没有捕捉来源。",
-        "dashboard_source_to_evidence_hint": "捕捉内容先进入 inbox，审阅后再成为 evidence candidate。",
+        "dashboard_source_to_evidence_hint": "捕捉内容先进入收件箱，审阅后再成为证据候选。",
         "dashboard_atomic_evidence_title": "原子证据",
         "dashboard_evidence_candidate_title": "证据候选",
         "dashboard_atomic_evidence_unlinked": "未挂技能的原子证据",
@@ -2075,7 +2264,7 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_feedback_planned": "反馈区域仍在搭建中。",
         "dashboard_graph_loading": "正在加载图谱…",
         "dashboard_graph_3d_hint": (
-            "North Star 依次流向目标、项目容器、活动、来源、证据、断言、能力、输出、反馈与治理。"
+            "长期方向依次流向目标、项目容器、活动、来源、证据、断言、能力、输出、反馈与治理。"
             "可旋转、缩放；点击节点后在右侧查看。"
         ),
         "dashboard_view_canvas": "2D 画布",
@@ -2105,15 +2294,15 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_workbench_title": "今日工作台",
         "dashboard_workbench_caption": "集中查看今天的信号、捕捉入口和快捷操作。",
         "dashboard_canvas_setup_title": "当前画布仍处于搭建阶段",
-        "dashboard_canvas_setup_hint": "先补 North Star 和当前目标，再逐步用真实来源与证据替换骨架。",
-        "dashboard_canvas_missing_north_star": "缺少 North Star",
+        "dashboard_canvas_setup_hint": "先补长期方向和当前目标，再逐步用真实来源与证据替换骨架。",
+        "dashboard_canvas_missing_north_star": "缺少长期方向",
         "dashboard_canvas_missing_goal": "缺少当前目标",
         "dashboard_canvas_missing_sources": "还没有捕捉来源",
         "dashboard_canvas_reset_filters": "显示全部层",
         "dashboard_canvas_no_layers": "已隐藏全部层。",
         "dashboard_skill_progress_title": "技能进度",
-        "dashboard_skill_progress_caption": "solid / expert 点亮率",
-        "dashboard_skill_progress_empty": "暂无 skill tree 数据。",
+        "dashboard_skill_progress_caption": "扎实 / 专家点亮率",
+        "dashboard_skill_progress_empty": "暂无技能树数据。",
         "dashboard_skill_lit_rate": "点亮率",
         "dashboard_skill_status_expert": "专家",
         "dashboard_skill_status_solid": "扎实",
@@ -2156,76 +2345,76 @@ _HOME: dict[str, dict[str, str]] = {
         "dashboard_layer_governance": "治理",
         "dashboard_set_as_primary": "设为主目标",
         "dashboard_set_primary": "设为主目标",
-        "quick_skill_tree": "技能地图 Skill Map",
-        "quick_skill_tree_help": "编辑技能状态与 evidence refs。",
-        "quick_evidence_review": "证据审阅 Evidence",
-        "quick_evidence_review_help": "审阅 evidence 强度、技能关联与 Done 结晶。",
-        "quick_research": "研究工作台 Research",
+        "quick_skill_tree": "技能地图",
+        "quick_skill_tree_help": "编辑技能状态与证据引用。",
+        "quick_evidence_review": "证据审阅",
+        "quick_evidence_review_help": "审阅证据强度、技能关联与完成项结晶。",
+        "quick_research": "研究工作台",
         "quick_research_help": "捕捉和整理外部来源。",
-        "quick_gap": "差距分析 Gap",
+        "quick_gap": "差距分析",
         "quick_gap_help": "把任务映射到技能与缺口。",
-        "quick_kanban": "看板 Kanban",
-        "quick_kanban_help": "查看 Doing、Queue 与 Done。",
-        "quick_public_site": "输出工作台 Studio",
+        "quick_kanban": "看板",
+        "quick_kanban_help": "查看进行中、队列与已完成任务。",
+        "quick_public_site": "输出工作台",
         "quick_public_site_help": "查看草稿并生成公开输出。",
-        "quick_profile_health": "档案体检 Health",
-        "quick_profile_health_help": "查看校验、sync drift 与证据风险。",
-        "profile_evidence_import_expander": "批量导入 profile evidence",
+        "quick_profile_health": "档案体检",
+        "quick_profile_health_help": "查看校验、同步漂移与证据风险。",
+        "profile_evidence_import_expander": "批量导入档案证据",
         "profile_evidence_import_caption": (
-            "粘贴简历或长文本，让 AI 生成 evidence 与 skill-tree 变更草案；"
+            "粘贴简历或长文本，让 AI 生成证据与技能树变更草案；"
             "写入前请逐条审阅。"
         ),
-        "profile_context_expander": "Profile Context / SKILL.md",
+        "profile_context_expander": "档案上下文 / SKILL.md",
         "profile_context_caption": (
-            "高级区：维护长期的人写画像与 Agent Context；"
-            "生成事实继续由各 owner 文件负责。"
+            "高级区：维护长期的人写画像与 Agent 上下文；"
+            "生成事实继续由各归属文件负责。"
         ),
         "profile_context_structured_title": "结构化画像",
         "profile_context_narrative_title": "长期叙事章节",
         "profile_context_narrative_caption": (
             "这些章节由人维护，继续写入 SKILL.md。"
         ),
-        "identity_name": "Name",
-        "identity_domain": "Domain",
-        "identity_journey": "Journey",
-        "identity_current_role": "Current Role",
-        "identity_north_star": "North Star",
-        "identity_north_star_brief": "North Star Brief",
-        "identity_north_star_visibility": "North Star Visibility",
-        "profile_section_research_fingerprint": "Research Fingerprint",
-        "profile_section_thinking_style": "Thinking & Communication Style",
-        "profile_section_growth_log": "Growth Log",
-        "profile_section_influence_output": "Influence & Output",
-        "save_profile_context": "保存 Profile Context",
+        "identity_name": "姓名",
+        "identity_domain": "领域",
+        "identity_journey": "经历线索",
+        "identity_current_role": "当前角色",
+        "identity_north_star": "长期方向",
+        "identity_north_star_brief": "长期方向摘要",
+        "identity_north_star_visibility": "长期方向可见性",
+        "profile_section_research_fingerprint": "研究指纹",
+        "profile_section_thinking_style": "思考与沟通风格",
+        "profile_section_growth_log": "成长记录",
+        "profile_section_influence_output": "影响力与输出",
+        "save_profile_context": "保存档案上下文",
         "generated_block_preview_title": "生成块预览",
         "generated_block_owner_hint": (
             "`skill_tree` 由 skill-tree.yaml / evidence-pool.yaml 负责；"
             "`current_focus` 由 kanban.md 负责。此处只读预览。"
         ),
         "generated_block_expander": "{block}",
-        "generated_block_skill_tree_help": "Owner：skill-tree.yaml 与 evidence-pool.yaml。",
-        "generated_block_kanban_help": "Owner：kanban.md 的 current focus。",
+        "generated_block_skill_tree_help": "归属：skill-tree.yaml 与 evidence-pool.yaml。",
+        "generated_block_kanban_help": "归属：kanban.md 的当前焦点。",
         "generated_block_sync_hint": "如需刷新生成块，运行 `nblane sync <profile> --write`。",
-        "generated_block_missing": "未找到该 generated block。",
-        "raw_markdown_expander": "Raw Markdown",
+        "generated_block_missing": "未找到该生成块。",
+        "raw_markdown_expander": "原始 Markdown",
         "raw_drift_warning": (
-            "Raw 编辑可能改到 generated block 并造成 sync drift。"
-            "保存后请用 Profile Health 检查 drift。"
+            "原始编辑可能改到生成块并造成同步漂移。"
+            "保存后请用档案体检检查漂移。"
         ),
         "tab_overview": "📊 概览",
         "tab_editor": "✏️ 结构化编辑",
         "tab_raw": "📝 原文",
         "sub_overview": "技能概览",
         "sub_category": "按分类",
-        "goal_module_title": "Current Goal",
+        "goal_module_title": "当前目标",
         "goal_module_caption": (
             "4-8 周阶段目标，用来统一差距分析、证据整理和输出规划。"
         ),
-        "goal_create_title": "创建 current goal",
-        "goal_edit_title": "编辑 current goal",
-        "goal_reveal_private": "本会话显示 private goal",
+        "goal_create_title": "创建当前目标",
+        "goal_edit_title": "编辑当前目标",
+        "goal_reveal_private": "本会话显示私密目标",
         "goal_private_locked": (
-            "该 goal 标记为 private。需在本会话显式显示后才能编辑明文细节。"
+            "该目标标记为私密。需在本会话显式显示后才能编辑明文细节。"
         ),
         "goal_field_title": "标题",
         "goal_field_label": "隐私替代标签",
@@ -2233,22 +2422,22 @@ _HOME: dict[str, dict[str, str]] = {
         "goal_field_start": "开始日期",
         "goal_field_target": "目标日期",
         "goal_field_summary": "摘要",
-        "goal_field_alignment": "与 North Star 的关系",
+        "goal_field_alignment": "与长期方向的关系",
         "goal_field_target_skills": "目标技能（每行一项）",
         "goal_field_success_criteria": "成功标准（每行一项）",
-        "goal_field_focus": "本周 focus（每行一项）",
-        "goal_field_evidence_refs": "Evidence refs（每行一项）",
-        "goal_field_task_refs": "Task refs（每行一项）",
-        "goal_field_output_refs": "Output refs（每行一项）",
+        "goal_field_focus": "本周焦点（每行一项）",
+        "goal_field_evidence_refs": "证据引用（每行一项）",
+        "goal_field_task_refs": "任务引用（每行一项）",
+        "goal_field_output_refs": "输出引用（每行一项）",
         "goal_field_notes": "私密备注",
         "goal_field_ui_visibility": "UI 展示级别",
-        "goal_field_agent_context": "进入 Agent context",
+        "goal_field_agent_context": "进入 Agent 上下文",
         "goal_field_public_output": "允许未来公开输出引用",
         "goal_public_disabled_caption": (
             "P0 只保存该字段，公开站构建不会读取 goals.yaml。"
         ),
-        "goal_save": "保存 current goal",
-        "goal_saved": "Current goal 已保存。",
+        "goal_save": "保存当前目标",
+        "goal_saved": "当前目标已保存。",
         "goal_title_required": "标题不能为空。",
         "goal_preview": "预览",
         "home_expander_cat": "{cat} — 共 {total} 个节点",
@@ -2279,10 +2468,10 @@ _HOME: dict[str, dict[str, str]] = {
         "home_saved": "已保存。",
         "hint_after_save": (
             "保存后运行 `nblane context {profile}` "
-            "生成最新 system prompt。"
+            "生成最新系统提示词。"
         ),
         "raw_label": (
-            "编辑 SKILL.md（即 agent system prompt 的来源）"
+            "编辑 SKILL.md（即 Agent 系统提示词的来源）"
         ),
         "resume_expander": "简历 / 长文本（AI 摄入）",
         "resume_placeholder": "粘贴简历、项目列表或简介…",
@@ -2314,6 +2503,16 @@ _KANBAN: dict[str, dict[str, str]] = {
             "Private OS: weekly execution board. Done items can be "
             "draft-ingested into evidence — review each proposal before "
             "apply."
+        ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Kanban workflow\n\n"
+            "1. Capture uncertain work into Queue or Inbox; keep Doing small enough to finish this week.\n"
+            "2. Use task details for outcome, context, blockers, and links. Subtasks should be checkable execution steps.\n"
+            "3. Done is not evidence by itself. Send Done tasks through Evidence Review before they upgrade skills or public claims.\n"
+            "4. Personal check-ins record learning and exercise without cluttering execution columns.\n"
+            "5. Kanban AI can draft subtasks or clarify vague tasks, but proposals must be accepted before they write to kanban.md.\n\n"
+            "Save or autosave writes kanban.md and syncs project-board ownership."
         ),
         "reload": "Reload from file",
         "save": "Save",
@@ -2621,6 +2820,36 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_backend_llm": "LLM",
         "kb_ai_backend_codex": "Codex",
         "kb_ai_backend_codex_status": "Codex: read-only local",
+        "kb_ai_settings_title": "Kanban AI Config",
+        "kb_ai_settings_caption": (
+            "These settings only affect Kanban task clarification and subtask drafting "
+            "for the current profile. API keys still come from the shared AI / LLM runtime."
+        ),
+        "kb_ai_action_task_alignment": "Task clarification",
+        "kb_ai_action_task_alignment_help": (
+            "Suggest candidate interpretations before drafting subtasks for vague tasks."
+        ),
+        "kb_ai_action_subtasks": "Subtask drafting",
+        "kb_ai_action_subtasks_help": (
+            "Draft reviewable subtasks from the chosen task interpretation."
+        ),
+        "kb_ai_config_backend": "Backend",
+        "kb_ai_config_llm_model": "LLM model override",
+        "kb_ai_config_codex_model": "Codex model override",
+        "kb_ai_config_model_help": "Leave blank to use the global/default model.",
+        "kb_ai_effective_config": "Effective: {backend} · {model}",
+        "kb_ai_llm_status": "LLM: {status} · {model}",
+        "kb_ai_codex_status": "Codex: {status}",
+        "kb_ai_configured": "configured",
+        "kb_ai_missing_key": "missing key",
+        "kb_ai_installed": "installed",
+        "kb_ai_missing": "missing",
+        "kb_ai_logged_in": "logged in",
+        "kb_ai_login_unknown": "login unknown",
+        "kb_ai_codex_default": "Codex CLI default",
+        "kb_ai_app_default": "app default",
+        "kb_ai_save": "Save AI preferences",
+        "kb_ai_saved": "Kanban AI preferences saved.",
         "kb_mark_crystallized": "Mark crystallized",
         "kb_crystallize_short": "Cry",
         "kb_crystallize_done_only": "Only Done tasks can be crystallized.",
@@ -2751,6 +2980,16 @@ _KANBAN: dict[str, dict[str, str]] = {
         "page_context_line": (
             "私人操作系统 · 执行面：本周任务看板。「已完成」可经 AI 生成摄入草案，"
             "请按条审阅后再写入。"
+        ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### 看板使用流程\n\n"
+            "1. 不确定的事项先放入队列或收件区；进行中保持足够小，确保本周能收尾。\n"
+            "2. 任务详情写清结果、背景、阻塞和链接；子任务应是可勾选的执行步骤。\n"
+            "3. 已完成不等于证据。Done 任务需要进入 Evidence Review，审阅后才支撑技能升级或公开 claim。\n"
+            "4. 学习和运动记录放在个人工作台，避免污染执行列。\n"
+            "5. 看板 AI 可以生成子任务或澄清模糊任务，但必须确认候选后才会写入 kanban.md。\n\n"
+            "保存或自动保存会写入 kanban.md，并同步项目归属到 project-board.yaml。"
         ),
         "reload": "从文件重新加载",
         "save": "保存",
@@ -3032,6 +3271,35 @@ _KANBAN: dict[str, dict[str, str]] = {
         "kb_ai_backend_llm": "LLM",
         "kb_ai_backend_codex": "Codex",
         "kb_ai_backend_codex_status": "Codex：本地只读",
+        "kb_ai_settings_title": "看板 AI 配置",
+        "kb_ai_settings_caption": (
+            "这些设置只影响当前档案的看板任务理解与拆任务动作。API key 仍由全局 AI / LLM 运行时提供。"
+        ),
+        "kb_ai_action_task_alignment": "任务理解",
+        "kb_ai_action_task_alignment_help": (
+            "为含糊任务先生成候选理解，再进入拆任务。"
+        ),
+        "kb_ai_action_subtasks": "拆任务",
+        "kb_ai_action_subtasks_help": (
+            "基于已确认的任务理解生成可审阅的子任务草案。"
+        ),
+        "kb_ai_config_backend": "后端",
+        "kb_ai_config_llm_model": "LLM 模型覆盖",
+        "kb_ai_config_codex_model": "Codex 模型覆盖",
+        "kb_ai_config_model_help": "留空则使用全局/应用默认模型。",
+        "kb_ai_effective_config": "当前生效：{backend} · {model}",
+        "kb_ai_llm_status": "LLM：{status} · {model}",
+        "kb_ai_codex_status": "Codex：{status}",
+        "kb_ai_configured": "已配置",
+        "kb_ai_missing_key": "缺少 key",
+        "kb_ai_installed": "已安装",
+        "kb_ai_missing": "缺失",
+        "kb_ai_logged_in": "已登录",
+        "kb_ai_login_unknown": "登录状态未知",
+        "kb_ai_codex_default": "Codex CLI 默认",
+        "kb_ai_app_default": "应用默认",
+        "kb_ai_save": "保存 AI 配置",
+        "kb_ai_saved": "看板 AI 配置已保存。",
         "kb_mark_crystallized": "标记已结晶",
         "kb_crystallize_short": "晶",
         "kb_crystallize_done_only": "只有「已完成」任务可以标记为已结晶。",
@@ -3098,10 +3366,10 @@ _KANBAN: dict[str, dict[str, str]] = {
         "subtasks_label": "子任务（可勾选）",
         "add_subtask": "+ 子任务",
         "crystallized": "已结晶（已摄入）",
-        "kb_open_evidence_review": "打开 Evidence Review",
+        "kb_open_evidence_review": "打开证据审阅",
         "kb_done_review_hint": (
-            "Done -> evidence 草案与批量整理统一在 Evidence Review 处理；"
-            "看板 Done 卡片这里只保留单卡归档或删除。"
+            "已完成 -> 证据草案与批量整理统一在证据审阅处理；"
+            "看板已完成卡片这里只保留单卡归档或删除。"
         ),
         "kb_archive_card": "归档",
         "kb_archive_short": "归档",
@@ -3155,6 +3423,16 @@ _TEAM: dict[str, dict[str, str]] = {
             "Team OS: edit shared team.yaml and product pool files "
             "under teams/."
         ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Team View workflow\n\n"
+            "1. Pick the team you are editing; team files live under teams/ and are not filtered by the personal profile.\n"
+            "2. Update mission, members, rules, and priorities in team.yaml when the team operating context changes.\n"
+            "3. Use product pools to collect shared problems, projects, evidence, methods, and decisions.\n"
+            "4. Check the write-owner block before saving so you know which team files will change.\n"
+            "5. Personal skill or evidence claims still belong in the selected profile pages, not team.yaml.\n\n"
+            "Team View writes team.yaml and product-pool.yaml for the selected team."
+        ),
         "no_teams": (
             "No teams found. Create a team under `teams/` "
             "from the template."
@@ -3195,6 +3473,16 @@ _TEAM: dict[str, dict[str, str]] = {
         "page_context_line": (
             "团队操作系统：维护 teams/ 下的 team.yaml 与共享产品池。"
         ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### 团队视图使用流程\n\n"
+            "1. 先选择要编辑的团队；团队文件位于 teams/，不会按个人档案过滤。\n"
+            "2. 团队使命、成员、规则和当前优先级变化时，更新 team.yaml。\n"
+            "3. 产品池用于沉淀共享问题、项目、证据、方法和决策。\n"
+            "4. 保存前查看写入范围，确认本次会修改哪些团队文件。\n"
+            "5. 个人技能、个人证据和个人目标仍应回到当前 profile 的页面维护。\n\n"
+            "本页写入所选团队的 team.yaml 和 product-pool.yaml。"
+        ),
         "no_teams": (
             "未找到团队。请从模板在 `teams/` 下创建团队。"
         ),
@@ -3216,10 +3504,10 @@ _TEAM: dict[str, dict[str, str]] = {
         "add": "添加",
         "save_pool": "保存 product-pool.yaml",
         "pool_saved": "已保存 product-pool.yaml。",
-        "write_owner": "Write owner",
-        "team_scope": "Team scope",
-        "writes": "Writes",
-        "view_as_profile": "View-as profile",
+        "write_owner": "写入归属",
+        "team_scope": "团队范围",
+        "writes": "写入文件",
+        "view_as_profile": "按档案查看",
         "save_team_path": "保存 team.yaml -> {path}",
         "save_pool_path": "保存 product-pool.yaml -> {path}",
         "team_profile_scope": (
@@ -3236,6 +3524,16 @@ _PROFILE_HEALTH: dict[str, dict[str, str]] = {
         "page_context_line": (
             "Read-only health checks for profile trust, context readiness, "
             "and publication risks."
+        ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Profile Health workflow\n\n"
+            "1. Use this page as a read-only preflight before publishing, generating output, or trusting profile context.\n"
+            "2. Errors are blockers; warnings usually need review; info items explain context quality.\n"
+            "3. Follow suggested actions on the owner page instead of editing data here.\n"
+            "4. Open Review when you need to turn recent activity into evidence, next actions, or draft output.\n"
+            "5. Re-run after evidence, skill tree, project, or public layer edits.\n\n"
+            "Health never writes files. It points to the page that should own each fix."
         ),
         "review_link": "Open Review",
         "review_link_help": (
@@ -3258,6 +3556,16 @@ _PROFILE_HEALTH: dict[str, dict[str, str]] = {
         "page_context_line": (
             "只读体检页：检查档案可信度、上下文可发布性和公开风险。"
         ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### 档案体检使用流程\n\n"
+            "1. 发布、生成输出或信任 profile context 前，先把这里当作只读预检。\n"
+            "2. 错误是阻断项；警告通常需要审阅；信息项用于解释上下文质量。\n"
+            "3. 按建议跳到 owner 页面修复，不在本页直接编辑数据。\n"
+            "4. 需要把近期 activity 整理成 evidence、next action 或草稿时，打开 Review。\n"
+            "5. 修改证据、技能树、项目或公开层后，再回本页复查。\n\n"
+            "Health 不写文件，只指出应由哪个页面负责修复。"
+        ),
         "review_link": "打开 Review",
         "review_link_help": (
             "复盘候选在 Review 页面生成；Health 保持只读。"
@@ -3278,7 +3586,7 @@ _PROFILE_HEALTH: dict[str, dict[str, str]] = {
 _REVIEW: dict[str, dict[str, str]] = {
     "en": {
         "page_title": "Review · nblane",
-        "title": "Review",
+        "title": "复盘",
         "page_context_line": (
             "Turn weekly or stage review inputs into evidence, next action, "
             "and public draft candidates."
@@ -3325,20 +3633,20 @@ _REVIEW: dict[str, dict[str, str]] = {
         "public_draft_note": "Creates draft blog posts only; it never publishes.",
     },
     "zh": {
-        "page_title": "Review · nblane",
-        "title": "Review",
+        "page_title": "复盘 · nblane",
+        "title": "复盘",
         "page_context_line": (
-            "把周复盘或阶段复盘整理成 evidence、next action 和 public draft 候选。"
+            "把周复盘或阶段复盘整理成证据、下一步行动和公开草稿候选。"
         ),
         "page_help_short": "使用说明",
         "review_help_body": (
-            "### Review 使用流程\n\n"
-            "1. 选择时间窗口，从 activity、Done 任务、学习记录和 inbox 信号生成候选。\n"
-            "2. 在 **Evidence 候选** 中，可先保存到 Activity 留痕，也可把确认过的条目应用到证据池；来源 Done 已覆盖时保留 crystallized 标记。\n"
-            "3. 在 **Next action 候选** 中，只保存或应用你决定继续推进的队列项。\n"
-            "4. 在 **Public draft 候选** 中创建 draft blog；本页不会发布内容。\n"
-            "5. 用 **Method notes** 和 **Agent Activity** 审计候选来源和写入记录。\n\n"
-            "Review 是候选生成器；所有文件写入都需要显式选择并应用。"
+            "### 复盘使用流程\n\n"
+            "1. 选择时间窗口，从活动、已完成任务、学习记录和收件信号生成候选。\n"
+            "2. 在 **证据候选** 中，可先保存到 Activity 留痕，也可把确认过的条目应用到证据池；来源 Done 已覆盖时保留 crystallized 标记。\n"
+            "3. 在 **下一步行动候选** 中，只保存或应用你决定继续推进的队列项。\n"
+            "4. 在 **公开草稿候选** 中创建博客草稿；本页不会发布内容。\n"
+            "5. 用 **方法说明** 和 **Agent 活动** 审计候选来源和写入记录。\n\n"
+            "复盘是候选生成器；所有文件写入都需要显式选择并应用。"
         ),
         "preset": "时间窗口",
         "preset_current_week": "本周",
@@ -3349,27 +3657,27 @@ _REVIEW: dict[str, dict[str, str]] = {
         "end_date": "结束",
         "generate": "生成候选",
         "summary": "摘要",
-        "done_tasks": "Done 任务",
-        "activity": "Activity",
-        "learning": "Learning",
-        "inbox": "Inbox",
-        "evidence_candidates": "Evidence 候选",
-        "next_action_candidates": "Next action 候选",
-        "public_draft_candidates": "Public draft 候选",
-        "method_notes": "Method notes",
-        "agent_activity": "Agent Activity",
-        "save_to_activity": "保存所选到 Activity",
+        "done_tasks": "已完成任务",
+        "activity": "活动",
+        "learning": "学习",
+        "inbox": "收件箱",
+        "evidence_candidates": "证据候选",
+        "next_action_candidates": "下一步行动候选",
+        "public_draft_candidates": "公开草稿候选",
+        "method_notes": "方法说明",
+        "agent_activity": "Agent 活动",
+        "save_to_activity": "保存所选到活动",
         "apply_selected": "应用所选",
         "create_public_drafts": "生成所选草稿",
-        "mark_crystallized": "标记来源 Done task 为 crystallized",
+        "mark_crystallized": "标记来源已完成任务为已结晶",
         "no_candidates": "这个时间窗口暂无候选。",
-        "saved": "已保存到 Activity。",
+        "saved": "已保存到活动。",
         "applied": "已应用。",
         "failed": "失败",
         "select_rows": "选择行",
         "candidate_preview": "预览",
-        "open_activity": "打开 Agent Activity",
-        "public_draft_note": "只创建 draft blog，不会发布。",
+        "open_activity": "打开 Agent 活动",
+        "public_draft_note": "只创建博客草稿，不会发布。",
     },
 }
 
@@ -3380,6 +3688,16 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "page_context_line": (
             "Review cross-page candidates, patches, writebacks, and failed "
             "apply attempts."
+        ),
+        "page_help_short": "Guide",
+        "page_help_body": (
+            "### Agent Activity workflow\n\n"
+            "1. Treat this page as the audit queue for AI or agent-generated candidates across the app.\n"
+            "2. Filter by status, module, kind, or candidate type to find pending and failed work.\n"
+            "3. Apply only candidates whose owner page supports safe writeback; otherwise open the owner page and review there.\n"
+            "4. Dismiss stale candidates instead of deleting them when you still need audit history.\n"
+            "5. Use technical details for debugging failed agent/Codex runs, but use preview and refs for product decisions.\n\n"
+            "Activity is the review ledger. It should make AI writes traceable, not invisible."
         ),
         "status": "Status",
         "kind": "Kind",
@@ -3450,16 +3768,26 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "apply_unavailable": "Only pending Review candidates can be applied here.",
     },
     "zh": {
-        "page_title": "Agent Activity · nblane",
-        "title": "Agent Activity",
+        "page_title": "Agent 活动 · nblane",
+        "title": "Agent 活动",
         "page_context_line": (
-            "审查跨页面候选、patch、写回结果和失败状态。"
+            "审查跨页面候选、补丁、写回结果和失败状态。"
+        ),
+        "page_help_short": "使用说明",
+        "page_help_body": (
+            "### Agent 活动使用流程\n\n"
+            "1. 把这里当作全应用 AI / Agent 候选的审计队列。\n"
+            "2. 通过状态、模块、类型和候选类型筛选待处理或失败项。\n"
+            "3. 只有 owner 页面支持安全写回的候选才在这里应用；否则打开 owner 页面审阅。\n"
+            "4. 仍需要留痕的过期候选请标记丢弃，不要直接删除。\n"
+            "5. 技术详情用于排查失败的 Agent / Codex 调用；产品判断优先看预览和引用。\n\n"
+            "Agent 活动是审阅账本，目标是让 AI 写入可追踪，而不是隐形发生。"
         ),
         "status": "状态",
         "kind": "类型",
         "candidate_type": "候选类型",
         "source_page": "来源页面",
-        "target_owner": "目标 owner",
+        "target_owner": "目标归属",
         "all": "全部",
         "pending": "待审阅",
         "applied": "已应用",
@@ -3467,7 +3795,7 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "dismissed": "已丢弃",
         "superseded": "已替代",
         "items": "条目",
-        "no_items": "当前过滤条件下没有 Activity 条目。",
+        "no_items": "当前过滤条件下没有活动条目。",
         "source_group": "来源",
         "module": "模块",
         "all_modules": "全部模块",
@@ -3476,7 +3804,7 @@ _AGENT_ACTIVITY: dict[str, dict[str, str]] = {
         "sort_updated_desc": "最新在前",
         "sort_updated_asc": "最早在前",
         "sort_queue": "队列优先",
-        "focused_item_notice": "已定位 Activity 条目：{id}",
+        "focused_item_notice": "已定位活动条目：{id}",
         "focused_item_highlight": "从 {source} 跳转而来。",
         "focused_item_missing": "目标 Activity 条目在当前筛选条件下不可见。",
         "created": "创建",
@@ -3943,25 +4271,28 @@ _RESEARCH: dict[str, dict[str, str]] = {
         "blog_candidate_preview": "博客候选预览",
         "create_blog_draft": "创建博客草稿",
         "body": "正文",
-        "connectors_caption": "Connector 配置不保存 token、cookie 或 API key。",
+        "connectors_caption": (
+            "连接器负责把外部 URL、CSV 或订阅结果导入研究收件箱；"
+            "配置不保存 token、cookie 或 API key。导入后的论文再进入 Reader。"
+        ),
         "connectors_empty": "暂无连接器配置。",
         "configure_connector": "配置连接器",
-        "connector_provider": "Provider",
-        "connector_id": "Connector id",
-        "connector_query": "Query / subscription",
+        "connector_provider": "来源类型",
+        "connector_id": "连接器 id",
+        "connector_query": "查询 / 订阅",
         "connector_enabled": "启用",
         "privacy_default": "默认可见性",
-        "connector_options": "Options YAML",
-        "connector_dry_run": "Dry run",
+        "connector_options": "选项 YAML",
+        "connector_dry_run": "预演",
         "connector_run_now": "立即同步",
         "generate_reading_draft": "生成阅读草稿",
         "save_reading_annotations": "保存阅读标注",
-        "create_evidence_candidate": "生成 evidence 候选",
-        "evidence_candidate_preview": "Evidence candidate 预览",
+        "create_evidence_candidate": "生成证据候选",
+        "evidence_candidate_preview": "证据候选预览",
         "add_source": "新增来源",
         "edit_source": "编辑来源",
         "source_queue": "来源队列",
-        "candidate_preview": "Evidence candidate 预览",
+        "candidate_preview": "证据候选预览",
         "candidate_preview_help": "只读草稿；本页不会写入 evidence。",
         "source_id": "Source id",
         "kind": "类型",

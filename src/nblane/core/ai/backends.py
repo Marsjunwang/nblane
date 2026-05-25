@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -47,10 +49,12 @@ class DirectLLMBackend:
                 error="ai_not_configured: LLM_API_KEY is not configured",
             )
         prompt = prompt_for_action(request, spec)
+        use_stream = _stream_llm_action(request)
         raw = llm.chat(
             prompt.system,
             prompt.user,
             temperature=spec.temperature,
+            stream=use_stream,
             model=_model_override(request.payload),
             timeout=_positive_float_override(
                 request.payload,
@@ -510,6 +514,19 @@ def _positive_float_override(payload: dict[str, Any], *keys: str) -> float | Non
         if clean > 0:
             return clean
     return None
+
+
+def _stream_llm_action(request: AIActionRequest) -> bool:
+    """Return True for long JSON actions that are safer over streaming HTTP."""
+
+    if request.action != "research.paper_translate":
+        return False
+    configured = (
+        str(os.getenv("NBLANE_STREAM_PAPER_TRANSLATION", "1") or "")
+        .strip()
+        .lower()
+    )
+    return configured not in {"0", "false", "no", "off"}
 
 
 def _codex_reasoning_effort_override(payload: dict[str, Any]) -> str:
@@ -1076,6 +1093,30 @@ def fallback_structured(
             },
             [warning],
         )
+    if action == "project.suggest_refs":
+        suggestions = {
+            field: _project_candidate_refs(payload, field)
+            for field in (
+                "goal_refs",
+                "task_refs",
+                "evidence_refs",
+                "source_refs",
+                "output_refs",
+            )
+        }
+        rationale = (
+            "按项目标题、摘要、备注与候选项标签的关键词重合生成候选关联。"
+            if _reply_language(payload) == "zh"
+            else "Suggested from keyword overlap between the project text and candidate labels."
+        )
+        return (
+            {
+                **suggestions,
+                "rationale": rationale,
+                "warnings": [warning],
+            },
+            [warning],
+        )
     if action == "work.remote_dev_task":
         return (
             {
@@ -1257,6 +1298,72 @@ def _ids_from_payload(payload: dict[str, Any], list_key: str, refs_key: str) -> 
         if ref:
             out.append(ref)
     return _merge_refs(out)
+
+
+def _project_candidate_refs(payload: dict[str, Any], field: str) -> list[str]:
+    current_refs = payload.get("current_refs") if isinstance(payload.get("current_refs"), dict) else {}
+    existing = _merge_refs(current_refs.get(field))
+    if existing:
+        return existing[:8]
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), dict) else {}
+    rows = candidates.get(field) if isinstance(candidates.get(field), list) else []
+    project = payload.get("project") if isinstance(payload.get("project"), dict) else {}
+    project_text = " ".join(
+        _clean_text(project.get(key))
+        for key in ("title", "summary", "notes", "kind", "status")
+    )
+    scored: list[tuple[int, int, str]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        ref = _clean_text(row.get("id") or row.get("ref"))
+        label = _clean_text(row.get("label") or row.get("title") or ref)
+        if not ref:
+            continue
+        score = _project_ref_overlap_score(project_text, label)
+        if score:
+            scored.append((score, -index, ref))
+    scored.sort(reverse=True)
+    return _merge_refs([ref for _, _, ref in scored[:5]])
+
+
+def _project_ref_overlap_score(project_text: str, candidate_text: str) -> int:
+    project_tokens = _project_ref_tokens(project_text)
+    if not project_tokens:
+        return 0
+    candidate_tokens = _project_ref_tokens(candidate_text)
+    if not candidate_tokens:
+        return 0
+    return len(project_tokens & candidate_tokens)
+
+
+def _project_ref_tokens(value: str) -> set[str]:
+    tokens = {
+        token
+        for token in re.findall(
+            r"[a-z0-9_\-]+|[\u4e00-\u9fff]{2,}",
+            _clean_text(value).lower(),
+        )
+        if len(token) >= 2
+    }
+    stop = {
+        "project",
+        "task",
+        "goal",
+        "source",
+        "evidence",
+        "status",
+        "active",
+        "planned",
+        "completed",
+        "研究",
+        "项目",
+        "任务",
+        "目标",
+        "证据",
+        "资料",
+    }
+    return tokens - stop
 
 
 def _target_harness(payload: dict[str, Any]) -> str:

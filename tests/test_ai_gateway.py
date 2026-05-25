@@ -57,6 +57,7 @@ class TestAIGateway(unittest.TestCase):
                 "output.inline_patch",
                 "kanban.task_alignment",
                 "kanban.subtasks",
+                "project.suggest_refs",
                 "work.remote_dev_task",
             },
         )
@@ -111,6 +112,40 @@ class TestAIGateway(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(chat.call_args.kwargs["model"], "qwen-plus")
         self.assertEqual(chat.call_args.kwargs["timeout"], 11.0)
+        self.assertTrue(chat.call_args.kwargs["stream"])
+
+    def test_direct_backend_can_disable_streaming_paper_translation(self) -> None:
+        """Operators can temporarily return paper translation to non-streaming HTTP."""
+
+        spec = get_action_spec("research.paper_translate")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="research.paper_translate",
+            profile="",
+            payload={
+                "source_id": "source:paper:1",
+                "model_timeout_seconds": 11,
+                "segments": [
+                    {
+                        "segment_id": "seg:1",
+                        "text": "hello",
+                        "text_hash": "sha256:abc",
+                    }
+                ],
+            },
+        )
+        with (
+            patch.dict("os.environ", {"NBLANE_STREAM_PAPER_TRANSLATION": "0"}),
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch(
+                "nblane.core.llm.chat",
+                return_value='{"translations":[{"segment_id":"seg:1","source_hash":"sha256:abc","translated_text":"你好"}],"warnings":[],"ref":"paper:1"}',
+            ) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        self.assertFalse(chat.call_args.kwargs["stream"])
 
     def test_translate_paper_segments_sets_long_translation_timeout(self) -> None:
         """Full-paper translation batches should not inherit short UI polling limits."""

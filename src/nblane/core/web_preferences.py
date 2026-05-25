@@ -38,6 +38,7 @@ AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "dashboard.graph_insights": "llm",
     "kanban.task_alignment": "llm",
     "kanban.subtasks": "llm",
+    "project.suggest_refs": "llm",
 }
 
 

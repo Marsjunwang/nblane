@@ -28,6 +28,7 @@ from nblane.core.profile_context import (
     parse_identity_fields,
 )
 from nblane.core.web_preferences import (
+    AI_ACTION_DEFAULT_BACKENDS,
     load_web_preferences,
     update_web_preferences,
 )
@@ -414,6 +415,244 @@ def apply_ui_language_from_session() -> None:
         llm_client.configure(ui_lang=ui_lang)
 
 
+def render_page_help(
+    ui: dict[str, str],
+    *,
+    body_key: str = "page_help_body",
+    label_key: str = "page_help_short",
+    key: str = "",
+    docs_path: str = "",
+) -> None:
+    """Render a compact, shared page guide popover when help copy exists."""
+
+    body = str(ui.get(body_key) or ui.get("help_body") or "").strip()
+    if not body:
+        return
+    label = str(ui.get(label_key) or "Guide").strip() or "Guide"
+    popover_kwargs: dict[str, object] = {}
+    if key:
+        popover_kwargs["key"] = key
+    with st.popover(label, **popover_kwargs):
+        st.markdown(body)
+        if docs_path:
+            docs_body = _read_page_help_docs(docs_path)
+            if docs_body:
+                with st.expander(
+                    str(
+                        ui.get(
+                            "page_help_docs_open_inline",
+                            "Open full guide",
+                        )
+                    ),
+                    expanded=False,
+                ):
+                    st.markdown(docs_body)
+            else:
+                st.caption(
+                    str(
+                        ui.get(
+                            "page_help_docs_missing",
+                            "Full guide not found: {path}",
+                        )
+                    ).format(path=docs_path)
+                )
+
+
+def _read_page_help_docs(docs_path: str) -> str:
+    """Return a local guide document body for in-app help popovers."""
+
+    raw = str(docs_path or "").strip()
+    if not raw:
+        return ""
+    path = Path(raw)
+    candidates = [path]
+    if not path.is_absolute():
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            Path.cwd() / path,
+            repo_root / path,
+        ]
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.is_file():
+                return candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+    return ""
+
+
+def _action_preferences(prefs: dict[str, object]) -> dict[str, dict[str, object]]:
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    return {
+        str(name): dict(value)
+        for name, value in actions.items()
+        if isinstance(value, dict)
+    }
+
+
+def _action_config_row(
+    u: dict[str, str],
+    actions: dict[str, dict[str, object]],
+    page: str,
+    action: str,
+) -> dict[str, str]:
+    pref = actions.get(action, {})
+    configured_backend = str(pref.get("backend") or "").strip()
+    default_backend = AI_ACTION_DEFAULT_BACKENDS.get(action, "llm")
+    backend = configured_backend or default_backend
+    model = str(
+        pref.get("codex_model" if backend == "codex" else "llm_model")
+        or ""
+    ).strip()
+    return {
+        u.get("ai_config_overview_col_page", "Page"): page,
+        u.get("ai_config_overview_col_action", "Action"): action,
+        u.get("ai_config_overview_col_backend", "Backend"): backend,
+        u.get("ai_config_overview_col_model", "Model"): (
+            model or u.get("ai_config_overview_default_model", "app default")
+        ),
+        u.get("ai_config_overview_col_source", "Source"): (
+            u.get("ai_config_overview_profile_override", "profile override")
+            if configured_backend or model
+            else u.get("ai_config_overview_app_default", "app default")
+        ),
+    }
+
+
+def _render_ai_scope_flow(
+    u: dict[str, str],
+    *,
+    llm_ready: bool,
+    codex_ready: bool,
+    override_count: int,
+) -> None:
+    items = [
+        (
+            u.get("ai_scope_global_llm", "Global LLM"),
+            u.get("ai_scope_ready", "ready") if llm_ready else u.get("ai_scope_missing", "missing"),
+        ),
+        (
+            u.get("ai_scope_page_actions", "Page actions"),
+            u.get("ai_scope_overrides_count", "{count} override(s)").format(
+                count=override_count
+            ),
+        ),
+        (
+            u.get("ai_scope_codex", "Codex"),
+            u.get("ai_scope_ready", "ready") if codex_ready else u.get("ai_scope_missing", "missing"),
+        ),
+        (
+            u.get("ai_scope_review_gate", "Review gate"),
+            u.get("ai_scope_candidate_first", "candidate-first writes"),
+        ),
+    ]
+    html = [
+        "<style>",
+        ".nblane-ai-flow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:.35rem 0 1rem;}",
+        ".nblane-ai-step{border:1px solid rgba(120,120,120,.35);border-radius:8px;padding:10px 12px;min-width:135px;background:rgba(120,120,120,.06);}",
+        ".nblane-ai-step strong{display:block;font-size:.88rem;margin-bottom:3px;}",
+        ".nblane-ai-step span{font-size:.78rem;opacity:.78;}",
+        ".nblane-ai-arrow{align-self:center;opacity:.45;}",
+        "</style>",
+        '<div class="nblane-ai-flow">',
+    ]
+    for index, (title, detail) in enumerate(items):
+        if index:
+            html.append('<div class="nblane-ai-arrow">→</div>')
+        html.append(
+            f'<div class="nblane-ai-step"><strong>{title}</strong><span>{detail}</span></div>'
+        )
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def _render_ai_config_overview(profile: str, u: dict[str, str]) -> None:
+    prefs = load_web_preferences(profile) if profile else {}
+    actions = _action_preferences(prefs)
+    llm_cfg = llm_client.current_config(mask_key=True)
+    codex_status = _codex_status(profile)
+    action_groups: list[tuple[str, tuple[str, ...]]] = [
+        (
+            u.get("ai_page_dashboard", "Dashboard"),
+            ("dashboard.goal_skill_match", "dashboard.graph_insights"),
+        ),
+        (
+            u.get("ai_page_evidence", "Evidence Review"),
+            ("kanban.subtasks", "kanban.task_alignment"),
+        ),
+        (
+            u.get("ai_page_research", "Research"),
+            (
+                "research.paper_search_codex",
+                "research.paper_translate",
+                "research.paper_review_card",
+                "research.paper_deep_read",
+            ),
+        ),
+        (
+            u.get("ai_page_kanban", "Kanban"),
+            ("kanban.subtasks", "kanban.task_alignment"),
+        ),
+        (
+            u.get("ai_page_project", "Project Board"),
+            ("project.suggest_refs",),
+        ),
+    ]
+    rows = [
+        _action_config_row(u, actions, page, action)
+        for page, group_actions in action_groups
+        for action in group_actions
+    ]
+    override_count = sum(
+        1
+        for value in actions.values()
+        if str(value.get("backend") or value.get("llm_model") or value.get("codex_model") or "").strip()
+    )
+    with st.popover(
+        u.get("ai_config_overview_title", "AI config overview"),
+        key=_codex_widget_key(profile, "ai_config_overview"),
+    ):
+        st.caption(
+            u.get(
+                "ai_config_overview_caption",
+                "See which global runtime and profile-level action preferences are in effect.",
+            )
+        )
+        _render_ai_scope_flow(
+            u,
+            llm_ready=llm_client.is_configured(),
+            codex_ready=codex_status.installed and codex_status.logged_in,
+            override_count=override_count,
+        )
+        c_llm, c_codex = st.columns(2)
+        with c_llm:
+            st.markdown(f"**{u.get('ai_config_overview_llm_title', 'Global LLM')}**")
+            st.caption(
+                u.get("ai_config_overview_llm_line", "Provider: {provider} · Model: {model}").format(
+                    provider=str(llm_cfg.get("base_url") or "-"),
+                    model=str(llm_cfg.get("model") or "-"),
+                )
+            )
+            st.caption(
+                u.get("ai_config_overview_llm_scope", "API key is session/env scoped; page actions store non-secret preferences.")
+            )
+        with c_codex:
+            st.markdown(f"**{u.get('ai_config_overview_codex_title', 'Codex')}**")
+            st.caption(
+                (
+                    u.get("codex_logged_in", "Codex login: ready.")
+                    if codex_status.logged_in
+                    else u.get("codex_not_logged_in", "Codex login is not ready.")
+                )
+            )
+            st.caption(
+                u.get("codex_scope_hint", "Auth and CLI config are shared for this deployment; profile config only stores non-secret preferences.")
+            )
+        st.markdown(f"**{u.get('ai_config_overview_actions_title', 'Page action preferences')}**")
+        st.table(rows)
+
+
 def render_llm_settings(profile: str = "") -> None:
     """Render app-wide LLM settings in the Streamlit sidebar."""
     _ensure_llm_session_defaults(profile)
@@ -421,6 +660,7 @@ def render_llm_settings(profile: str = "") -> None:
 
     with st.expander(u["llm_settings_title"]):
         if profile:
+            _render_ai_config_overview(profile, u)
             _render_kanban_ai_backend_selector(profile, u)
             _render_codex_sidebar_entry(profile, u)
             st.divider()

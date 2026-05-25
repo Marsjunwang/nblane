@@ -11,6 +11,7 @@ from nblane.web_shared import (
     apply_ui_language_from_session,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
 )
 
@@ -36,6 +37,11 @@ with _head_l:
     st.caption(ui["page_context_line"])
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
+render_page_help(
+    ui,
+    key=f"profile_health_help:{selected}",
+    docs_path="docs/zh/guides/profile-health.md",
+)
 
 st.info(ui["review_link_help"])
 st.page_link("pages/8_Review.py", label=ui["review_link"])

@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import streamlit as st
 from nblane.checkin_calendar_component import st_checkin_calendar
+from nblane.core import codex_adapter
 from nblane.core import gap as gap_engine
 from nblane.core import llm as llm_client
 from nblane.core.file_state import (
@@ -79,6 +80,7 @@ from nblane.web_cache import (
     clear_web_cache,
 )
 from nblane.core.web_preferences import (
+    AI_ACTION_DEFAULT_BACKENDS,
     load_web_preferences,
     update_web_preferences,
 )
@@ -96,7 +98,9 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     kanban_ai_backend,
+    kanban_ai_backend_key,
     kanban_ai_suffix,
     select_profile,
     stash_git_backup_results,
@@ -104,6 +108,20 @@ from nblane.web_shared import (
 )
 
 apply_ui_language_from_session()
+
+_KANBAN_AI_ACTIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "kanban.task_alignment",
+        "kb_ai_action_task_alignment",
+        "kb_ai_action_task_alignment_help",
+    ),
+    (
+        "kanban.subtasks",
+        "kb_ai_action_subtasks",
+        "kb_ai_action_subtasks_help",
+    ),
+)
+_KANBAN_AI_BACKENDS = ("llm", "codex")
 
 
 def _state_key(profile: str) -> str:
@@ -362,6 +380,160 @@ def _persist_kanban_subtask_preferences(
             }
         },
     )
+
+
+def _kanban_ai_action_prefs(profile: str) -> dict[str, dict[str, str]]:
+    """Return profile-scoped Kanban AI action preferences."""
+
+    prefs = load_web_preferences(profile)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    return {
+        name: dict(value)
+        for name, value in actions.items()
+        if isinstance(value, dict)
+    }
+
+
+def _kanban_backend_label(value: str, ui: dict[str, str]) -> str:
+    return ui.get(f"kb_ai_backend_{value}", value.upper())
+
+
+def _kanban_effective_backend(action_name: str, config: dict[str, str]) -> str:
+    configured = str(config.get("backend") or "").strip()
+    if configured in _KANBAN_AI_BACKENDS:
+        return configured
+    default = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+    return default if default in _KANBAN_AI_BACKENDS else "llm"
+
+
+def _render_kanban_ai_settings(profile: str, ui: dict[str, str]) -> None:
+    """Render page-level Kanban AI routing and model preferences."""
+
+    prefs = _kanban_ai_action_prefs(profile)
+    llm_cfg = llm_client.current_config(mask_key=True)
+    llm_default = str(llm_cfg.get("model") or "").strip()
+    codex_cfg = codex_adapter.current_config(profile=profile)
+    codex_default = str(codex_cfg.model or "").strip()
+    codex_status = codex_adapter.codex_status(
+        replace(
+            codex_cfg,
+            timeout_seconds=min(float(codex_cfg.timeout_seconds or 8.0), 8.0),
+        )
+    )
+
+    st.caption(
+        ui.get(
+            "kb_ai_settings_caption",
+            "These preferences only affect Kanban AI actions for the current profile.",
+        )
+    )
+    status_cols = st.columns(2)
+    with status_cols[0]:
+        st.caption(
+            ui.get("kb_ai_llm_status", "LLM: {status} · {model}").format(
+                status=ui.get("kb_ai_configured", "configured")
+                if llm_cfg.get("configured")
+                else ui.get("kb_ai_missing_key", "missing key"),
+                model=llm_default or ui.get("missing", "missing"),
+            )
+        )
+    with status_cols[1]:
+        codex_bits = [
+            ui.get("kb_ai_installed", "installed")
+            if codex_status.installed
+            else ui.get("kb_ai_missing", "missing"),
+            ui.get("kb_ai_logged_in", "logged in")
+            if codex_status.logged_in
+            else ui.get("kb_ai_login_unknown", "login unknown"),
+            codex_default or ui.get("kb_ai_codex_default", "Codex CLI default"),
+        ]
+        st.caption(
+            ui.get("kb_ai_codex_status", "Codex: {status}").format(
+                status=" · ".join(codex_bits)
+            )
+        )
+        if codex_status.error:
+            st.caption(codex_status.error)
+
+    next_actions: dict[str, dict[str, str]] = {}
+    with st.form(f"kanban_ai_settings:{profile}", border=False):
+        for action_name, label_key, help_key in _KANBAN_AI_ACTIONS:
+            current = prefs.get(action_name, {})
+            default_backend = _kanban_effective_backend(action_name, current)
+            st.markdown(f"**{ui.get(label_key, action_name)}**")
+            st.caption(ui.get(help_key, "Choose the engine and optional model override."))
+            cols = st.columns([1, 1.25, 1.25], gap="small")
+            with cols[0]:
+                backend = st.selectbox(
+                    ui.get("kb_ai_config_backend", "Backend"),
+                    list(_KANBAN_AI_BACKENDS),
+                    index=list(_KANBAN_AI_BACKENDS).index(default_backend),
+                    format_func=lambda value: _kanban_backend_label(value, ui),
+                    key=f"kanban_ai:{profile}:{action_name}:backend",
+                )
+            with cols[1]:
+                llm_model = st.text_input(
+                    ui.get("kb_ai_config_llm_model", "LLM model override"),
+                    value=str(current.get("llm_model") or ""),
+                    placeholder=llm_default or ui.get("kb_ai_app_default", "app default"),
+                    help=ui.get(
+                        "kb_ai_config_model_help",
+                        "Leave blank to use the global/default model.",
+                    ),
+                    key=f"kanban_ai:{profile}:{action_name}:llm_model",
+                ).strip()
+            with cols[2]:
+                codex_model = st.text_input(
+                    ui.get("kb_ai_config_codex_model", "Codex model override"),
+                    value=str(current.get("codex_model") or ""),
+                    placeholder=codex_default
+                    or ui.get("kb_ai_codex_default", "Codex CLI default"),
+                    help=ui.get(
+                        "kb_ai_config_model_help",
+                        "Leave blank to use the global/default model.",
+                    ),
+                    key=f"kanban_ai:{profile}:{action_name}:codex_model",
+                ).strip()
+            if backend == "codex":
+                effective_model = codex_model or codex_default
+            else:
+                effective_model = llm_model or llm_default
+            st.caption(
+                ui.get(
+                    "kb_ai_effective_config",
+                    "Effective: {backend} · {model}",
+                ).format(
+                    backend=_kanban_backend_label(backend, ui),
+                    model=effective_model
+                    or ui.get("kb_ai_app_default", "app default"),
+                )
+            )
+            next_actions[action_name] = {
+                "backend": backend,
+                "llm_model": llm_model,
+                "codex_model": codex_model,
+            }
+
+        if st.form_submit_button(
+            ui.get("kb_ai_save", "Save AI preferences"),
+            type="primary",
+            use_container_width=True,
+        ):
+            kanban_backend = next_actions.get("kanban.subtasks", {}).get("backend") or "llm"
+            st.session_state[kanban_ai_backend_key(profile)] = kanban_backend
+            update_web_preferences(
+                profile,
+                {
+                    "ai": {
+                        "kanban_backend": kanban_backend,
+                        "actions": next_actions,
+                    }
+                },
+            )
+            clear_web_cache()
+            st.success(ui.get("kb_ai_saved", "Kanban AI preferences saved."))
+            st.rerun()
 
 
 def _style_hint_from_alignment_payload(payload: dict) -> str:
@@ -2052,6 +2224,23 @@ with header_left:
             compact=True,
             align="right",
         )
+    help_col, ai_col = st.columns(
+        [1, 1],
+        gap="small",
+        vertical_alignment="top",
+    )
+    with help_col:
+        render_page_help(
+            ui,
+            key=f"kanban_help:{selected}",
+            docs_path="docs/zh/guides/kanban.md",
+        )
+    with ai_col:
+        with st.popover(
+            ui.get("kb_ai_settings_title", "Kanban AI Config"),
+            key=f"kanban_ai_settings:{selected}",
+        ):
+            _render_kanban_ai_settings(selected, ui)
     settings_col, _spacer_col = st.columns(
         [2, 1],
         gap="small",

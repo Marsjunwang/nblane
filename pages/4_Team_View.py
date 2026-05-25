@@ -23,6 +23,7 @@ from nblane.web_shared import (
     ensure_file_snapshot,
     refresh_file_snapshots,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
     stash_git_backup_results,
     ui_emoji_enabled,
@@ -51,6 +52,11 @@ st.title(ui["title"])
 st.caption(ui["page_context_line"])
 st.caption(
     ui["team_profile_scope"].format(profile=selected_profile)
+)
+render_page_help(
+    ui,
+    key=f"team_help:{selected_profile}",
+    docs_path="docs/zh/guides/team-view.md",
 )
 
 teams = allowed_teams()

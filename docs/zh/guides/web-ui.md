@@ -258,6 +258,10 @@ fallback；`provider_budget_seconds` 和 `provider_timeout_seconds` 控制 provi
 Paper Library 的 `Retry translation` 也是后台 job。页面轮询 job 状态时，偶发的 status 请求超时不代表
 LLM 翻译已经失败；前端会继续等待后台 job。论文翻译 batch 的 LLM 调用默认使用更长的
 `NBLANE_PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS=180` 秒预算，避免大段结构化翻译被普通短请求超时误杀。
+Direct LLM 的 `research.paper_translate` 默认启用流式请求（`NBLANE_STREAM_PAPER_TRANSLATION=1`），
+用于规避 SOCKS 代理或供应商网关在长非流式 JSON 响应上一直不返回的问题；如需回退旧行为，可设为 `0`。
+大论文的全文翻译可能持续十几分钟以上，生产 sidecar 建议把 `NBLANE_READER_TASK_TIMEOUT_SECONDS`
+设为不低于 `3600`，让 Reader 任务状态和已落库进度保持可见。
 详情页 `Retry translation` 旁可选择翻译模式：
 
 - `Fast body`：默认值。使用带 PDF 定位的 structure 单元，只翻正文、标题和图表 caption，跳过参考文献。
@@ -567,6 +571,8 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 ### 5.11 Output Studio（`pages/6_Output_Studio.py`）
 
+详细使用说明见 [Output Studio 使用说明](output-studio.md)。
+
 - 为当前档案初始化缺失的公开层文件。
 - **Generate** 从 reviewed evidence 或 accepted claims 生成 blog draft、resume bullet preview、project update draft。
 - **Profile** 编辑公开姓名、headline、简介、联系方式、头像、原始 YAML，并提供实时整站预览。
@@ -576,6 +582,8 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 - **Known Info** 将选中的 evidence 整理成 draft 公开项目。
 
 ### 5.12 Public Build（`pages/10_Public_Build.py`）
+
+详细使用说明见 [Public Build 使用说明](public-build.md)。
 
 - 只负责静态站校验、预览和构建，不编辑 Blog / Resume / Known Info。
 - 默认构建到 `dist/public/<profile>`；可选择是否包含 draft/private 预览内容，并填写生产 `Base URL` 生成 SEO 与子路径部署链接。
@@ -608,6 +616,19 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 ## 7. 相关文档
 
+- [Dashboard 使用说明](dashboard.md)
+- [Skill Tree 使用说明](skill-tree.md)
+- [Kanban 使用说明](kanban.md)
+- [Project Board 使用说明](project-board.md)
+- [Evidence Review 使用说明](evidence-review.md)
+- [Research 使用说明](research.md)
+- [Review 使用说明](review.md)
+- [Gap Analysis 使用说明](gap-analysis.md)
+- [Profile Health 使用说明](profile-health.md)
+- [Output Studio 使用说明](output-studio.md)
+- [Public Build 使用说明](public-build.md)
+- [Team View 使用说明](team-view.md)
+- [Agent Activity 使用说明](agent-activity.md)
 - [Web 体验设计（Streamlit）](../product/web-experience.md) — 信息架构、品牌、backlog
 - [当前状态](../project/status.md) — 已交付页面表
 - [架构总览](../architecture/overview.md)

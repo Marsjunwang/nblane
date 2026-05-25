@@ -83,6 +83,13 @@
       align-items: center;
       justify-content: flex-end;
     }
+    .pr-toolbar-note {
+      width: 100%;
+      color: var(--muted);
+      font-size: .72rem;
+      line-height: 1.25;
+      text-align: right;
+    }
     .pr-search { flex-wrap: nowrap; justify-content: stretch; }
     .pr-mode { justify-content: flex-start; }
     .pr-button, .pr-icon-button, .pr-input, .pr-select, .pr-textarea {
@@ -432,9 +439,16 @@
     }
     .pr-text-layer span {
       position: absolute;
+      background: transparent !important;
+      color: transparent !important;
+      text-shadow: none !important;
       white-space: pre;
       transform-origin: 0 0;
       cursor: text;
+    }
+    .pr-text-layer .endOfContent {
+      background: transparent !important;
+      color: transparent !important;
     }
     .pr-highlight-layer { pointer-events: none; }
     .pr-highlight-layer { z-index: 3; }
@@ -1159,6 +1173,7 @@
       delete_annotation: "Delete annotation",
       translate_selection: "Translate",
       translate_full_paper: "Full translation",
+      translate_full_paper_help: "Translate missing or stale structure/layout units for the whole paper.",
       translate_visible_pages: "Visible pages",
       explain_selection: "Explain",
       ask_paper: "Ask",
@@ -1173,6 +1188,10 @@
       mode_translation: "Translation only",
       search: "Search",
       page: "Page",
+      previous_page: "Previous page",
+      next_page: "Next page",
+      zoom_out: "Zoom out",
+      zoom_in: "Zoom in",
       pdf_loading: "Loading PDF...",
       pdf_ready: "PDF ready",
       pdf_missing: "No PDF page preview is available.",
@@ -1224,6 +1243,8 @@
       current_page: "Current page",
       translate: "Translate",
       selection_single_page: "Multi-page selection is captured from the first page for now.",
+      reader_workflow_hint: "Translate, annotate, cite, then review before promotion.",
+      connector_scope_hint: "Connectors live in Research > Inbox & Connectors; Reader consumes imported sources.",
     };
     let args = {};
     let pdfDoc = null;
@@ -2117,14 +2138,14 @@
           <header class="pr-toolbar">
             <div class="pr-title" title="${attr(title)}">${esc(title)}</div>
             <div class="pr-controls">
-              <button class="pr-icon-button" data-action="prev" title="Previous page">&lt;</button>
+              <button class="pr-icon-button" data-action="prev" title="${attr(label("previous_page"))}">&lt;</button>
               <span class="pr-status pr-status-main">${esc(message || label("pdf_loading"))}</span>
               <span class="pr-prep-status ${attr(preparationStatusClass())}" title="${attr(preparationStatusText())}">${esc(preparationStatusText())}</span>
               <input class="pr-input pr-page-input" id="pageInput" value="${currentPage || 1}" inputmode="numeric" />
               <span class="pr-status">/ ${totalPages || "?"}</span>
-              <button class="pr-icon-button" data-action="next" title="Next page">&gt;</button>
-              <button class="pr-icon-button" data-action="zoomOut" title="Zoom out">-</button>
-              <button class="pr-icon-button" data-action="zoomIn" title="Zoom in">+</button>
+              <button class="pr-icon-button" data-action="next" title="${attr(label("next_page"))}">&gt;</button>
+              <button class="pr-icon-button" data-action="zoomOut" title="${attr(label("zoom_out"))}">-</button>
+              <button class="pr-icon-button" data-action="zoomIn" title="${attr(label("zoom_in"))}">+</button>
               <button class="pr-button" data-action="fitWidth">${esc(label("fit_width"))}</button>
               <button class="pr-button" data-action="fitPage">${esc(label("fit_page"))}</button>
               <button class="pr-button" data-action="actualSize">${esc(label("actual_size"))}</button>
@@ -2135,13 +2156,14 @@
               <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation">${esc(label("mode_translation"))}</button>
             </div>
             <div class="pr-actions">
-              <button class="pr-button" data-action="translateFull">${esc(label("translate_full_paper"))}</button>
+              <button class="pr-button" data-action="translateFull" title="${attr(label("translate_full_paper_help"))}">${esc(label("translate_full_paper"))}</button>
               <button class="pr-button primary" data-action="analyzePaper">${esc(label("analyze_paper"))}</button>
               <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
               <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
               <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
               <span class="pr-action-status" aria-live="polite"></span>
+              <span class="pr-toolbar-note">${esc(label("reader_workflow_hint"))}</span>
             </div>
           </header>
           <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""} ${leftRailCollapsed ? "left-rail-collapsed" : ""}" style="${attr(workspaceStyle)}">
@@ -4214,7 +4236,7 @@
         dockState = { mode: "ai", status: label("deep_read"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
-        return startReaderTask(action === "reviewCard" ? "generate_review_card" : "analyze_paper", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+        return startReaderTask(action === "reviewCard" ? "generate_review_card" : "analyze_paper", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}`, scope: "paper", full_paper: true, ensure_artifacts: true });
       }
       if (action === "deepRead") {
         activeTab = "review";
@@ -4224,7 +4246,7 @@
         dockState = { mode: "ai", status: label("analyze_paper"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
-        return startReaderTask("codex_deep_read", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}` });
+        return startReaderTask("codex_deep_read", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}`, scope: "paper", full_paper: true, ensure_artifacts: true });
       }
       if (action === "translateVisible") {
         const pages = visiblePages.length ? visiblePages : [currentPage];

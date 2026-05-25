@@ -33,6 +33,7 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
     stash_git_backup_results,
 )
@@ -820,6 +821,11 @@ with _head_l:
     st.caption(ui["page_context_line"])
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
+render_page_help(
+    ui,
+    key=f"agent_activity_help:{selected}",
+    docs_path="docs/zh/guides/agent-activity.md",
+)
 
 summary = activity_summary(selected)
 c1, c2, c3, c4 = st.columns(4)

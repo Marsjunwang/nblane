@@ -24,6 +24,7 @@ from nblane.web_shared import (
     ensure_file_snapshot,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
     stash_git_backup_results,
 )
@@ -36,13 +37,23 @@ def _ui() -> dict[str, str]:
     if llm_client.ui_language() == "zh":
         return {
             "page_title": "Public Build · nblane",
-            "title": "Public Build",
+            "title": "公开构建",
             "caption": "校验、预览并构建静态公开站点。",
+            "page_help_short": "使用说明",
+            "page_help_body": (
+                "### 公开构建使用流程\n\n"
+                "1. 输出工作台负责编辑公开资料和草稿；本页负责校验、预览和构建静态站点。\n"
+                "2. 构建前先运行校验，处理错误后再生成站点。\n"
+                "3. 预览可包含草稿 / 私有内容，但生产构建前应关闭该选项。\n"
+                "4. 基准 URL 用生产域名或子路径，避免站内链接在部署后失效。\n"
+                "5. 构建结果写入输出目录，部署脚本再把静态文件发布出去。\n\n"
+                "公开构建是最后一道发布闸门，不负责生成新内容。"
+            ),
             "init_needed": "此档案尚未初始化公开层。",
             "init": "初始化公开层",
             "include_drafts": "包含草稿 / 私有内容（预览）",
             "output_dir": "输出目录",
-            "base_url": "Base URL",
+            "base_url": "基准 URL",
             "base_url_help": "生产部署域名，可包含子路径，例如 https://www.example.com/site。",
             "validate": "校验",
             "build_site": "构建静态站",
@@ -55,10 +66,20 @@ def _ui() -> dict[str, str]:
             "built": "已构建：{path}",
         }
     return {
-        "page_title": "Public Build · nblane",
-        "title": "Public Build",
-        "caption": "Validate, preview, and build the static public site.",
-        "init_needed": "This profile has not initialized its public layer.",
+            "page_title": "Public Build · nblane",
+            "title": "Public Build",
+            "caption": "Validate, preview, and build the static public site.",
+            "page_help_short": "Guide",
+            "page_help_body": (
+                "### Public Build workflow\n\n"
+                "1. Output Studio edits public source files and drafts; this page validates, previews, and builds the static site.\n"
+                "2. Run validation before build, fix errors, then build.\n"
+                "3. Preview may include drafts/private content, but production builds should usually disable that option.\n"
+                "4. Set Base URL to the production domain or sub-path so links remain valid after deployment.\n"
+                "5. The build output goes to the selected directory; deployment scripts publish those static files.\n\n"
+                "Public Build is the release gate, not a content generator."
+            ),
+            "init_needed": "This profile has not initialized its public layer.",
         "init": "Initialize public layer",
         "include_drafts": "Include drafts / private content for preview",
         "output_dir": "Output directory",
@@ -143,6 +164,11 @@ def main() -> None:
         st.caption(ui["caption"])
     with head_goal:
         render_current_goal_strip(selected, compact=True, align="right")
+    render_page_help(
+        ui,
+        key=f"public_build_help:{selected}",
+        docs_path="docs/zh/guides/public-build.md",
+    )
 
     if not all(path.exists() for path in required_paths):
         st.warning(ui["init_needed"])

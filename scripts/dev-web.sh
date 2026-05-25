@@ -217,13 +217,21 @@ if [[ "$mode" == "isolated" && "${NBLANE_DEV_AUTH_FILE:-}" == "" ]]; then
   auth_env="NBLANE_AUTH_FILE="
 fi
 
+lang_env=""
+if [[ "${UI_LANG:-}" == "en" || "${UI_LANG:-}" == "zh" ]]; then
+  lang_env="UI_LANG=${UI_LANG}"
+fi
+if [[ "${LLM_REPLY_LANG:-}" == "en" || "${LLM_REPLY_LANG:-}" == "zh" ]]; then
+  lang_env="${lang_env} LLM_REPLY_LANG=${LLM_REPLY_LANG}"
+fi
+
 stop_sessions
 
 tmux new-session -d -s "$reader_session" -c "$repo_root" \
   "NBLANE_ROOT='$dev_root' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
-   ${auth_env} ${grobid_env} \
+   ${auth_env} ${grobid_env} ${lang_env} \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
 
 tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
@@ -233,7 +241,7 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
    NBLANE_PAPER_LIBRARY_RUNTIME='$runtime' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
-   ${auth_env} ${grobid_env} \
+   ${auth_env} ${grobid_env} ${lang_env} \
    PYTHONPATH=src .venv/bin/streamlit run app.py \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
 

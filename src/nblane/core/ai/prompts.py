@@ -81,7 +81,9 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "candidate should remain review-first and carry cited refs."
     ),
     "research.paper_deep_read_codex": (
-        "Prepare a deep-reading candidate from supplied paper material. Keep "
+        "Prepare a deep-reading candidate from supplied paper material. When "
+        "payload scope is paper/full_paper, treat the supplied segments as a "
+        "balanced whole-paper context rather than only the current page. Keep "
         "full text out of metadata and cite segment, chunk, or annotation refs."
     ),
     "research.paper_compare_codex": (
@@ -111,6 +113,11 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
     "kanban.subtasks": (
         "Draft reviewable Kanban subtask candidates. Do not mutate the board "
         "or invent unrelated implementation detail."
+    ),
+    "project.suggest_refs": (
+        "Suggest project ownership refs from the supplied candidate IDs only. "
+        "Return reviewable candidate refs; never invent IDs and never imply a "
+        "writeback has happened."
     ),
     "work.remote_dev_task": (
         "Prepare a remote development handoff for an external coding harness. "

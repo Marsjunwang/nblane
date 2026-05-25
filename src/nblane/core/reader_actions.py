@@ -203,6 +203,27 @@ def _context_segments(payload: dict[str, Any], segment_rows, *, limit: int = 30)
     return [segment.to_dict() for segment in segment_rows[:limit]]
 
 
+def _balanced_paper_segments(segment_rows, *, limit: int) -> list:
+    """Sample segments across the paper instead of only the first pages."""
+
+    rows = list(segment_rows)
+    if len(rows) <= limit:
+        return rows
+    selected_indexes: set[int] = set()
+    front_count = min(8, max(1, limit // 5))
+    for index in range(front_count):
+        selected_indexes.add(index)
+    remaining = max(0, limit - len(selected_indexes))
+    if remaining:
+        span = max(1, len(rows) - 1)
+        for step in range(remaining):
+            index = round(step * span / max(1, remaining - 1))
+            selected_indexes.add(min(len(rows) - 1, max(0, index)))
+            if len(selected_indexes) >= limit:
+                break
+    return [rows[index] for index in sorted(selected_indexes)[:limit]]
+
+
 def _compact_segments_for_deep_read(
     payload: dict[str, Any],
     segment_rows,
@@ -210,21 +231,29 @@ def _compact_segments_for_deep_read(
     limit: int = 40,
     char_limit: int = 24_000,
 ) -> list[dict[str, Any]]:
+    full_paper = _payload_bool(payload, "full_paper") or _payload_text(payload, "scope") == "paper"
     refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
-    visible_pages = {
-        int(item)
-        for item in payload.get("visible_pages", [])
-        if str(item).strip().isdigit()
-    } if isinstance(payload.get("visible_pages"), list) else set()
+    visible_pages = set()
+    if not full_paper:
+        visible_pages = {
+            int(item)
+            for item in payload.get("visible_pages", [])
+            if str(item).strip().isdigit()
+        } if isinstance(payload.get("visible_pages"), list) else set()
     primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
-    if not refs and not visible_pages and primary_page:
+    if not full_paper and not refs and not visible_pages and primary_page:
         visible_pages = {primary_page}
-    picked = [
-        segment
-        for segment in segment_rows
-        if (refs and segment.segment_id in refs)
-        or (visible_pages and segment.page in visible_pages)
-    ]
+    if full_paper and not refs:
+        limit = 80
+        char_limit = 60_000
+        picked = _balanced_paper_segments(segment_rows, limit=limit)
+    else:
+        picked = [
+            segment
+            for segment in segment_rows
+            if (refs and segment.segment_id in refs)
+            or (visible_pages and segment.page in visible_pages)
+        ]
     if not picked:
         picked = list(segment_rows[:limit])
     rows: list[dict[str, Any]] = []
@@ -518,8 +547,26 @@ def _blank_translation_backend_warning(ai_result: Any, translations: list[dict[s
         ]
     ).lower()
     if "rule_fallback" in marker or "llm_api_key" in marker or "ai_not_configured" in marker:
-        return NO_LLM_TRANSLATION_WARNING
+        return _translation_backend_failure_message(marker)
     return ""
+
+
+def _translation_backend_failure_message(marker: str) -> str:
+    if "arrearage" in marker or "overdue-payment" in marker:
+        return (
+            f"{NO_LLM_TRANSLATION_WARNING} Provider rejected the request: "
+            "the configured LLM account appears to have overdue payment or arrears."
+        )
+    if "too many requests" in marker or " 429 " in marker:
+        return (
+            f"{NO_LLM_TRANSLATION_WARNING} Provider rejected the request: "
+            "rate limit or quota was reached."
+        )
+    if "llm_api_key" in marker or "ai_not_configured" in marker:
+        return (
+            f"{NO_LLM_TRANSLATION_WARNING} Configure an LLM API key/model before translating."
+        )
+    return NO_LLM_TRANSLATION_WARNING
 
 
 def _visible_translation_batch_size(scope: str) -> int:
@@ -968,6 +1015,7 @@ def _handle_reader_action_inner(
         warnings: list[str] = []
         combined_structured: dict[str, Any] = {"translations": [], "warnings": []}
         positioned_backend_warning = ""
+        translation_backend_warning = ""
         processed = 0
         for batch_index, batch in enumerate(batches, start=1):
             emit_translation_progress(
@@ -998,9 +1046,10 @@ def _handle_reader_action_inner(
             combined_structured["translations"].extend(batch_rows)
             if batch_warnings:
                 combined_structured["warnings"].extend(batch_warnings)
-            if positioned_scope_rows:
-                warning = _blank_translation_backend_warning(ai_result, batch_rows)
-                if warning:
+            warning = _blank_translation_backend_warning(ai_result, batch_rows)
+            if warning:
+                translation_backend_warning = warning
+                if positioned_scope_rows:
                     positioned_backend_warning = warning
             processed += len(batch)
             emit_translation_progress(
@@ -1024,6 +1073,12 @@ def _handle_reader_action_inner(
             backend_warning = positioned_backend_warning
             if backend_warning and backend_warning not in warnings:
                 warnings.append(backend_warning)
+        else:
+            backend_warning = translation_backend_warning
+            if backend_warning and backend_warning not in warnings:
+                warnings.append(backend_warning)
+        if positioned_scope_rows:
+            scope = positioned_scope_type or "layout"
             positioned_index: dict[str, dict[str, Any]] = {}
             for positioned_row in positioned_scope_rows.values():
                 positioned_index[str(positioned_row["segment_id"])] = positioned_row
@@ -1096,6 +1151,9 @@ def _handle_reader_action_inner(
                     continue
                 translated_text = translation_text_from_row(row)
                 if not translated_text:
+                    if backend_warning:
+                        skipped += 1
+                        continue
                     warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
                     existing = existing_by_scope.get(str(page_row["scope_ref"]))
                     if not _translation_row_current(existing, str(page_row["text_hash"]), target_lang):
@@ -1159,6 +1217,9 @@ def _handle_reader_action_inner(
                     continue
                 translated_text = translation_text_from_row(row)
                 if not translated_text:
+                    if backend_warning:
+                        skipped += 1
+                        continue
                     warnings.append(f"Skipped translation for {row_ref}: translated_text is blank.")
                     existing = existing_by_segment.get(row_ref)
                     if not _translation_row_current(existing, segment.text_hash, target_lang):
@@ -1216,10 +1277,13 @@ def _handle_reader_action_inner(
             total=len(segment_payloads),
             saved_count=saved,
         )
+        no_backend_text = bool(translation_backend_warning and not saved)
         if saved:
             message = f"Saved {saved} translation row(s)."
         elif failed:
             message = f"Saved {failed} failed translation row(s)."
+        elif no_backend_text:
+            message = translation_backend_warning
         else:
             message = "No translation rows were saved."
         return ReaderActionResult(
@@ -1258,6 +1322,7 @@ def _handle_reader_action_inner(
                 for row in ai_result.structured.get("translations", [])
                 if isinstance(row, dict)
             ]
+        backend_warning = _blank_translation_backend_warning(ai_result, translations)
         if segment_refs:
             segment_ids = {segment.segment_id for segment in segment_rows}
             savable = [
@@ -1294,21 +1359,25 @@ def _handle_reader_action_inner(
                         "target_lang": target_lang,
                     }
                 )
-        if savable:
-            upsert_paper_translations(profile, source_id, savable)
         translation_text = next(
             (translation_text_from_row(row) for row in savable if translation_text_from_row(row)),
             "",
         )
+        no_backend_text = bool(backend_warning and not translation_text)
+        warnings = list(ai_result.warnings)
+        if backend_warning and backend_warning not in warnings:
+            warnings.append(backend_warning)
+        if savable and not no_backend_text:
+            upsert_paper_translations(profile, source_id, savable)
         return ReaderActionResult(
             data={
                 "structured": ai_result.structured or {},
-                "translations": savable,
+                "translations": [] if no_backend_text else savable,
                 "translation_text": translation_text,
-                "saved": len(savable),
+                "saved": 0 if no_backend_text else len(savable),
             },
-            warnings=list(ai_result.warnings),
-            message="Saved" if savable else "",
+            warnings=warnings,
+            message=backend_warning if no_backend_text else "Saved" if savable else "",
         )
 
     if action == EXPLAIN_SELECTION:
@@ -1351,6 +1420,15 @@ def _handle_reader_action_inner(
         )
 
     if action == ANALYZE_PAPER:
+        artifact_summary = ensure_paper_reading_artifacts(
+            profile,
+            source_id,
+            prefer_grobid=True,
+            target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+            progress_callback=progress_callback,
+        )
+        segment_rows = load_paper_segments(profile, source_id)
+        artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
@@ -1371,23 +1449,47 @@ def _handle_reader_action_inner(
             data={
                 "structured": analysis,
                 "analysis": load_paper_analysis(profile, source_id),
+                "artifact_summary": artifact_summary,
             },
-            warnings=list(ai_result.warnings) + list(analysis.get("warnings") or []),
+            warnings=artifact_warnings + list(ai_result.warnings) + list(analysis.get("warnings") or []),
             message=message,
         )
 
     if action == "codex_deep_read":
+        artifact_summary = ensure_paper_reading_artifacts(
+            profile,
+            source_id,
+            prefer_grobid=True,
+            target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+            progress_callback=progress_callback,
+        )
+        segment_rows = load_paper_segments(profile, source_id)
+        artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
+        compact_segments = _compact_segments_for_deep_read(payload, segment_rows)
         ai_result = deep_read_paper_codex(
             ctx.profile_name,
             source_id,
             payload={
                 "source": _compact_source_for_deep_read(source, source_id),
-                "segments": _compact_segments_for_deep_read(payload, segment_rows),
+                "segments": compact_segments,
                 "chunks": _compact_chunks_for_deep_read(chunk_rows),
                 "annotations": _compact_annotations_for_deep_read(annotation_rows),
                 "question": _payload_text(payload, "question", "prompt", "text"),
                 "reading_goal": _payload_text(payload, "reading_goal", "goal"),
+                "scope": _payload_text(payload, "scope") or "paper",
+                "full_paper": _payload_bool(payload, "full_paper", True),
+                "paper_context": {
+                    "source_segments": len(segment_rows),
+                    "supplied_segments": len(compact_segments),
+                    "pages_covered": sorted(
+                        {
+                            int(row.get("page") or 0)
+                            for row in compact_segments
+                            if int(row.get("page") or 0) > 0
+                        }
+                    ),
+                },
                 "page": _payload_int(payload, "page"),
                 "visible_pages": payload.get("visible_pages")
                 if isinstance(payload.get("visible_pages"), list)
@@ -1414,12 +1516,22 @@ def _handle_reader_action_inner(
             data={
                 "structured": structured,
                 "analysis": load_paper_analysis(profile, source_id),
+                "artifact_summary": artifact_summary,
             },
-            warnings=list(ai_result.warnings),
+            warnings=artifact_warnings + list(ai_result.warnings),
             message=message,
         )
 
     if action == "generate_review_card":
+        artifact_summary = ensure_paper_reading_artifacts(
+            profile,
+            source_id,
+            prefer_grobid=True,
+            target_lang=_payload_text(payload, "target_lang", "language") or "zh",
+            progress_callback=progress_callback,
+        )
+        segment_rows = load_paper_segments(profile, source_id)
+        artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
@@ -1439,8 +1551,9 @@ def _handle_reader_action_inner(
             data={
                 "structured": analysis,
                 "analysis": load_paper_analysis(profile, source_id),
+                "artifact_summary": artifact_summary,
             },
-            warnings=list(ai_result.warnings) + list(analysis.get("warnings") or []),
+            warnings=artifact_warnings + list(ai_result.warnings) + list(analysis.get("warnings") or []),
             message="Saved" if structured else "",
         )
 

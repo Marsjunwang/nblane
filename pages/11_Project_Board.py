@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import replace
 
 import streamlit as st
 import yaml
 
+from nblane.core import llm as llm_client
+from nblane.core.ai.gateway import run_ai_action
 from nblane.core.experience import load_experience_book
 from nblane.core.goals import load_goal_book
 from nblane.core.io import (
@@ -27,7 +30,6 @@ from nblane.core.project_board import (
     ProjectMilestone,
     add_project_case,
     load_project_board,
-    update_project_case,
 )
 from nblane.core.project_board_sync import (
     sync_project_board_from_kanban,
@@ -44,6 +46,7 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
     stash_git_backup_results,
 )
@@ -234,6 +237,7 @@ def _multiselect_refs(
     options: dict[str, str],
     *,
     key: str,
+    help_text: str = "",
 ) -> list[str]:
     merged = _with_unknown_options(refs, options)
     return st.multiselect(
@@ -242,13 +246,172 @@ def _multiselect_refs(
         default=[ref for ref in refs if ref in merged],
         format_func=lambda ref: _option_label(merged, ref),
         key=key,
+        help=help_text or None,
     )
 
 
-def _sync_and_refresh(board: ProjectBoard, project_id: str) -> None:
+def _candidate_rows(options: dict[str, str]) -> list[dict[str, str]]:
+    return [
+        {"id": ref, "label": label}
+        for ref, label in list(options.items())[:80]
+    ]
+
+
+def _valid_suggested_refs(raw: object, options: dict[str, str]) -> list[str]:
+    values = _clean_list(raw)
+    return [ref for ref in values if ref in options]
+
+
+def _project_ai_payload(case, option_maps: dict[str, dict[str, str]]) -> dict:
+    return {
+        "reply_language": llm_client.reply_language(),
+        "project": {
+            "id": case.id,
+            "title": case.title,
+            "status": case.status,
+            "kind": case.kind,
+            "summary": case.summary,
+            "notes": case.notes,
+        },
+        "current_refs": {
+            "goal_refs": list(case.goal_refs),
+            "task_refs": list(case.task_refs),
+            "evidence_refs": list(case.evidence_refs),
+            "source_refs": list(case.source_refs),
+            "output_refs": list(case.output_refs),
+        },
+        "candidates": {
+            field: _candidate_rows(options)
+            for field, options in option_maps.items()
+        },
+    }
+
+
+def _suggest_project_refs(case, option_maps: dict[str, dict[str, str]]) -> dict:
+    result = run_ai_action(
+        "project.suggest_refs",
+        _project_ai_payload(case, option_maps),
+        profile=selected,
+        context_refs=[case.id],
+        require_review=True,
+    )
+    if not result.ok:
+        return {
+            "ok": False,
+            "error": result.error or result.content or ui["project_ai_suggest_failed"],
+            "warnings": list(result.warnings),
+        }
+    data = result.structured if isinstance(result.structured, dict) else {}
+    suggestions = {
+        field: _valid_suggested_refs(data.get(field), option_maps.get(field, {}))
+        for field in option_maps
+    }
+    return {
+        "ok": True,
+        "backend": result.backend,
+        "suggestions": suggestions,
+        "rationale": str(data.get("rationale") or "").strip(),
+        "warnings": _clean_list(data.get("warnings")) + list(result.warnings),
+    }
+
+
+def _apply_project_ref_suggestions(case, suggestions: dict[str, list[str]]) -> int:
+    field_to_key = {
+        "goal_refs": "goals",
+        "task_refs": "tasks",
+        "evidence_refs": "evidence",
+        "source_refs": "sources",
+        "output_refs": "outputs",
+    }
+    total_added = 0
+    for field, key_name in field_to_key.items():
+        current = _clean_list(list(getattr(case, field, [])))
+        merged = _clean_list([*current, *suggestions.get(field, [])])
+        total_added += max(0, len(merged) - len(current))
+        st.session_state[_state_key(f"{key_name}:{case.id}")] = merged
+    return total_added
+
+
+def _render_project_ref_suggestion_state(case) -> None:
+    state = st.session_state.get(_state_key(f"ai_ref_suggestions:{case.id}"))
+    if not isinstance(state, dict) or not state.get("ok"):
+        return
+    suggestions = state.get("suggestions") if isinstance(state.get("suggestions"), dict) else {}
+    total = sum(len(value) for value in suggestions.values() if isinstance(value, list))
+    if total <= 0:
+        st.caption(ui["project_ai_suggest_none"])
+        return
+    st.caption(ui["project_ai_suggest_summary"].format(count=total))
+    if state.get("rationale"):
+        st.caption(str(state["rationale"]))
+    warnings = _clean_list(state.get("warnings"))
+    if warnings:
+        st.caption(" / ".join(warnings[:3]))
+
+
+def _case_by_id(board: ProjectBoard, case_id: str):
+    return board.by_id().get(case_id)
+
+
+def _milestone_by_id(case, milestone_id: str):
+    for milestone in case.milestones:
+        if milestone.id == milestone_id:
+            return milestone
+    return None
+
+
+def _clone(value):
+    return deepcopy(value)
+
+
+def _apply_changed_case_fields(latest_case, original_case, submitted_case) -> None:
+    simple_fields = (
+        "title",
+        "status",
+        "kind",
+        "visibility",
+        "time_range",
+        "summary",
+        "notes",
+    )
+    list_fields = (
+        "goal_refs",
+        "task_refs",
+        "evidence_refs",
+        "source_refs",
+        "experience_refs",
+        "output_refs",
+    )
+    for field in simple_fields + list_fields:
+        submitted_value = getattr(submitted_case, field)
+        if submitted_value != getattr(original_case, field):
+            setattr(latest_case, field, _clone(submitted_value))
+
+
+def _apply_changed_milestone_fields(
+    latest_milestone,
+    original_milestone,
+    submitted_milestone,
+) -> None:
+    for field in (
+        "title",
+        "status",
+        "target",
+        "summary",
+        "task_refs",
+        "evidence_refs",
+        "source_refs",
+        "output_refs",
+    ):
+        submitted_value = getattr(submitted_milestone, field)
+        if submitted_value != getattr(original_milestone, field):
+            setattr(latest_milestone, field, _clone(submitted_value))
+
+
+def _sync_latest_and_refresh(board: ProjectBoard, project_id: str) -> None:
+    refresh_file_snapshots([_project_path])
     assert_files_current(
         [
-            _project_path,
             _kanban_path,
             _pool_path,
             _research_sources_path,
@@ -268,6 +431,87 @@ def _sync_and_refresh(board: ProjectBoard, project_id: str) -> None:
     for warning in result.warnings:
         st.warning(warning)
     st.success(ui["saved"])
+
+
+def _sync_case_update_and_refresh(
+    original_case,
+    submitted_case,
+) -> None:
+    latest_board = load_project_board(selected)
+    latest_case = _case_by_id(latest_board, submitted_case.id)
+    if latest_case is None:
+        st.error(ui["project_missing_reload"].format(id=submitted_case.id))
+        refresh_file_snapshots([_project_path])
+        st.stop()
+    _apply_changed_case_fields(latest_case, original_case, submitted_case)
+    _sync_latest_and_refresh(latest_board, latest_case.id)
+
+
+def _sync_new_case_and_refresh(
+    *,
+    title: str,
+    case_id: str,
+    status: str,
+    kind: str,
+    visibility: str,
+    summary: str,
+    goal_refs: list[str],
+):
+    latest_board = load_project_board(selected)
+    try:
+        case = add_project_case(
+            latest_board,
+            title,
+            case_id=case_id,
+            status=status,
+            kind=kind,
+            visibility=visibility,
+            summary=summary,
+            goal_refs=goal_refs,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return None
+    _sync_latest_and_refresh(latest_board, case.id)
+    return case
+
+
+def _sync_milestone_update_and_refresh(
+    case_id: str,
+    original_milestone: ProjectMilestone,
+    submitted_milestone: ProjectMilestone,
+) -> None:
+    latest_board = load_project_board(selected)
+    latest_case = _case_by_id(latest_board, case_id)
+    if latest_case is None:
+        st.error(ui["project_missing_reload"].format(id=case_id))
+        refresh_file_snapshots([_project_path])
+        st.stop()
+    latest_milestone = _milestone_by_id(latest_case, submitted_milestone.id)
+    if latest_milestone is None:
+        st.error(ui["milestone_missing_reload"].format(id=submitted_milestone.id))
+        refresh_file_snapshots([_project_path])
+        st.stop()
+    _apply_changed_milestone_fields(
+        latest_milestone,
+        original_milestone,
+        submitted_milestone,
+    )
+    _sync_latest_and_refresh(latest_board, case_id)
+
+
+def _sync_milestone_add_and_refresh(case_id: str, milestone: ProjectMilestone) -> None:
+    latest_board = load_project_board(selected)
+    latest_case = _case_by_id(latest_board, case_id)
+    if latest_case is None:
+        st.error(ui["project_missing_reload"].format(id=case_id))
+        refresh_file_snapshots([_project_path])
+        st.stop()
+    if _milestone_by_id(latest_case, milestone.id) is not None:
+        st.error(ui["duplicate_milestone"].format(id=milestone.id))
+        return
+    latest_case.milestones.append(_clone(milestone))
+    _sync_latest_and_refresh(latest_board, case_id)
 
 
 def _summary_metrics(board: ProjectBoard) -> None:
@@ -326,6 +570,7 @@ def _render_create_project(board: ProjectBoard) -> None:
                 [],
                 _goal_options(),
                 key=_state_key("create_goals"),
+                help_text=ui["field_goal_refs_help"],
             )
             submitted = st.form_submit_button(
                 ui["create_project"],
@@ -333,21 +578,17 @@ def _render_create_project(board: ProjectBoard) -> None:
             )
         if not submitted:
             return
-        try:
-            case = add_project_case(
-                board,
-                title,
-                case_id=case_id,
-                status=status,
-                kind=kind,
-                visibility=visibility,
-                summary=summary,
-                goal_refs=goals,
-            )
-        except ValueError as exc:
-            st.error(str(exc))
+        case = _sync_new_case_and_refresh(
+            title=title,
+            case_id=case_id,
+            status=status,
+            kind=kind,
+            visibility=visibility,
+            summary=summary,
+            goal_refs=goals,
+        )
+        if case is None:
             return
-        _sync_and_refresh(board, case.id)
         st.session_state[_state_key("selected_project")] = case.id
         st.rerun()
 
@@ -400,10 +641,43 @@ def _render_project_board(board: ProjectBoard) -> None:
 
 def _render_project_form(board: ProjectBoard, case) -> None:
     st.subheader(ui["project_detail"])
+    original_case = _clone(case)
     task_options = _task_options_for_case(case.id)
+    option_maps = {
+        "goal_refs": _goal_options(),
+        "task_refs": task_options,
+        "evidence_refs": _evidence_options(),
+        "source_refs": _source_options(),
+        "output_refs": _output_options(),
+    }
     blocked = _claimed_elsewhere_count(case.id)
     if blocked:
         st.caption(ui["claimed_elsewhere_hint"].format(count=blocked))
+    st.caption(ui["project_refs_hint"])
+    suggest_cols = st.columns([1, 2.5])
+    with suggest_cols[0]:
+        if st.button(
+            ui["project_ai_suggest_refs"],
+            key=_state_key(f"ai_suggest_refs:{case.id}"),
+            help=ui["project_ai_suggest_help"],
+            use_container_width=True,
+        ):
+            with st.spinner(ui["project_ai_suggest_running"]):
+                state = _suggest_project_refs(case, option_maps)
+            st.session_state[_state_key(f"ai_ref_suggestions:{case.id}")] = state
+            if state.get("ok"):
+                added = _apply_project_ref_suggestions(
+                    case,
+                    state.get("suggestions") if isinstance(state.get("suggestions"), dict) else {},
+                )
+                if added:
+                    st.success(ui["project_ai_suggest_applied"].format(count=added))
+                    st.rerun()
+                st.info(ui["project_ai_suggest_none"])
+            else:
+                st.error(str(state.get("error") or ui["project_ai_suggest_failed"]))
+    with suggest_cols[1]:
+        _render_project_ref_suggestion_state(case)
 
     with st.form(_state_key(f"project_form:{case.id}")):
         st.text_input(ui["field_id"], value=case.id, disabled=True)
@@ -439,70 +713,75 @@ def _render_project_form(board: ProjectBoard, case) -> None:
         goal_refs = _multiselect_refs(
             ui["field_goal_refs"],
             case.goal_refs,
-            _goal_options(),
+            option_maps["goal_refs"],
             key=_state_key(f"goals:{case.id}"),
+            help_text=ui["field_goal_refs_help"],
         )
         task_refs = _multiselect_refs(
             ui["field_task_refs"],
             case.task_refs,
-            task_options,
+            option_maps["task_refs"],
             key=_state_key(f"tasks:{case.id}"),
+            help_text=ui["field_task_refs_help"],
         )
         evidence_refs = _multiselect_refs(
             ui["field_evidence_refs"],
             case.evidence_refs,
-            _evidence_options(),
+            option_maps["evidence_refs"],
             key=_state_key(f"evidence:{case.id}"),
+            help_text=ui["field_evidence_refs_help"],
         )
         source_refs = _multiselect_refs(
             ui["field_source_refs"],
             case.source_refs,
-            _source_options(),
+            option_maps["source_refs"],
             key=_state_key(f"sources:{case.id}"),
+            help_text=ui["field_source_refs_help"],
         )
         experience_refs = _multiselect_refs(
             ui["field_experience_refs"],
             case.experience_refs,
             _experience_options(),
             key=_state_key(f"experiences:{case.id}"),
+            help_text=ui.get("field_experience_refs_help", ""),
         )
         output_refs = _multiselect_refs(
             ui["field_output_refs"],
             case.output_refs,
-            _output_options(),
+            option_maps["output_refs"],
             key=_state_key(f"outputs:{case.id}"),
+            help_text=ui.get("field_output_refs_help", ""),
         )
         submitted = st.form_submit_button(ui["save_project"], type="primary")
     if submitted:
-        try:
-            update_project_case(
-                board,
-                case.id,
-                title=title,
-                status=status,
-                kind=kind,
-                visibility=visibility,
-                time_range=time_range,
-                summary=summary,
-                notes=notes,
-                goal_refs=goal_refs,
-                task_refs=task_refs,
-                evidence_refs=evidence_refs,
-                source_refs=source_refs,
-                experience_refs=experience_refs,
-                output_refs=output_refs,
-                milestones=case.milestones,
-            )
-        except ValueError as exc:
-            st.error(str(exc))
+        clean_title = title.strip()
+        if not clean_title:
+            st.error(ui["title_required"])
             return
-        _sync_and_refresh(board, case.id)
+        submitted_case = replace(
+            original_case,
+            title=clean_title,
+            status=status,
+            kind=kind,
+            visibility=visibility,
+            time_range=time_range.strip(),
+            summary=summary.strip(),
+            notes=notes.strip(),
+            goal_refs=goal_refs,
+            task_refs=task_refs,
+            evidence_refs=evidence_refs,
+            source_refs=source_refs,
+            experience_refs=experience_refs,
+            output_refs=output_refs,
+        )
+        _sync_case_update_and_refresh(original_case, submitted_case)
         st.rerun()
 
 
 def _render_milestones(board: ProjectBoard, case) -> None:
     st.subheader(ui["milestones"])
     for milestone in case.milestones:
+        original_milestone = _clone(milestone)
         with st.expander(f"{milestone.title or milestone.id} · {milestone.status}"):
             with st.form(_state_key(f"milestone:{case.id}:{milestone.id}")):
                 title = st.text_input(ui["field_title"], value=milestone.title)
@@ -524,43 +803,51 @@ def _render_milestones(board: ProjectBoard, case) -> None:
                     milestone.task_refs,
                     _task_options_for_case(case.id),
                     key=_state_key(f"milestone_tasks:{case.id}:{milestone.id}"),
+                    help_text=ui["field_task_refs_help"],
                 )
                 evidence_refs = _multiselect_refs(
                     ui["field_evidence_refs"],
                     milestone.evidence_refs,
                     _evidence_options(),
                     key=_state_key(f"milestone_evidence:{case.id}:{milestone.id}"),
+                    help_text=ui["field_evidence_refs_help"],
                 )
                 source_refs = _multiselect_refs(
                     ui["field_source_refs"],
                     milestone.source_refs,
                     _source_options(),
                     key=_state_key(f"milestone_sources:{case.id}:{milestone.id}"),
+                    help_text=ui["field_source_refs_help"],
                 )
                 output_refs = _multiselect_refs(
                     ui["field_output_refs"],
                     milestone.output_refs,
                     _output_options(),
                     key=_state_key(f"milestone_outputs:{case.id}:{milestone.id}"),
+                    help_text=ui.get("field_output_refs_help", ""),
                 )
                 submitted = st.form_submit_button(ui["save_milestone"])
             if submitted:
+                clean_title = title.strip()
+                if not clean_title:
+                    st.error(ui["title_required"])
+                    return
                 updated = replace(
-                    milestone,
-                    title=title,
+                    original_milestone,
+                    title=clean_title,
                     status=status,
-                    target=target,
-                    summary=summary,
+                    target=target.strip(),
+                    summary=summary.strip(),
                     task_refs=task_refs,
                     evidence_refs=evidence_refs,
                     source_refs=source_refs,
                     output_refs=output_refs,
                 )
-                case.milestones = [
-                    updated if item.id == milestone.id else item
-                    for item in case.milestones
-                ]
-                _sync_and_refresh(board, case.id)
+                _sync_milestone_update_and_refresh(
+                    case.id,
+                    original_milestone,
+                    updated,
+                )
                 st.rerun()
 
     with st.expander(ui["add_milestone"], expanded=not case.milestones):
@@ -579,15 +866,15 @@ def _render_milestones(board: ProjectBoard, case) -> None:
             if any(item.id == clean_id for item in case.milestones):
                 st.error(ui["duplicate_milestone"].format(id=clean_id))
                 return
-            case.milestones.append(
+            _sync_milestone_add_and_refresh(
+                case.id,
                 ProjectMilestone(
                     id=clean_id,
                     title=clean_title,
-                    target=target,
-                    summary=summary,
-                )
+                    target=target.strip(),
+                    summary=summary.strip(),
+                ),
             )
-            _sync_and_refresh(board, case.id)
             st.rerun()
 
 
@@ -620,7 +907,12 @@ def _render_create_task(board: ProjectBoard, case) -> None:
         if not clean_title:
             st.error(ui["title_required"])
             return
-        assert_files_current([_kanban_path, _project_path])
+        assert_files_current([_kanban_path])
+        latest_board = load_project_board(selected)
+        if _case_by_id(latest_board, case.id) is None:
+            st.error(ui["project_missing_reload"].format(id=case.id))
+            refresh_file_snapshots([_project_path])
+            st.stop()
         sections = parse_kanban(selected)
         sections.setdefault(section, []).append(
             KanbanTask(
@@ -646,6 +938,11 @@ def main() -> None:
         st.caption(ui["page_context_line"])
     with head_goal:
         render_current_goal_strip(selected, compact=True, align="right")
+    render_page_help(
+        ui,
+        key=f"project_board_help:{selected}",
+        docs_path="docs/zh/guides/project-board.md",
+    )
 
     _summary_metrics(board)
     st.divider()
@@ -676,8 +973,9 @@ def main() -> None:
 
     if case.status != "archived":
         if st.button(ui["archive_project"], type="secondary"):
-            update_project_case(board, case.id, status="archived")
-            _sync_and_refresh(board, case.id)
+            original_case = _clone(case)
+            submitted_case = replace(original_case, status="archived")
+            _sync_case_update_and_refresh(original_case, submitted_case)
             st.rerun()
 
 

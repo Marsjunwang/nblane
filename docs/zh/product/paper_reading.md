@@ -61,7 +61,7 @@ Research
   Reader
   Claims & Citations
   Synthesis / Export
-  Advanced Connectors
+  Inbox & Connectors
 ```
 
 ### 2.1 Overview
@@ -842,10 +842,12 @@ research/exports/<timestamp>.bib
 research/exports/<timestamp>.md
 ```
 
-### 2.7 Advanced Connectors
+### 2.7 Inbox & Connectors
 
-现有 Connectors 移到高级区。arXiv / Semantic Scholar 的日常搜索优先通过
-Paper Search 使用；Connectors 用于长期 query sync。
+连接器不再使用含糊的“高级连接器”命名。它属于 Research 的「收件箱与连接器」区：
+手动 URL、CSV、JSON、arXiv / Semantic Scholar 等导入先进入 Source Inbox、
+collection 或 metadata-only 队列。Reader 只消费已经导入的 source，不负责配置
+token、cookie 或 API key。
 
 ## 3. 存储设计
 

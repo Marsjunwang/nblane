@@ -365,6 +365,33 @@ sudo sh -c "tr '\0' '\n' < /proc/$pid/environ" | grep -i proxy
 如果 Paper Reading Studio 下载 arXiv PDF 很慢，优先检查生产进程环境，而不是只刷新
 浏览器页面。页面刷新只能重拉前端状态；PDF 下载实际发生在后端服务进程里。
 
+#### 7. 让 Streamlit 与 Reader 使用同一界面语言
+
+`UI_LANG` / `LLM_REPLY_LANG` 不会从 `nblane.service` 自动继承到
+`nblane-reader.service`。如果只给 Streamlit 配置中文，Reader payload 里的“Full
+translation”等按钮仍会使用英文默认值。生产环境建议给两个服务都配置同一组语言变量：
+
+```bash
+sudo install -d /etc/systemd/system/nblane.service.d
+sudo install -d /etc/systemd/system/nblane-reader.service.d
+sudo tee /etc/systemd/system/nblane.service.d/20-lang.conf >/dev/null <<'EOF'
+[Service]
+Environment=UI_LANG=zh
+Environment=LLM_REPLY_LANG=zh
+EOF
+sudo cp /etc/systemd/system/nblane.service.d/20-lang.conf \
+  /etc/systemd/system/nblane-reader.service.d/20-lang.conf
+sudo systemctl daemon-reload
+sudo systemctl restart nblane-reader.service nblane.service
+```
+
+验证 Reader 进程已经拿到语言变量：
+
+```bash
+pid=$(systemctl show -p MainPID --value nblane-reader.service)
+sudo sh -c "tr '\0' '\n' < /proc/$pid/environ" | grep -E 'UI_LANG|LLM_REPLY_LANG'
+```
+
 ## LLM 配置
 
 AI 功能（Web UI 中 Gap Analysis 的 AI 模式）是**可选的**。CLI 和所有基于规则的功能无需任何 API Key 即可正常使用。

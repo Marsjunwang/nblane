@@ -507,6 +507,33 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             },
         ),
     ),
+    "project.suggest_refs": AIActionSpec(
+        name="project.suggest_refs",
+        owner="project",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="candidate",
+        schema=schema_for_keys(
+            [
+                "goal_refs",
+                "task_refs",
+                "evidence_refs",
+                "source_refs",
+                "output_refs",
+                "rationale",
+                "warnings",
+            ],
+            properties={
+                "goal_refs": {"type": "array"},
+                "task_refs": {"type": "array"},
+                "evidence_refs": {"type": "array"},
+                "source_refs": {"type": "array"},
+                "output_refs": {"type": "array"},
+                "warnings": {"type": "array"},
+            },
+        ),
+    ),
     "work.remote_dev_task": AIActionSpec(
         name="work.remote_dev_task",
         owner="work",

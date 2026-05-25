@@ -436,6 +436,118 @@ def _clean_text(value: object) -> str:
     return str(value or "").strip()
 
 
+def _reader_ui() -> dict[str, str]:
+    """Return Reader UI copy for the current deployment language."""
+
+    if llm_client.ui_language() != "zh":
+        return {
+            "reader_workflow_hint": (
+                "Reader writes stay candidate-first: translate, annotate, cite, then review before promotion."
+            ),
+            "translate_full_paper_help": (
+                "Translate missing or stale structure/layout units for the whole paper. "
+                "Existing current translations are reused."
+            ),
+            "connector_scope_hint": (
+                "Connectors live in Research > Inbox & Connectors; Reader consumes imported sources."
+            ),
+        }
+    return {
+        "annotations": "标注",
+        "notes": "笔记",
+        "translation": "翻译",
+        "review": "审阅",
+        "figures": "图表",
+        "ai": "审阅",
+        "claims": "断言",
+        "create_annotation": "高亮",
+        "create_note": "笔记",
+        "create_chunk": "保存引文",
+        "create_citation": "引用此处",
+        "delete_annotation": "删除标注",
+        "translate_selection": "翻译选区",
+        "translate_full_paper": "全文翻译",
+        "translate_full_paper_help": (
+            "为整篇论文缺失或过期的结构/版面单元生成译文，已是最新的译文会复用。"
+        ),
+        "translate_visible_pages": "翻译可见页",
+        "explain_selection": "解释",
+        "ask_paper": "提问",
+        "save_progress": "保存进度",
+        "review_card": "分析论文",
+        "analyze_paper": "分析论文",
+        "deep_read": "深读",
+        "fullscreen": "全屏",
+        "exit_fullscreen": "退出全屏",
+        "mode_pdf": "PDF",
+        "mode_compare": "对照",
+        "mode_translation": "仅译文",
+        "search": "搜索",
+        "page": "页",
+        "previous_page": "上一页",
+        "next_page": "下一页",
+        "zoom_out": "缩小",
+        "zoom_in": "放大",
+        "pdf_loading": "正在加载 PDF...",
+        "pdf_ready": "PDF 就绪",
+        "pdf_missing": "没有可用的 PDF 页面预览。",
+        "pdf_preview_mode": "正在使用页面预览",
+        "pdf_error": "PDF.js 无法渲染这篇论文。",
+        "extracting_page_text": "正在抽取页面文本",
+        "running_grobid": "正在运行 GROBID",
+        "structured_text_ready": "结构化文本就绪",
+        "fallback_text_ready": "备用文本就绪",
+        "preparation_failed": "准备失败",
+        "selected_text": "已选文本",
+        "note": "笔记",
+        "question": "问题",
+        "jump": "跳转",
+        "empty": "暂无内容",
+        "fit_width": "适应宽度",
+        "fit_page": "适应页面",
+        "actual_size": "1:1",
+        "panel": "面板",
+        "outline": "大纲",
+        "pages": "页码",
+        "debug": "调试",
+        "overlay_debug": "叠层调试",
+        "show_source": "显示原文",
+        "hide_source": "隐藏原文",
+        "translated": "已翻译",
+        "translating": "正在翻译...",
+        "translating_visible_pages": "正在翻译可见页...",
+        "translating_full_paper": "正在翻译全文...",
+        "reviewing_paper": "正在分析论文...",
+        "deep_reading": "正在深读论文...",
+        "answering": "正在回答...",
+        "answered": "已回答。",
+        "missing": "缺失",
+        "stale": "过期",
+        "failed": "失败",
+        "saved_pending": "已保存，等待同步",
+        "saved": "已保存",
+        "ask_selection": "带选区提问",
+        "retry": "重试",
+        "edit": "编辑",
+        "cancel": "取消",
+        "close": "关闭",
+        "pin": "固定",
+        "unpin": "取消固定",
+        "reset": "重置",
+        "dock_bottom": "底部",
+        "all": "全部",
+        "current_page": "当前页",
+        "translate": "翻译",
+        "selection_single_page": "多页选区暂时只捕获第一页。",
+        "reader_workflow_hint": (
+            "Reader 写入保持候选优先：先翻译、标注、引用，再审阅后推进。"
+        ),
+        "connector_scope_hint": (
+            "连接器在研究工作台的「收件箱与连接器」中配置；Reader 只消费已导入的来源。"
+        ),
+    }
+
+
 def _default_research_overview_url() -> str:
     explicit = os.getenv("NBLANE_RESEARCH_OVERVIEW_URL", "").strip()
     if explicit:
@@ -699,7 +811,7 @@ def _payload_for_context(
     )
     payload["page_previews"] = []
     payload["pdf_base64"] = ""
-    payload["ui"] = {}
+    payload["ui"] = _reader_ui()
     payload["settings"] = _reader_settings(payload, current_page, target_lang)
     payload["events_contract_version"] = 1
     return payload

@@ -135,6 +135,7 @@ from nblane.web_shared import (
     refresh_file_snapshots,
     render_current_goal_strip,
     render_git_backup_notices,
+    render_page_help,
     select_profile,
     stash_git_backup_results,
 )
@@ -146,27 +147,37 @@ def _ui() -> dict[str, str]:
     if llm_client.ui_language() == "zh":
         return {
             "page_title": "Output Studio · nblane",
-            "title": "Output Studio",
-            "caption": "从 evidence、claim 与 research provenance 生成可追溯公开输出。",
+            "title": "输出工作台",
+            "caption": "从证据、断言与研究来源生成可追溯公开输出。",
+            "page_help_short": "使用说明",
+            "page_help_body": (
+                "### 输出工作台使用流程\n\n"
+                "1. 先从已审阅证据或已确认断言生成候选，再确认创建草稿。\n"
+                "2. 档案、简历与已知信息是公开层资料源；修改后先校验，再去公开构建页面构建。\n"
+                "3. 博客草稿支持结构化编辑、媒体、公式和引用关系；发布前检查来源链和公开准备度。\n"
+                "4. 博客标签页会保持当前状态，内部动作不应把你带回从证据生成页。\n"
+                "5. 本页只负责生成和编辑公开输出；真正构建静态站点在公开构建页面。\n\n"
+                "输出应能追溯到证据、断言或研究来源。"
+            ),
             "init_needed": "此档案尚未初始化公开层。",
             "init": "初始化公开层",
             "output_studio": "从证据生成",
-            "output_studio_caption": "先选择 reviewed evidence 或 accepted claims，再生成可追溯的公开输出候选。",
+            "output_studio_caption": "先选择已审阅证据或已确认断言，再生成可追溯的公开输出候选。",
             "output_source": "来源",
-            "output_source_claims": "Accepted claims",
-            "output_source_evidence": "Evidence",
+            "output_source_claims": "已确认断言",
+            "output_source_evidence": "证据",
             "output_target": "输出目标",
-            "output_target_blog": "Blog draft",
-            "output_target_resume": "Resume bullets preview",
-            "output_target_project": "Project update draft",
+            "output_target_blog": "博客草稿",
+            "output_target_resume": "简历要点预览",
+            "output_target_project": "项目更新草稿",
             "output_generate_preview": "生成预览",
             "output_create_draft": "确认创建草稿",
             "output_preview_empty": "先生成一个候选预览。",
-            "output_project_required": "请选择 project。",
-            "profile": "Profile",
-            "blog": "Blog",
-            "resume": "Resume",
-            "curation": "Known Info",
+            "output_project_required": "请选择项目。",
+            "profile": "档案",
+            "blog": "博客",
+            "resume": "简历",
+            "curation": "已知信息",
             "save": "保存",
             "saved": "已保存。",
             "validate": "校验",
@@ -188,15 +199,15 @@ def _ui() -> dict[str, str]:
             "math_safe_help": "使用 Markdown 源码编辑器，避免公式在 BlockNote 转换中被改写。",
             "math_safe_notice": "检测到公式，已使用 Markdown 源码编辑器。",
             "tags_help": "用逗号分隔",
-            "related_evidence": "关联 evidence",
+            "related_evidence": "关联证据",
             "related_kanban": "关联看板项",
-            "related_claims": "关联 claims",
-            "related_sources": "关联 research sources",
-            "related_research_claims": "关联 research claims",
+            "related_claims": "关联断言",
+            "related_sources": "关联研究来源",
+            "related_research_claims": "关联研究断言",
             "related_citations": "关联 citations",
-            "draft_from_claims": "从 claims 生成博客草稿",
-            "claim_ids": "Claim IDs",
-            "accepted_claims_empty": "暂无 accepted claims。",
+            "draft_from_claims": "从断言生成博客草稿",
+            "claim_ids": "断言 ID",
+            "accepted_claims_empty": "暂无已确认断言。",
             "insert_marker": "插入位置标记",
             "media": "媒体",
             "formula_block": "公式",
@@ -219,15 +230,15 @@ def _ui() -> dict[str, str]:
             "snippet": "可粘贴片段",
             "publish_ready": "发布前检查通过。",
             "site_post_preview": "公开页预览",
-            "draft_from_evidence": "从 evidence 生成博客草稿",
-            "draft_from_done": "从 Done 生成博客草稿",
-            "evidence_id": "Evidence ID",
+            "draft_from_evidence": "从证据生成博客草稿",
+            "draft_from_done": "从已完成任务生成博客草稿",
+            "evidence_id": "证据 ID",
             "target": "目标岗位 / 方向",
             "draft_resume": "生成定制简历草稿",
-            "draft_resume_bullets_from_claims": "从 claims 生成简历 bullet 候选",
-            "project_id": "Project ID",
+            "draft_resume_bullets_from_claims": "从断言生成简历要点候选",
+            "project_id": "项目 ID",
             "draft_update": "生成项目更新草稿",
-            "draft_update_from_claims": "从 claims 生成项目更新草稿",
+            "draft_update_from_claims": "从断言生成项目更新草稿",
             "avatar_upload": "上传头像",
             "profile_fields": "公开资料",
             "visibility": "可见性",
@@ -250,21 +261,21 @@ def _ui() -> dict[str, str]:
             "save_profile": "保存公开资料",
             "confirm_public_profile": "我确认将公开此资料页的姓名、简介、头像和联系方式。",
             "confirm_public_required": "从 private 切换到 public 需要先勾选公开确认。",
-            "curation_caption": "把零散 evidence 人工聚合成公开项目草稿。",
-            "evidence": "Evidence",
+            "curation_caption": "把零散证据人工聚合成公开项目草稿。",
+            "evidence": "证据",
             "suggest_groups": "推荐分组",
             "create_project_group": "生成项目草稿",
             "project_summary": "项目摘要",
             "tags": "标签（逗号分隔）",
             "current_projects": "当前公开项目",
-            "keep_evidence_refs": "保留的 evidence_refs",
-            "update_project_refs": "更新项目 evidence_refs",
+            "keep_evidence_refs": "保留的证据引用",
+            "update_project_refs": "更新项目证据引用",
             "articles": "文章",
             "editor": "编辑器",
             "tools": "工具",
-            "meta": "Meta",
+            "meta": "元数据",
             "ai": "AI",
-            "check": "Check",
+            "check": "检查",
             "left_panel": "文章栏",
             "close_left_panel": "收起文章栏",
             "right_panel": "工具栏",
@@ -459,10 +470,20 @@ def _ui() -> dict[str, str]:
             "library_virtual": "虚拟",
         }
     return {
-        "page_title": "Output Studio · nblane",
-        "title": "Output Studio",
-        "caption": "Create provenance-backed public output from evidence, claims, and research.",
-        "init_needed": "This profile has not initialized its public layer.",
+            "page_title": "Output Studio · nblane",
+            "title": "Output Studio",
+            "caption": "Create provenance-backed public output from evidence, claims, and research.",
+            "page_help_short": "Guide",
+            "page_help_body": (
+                "### Output Studio workflow\n\n"
+                "1. Start from reviewed evidence or accepted claims, generate a candidate, then explicitly create a draft.\n"
+                "2. Profile, Resume, and Known Info are public-layer source files. Validate before building the site.\n"
+                "3. Blog drafts support structured editing, media, formulas, and provenance refs. Check readiness before publishing.\n"
+                "4. The Blog tab should remain active after Blog actions instead of jumping back to evidence generation.\n"
+                "5. This page edits output; Public Build validates and builds the static site.\n\n"
+                "Every public output should trace back to evidence, claims, or research sources."
+            ),
+            "init_needed": "This profile has not initialized its public layer.",
         "init": "Initialize public layer",
         "output_studio": "Output Studio",
         "output_studio_caption": "Start from reviewed evidence or accepted claims, then create provenance-backed public output.",
@@ -6514,6 +6535,11 @@ def main() -> None:
         st.caption(ui["caption"])
     with _head_goal:
         render_current_goal_strip(selected, compact=True, align="right")
+    render_page_help(
+        ui,
+        key=f"output_studio_help:{selected}",
+        docs_path="docs/zh/guides/output-studio.md",
+    )
 
     if not all(path.exists() for path in required_paths):
         st.warning(ui["init_needed"])
