@@ -450,10 +450,45 @@
       box-shadow: 0 4px 20px rgba(23, 33, 31, .10);
     }
     .pr-page-wrap.loading {
-      display: grid;
-      place-items: center;
+      overflow: hidden;
+    }
+    .pr-page-wrap.shell-placeholder {
+      background: #f3f5f2;
+    }
+    .pr-page-wrap.loading::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, transparent 6%, rgba(0, 0, 0, .055) 6.6%, transparent 7.6%) 0 0/100% 22px repeat-y,
+        linear-gradient(180deg, transparent 6%, rgba(0, 0, 0, .04) 6.6%, transparent 7.6%) 0 11px/100% 22px repeat-y,
+        linear-gradient(180deg, transparent 0, transparent 100%);
+      mask: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
+      -webkit-mask: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
+      pointer-events: none;
+      opacity: .85;
+    }
+    .pr-page-wrap.loading::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .55) 50%, transparent 70%);
+      animation: pr-skeleton-shimmer 1.6s ease-in-out infinite;
+      pointer-events: none;
+    }
+    .pr-page-wrap.loading > span {
+      position: absolute;
+      inset: auto 0 14px 0;
+      text-align: center;
       color: var(--muted);
-      font-size: .82rem;
+      font-size: .76rem;
+      letter-spacing: .04em;
+      z-index: 2;
+      pointer-events: none;
+    }
+    @keyframes pr-skeleton-shimmer {
+      0% { transform: translateX(-60%); }
+      100% { transform: translateX(60%); }
     }
     .pr-canvas {
       position: relative;
@@ -590,6 +625,7 @@
       position: relative;
       width: var(--pr-page-width, 760px);
       height: var(--pr-page-height, 980px);
+      max-width: 100%;
       overflow: hidden;
       border: 1px solid rgba(23, 33, 31, .12);
       background: #fff;
@@ -610,9 +646,12 @@
       width: 100%;
       height: 100%;
       object-fit: contain;
-      opacity: .98;
+      opacity: .35;
       pointer-events: none;
       user-select: none;
+    }
+    .pr-workspace.reader-mode-translation .pr-translation-page-preview {
+      opacity: .12;
     }
     .pr-translation-page-label {
       position: absolute;
@@ -641,8 +680,8 @@
       margin: 0;
       padding: 2px 3px;
       overflow: hidden;
-      font-size: clamp(.72rem, var(--pr-translation-font, .9rem), 1rem);
-      line-height: 1.35;
+      font-size: clamp(.8rem, var(--pr-translation-font, 1rem), 1.85rem);
+      line-height: 1.4;
       height: var(--pr-translation-height, auto);
       max-height: var(--pr-translation-height, none);
       cursor: pointer;
@@ -1081,6 +1120,75 @@
       font-size: .68rem;
       line-height: 1.1;
     }
+    .pr-color-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, .15);
+      margin-right: 6px;
+      vertical-align: middle;
+      flex: 0 0 auto;
+    }
+    .pr-color-dot.color-yellow { background: #fde68a; }
+    .pr-color-dot.color-orange { background: #fed7aa; }
+    .pr-color-dot.color-red { background: #fecaca; }
+    .pr-color-dot.color-pink { background: #fbcfe8; }
+    .pr-color-dot.color-green { background: #bbf7d0; }
+    .pr-color-dot.color-blue { background: #bfdbfe; }
+    .pr-color-dot.color-purple { background: #ddd6fe; }
+    .pr-color-dot.color-grey, .pr-color-dot.color-gray { background: #e5e7eb; }
+    .pr-tag-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 6px;
+      margin: 2px 4px 0 0;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: .68rem;
+      line-height: 1.4;
+      border: 1px solid var(--line);
+    }
+    .pr-quote-text {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      font-size: .8rem;
+      color: var(--ink);
+      line-height: 1.35;
+    }
+    .pr-note-text {
+      font-size: .76rem;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: 2px;
+      white-space: pre-wrap;
+    }
+    .pr-tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin-top: 2px; }
+    .pr-ref-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .pr-ref-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(70, 158, 130, .12);
+      color: var(--accent-strong, #21685b);
+      font-size: .68rem;
+      line-height: 1.4;
+      border: 1px solid rgba(70, 158, 130, .35);
+      cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+    .pr-ref-chip:hover { background: rgba(70, 158, 130, .22); }
+    .pr-ref-chip[data-ref-kind="chunk"] { background: rgba(192, 132, 252, .12); border-color: rgba(192, 132, 252, .35); color: #6d28d9; }
+    .pr-ref-chip[data-ref-kind="annotation"] { background: rgba(251, 191, 36, .15); border-color: rgba(251, 191, 36, .45); color: #92400e; }
     .pr-list { display: grid; gap: 7px; max-height: 360px; overflow: auto; }
     .pr-item {
       display: grid;
@@ -1325,7 +1433,7 @@
     let observer = null;
     let currentSelection = null;
     let activeTab = "notes";
-    let notesFilterCurrentPage = true;
+    let notesFilterCurrentPage = false;
     let focusedAnnotationId = "";
     let eventSeq = 0;
     let lastFrameHeight = 0;
@@ -2486,6 +2594,26 @@
         scale: pageScale,
       };
     }
+    function startupPdfSkeletonHtml() {
+      const total = Math.max(1, totalPages || knownPageCount(currentPage || 1));
+      const start = Math.max(1, Math.min(Number(currentPage || 1), Math.max(1, total - 2)));
+      const pages = Array.from(
+        { length: Math.min(3, total - start + 1) },
+        (_, index) => start + index
+      );
+      while (pages.length < 3) {
+        const next = pages.length ? pages[pages.length - 1] + 1 : 1;
+        pages.push(next);
+      }
+      return pages.slice(0, 3).map((pageNumber) => `
+        <article class="pr-page-container" data-page="${pageNumber}" data-shell-placeholder="true">
+          <div class="pr-page-label">${esc(label("page"))} ${pageNumber}</div>
+          <div class="pr-page-wrap loading shell-placeholder" style="width:612px;height:792px">
+            <span>${esc(label("pdf_loading"))}</span>
+          </div>
+        </article>
+      `).join("");
+    }
     function renderShell(message = "") {
       const source = asObj(args.source);
       const title = text(source.title || source.id || "Paper");
@@ -2534,7 +2662,7 @@
           <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""} ${leftRailCollapsed ? "left-rail-collapsed" : ""}" style="${attr(workspaceStyle)}">
             <aside class="pr-left-rail ${leftRailCollapsed ? "collapsed" : ""}" id="leftRail">${leftRailHtml()}</aside>
             <section class="pr-viewer" id="viewer">
-              <div class="pr-continuous-document" id="continuousDocument"></div>
+              <div class="pr-continuous-document" id="continuousDocument">${startupPdfSkeletonHtml()}</div>
               <section class="pr-dock pr-selection-popover ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             </section>
             <div class="pr-compare-divider" id="compareDivider" data-resize="compare" title="Resize compare panes"></div>
@@ -3318,19 +3446,25 @@
       const reader = document.getElementById("translationReader");
       const container = body || reader;
       const base = translationPageBaseSize(pageNumber);
-      const widthSpace = Math.max(240, (container ? container.clientWidth : 760) - 24);
-      return Math.max(.35, Math.min(3, widthSpace / Math.max(1, base.width)));
+      const measured = container ? container.clientWidth : 0;
+      const fallbackWidth = readerMode === "translation" ? 880 : 560;
+      const rawWidth = measured > 80 ? measured : fallbackWidth;
+      const widthSpace = Math.max(220, rawWidth - 28);
+      const scale = widthSpace / Math.max(1, base.width);
+      return Math.max(.35, Math.min(2.4, scale));
     }
     function translationPageViewportSize(pageNumber) {
       const base = translationPageBaseSize(pageNumber);
       const pageScale = scaleForTranslationPage(pageNumber);
+      const width = Math.max(180, base.width * pageScale);
+      const height = Math.max(220, base.height * pageScale);
       return {
         page: Number(pageNumber || 1),
         baseWidth: base.width,
         baseHeight: base.height,
         rotation: base.rotation,
-        width: Math.max(180, base.width * pageScale),
-        height: Math.max(220, base.height * pageScale),
+        width,
+        height,
         scale: pageScale,
       };
     }
@@ -3390,9 +3524,22 @@
       const width = Math.max(24, right - left);
       const height = Math.max(16, bottom - top);
       const body = unitDisplayText(unit);
+      const charCount = Math.max(1, body.length);
+      const hasCJK = /[\u4e00-\u9fff]/.test(body);
       const sourceFont = Number(asObj(unit).font_size || 0) * Number(size.scale || 1);
-      const density = body.length ? Math.sqrt((width * height) / Math.max(1, body.length * 5.4)) : height * .72;
-      const fontSize = Math.max(8, Math.min(16, sourceFont || density, height * .76));
+      // Bbox-aware density: assume each character occupies ~ font^2 * factor pixels.
+      // CJK glyphs are roughly square (factor ~1.0); Latin letters ~0.55 wide vs tall.
+      const charAreaFactor = hasCJK ? 1.0 : 0.55;
+      const usableArea = width * height * 0.86;
+      const densityFont = Math.sqrt(usableArea / Math.max(1, charCount * charAreaFactor));
+      // Allow Chinese to grow up to bbox height; cap so very tall single-line bboxes stay sane.
+      const heightCap = hasCJK ? Math.min(30, height * 0.92) : Math.min(22, height * 0.82);
+      const minFont = hasCJK ? 12 : 9;
+      // If we have a sourceFont, take the larger of (bbox-derived) and (sourceFont * factor) so
+      // CJK is not pinned to the small English original; otherwise rely on density alone.
+      const cjkFactor = hasCJK ? 1.18 : 1.0;
+      const candidate = Math.max(densityFont, sourceFont * cjkFactor);
+      const fontSize = Math.max(minFont, Math.min(heightCap, candidate || densityFont || minFont));
       return {
         className: "placed",
         style: `left:${left.toFixed(2)}px;top:${top.toFixed(2)}px;width:${Math.max(2, width).toFixed(2)}px;height:${Math.max(2, height).toFixed(2)}px;--pr-translation-height:${Math.round(height)}px;--pr-translation-font:${fontSize.toFixed(2)}px;`,
@@ -3404,7 +3551,7 @@
         if (!text(block.textContent).trim()) return;
         block.classList.remove("overflowing");
         const initial = Number.parseFloat(window.getComputedStyle(block).fontSize || "12") || 12;
-        let low = 7;
+        let low = 10;
         let high = Math.max(low, initial);
         for (let index = 0; index < 12; index += 1) {
           const mid = (low + high) / 2;
@@ -3474,6 +3621,30 @@
       if (!reader) return null;
       return reader.querySelector(".pr-translation-body") || reader;
     }
+    let translationResizeObserver = null;
+    let translationResizeTimer = null;
+    let translationLastReaderWidth = 0;
+    function ensureTranslationResizeObserver() {
+      const reader = document.getElementById("translationReader");
+      if (!reader || typeof ResizeObserver === "undefined") return;
+      if (translationResizeObserver) {
+        try { translationResizeObserver.disconnect(); } catch {}
+      }
+      translationLastReaderWidth = reader.clientWidth || 0;
+      translationResizeObserver = new ResizeObserver((entries) => {
+        if (!entries || !entries.length) return;
+        if (readerMode === "pdf") return;
+        const nextWidth = Math.round(entries[0].contentRect ? entries[0].contentRect.width : reader.clientWidth || 0);
+        if (Math.abs(nextWidth - translationLastReaderWidth) < 6) return;
+        translationLastReaderWidth = nextWidth;
+        if (translationResizeTimer) window.clearTimeout(translationResizeTimer);
+        translationResizeTimer = window.setTimeout(() => {
+          translationResizeTimer = null;
+          try { refreshTranslationReader({ preserveScroll: true }); } catch {}
+        }, 140);
+      });
+      try { translationResizeObserver.observe(reader); } catch {}
+    }
     function wireTranslationScroll() {
       const scrollEl = translationScrollElement();
       if (!scrollEl || translationScrollWired.has(scrollEl)) return;
@@ -3499,6 +3670,7 @@
       if (el) el.innerHTML = translationReaderHtml();
       wireTranslationRows();
       wireTranslationScroll();
+      ensureTranslationResizeObserver();
       if (el && preserveScroll) {
         const restoreScroll = () => {
           const nextScroller = translationScrollElement();
@@ -3573,15 +3745,84 @@
     function reviewItemText(value) {
       if (value && typeof value === "object") {
         const obj = asObj(value);
-        const body = text(obj.text || obj.summary || obj.reason || obj.title || obj.metric);
-        const refs = asArr(obj.refs || obj.cited_segment_refs || obj.cited_refs).map((row) => text(row)).filter(Boolean);
-        return refs.length ? `${body} (${refs.join(", ")})` : body;
+        return text(obj.text || obj.summary || obj.reason || obj.title || obj.metric);
       }
       return text(value);
     }
+    function refIdText(value) {
+      if (value && typeof value === "object") {
+        const obj = asObj(value);
+        return text(obj.segment_id || obj.segment_ref || obj.scope_ref || obj.ref || obj.id || obj.chunk_id || obj.annotation_id);
+      }
+      return text(value);
+    }
+    function reviewItemRefs(value) {
+      if (!value || typeof value !== "object") return [];
+      const obj = asObj(value);
+      const seen = new Set();
+      const refs = [];
+      const addRef = (row) => {
+        const ref = refIdText(row);
+        if (ref && !seen.has(ref)) {
+          seen.add(ref);
+          refs.push(ref);
+        }
+      };
+      asArr(obj.refs || obj.cited_segment_refs || obj.cited_refs).forEach(addRef);
+      ["segment_id", "segment_ref", "scope_ref", "chunk_id", "annotation_id"].forEach((key) => {
+        addRef(obj[key]);
+      });
+      return refs;
+    }
+    function refKindFor(refId) {
+      const value = String(refId || "");
+      if (value.startsWith("seg:")) return "segment";
+      if (value.startsWith("chunk")) return "chunk";
+      if (value.startsWith("ann")) return "annotation";
+      return "ref";
+    }
+    function refLookupPage(refId) {
+      const ref = String(refId || "");
+      if (!ref) return 0;
+      const kind = refKindFor(ref);
+      if (kind === "segment") {
+        const seg = asArr(args.segments).map((row) => asObj(row)).find((row) => text(row.segment_id) === ref);
+        if (seg) return Number(seg.page || 0);
+        const unit = buildAnchorIndex().get(ref);
+        if (unit) return Number(asObj(unit).page || 0);
+      }
+      if (kind === "chunk") {
+        const chunk = asArr(args.chunks).map((row) => asObj(row)).find((row) => text(row.id) === ref);
+        if (chunk) return Number(asObj(chunk.metadata).page || 0);
+      }
+      if (kind === "annotation") {
+        const ann = asArr(args.annotations).map((row) => asObj(row)).find((row) => text(row.id) === ref);
+        if (ann) return Number(ann.page || 0);
+      }
+      return 0;
+    }
+    function refButtonHtml(ref) {
+      const clean = String(ref || "");
+      if (!clean) return "";
+      const kind = refKindFor(clean);
+      const page = refLookupPage(clean);
+      const labelText = kind === "segment" && page ? `p.${page}` : (kind === "chunk" ? "quote" : (kind === "annotation" ? "note" : clean.slice(0, 12)));
+      const segmentAttr = kind === "segment" ? ` data-jump-segment="${attr(clean)}"` : "";
+      return `<button class="pr-ref-chip" data-jump-ref="${attr(clean)}"${segmentAttr} data-ref-kind="${attr(kind)}" data-page="${page || ""}" title="${attr(clean)}">${esc(labelText)}</button>`;
+    }
     function listHtml(values) {
-      const rows = asArr(values).map((value) => reviewItemText(value)).filter(Boolean);
-      return rows.length ? `<div class="pr-list">${rows.map((value) => `<div class="pr-item"><div class="pr-item-title">${esc(value)}</div></div>`).join("")}</div>` : "";
+      const items = asArr(values);
+      const rows = items.map((value) => ({
+        body: reviewItemText(value),
+        refs: reviewItemRefs(value),
+      })).filter((row) => row.body);
+      if (!rows.length) return "";
+      return `<div class="pr-list">${rows.map((row) => `
+        <div class="pr-item">
+          <div class="pr-item-title">${esc(row.body)}</div>
+          ${row.refs.length ? `<div class="pr-ref-row">${row.refs.map((ref) => refButtonHtml(ref)).join("")}</div>` : ""}
+        </div>
+      `).join("")}</div>`;
     }
     function reviewSectionHtml(title, values, className = "") {
       const body = Array.isArray(values) ? listHtml(values) : (text(values) ? `<div class="pr-list"><div class="pr-item ${attr(className)}"><div class="pr-item-title">${esc(values)}</div></div></div>` : "");
@@ -3619,12 +3860,13 @@
         chunks.push(`<div class="pr-item"><div class="pr-item-meta">Rationale</div><div class="pr-item-title">${esc(analysis.score_rationale)}</div></div>`);
       }
       const citedRefs = [
+        ...asArr(analysis.cited_refs),
         ...asArr(analysis.cited_segment_refs),
         ...asArr(analysis.cited_chunk_refs),
         ...asArr(analysis.cited_annotation_refs),
-      ].map((row) => text(row)).filter(Boolean);
+      ].map((row) => refIdText(row)).filter(Boolean);
       if (citedRefs.length) {
-        chunks.push(`<div class="pr-panel-head">Refs</div><div class="pr-item"><div class="pr-item-meta">${esc(citedRefs.join(", "))}</div></div>`);
+        chunks.push(`<div class="pr-panel-head">Refs</div><div class="pr-item"><div class="pr-ref-row">${citedRefs.map((ref) => refButtonHtml(ref)).join("")}</div></div>`);
       }
       const deepRead = asObj(analysis.codex_deep_read || {});
       if (Object.keys(deepRead).length) {
@@ -4089,27 +4331,46 @@
       };
     }
     function notesPanelHtml() {
-      const rows = asArr(args.annotations)
+      const all = asArr(args.annotations)
         .map((row) => asObj(row))
-        .filter((row) => row.status !== "deleted")
-        .filter((row) => !notesFilterCurrentPage || Number(row.page || 0) === currentPage);
+        .filter((row) => row.status !== "deleted");
+      const rows = all.filter((row) => !notesFilterCurrentPage || Number(row.page || 0) === currentPage);
       const filter = `
         <div class="pr-dock-actions">
-          <button class="pr-button ${notesFilterCurrentPage ? "active" : ""}" data-notes-filter="page">${esc(label("current_page"))}</button>
-          <button class="pr-button ${!notesFilterCurrentPage ? "active" : ""}" data-notes-filter="all">${esc(label("all"))}</button>
+          <button class="pr-button ${notesFilterCurrentPage ? "active" : ""}" data-notes-filter="page">${esc(label("current_page"))}${notesFilterCurrentPage ? ` (${rows.length})` : ""}</button>
+          <button class="pr-button ${!notesFilterCurrentPage ? "active" : ""}" data-notes-filter="all">${esc(label("all"))}${!notesFilterCurrentPage ? ` (${all.length})` : ""}</button>
         </div>
       `;
       if (!rows.length) return `${filter}<div class="pr-empty">${esc(label("empty"))}</div>`;
+      const colorClass = (color) => {
+        const value = String(color || "").trim().toLowerCase();
+        if (!value) return "color-yellow";
+        if (/^[a-z]+$/.test(value)) return `color-${value}`;
+        return "color-yellow";
+      };
       return `${filter}<div class="pr-list">${rows.map((obj) => {
         const id = text(obj.id);
         const page = Number(obj.page || 0);
-        const title = annotationTitle(obj);
         const focused = id && id === focusedAnnotationId;
+        const quote = text(obj.selected_text);
+        const note = text(obj.note);
+        const tags = asArr(obj.tags).map((row) => text(row)).filter(Boolean);
+        const meta = obj.locator || (page ? `p. ${page}` : "");
+        const tagsHtml = tags.length
+          ? `<div class="pr-tag-row">${tags.map((tag) => `<span class="pr-tag-chip">${esc(tag)}</span>`).join("")}</div>`
+          : "";
+        const quoteHtml = quote ? `<div class="pr-quote-text">${esc(quote)}</div>` : "";
+        const noteHtml = note ? `<div class="pr-note-text">${esc(note)}</div>` : "";
         return `
           <div class="pr-annotation-row">
             <button class="pr-item" data-jump-annotation="${attr(id)}" data-page="${page || ""}">
-              <div class="pr-item-title">${esc(title.slice(0, 180))}</div>
-              <div class="pr-item-meta">${esc(obj.locator || (page ? `p. ${page}` : ""))}${focused ? " - focus" : ""}${asArr(obj.segment_refs).length ? " - refs" : ""}</div>
+              <div class="pr-item-title" style="display:flex;align-items:center;gap:0">
+                <span class="pr-color-dot ${colorClass(obj.color)}" aria-hidden="true"></span>
+                <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}${focused ? " · focus" : ""}</span>
+              </div>
+              ${quoteHtml}
+              ${noteHtml}
+              ${tagsHtml}
             </button>
             <button class="pr-danger-button" data-delete-annotation="${attr(id)}" data-page="${page || ""}" title="${attr(label("delete_annotation"))}">x</button>
           </div>
@@ -4240,6 +4501,7 @@
       const translationReader = document.getElementById("translationReader");
       if (translationReader) {
         wireTranslationScroll();
+        ensureTranslationResizeObserver();
       }
       wireResizeHandles();
       wireTranslationRows();
@@ -4626,6 +4888,45 @@
         button.addEventListener("click", () => {
           const page = Number(button.dataset.page || 0);
           if (page) scrollToPage(page);
+        });
+      });
+      document.querySelectorAll("[data-jump-ref]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const ref = button.dataset.jumpRef || "";
+          const kind = button.dataset.refKind || "ref";
+          const fallbackPage = Number(button.dataset.page || 0);
+          if (!ref) return;
+          if (kind === "annotation") {
+            const ann = asArr(args.annotations).map((row) => asObj(row)).find((row) => text(row.id) === ref);
+            if (ann) {
+              focusedAnnotationId = ref;
+              const annPage = Number(ann.page || 0) || fallbackPage;
+              if (annPage) scrollToPage(annPage);
+              openAnnotationPopover(ann, { left: window.innerWidth - 390, top: 90, bottom: 120 });
+              scheduleReaderStateChanged(true);
+              return;
+            }
+          }
+          if (kind === "segment") {
+            const unit = buildAnchorIndex().get(ref);
+            if (unit) {
+              const unitPage = Number(asObj(unit).page || 0) || fallbackPage;
+              if (unitPage) scrollToPage(unitPage);
+              const anchorId = text(asObj(unit).anchor_id || asObj(unit).unit_id || ref);
+              if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false });
+              return;
+            }
+          }
+          if (kind === "chunk") {
+            const chunk = asArr(args.chunks).map((row) => asObj(row)).find((row) => text(row.id) === ref);
+            if (chunk) {
+              const chunkPage = Number(asObj(chunk.metadata).page || 0) || fallbackPage;
+              if (chunkPage) scrollToPage(chunkPage);
+              return;
+            }
+          }
+          if (fallbackPage) scrollToPage(fallbackPage);
         });
       });
     }
@@ -5871,6 +6172,9 @@
       scrollToPage(page);
       renderAround(page, { force: true });
       placeSelectionDock();
+      if (readerMode !== "pdf") {
+        try { refreshTranslationReader({ preserveScroll: true }); } catch {}
+      }
     }
     function scheduleViewportUpdate() {
       if (viewportTimer) window.clearTimeout(viewportTimer);
@@ -5969,7 +6273,7 @@
       if (activeTab === "review" && sidePanelCollapsed && hasReviewContent() && !localStateFresh(local)) {
         sidePanelCollapsed = false;
       }
-      notesFilterCurrentPage = typeof local.notes_filter_current_page === "boolean" ? local.notes_filter_current_page : true;
+      notesFilterCurrentPage = typeof local.notes_filter_current_page === "boolean" ? local.notes_filter_current_page : false;
       syncDockUiFromLocal(local);
       compareSplitRatio = Math.max(25, Math.min(75, Number(settings().compare_split_ratio || local.compare_split_ratio || args.compare_split_ratio || 50)));
       panelWidth = Math.max(280, Math.min(560, Number(settings().panel_width || local.panel_width || args.panel_width || 340)));
@@ -6240,6 +6544,9 @@
       resizeTimer = window.setTimeout(() => {
         rerenderForScale();
         placeSelectionDock();
+        if (readerMode !== "pdf") {
+          try { refreshTranslationReader({ preserveScroll: true }); } catch {}
+        }
       }, 180);
     });
     window.addEventListener("beforeunload", sendProgressBeacon);

@@ -1370,6 +1370,59 @@ class TestResearchPapers(unittest.TestCase):
             self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
             self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
 
+    def test_layout_formula_detection_excludes_formula_from_translation_units(self) -> None:
+        from nblane.core.research_papers import (
+            _layout_candidates_from_text_layer,
+            _layout_text_is_formula,
+            reader_translation_layout_units,
+        )
+
+        formula = "L_gen = E_ξ1 [‖f_gen(z_t-m, z_t; h_und) - sg[z_t+m]‖²]"
+
+        self.assertTrue(_layout_text_is_formula(formula, 9.5))
+        self.assertFalse(_layout_text_is_formula("x = 5", 9.5))
+        self.assertFalse(_layout_text_is_formula("这是一个包含 x = 5 的中文段落。", 9.5))
+
+        candidates = _layout_candidates_from_text_layer(
+            page=1,
+            layer={
+                "lines": [
+                    {
+                        "block": 1,
+                        "line": 1,
+                        "text": formula,
+                        "x": 40,
+                        "y": 120,
+                        "w": 250,
+                        "h": 16,
+                        "page_width": 360,
+                        "page_height": 480,
+                        "font_size": 9.5,
+                    }
+                ],
+                "image_rects": [],
+            },
+            accepted_table_rects=[],
+        )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["kind"], "formula")
+        self.assertFalse(candidates[0]["translatable"])
+        self.assertTrue(candidates[0]["preserve_source"])
+        self.assertEqual(
+            reader_translation_layout_units(
+                [
+                    {
+                        "kind": "formula",
+                        "source_text": formula,
+                        "translatable": False,
+                        "display_source": True,
+                    }
+                ]
+            ),
+            [],
+        )
+
     def test_build_paper_layout_units_merges_title_and_marks_front_matter(self) -> None:
         if not pymupdf_available():
             self.skipTest("PyMuPDF is not available")
@@ -4010,6 +4063,201 @@ class TestResearchPapers(unittest.TestCase):
             diagnostics = paper_citation_diagnostics(profile, "source:paper:grounded")
 
         self.assertTrue(any("quote does not match" in item for item in diagnostics))
+
+    def test_refine_segment_pages_with_pdf_relocates_misassigned_pages(self) -> None:
+        from nblane.core.research_papers import (
+            PaperSegment,
+            _refine_segment_pages_with_pdf,
+        )
+
+        page_texts = [
+            "Title and authors and abstract",
+            "Introduction discusses related work",
+            "We present the Transformer architecture in detail",
+            "Tables of results and BLEU scores",
+            "Conclusion future work and acknowledgements",
+        ]
+        segments = [
+            PaperSegment(
+                segment_id="seg:demo:00001",
+                source_id="source:paper:demo",
+                page=3,
+                order=1,
+                text="Title and authors and abstract",
+                section_path=["Title"],
+                kind="heading",
+                text_hash="sha256:abc",
+                locator="p. 3",
+                rects=[],
+                metadata={},
+            ),
+            PaperSegment(
+                segment_id="seg:demo:00002",
+                source_id="source:paper:demo",
+                page=3,
+                order=2,
+                text="We present the Transformer architecture in detail",
+                section_path=["Method"],
+                kind="paragraph",
+                text_hash="sha256:def",
+                locator="p. 3 § Method",
+                rects=[{"page": 3, "x_pct": 0.1, "y_pct": 0.2}],
+                metadata={},
+            ),
+            PaperSegment(
+                segment_id="seg:demo:00003",
+                source_id="source:paper:demo",
+                page=3,
+                order=3,
+                text="Conclusion future work and acknowledgements",
+                section_path=["Conclusion"],
+                kind="heading",
+                text_hash="sha256:ghi",
+                locator="p. 3 § Conclusion",
+                rects=[],
+                metadata={},
+            ),
+        ]
+
+        result, refined = _refine_segment_pages_with_pdf(segments, page_texts)
+
+        self.assertEqual(refined, 2)
+        self.assertEqual([seg.page for seg in result], [1, 3, 5])
+        self.assertEqual(result[0].locator, "p. 1")
+        self.assertEqual(result[1].locator, "p. 3 § Method")
+        self.assertEqual(result[1].rects[0]["page"], 3)
+        self.assertEqual(result[2].locator, "p. 5 § Conclusion")
+
+    def test_refine_segment_pages_keeps_pages_when_no_match(self) -> None:
+        from nblane.core.research_papers import (
+            PaperSegment,
+            _refine_segment_pages_with_pdf,
+        )
+
+        segments = [
+            PaperSegment(
+                segment_id="seg:demo:00001",
+                source_id="source:paper:demo",
+                page=2,
+                order=1,
+                text="Some text that does not appear",
+                section_path=[],
+                kind="paragraph",
+                text_hash="sha256:abc",
+                locator="p. 2",
+                rects=[],
+                metadata={},
+            )
+        ]
+        result, refined = _refine_segment_pages_with_pdf(
+            segments,
+            ["totally different content", "yet other content"],
+        )
+        self.assertEqual(refined, 0)
+        self.assertEqual(result[0].page, 2)
+
+    def test_refine_segment_pages_normalizes_pdf_text_and_updates_rect_pages(self) -> None:
+        from nblane.core.research_papers import (
+            PaperSegment,
+            _refine_segment_pages_with_pdf,
+        )
+
+        page_texts = [
+            "Abstract and introduction.",
+            "We introduce a cross-modal archi-\ntecture for better action prediction.",
+            "Conclusion.",
+        ]
+        segments = [
+            PaperSegment(
+                segment_id="seg:demo:00001",
+                source_id="source:paper:demo",
+                page=9,
+                order=1,
+                text="We introduce a cross-modal architecture for better action prediction.",
+                section_path=["8 Method"],
+                kind="paragraph",
+                text_hash="sha256:abc",
+                locator="p. 9 § 8 Method",
+                rects=[{"page": 9, "x_pct": 0.1, "y_pct": 0.2}],
+                metadata={},
+            )
+        ]
+
+        result, refined = _refine_segment_pages_with_pdf(segments, page_texts)
+
+        self.assertEqual(refined, 1)
+        self.assertEqual(result[0].page, 2)
+        self.assertEqual(result[0].locator, "p. 2 § 8 Method")
+        self.assertEqual(result[0].rects[0]["page"], 2)
+        self.assertEqual(result[0].metadata["grobid_original_page"], 9)
+        self.assertEqual(result[0].metadata["page_refined_with"], "pymupdf_text")
+
+    def test_save_paper_analysis_preserves_codex_deep_read_on_overwrite(self) -> None:
+        from nblane.core.research_papers import (
+            save_paper_analysis,
+            load_paper_analysis,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_workspace.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers._deletion.git_backup.record_change"),
+            ):
+                save_paper_analysis(
+                    profile,
+                    "source:paper:grounded",
+                    {
+                        "tldr": "First pass tldr",
+                        "codex_deep_read": {"findings": ["F1", "F2"], "reading_plan": ["S1"]},
+                        "codex_deep_read_updated": "2026-05-26T08:00:00+00:00",
+                    },
+                )
+                save_paper_analysis(
+                    profile,
+                    "source:paper:grounded",
+                    {
+                        "tldr": "Second pass tldr",
+                        "key_points": [{"text": "kp1"}],
+                        "reading_plan": [],
+                    },
+                )
+
+            after = load_paper_analysis(profile, "source:paper:grounded")
+            self.assertEqual(after.get("tldr"), "Second pass tldr")
+            self.assertEqual(after.get("codex_deep_read"), {"findings": ["F1", "F2"], "reading_plan": ["S1"]})
+            self.assertEqual(after.get("codex_deep_read_updated"), "2026-05-26T08:00:00+00:00")
+            self.assertEqual(after.get("key_points"), [{"text": "kp1"}])
+
+    def test_save_paper_analysis_replace_clears_preserved_keys(self) -> None:
+        from nblane.core.research_papers import (
+            save_paper_analysis,
+            load_paper_analysis,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_workspace.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers._deletion.git_backup.record_change"),
+            ):
+                save_paper_analysis(
+                    profile,
+                    "source:paper:grounded",
+                    {"codex_deep_read": {"findings": ["F1"]}},
+                )
+                save_paper_analysis(
+                    profile,
+                    "source:paper:grounded",
+                    {"tldr": "fresh"},
+                    replace=True,
+                )
+
+            after = load_paper_analysis(profile, "source:paper:grounded")
+            self.assertEqual(after.get("tldr"), "fresh")
+            self.assertNotIn("codex_deep_read", after)
 
 
 if __name__ == "__main__":

@@ -1141,6 +1141,17 @@ def extract_paper_segments(
             segments = grobid_tei_to_segments(source_id, doc.tei_xml)
             references = grobid_tei_to_bibliography(source_id, doc.tei_xml)
             if segments:
+                page_refined_count = 0
+                try:
+                    pdf_path = paper_pdf_asset_path(profile, source_id)
+                    page_texts = _build_pdf_page_text_index(pdf_path)
+                    if page_texts:
+                        segments, page_refined_count = _refine_segment_pages_with_pdf(segments, page_texts)
+                except FileNotFoundError:
+                    page_texts = []
+                except Exception as exc:
+                    warnings.append(f"PyMuPDF page refinement failed: {exc}")
+                    page_texts = []
                 save_paper_segments(profile, source_id, segments)
                 _update_source_metadata(
                     profile,
@@ -1150,7 +1161,8 @@ def extract_paper_segments(
                         "structured_extracted_at": _now(),
                         "structured_references": references,
                         "structured_references_count": len(references),
-                        "structured_extraction_warnings": [],
+                        "structured_extraction_warnings": warnings,
+                        "structured_page_refined_segments": page_refined_count,
                         "grobid_status": "available",
                         "grobid_available": True,
                         "grobid_last_error": "",
@@ -1799,6 +1811,162 @@ def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
 
     walk_container(body, [])
     return segments
+
+
+def _normalize_pdf_search_text(text: object) -> str:
+    value = str(text or "").replace("\u00ad", "")
+    value = re.sub(r"(?<=\w)-\s+(?=\w)", "", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _compact_pdf_search_text(text: object) -> str:
+    normalized = _normalize_pdf_search_text(text).casefold()
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", normalized, flags=re.UNICODE)
+
+
+def _segment_search_needle(text: str, *, max_len: int = 120) -> str:
+    cleaned = _normalize_pdf_search_text(text)
+    if not cleaned:
+        return ""
+    return cleaned[:max_len]
+
+
+def _build_pdf_page_text_index(pdf_path: Path) -> list[str]:
+    if not pymupdf_available():
+        return []
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except Exception:
+        return []
+    pages: list[str] = []
+    try:
+        with fitz.open(str(pdf_path)) as document:
+            for page_index in range(document.page_count):
+                try:
+                    raw = document.load_page(page_index).get_text("text") or ""
+                except Exception:
+                    raw = ""
+                pages.append(_normalize_pdf_search_text(raw))
+    except Exception:
+        return []
+    return pages
+
+
+def _refine_segment_pages_with_pdf(
+    segments: list[PaperSegment],
+    page_texts: list[str],
+) -> tuple[list[PaperSegment], int]:
+    if not segments or not page_texts:
+        return segments, 0
+    refined = 0
+    last_page = 0
+    page_views = [
+        (_normalize_pdf_search_text(raw), _compact_pdf_search_text(raw))
+        for raw in page_texts
+    ]
+    matched_pages = [0 for _ in segments]
+    for index, segment in enumerate(segments):
+        match_page = _find_segment_page_in_pdf(segment.text, page_views, start_page=last_page)
+        if match_page:
+            matched_pages[index] = match_page
+            if _set_segment_page_from_pdf(segment, match_page):
+                refined += 1
+            last_page = match_page
+
+    for index, segment in enumerate(segments):
+        if matched_pages[index]:
+            continue
+        if _clean_text(segment.kind).lower() != "heading" or not segment.section_path:
+            continue
+        inferred = 0
+        for next_index in range(index + 1, min(len(segments), index + 8)):
+            next_page = matched_pages[next_index]
+            if not next_page:
+                continue
+            next_path = segments[next_index].section_path
+            if next_path[: len(segment.section_path)] == segment.section_path:
+                inferred = next_page
+                break
+        if inferred:
+            matched_pages[index] = inferred
+            if _set_segment_page_from_pdf(segment, inferred):
+                refined += 1
+    return segments, refined
+
+
+def _find_segment_page_in_pdf(
+    text: object,
+    page_views: list[tuple[str, str]],
+    *,
+    start_page: int = 0,
+) -> int:
+    if not page_views:
+        return 0
+    clean = _normalize_pdf_search_text(text)
+    compact = _compact_pdf_search_text(clean)
+    if not clean and not compact:
+        return 0
+    candidates: list[tuple[str, str, int, bool]] = []
+    if len(clean) >= 16:
+        candidates.append(("text", clean[:160], 16, False))
+    if len(compact) >= 24:
+        candidates.append(("compact", compact[:180], 24, False))
+    if len(compact) >= 48:
+        candidates.append(("compact", compact[:64], 48, False))
+    if 3 <= len(clean) <= 80 and len(clean.split()) <= 8:
+        candidates.append(("text", clean, 3, True))
+
+    search_start = max(0, min(len(page_views) - 1, int(start_page or 1) - 1))
+    ordered = list(range(search_start, len(page_views))) + list(range(0, search_start))
+    for view_name, needle, min_len, require_unique in candidates:
+        if len(needle) < min_len:
+            continue
+        view_index = 1 if view_name == "compact" else 0
+        matches = [
+            idx
+            for idx, views in enumerate(page_views)
+            if needle and needle in views[view_index]
+        ]
+        if not matches:
+            continue
+        if require_unique and len(matches) != 1:
+            continue
+        match_set = set(matches)
+        for idx in ordered:
+            if idx in match_set:
+                return idx + 1
+    return 0
+
+
+def _set_segment_page_from_pdf(segment: PaperSegment, match_page: int) -> bool:
+    try:
+        old_page = int(segment.page or 0)
+    except (TypeError, ValueError):
+        old_page = 0
+    if match_page < 1 or match_page == old_page:
+        return False
+    if isinstance(segment.metadata, dict):
+        segment.metadata.setdefault("grobid_original_page", old_page)
+        segment.metadata["page_refined_with"] = "pymupdf_text"
+    else:
+        segment.metadata = {
+            "grobid_original_page": old_page,
+            "page_refined_with": "pymupdf_text",
+        }
+    old_locator = segment.locator or ""
+    segment.page = match_page
+    if old_locator.startswith("p. "):
+        tail_idx = old_locator.find(" §")
+        tail = old_locator[tail_idx:] if tail_idx >= 0 else ""
+        segment.locator = f"p. {match_page}{tail}"
+    elif "§" in old_locator and not old_locator.startswith("p."):
+        segment.locator = f"p. {match_page} {old_locator}".strip()
+    elif not old_locator:
+        segment.locator = f"p. {match_page}"
+    for rect in segment.rects or []:
+        if isinstance(rect, dict):
+            rect["page"] = match_page
+    return True
 
 
 def grobid_tei_to_bibliography(source_id: str, tei_xml: str) -> list[dict[str, object]]:
@@ -3203,6 +3371,47 @@ def _layout_text_is_translatable(value: str) -> bool:
     return True
 
 
+_FORMULA_SYMBOLS = re.compile(
+    r"[∑∏∫√≈≠≤≥±×÷∂∇∞∈∉⊂⊃∪∩∧∨¬∀∃→←↔⇒⇔ℝℕℤℚℂ"
+    r"αβγδεζηθικλμνξπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΠΡΣΤΥΦΧΨΩ]"
+)
+_FORMULA_SUPERSUB = re.compile(r"[⁰-₟]")
+_FORMULA_DOUBLEBAR = re.compile(r"[‖∥]")
+
+
+def _layout_text_is_formula(text: str, font_size: float = 0.0) -> bool:
+    clean = _clean_text(text)
+    if len(clean) < 3:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", clean):
+        return False
+    if clean.endswith(".") and len(clean.split()) > 12:
+        return False
+    compact = re.sub(r"\s", "", clean)
+    if not compact:
+        return False
+    math_syms = len(_FORMULA_SYMBOLS.findall(compact))
+    super_sub = len(_FORMULA_SUPERSUB.findall(compact))
+    double_bars = len(_FORMULA_DOUBLEBAR.findall(compact))
+    underscores = compact.count("_")
+    carets = compact.count("^")
+    operators = sum(compact.count(ch) for ch in "=+−-*/()[]{}|<>")
+    letters = len(re.findall(r"[A-Za-z]", compact))
+    digits = len(re.findall(r"\d", compact))
+    total = len(compact)
+    special = math_syms + super_sub + double_bars + underscores + carets
+    if special / total > 0.18:
+        return True
+    if double_bars >= 2 and (math_syms or super_sub or underscores):
+        return True
+    if underscores >= 2 and (math_syms + super_sub + double_bars + carets) >= 1:
+        return True
+    if "=" in compact and operators >= 4 and letters + digits <= total * 0.8 and len(clean.split()) <= 10:
+        if math_syms or super_sub or double_bars or underscores >= 1 or carets >= 1:
+            return True
+    return False
+
+
 def _layout_kind(text: str, font_size: float, *, table: bool = False, symbol: bool = False) -> str:
     clean = _clean_text(text)
     if table:
@@ -3476,6 +3685,11 @@ def _same_layout_paragraph(previous: dict[str, object], current: dict[str, objec
     cur_text = _clean_text(current.get("text"))
     if not prev_text or not cur_text:
         return False
+    if _layout_text_is_formula(prev_text, float(previous.get("font_size") or 0)) or _layout_text_is_formula(
+        cur_text,
+        float(current.get("font_size") or 0),
+    ):
+        return False
     prev_kind = _layout_kind(prev_text, float(previous.get("font_size") or 0))
     cur_kind = _layout_kind(cur_text, float(current.get("font_size") or 0))
     if prev_kind == "title" or cur_kind == "title":
@@ -3565,22 +3779,28 @@ def _layout_candidates_from_text_layer(
                 continue
             font_size = max((float(row.get("font_size") or 0) for row in group), default=0.0)
             inside_image = any(_rect_overlap_ratio(rect, image_rect) > 0.55 for image_rect in image_rects)
-            translatable = _layout_text_is_translatable(text) and not inside_image
-            if not translatable and re.search(r"[A-Za-z\u4e00-\u9fff]", text):
-                if not inside_image:
-                    continue
-            kind = "figure_label" if inside_image else _layout_kind(text, font_size, symbol=not translatable)
-            kind = _front_matter_layout_kind(
-                page=page,
-                text=text,
-                rect=rect,
-                font_size=font_size,
-                current_kind=kind,
-            )
-            preserve_source = (not translatable) and not inside_image
-            if kind in {"authors", "affiliation"}:
+            is_formula = _layout_text_is_formula(text, font_size)
+            translatable = _layout_text_is_translatable(text) and not inside_image and not is_formula
+            if is_formula:
+                kind = "formula"
                 translatable = False
                 preserve_source = True
+            else:
+                if not translatable and re.search(r"[A-Za-z\u4e00-\u9fff]", text):
+                    if not inside_image:
+                        continue
+                kind = "figure_label" if inside_image else _layout_kind(text, font_size, symbol=not translatable)
+                kind = _front_matter_layout_kind(
+                    page=page,
+                    text=text,
+                    rect=rect,
+                    font_size=font_size,
+                    current_kind=kind,
+                )
+                preserve_source = (not translatable) and not inside_image
+                if kind in {"authors", "affiliation"}:
+                    translatable = False
+                    preserve_source = True
             candidates.append(
                 {
                     "page": page,
@@ -3721,7 +3941,7 @@ def reader_translation_layout_units(layout_units: list[dict[str, object]]) -> li
     """
 
     rows: list[dict[str, object]] = []
-    excluded_kinds = {"table_cell", "figure_label", "symbol"}
+    excluded_kinds = {"table_cell", "figure_label", "symbol", "formula"}
     for raw_unit in layout_units:
         if not isinstance(raw_unit, dict):
             continue

@@ -83,14 +83,36 @@ from ._types import PaperImportError
 from ._utils import _clean_list, _clean_mapping, _clean_text, _now
 from ._io import load_paper_annotations
 
-def save_paper_analysis(profile: str | Path, source_id: str, data: dict[str, object]) -> Path:
+_ANALYSIS_PRESERVED_KEYS = (
+    "codex_deep_read",
+    "codex_deep_read_updated",
+)
+
+
+def save_paper_analysis(
+    profile: str | Path,
+    source_id: str,
+    data: dict[str, object],
+    *,
+    replace: bool = False,
+) -> Path:
     _source_by_id(profile, source_id)
     path = _yaml_path(profile, PAPER_ANALYSIS_DIRNAME, source_id)
+    incoming = _clean_mapping(data)
+    if replace:
+        merged: dict[str, object] = dict(incoming)
+    else:
+        existing = _load_yaml_dict(path) or {}
+        merged = dict(_clean_mapping(existing))
+        for key in _ANALYSIS_PRESERVED_KEYS:
+            if key in existing and key not in incoming:
+                merged[key] = existing[key]
+        merged.update(incoming)
     payload = {
         "schema_version": "1.0",
         "source_id": source_id,
         "updated": _now(),
-        **_clean_mapping(data),
+        **merged,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(path, yaml.dump(payload, allow_unicode=True, default_flow_style=False, sort_keys=False))

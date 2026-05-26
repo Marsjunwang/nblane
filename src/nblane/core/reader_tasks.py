@@ -321,6 +321,19 @@ def _progress_callback(task_id: str, action: str):
                     "total": int(raw.get("total") or 0),
                     "saved": int(raw.get("saved") or 0),
                 }
+            elif action in {ANALYZE_PAPER, "codex_deep_read", "generate_review_card"}:
+                default_label = {
+                    ANALYZE_PAPER: "Analyzing paper...",
+                    "codex_deep_read": "Deep read in progress...",
+                    "generate_review_card": "Generating review...",
+                }.get(action, "Working...")
+                task["progress"] = {
+                    "phase": str(raw.get("phase") or "running"),
+                    "label": str(raw.get("label") or default_label),
+                    "current": int(raw.get("current") or 0),
+                    "total": int(raw.get("total") or 5),
+                    "saved": int(raw.get("saved") or 0),
+                }
             else:
                 return
             task["updated_at"] = time.time()

@@ -382,6 +382,11 @@ def _analysis_refs_from_value(value: Any) -> list[str]:
             "cited_chunk_refs",
             "annotation_refs",
             "cited_annotation_refs",
+            "segment_id",
+            "segment_ref",
+            "scope_ref",
+            "chunk_id",
+            "annotation_id",
         ):
             refs.extend(_payload_list(value, key))
     return refs
@@ -1420,6 +1425,15 @@ def _handle_reader_action_inner(
         )
 
     if action == ANALYZE_PAPER:
+        def emit_analysis_progress(phase: str, label: str, *, current: int = 0, total: int = 5) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback({"phase": phase, "label": label, "current": current, "total": total})
+            except Exception:
+                pass
+
+        emit_analysis_progress("preparing", "Preparing reader artifacts...", current=0, total=5)
         artifact_summary = ensure_paper_reading_artifacts(
             profile,
             source_id,
@@ -1430,6 +1444,18 @@ def _handle_reader_action_inner(
         segment_rows = load_paper_segments(profile, source_id)
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
+        emit_analysis_progress(
+            "summarizing",
+            f"Reading {len(segment_rows)} segments…",
+            current=1,
+            total=5,
+        )
+        emit_analysis_progress(
+            "scoring",
+            "Asking model for TL;DR, key points, scores…",
+            current=2,
+            total=5,
+        )
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
@@ -1439,10 +1465,13 @@ def _handle_reader_action_inner(
             annotations=[row.to_dict() for row in annotation_rows],
             require_review=False,
         )
+        emit_analysis_progress("normalizing", "Normalizing analysis output…", current=3, total=5)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
         if structured:
+            emit_analysis_progress("saving", "Saving analysis…", current=4, total=5)
             save_paper_analysis(profile, source_id, analysis)
+        emit_analysis_progress("done", "Analysis saved" if structured else "Analysis incomplete", current=5, total=5)
         message = "Analysis saved" if structured else (getattr(ai_result, "error", "") or "Analysis did not return structured output.")
         return ReaderActionResult(
             ok=bool(getattr(ai_result, "ok", True) and structured),
@@ -1456,6 +1485,15 @@ def _handle_reader_action_inner(
         )
 
     if action == "codex_deep_read":
+        def emit_deepread_progress(phase: str, label: str, *, current: int = 0, total: int = 5) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback({"phase": phase, "label": label, "current": current, "total": total})
+            except Exception:
+                pass
+
+        emit_deepread_progress("preparing", "Preparing reader artifacts...", current=0, total=5)
         artifact_summary = ensure_paper_reading_artifacts(
             profile,
             source_id,
@@ -1467,6 +1505,18 @@ def _handle_reader_action_inner(
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
         compact_segments = _compact_segments_for_deep_read(payload, segment_rows)
+        emit_deepread_progress(
+            "compacting",
+            f"Compacting {len(compact_segments)} segments for deep read…",
+            current=1,
+            total=5,
+        )
+        emit_deepread_progress(
+            "reading",
+            "Codex is reading the paper end-to-end…",
+            current=2,
+            total=5,
+        )
         ai_result = deep_read_paper_codex(
             ctx.profile_name,
             source_id,
@@ -1498,14 +1548,22 @@ def _handle_reader_action_inner(
             },
             require_review=True,
         )
+        emit_deepread_progress("structuring", "Structuring findings + reading plan…", current=3, total=5)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         if ai_result.ok and structured:
+            emit_deepread_progress("saving", "Saving deep-read result…", current=4, total=5)
             analysis = load_paper_analysis(profile, source_id)
             analysis["codex_deep_read"] = structured
             analysis["codex_deep_read_updated"] = datetime.now().astimezone().isoformat(
                 timespec="seconds"
             )
             save_paper_analysis(profile, source_id, analysis)
+        emit_deepread_progress(
+            "done",
+            "Deep read candidate ready" if (ai_result.ok and structured) else "Deep read incomplete",
+            current=5,
+            total=5,
+        )
         message = (
             "Deep read candidate ready."
             if ai_result.ok and structured

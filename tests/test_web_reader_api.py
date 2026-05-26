@@ -489,6 +489,32 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn('data-action="analyzePaper"', response.text)
         self.assertIn('tabButton("translation"', response.text)
         self.assertIn('tabButton("review"', response.text)
+        # Notes panel chips (color dot + tag chips + quote/note rendering)
+        self.assertIn("pr-color-dot", response.text)
+        self.assertIn("pr-tag-chip", response.text)
+        self.assertIn("pr-quote-text", response.text)
+        self.assertIn("pr-note-text", response.text)
+        # Default to All (not current page) for notes filter
+        self.assertIn("let notesFilterCurrentPage = false;", response.text)
+        # Clickable cited refs in review panel
+        self.assertIn("pr-ref-chip", response.text)
+        self.assertIn("data-jump-ref", response.text)
+        self.assertIn("data-jump-segment", response.text)
+        self.assertIn("refButtonHtml", response.text)
+        self.assertIn("refIdText", response.text)
+        # PDF skeleton shimmer
+        self.assertIn("startupPdfSkeletonHtml", response.text)
+        self.assertIn("data-shell-placeholder", response.text)
+        self.assertIn("pr-skeleton-shimmer", response.text)
+        self.assertIn(".pr-page-wrap.loading::before", response.text)
+        # Translation overlay CJK sizing / default page scale
+        self.assertIn("font-size: clamp(.8rem, var(--pr-translation-font, 1rem), 1.85rem);", response.text)
+        self.assertIn("const widthSpace = Math.max(220, rawWidth - 28);", response.text)
+        self.assertIn("return Math.max(.35, Math.min(2.4, scale));", response.text)
+        self.assertIn("let low = 10;", response.text)
+        # Translation reader auto-fits container width on resize.
+        self.assertIn("ensureTranslationResizeObserver", response.text)
+        self.assertIn(".pr-workspace.reader-mode-translation .pr-translation-page-preview", response.text)
         self.assertNotIn('<button class="pr-button primary" data-action="translateFull"', response.text)
         self.assertNotIn('<button class="pr-button" data-action="ask"', response.text)
         self.assertNotIn('data-action="reviewCard"', response.text)
