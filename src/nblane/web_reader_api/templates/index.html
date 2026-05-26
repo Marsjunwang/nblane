@@ -1901,6 +1901,33 @@
       if (action === "generate_review_card" || action === "codex_deep_read" || action === "analyze_paper") return label("saved");
       return label("saved");
     }
+    function actionPrimaryMessage(action, result, warnings) {
+      if (result && result.ok === false) {
+        return (warnings || [])[0] || text(result.detail || result.error || result.message) || label("failed");
+      }
+      return taskDoneLabel(action, result) || label("saved");
+    }
+    function askPaperResultText(result) {
+      const data = asObj(result && result.data);
+      const structured = asObj(data.structured);
+      const summary = asObj(data.summary);
+      const candidates = [
+        structured.answer,
+        structured.response,
+        structured.summary,
+        data.answer,
+        summary.answer,
+        summary.message,
+      ];
+      for (const candidate of candidates) {
+        const value = text(candidate);
+        if (value) return value;
+      }
+      if (Object.keys(structured).length) return JSON.stringify(structured, null, 2);
+      if (Object.keys(summary).length) return JSON.stringify(summary, null, 2);
+      if (Object.keys(data).length) return JSON.stringify(data, null, 2);
+      return text(result && result.message);
+    }
     function actionButtonSelector(action) {
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
@@ -2231,15 +2258,16 @@
     }
     function displayActionResult(action, result) {
       const warnings = asArr(result && result.warnings).map(text).filter(Boolean);
-      if (warnings.length) status(warnings[0]);
-      else if (result && result.message) status(text(result.message));
+      const ok = !(result && result.ok === false);
+      const primaryMessage = actionPrimaryMessage(action, result, warnings);
+      if (primaryMessage) status(primaryMessage);
       if (["translate_visible_pages", "translate_full_paper", "generate_review_card", "codex_deep_read", "analyze_paper"].includes(action)) {
         const data = asObj(result && result.data);
         const summary = data.summary || data.structured || data.analysis || data;
-        setActionState(action, (result && result.ok === false) ? "error" : "done", warnings[0] || text(result && result.message) || label("saved"));
+        setActionState(action, ok ? "done" : "error", primaryMessage);
         if (action === "generate_review_card" || action === "codex_deep_read" || action === "analyze_paper") {
           dockState.pending = false;
-          dockState.status = warnings[0] || text(result && result.message) || label("saved");
+          dockState.status = primaryMessage;
           dockState.result = JSON.stringify(summary, null, 2);
           refreshDock();
         }
@@ -2247,9 +2275,12 @@
       if (["translate_selection", "translate_segment", "explain_selection", "ask_paper"].includes(action)) {
         const data = asObj(result && result.data);
         dockState.pending = false;
-        dockState.status = warnings[0] || text(result && result.message) || label("saved");
+        dockState.status = primaryMessage;
         if (action === "translate_selection" || action === "translate_segment") {
           dockState.result = translationTextFromResult(result) || text(data.summary && data.summary.message);
+        } else if (action === "ask_paper") {
+          setActionState(action, ok ? "done" : "error", primaryMessage);
+          dockState.result = askPaperResultText(result);
         } else {
           dockState.result = JSON.stringify(data.structured || data.summary || data, null, 2);
         }
@@ -5084,7 +5115,7 @@
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
-        dockState = { mode: "ai", status: label("deep_read"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        dockState = { mode: "ai", status: label("reviewing_paper"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
         return startReaderTask(action === "reviewCard" ? "generate_review_card" : "analyze_paper", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}`, scope: "paper", full_paper: true, ensure_artifacts: true });
@@ -5094,7 +5125,7 @@
         sidePanelCollapsed = false;
         document.querySelector(".pr-workspace")?.classList.remove("panel-collapsed");
         document.querySelector(".pr-side")?.classList.remove("collapsed");
-        dockState = { mode: "ai", status: label("analyze_paper"), selected_text: "", result: "", pending: true, selection_hash: "" };
+        dockState = { mode: "ai", status: label("deep_reading"), selected_text: "", result: "", pending: true, selection_hash: "" };
         refreshSide();
         refreshDock();
         return startReaderTask("codex_deep_read", { page: currentPage, primary_page: currentPage, visible_pages: visiblePages.slice(), locator: `p. ${currentPage}`, scope: "paper", full_paper: true, ensure_artifacts: true });

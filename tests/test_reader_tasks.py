@@ -42,6 +42,22 @@ class TestReaderTasks(unittest.TestCase):
         self.assertEqual(final["changed_ids"], {"x": "y"})
         action.assert_called_once()
 
+    def test_ask_paper_done_progress_uses_answered_label_without_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(Path(tmp))
+
+            with patch(
+                "nblane.core.reader_tasks.handle_reader_action",
+                return_value=ReaderActionResult(data={"structured": {"answer": "Because."}}),
+            ):
+                reader_tasks.start(ctx, "ask_paper", {"question": "Why?"}, task_id="reader-task-test-ask-done")
+                final = list(reader_tasks.iter_snapshots("reader-task-test-ask-done", ctx=ctx, poll_seconds=0.01))[-1]
+
+        self.assertEqual(final["status"], "done")
+        self.assertEqual(final["progress"]["label"], "Answered")
+        self.assertEqual(final["progress"]["current"], 1)
+        self.assertEqual(final["progress"]["total"], 1)
+
     def test_unknown_task_returns_failed_lost_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ctx = self._ctx(Path(tmp))

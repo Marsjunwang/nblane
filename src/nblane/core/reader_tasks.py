@@ -463,6 +463,20 @@ def _progress_for_result(action: str, result: dict[str, Any]) -> dict[str, Any]:
             "total": 1,
             "saved": score_count,
         }
+    if action == ASK_PAPER:
+        ok = result.get("ok", True) is not False
+        warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+        label = str(
+            result.get("message")
+            or ("Answered" if ok else (warnings[0] if warnings else "Answer failed"))
+        )
+        return {
+            "phase": "done" if ok else "failed",
+            "label": label,
+            "current": 1 if ok else 0,
+            "total": 1,
+            "saved": 1 if ok else 0,
+        }
     total = int(
         summary.get("segments_selected")
         or summary.get("segments_total")
