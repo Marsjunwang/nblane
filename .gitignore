@@ -12,6 +12,8 @@ build/
 node_modules/
 .dev-data/
 .dev-assets/
+test-results/
+tmux-*.log
 !src/nblane/goal_presence_component/frontend/dist/
 !src/nblane/goal_presence_component/frontend/dist/**
 
