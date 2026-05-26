@@ -136,12 +136,13 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(payload.json()["page_previews"], [])
         self.assertEqual(payload.json()["pdf_url"], f"/reader/api/{quote(source_id, safe='')}/pdf")
         self.assertIn("reader_preparation", payload.json())
-        self.assertEqual(payload.json()["settings"]["overscan_pages"], 3)
-        self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], 36)
+        self.assertEqual(payload.json()["settings"]["overscan_pages"], "auto")
+        self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], "auto")
         self.assertEqual(payload.json()["settings"]["reader_mode"], "pdf")
-        self.assertEqual(payload.json()["settings"]["translation_layout"], "flow")
+        self.assertEqual(payload.json()["settings"]["translation_layout"], "overlay")
         self.assertIn("outline", payload.json())
         self.assertFalse(payload.json()["settings"]["debug_overlay_enabled"])
+        self.assertFalse(payload.json()["settings"]["full_translation_context"])
         self.assertEqual(payload.json()["settings"]["active_left_tab"], "outline")
         self.assertEqual(payload.json()["settings"]["translation_overflow_policy"], "fixed-expand")
 
@@ -195,10 +196,21 @@ class TestWebReaderApi(unittest.TestCase):
                 mint_reader_token("local", "alice", source_id),
             )
 
-            response = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=5")
+            response = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?page=5&full_document=0"
+            )
             payload = response.json()
-            expanded = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=5&pages=2,8")
+            expanded = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?page=5&pages=2,8&full_document=0"
+            )
             expanded_payload = expanded.json()
+            full = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?page=5&full_translation=1"
+            )
+            full_payload = full.json()
+            # Default (no full_document param) returns the whole document.
+            default_resp = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=5")
+            default_payload = default_resp.json()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["context_window"]["pages"], [4, 5, 6])
@@ -211,6 +223,126 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(expanded.status_code, 200)
         self.assertEqual(expanded_payload["context_window"]["pages"], [2, 4, 5, 6, 8])
         self.assertEqual({row["page"] for row in expanded_payload["segments"]}, {2, 4, 5, 6, 8})
+        self.assertEqual(full.status_code, 200)
+        self.assertEqual(full_payload["context_window"]["pages"], list(range(1, 9)))
+        self.assertEqual({row["page"] for row in full_payload["segments"]}, set(range(1, 9)))
+        self.assertTrue(full_payload["settings"]["full_translation_context"])
+        self.assertEqual(default_resp.status_code, 200)
+        self.assertEqual(default_payload["context_window"]["pages"], list(range(1, 9)))
+        self.assertTrue(default_payload["settings"]["full_document_payload"])
+        self.assertTrue(default_resp.headers.get("etag", "").startswith('W/"'))
+
+    def test_payload_returns_304_when_etag_matches(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+
+            first = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=1")
+            etag = first.headers.get("etag")
+            second = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?page=1",
+                headers={"If-None-Match": etag or ""},
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(etag and etag.startswith('W/"'))
+        self.assertEqual(second.status_code, 304)
+        self.assertEqual(second.headers.get("etag"), etag)
+
+    def test_translations_bulk_returns_all_segments_with_etag(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            pages = [
+                PaperPage(source_id=source_id, page=index, text=f"Page {index}", text_hash=text_hash(f"Page {index}"))
+                for index in range(1, 4)
+            ]
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:{index}",
+                    source_id=source_id,
+                    page=index,
+                    order=index,
+                    section_path=[f"Section {index}"],
+                    text=f"Segment body {index}",
+                    text_hash=text_hash(f"Segment body {index}"),
+                )
+                for index in range(1, 4)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, pages)
+                save_paper_segments(profile, source_id, segments)
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segment.segment_id,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": f"译文 {segment.page}",
+                            "rects": [{"x": 0.1, "y": 0.2, "w": 0.4, "h": 0.05, "page": segment.page}],
+                        }
+                        for segment in segments
+                    ],
+                )
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+            first = client.get(f"/reader/api/{quote(source_id, safe='')}/translations/bulk")
+            etag = first.headers.get("etag")
+            second = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/translations/bulk",
+                headers={"If-None-Match": etag or ""},
+            )
+
+        self.assertEqual(first.status_code, 200)
+        body = first.json()
+        self.assertEqual(body["paper_id"], source_id)
+        self.assertEqual(body["segment_count"], 3)
+        self.assertEqual({seg["page"] for seg in body["segments"]}, {1, 2, 3})
+        self.assertTrue(body["content_hash"])
+        self.assertTrue(etag and etag.startswith('W/"'))
+        self.assertEqual(second.status_code, 304)
+        self.assertEqual(second.headers.get("etag"), etag)
+
+    def test_translations_bulk_unauthorized_without_token(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            response = client.get(f"/reader/api/{quote(source_id, safe='')}/translations/bulk")
+
+        self.assertEqual(response.status_code, 401)
 
     def test_payload_accepts_reader_token_query_fallback(self) -> None:
         source_id = "source:paper:grounded"
@@ -269,7 +401,8 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("/reader/assets/pdf.min.js", response.text)
         self.assertIn("source:paper:grounded", response.text)
-        self.assertIn("for (let pageNumber = 1; pageNumber <= count", response.text)
+        self.assertIn("skeletonWindowForPage", response.text)
+        self.assertIn("pr-page-spacer", response.text)
         self.assertIn("window.pdfjsLib.renderTextLayer", response.text)
         self.assertIn("pr-action-status", response.text)
         self.assertIn("actionState", response.text)
@@ -278,6 +411,14 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("watchReaderTask", response.text)
         self.assertIn("schedulePayloadRefresh", response.text)
         self.assertIn('params.set("pages", requestedPages.join(","))', response.text)
+        self.assertIn('params.set("full_translation", "1")', response.text)
+        self.assertIn("maybeRefreshTranslationProgress", response.text)
+        self.assertIn("pagePreviewBatchLimit", response.text)
+        self.assertIn("fetchTranslationsBulk", response.text)
+        self.assertIn("hasBulkTranslationsLoaded", response.text)
+        self.assertIn("translationProgressShell", response.text)
+        self.assertIn("toggleCompareLock", response.text)
+        self.assertIn("compareDualScrollLockEnabled", response.text)
         self.assertIn("prepare_reader_artifacts", response.text)
         self.assertIn("reader_preparation", response.text)
         self.assertIn("PDF ready", response.text)

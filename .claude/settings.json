@@ -13,7 +13,15 @@
       "Bash(sed -n '2370,2420p' pages/6_Public_Site.py)",
       "Bash(sed -n '2600,2640p' pages/6_Public_Site.py)",
       "Bash(sed -n '1255,1300p' src/nblane/public_blog_editor_component/frontend/src/main.jsx)",
-      "Bash(sed -n '2099,2125p' src/nblane/public_blog_editor_component/frontend/src/main.jsx)"
+      "Bash(sed -n '2099,2125p' src/nblane/public_blog_editor_component/frontend/src/main.jsx)",
+      "Bash(/home/ubuntu/nblane/.venv/bin/pytest tests/*)",
+      "Bash(.venv/bin/pytest tests/*)",
+      "Bash(.venv/bin/python -m pytest tests/*)",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash"
     ]
   }
 }

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -2589,6 +2591,7 @@ class TestResearchPapers(unittest.TestCase):
             with (
                 patch("nblane.core.ai.gateway.translate_paper_segments", side_effect=fake_translate),
                 patch("nblane.core.research_papers.git_backup.record_change"),
+                patch.dict(os.environ, {"NBLANE_TRANSLATION_CONCURRENCY": "1"}, clear=False),
             ):
                 summary = translate_full_paper(
                     profile,
@@ -2605,6 +2608,85 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(summary["updated"], 2)
         self.assertEqual(len(translations), 2)
         self.assertTrue(any("provider interrupted" in warning for warning in summary["warnings"]))
+
+    def test_translate_full_paper_runs_batches_concurrently(self) -> None:
+        """8 batches × 1.0s should finish in <3s with concurrency=4."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:source-paper-grounded:{index:05d}",
+                    source_id=source_id,
+                    page=index,
+                    order=index,
+                    text=f"Concurrent passage {index}.",
+                    text_hash=text_hash(f"Concurrent passage {index}."),
+                )
+                for index in range(1, 9)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, segments)
+
+            seen_batches: list[int] = []
+            seen_lock = threading.Lock()
+            max_in_flight = 0
+            in_flight = 0
+            in_flight_lock = threading.Lock()
+
+            def fake_translate(profile_arg, source_id_arg, batch, *, target_lang="zh", require_review=True, **kwargs):
+                nonlocal max_in_flight, in_flight
+                with in_flight_lock:
+                    in_flight += 1
+                    if in_flight > max_in_flight:
+                        max_in_flight = in_flight
+                try:
+                    time.sleep(0.4)
+                    with seen_lock:
+                        seen_batches.append(len(batch))
+                    return SimpleNamespace(
+                        warnings=[],
+                        error="",
+                        structured={
+                            "translations": [
+                                {
+                                    "segment_id": row["segment_id"],
+                                    "source_hash": row["text_hash"],
+                                    "source_text": row["text"],
+                                    "target_lang": target_lang,
+                                    "translated_text": f"zh:{row['segment_id']}",
+                                }
+                                for row in batch
+                            ]
+                        },
+                    )
+                finally:
+                    with in_flight_lock:
+                        in_flight -= 1
+
+            t0 = time.monotonic()
+            with (
+                patch("nblane.core.ai.gateway.translate_paper_segments", side_effect=fake_translate),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch.dict(os.environ, {"NBLANE_TRANSLATION_CONCURRENCY": "4"}, clear=False),
+            ):
+                summary = translate_full_paper(
+                    profile,
+                    source_id,
+                    target_lang="zh",
+                    mode="all",
+                    batch_size=1,
+                    ai_profile="",
+                    require_review=False,
+                )
+            elapsed = time.monotonic() - t0
+            translations = load_paper_translations(profile, source_id)
+
+        self.assertEqual(summary["batches"], 8)
+        self.assertEqual(summary["updated"], 8)
+        self.assertEqual(len(translations), 8)
+        self.assertGreaterEqual(max_in_flight, 2, f"only {max_in_flight} batch in flight at once — not concurrent")
+        self.assertLess(elapsed, 2.0, f"8 batches × 0.4s ran in {elapsed:.2f}s — not concurrent enough")
 
     def test_translate_full_paper_rejects_hash_mismatch_without_overwriting_current_translation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

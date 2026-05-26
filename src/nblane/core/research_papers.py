@@ -27,10 +27,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -2506,6 +2508,124 @@ def save_paper_translations(
         serialized,
         action=f"update paper translations for {source_id}",
     )
+
+
+def paper_translations_bulk(
+    profile: str | Path,
+    source_id: str,
+    *,
+    target_lang: str = "zh",
+) -> tuple[dict[str, object], str]:
+    """Return every translation segment for a paper, plus a content-hash ETag.
+
+    Lets the reader pre-load the full translated overlay in one shot instead of
+    repeatedly hitting the page-window /payload endpoint as the user scrolls.
+    """
+
+    rows = load_paper_translations(profile, source_id)
+    inbox = load_research_sources(profile)
+    source = inbox.by_id().get(source_id)
+    metadata = dict(source.metadata or {}) if source is not None else {}
+    page_rows = load_paper_pages(profile, source_id) if source is not None else []
+    segment_rows = load_paper_segments(profile, source_id) if source is not None else []
+    segment_pages = {seg.segment_id: int(seg.page or 0) for seg in segment_rows}
+    total_pages = max(
+        [
+            int(metadata.get("page_count") or 0),
+            int(metadata.get("reading_artifacts_page_count") or 0),
+            *[int(row.page or 0) for row in page_rows],
+            *[int(row.page or 0) for row in rows],
+            *segment_pages.values(),
+            0,
+        ]
+    )
+
+    segments: list[dict[str, object]] = []
+    for row in rows:
+        if target_lang and row.target_lang and row.target_lang != target_lang:
+            continue
+        translated = _clean_text(row.translated_text)
+        if not translated and row.status not in {"stale", "missing", "failed"}:
+            continue
+        page_value = int(row.page or 0)
+        if page_value <= 0:
+            page_value = int(segment_pages.get(row.segment_id, 0) or 0)
+        if page_value <= 0:
+            for rect in row.rects or []:
+                if isinstance(rect, dict):
+                    try:
+                        candidate = int(rect.get("page") or 0)
+                    except (TypeError, ValueError):
+                        candidate = 0
+                    if candidate > 0:
+                        page_value = candidate
+                        break
+        rects = []
+        for rect in row.rects or []:
+            if not isinstance(rect, dict):
+                continue
+            try:
+                rects.append(
+                    {
+                        "x": float(rect.get("x") or 0),
+                        "y": float(rect.get("y") or 0),
+                        "w": float(rect.get("w") or rect.get("width") or 0),
+                        "h": float(rect.get("h") or rect.get("height") or 0),
+                        "page": int(rect.get("page") or page_value or 0),
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+        font_size = 0.0
+        try:
+            font_size = float((row.glossary or {}).get("font_size") or 0)
+        except (TypeError, ValueError):
+            font_size = 0.0
+        segments.append(
+            {
+                "id": row.id,
+                "page": page_value,
+                "anchor_id": row.anchor_id,
+                "scope_type": row.scope_type or "segment",
+                "scope_ref": row.scope_ref,
+                "segment_id": row.segment_id,
+                "rects": rects,
+                "translated_text": translated,
+                "source_text": row.source_text,
+                "source_hash": row.source_hash,
+                "status": row.status or ("translated" if translated else "missing"),
+                "target_lang": row.target_lang or target_lang,
+                "font_size": font_size,
+                "created": row.created,
+            }
+        )
+
+    segments.sort(key=lambda row: (int(row.get("page") or 0), str(row.get("anchor_id") or ""), str(row.get("id") or "")))
+
+    fingerprint_parts = [
+        str(_clean_text(metadata.get("pdf_asset_ref"))),
+        str(_clean_text(metadata.get("pdf_sha256"))),
+        str(int(total_pages)),
+        str(len(segments)),
+    ]
+    for segment in segments:
+        fingerprint_parts.append(str(segment.get("id") or ""))
+        fingerprint_parts.append(str(segment.get("status") or ""))
+        fingerprint_parts.append(str(segment.get("source_hash") or ""))
+        fingerprint_parts.append(str(segment.get("created") or ""))
+    content_hash = hashlib.sha1("|".join(fingerprint_parts).encode("utf-8")).hexdigest()[:16]
+
+    body = {
+        "paper_id": source_id,
+        "target_lang": target_lang,
+        "content_hash": content_hash,
+        "total_pages": int(total_pages),
+        "segment_count": len(segments),
+        "generated_at": _now(),
+        "segments": segments,
+    }
+    etag = f'W/"{content_hash}"'
+    return body, etag
 
 
 def _next_translation_id(existing: list[PaperTranslation], source_id: str) -> str:
@@ -5978,12 +6098,136 @@ def _persist_translation_batch(
 ) -> int:
     if len(rows) <= persisted_count:
         return persisted_count
+    lock = _translation_persist_lock(profile, source_id)
+    with lock:
+        try:
+            upsert_paper_translations(profile, source_id, rows[persisted_count:])
+        except Exception as exc:
+            warnings.append(f"Saving translation batch failed: {exc}")
+            return persisted_count
+        return len(rows)
+
+
+_TRANSLATION_PERSIST_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+_TRANSLATION_PERSIST_LOCKS_GUARD = threading.Lock()
+
+
+def _translation_persist_lock(profile: str | Path, source_id: str) -> threading.RLock:
+    """Per-(profile, source) lock that serializes JSONL read-modify-write."""
+
+    key = (str(profile), str(source_id))
+    with _TRANSLATION_PERSIST_LOCKS_GUARD:
+        lock = _TRANSLATION_PERSIST_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _TRANSLATION_PERSIST_LOCKS[key] = lock
+        return lock
+
+
+def _translation_concurrency() -> int:
+    """Return the desired translation batch concurrency.
+
+    Defaults to 4. Override with NBLANE_TRANSLATION_CONCURRENCY=N (1-16).
+    A value of 1 keeps the original serial behavior, useful when an LLM
+    backend cannot tolerate parallel calls.
+    """
+
+    raw = os.getenv("NBLANE_TRANSLATION_CONCURRENCY", "").strip()
+    if not raw:
+        return 4
     try:
-        upsert_paper_translations(profile, source_id, rows[persisted_count:])
-    except Exception as exc:
-        warnings.append(f"Saving translation batch failed: {exc}")
-        return persisted_count
-    return len(rows)
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 4
+    return max(1, min(16, value))
+
+
+def _translation_streaming_enabled() -> bool:
+    raw = os.getenv("NBLANE_STREAM_PAPER_TRANSLATION", "").strip().lower()
+    if not raw:
+        return True
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _process_translation_batches(
+    batches: list[list[dict[str, object]]],
+    *,
+    ai_profile_arg: str,
+    source_id: str,
+    target_lang: str,
+    require_review: bool,
+    handle_result: Any,  # Callable[[batch, result_or_None, exc_or_None], None]
+    progress_lock: threading.Lock,
+    stream_callback: Any = None,  # Callable[[batch, str_chunk], None] | None
+) -> None:
+    """Run translation batches with optional concurrency.
+
+    `handle_result(batch, result, exc)` is called once per batch under
+    `progress_lock`. Either `result` is the gateway return value and `exc`
+    is None, or `result` is None and `exc` is the exception raised by the
+    gateway call.
+    """
+
+    if not batches:
+        return
+    from nblane.core.ai.gateway import translate_paper_segments
+
+    concurrency = max(1, min(_translation_concurrency(), len(batches)))
+    streaming = _translation_streaming_enabled()
+
+    def run_one(batch: list[dict[str, object]]):
+        kwargs: dict[str, object] = {
+            "target_lang": target_lang,
+            "require_review": require_review,
+        }
+        if streaming and stream_callback is not None:
+            kwargs["stream_callback"] = lambda chunk, b=batch: stream_callback(b, chunk)
+        try:
+            result = translate_paper_segments(
+                ai_profile_arg,
+                source_id,
+                batch,
+                **kwargs,
+            )
+            return ("ok", result, batch)
+        except TypeError:
+            # Gateway might not yet accept stream_callback; retry without it.
+            kwargs.pop("stream_callback", None)
+            try:
+                result = translate_paper_segments(
+                    ai_profile_arg,
+                    source_id,
+                    batch,
+                    **kwargs,
+                )
+                return ("ok", result, batch)
+            except Exception as exc:
+                return ("err", exc, batch)
+        except Exception as exc:
+            return ("err", exc, batch)
+
+    if concurrency <= 1:
+        for batch in batches:
+            tag, payload, b = run_one(batch)
+            with progress_lock:
+                if tag == "ok":
+                    handle_result(b, payload, None)
+                else:
+                    handle_result(b, None, payload)
+        return
+
+    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="translate-batch") as executor:
+        futures = {executor.submit(run_one, batch): batch for batch in batches}
+        for fut in as_completed(futures):
+            try:
+                tag, payload, b = fut.result()
+            except Exception as exc:
+                tag, payload, b = "err", exc, futures[fut]
+            with progress_lock:
+                if tag == "ok":
+                    handle_result(b, payload, None)
+                else:
+                    handle_result(b, None, payload)
 
 
 def translate_full_paper(
@@ -6093,40 +6337,38 @@ def translate_full_paper(
             except Exception as exc:
                 warnings.append(f"Progress callback failed: {exc}")
         if batches:
-            from nblane.core.ai.gateway import translate_paper_segments
+            progress_lock = threading.Lock()
+            ai_profile_arg = ai_profile if ai_profile is not None else _profile_name(profile)
 
-            for batch in batches:
+            def emit_progress() -> None:
+                if progress_callback is None:
+                    return
                 try:
-                    result = translate_paper_segments(
-                        ai_profile if ai_profile is not None else _profile_name(profile),
-                        source_id,
-                        batch,
-                        target_lang=clean_lang,
-                        require_review=require_review,
+                    progress_callback(
+                        {
+                            "source_id": source_id,
+                            "target_lang": clean_lang,
+                            "mode": clean_mode,
+                            "scope": positioned_scope_type,
+                            "batches": len(batches),
+                            "batches_completed": batches_completed,
+                            "segments_selected": len(selected_units),
+                            "segments_processed": units_processed,
+                            "updated": len(accepted_rows),
+                            "warnings": len(warnings),
+                        }
                     )
-                except Exception as exc:
+                except Exception as cb_exc:
+                    warnings.append(f"Progress callback failed: {cb_exc}")
+
+            def handle_layout_result(batch: list[dict[str, object]], result, exc) -> None:
+                nonlocal batches_completed, units_processed, persisted_count
+                if exc is not None:
                     warnings.append(f"Translation batch failed: {exc}")
                     batches_completed += 1
                     units_processed += len(batch)
-                    if progress_callback is not None:
-                        try:
-                            progress_callback(
-                                {
-                                    "source_id": source_id,
-                                    "target_lang": clean_lang,
-                                    "mode": clean_mode,
-                                    "scope": positioned_scope_type,
-                                    "batches": len(batches),
-                                    "batches_completed": batches_completed,
-                                    "segments_selected": len(selected_units),
-                                    "segments_processed": units_processed,
-                                    "updated": len(accepted_rows),
-                                    "warnings": len(warnings),
-                                }
-                            )
-                        except Exception as callback_exc:
-                            warnings.append(f"Progress callback failed: {callback_exc}")
-                    continue
+                    emit_progress()
+                    return
                 warnings.extend(str(warning) for warning in result.warnings)
                 if result.error:
                     warnings.append(result.error)
@@ -6184,24 +6426,17 @@ def translate_full_paper(
                 )
                 batches_completed += 1
                 units_processed += len(batch)
-                if progress_callback is not None:
-                    try:
-                        progress_callback(
-                            {
-                                "source_id": source_id,
-                                "target_lang": clean_lang,
-                                "mode": clean_mode,
-                                "scope": positioned_scope_type,
-                                "batches": len(batches),
-                                "batches_completed": batches_completed,
-                                "segments_selected": len(selected_units),
-                                "segments_processed": units_processed,
-                                "updated": len(accepted_rows),
-                                "warnings": len(warnings),
-                            }
-                        )
-                    except Exception as exc:
-                        warnings.append(f"Progress callback failed: {exc}")
+                emit_progress()
+
+            _process_translation_batches(
+                batches,
+                ai_profile_arg=ai_profile_arg,
+                source_id=source_id,
+                target_lang=clean_lang,
+                require_review=require_review,
+                handle_result=handle_layout_result,
+                progress_lock=progress_lock,
+            )
         persisted_count = _persist_translation_batch(
             profile,
             source_id,
@@ -6307,40 +6542,38 @@ def translate_full_paper(
             except Exception as exc:
                 warnings.append(f"Progress callback failed: {exc}")
         if batches:
-            from nblane.core.ai.gateway import translate_paper_segments
+            progress_lock = threading.Lock()
+            ai_profile_arg = ai_profile if ai_profile is not None else _profile_name(profile)
 
-            for batch in batches:
+            def emit_progress() -> None:
+                if progress_callback is None:
+                    return
                 try:
-                    result = translate_paper_segments(
-                        ai_profile if ai_profile is not None else _profile_name(profile),
-                        source_id,
-                        batch,
-                        target_lang=clean_lang,
-                        require_review=require_review,
+                    progress_callback(
+                        {
+                            "source_id": source_id,
+                            "target_lang": clean_lang,
+                            "mode": clean_mode,
+                            "scope": "page",
+                            "batches": len(batches),
+                            "batches_completed": batches_completed,
+                            "segments_selected": len(selected_pages),
+                            "segments_processed": pages_processed,
+                            "updated": len(accepted_rows),
+                            "warnings": len(warnings),
+                        }
                     )
-                except Exception as exc:
+                except Exception as cb_exc:
+                    warnings.append(f"Progress callback failed: {cb_exc}")
+
+            def handle_page_result(batch: list[dict[str, object]], result, exc) -> None:
+                nonlocal batches_completed, pages_processed, persisted_count
+                if exc is not None:
                     warnings.append(f"Translation batch failed: {exc}")
                     batches_completed += 1
                     pages_processed += len(batch)
-                    if progress_callback is not None:
-                        try:
-                            progress_callback(
-                                {
-                                    "source_id": source_id,
-                                    "target_lang": clean_lang,
-                                    "mode": clean_mode,
-                                    "scope": "page",
-                                    "batches": len(batches),
-                                    "batches_completed": batches_completed,
-                                    "segments_selected": len(selected_pages),
-                                    "segments_processed": pages_processed,
-                                    "updated": len(accepted_rows),
-                                    "warnings": len(warnings),
-                                }
-                            )
-                        except Exception as callback_exc:
-                            warnings.append(f"Progress callback failed: {callback_exc}")
-                    continue
+                    emit_progress()
+                    return
                 warnings.extend(str(warning) for warning in result.warnings)
                 if result.error:
                     warnings.append(result.error)
@@ -6409,24 +6642,17 @@ def translate_full_paper(
                 )
                 batches_completed += 1
                 pages_processed += len(batch)
-                if progress_callback is not None:
-                    try:
-                        progress_callback(
-                            {
-                                "source_id": source_id,
-                                "target_lang": clean_lang,
-                                "mode": clean_mode,
-                                "scope": "page",
-                                "batches": len(batches),
-                                "batches_completed": batches_completed,
-                                "segments_selected": len(selected_pages),
-                                "segments_processed": pages_processed,
-                                "updated": len(accepted_rows),
-                                "warnings": len(warnings),
-                            }
-                        )
-                    except Exception as exc:
-                        warnings.append(f"Progress callback failed: {exc}")
+                emit_progress()
+
+            _process_translation_batches(
+                batches,
+                ai_profile_arg=ai_profile_arg,
+                source_id=source_id,
+                target_lang=clean_lang,
+                require_review=require_review,
+                handle_result=handle_page_result,
+                progress_lock=progress_lock,
+            )
         persisted_count = _persist_translation_batch(
             profile,
             source_id,
@@ -6504,39 +6730,37 @@ def translate_full_paper(
         except Exception as exc:
             warnings.append(f"Progress callback failed: {exc}")
     if batches:
-        from nblane.core.ai.gateway import translate_paper_segments
+        progress_lock = threading.Lock()
+        ai_profile_arg = ai_profile if ai_profile is not None else _profile_name(profile)
 
-        for batch in batches:
+        def emit_progress() -> None:
+            if progress_callback is None:
+                return
             try:
-                result = translate_paper_segments(
-                    ai_profile if ai_profile is not None else _profile_name(profile),
-                    source_id,
-                    batch,
-                    target_lang=clean_lang,
-                    require_review=require_review,
+                progress_callback(
+                    {
+                        "source_id": source_id,
+                        "target_lang": clean_lang,
+                        "mode": clean_mode,
+                        "batches": len(batches),
+                        "batches_completed": batches_completed,
+                        "segments_selected": len(selected_segments),
+                        "segments_processed": segments_processed,
+                        "updated": len(accepted_rows),
+                        "warnings": len(warnings),
+                    }
                 )
-            except Exception as exc:
+            except Exception as cb_exc:
+                warnings.append(f"Progress callback failed: {cb_exc}")
+
+        def handle_segment_result(batch: list[dict[str, object]], result, exc) -> None:
+            nonlocal batches_completed, segments_processed, persisted_count
+            if exc is not None:
                 warnings.append(f"Translation batch failed: {exc}")
                 batches_completed += 1
                 segments_processed += len(batch)
-                if progress_callback is not None:
-                    try:
-                        progress_callback(
-                            {
-                                "source_id": source_id,
-                                "target_lang": clean_lang,
-                                "mode": clean_mode,
-                                "batches": len(batches),
-                                "batches_completed": batches_completed,
-                                "segments_selected": len(selected_segments),
-                                "segments_processed": segments_processed,
-                                "updated": len(accepted_rows),
-                                "warnings": len(warnings),
-                            }
-                        )
-                    except Exception as callback_exc:
-                        warnings.append(f"Progress callback failed: {callback_exc}")
-                continue
+                emit_progress()
+                return
             warnings.extend(str(warning) for warning in result.warnings)
             if result.error:
                 warnings.append(result.error)
@@ -6605,23 +6829,17 @@ def translate_full_paper(
             )
             batches_completed += 1
             segments_processed += len(batch)
-            if progress_callback is not None:
-                try:
-                    progress_callback(
-                        {
-                            "source_id": source_id,
-                            "target_lang": clean_lang,
-                            "mode": clean_mode,
-                            "batches": len(batches),
-                            "batches_completed": batches_completed,
-                            "segments_selected": len(selected_segments),
-                            "segments_processed": segments_processed,
-                            "updated": len(accepted_rows),
-                            "warnings": len(warnings),
-                        }
-                    )
-                except Exception as exc:
-                    warnings.append(f"Progress callback failed: {exc}")
+            emit_progress()
+
+        _process_translation_batches(
+            batches,
+            ai_profile_arg=ai_profile_arg,
+            source_id=source_id,
+            target_lang=clean_lang,
+            require_review=require_review,
+            handle_result=handle_segment_result,
+            progress_lock=progress_lock,
+        )
 
     persisted_count = _persist_translation_batch(
         profile,

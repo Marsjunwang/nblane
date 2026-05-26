@@ -140,12 +140,37 @@ async function renderReader(page, payload) {
   await page.route("**/reader/api/**/payload**", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(payload) });
   });
+  await page.route("**/reader/api/**/page-preview/**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ page: 1, width: 200, height: 100, data_url: previewDataUrl }),
+    });
+  });
+  await page.route("**/reader/api/**/page-text-layer/**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ spans: [] }) });
+  });
+  await page.route("**/reader/api/**/progress**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
   await page.route("**/reader/assets/pdf.min.js", async (route) => {
     await route.fulfill({ contentType: "application/javascript", body: "" });
   });
   await page.setContent(readerHtml(), { waitUntil: "domcontentloaded" });
   await expect(page.locator(".pr-translation-page")).toBeVisible();
   await expect(page.locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')).toBeVisible();
+}
+
+async function measuredBox(page, selector) {
+  let latest = null;
+  await expect
+    .poll(async () => {
+      const box = await page.locator(selector).first().boundingBox();
+      if (box && box.width > 0 && box.height > 0) latest = box;
+      return latest ? "ready" : "";
+    })
+    .toBe("ready");
+  if (!latest) throw new Error(`No visible box for ${selector}`);
+  return latest;
 }
 
 test("debug translation overlay uses stable page geometry", async ({ page }) => {
@@ -163,13 +188,8 @@ test("debug translation overlay uses stable page geometry", async ({ page }) => 
   }));
   expect(bodyScroll.scrollWidth).toBeLessThanOrEqual(bodyScroll.clientWidth + 1);
 
-  const pageBox = await page.locator(".pr-translation-page").boundingBox();
-  const blockBox = await page
-    .locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')
-    .boundingBox();
-  expect(pageBox).not.toBeNull();
-  expect(blockBox).not.toBeNull();
-  if (!pageBox || !blockBox) return;
+  const pageBox = await measuredBox(page, ".pr-translation-page");
+  const blockBox = await measuredBox(page, '.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]');
 
   expect(Math.abs(blockBox.x - (pageBox.x + pageBox.width * 0.1))).toBeLessThanOrEqual(3);
   expect(Math.abs(blockBox.y - (pageBox.y + pageBox.height * 0.2))).toBeLessThanOrEqual(3);
@@ -184,24 +204,141 @@ test("debug translation overlay uses stable page geometry", async ({ page }) => 
 test("late page preview does not move placed overlay blocks", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 760 });
   await renderReader(page, readerPayload(false));
-  const before = await page
-    .locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')
-    .boundingBox();
-  expect(before).not.toBeNull();
+  const before = await measuredBox(page, '.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]');
 
   await page.evaluate((args) => {
     return (window as any).onRender({ data: { args } });
   }, readerPayload(true));
   await expect(page.locator(".pr-translation-page-preview")).toBeVisible();
 
-  const after = await page
-    .locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')
-    .boundingBox();
-  expect(after).not.toBeNull();
-  if (!before || !after) return;
+  const after = await measuredBox(page, '.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]');
 
   expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
   expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(1);
 });
+
+test("pdf reader creates a bounded page window on first render", async ({ page }) => {
+  const payload = readerPayload(false);
+  payload.settings.reader_mode = "pdf";
+  payload.settings.translation_layout = "flow";
+  payload.settings.debug_overlay_enabled = false;
+  payload.settings.overscan_pages = 1;
+  payload.settings.page_count = 36;
+  payload.source.metadata.page_count = 36;
+  payload.context_window = { pages: [1, 2], total_pages: 36 };
+
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await page.route("**/reader/api/**/payload**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(payload) });
+  });
+  await page.route("**/reader/api/**/page-preview/**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ page: 1, width: 200, height: 100, data_url: previewDataUrl }),
+    });
+  });
+  await page.route("**/reader/api/**/page-text-layer/**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ spans: [] }) });
+  });
+  await page.route("**/reader/assets/pdf.min.js", async (route) => {
+    await route.fulfill({ contentType: "application/javascript", body: "" });
+  });
+  await page.setContent(readerHtml(), { waitUntil: "domcontentloaded" });
+
+  await expect(page.locator(".pr-page-container")).toHaveCount(3);
+  await expect(page.locator('[data-spacer="after"]')).toBeVisible();
+  await expect(page.locator("canvas")).toHaveCount(3);
+});
+
+test("translation progress bar reflects actionState and fades out", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await renderReader(page, readerPayload(false));
+
+  await page.evaluate(() => {
+    (window as any).setActionState("translate_full_paper", "pending", "Translating", {
+      progress: { batches: 4, batches_completed: 1 },
+    });
+  });
+  await expect(page.locator("#translationProgressShell")).toHaveClass(/visible/);
+  await expect(page.locator("#translationProgressLabel")).toHaveText("25%");
+
+  await page.evaluate(() => {
+    (window as any).setActionState("translate_full_paper", "pending", "Translating", {
+      progress: { batches: 4, batches_completed: 4 },
+    });
+  });
+  await expect(page.locator("#translationProgressLabel")).toHaveText("100%");
+
+  await page.evaluate(() => {
+    (window as any).setActionState("translate_full_paper", "done", "", {
+      progress: { batches: 4, batches_completed: 4 },
+    });
+  });
+  await expect(page.locator("#translationProgressShell")).toHaveClass(/fading/);
+});
+
+test("bulk translations endpoint hydrates overlay across all pages", async ({ page }) => {
+  const payload = readerPayload(false);
+  payload.settings.reader_mode = "compare";
+  payload.settings.translation_layout = "overlay";
+  payload.settings.debug_overlay_enabled = true;
+  payload.context_window = { pages: [1], total_pages: 2 };
+
+  await page.setViewportSize({ width: 1200, height: 760 });
+
+  let bulkHits = 0;
+  await page.route("**/reader/api/**/translations/bulk**", async (route) => {
+    bulkHits += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      headers: { ETag: 'W/"abc123"' },
+      body: JSON.stringify({
+        paper_id: "source:reader:geometry",
+        target_lang: "zh",
+        content_hash: "abc123",
+        total_pages: 2,
+        segment_count: 2,
+        generated_at: "2026-05-26T00:00:00Z",
+        segments: [
+          {
+            id: "tr:1",
+            page: 1,
+            anchor_id: "layout:v2:1:00001:main",
+            scope_type: "layout",
+            scope_ref: "layout:v2:1:00001:main",
+            translated_text: "全文译文一",
+            source_text: "Main positioned text",
+            status: "translated",
+            target_lang: "zh",
+            font_size: 10,
+            rects: [{ x: 0.1, y: 0.2, w: 0.5, h: 0.3, page: 1 }],
+          },
+          {
+            id: "tr:2",
+            page: 2,
+            anchor_id: "layout:v2:2:00001:second",
+            scope_type: "layout",
+            scope_ref: "layout:v2:2:00001:second",
+            translated_text: "全文译文二",
+            source_text: "Second page text",
+            status: "translated",
+            target_lang: "zh",
+            font_size: 10,
+            rects: [{ x: 0.1, y: 0.1, w: 0.5, h: 0.2, page: 2 }],
+          },
+        ],
+      }),
+    });
+  });
+  await renderReader(page, payload);
+
+  await expect.poll(() => bulkHits, { timeout: 4000 }).toBeGreaterThanOrEqual(1);
+  await page.evaluate(() => (window as any).fetchTranslationsBulk({ force: true }));
+  await expect(page.locator(".pr-translation-page-shell")).toHaveCount(2);
+  await expect(
+    page.locator('.pr-translation-page-shell[data-page-shell="2"]'),
+  ).toHaveCount(1);
+});
+

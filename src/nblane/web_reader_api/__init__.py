@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import asyncio
+import hashlib
 import json
 import mimetypes
 import os
@@ -41,6 +42,7 @@ from nblane.core.research_papers import (
     load_paper_pages,
     mark_imported_paper_results,
     paper_pdf_asset_path,
+    paper_translations_bulk,
     render_paper_page_preview,
     search_papers,
     search_papers_with_codex,
@@ -477,6 +479,10 @@ def _reader_ui() -> dict[str, str]:
         "review_card": "分析论文",
         "analyze_paper": "分析论文",
         "deep_read": "深读",
+        "deep_read_empty": "暂无可靠深读发现。",
+        "warnings": "警告",
+        "searching": "正在搜索...",
+        "no_match": "未找到匹配",
         "fullscreen": "全屏",
         "exit_fullscreen": "退出全屏",
         "mode_pdf": "PDF",
@@ -727,6 +733,11 @@ def _paper_library_reply_language(profile_path: Path, body: dict[str, object], q
 def _reader_settings(payload: dict[str, object], page: int, target_lang: str) -> dict[str, object]:
     reader_state = payload.get("reader_state") if isinstance(payload.get("reader_state"), dict) else {}
     context_window = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
+    overscan_pages = os.getenv("NBLANE_READER_OVERSCAN_PAGES", "auto").strip() or "auto"
+    render_cache_max_pages = os.getenv("NBLANE_READER_RENDER_CACHE_MAX_PAGES", "auto").strip() or "auto"
+    translation_layout = os.getenv("NBLANE_READER_TRANSLATION_LAYOUT", "overlay").strip().lower() or "overlay"
+    if translation_layout not in {"flow", "overlay"}:
+        translation_layout = "overlay"
     return {
         "page": reader_state.get("last_read_page") or page,
         "initial_page": reader_state.get("last_read_page") or page,
@@ -739,7 +750,7 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "target_lang": reader_state.get("target_lang") or target_lang or "zh",
         "compare_split_ratio": reader_state.get("compare_split_ratio") or payload.get("compare_split_ratio") or 50,
         "panel_width": reader_state.get("panel_width") or payload.get("panel_width") or 340,
-        "overscan_pages": 3,
+        "overscan_pages": overscan_pages,
         "auto_save_progress": False,
         "emit_passive_events": False,
         "side_panel_default": "collapsed" if reader_state.get("side_panel_collapsed", True) else "open",
@@ -752,8 +763,8 @@ def _reader_settings(payload: dict[str, object], page: int, target_lang: str) ->
         "active_translation_anchor": reader_state.get("active_translation_anchor") or "",
         "height_mode": "viewport",
         "render_cache": True,
-        "render_cache_max_pages": 36,
-        "translation_layout": "flow",
+        "render_cache_max_pages": render_cache_max_pages,
+        "translation_layout": translation_layout,
         "translation_overflow_policy": "fixed-expand",
         "debug_overlay_enabled": os.getenv("NBLANE_READER_DEBUG_OVERLAY", "").strip().lower() in {"1", "true", "yes", "on"},
         "translation_dock_default": "selection",
@@ -782,6 +793,8 @@ def _payload_for_context(
     page: int | None = None,
     *,
     requested_pages: set[int] | None = None,
+    full_translation: bool = False,
+    full_document: bool | None = None,
 ) -> dict[str, object]:
     inbox = load_research_sources(ctx.profile_path)
     source = inbox.by_id().get(ctx.source_id)
@@ -800,11 +813,16 @@ def _payload_for_context(
             1,
         ]
     )
+    if full_document is None:
+        full_document = _payload_full_document_default()
+    context_requested_pages = set(requested_pages or set())
+    if full_translation or full_document:
+        context_requested_pages.update(range(1, total_pages + 1))
     payload = build_reader_payload(
         ctx.profile_path,
         ctx.source_id,
         page=current_page,
-        requested_pages=set(requested_pages or set()),
+        requested_pages=context_requested_pages,
         target_lang=target_lang,
         include_page_previews=False,
         pdf_url_override=f"{READER_PREFIX}/api/{quote(ctx.source_id, safe='')}/pdf",
@@ -813,8 +831,46 @@ def _payload_for_context(
     payload["pdf_base64"] = ""
     payload["ui"] = _reader_ui()
     payload["settings"] = _reader_settings(payload, current_page, target_lang)
+    payload["settings"]["full_translation_context"] = bool(full_translation)
+    payload["settings"]["full_document_payload"] = bool(full_document)
     payload["events_contract_version"] = 1
     return payload
+
+
+def _payload_full_document_default() -> bool:
+    raw = os.getenv("NBLANE_READER_FULL_DOCUMENT_PAYLOAD", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return True
+
+
+def _payload_etag(payload: dict[str, object], *, target_lang: str) -> str:
+    """Stable ETag for /payload responses.
+
+    Mixes PDF fingerprint, total pages, segment/translation/annotation counts,
+    and a coarse 'last touched' marker so any meaningful change busts the cache.
+    """
+
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    fingerprint = str(metadata.get("pdf_sha256") or metadata.get("pdf_asset_ref") or source.get("id") or "")
+    counters = (
+        len(payload.get("segments") or []),
+        len(payload.get("translations") or []),
+        len(payload.get("translation_units") or []),
+        len(payload.get("annotations") or []),
+        len(payload.get("page_models") or []),
+        int((payload.get("settings") or {}).get("page_count") or 0),
+    )
+    last_touched = ""
+    for row in payload.get("translations") or []:
+        if isinstance(row, dict):
+            value = str(row.get("created") or row.get("updated") or "")
+            if value > last_touched:
+                last_touched = value
+    fingerprint_parts = [fingerprint, target_lang, last_touched, *map(str, counters)]
+    digest = hashlib.sha1("|".join(fingerprint_parts).encode("utf-8")).hexdigest()[:16]
+    return f'W/"{digest}"'
 
 
 def _paper_page_text_layer(profile_path: Path, source_id: str, page: int) -> dict[str, object]:
@@ -2017,7 +2073,8 @@ def _range_response(path: Path, range_header: str | None) -> Response:
     size = path.stat().st_size
     headers = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": "private, max-age=300",
+        "Cache-Control": "private, max-age=86400",
+        "ETag": f'W/"{path.stat().st_mtime_ns:x}-{size:x}"',
     }
     media_type = "application/pdf"
     if not range_header:
@@ -2121,7 +2178,8 @@ async def reader_pdf_head(request: Request, source_id: str):
         media_type="application/pdf",
         headers={
             "Accept-Ranges": "bytes",
-            "Cache-Control": "private, max-age=300",
+            "Cache-Control": "private, max-age=86400",
+            "ETag": f'W/"{path.stat().st_mtime_ns:x}-{path.stat().st_size:x}"',
             "Content-Length": str(path.stat().st_size),
         },
     )
@@ -2130,19 +2188,68 @@ async def reader_pdf_head(request: Request, source_id: str):
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/payload")
 async def reader_payload(request: Request, source_id: str, page: int | None = None):
     ctx = _request_context(request, source_id)
-    return JSONResponse(_payload_for_context(ctx, page=page, requested_pages=_query_pages(request)))
+    full_translation = _clean_bool(request.query_params.get("full_translation"), False)
+    full_document_param = request.query_params.get("full_document")
+    full_document: bool | None
+    if full_document_param is None:
+        full_document = None  # default = honor env / always full
+    else:
+        full_document = _clean_bool(full_document_param, True)
+    payload = _payload_for_context(
+        ctx,
+        page=page,
+        requested_pages=_query_pages(request),
+        full_translation=full_translation,
+        full_document=full_document,
+    )
+    target_lang = str((payload.get("settings") or {}).get("target_lang") or "zh")
+    etag = _payload_etag(payload, target_lang=target_lang)
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=0, must-revalidate",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(payload, headers=headers)
 
 
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/page-preview/{{page}}")
 async def reader_page_preview(request: Request, source_id: str, page: int):
     ctx = _request_context(request, source_id)
-    return JSONResponse(render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=1100))
+    return JSONResponse(
+        render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=1100),
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/page-text-layer/{{page}}")
 async def reader_page_text_layer(request: Request, source_id: str, page: int):
     ctx = _request_context(request, source_id)
-    return JSONResponse(_paper_page_text_layer(ctx.profile_path, source_id, max(1, page)))
+    return JSONResponse(
+        _paper_page_text_layer(ctx.profile_path, source_id, max(1, page)),
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@app.get(f"{READER_PREFIX}/api/{{source_id}}/translations/bulk")
+async def reader_translations_bulk(request: Request, source_id: str):
+    ctx = _request_context(request, source_id)
+    target_lang = (request.query_params.get("target_lang") or "zh").strip() or "zh"
+    inbox = load_research_sources(ctx.profile_path)
+    source = inbox.by_id().get(ctx.source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    metadata = dict(source.metadata or {})
+    if not target_lang or target_lang == "zh":
+        target_lang = str(metadata.get("target_lang") or target_lang or "zh")
+    body, etag = paper_translations_bulk(ctx.profile_path, ctx.source_id, target_lang=target_lang)
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=30",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(body, headers=headers)
 
 
 async def _run_action_endpoint(

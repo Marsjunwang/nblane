@@ -160,6 +160,55 @@
       background: #fff3f3;
       color: var(--danger);
     }
+    .pr-translation-progress-shell {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+      min-width: 180px;
+      transition: opacity .55s ease;
+      opacity: 1;
+    }
+    .pr-translation-progress-shell.visible { display: inline-flex; }
+    .pr-translation-progress-shell.fading { opacity: 0; }
+    .pr-translation-progress-shell .pr-progress-label {
+      font-size: .72rem;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+    .pr-translation-progress {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 140px;
+      height: 5px;
+      border: none;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(33, 104, 91, .12);
+    }
+    .pr-translation-progress::-webkit-progress-bar {
+      background: rgba(33, 104, 91, .12);
+      border-radius: 999px;
+    }
+    .pr-translation-progress::-webkit-progress-value {
+      background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+      border-radius: 999px;
+      transition: width .25s ease;
+    }
+    .pr-translation-progress::-moz-progress-bar {
+      background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+      border-radius: 999px;
+    }
+    .pr-translation-progress-shell.indeterminate .pr-translation-progress {
+      animation: pr-progress-indeterminate 1.4s linear infinite;
+      background-size: 200% 100%;
+      background-image: linear-gradient(90deg, rgba(33, 104, 91, .12) 0%, rgba(33, 104, 91, .12) 35%, rgba(33, 104, 91, .55) 50%, rgba(33, 104, 91, .12) 65%, rgba(33, 104, 91, .12) 100%);
+    }
+    @keyframes pr-progress-indeterminate {
+      from { background-position: 200% 0; }
+      to { background-position: -200% 0; }
+    }
     .pr-input, .pr-select, .pr-textarea {
       width: 100%;
       padding: 5px 8px;
@@ -1032,7 +1081,7 @@
       font-size: .68rem;
       line-height: 1.1;
     }
-    .pr-list { display: grid; gap: 7px; max-height: 292px; overflow: auto; }
+    .pr-list { display: grid; gap: 7px; max-height: 360px; overflow: auto; }
     .pr-item {
       display: grid;
       gap: 4px;
@@ -1047,6 +1096,20 @@
     .pr-item:hover { border-color: rgba(33, 104, 91, .45); background: #fbfdfc; }
     .pr-item-title { font-size: .8rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
     .pr-item-meta { color: var(--muted); font-size: .73rem; line-height: 1.25; overflow-wrap: anywhere; }
+    .pr-item-snippet {
+      color: var(--ink);
+      font-size: .76rem;
+      line-height: 1.42;
+      overflow-wrap: anywhere;
+    }
+    .pr-review-section {
+      display: grid;
+      gap: 7px;
+    }
+    .pr-warning-item {
+      border-color: rgba(138, 91, 18, .26);
+      background: #fff8e8;
+    }
     .pr-figure-list {
       display: grid;
       gap: 8px;
@@ -1181,6 +1244,10 @@
       review_card: "Analyze Paper",
       analyze_paper: "Analyze Paper",
       deep_read: "Deep read",
+      deep_read_empty: "No reliable deep-read findings yet.",
+      warnings: "Warnings",
+      searching: "Searching...",
+      no_match: "No match",
       fullscreen: "Fullscreen",
       exit_fullscreen: "Exit fullscreen",
       mode_pdf: "PDF",
@@ -1289,12 +1356,15 @@
     let fullscreenActive = false;
     let requestedPreviews = new Set();
     let requestedContextPages = new Set();
+    let skeletonWindow = { start: 1, end: 1 };
     let resizeTimer = null;
     let viewportTimer = null;
     let pageThumbTimer = null;
     let payloadRefreshTimer = null;
     let readerStateTimer = null;
     let lastReaderStateEmit = 0;
+    let lastTranslationProgressRefreshKey = "";
+    let lastTranslationProgressRefreshAt = 0;
     let selectingText = false;
     let lastSelectionEndedAt = 0;
     let loadingWatchdogTimer = null;
@@ -1313,12 +1383,25 @@
     let payloadLoading = false;
     let pageTextLayerCache = new Map();
     let requestedTextLayers = new Set();
+    let bulkTranslations = null;
+    let bulkTranslationsEtag = "";
+    let bulkTranslationsMergedAt = 0;
+    let bulkTranslationsFetchInFlight = false;
+    let bulkTranslationsLastFetchAt = 0;
+    let bulkTranslationsScheduledTimer = null;
+    let payloadEtag = "";
     const CACHE_DB = "nblane_pdf_reader_cache_v1";
     const CACHE_STORE = "pages";
+    const TRANSLATIONS_STORE = "translations";
+    const CACHE_DB_VERSION = 2;
 
     function apiPath(path) {
       const prefix = text(READER_BOOT.prefix || "/reader").replace(/\/$/, "");
-      return withReaderToken(`${prefix}${path}`);
+      const raw = `${prefix}${path}`;
+      const url = window.location.protocol === "about:"
+        ? new URL(raw, "http://localhost").toString()
+        : raw;
+      return withReaderToken(url);
     }
     function readerToken() {
       return text(READER_BOOT.token || "");
@@ -1428,10 +1511,11 @@
       if (cacheDbPromise) return cacheDbPromise;
       cacheDbPromise = new Promise((resolve) => {
         try {
-          const request = indexedDB.open(CACHE_DB, 1);
+          const request = indexedDB.open(CACHE_DB, CACHE_DB_VERSION);
           request.onupgradeneeded = () => {
             const db = request.result;
             if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE, { keyPath: "key" });
+            if (!db.objectStoreNames.contains(TRANSLATIONS_STORE)) db.createObjectStore(TRANSLATIONS_STORE, { keyPath: "source_id" });
           };
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => resolve(null);
@@ -1468,10 +1552,6 @@
         prunePageCache(row.pdf);
       } catch {}
     }
-    function renderCacheMaxPages() {
-      const raw = Number(settings().render_cache_max_pages);
-      return Number.isFinite(raw) ? Math.max(8, Math.min(120, raw)) : 36;
-    }
     async function prunePageCache(pdfIdentity) {
       try {
         const db = await openCacheDb();
@@ -1495,6 +1575,124 @@
           tx.onerror = () => resolve();
         });
       } catch {}
+    }
+    async function readTranslationsCache(sid) {
+      try {
+        const db = await openCacheDb();
+        if (!db || !db.objectStoreNames.contains(TRANSLATIONS_STORE)) return null;
+        return await new Promise((resolve) => {
+          const tx = db.transaction(TRANSLATIONS_STORE, "readonly");
+          const request = tx.objectStore(TRANSLATIONS_STORE).get(sid);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => resolve(null);
+        });
+      } catch {
+        return null;
+      }
+    }
+    async function writeTranslationsCache(sid, etag, body) {
+      try {
+        const db = await openCacheDb();
+        if (!db || !db.objectStoreNames.contains(TRANSLATIONS_STORE)) return;
+        await new Promise((resolve) => {
+          const tx = db.transaction(TRANSLATIONS_STORE, "readwrite");
+          tx.objectStore(TRANSLATIONS_STORE).put({ source_id: sid, etag, body, written_at: Date.now() });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        });
+      } catch {}
+    }
+    function bulkTranslationSegments() {
+      return asArr(bulkTranslations && bulkTranslations.segments);
+    }
+    function hasBulkTranslationsLoaded() {
+      const segments = bulkTranslationSegments();
+      if (!segments.length) return false;
+      const sid = sourceId();
+      return Boolean(bulkTranslations && bulkTranslations.paper_id === sid);
+    }
+    function mergeBulkTranslationsIntoArgs(body) {
+      if (!body || !Array.isArray(body.segments)) return false;
+      const sid = sourceId();
+      if (body.paper_id && sid && body.paper_id !== sid) return false;
+      bulkTranslations = body;
+      bulkTranslationsMergedAt = Date.now();
+      try {
+        const existing = asArr(args.translations);
+        const seen = new Map();
+        for (const row of existing) {
+          if (!row || typeof row !== "object") continue;
+          const key = text(row.id || row.anchor_id);
+          if (!key) continue;
+          seen.set(key, row);
+        }
+        for (const seg of body.segments) {
+          if (!seg || typeof seg !== "object") continue;
+          const key = text(seg.id || seg.anchor_id);
+          if (!key) continue;
+          const merged = { ...(seen.get(key) || {}), ...seg };
+          seen.set(key, merged);
+        }
+        args.translations = Array.from(seen.values());
+        const ctx = asObj(args.context_window);
+        if (Array.isArray(ctx.pages)) {
+          const total = Number(body.total_pages || ctx.total_pages || 0);
+          if (Number.isFinite(total) && total > 0) {
+            args.context_window = { pages: Array.from({ length: total }, (_, i) => i + 1), total_pages: total };
+          }
+        }
+      } catch (mergeError) {
+        try { console.warn("mergeBulkTranslationsIntoArgs failed", mergeError); } catch {}
+      }
+      return true;
+    }
+    async function fetchTranslationsBulk(options = {}) {
+      const sid = sourceId();
+      if (!sid) return null;
+      if (bulkTranslationsFetchInFlight) return null;
+      const force = Boolean(options.force);
+      const cached = await readTranslationsCache(sid);
+      if (cached && cached.body && !options.skipCache) {
+        if (!bulkTranslations || bulkTranslations.content_hash !== cached.etag) {
+          if (mergeBulkTranslationsIntoArgs(cached.body)) {
+            bulkTranslationsEtag = cached.etag || "";
+            try { refreshTranslationReader(); } catch {}
+          }
+        }
+      }
+      const now = Date.now();
+      if (!force && now - bulkTranslationsLastFetchAt < 800) return bulkTranslations;
+      bulkTranslationsFetchInFlight = true;
+      bulkTranslationsLastFetchAt = now;
+      try {
+        const headers = authHeaders({});
+        if (cached && cached.etag) headers["If-None-Match"] = cached.etag;
+        const response = await fetch(apiPath(`/api/${sourcePath()}/translations/bulk`), {
+          credentials: "same-origin",
+          headers,
+        });
+        if (response.status === 304) return bulkTranslations;
+        if (!response.ok) return null;
+        const body = await response.json();
+        const etag = response.headers.get("ETag") || (body && body.content_hash ? `W/"${body.content_hash}"` : "");
+        if (!mergeBulkTranslationsIntoArgs(body)) return null;
+        bulkTranslationsEtag = etag;
+        await writeTranslationsCache(sid, etag, body);
+        try { refreshTranslationReader(); } catch {}
+        try { refreshLeftRail(); } catch {}
+        return bulkTranslations;
+      } catch {
+        return null;
+      } finally {
+        bulkTranslationsFetchInFlight = false;
+      }
+    }
+    function scheduleBulkTranslationsFetch(wait = 80, options = {}) {
+      if (bulkTranslationsScheduledTimer) window.clearTimeout(bulkTranslationsScheduledTimer);
+      bulkTranslationsScheduledTimer = window.setTimeout(() => {
+        bulkTranslationsScheduledTimer = null;
+        fetchTranslationsBulk(options).catch(() => {});
+      }, Math.max(0, Number(wait || 0)));
     }
     function eventId(action) {
       eventSeq += 1;
@@ -1571,7 +1769,12 @@
       parts.push(labelText);
       const total = Number(progress.total || 0);
       const current = Number(progress.current || 0);
-      if (total > 0) parts.push(`${Math.min(current, total)}/${total}`);
+      if (total > 0) {
+        const boundedCurrent = Math.min(current, total);
+        const percent = Math.max(0, Math.min(100, Math.round((boundedCurrent / total) * 100)));
+        parts.push(`${percent}%`);
+        parts.push(`${boundedCurrent}/${total}`);
+      }
       if (Number(progress.saved || 0) > 0) parts.push(`${progress.saved} ${label("saved").toLowerCase()}`);
       return parts.join(" · ");
     }
@@ -1610,6 +1813,63 @@
         if (busy) button.setAttribute("aria-busy", "true");
         else button.removeAttribute("aria-busy");
       });
+      refreshTranslationProgressBar();
+    }
+    let translationProgressFadeTimer = null;
+    function translationProgressPercent() {
+      const progress = asObj(actionState.progress);
+      const batches = Number(progress.batches || progress.batches_total || 0);
+      const batchesDone = Number(progress.batches_completed || progress.batches_done || 0);
+      const total = Number(progress.total || 0);
+      const current = Number(progress.current || progress.saved || 0);
+      if (batches > 0) return Math.max(0, Math.min(100, Math.round((batchesDone / batches) * 100)));
+      if (total > 0) return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+      return -1;
+    }
+    function refreshTranslationProgressBar() {
+      const shell = document.getElementById("translationProgressShell");
+      if (!shell) return;
+      const isTranslating = translationTaskAction(actionState.action) && actionState.phase === "pending";
+      if (!isTranslating) {
+        const wasVisible = shell.classList.contains("visible");
+        if (wasVisible && !shell.classList.contains("fading")) {
+          shell.classList.add("fading");
+          if (translationProgressFadeTimer) window.clearTimeout(translationProgressFadeTimer);
+          translationProgressFadeTimer = window.setTimeout(() => {
+            shell.classList.remove("visible", "fading");
+            const bar = document.getElementById("translationProgress");
+            if (bar) bar.value = 0;
+            const lbl = document.getElementById("translationProgressLabel");
+            if (lbl) lbl.textContent = "0%";
+            translationProgressFadeTimer = null;
+          }, 700);
+        }
+        return;
+      }
+      if (translationProgressFadeTimer) {
+        window.clearTimeout(translationProgressFadeTimer);
+        translationProgressFadeTimer = null;
+      }
+      shell.classList.remove("fading");
+      shell.classList.add("visible");
+      const percent = translationProgressPercent();
+      const bar = document.getElementById("translationProgress");
+      const lbl = document.getElementById("translationProgressLabel");
+      if (percent >= 0) {
+        shell.classList.remove("indeterminate");
+        if (bar) {
+          bar.removeAttribute("indeterminate");
+          bar.value = percent;
+        }
+        if (lbl) lbl.textContent = `${percent}%`;
+      } else {
+        shell.classList.add("indeterminate");
+        if (bar) {
+          bar.removeAttribute("value");
+          bar.setAttribute("indeterminate", "");
+        }
+        if (lbl) lbl.textContent = label("translating") || "...";
+      }
     }
     function setActionState(action, phase, message = "", extra = {}) {
       actionState = {
@@ -1725,6 +1985,7 @@
           progress: asObj(task.progress),
           event_id: text(task.event_id || actionState.event_id),
         });
+        maybeRefreshTranslationProgress(task, action);
         return;
       }
       stopTaskWatchers();
@@ -1737,7 +1998,7 @@
         });
         displayActionResult(action, result);
         if (asObj(task.refresh).payload || actionRefreshesPayload(action)) {
-          await loadReaderPayload({ preserveView: true });
+          await loadReaderPayload({ preserveView: true, fullTranslation: translationTaskAction(action) });
         }
         persistLocalState();
         return;
@@ -1751,6 +2012,24 @@
       if (asObj(task.refresh).payload) {
         await loadReaderPayload({ preserveView: true });
       }
+    }
+    function maybeRefreshTranslationProgress(task, action = "") {
+      const cleanAction = text(action || asObj(task).action);
+      if (!translationTaskAction(cleanAction)) return;
+      const progress = asObj(asObj(task).progress);
+      const saved = Number(progress.saved || 0);
+      const current = Number(progress.current || 0);
+      const total = Number(progress.total || 0);
+      if (saved <= 0 && current <= 0) return;
+      const taskId = text(asObj(task).task_id || actionState.task_id);
+      const key = `${taskId}:${saved}:${current}:${total}`;
+      if (key === lastTranslationProgressRefreshKey) return;
+      const now = Date.now();
+      if (now - lastTranslationProgressRefreshAt < 1200) return;
+      lastTranslationProgressRefreshKey = key;
+      lastTranslationProgressRefreshAt = now;
+      schedulePayloadRefresh(80, { fullTranslation: cleanAction === "translate_full_paper" || readerMode === "translation" });
+      scheduleBulkTranslationsFetch(140, { force: true });
     }
     function endpointForAction(action, payload) {
       if (action === "annotation_create" || action === "annotation_update") {
@@ -1910,8 +2189,31 @@
       const cores = Number(navigator.hardwareConcurrency || 0);
       const memory = Number(navigator.deviceMemory || 0);
       if ((cores && cores <= 2) || (memory && memory <= 4)) return 2;
-      if ((cores && cores >= 8) || (memory && memory >= 8)) return 4;
-      return 3;
+      if ((cores && cores >= 12) || (memory && memory >= 16)) return 6;
+      if ((cores && cores >= 8) || (memory && memory >= 8)) return 5;
+      return 4;
+    }
+    function renderCacheMaxPages() {
+      const raw = Number(settings().render_cache_max_pages);
+      if (Number.isFinite(raw)) return Math.max(8, Math.min(160, raw));
+      const cores = Number(navigator.hardwareConcurrency || 0);
+      const memory = Number(navigator.deviceMemory || 0);
+      let base = 64;
+      if ((cores && cores >= 12) || (memory && memory >= 16)) base = 128;
+      else if ((cores && cores >= 8) || (memory && memory >= 8)) base = 96;
+      else if ((cores && cores <= 2) || (memory && memory <= 4)) base = 32;
+      const total = Number(totalPages || 0);
+      if (total > 0) return Math.min(base, Math.max(24, total));
+      return base;
+    }
+    function pagePreviewBatchLimit() {
+      const raw = Number(settings().page_preview_batch_limit);
+      if (Number.isFinite(raw)) return Math.max(4, Math.min(96, raw));
+      const cores = Number(navigator.hardwareConcurrency || 0);
+      const memory = Number(navigator.deviceMemory || 0);
+      if ((cores && cores >= 8) || (memory && memory >= 8)) return 48;
+      if ((cores && cores <= 2) || (memory && memory <= 4)) return 12;
+      return 24;
     }
     function pdfLoadTimeoutMs() {
       const raw = Number(settings().pdf_load_timeout_ms);
@@ -2043,6 +2345,8 @@
     }
     function requestReaderContext(pages) {
       if (selectionIsActive()) return;
+      // If the server already gave us the whole document, never ask for "more pages" again.
+      if (hasFullDocumentPayloadLoaded()) return;
       const clean = Array.from(new Set(asArr(pages).map((page) => Number(page || 0)).filter((page) => page > 0))).slice(0, 20);
       const loaded = new Set(contextPages().map((page) => Number(page || 0)).filter(Boolean));
       const missing = clean.filter((page) => !loaded.has(page));
@@ -2051,11 +2355,34 @@
     }
     function requestPagePreviews(pages) {
       if (selectionIsActive()) return;
-      const clean = Array.from(new Set(asArr(pages).map((page) => Number(page || 0)).filter((page) => page > 0))).slice(0, 20);
+      const clean = Array.from(new Set(asArr(pages).map((page) => Number(page || 0)).filter((page) => page > 0))).slice(0, pagePreviewBatchLimit());
       const missing = clean.filter((page) => !requestedPreviews.has(page) && !previewForPage(page));
       if (!missing.length) return;
       missing.forEach((page) => requestedPreviews.add(page));
       missing.forEach((page) => fetchPagePreview(page));
+    }
+    function allDocumentPages() {
+      const count = totalPages || knownPageCount(currentPage);
+      return Array.from({ length: Math.max(1, count) }, (_, index) => index + 1);
+    }
+    function hasFullTranslationContext() {
+      const pages = new Set(asArr(contextWindow().pages).map((page) => Number(page || 0)).filter(Boolean));
+      const count = totalPages || knownPageCount(currentPage);
+      return count > 0 && pages.size >= count;
+    }
+    function hasFullDocumentPayloadLoaded() {
+      if (settings().full_document_payload === true) return true;
+      return hasFullTranslationContext();
+    }
+    function wantsFullDocumentPayload() {
+      const explicit = settings().full_document_payload;
+      if (explicit === false) return false;
+      return true;
+    }
+    function wantsFullTranslationContext(extra = {}) {
+      return Boolean(extra.fullTranslation)
+        || readerMode === "translation"
+        || actionState.action === "translate_full_paper";
     }
     function status(message) {
       const el = document.querySelector(".pr-status-main");
@@ -2074,6 +2401,39 @@
         Number(pageNumber || 1),
         1
       );
+    }
+    function skeletonExtraPages() {
+      return Math.max(1, Math.min(6, overscanPages() + 1));
+    }
+    function pageRowHeightEstimate(pageNumber = currentPage || 1) {
+      const size = pageViewportSize(pageNumber || 1);
+      return Math.max(340, size.height + 42);
+    }
+    function fullDocSkeletonHardCap() {
+      const raw = Number(settings().full_doc_skeleton_cap || 0);
+      if (Number.isFinite(raw) && raw > 0) return Math.max(20, Math.min(400, raw));
+      return 80;
+    }
+    function shouldUseFullDocSkeleton() {
+      if (readerMode !== "compare" && readerMode !== "translation") return false;
+      if (!hasBulkTranslationsLoaded() && !hasFullTranslationContext()) return false;
+      const count = Math.max(1, totalPages || knownPageCount(currentPage));
+      return count <= fullDocSkeletonHardCap();
+    }
+    function skeletonWindowForPage(pageNumber = currentPage || 1) {
+      const count = Math.max(1, totalPages || knownPageCount(pageNumber));
+      const page = Math.max(1, Math.min(count, Number(pageNumber || 1)));
+      if (shouldUseFullDocSkeleton()) {
+        return { start: 1, end: count, count };
+      }
+      const extra = (readerMode === "compare" || readerMode === "translation")
+        ? Math.max(skeletonExtraPages(), Math.min(20, Math.ceil(count / 4)))
+        : skeletonExtraPages();
+      return {
+        start: Math.max(1, page - extra),
+        end: Math.min(count, page + extra),
+        count,
+      };
     }
     function initialPage() {
       const local = readLocalState();
@@ -2154,6 +2514,7 @@
               <button class="pr-button ${readerMode === "pdf" ? "active" : ""}" data-mode="pdf">${esc(label("mode_pdf"))}</button>
               <button class="pr-button ${readerMode === "compare" ? "active" : ""}" data-mode="compare">${esc(label("mode_compare"))}</button>
               <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation">${esc(label("mode_translation"))}</button>
+              <button class="pr-button ${compareDualScrollLockEnabled() ? "active" : ""}" data-action="toggleCompareLock" title="${attr(label("compare_lock_scroll") || "Lock dual scroll")}" aria-pressed="${compareDualScrollLockEnabled() ? "true" : "false"}">⇅</button>
             </div>
             <div class="pr-actions">
               <button class="pr-button" data-action="translateFull" title="${attr(label("translate_full_paper_help"))}">${esc(label("translate_full_paper"))}</button>
@@ -2163,6 +2524,10 @@
               <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
               <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
               <span class="pr-action-status" aria-live="polite"></span>
+              <span class="pr-translation-progress-shell" id="translationProgressShell" aria-hidden="true">
+                <span class="pr-progress-label" id="translationProgressLabel">0%</span>
+                <progress class="pr-translation-progress" id="translationProgress" max="100" value="0"></progress>
+              </span>
               <span class="pr-toolbar-note">${esc(label("reader_workflow_hint"))}</span>
             </div>
           </header>
@@ -2276,8 +2641,9 @@
         <div class="pr-search-results">
           ${rows.length ? rows.map((row) => `
             <button class="pr-item" data-page="${Number(row.page || 0)}">
-              <div class="pr-item-title">${esc(text(row.title || row.snippet).slice(0, 140))}</div>
-              <div class="pr-item-meta">${esc(label("page"))} ${Number(row.page || 0)}</div>
+              <div class="pr-item-title">${esc(text(row.title || row.locator || `${label("page")} ${Number(row.page || 0)}`).slice(0, 120))}</div>
+              ${text(row.snippet) ? `<div class="pr-item-snippet">${esc(text(row.snippet).slice(0, 220))}</div>` : ""}
+              <div class="pr-item-meta">${esc(text(row.locator || `${label("page")} ${Number(row.page || 0)}`))}</div>
             </button>
           `).join("") : `<div class="pr-empty">${esc(label("empty"))}</div>`}
         </div>
@@ -2352,6 +2718,21 @@
       if (!translatedTextFromRow(row)) return "missing";
       return "translated";
     }
+    function normalizeSourceText(value) {
+      let clean = flowText(value).replace(/\s+/g, " ").trim();
+      clean = clean.replace(/\b([A-Za-z])\s+([A-Z][A-Z]{1,})\b/g, "$1$2");
+      clean = clean.replace(/\bMEM-\s*ORY\b/gi, "MEMORY");
+      return clean;
+    }
+    function sourceTextLooksUseful(value) {
+      const clean = normalizeSourceText(value);
+      if (clean.length < 12) return false;
+      const letters = (clean.match(/[A-Za-z\u4e00-\u9fff]/g) || []).length;
+      if (letters < 10) return false;
+      const words = clean.split(/\s+/).filter(Boolean);
+      if (words.length <= 2 && clean.length < 28) return false;
+      return true;
+    }
     function translationRowsForPages(pages, limit = 160) {
       const translations = translationBySegment();
       const pageRows = pageTranslationRowsForPages(pages).map((translation) => ({
@@ -2394,9 +2775,13 @@
       });
     }
     function translationPages() {
-      const pages = readerMode === "compare"
-        ? (visiblePages.length ? visiblePages : [currentPage])
-        : [currentPage || initialPage()];
+      const allPages = allDocumentPages();
+      const fullContext = hasFullTranslationContext() || hasBulkTranslationsLoaded();
+      const pages = readerMode === "translation"
+        ? (fullContext ? allPages : (asArr(contextWindow().pages).length ? asArr(contextWindow().pages) : [currentPage || initialPage()]))
+        : readerMode === "compare"
+          ? (fullContext ? allPages : (visiblePages.length ? visiblePages : [currentPage]))
+          : [currentPage || initialPage()];
       const merged = [...new Set(pages.map((page) => Number(page || 0)).filter(Boolean))].sort((a, b) => a - b);
       return merged.length ? merged : [currentPage || 1];
     }
@@ -2540,6 +2925,9 @@
       });
     }
     function translationLayoutMode() {
+      const configured = text(settings().translation_layout || "").toLowerCase();
+      if (configured === "overlay") return "overlay";
+      if (configured === "flow") return debugOverlayEnabled() && debugOverlayActive ? "overlay" : "flow";
       if (!debugOverlayEnabled()) return "flow";
       return debugOverlayActive ? "overlay" : "flow";
     }
@@ -2600,9 +2988,10 @@
       const anchorId = text(obj.anchor_id || obj.unit_id);
       const statusName = text(obj.status || (text(obj.translated_text) ? "translated" : "missing"));
       const translated = text(obj.translated_text).trim();
-      const display = flowText(statusName === "failed" || !translated ? text(obj.source_text) : translated);
+      const sourceSnippet = normalizeSourceText(obj.source_text);
+      const usefulSource = sourceTextLooksUseful(obj.source_text);
+      const display = statusName === "failed" || !translated ? sourceSnippet : flowText(translated);
       const page = Number(obj.page || 0);
-      const sourceSnippet = flowText(obj.source_text).replace(/\s+/g, " ").trim();
       const stale = statusName === "stale";
       const missing = statusName === "missing";
       const failed = statusName === "failed";
@@ -2620,7 +3009,7 @@
             <span class="pr-translation-unit-status ${attr(statusName)}">${esc(translationUnitStatusLabel(statusName))}</span>
           </div>
           <div class="pr-translation-unit-text">${esc(display || translationUnitStatusLabel(statusName))}</div>
-          ${translationSourceVisible && sourceSnippet ? `<div class="pr-translation-source-snippet">${esc(sourceSnippet)}</div>` : ""}
+          ${translationSourceVisible && sourceSnippet && (translated || usefulSource) ? `<div class="pr-translation-source-snippet">${esc(sourceSnippet)}</div>` : ""}
           ${actionHtml}
         </article>
       `;
@@ -2894,7 +3283,7 @@
       const translated = text(obj.translated_text).trim();
       if (translated && text(obj.status || "translated") !== "failed") return flowText(translated);
       if (isPositionedTranslationScope(obj.scope_type)) return obj.display_source === true ? flowText(obj.source_text) : "";
-      return flowText(obj.source_text);
+      return normalizeSourceText(obj.source_text);
     }
     function pageModelFromUnits(pageNumber) {
       for (const unit of translationUnits()) {
@@ -3068,7 +3457,9 @@
     }
     function translationReaderHtml() {
       const pages = translationPages();
-      const pageLabel = `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
+      const pageLabel = pages.length > 5
+        ? `${label("translation")} · ${label("page")} ${pages[0]}-${pages[pages.length - 1]}`
+        : `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
       const body = translationLayoutMode() === "overlay"
         ? pages.map((pageNumber) => renderTranslationPage(pageNumber)).join("")
         : translationFlowHtml();
@@ -3131,6 +3522,15 @@
     function analysisObj() {
       return asObj(args.analysis || args.review_card || args.paper_analysis);
     }
+    function hasReviewContent() {
+      const analysis = analysisObj();
+      const deepRead = asObj(analysis.codex_deep_read || {});
+      return Boolean(
+        Object.keys(analysis).length
+        || Object.keys(deepRead).length
+        || latestAiText()
+      );
+    }
     function figureRows() {
       return asArr(args.figures)
         .map((row) => {
@@ -3183,6 +3583,11 @@
       const rows = asArr(values).map((value) => reviewItemText(value)).filter(Boolean);
       return rows.length ? `<div class="pr-list">${rows.map((value) => `<div class="pr-item"><div class="pr-item-title">${esc(value)}</div></div>`).join("")}</div>` : "";
     }
+    function reviewSectionHtml(title, values, className = "") {
+      const body = Array.isArray(values) ? listHtml(values) : (text(values) ? `<div class="pr-list"><div class="pr-item ${attr(className)}"><div class="pr-item-title">${esc(values)}</div></div></div>` : "");
+      if (!body) return "";
+      return `<section class="pr-review-section"><div class="pr-panel-head">${esc(title)}</div>${body}</section>`;
+    }
     function analysisBodyHtml() {
       const analysis = analysisObj();
       const hasAnalysis = Object.keys(analysis).length > 0;
@@ -3205,8 +3610,8 @@
         ["Reading plan", analysis.reading_plan],
         ["Open questions", analysis.open_questions],
       ]) {
-        const body = Array.isArray(values) ? listHtml(values) : (text(values) ? `<div class="pr-item"><div class="pr-item-title">${esc(values)}</div></div>` : "");
-        if (body) chunks.push(`<div class="pr-panel-head">${esc(title)}</div>${body}`);
+        const body = reviewSectionHtml(title, values);
+        if (body) chunks.push(body);
       }
       if (Array.isArray(analysis.score_rationale)) {
         chunks.push(`<div class="pr-panel-head">Rationale</div>${listHtml(analysis.score_rationale)}`);
@@ -3225,8 +3630,14 @@
       if (Object.keys(deepRead).length) {
         const plan = listHtml(deepRead.reading_plan);
         const findings = listHtml(deepRead.findings);
-        if (plan) chunks.push(`<div class="pr-panel-head">Reading Plan</div>${plan}`);
-        if (findings) chunks.push(`<div class="pr-panel-head">Findings</div>${findings}`);
+        if (findings) {
+          chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">Findings</div>${findings}</section>`);
+        } else {
+          chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">${esc(label("deep_read"))}</div><div class="pr-list"><div class="pr-item"><div class="pr-item-title">${esc(label("deep_read_empty"))}</div></div></div></section>`);
+        }
+        if (plan) chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">Reading Plan</div>${plan}</section>`);
+        const warnings = listHtml(deepRead.warnings);
+        if (warnings) chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">${esc(label("warnings"))}</div>${warnings.replaceAll('class="pr-item"', 'class="pr-item pr-warning-item"')}</section>`);
       }
       if (latest && !hasAnalysis) {
         chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(latest)}</div></div>`);
@@ -3895,7 +4306,7 @@
         })
         .map((button) => Number(button.dataset.pageThumb || 0))
         .filter(Boolean)
-        .slice(0, 24);
+        .slice(0, Math.min(24, pagePreviewBatchLimit()));
       if (!pages.includes(currentPage)) pages.push(currentPage);
       requestPagePreviews(pages);
     }
@@ -3915,6 +4326,7 @@
       refreshTranslationReader();
       refreshLeftRail();
       scheduleViewportUpdate();
+      if (readerMode === "translation" && !hasFullTranslationContext()) schedulePayloadRefresh(20, { fullTranslation: true });
       if (!userAnchorLocked()) scheduleReaderStateChanged(true);
       window.setTimeout(() => {
         renderAround(currentPage, { force: true });
@@ -3985,22 +4397,67 @@
     function translationPageElement(pageNumber) {
       return document.querySelector(`.pr-translation-page[data-page="${Number(pageNumber || 0)}"]`);
     }
+    function compareDualScrollLockEnabled() {
+      try {
+        const stored = window.localStorage.getItem("nblane_reader_compare_lock");
+        if (stored == null) return true;
+        return stored !== "0" && stored !== "false";
+      } catch {
+        return true;
+      }
+    }
+    function setCompareDualScrollLock(value) {
+      try {
+        window.localStorage.setItem("nblane_reader_compare_lock", value ? "1" : "0");
+      } catch {}
+    }
+    function pageVisibleOffsetRatio(scrollEl, pageEl) {
+      if (!scrollEl || !pageEl) return null;
+      const elRect = scrollEl.getBoundingClientRect();
+      const pageRect = pageEl.getBoundingClientRect();
+      const top = pageRect.top - elRect.top;
+      const offset = -top;
+      const height = Math.max(1, pageRect.height);
+      return Math.max(0, Math.min(1, offset / height));
+    }
+    function applyPageOffsetTo(scrollEl, pageEl, ratio) {
+      if (!scrollEl || !pageEl) return;
+      const elRect = scrollEl.getBoundingClientRect();
+      const pageRect = pageEl.getBoundingClientRect();
+      const target = scrollEl.scrollTop + (pageRect.top - elRect.top) + (pageRect.height * Math.max(0, Math.min(1, ratio)));
+      scrollEl.scrollTop = Math.max(0, target);
+    }
     function syncCompareScroll(source) {
       if (readerMode !== "compare" || syncLock) return;
       if (viewportAnchorSyncMuted() || userAnchorLocked()) return;
       const viewer = document.getElementById("viewer");
       const translationReader = document.getElementById("translationReader");
       if (!viewer || !translationReader) return;
+      const scrollEl = translationScrollElement() || translationReader;
+      const dualLock = compareDualScrollLockEnabled();
       syncLock = true;
       window.setTimeout(() => { syncLock = false; }, 180);
       if (source === "pdf") {
         const anchorId = activeSegmentFromViewport();
-        if (anchorId) {
+        if (anchorId && !dualLock) {
           setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false });
-        } else {
-          const pageEl = translationPageElement(currentPage);
-          if (pageEl) pageEl.scrollIntoView({ block: "start" });
+          return;
         }
+        if (dualLock) {
+          const page = currentPage || activePageFromViewport(viewer) || 1;
+          const pdfPageEl = pageElement(page);
+          const ratio = pageVisibleOffsetRatio(viewer, pdfPageEl);
+          const transPageEl = translationPageElement(page);
+          if (transPageEl && ratio != null) {
+            applyPageOffsetTo(scrollEl, transPageEl, ratio);
+          } else if (transPageEl) {
+            transPageEl.scrollIntoView({ block: "start" });
+          }
+          if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
+          return;
+        }
+        const pageEl = translationPageElement(currentPage);
+        if (pageEl) pageEl.scrollIntoView({ block: "start" });
         return;
       }
       if (translationScrollSyncMuted()) return;
@@ -4008,7 +4465,6 @@
         if (anchorVisibleInTranslation(stickyUserAnchor)) return;
         clearStickyUserAnchor(stickyUserAnchor);
       }
-      const scrollEl = translationScrollElement() || translationReader;
       const box = scrollEl.getBoundingClientRect();
       const rows = [...translationReader.querySelectorAll(".pr-translation-unit[data-anchor-id], .pr-translation-page[data-page]")];
       const picked = rows.find((row) => {
@@ -4018,10 +4474,37 @@
       const page = Number(picked?.dataset.page || 0);
       const anchorId = text(picked?.dataset.anchorId || "");
       if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
-      if (page && page !== currentPage) {
-        muteViewportAnchorSync(600);
-        scrollToPage(page, { smooth: false });
+      if (page) {
+        if (dualLock) {
+          const transPageEl = translationPageElement(page);
+          const ratio = pageVisibleOffsetRatio(scrollEl, transPageEl);
+          const pdfPageEl = pageElement(page);
+          if (pdfPageEl && ratio != null) {
+            muteViewportAnchorSync(600);
+            applyPageOffsetTo(viewer, pdfPageEl, ratio);
+            currentPage = page;
+            updatePageUi();
+            return;
+          }
+        }
+        if (page !== currentPage) {
+          muteViewportAnchorSync(600);
+          scrollToPage(page, { smooth: false });
+        }
       }
+    }
+    function activePageFromViewport(viewer) {
+      const pages = document.querySelectorAll(".pr-page-container[data-page]");
+      const top = viewer.getBoundingClientRect().top;
+      let best = 0;
+      for (const el of pages) {
+        const r = el.getBoundingClientRect();
+        if (r.bottom < top + 40) continue;
+        if (r.top > top + viewer.clientHeight - 40) break;
+        best = Number(el.dataset.page || 0);
+        if (r.top >= top - 1) break;
+      }
+      return best;
     }
     function showTranslationUnitDock(anchorId) {
       const unit = buildAnchorIndex().get(text(anchorId));
@@ -4177,6 +4660,16 @@
         return rerenderForScale();
       }
       if (action === "fullscreen") return toggleFullscreen();
+      if (action === "toggleCompareLock") {
+        const next = !compareDualScrollLockEnabled();
+        setCompareDualScrollLock(next);
+        const btn = document.querySelector('[data-action="toggleCompareLock"]');
+        if (btn) {
+          btn.classList.toggle("active", next);
+          btn.setAttribute("aria-pressed", next ? "true" : "false");
+        }
+        return;
+      }
       if (action === "togglePanel") {
         sidePanelCollapsed = !sidePanelCollapsed;
         document.querySelector(".pr-workspace")?.classList.toggle("panel-collapsed", sidePanelCollapsed);
@@ -4349,47 +4842,96 @@
     function renderDocumentSkeleton() {
       const doc = document.getElementById("continuousDocument");
       if (!doc) return;
-      const count = Math.max(1, totalPages || knownPageCount(currentPage));
-      const rows = [];
-      for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
-        const size = pageViewportSize(pageNumber);
-        rows.push(`
-          <article class="pr-page-container" id="pageContainer-${pageNumber}" data-page="${pageNumber}">
-            <div class="pr-page-label">${esc(label("page"))} ${pageNumber}</div>
-            <div class="pr-page-wrap loading" id="pageWrap-${pageNumber}" style="width:${size.width}px;height:${size.height}px">
+      try {
+        const windowInfo = skeletonWindowForPage(currentPage);
+        const count = Math.max(1, Number.isFinite(Number(windowInfo.count)) ? Number(windowInfo.count) : 1);
+        const startPage = Math.max(1, Math.min(count, Number.isFinite(Number(windowInfo.start)) ? Number(windowInfo.start) : 1));
+        const endPage = Math.max(startPage, Math.min(count, Number.isFinite(Number(windowInfo.end)) ? Number(windowInfo.end) : startPage));
+        skeletonWindow = { start: startPage, end: endPage };
+        const rows = [];
+        const beforeHeight = estimateSpacerHeight(1, startPage - 1);
+        const afterHeight = estimateSpacerHeight(endPage + 1, count);
+        if (beforeHeight > 0) {
+          rows.push(`<div class="pr-page-spacer" data-spacer="before" style="height:${Math.round(beforeHeight)}px"></div>`);
+        }
+        for (let pageNumber = startPage; pageNumber <= endPage; pageNumber += 1) {
+          const size = pageViewportSize(pageNumber);
+          const safeWidth = Math.max(120, Math.round(Number.isFinite(size.width) ? size.width : 612));
+          const safeHeight = Math.max(160, Math.round(Number.isFinite(size.height) ? size.height : 792));
+          rows.push(`
+            <article class="pr-page-container" id="pageContainer-${pageNumber}" data-page="${pageNumber}">
+              <div class="pr-page-label">${esc(label("page"))} ${pageNumber}</div>
+              <div class="pr-page-wrap loading" id="pageWrap-${pageNumber}" style="width:${safeWidth}px;height:${safeHeight}px">
+                <span>${esc(label("pdf_loading"))}</span>
+                <img class="pr-page-preview" id="pagePreview-${pageNumber}" alt="" />
+                <canvas class="pr-canvas" id="pdfCanvas-${pageNumber}"></canvas>
+                <div class="pr-text-layer" id="textLayer-${pageNumber}" data-page="${pageNumber}"></div>
+                <div class="pr-highlight-layer" id="highlightLayer-${pageNumber}"></div>
+              </div>
+            </article>
+          `);
+        }
+        if (afterHeight > 0) {
+          rows.push(`<div class="pr-page-spacer" data-spacer="after" style="height:${Math.round(afterHeight)}px"></div>`);
+        }
+        doc.innerHTML = rows.join("");
+        document.querySelectorAll(".pr-text-layer").forEach((layer) => {
+          layer.addEventListener("mousedown", () => { selectingText = true; });
+          layer.addEventListener("pointerdown", () => { selectingText = true; });
+          layer.addEventListener("mouseup", handleSelection);
+          layer.addEventListener("keyup", handleSelection);
+          layer.addEventListener("dblclick", handleTextDoubleClick);
+        });
+        applyAllKnownHighlights();
+      } catch (error) {
+        try { console.error("renderDocumentSkeleton failed", error); } catch {}
+        const fallbackPage = Math.max(1, Number(currentPage || 1));
+        doc.innerHTML = `
+          <article class="pr-page-container" id="pageContainer-${fallbackPage}" data-page="${fallbackPage}">
+            <div class="pr-page-label">${esc(label("page"))} ${fallbackPage}</div>
+            <div class="pr-page-wrap loading" id="pageWrap-${fallbackPage}" style="width:612px;height:792px">
               <span>${esc(label("pdf_loading"))}</span>
-              <img class="pr-page-preview" id="pagePreview-${pageNumber}" alt="" />
-              <canvas class="pr-canvas" id="pdfCanvas-${pageNumber}"></canvas>
-              <div class="pr-text-layer" id="textLayer-${pageNumber}" data-page="${pageNumber}"></div>
-              <div class="pr-highlight-layer" id="highlightLayer-${pageNumber}"></div>
+              <canvas class="pr-canvas" id="pdfCanvas-${fallbackPage}"></canvas>
+              <div class="pr-text-layer" id="textLayer-${fallbackPage}" data-page="${fallbackPage}"></div>
+              <div class="pr-highlight-layer" id="highlightLayer-${fallbackPage}"></div>
             </div>
           </article>
-        `);
+        `;
+        skeletonWindow = { start: fallbackPage, end: fallbackPage };
       }
-      doc.innerHTML = rows.join("");
-      document.querySelectorAll(".pr-text-layer").forEach((layer) => {
-        layer.addEventListener("mousedown", () => { selectingText = true; });
-        layer.addEventListener("pointerdown", () => { selectingText = true; });
-        layer.addEventListener("mouseup", handleSelection);
-        layer.addEventListener("keyup", handleSelection);
-        layer.addEventListener("dblclick", handleTextDoubleClick);
-      });
-      applyAllKnownHighlights();
     }
     function estimateSpacerHeight(start, end) {
-      if (end < start) return 0;
-      const size = pageViewportSize(currentPage || 1);
-      const rowHeight = Math.max(340, size.height + 42);
-      return (end - start + 1) * rowHeight;
+      const lo = Number(start || 0);
+      const hi = Number(end || 0);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi < lo) return 0;
+      const rowHeight = pageRowHeightEstimate(currentPage || 1);
+      if (!Number.isFinite(rowHeight) || rowHeight <= 0) return 0;
+      const span = Math.max(0, Math.floor(hi) - Math.floor(lo) + 1);
+      return Math.min(span, 4000) * rowHeight;
     }
     function estimatedPageFromScroll(viewer) {
       const count = Math.max(1, totalPages || knownPageCount(currentPage));
-      const size = pageViewportSize(currentPage || 1);
-      const rowHeight = Math.max(340, size.height + 42);
+      const rowHeight = pageRowHeightEstimate(currentPage || 1);
       return Math.max(1, Math.min(count, Math.floor(Number(viewer.scrollTop || 0) / rowHeight) + 1));
     }
     function skeletonPageCount() {
       return document.querySelectorAll(".pr-page-container").length;
+    }
+    function pageInSkeletonWindow(pageNumber) {
+      const page = Number(pageNumber || 0);
+      return page >= Number(skeletonWindow.start || 1) && page <= Number(skeletonWindow.end || 1);
+    }
+    function ensureSkeletonForPage(pageNumber, preserveScroll = false) {
+      if (pageInSkeletonWindow(pageNumber) && pageElement(pageNumber)) return false;
+      const viewer = document.getElementById("viewer");
+      const previousTop = Number(viewer?.scrollTop || 0);
+      renderDocumentSkeleton();
+      setupIntersectionObserver();
+      if (viewer) {
+        const before = estimateSpacerHeight(1, Math.max(0, Number(skeletonWindow.start || 1) - 1));
+        viewer.scrollTop = preserveScroll ? previousTop : before;
+      }
+      return true;
     }
     function refreshForArgsUpdate(options = {}) {
       const preserveTranslationScroll = options.preserveTranslationScroll === true || userAnchorLocked() || readerMode === "compare";
@@ -4440,7 +4982,7 @@
           if (pageNumber) renderAround(pageNumber);
         });
         scheduleViewportUpdate();
-      }, { root: viewer, rootMargin: "1080px 0px", threshold: [0, .01, .25, .5, .75, 1] });
+      }, { root: viewer, rootMargin: "360px 0px", threshold: [0, .01, .25, .5, .75, 1] });
       document.querySelectorAll(".pr-page-container").forEach((page) => observer.observe(page));
     }
     function pageDomReady(pageNumber, statusName = "") {
@@ -4469,18 +5011,18 @@
       }, 1800);
     }
     function renderAround(pageNumber, options = {}) {
-      if (!pageElement(pageNumber)) {
-        currentPage = Math.max(1, Number(pageNumber || currentPage || 1));
-        renderDocumentSkeleton();
-        setupIntersectionObserver();
+      const targetPage = Math.max(1, Number(pageNumber || currentPage || 1));
+      if (!pageElement(targetPage)) {
+        currentPage = targetPage;
+        ensureSkeletonForPage(targetPage, Boolean(options.preserveScroll));
       }
       const extra = overscanPages();
-      const start = Math.max(1, pageNumber - extra);
-      const end = Math.min(totalPages || knownPageCount(pageNumber), pageNumber + extra);
+      const start = Math.max(Number(skeletonWindow.start || 1), targetPage - extra);
+      const end = Math.min(Number(skeletonWindow.end || targetPage), totalPages || knownPageCount(targetPage), targetPage + extra);
       for (let page = start; page <= end; page += 1) {
         ensurePageRendered(page, options);
       }
-      releaseFarPages(pageNumber);
+      releaseFarPages(targetPage);
       scheduleLoadingWatchdog();
       placeSelectionDock();
     }
@@ -4860,7 +5402,9 @@
       renderHighlights(pageNumber);
     }
     function applyAllKnownHighlights() {
-      for (let pageNumber = 1; pageNumber <= (totalPages || knownPageCount(currentPage)); pageNumber += 1) {
+      const start = Math.max(1, Number(skeletonWindow.start || 1));
+      const end = Math.min(totalPages || knownPageCount(currentPage), Number(skeletonWindow.end || start));
+      for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
         renderHighlights(pageNumber);
       }
     }
@@ -5133,48 +5677,80 @@
         .map((row) => text(row.segment_id))
         .filter(Boolean);
     }
+    function searchSnippet(value, query, limit = 220) {
+      const clean = text(value).replace(/\s+/g, " ").trim();
+      if (!clean) return "";
+      const needle = text(query).trim().toLowerCase();
+      const hit = needle ? clean.toLowerCase().indexOf(needle) : -1;
+      if (hit < 0) return clean.slice(0, limit);
+      const context = Math.max(0, Math.floor((limit - needle.length) / 2));
+      let start = Math.max(0, hit - context);
+      let end = Math.min(clean.length, start + limit);
+      start = Math.max(0, end - limit);
+      const prefix = start > 0 ? "..." : "";
+      const suffix = end < clean.length ? "..." : "";
+      return `${prefix}${clean.slice(start, end)}${suffix}`;
+    }
     async function runSearch() {
       const query = text(document.getElementById("searchInput")?.value).trim().toLowerCase();
       if (!query) return;
       lastSearchQuery = query;
       searchResults = [];
+      status(label("searching"));
       for (const outline of outlineRows()) {
         const title = text(outline.title);
         if (title.toLowerCase().includes(query)) {
-          searchResults.push({ page: Number(outline.page || 0), title, snippet: title });
+          const page = Number(outline.page || 0);
+          searchResults.push({ page, title, snippet: title, locator: page ? `${label("page")} ${page}` : "" });
         }
       }
       for (const unit of translationUnits()) {
-        const body = `${text(unit.source_text)} ${text(unit.translated_text)}`.toLowerCase();
+        const source = normalizeSourceText(unit.source_text);
+        const translated = flowText(unit.translated_text);
+        const body = `${source} ${translated}`.toLowerCase();
         if (body.includes(query)) {
+          const page = Number(unit.page || 0);
           searchResults.push({
-            page: Number(unit.page || 0),
-            title: text(unit.locator || `${label("page")} ${unit.page || ""}`),
-            snippet: text(unit.source_text || unit.translated_text).replace(/\s+/g, " ").slice(0, 180),
+            page,
+            title: text(unit.locator || `${label("page")} ${page || ""}`),
+            locator: text(unit.locator || (page ? `${label("page")} ${page}` : "")),
+            snippet: searchSnippet(translated || source, query),
           });
         }
       }
+      const seen = new Set();
+      searchResults = searchResults.filter((row) => {
+        const key = `${Number(row.page || 0)}:${text(row.title)}:${text(row.snippet).slice(0, 60)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 40);
+      activeLeftTab = "search";
+      refreshLeftRail();
+      if (searchResults.length) status(`${label("search")} · ${searchResults.length}`);
       for (let page = currentPage; page <= (totalPages || knownPageCount(currentPage)); page += 1) {
         const body = await pageText(page);
         if (body.toLowerCase().includes(query)) {
-          searchResults.unshift({ page, title: `${label("page")} ${page}`, snippet: body.replace(/\s+/g, " ").slice(0, 180) });
+          searchResults.unshift({ page, title: `${label("page")} ${page}`, locator: `${label("page")} ${page}`, snippet: searchSnippet(body, query) });
           activeLeftTab = "search";
           refreshLeftRail();
+          status(`${label("search")} · ${searchResults.length}`);
           return scrollToPage(page);
         }
       }
       for (let page = 1; page < currentPage; page += 1) {
         const body = await pageText(page);
         if (body.toLowerCase().includes(query)) {
-          searchResults.unshift({ page, title: `${label("page")} ${page}`, snippet: body.replace(/\s+/g, " ").slice(0, 180) });
+          searchResults.unshift({ page, title: `${label("page")} ${page}`, locator: `${label("page")} ${page}`, snippet: searchSnippet(body, query) });
           activeLeftTab = "search";
           refreshLeftRail();
+          status(`${label("search")} · ${searchResults.length}`);
           return scrollToPage(page);
         }
       }
       activeLeftTab = "search";
       refreshLeftRail();
-      status("No match");
+      status(searchResults.length ? `${label("search")} · ${searchResults.length}` : label("no_match"));
     }
     function shellEl() {
       return document.getElementById("readerShell") || document.querySelector(".pr-shell");
@@ -5265,13 +5841,8 @@
       if (viewer && options.smooth === false) viewer.style.scrollBehavior = "auto";
       if (!pageElement(next)) {
         if (viewer) viewer.style.scrollBehavior = "auto";
-        renderDocumentSkeleton();
-        setupIntersectionObserver();
-        if (viewer) {
-          const spacer = document.querySelector('[data-spacer="before"]');
-          viewer.scrollTop = spacer ? Number.parseFloat(spacer.style.height || "0") : viewer.scrollTop;
-          window.setTimeout(() => { viewer.style.scrollBehavior = previousScrollBehavior; }, 30);
-        }
+        ensureSkeletonForPage(next, false);
+        if (viewer) window.setTimeout(() => { viewer.style.scrollBehavior = previousScrollBehavior; }, 30);
       }
       const page = pageElement(next);
       if (page) page.scrollIntoView({ block: "start", behavior: options.smooth === false ? "auto" : "smooth" });
@@ -5395,6 +5966,9 @@
       readerMode = text(settings().reader_mode || local.reader_mode || readerMode || "pdf") || "pdf";
       activeTab = text(settings().active_tab || local.active_tab || activeTab || "notes") || "notes";
       if (!["notes", "translation", "review", "claims"].includes(activeTab)) activeTab = "notes";
+      if (activeTab === "review" && sidePanelCollapsed && hasReviewContent() && !localStateFresh(local)) {
+        sidePanelCollapsed = false;
+      }
       notesFilterCurrentPage = typeof local.notes_filter_current_page === "boolean" ? local.notes_filter_current_page : true;
       syncDockUiFromLocal(local);
       compareSplitRatio = Math.max(25, Math.min(75, Number(settings().compare_split_ratio || local.compare_split_ratio || args.compare_split_ratio || 50)));
@@ -5417,6 +5991,9 @@
       setupIntersectionObserver();
       await renderAfterLayout(currentPage, { force: true });
       if (!pdfBase64 && !pdfUrl) {
+        if (readerMode === "translation" && !hasFullTranslationContext()) {
+          schedulePayloadRefresh(20, { fullTranslation: true });
+        }
         return;
       }
       if (!window.pdfjsLib) {
@@ -5458,6 +6035,9 @@
         renderDocumentSkeleton();
         setupIntersectionObserver();
         await renderAfterLayout(currentPage, { force: true });
+        if (readerMode === "translation" && !hasFullTranslationContext()) {
+          schedulePayloadRefresh(20, { fullTranslation: true });
+        }
         if (preserveViewState) {
           currentPage = preserveViewState.page || currentPage;
           updatePageUi();
@@ -5487,6 +6067,9 @@
         renderDocumentSkeleton();
         setupIntersectionObserver();
         await renderAfterLayout(currentPage, { force: true });
+        if (readerMode === "translation" && !hasFullTranslationContext()) {
+          schedulePayloadRefresh(20, { fullTranslation: true });
+        }
         status(`${label("pdf_preview_mode")} · ${error && error.message ? error.message : error}`);
       }
     }
@@ -5528,15 +6111,15 @@
         return null;
       }
     }
-    function schedulePayloadRefresh(wait = 240) {
+    function schedulePayloadRefresh(wait = 240, options = {}) {
       if (payloadRefreshTimer) window.clearTimeout(payloadRefreshTimer);
       payloadRefreshTimer = window.setTimeout(() => {
         payloadRefreshTimer = null;
         if (payloadLoading) {
-          schedulePayloadRefresh(wait);
+          schedulePayloadRefresh(wait, options);
           return;
         }
-        loadReaderPayload({ preserveView: true }).catch((error) => {
+        loadReaderPayload({ preserveView: true, ...asObj(options) }).catch((error) => {
           status(error && error.message ? error.message : text(error));
         });
       }, wait);
@@ -5552,24 +6135,39 @@
         const params = new URLSearchParams();
         if (currentPage) params.set("page", String(currentPage));
         if (requestedPages.length) params.set("pages", requestedPages.join(","));
+        if (wantsFullTranslationContext(options)) params.set("full_translation", "1");
+        if (!wantsFullDocumentPayload()) params.set("full_document", "0");
         const query = params.toString() ? `?${params.toString()}` : "";
+        const headers = authHeaders({});
+        if (payloadEtag && options.preserveView !== false && options.force !== true) {
+          headers["If-None-Match"] = payloadEtag;
+        }
         const response = await fetch(apiPath(`/api/${sourcePath()}/payload${query}`), {
           credentials: "same-origin",
+          headers,
         });
         if (response.status === 401) {
           showExpiredSession();
+          return;
+        }
+        if (response.status === 304) {
+          // payload unchanged — keep current args, do nothing.
+          requestedPages.forEach((page) => requestedContextPages.delete(page));
           return;
         }
         if (!response.ok) {
           const message = await response.text();
           throw new Error(message || response.statusText || "Reader payload failed");
         }
+        const newEtag = response.headers.get("ETag") || "";
+        if (newEtag) payloadEtag = newEtag;
         const payload = await response.json();
         await onRender({ data: { args: payload }, preserveView: options.preserveView === true });
         requestedPages.forEach((page) => requestedContextPages.delete(page));
         if (options.preserveView) {
           updatePageUi();
         }
+        scheduleBulkTranslationsFetch(40, { force: Boolean(options.fullTranslation) });
       } finally {
         payloadLoading = false;
       }
@@ -5600,7 +6198,9 @@
         debugState.lastSourceSignature = sourceSignature;
         const expectedPages = Math.max(1, totalPages || knownPageCount(currentPage));
         const realPageNodes = skeletonPageCount();
-        const virtualized = realPageNodes > 0 && realPageNodes <= (overscanPages() * 2 + 1);
+        const virtualized = realPageNodes > 0 && (
+          document.querySelector("[data-spacer]") || realPageNodes <= Math.min(expectedPages, skeletonExtraPages() * 2 + 1)
+        );
         const skeletonMismatch = realPageNodes > 0 && !virtualized && realPageNodes !== expectedPages;
         const hasShell = Boolean(document.getElementById("continuousDocument"));
         const needsLoad = !hasShell || sourceSignature !== text(onRender.lastSignature) || skeletonMismatch;
@@ -5617,9 +6217,22 @@
         refreshActionStatus();
         maybeStartPreparationTask();
       } catch (error) {
-        renderShell(label("pdf_error"));
+        try { console.error("onRender failed", error); } catch {}
+        const message = error && error.message ? error.message : text(error);
+        try { renderShell(label("pdf_error")); } catch (shellError) {
+          try { console.error("renderShell fallback failed", shellError); } catch {}
+          const root = document.getElementById("root");
+          if (root) {
+            root.innerHTML = `<div style="padding:24px;font-family:system-ui;color:#7a1f1f;line-height:1.5">
+              <strong>${esc(label("pdf_error") || "Reader error")}</strong>
+              <div style="margin-top:8px;font-size:.85rem;color:#444">${esc(message || "render failed")}</div>
+              <button style="margin-top:16px;padding:6px 12px" onclick="window.location.reload()">Reload</button>
+            </div>`;
+          }
+          return;
+        }
         const viewer = document.querySelector(".pr-viewer");
-        if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(label("pdf_error"))}<br>${esc(error && error.message ? error.message : error)}</div>`;
+        if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(label("pdf_error"))}<br>${esc(message)}</div>`;
       }
     }
     window.addEventListener("resize", () => {
@@ -5630,11 +6243,26 @@
       }, 180);
     });
     window.addEventListener("beforeunload", sendProgressBeacon);
+    window.addEventListener("error", (event) => {
+      try { console.error("reader window.error", event && event.error); } catch {}
+    });
     renderShell("Loading PDF...");
     loadReaderPayload().catch((error) => {
-      renderShell(label("pdf_error"));
+      try { console.error("initial loadReaderPayload failed", error); } catch {}
+      const message = error && error.message ? error.message : text(error);
+      try { renderShell(label("pdf_error")); } catch {
+        const root = document.getElementById("root");
+        if (root) {
+          root.innerHTML = `<div style="padding:24px;font-family:system-ui;color:#7a1f1f;line-height:1.5">
+            <strong>${esc(label("pdf_error") || "Reader error")}</strong>
+            <div style="margin-top:8px;font-size:.85rem;color:#444">${esc(message || "load failed")}</div>
+            <button style="margin-top:16px;padding:6px 12px" onclick="window.location.reload()">Reload</button>
+          </div>`;
+        }
+        return;
+      }
       const viewer = document.querySelector(".pr-viewer");
-      if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(error && error.message ? error.message : error)}</div>`;
+      if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(message)}</div>`;
     });
   </script>
 </body>
