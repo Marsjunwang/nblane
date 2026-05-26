@@ -94,7 +94,7 @@ def _render_source_form(ctx, inbox, *, source=None, prefix: str) -> None:
                 index=SOURCE_STATUSES.index(current_status)
                 if current_status in SOURCE_STATUSES
                 else 0,
-                format_func=_status_label,
+                format_func=lambda status: _status_label(ctx, status),
             )
         with c3:
             current_visibility = getattr(existing, "visibility", "private")
@@ -279,5 +279,4 @@ def _render_candidate_preview(ctx, inbox) -> None:
         ),
         language="yaml",
     )
-
 

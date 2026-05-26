@@ -989,7 +989,7 @@ def _render_library_bulk_actions(ctx, selected_rows: list[str], node_options: di
                 _l(ui, "set_status", "Set status"),
                 SOURCE_STATUSES,
                 key=f"bulk_status:{selected}",
-                format_func=_status_label,
+                format_func=lambda status: _status_label(ctx, status),
             )
             if st.button(
                 _l(ui, "set_status", "Set status"),
@@ -1262,7 +1262,7 @@ def _render_paper_detail_panel(ctx,
                 _l(ui, "set_status", "Set status"),
                 SOURCE_STATUSES,
                 index=status_index,
-                format_func=_status_label,
+                format_func=lambda status: _status_label(ctx, status),
             )
             next_node = st.selectbox(
                 _l(ui, "move_to_node", "Move to node"),
@@ -1754,5 +1754,4 @@ def _render_paper_library_streamlit_component(ctx, inbox, *, include_import: boo
             next((row for row in rows if str(row.get("id")) == detail_id), {}),
         )
         _render_paper_detail_panel(ctx, inbox, source, detail_row, node_options)
-
 
