@@ -26,6 +26,26 @@ def _l(ui: dict[str, str], key: str, default: str) -> str:
     return ui.get(key, default)
 
 
+def _applied_state(key: str, default: str = "") -> str:
+    """Return the applied (committed) value for a filter key.
+
+    Used by st.form-based filter bars: a temporary value lives under `key`,
+    and only after the user clicks "Apply" do we copy it to `f"{key}__applied"`.
+    Filter logic should always read the applied value so widget interaction
+    alone does not trigger a recompute on the next rerun.
+    """
+
+    return str(st.session_state.get(f"{key}__applied", default) or default)
+
+
+def _commit_applied_state(*keys: str) -> None:
+    """Copy the live widget value of each key into its `__applied` slot."""
+
+    for key in keys:
+        if key in st.session_state:
+            st.session_state[f"{key}__applied"] = st.session_state[key]
+
+
 _PENDING_IMPORT_WARNINGS_KEY = "research:pending_pdf_import_warnings"
 
 

@@ -203,6 +203,16 @@ def _context_segments(payload: dict[str, Any], segment_rows, *, limit: int = 30)
     return [segment.to_dict() for segment in segment_rows[:limit]]
 
 
+def _question_context_segments(payload: dict[str, Any], segment_rows) -> list[dict[str, Any]]:
+    picked = _selection_segments(payload, segment_rows)
+    if picked:
+        return picked
+    whole_paper_payload = dict(payload)
+    whole_paper_payload["full_paper"] = True
+    whole_paper_payload.setdefault("scope", "paper")
+    return _compact_segments_for_deep_read(whole_paper_payload, segment_rows)
+
+
 def _balanced_paper_segments(segment_rows, *, limit: int) -> list:
     """Sample segments across the paper instead of only the first pages."""
 
@@ -1409,14 +1419,31 @@ def _handle_reader_action_inner(
         question = _payload_text(payload, "question", "prompt", "text")
         if not question:
             raise ValueError("Reader question cannot be blank.")
+        qa_segments = _question_context_segments(payload, segment_rows)
+        has_selection_scope = bool(_selection_segments(payload, segment_rows))
+        source = load_research_sources(profile).by_id().get(source_id)
         ai_result = answer_paper_question(
             ctx.profile_name,
             source_id,
             question,
             payload={
-                "segments": _context_segments(payload, segment_rows, limit=30),
+                "source": _compact_source_for_deep_read(source, source_id),
+                "segments": qa_segments,
                 "annotations": [row.to_dict() for row in annotation_rows[:30]],
                 "chunks": [row.to_dict() for row in chunk_rows[:30]],
+                "scope": "selection" if has_selection_scope else "paper",
+                "full_paper": not has_selection_scope,
+                "paper_context": {
+                    "source_segments": len(segment_rows),
+                    "supplied_segments": len(qa_segments),
+                    "pages_covered": sorted(
+                        {
+                            int(row.get("page") or 0)
+                            for row in qa_segments
+                            if int(row.get("page") or 0) > 0
+                        }
+                    ),
+                },
             },
         )
         return ReaderActionResult(

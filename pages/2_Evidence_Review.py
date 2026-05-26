@@ -624,22 +624,21 @@ def _render_done_ingest(review: dict) -> None:
     if not pending_done:
         st.caption(ui["done_queue_empty"])
     else:
-        pick = st.multiselect(
-            ui["done_pick"],
-            options=list(range(len(pending_done))),
-            format_func=lambda i: pending_done[i].title,
-            key=f"evidence_review_done_pick_{selected}",
-        )
-        allow_status = st.checkbox(
-            ui["done_allow_status"],
-            value=False,
-            key=allow_status_key,
-        )
-        st.caption(ui["done_allow_status_help"])
-        if st.button(
-            ui["done_generate"],
-            key=f"evidence_review_done_generate_{selected}",
-        ) and pick:
+        with st.form(f"evidence_review_done_form_{selected}", clear_on_submit=False):
+            pick = st.multiselect(
+                ui["done_pick"],
+                options=list(range(len(pending_done))),
+                format_func=lambda i: pending_done[i].title,
+                key=f"evidence_review_done_pick_{selected}",
+            )
+            allow_status = st.checkbox(
+                ui["done_allow_status"],
+                value=False,
+                key=allow_status_key,
+            )
+            st.caption(ui["done_allow_status_help"])
+            generate_clicked = st.form_submit_button(ui["done_generate"])
+        if generate_clicked and pick:
             chosen = [pending_done[i] for i in pick]
             ai_backend = kanban_ai_backend(selected)
             if ai_backend == "llm" and not llm_client.is_configured():
@@ -884,23 +883,62 @@ def _render_done_ingest(review: dict) -> None:
     st.rerun()
 
 
+def _paginated_show(items: list, *, key: str, page_size: int = 20) -> list:
+    """Return a slice of `items` based on session_state[`key`] page count.
+
+    Renders a "Show more" / "Show less" pair below the rendered slice (call site
+    is responsible for the actual rendering of the slice). Use after the slice
+    is already rendered.
+    """
+
+    total = len(items)
+    pages = max(1, int(st.session_state.get(key, 1) or 1))
+    visible = pages * page_size
+    return items[: min(visible, total)]
+
+
+def _paginated_controls(items: list, *, key: str, page_size: int = 20) -> None:
+    total = len(items)
+    pages = max(1, int(st.session_state.get(key, 1) or 1))
+    shown = min(pages * page_size, total)
+    if total <= page_size:
+        return
+    cols = st.columns([1, 1, 6])
+    with cols[0]:
+        if shown < total and st.button(
+            f"Show more ({shown}/{total})",
+            key=f"{key}__more",
+            use_container_width=True,
+        ):
+            st.session_state[key] = pages + 1
+            st.rerun()
+    with cols[1]:
+        if pages > 1 and st.button("Reset", key=f"{key}__reset", use_container_width=True):
+            st.session_state[key] = 1
+            st.rerun()
+
+
 def _render_review_lists(review: dict) -> None:
     needs_review = list(review.get("needs_review") or [])
     st.markdown(f"**{ui['review_rows_title']}**")
     if not needs_review:
         st.caption(ui["review_rows_empty"])
-    for row in needs_review[:8]:
+    needs_key = f"evidence_review_needs_pages_{selected}"
+    for row in _paginated_show(needs_review, key=needs_key):
         st.caption(
             f"- `{row['id']}` {row['title']} - "
             f"{row.get('review_reason', '')}"
         )
+    _paginated_controls(needs_review, key=needs_key)
 
     unlinked = list(review.get("unlinked") or [])
     st.markdown(f"**{ui['unlinked_rows_title']}**")
     if not unlinked:
         st.caption(ui["unlinked_rows_empty"])
-    for row in unlinked[:8]:
+    unlinked_key = f"evidence_review_unlinked_pages_{selected}"
+    for row in _paginated_show(unlinked, key=unlinked_key):
         st.caption(f"- `{row['id']}` {row['title']}")
+    _paginated_controls(unlinked, key=unlinked_key)
 
 
 def _render_pool_form(
@@ -1090,7 +1128,70 @@ def _render_pool_editor(review: dict) -> None:
     if not entries:
         st.caption(ui["pool_empty"])
         return
-    for index, row in enumerate(entries):
+    search_key = f"evidence_review_pool_search_{selected}"
+    sort_key = f"evidence_review_pool_sort_{selected}"
+    show_deprecated_key = f"evidence_review_pool_show_deprecated_{selected}"
+    f1, f2, f3 = st.columns([3, 2, 2])
+    with f1:
+        query = st.text_input(
+            ui.get("pool_search", "Search id / title / claim"),
+            key=search_key,
+        ).strip().lower()
+    with f2:
+        sort_choice = st.selectbox(
+            ui.get("pool_sort", "Sort by"),
+            options=["title", "id", "status", "updated_at"],
+            format_func=lambda v: ui.get(f"pool_sort_{v}", v.replace("_", " ").title()),
+            key=sort_key,
+        )
+    with f3:
+        show_deprecated = st.checkbox(
+            ui.get("pool_show_deprecated", "Include deprecated"),
+            value=False,
+            key=show_deprecated_key,
+        )
+
+    def _matches(row: dict) -> bool:
+        if not show_deprecated and bool(row.get("deprecated", False)):
+            return False
+        if not query:
+            return True
+        haystacks = [
+            str(row.get(field, "") or "").lower()
+            for field in (
+                "id",
+                "title",
+                "claim",
+                "summary",
+                "status",
+                "review_status",
+                "public_readiness",
+            )
+        ]
+        return any(query in piece for piece in haystacks)
+
+    indexed_entries = [(index, row) for index, row in enumerate(entries) if _matches(row)]
+
+    sort_funcs = {
+        "title": lambda pair: str(pair[1].get("title", "") or "").lower(),
+        "id": lambda pair: str(pair[1].get("id", "") or "").lower(),
+        "status": lambda pair: (
+            str(pair[1].get("review_status", "") or "").lower(),
+            str(pair[1].get("public_readiness", "") or "").lower(),
+            str(pair[1].get("status", "") or "").lower(),
+        ),
+        "updated_at": lambda pair: str(pair[1].get("updated_at", "") or ""),
+    }
+    indexed_entries.sort(key=sort_funcs.get(sort_choice, sort_funcs["title"]))
+
+    if not indexed_entries:
+        st.caption(ui.get("pool_search_empty", "No evidence matches the current filters."))
+        return
+
+    pages_key = f"evidence_review_pool_pages_{selected}"
+    visible_pairs = _paginated_show(indexed_entries, key=pages_key, page_size=20)
+
+    for index, row in visible_pairs:
         title = _row_label(row)
         if bool(row.get("deprecated", False)):
             title = f"{title} (deprecated)"
@@ -1108,6 +1209,7 @@ def _render_pool_editor(review: dict) -> None:
                 ui["pool_deprecated"] if deprecated else ui["pool_updated"],
             )
             st.rerun()
+    _paginated_controls(indexed_entries, key=pages_key, page_size=20)
 
 
 def _render_links(review: dict) -> None:
@@ -1157,8 +1259,10 @@ def _render_links(review: dict) -> None:
     unlinked = list(review.get("unlinked") or [])
     if not unlinked:
         st.caption(ui["unlinked_rows_empty"])
-    for row in unlinked[:12]:
+    unlinked_links_key = f"evidence_review_links_unlinked_pages_{selected}"
+    for row in _paginated_show(unlinked, key=unlinked_links_key):
         st.caption(f"- `{row['id']}` {row['title']}")
+    _paginated_controls(unlinked, key=unlinked_links_key)
 
 
 def _claim_source_score(row: dict) -> tuple[int, str]:

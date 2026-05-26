@@ -74,7 +74,9 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
     ),
     "research.paper_qa": (
         "Answer the question only from supplied paper refs. If no supporting "
-        "refs are present, return a warning and do not guess."
+        "refs are present, return a warning and do not guess. When payload "
+        "scope is paper/full_paper, treat the supplied segments as a compact "
+        "whole-paper context and cite the refs that support the answer."
     ),
     "research.paper_claim_extract": (
         "Extract claim candidates only from supplied paper context. Every "

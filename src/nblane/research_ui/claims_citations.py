@@ -57,6 +57,8 @@ from nblane.web_shared import (
 
 from .context import ResearchContext
 from ._helpers import (
+    _applied_state,
+    _commit_applied_state,
     _l,
     _node_options,
     _paper_library_workspace_url,
@@ -80,19 +82,66 @@ def _render_claims_citations(ctx, inbox) -> None:
         return
     source_options = [source.id for source in inbox.sources]
     source_key = f"research_cc_source:{selected}"
+    status_options = ["", "draft", "ready", "promoted", "dismissed"]
+    status_key = f"research_claim_status_filter:{selected}"
+    queue_options = ["", "missing_citation", "quote_warning", "ready", "promoted"]
+    queue_key = f"research_claim_queue_filter:{selected}"
+
     if str(st.session_state.get(source_key) or "") not in source_options:
         st.session_state.pop(source_key, None)
-    source_id = st.selectbox(
-        ui["source_id"],
-        options=source_options,
-        format_func=lambda sid: next(
-            (source.title or source.id for source in inbox.sources if source.id == sid),
-            sid,
-        ),
-        key=source_key,
-    )
+        st.session_state.pop(f"{source_key}__applied", None)
+    if str(st.session_state.get(status_key) or "") not in status_options:
+        st.session_state.pop(status_key, None)
+        st.session_state.pop(f"{status_key}__applied", None)
+    if str(st.session_state.get(queue_key) or "") not in queue_options:
+        st.session_state.pop(queue_key, None)
+        st.session_state.pop(f"{queue_key}__applied", None)
+
+    if not _applied_state(source_key) and source_options:
+        st.session_state[f"{source_key}__applied"] = source_options[0]
+
+    with st.form(f"research_cc_filter_form:{selected}", clear_on_submit=False):
+        f1, f2, f3 = st.columns([2, 1, 1])
+        with f1:
+            st.selectbox(
+                ui["source_id"],
+                options=source_options,
+                format_func=lambda sid: next(
+                    (source.title or source.id for source in inbox.sources if source.id == sid),
+                    sid,
+                ),
+                key=source_key,
+            )
+        with f2:
+            st.selectbox(
+                _l(ui, "claim_status_filter", "Claim status filter"),
+                options=status_options,
+                format_func=lambda value: _l(ui, "all_statuses", "All statuses") if not value else value,
+                key=status_key,
+            )
+        with f3:
+            st.selectbox(
+                _l(ui, "claim_queue_filter", "Review queue"),
+                options=queue_options,
+                format_func=lambda value: {
+                    "": _l(ui, "all_queues", "All queues"),
+                    "missing_citation": _l(ui, "missing_citation", "Missing citation"),
+                    "quote_warning": _l(ui, "quote_warning", "Quote warning"),
+                    "ready": _l(ui, "ready_claims", "Ready claims"),
+                    "promoted": _l(ui, "promoted_claims", "Promoted claims"),
+                }.get(value, value),
+                key=queue_key,
+            )
+        applied = st.form_submit_button(_l(ui, "apply_filters", "Apply filters"))
+        if applied:
+            _commit_applied_state(source_key, status_key, queue_key)
+
+    source_id = _applied_state(source_key, source_options[0] if source_options else "")
+    if source_id not in source_options:
+        source_id = source_options[0] if source_options else ""
     source = inbox.by_id().get(source_id)
     if source is None:
+        st.caption(_l(ui, "claim_filter_pick_source", "Pick a source and click Apply to load claims."))
         return
     chunks = load_chunks(_pdir)
     source_chunks = [chunk for chunk in chunks if chunk.source_id == source_id]
@@ -100,32 +149,8 @@ def _render_claims_citations(ctx, inbox) -> None:
     claim_rows = load_research_claims(_pdir)
     claim_ids = [claim.id for claim in claim_rows]
     citation_rows = load_research_citations(_pdir)
-    status_options = ["", "draft", "ready", "promoted", "dismissed"]
-    status_key = f"research_claim_status_filter:{selected}"
-    if str(st.session_state.get(status_key) or "") not in status_options:
-        st.session_state.pop(status_key, None)
-    status_filter = st.selectbox(
-        _l(ui, "claim_status_filter", "Claim status filter"),
-        options=status_options,
-        format_func=lambda value: _l(ui, "all_statuses", "All statuses") if not value else value,
-        key=status_key,
-    )
-    queue_options = ["", "missing_citation", "quote_warning", "ready", "promoted"]
-    queue_key = f"research_claim_queue_filter:{selected}"
-    if str(st.session_state.get(queue_key) or "") not in queue_options:
-        st.session_state.pop(queue_key, None)
-    queue_filter = st.selectbox(
-        _l(ui, "claim_queue_filter", "Review queue"),
-        options=queue_options,
-        format_func=lambda value: {
-            "": _l(ui, "all_queues", "All queues"),
-            "missing_citation": _l(ui, "missing_citation", "Missing citation"),
-            "quote_warning": _l(ui, "quote_warning", "Quote warning"),
-            "ready": _l(ui, "ready_claims", "Ready claims"),
-            "promoted": _l(ui, "promoted_claims", "Promoted claims"),
-        }.get(value, value),
-        key=queue_key,
-    )
+    status_filter = _applied_state(status_key)
+    queue_filter = _applied_state(queue_key)
     review = build_research_claim_review_payload(
         _pdir,
         source_id=source_id,

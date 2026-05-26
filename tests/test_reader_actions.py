@@ -777,6 +777,35 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(result.data["structured"], {"answer": "42"})
         self.assertEqual(result.warnings, ["check"])
 
+    def test_ask_paper_uses_whole_paper_context_without_selection(self) -> None:
+        ai_result = SimpleNamespace(structured={"answer": "whole"}, warnings=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:{index}",
+                    source_id=ctx.source_id,
+                    page=max(1, (index + 2) // 3),
+                    order=index,
+                    text=f"Passage {index}",
+                    text_hash=text_hash(f"Passage {index}"),
+                )
+                for index in range(1, 91)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, ctx.source_id, segments)
+            with patch("nblane.core.reader_actions.answer_paper_question", return_value=ai_result) as ask:
+                handle_reader_action(ctx, "ask_paper", {"question": "文章讲了什么"})
+
+        payload = ask.call_args.kwargs["payload"]
+        segment_refs = [row["segment_id"] for row in payload["segments"]]
+        self.assertGreater(len(segment_refs), 30)
+        self.assertIn("seg:90", segment_refs)
+        self.assertEqual(payload["scope"], "paper")
+        self.assertTrue(payload["full_paper"])
+        self.assertEqual(payload["paper_context"]["source_segments"], 90)
+        self.assertEqual(payload["paper_context"]["supplied_segments"], len(segment_refs))
+
     def test_analyze_paper_saves_normalized_review_schema(self) -> None:
         ai_result = SimpleNamespace(
             ok=True,

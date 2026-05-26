@@ -4,8 +4,9 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const e2eDir = __dirname;
+const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(e2eDir, "../..");
 const profileName = process.env.NBLANE_E2E_8502_PROFILE || "e2e-paper-library";
 let tempRoot = "";
