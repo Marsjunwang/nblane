@@ -1342,7 +1342,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
     setResults(nextResults);
     setSelectedIds(new Set(
       nextResults
-        .filter((candidate) => !cleanText(candidate.imported_source_id) && candidateHasPdf(candidate))
+        .filter((candidate) => candidateHasPdf(candidate))
         .map((candidate) => cleanText(candidate.candidate_id))
         .filter(Boolean),
     ));
@@ -1482,14 +1482,20 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
           status: statusValue,
           visibility: visibilityValue,
           download_pdf: downloadPdf,
+          replace_existing: true,
         }),
       });
       const imported = asArray(data.imported).map(cleanText).filter(Boolean);
-      setResults((rows) => rows.map((row) => (
-        selectedIds.has(cleanText(row.candidate_id))
-          ? { ...row, imported_source_id: imported[0] || "imported" }
-          : row
-      )));
+      let importedIndex = 0;
+      setResults((rows) => rows.map((row) => {
+        if (!selectedIds.has(cleanText(row.candidate_id))) {
+          return row;
+        }
+        const existingId = cleanText(row.imported_source_id);
+        const importedId = existingId || imported[importedIndex] || "imported";
+        importedIndex += 1;
+        return { ...row, imported_source_id: importedId };
+      }));
       setSelectedIds(new Set());
       const importWarnings = asArray(data.warnings).map(cleanText).filter(Boolean);
       setMessage([
@@ -1939,14 +1945,14 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                   <span>Download PDF</span>
                 </label>
                 <button type="button" className="paper-discovery-import" disabled={busy || !selectedCount} onClick={importSelected}>
-                  Import selected ({selectedCount})
+                  Import / update selected ({selectedCount})
                 </button>
               </div>
               <div className="paper-discovery-card-list">
                 {results.map((candidate) => {
                   const candidateId = cleanText(candidate.candidate_id);
                   const importedId = cleanText(candidate.imported_source_id);
-                  const disabled = Boolean(importedId) || !candidateHasPdf(candidate);
+                  const disabled = !candidateHasPdf(candidate);
                   const overview = cleanText(candidate.ai_summary);
                   const selectionReason = cleanText(candidate.why_relevant);
                   const explanationLinks = candidateExplanationLinks(candidate);
@@ -1963,7 +1969,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                       <div className="paper-discovery-card-body">
                         <div className="paper-discovery-card-top">
                           <strong>{cleanText(candidate.title || candidateId)}</strong>
-                          <span>{importedId ? "Imported" : "PDF ready"}</span>
+                          <span>{importedId ? "Update local" : "PDF ready"}</span>
                         </div>
                         {candidateMeta(candidate) ? <p className="paper-discovery-meta">{candidateMeta(candidate)}</p> : null}
                         {overview ? (

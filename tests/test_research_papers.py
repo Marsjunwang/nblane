@@ -3043,6 +3043,71 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(sources[imported[0]].metadata["ai_summary"], "This is a plain-language overview for coarse reading.")
         self.assertEqual(sources[imported[0]].metadata["explanation_links"][0]["source"], "Zhihu")
 
+    def test_import_selected_search_results_can_update_existing_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            inbox = load_research_sources(profile)
+            existing = inbox.by_id()["source:paper:grounded"]
+            existing.title = "Old Grounded Paper"
+            existing.url = "https://example.com/old"
+            existing.status = "reading"
+            existing.visibility = "private"
+            existing.tags = ["kept"]
+            existing.library_node_refs = ["paper-node:old"]
+            existing.summary = "Old abstract."
+            existing.notes = "Keep my local notes."
+            existing.metadata = {"doi": "10.1000/update", "last_read_page": 7}
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                save_research_sources(profile, inbox)
+
+            result = {
+                "candidate_id": "candidate-update",
+                "title": "Updated Grounded Paper",
+                "authors": ["Alice", "Bob"],
+                "year": "2026",
+                "doi": "10.1000/update",
+                "canonical_url": "https://example.com/new",
+                "pdf_url": "https://example.com/new.pdf",
+                "tags": ["vla"],
+                "abstract": "Fresh abstract from search.",
+                "why_relevant": "Better search metadata.",
+                "ai_summary": "Plain-language refresh.",
+                "imported_source_id": "source:paper:grounded",
+            }
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                changed = import_paper_search_results(
+                    profile,
+                    [result],
+                    ["candidate-update"],
+                    {
+                        "replace_existing": True,
+                        "status": "inbox",
+                        "visibility": "public",
+                        "tags": ["search"],
+                        "library_node_refs": ["paper-node:new"],
+                    },
+                )
+            sources = load_research_sources(profile).by_id()
+            source = sources["source:paper:grounded"]
+
+        self.assertEqual(changed, ["source:paper:grounded"])
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(source.title, "Updated Grounded Paper")
+        self.assertEqual(source.url, "https://example.com/new")
+        self.assertEqual(source.authors, ["Alice", "Bob"])
+        self.assertEqual(source.published, "2026")
+        self.assertEqual(source.summary, "Fresh abstract from search.")
+        self.assertEqual(source.status, "reading")
+        self.assertEqual(source.visibility, "private")
+        self.assertEqual(source.notes, "Keep my local notes.")
+        self.assertEqual(source.tags, ["kept", "search", "vla"])
+        self.assertEqual(source.library_node_refs, ["paper-node:old", "paper-node:new"])
+        self.assertEqual(source.metadata["open_access_pdf_url"], "https://example.com/new.pdf")
+        self.assertEqual(source.metadata["why_relevant"], "Better search metadata.")
+        self.assertEqual(source.metadata["ai_summary"], "Plain-language refresh.")
+        self.assertEqual(source.metadata["last_read_page"], 7)
+        self.assertIn("search_refreshed_at", source.metadata)
+
     def test_search_papers_with_codex_uses_structured_candidates_without_importing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))

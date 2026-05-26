@@ -1799,6 +1799,17 @@ async def paper_library_import(request: Request, profile: str):
     node_id = _clean_text(body.get("node_id") or body.get("library_node_ref"))
     status = _clean_text(body.get("status")) or "inbox"
     visibility = _clean_text(body.get("visibility")) or "private"
+    selected_set = set(selected_ids)
+    selected_existing_ids = {
+        _clean_text(item.get("imported_source_id"))
+        for item in candidates
+        if isinstance(item, dict)
+        and (
+            _clean_text(item.get("candidate_id")) in selected_set
+            or _clean_text(item.get("title")) in selected_set
+        )
+        and _clean_text(item.get("imported_source_id"))
+    }
     try:
         imported = await asyncio.to_thread(
             import_paper_search_results,
@@ -1813,6 +1824,7 @@ async def paper_library_import(request: Request, profile: str):
                 "goal_refs": _clean_list(body.get("goal_refs")),
                 "project_refs": _clean_list(body.get("project_refs")),
                 "download_pdf": bool(body.get("download_pdf", True)),
+                "replace_existing": _clean_bool(body.get("replace_existing"), True),
             },
         )
     except ValueError as exc:
@@ -1821,8 +1833,17 @@ async def paper_library_import(request: Request, profile: str):
             detail={"message": str(exc), "code": "import_failed", "retryable": False},
         ) from exc
     detail_id = imported[0] if imported else ""
+    updated = [source_id for source_id in imported if source_id in selected_existing_ids]
+    created = [source_id for source_id in imported if source_id not in set(updated)]
     pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
-    message = f"Imported {len(imported)} paper{'s' if len(imported) != 1 else ''}."
+    if created and updated:
+        message = f"Imported {len(created)} and updated {len(updated)} paper{'s' if len(imported) != 1 else ''}."
+    elif updated:
+        message = f"Updated {len(updated)} local paper{'s' if len(updated) != 1 else ''}."
+    elif created:
+        message = f"Imported {len(created)} paper{'s' if len(created) != 1 else ''}."
+    else:
+        message = "No selected papers changed."
     if pdf_warnings:
         message = f"{message} PDF needs attention: {pdf_warnings[0]}"
     payload = await asyncio.to_thread(
@@ -1839,6 +1860,7 @@ async def paper_library_import(request: Request, profile: str):
         {
             "ok": True,
             "imported": imported,
+            "updated": updated,
             "message": message,
             "warnings": pdf_warnings,
             "payload": payload,

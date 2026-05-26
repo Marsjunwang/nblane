@@ -8027,6 +8027,49 @@ def _existing_paper_pdf_digests(profile: str | Path, inbox: ResearchSourceInbox)
     return out
 
 
+def _update_existing_paper_from_search_result(
+    inbox: ResearchSourceInbox,
+    source_id: str,
+    result: PaperSearchResult,
+    *,
+    base_tags: list[str],
+    node_refs: list[str],
+    goal_refs: list[str],
+    project_refs: list[str],
+) -> ResearchSource:
+    """Refresh an existing paper source from a search candidate without losing local work."""
+
+    sources = inbox.by_id()
+    source = sources.get(_clean_text(source_id))
+    if source is None:
+        raise ValueError(f"Unknown research source: {source_id}")
+    metadata = dict(source.metadata or {})
+    metadata.update(result.source_metadata())
+    metadata["search_refreshed_at"] = _now()
+    if result.candidate_id:
+        metadata["search_candidate_id"] = result.candidate_id
+
+    fields: dict[str, object] = {
+        "kind": "paper",
+        "metadata": metadata,
+        "tags": _clean_list([*source.tags, *base_tags, *result.tags]),
+        "goal_refs": _clean_list([*source.goal_refs, *goal_refs]),
+        "project_refs": _clean_list([*source.project_refs, *project_refs]),
+        "library_node_refs": _clean_list([*source.library_node_refs, *node_refs]),
+    }
+    if result.title:
+        fields["title"] = result.title
+    if result.canonical_url:
+        fields["url"] = result.canonical_url
+    if result.authors:
+        fields["authors"] = result.authors
+    if result.year:
+        fields["published"] = result.year
+    if result.abstract:
+        fields["summary"] = result.abstract
+    return update_research_source(inbox, source.id, **fields)
+
+
 def mark_imported_paper_results(
     profile: str | Path,
     results: list[PaperSearchResult | dict],
@@ -8087,19 +8130,43 @@ def import_paper_search_results(
     goal_refs = _clean_list((options or {}).get("goal_refs"))
     project_refs = _clean_list((options or {}).get("project_refs"))
     allow_duplicates = bool((options or {}).get("allow_duplicates"))
+    replace_existing = bool((options or {}).get("replace_existing") or (options or {}).get("update_existing"))
     download_pdf = bool((options or {}).get("download_pdf"))
     title_index = _existing_paper_title_index(inbox)
     for result in candidates:
         if result.candidate_id not in selected and result.title not in selected:
             continue
-        duplicate = ""
+        sources_by_id = inbox.by_id()
+        duplicate = result.imported_source_id if result.imported_source_id in sources_by_id else ""
         for key in _duplicate_keys_for_result(result):
-            if key in existing_keys:
+            if not duplicate and key in existing_keys:
                 duplicate = existing_keys[key]
                 break
         if not duplicate:
             duplicate = _title_similarity_match(result.title, result.year, title_index)
         if duplicate and not allow_duplicates:
+            if not replace_existing:
+                continue
+            source = _update_existing_paper_from_search_result(
+                inbox,
+                duplicate,
+                result,
+                base_tags=base_tags,
+                node_refs=node_refs,
+                goal_refs=goal_refs,
+                project_refs=project_refs,
+            )
+            imported.append(source.id)
+            for key in _duplicate_keys_for_source(source):
+                existing_keys[key] = source.id
+            title_index = [row for row in title_index if row[0] != source.id]
+            title_index.append(
+                (
+                    source.id,
+                    _normalize_title_for_similarity(source.title),
+                    _published_year(source.published),
+                )
+            )
             continue
         source = add_research_source(
             inbox,
