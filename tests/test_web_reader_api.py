@@ -474,7 +474,7 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertNotIn("pr-translation-block.layout.empty", response.text)
         self.assertNotIn(".layout.missing", response.text)
         self.assertNotIn(".layout.failed", response.text)
-        self.assertIn("pollReaderTask(taskId, action), 2500", response.text)
+        self.assertIn("pollReaderTask(taskId, action), readerPollDelayMs()", response.text)
         self.assertIn("scope_refs: isPositionedTranslationScope(scopeType)", response.text)
         self.assertIn("syncCompareScroll", response.text)
         self.assertIn("annotationPopover", response.text)

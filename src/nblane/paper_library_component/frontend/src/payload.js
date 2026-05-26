@@ -72,6 +72,64 @@ export function filterItems(items, query) {
   return visit(items);
 }
 
+export function explanationLinksFrom(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const raw = Array.isArray(value)
+    ? value
+    : (source.explanation_links || source.reading_links || source.explainers);
+  const seen = new Set();
+  return asArray(raw)
+    .map((item) => {
+      if (typeof item === "string") {
+        const url = cleanText(item);
+        return { url, title: url, source: "", summary: "" };
+      }
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const url = cleanText(item.url || item.link);
+      const title = cleanText(item.title || item.name || url);
+      const site = cleanText(item.source || item.site || item.platform);
+      const summary = cleanText(item.summary || item.note || item.why);
+      return { url, title, source: site, summary };
+    })
+    .filter((item) => {
+      if (!item?.url || seen.has(item.url)) {
+        return false;
+      }
+      seen.add(item.url);
+      return true;
+    })
+    .slice(0, 6);
+}
+
+export function paperMatchesQuery(paper, query) {
+  const cleanQuery = cleanText(query).toLowerCase();
+  if (!cleanQuery) {
+    return true;
+  }
+  const linkText = explanationLinksFrom(paper)
+    .flatMap((link) => [link.title, link.source, link.summary, link.url])
+    .join(" ");
+  const haystack = [
+    paper?.title,
+    paper?.meta,
+    paper?.summary,
+    paper?.notes,
+    paper?.tree_path,
+    paper?.status_label,
+    paper?.metrics,
+    linkText,
+    ...asArray(paper?.tags),
+    ...asArray(paper?.badges),
+  ]
+    .map(cleanText)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(cleanQuery);
+}
+
 export function normalizePayload(raw) {
   const payload = raw && typeof raw === "object" ? raw : {};
   return {

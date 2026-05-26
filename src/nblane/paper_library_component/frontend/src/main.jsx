@@ -7,11 +7,13 @@ import {
   asArray,
   cleanText,
   expandableIds,
+  explanationLinksFrom,
   filterItems,
   nodeId,
   nodeTitle,
   nodeType,
   normalizePayload,
+  paperMatchesQuery,
 } from "./payload.js";
 
 function eventId() {
@@ -137,29 +139,6 @@ function currentUrlQuery() {
     return "";
   }
   return cleanText(new URLSearchParams(window.location.search).get("query"));
-}
-
-function paperMatchesQuery(paper, query) {
-  const cleanQuery = cleanText(query).toLowerCase();
-  if (!cleanQuery) {
-    return true;
-  }
-  const haystack = [
-    paper?.title,
-    paper?.meta,
-    paper?.summary,
-    paper?.notes,
-    paper?.tree_path,
-    paper?.status_label,
-    paper?.metrics,
-    ...asArray(paper?.tags),
-    ...asArray(paper?.badges),
-  ]
-    .map(cleanText)
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(cleanQuery);
 }
 
 function runtimeMode() {
@@ -442,27 +421,6 @@ function candidateMeta(candidate) {
 
 function candidateHasPdf(candidate) {
   return Boolean(cleanText(candidate.pdf_url || candidate.open_access_pdf_url));
-}
-
-function candidateExplanationLinks(candidate) {
-  const seen = new Set();
-  return asArray(candidate?.explanation_links)
-    .filter((item) => item && typeof item === "object")
-    .map((item) => {
-      const url = cleanText(item.url || item.link);
-      const title = cleanText(item.title || item.name || url);
-      const source = cleanText(item.source || item.site || item.platform);
-      const summary = cleanText(item.summary || item.note || item.why);
-      return { url, title, source, summary };
-    })
-    .filter((item) => {
-      if (!item.url || seen.has(item.url)) {
-        return false;
-      }
-      seen.add(item.url);
-      return true;
-    })
-    .slice(0, 6);
 }
 
 const optionalArtifactKeys = new Set([
@@ -1149,11 +1107,14 @@ function PaperList({
             const isActive = payload.detailId === paperId;
             const isDeepLinked = isActive && Boolean(payload.focus || payload.action);
             const dragIds = isSelected ? [...selected] : [paperId];
+            const explanationLinks = explanationLinksFrom(paper);
+            const visibleLinks = explanationLinks.slice(0, 3);
+            const extraLinkCount = Math.max(0, explanationLinks.length - visibleLinks.length);
             return (
               <article
                 key={paperId}
                 data-paper-id={paperId}
-                className={`paper-list-card ${isActive ? "is-active" : ""} ${isSelected ? "is-selected" : ""} ${isDeepLinked ? "is-deep-linked" : ""}`}
+                className={`paper-list-card ${isActive ? "is-active" : ""} ${isSelected ? "is-selected" : ""} ${isDeepLinked ? "is-deep-linked" : ""} ${explanationLinks.length ? "has-reading-links" : ""}`}
                 draggable
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -1196,6 +1157,32 @@ function PaperList({
                   </span>
                   {paper.metrics ? <span className="paper-card-metrics">{cleanText(paper.metrics)}</span> : null}
                 </button>
+                {explanationLinks.length ? (
+                  <div className="paper-card-reading-links">
+                    <span>{label(payload.labels, "explainer_links", "Explainers / reading links")}</span>
+                    <div className="paper-card-link-list">
+                      {visibleLinks.map((link) => (
+                        <a
+                          className="paper-card-link"
+                          href={link.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={link.summary || link.title}
+                          draggable={false}
+                          key={link.url}
+                        >
+                          <strong>{link.title}</strong>
+                          {link.source ? <span>{link.source}</span> : null}
+                        </a>
+                      ))}
+                      {extraLinkCount ? (
+                        <span className="paper-card-link-more">
+                          {label(payload.labels, "more_links", "+{count}").replace("{count}", extraLinkCount)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </article>
             );
           })}
@@ -1955,7 +1942,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                   const disabled = !candidateHasPdf(candidate);
                   const overview = cleanText(candidate.ai_summary);
                   const selectionReason = cleanText(candidate.why_relevant);
-                  const explanationLinks = candidateExplanationLinks(candidate);
+                  const explanationLinks = explanationLinksFrom(candidate);
                   return (
                     <article className={`paper-discovery-card ${disabled ? "is-disabled" : ""}`} key={candidateId || cleanText(candidate.title)}>
                       <label className="paper-discovery-card-check">
@@ -2219,6 +2206,7 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceB
   const artifactRows = artifactEntries(artifacts);
   const readingCard = detail.reading_card && typeof detail.reading_card === "object" ? detail.reading_card : {};
   const readingBody = cleanText(readingCard.body);
+  const explanationLinks = explanationLinksFrom(detail);
   const notesSummary = cleanText(detail.summary);
   const notesBody = cleanText(detail.notes);
   const showSummaryNote = notesSummary && notesSummary !== readingBody;
@@ -2312,6 +2300,26 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceB
           <div className="paper-reading-related">
             <span>{label(payload.labels, "why_relevant", "Why it matters")}</span>
             <p>{cleanText(readingCard.why_relevant)}</p>
+          </div>
+        ) : null}
+        {explanationLinks.length ? (
+          <div className="paper-reading-links">
+            <span>{label(payload.labels, "explainer_links", "Explainers / reading links")}</span>
+            <div className="paper-reading-link-list">
+              {explanationLinks.map((link) => (
+                <a
+                  className="paper-reading-link"
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={link.summary || link.title}
+                  key={link.url}
+                >
+                  <strong>{link.title}</strong>
+                  {link.source ? <span>{link.source}</span> : null}
+                </a>
+              ))}
+            </div>
           </div>
         ) : null}
       </section>

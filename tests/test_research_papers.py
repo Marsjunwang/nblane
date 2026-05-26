@@ -333,6 +333,17 @@ class TestResearchPapers(unittest.TestCase):
                     metadata={
                         "abstract": "This paper studies grounded claims through a compact abstract.",
                         "why_relevant": "It matches the current evidence workflow.",
+                        "explanation_links": [
+                            {
+                                "title": "Moonlight paper guide",
+                                "url": "https://example.com/moonlight",
+                                "source": "The Moonlight",
+                                "summary": "Plain-language explainer for later reading.",
+                            },
+                            {
+                                "title": "Missing URL should be dropped",
+                            },
+                        ],
                     },
                 )
                 save_research_sources(profile, inbox)
@@ -427,9 +438,13 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(source.library_node_refs, [node_id])
         self.assertEqual(payload["active_node_id"], node_id)
         self.assertEqual(payload["papers"][0]["id"], "source:paper:grounded")
+        self.assertEqual(payload["papers"][0]["explanation_links"][0]["title"], "Moonlight paper guide")
+        self.assertEqual(payload["papers"][0]["explanation_links"][0]["source"], "The Moonlight")
+        self.assertEqual(len(payload["papers"][0]["explanation_links"]), 1)
         self.assertEqual(payload["detail"]["source_id"], "source:paper:grounded")
         self.assertEqual(payload["detail"]["primary_node_id"], node_id)
         self.assertEqual(payload["detail"]["abstract"], "This paper studies grounded claims through a compact abstract.")
+        self.assertEqual(payload["detail"]["explanation_links"][0]["url"], "https://example.com/moonlight")
         self.assertEqual(payload["detail"]["reading_card"]["source"], "abstract")
         self.assertEqual(payload["detail"]["reading_card"]["source_label"], "Abstract")
         self.assertIn("grounded claims", payload["detail"]["reading_card"]["body"])
@@ -458,6 +473,65 @@ class TestResearchPapers(unittest.TestCase):
         self.assertFalse(any(item["id"] == "collections:trash" for item in purged_section["items"]))
         self.assertEqual(payload["metrics"]["papers"], 1)
         self.assertEqual(select_result.next["detail_id"], "source:paper:grounded")
+
+    def test_paper_library_payload_normalizes_explanation_link_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                inbox = load_research_sources(profile)
+                update_research_source(
+                    inbox,
+                    "source:paper:grounded",
+                    metadata={
+                        "reading_links": [
+                            {
+                                "name": "alphaXiv overview",
+                                "link": "https://example.com/alphaxiv",
+                                "site": "alphaXiv",
+                                "note": "Community reading page.",
+                            },
+                            {"title": "Duplicate", "url": "https://example.com/alphaxiv"},
+                        ],
+                    },
+                )
+                save_research_sources(profile, inbox)
+                reading_payload = build_paper_library_payload(
+                    profile,
+                    detail_id="source:paper:grounded",
+                    user_id="local",
+                )
+
+                inbox = load_research_sources(profile)
+                update_research_source(
+                    inbox,
+                    "source:paper:grounded",
+                    metadata={
+                        "explainers": [
+                            {
+                                "title": "Publisher explainer",
+                                "url": "https://example.com/publisher",
+                                "platform": "Publisher",
+                            }
+                        ],
+                    },
+                )
+                save_research_sources(profile, inbox)
+                explainer_payload = build_paper_library_payload(
+                    profile,
+                    detail_id="source:paper:grounded",
+                    user_id="local",
+                )
+
+        reading_links = reading_payload["detail"]["explanation_links"]
+        self.assertEqual(len(reading_links), 1)
+        self.assertEqual(reading_links[0]["title"], "alphaXiv overview")
+        self.assertEqual(reading_links[0]["source"], "alphaXiv")
+        self.assertEqual(reading_links[0]["summary"], "Community reading page.")
+        self.assertEqual(reading_payload["papers"][0]["explanation_links"][0]["url"], "https://example.com/alphaxiv")
+
+        explainer_links = explainer_payload["detail"]["explanation_links"]
+        self.assertEqual(explainer_links[0]["title"], "Publisher explainer")
+        self.assertEqual(explainer_links[0]["source"], "Publisher")
 
     def test_paper_library_status_action_is_visible_in_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2318,7 +2392,10 @@ class TestResearchPapers(unittest.TestCase):
 
         self.assertEqual(result["coordinate_extraction"]["segments_with_rects"], 0)
         self.assertEqual(result["coordinate_extraction"]["segments_without_rects"], 1)
-        self.assertIn("without PDF coordinates", " ".join(result["warnings"]))
+        coordinate_messages = " ".join(
+            list(result.get("warnings") or []) + list(result.get("notices") or [])
+        )
+        self.assertIn("GROBID 未返回 PDF 坐标", coordinate_messages)
 
     def test_migrate_legacy_translations_to_segments_copies_safe_layout_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3668,7 +3745,13 @@ class TestResearchPapers(unittest.TestCase):
             source.metadata["structure_backend"],
             "pymupdf_fallback" if pymupdf_available() else "fallback",
         )
-        self.assertIn("GROBID unavailable", " ".join(source.metadata["structured_extraction_warnings"]))
+        all_messages = " ".join(
+            list(source.metadata.get("structured_extraction_warnings") or [])
+            + list(source.metadata.get("structured_extraction_notices") or [])
+        )
+        self.assertTrue(
+            "GROBID 当前不可用" in all_messages or "GROBID unavailable" in all_messages
+        )
         self.assertIn("GROBID unavailable", diagnostics["badges"])
 
     def test_fallback_segments_clear_needs_structured_extraction_badge(self) -> None:

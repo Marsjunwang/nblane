@@ -424,16 +424,13 @@ def _same_origin_mutation(request: Request) -> None:
 
 
 async def _json_body(request: Request) -> dict[str, object]:
+    raw_bytes = await request.body()
+    if not raw_bytes:
+        return {}
     try:
-        body = await request.json()
-    except Exception:
-        raw = (await request.body()).decode("utf-8", errors="ignore").strip()
-        if not raw:
-            return {}
-        try:
-            body = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
+        body = json.loads(raw_bytes)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid request body")
     return body if isinstance(body, dict) else {}
 
 
@@ -554,6 +551,8 @@ def _reader_ui() -> dict[str, str]:
         "connector_scope_hint": (
             "连接器在研究工作台的「收件箱与连接器」中配置；Reader 只消费已导入的来源。"
         ),
+        "translation_sync_failed": "翻译数据同步失败，正在重新拉取...",
+        "page_load_failed": "页面加载失败",
     }
 
 

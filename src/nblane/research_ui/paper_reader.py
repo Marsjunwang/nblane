@@ -1,6 +1,7 @@
 """Reader frame, annotation handlers, and AI result store."""
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from urllib.parse import quote
 
@@ -955,8 +956,11 @@ def _render_paper_reader(ctx, inbox) -> None:
         )
     )
     artifact_warnings = source.metadata.get("structured_extraction_warnings") or source.metadata.get("text_extraction_warnings") or []
-    if artifact_warnings:
+    artifact_notices = source.metadata.get("structured_extraction_notices") or source.metadata.get("reading_artifacts_notices") or []
+    if artifact_warnings or artifact_notices:
         with st.expander(_l(ui, "reader_artifact_warnings", "Reader preparation warnings"), expanded=False):
+            for notice in artifact_notices:
+                st.info(str(notice))
             for warning in artifact_warnings:
                 st.warning(str(warning))
     sidecar_unavailable, sidecar_message = _paper_library_sidecar_unavailable(ctx)
@@ -970,7 +974,11 @@ def _render_paper_reader(ctx, inbox) -> None:
         encoded_source = quote(source_id, safe="")
         encoded_token = quote(token, safe="")
         iframe_src = f"{base}/reader/view/{encoded_source}?token={encoded_token}" if base else f"/reader/view/{encoded_source}?token={encoded_token}"
-        _render_iframe(ctx, iframe_src, height=1200, scrolling=False)
+        try:
+            iframe_height = max(640, int(os.getenv("NBLANE_READER_IFRAME_HEIGHT", "1200")))
+        except (TypeError, ValueError):
+            iframe_height = 1200
+        _render_iframe(ctx, iframe_src, height=iframe_height, scrolling=False)
         return
     if source.metadata.get("pdf_asset_ref"):
         st.warning(

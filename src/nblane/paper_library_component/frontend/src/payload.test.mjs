@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   allItemIds,
   expandableIds,
+  explanationLinksFrom,
   filterItems,
   normalizePayload,
+  paperMatchesQuery,
 } from "./payload.js";
 
 test("normalizePayload keeps stable defaults", () => {
@@ -62,4 +64,61 @@ test("tree helpers find expandable and filtered ids", () => {
   ]);
   assert.deepEqual([...expandableIds(items)], ["paper-node:vla"]);
   assert.deepEqual(filterItems(items, "memory").map((item) => item.id), ["paper-node:vla"]);
+});
+
+test("explanationLinksFrom normalizes aliases and caps links", () => {
+  const links = explanationLinksFrom({
+    reading_links: [
+      { title: "Moonlight 论文解读", url: "https://example.com/moonlight", source: "The Moonlight", summary: "Plain-language guide." },
+      { name: "alphaXiv discussion", link: "https://example.com/alphaxiv", site: "alphaXiv" },
+      "https://doi.org/10.1000/demo",
+      { title: "Missing URL" },
+      { title: "Duplicate", url: "https://example.com/moonlight" },
+      { title: "Four", url: "https://example.com/four" },
+      { title: "Five", url: "https://example.com/five" },
+      { title: "Six", url: "https://example.com/six" },
+      { title: "Seven", url: "https://example.com/seven" },
+    ],
+  });
+
+  assert.equal(links.length, 6);
+  assert.deepEqual(links[0], {
+    title: "Moonlight 论文解读",
+    url: "https://example.com/moonlight",
+    source: "The Moonlight",
+    summary: "Plain-language guide.",
+  });
+  assert.equal(links[1].title, "alphaXiv discussion");
+  assert.equal(links[2].title, "https://doi.org/10.1000/demo");
+  assert.equal(links.some((link) => link.title === "Missing URL"), false);
+  assert.equal(links.filter((link) => link.url === "https://example.com/moonlight").length, 1);
+
+  assert.deepEqual(explanationLinksFrom({
+    explainers: [{ name: "Explainer", link: "https://example.com/explainer", platform: "Blog" }],
+  }), [
+    {
+      title: "Explainer",
+      url: "https://example.com/explainer",
+      source: "Blog",
+      summary: "",
+    },
+  ]);
+});
+
+test("paperMatchesQuery includes explanation link text", () => {
+  const paper = {
+    title: "Restoring Linguistic Grounding",
+    explanation_links: [
+      {
+        title: "Moonlight 论文解读",
+        url: "https://example.com/moonlight",
+        source: "The Moonlight",
+        summary: "IGAR reading guide",
+      },
+    ],
+  };
+
+  assert.equal(paperMatchesQuery(paper, "moonlight"), true);
+  assert.equal(paperMatchesQuery(paper, "igar"), true);
+  assert.equal(paperMatchesQuery(paper, "not-present"), false);
 });

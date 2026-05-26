@@ -12,11 +12,12 @@ import streamlit as st
 
 from nblane.core.auth import mint_reader_token
 from nblane.core.research_papers import (
-    paper_rows,
     ensure_paper_pdf_downloaded,
+    paper_library_paths,
+    paper_rows,
 )
 from nblane.web_auth import sidecar_auth_handoff_token
-from nblane.web_cache import load_research_sources
+from nblane.web_cache import load_paper_library_tree, load_research_sources
 
 from .context import ResearchContext
 
@@ -586,5 +587,4 @@ def _payload_int(payload: dict, key: str, default: int = 0) -> int:
         return int(payload.get(key) or default)
     except (TypeError, ValueError):
         return default
-
 

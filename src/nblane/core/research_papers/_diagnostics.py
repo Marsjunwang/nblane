@@ -145,8 +145,13 @@ def _metadata_has_grobid_unavailable(metadata: dict[str, object]) -> bool:
     status = _clean_text(metadata.get("grobid_status")).lower()
     if status == "unavailable" or metadata.get("grobid_available") is False:
         return True
-    warnings = _clean_list(metadata.get("structured_extraction_warnings"))
-    return any("grobid unavailable" in warning.casefold() for warning in warnings)
+    messages = _clean_list(metadata.get("structured_extraction_warnings")) + _clean_list(
+        metadata.get("structured_extraction_notices")
+    )
+    return any(
+        "grobid unavailable" in message.casefold() or "grobid 当前不可用" in message
+        for message in messages
+    )
 
 
 def paper_source_diagnostics(

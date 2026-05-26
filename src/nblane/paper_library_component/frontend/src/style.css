@@ -1275,6 +1275,10 @@ select {
   cursor: grab;
 }
 
+.paper-list-card.has-reading-links .paper-card-body {
+  padding-bottom: 5px;
+}
+
 .paper-card-body:active {
   cursor: grabbing;
 }
@@ -1361,6 +1365,78 @@ select {
   color: #52606d;
   font-size: 11px;
   line-height: 1.45;
+}
+
+.paper-card-reading-links {
+  display: grid;
+  grid-column: 2;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 10px 10px 0;
+}
+
+.paper-card-reading-links > span,
+.paper-reading-links > span {
+  color: #627d98;
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.paper-card-link-list,
+.paper-reading-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.paper-card-link,
+.paper-reading-link,
+.paper-card-link-more {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 25px;
+  gap: 5px;
+  border: 1px solid rgba(82, 96, 109, 0.16);
+  border-radius: 7px;
+  padding: 3px 7px;
+  background: #ffffff;
+  color: #1f2933;
+  font-size: 11px;
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+.paper-card-link:hover,
+.paper-reading-link:hover {
+  border-color: rgba(37, 99, 235, 0.32);
+  color: #1d4ed8;
+}
+
+.paper-card-link strong,
+.paper-reading-link strong {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-card-link span,
+.paper-reading-link span {
+  flex: 0 0 auto;
+  color: #627d98;
+  font-weight: 760;
+}
+
+.paper-card-link-more {
+  color: #627d98;
+  font-weight: 760;
 }
 
 .paper-detail-pane {
@@ -1593,6 +1669,13 @@ select {
   display: grid;
   gap: 4px;
   border-left: 3px solid rgba(47, 133, 90, 0.22);
+  padding-left: 9px;
+}
+
+.paper-reading-links {
+  display: grid;
+  gap: 5px;
+  border-left: 3px solid rgba(37, 99, 235, 0.24);
   padding-left: 9px;
 }
 

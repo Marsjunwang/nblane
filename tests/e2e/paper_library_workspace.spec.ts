@@ -92,6 +92,11 @@ sources:
       last_read_at: "2026-05-22T09:30:00+08:00"
       last_read_page: 7
       structured_extracted_at: "2026-05-22T09:35:00+08:00"
+      explanation_links:
+        - title: "Moonlight paper guide"
+          url: "https://example.com/moonlight"
+          source: "The Moonlight"
+          summary: "Plain-language guide for later reading."
   - id: source:e2e:no-pdf
     kind: paper
     title: "超长中文论文标题用于验证论文库工作台在窄屏和详情面板中不会溢出并保持可读"
@@ -235,6 +240,9 @@ test("8502 standalone Paper Library completes core workspace actions", async ({ 
   await openPaperLibrary(page);
   await expect(page.locator(".paper-reading-card")).toContainText("Abstract Preview");
   await expect(page.locator(".paper-reading-card")).toContainText("PDF ready paper used to verify Open Reader actions");
+  await expect(paperCard(page, "source:e2e:pdf-ready").locator(".paper-card-reading-links")).toContainText("Moonlight paper guide");
+  await expect(page.locator(".paper-reading-links")).toContainText("Moonlight paper guide");
+  await expect(page.locator(".paper-reading-links")).toContainText("The Moonlight");
 
   await createTopCollection(page, "E2E Created Collection");
   await openRowMenu(page, "E2E Created Collection");

@@ -1131,8 +1131,12 @@ def extract_paper_segments(
     if clean_backend not in {"auto", "grobid", "fallback"}:
         raise ValueError(f"Unknown paper segment extraction backend: {backend}")
     warnings: list[str] = []
+    notices: list[str] = []
     grobid_status: dict[str, object] = {}
     grobid_failure = ""
+    grobid_failure_detail = ""
+    page_refinement_failed_at = ""
+    page_refinement_error_detail = ""
     if clean_backend in {"auto", "grobid"}:
         grobid_status = grobid_readiness()
     if clean_backend in {"auto", "grobid"} and grobid_status.get("available"):
@@ -1150,7 +1154,9 @@ def extract_paper_segments(
                 except FileNotFoundError:
                     page_texts = []
                 except Exception as exc:
-                    warnings.append(f"PyMuPDF page refinement failed: {exc}")
+                    notices.append("PDF 页面精修未完成，已使用 GROBID 原始坐标。")
+                    page_refinement_failed_at = _now()
+                    page_refinement_error_detail = f"PyMuPDF page refinement failed: {exc}"
                     page_texts = []
                 save_paper_segments(profile, source_id, segments)
                 _update_source_metadata(
@@ -1162,39 +1168,54 @@ def extract_paper_segments(
                         "structured_references": references,
                         "structured_references_count": len(references),
                         "structured_extraction_warnings": warnings,
+                        "structured_extraction_notices": notices,
                         "structured_page_refined_segments": page_refined_count,
+                        "page_refinement_failed_at": page_refinement_failed_at,
+                        "page_refinement_error_detail": page_refinement_error_detail,
                         "grobid_status": "available",
                         "grobid_available": True,
                         "grobid_last_error": "",
+                        "grobid_last_error_detail": "",
                         "grobid_last_failed_at": "",
                         "grobid_failure_pdf_sha256": "",
                     },
                 )
                 return segments
-            warnings.append("GROBID returned no usable segments; used page-text fallback.")
+            notices.append("GROBID 未返回可用段落，已自动切换到文本降级方案。")
         except Exception as exc:
-            grobid_failure = f"GROBID extraction failed: {exc}"
+            grobid_failure = "结构化提取遇到问题，已自动切换到文本降级方案。"
+            grobid_failure_detail = f"GROBID extraction failed: {exc}"
             warnings.append(grobid_failure)
     elif clean_backend in {"auto", "grobid"}:
-        message = _clean_text(grobid_status.get("message")) or "GROBID unavailable; used page-text fallback."
-        warnings.append(message)
+        raw_message = _clean_text(grobid_status.get("message"))
+        notices.append(
+            "GROBID 当前不可用，已自动切换到文本降级方案。"
+            if not raw_message or "grobid" in raw_message.casefold()
+            else raw_message
+        )
     else:
-        warnings.append("Used page-text fallback for structured segments.")
+        notices.append("已使用页面文本降级方案生成结构化段落。")
     pages = load_paper_pages(profile, source_id)
     if not pages:
         pages = extract_paper_pages(profile, source_id, backend="auto")
     segments = _segments_from_page_text(source_id, pages)
     save_paper_segments(profile, source_id, segments)
+    if not warnings and not notices:
+        notices.append("GROBID 当前不可用或未返回可用段落，已自动切换到文本降级方案。")
     metadata: dict[str, object] = {
         "structure_backend": "pymupdf_fallback" if pymupdf_available() else "fallback",
         "structured_extracted_at": _now(),
-        "structured_extraction_warnings": warnings
-        or ["GROBID unavailable or returned no usable segments; used page-text fallback."],
+        "structured_extraction_warnings": warnings,
+        "structured_extraction_notices": notices,
     }
     if grobid_failure:
         metadata["grobid_last_error"] = grobid_failure
+        metadata["grobid_last_error_detail"] = grobid_failure_detail
         metadata["grobid_last_failed_at"] = _now()
         metadata["grobid_failure_pdf_sha256"] = _paper_pdf_fingerprint(_source_by_id(profile, source_id)[1])
+    if page_refinement_failed_at:
+        metadata["page_refinement_failed_at"] = page_refinement_failed_at
+        metadata["page_refinement_error_detail"] = page_refinement_error_detail
     if grobid_status:
         metadata["grobid_status"] = _clean_text(grobid_status.get("status")) or (
             "available" if grobid_status.get("available") else "unavailable"
@@ -1250,6 +1271,9 @@ def _reader_preparation_summary(
     warnings = _clean_list(metadata.get("reading_artifacts_warnings")) + _clean_list(
         metadata.get("structured_extraction_warnings")
     )
+    notices = _clean_list(metadata.get("reading_artifacts_notices")) + _clean_list(
+        metadata.get("structured_extraction_notices")
+    )
     total_pages = max(
         [
             int(metadata.get("page_count") or 0),
@@ -1270,6 +1294,7 @@ def _reader_preparation_summary(
         "pdf_fingerprint": pdf_fingerprint,
         "pdf_changed": pdf_changed,
         "warnings": warnings,
+        "notices": notices,
     }
 
 
@@ -1384,13 +1409,23 @@ def ensure_paper_reading_artifacts(
         try:
             segments = extract_paper_segments(profile, source_id, backend=segment_backend)
         except Exception as exc:
-            warnings.append(f"Structured extraction failed: {exc}")
+            warnings.append("结构化提取遇到问题，已自动切换到文本降级方案。")
+            structured_extraction_error_detail = f"Structured extraction failed: {exc}"
             if not segments:
                 try:
                     emit_progress("saving_segments", "Saving fallback text...", 2, saved=0)
                     segments = extract_paper_segments(profile, source_id, backend="fallback")
                 except Exception as fallback_exc:
-                    warnings.append(f"Page-text fallback failed: {fallback_exc}")
+                    warnings.append("文本降级方案也未能完成段落生成，请稍后重试。")
+                    structured_extraction_error_detail += f"; Page-text fallback failed: {fallback_exc}"
+            try:
+                _update_source_metadata_if_changed(
+                    profile,
+                    source_id,
+                    {"structured_extraction_error_detail": structured_extraction_error_detail},
+                )
+            except Exception:
+                pass
 
     migration_lang = _clean_text(target_lang) or _clean_text(source_metadata.get("target_lang")) or "zh"
     migration_summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang=migration_lang)
@@ -1399,6 +1434,7 @@ def ensure_paper_reading_artifacts(
     metadata = dict(source.metadata or {})
     structure_backend = _clean_text(metadata.get("structure_backend"))
     structured_warnings = _clean_list(metadata.get("structured_extraction_warnings"))
+    structured_notices = _clean_list(metadata.get("structured_extraction_notices"))
     rect_count = sum(1 for segment in segments if segment.rects)
     structure_rect_count = 0
     structure_anchor_warnings: list[str] = []
@@ -1409,28 +1445,29 @@ def ensure_paper_reading_artifacts(
                 for unit in build_paper_structure_units(profile, source_id)
                 if unit.rects
             )
-        except Exception as exc:
+        except Exception:
             structure_anchor_warnings.append(
-                f"Layout structure anchor check failed: {exc}"
+                "版面结构锚点检测未完成，导航将回退到页级锚点。"
             )
     coordinate_summary = {
         "segments_with_rects": rect_count,
         "segments_without_rects": max(0, len(segments) - rect_count),
         "structure_units_with_rects": structure_rect_count,
     }
-    coordinate_warnings: list[str] = structure_anchor_warnings
+    coordinate_warnings: list[str] = list(structure_anchor_warnings)
+    coordinate_notices: list[str] = []
     if structure_backend == "grobid" and segments:
         if rect_count == 0 and structure_rect_count > 0:
-            coordinate_warnings.append(
-                "GROBID returned structured text without segment coordinates; Reader will use layout-grounded structure anchors for navigation and translation overlays."
+            coordinate_notices.append(
+                "GROBID 未返回段落坐标，Reader 将使用版面级结构锚点进行导航和翻译叠层。已自动处理，无需操作。"
             )
         elif rect_count == 0:
-            coordinate_warnings.append(
-                "GROBID returned structured text without PDF coordinates; Reader navigation will fall back to page-level anchors."
+            coordinate_notices.append(
+                "GROBID 未返回 PDF 坐标，Reader 将回退到页级锚点。已自动处理，无需操作。"
             )
         elif rect_count < len(segments):
-            coordinate_warnings.append(
-                "Some GROBID segments did not include PDF coordinates; those anchors will fall back to page-level navigation."
+            coordinate_notices.append(
+                "部分 GROBID 段落缺少 PDF 坐标，对应锚点将回退到页级导航。已自动处理，无需操作。"
             )
     status = "ready"
     if structure_backend and structure_backend != "grobid":
@@ -1449,6 +1486,11 @@ def ensure_paper_reading_artifacts(
         ready_metadata["reading_artifacts_warnings"] = warnings
     elif metadata.get("reading_artifacts_warnings"):
         ready_metadata["reading_artifacts_warnings"] = []
+    combined_notices = list(structured_notices) + list(coordinate_notices)
+    if combined_notices:
+        ready_metadata["reading_artifacts_notices"] = combined_notices
+    elif metadata.get("reading_artifacts_notices"):
+        ready_metadata["reading_artifacts_notices"] = []
     _update_source_metadata_if_changed(profile, source_id, ready_metadata)
     emit_progress(
         "done" if status != "failed" else "failed",
@@ -1467,6 +1509,7 @@ def ensure_paper_reading_artifacts(
         "coordinate_extraction": coordinate_summary,
         "translation_migration": migration_summary,
         "warnings": warnings + structured_warnings + coordinate_warnings,
+        "notices": structured_notices + coordinate_notices,
     }
 
 
@@ -7747,9 +7790,13 @@ def _metadata_has_recent_grobid_failure(metadata: dict[str, object], pdf_fingerp
     if failure_pdf and pdf_fingerprint and failure_pdf != pdf_fingerprint:
         return False
     warnings = " ".join(_clean_list(metadata.get("structured_extraction_warnings"))).casefold()
+    notices = " ".join(_clean_list(metadata.get("structured_extraction_notices"))).casefold()
     last_error = _clean_text(metadata.get("grobid_last_error")).casefold()
-    marker = f"{warnings} {last_error}"
-    if not any(token in marker for token in ("grobid extraction failed", "grobid unavailable", "timed out")):
+    last_error_detail = _clean_text(metadata.get("grobid_last_error_detail")).casefold()
+    marker = f"{warnings} {notices} {last_error} {last_error_detail}"
+    english_tokens = ("grobid extraction failed", "grobid unavailable", "timed out")
+    chinese_tokens = ("结构化提取遇到问题", "grobid 当前不可用", "超时")
+    if not any(token in marker for token in english_tokens + chinese_tokens):
         return False
     failed_at = (
         _timestamp_from_iso(metadata.get("grobid_last_failed_at"))

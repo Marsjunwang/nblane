@@ -626,6 +626,9 @@ def _render_grobid_status_block(ctx, source=None) -> None:
             if source is not None:
                 metadata = source.metadata or {}
                 warnings = metadata.get("structured_extraction_warnings") or []
+                notices = metadata.get("structured_extraction_notices") or []
+                for notice in notices:
+                    st.info(str(notice))
                 for warning in warnings:
                     st.warning(str(warning))
                 st.caption(
@@ -652,6 +655,9 @@ def _render_grobid_status_block(ctx, source=None) -> None:
         if source is not None:
             metadata = source.metadata or {}
             warnings = metadata.get("structured_extraction_warnings") or []
+            notices = metadata.get("structured_extraction_notices") or []
+            for notice in notices:
+                st.info(str(notice))
             if warnings:
                 for warning in warnings:
                     st.warning(str(warning))
@@ -1375,6 +1381,9 @@ def _render_paper_detail_panel(ctx,
                 except Exception as exc:
                     st.error(str(exc))
         warnings = source.metadata.get("structured_extraction_warnings") or source.metadata.get("text_extraction_warnings") or []
+        notices = source.metadata.get("structured_extraction_notices") or source.metadata.get("reading_artifacts_notices") or []
+        for notice in notices:
+            st.info(str(notice))
         for warning in warnings:
             st.warning(str(warning))
         _render_grobid_status_block(ctx, source)

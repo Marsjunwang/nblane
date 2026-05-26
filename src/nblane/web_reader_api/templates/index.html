@@ -576,6 +576,33 @@
       color: var(--danger);
       font-size: .8rem;
       line-height: 1.35;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .pr-page-error-text {
+      display: block;
+      max-height: 4.4em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pr-page-error-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .pr-page-error-btn {
+      cursor: pointer;
+      border: 1px solid rgba(159, 29, 29, .42);
+      background: #fff;
+      color: var(--danger);
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: .75rem;
+      line-height: 1.2;
+    }
+    .pr-page-error-btn:hover {
+      background: #fef2f2;
     }
     .pr-translation-reader {
       display: none;
@@ -1420,6 +1447,8 @@
       selection_single_page: "Multi-page selection is captured from the first page for now.",
       reader_workflow_hint: "Translate, annotate, cite, then review before promotion.",
       connector_scope_hint: "Connectors live in Research > Inbox & Connectors; Reader consumes imported sources.",
+      translation_sync_failed: "Translation sync failed; refreshing...",
+      page_load_failed: "Page failed to load",
     };
     let args = {};
     let pdfDoc = null;
@@ -1482,6 +1511,7 @@
     let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
+    let activeTaskStartedAt = 0;
     let preparationTaskStartedFor = "";
     let optimisticAnnotations = [];
     let debugState = { lastNeedsLoadReason: "", lastSourceSignature: "", lastLoadMs: 0, fallbackHits: 0, events: [] };
@@ -1694,7 +1724,8 @@
           request.onsuccess = () => resolve(request.result || null);
           request.onerror = () => resolve(null);
         });
-      } catch {
+      } catch (cacheError) {
+        try { console.warn("readTranslationsCache failed", cacheError); } catch {}
         return null;
       }
     }
@@ -1708,7 +1739,9 @@
           tx.oncomplete = () => resolve();
           tx.onerror = () => resolve();
         });
-      } catch {}
+      } catch (cacheError) {
+        try { console.warn("writeTranslationsCache failed", cacheError); } catch {}
+      }
     }
     function bulkTranslationSegments() {
       return asArr(bulkTranslations && bulkTranslations.segments);
@@ -1751,6 +1784,11 @@
         }
       } catch (mergeError) {
         try { console.warn("mergeBulkTranslationsIntoArgs failed", mergeError); } catch {}
+        bulkTranslations = null;
+        bulkTranslationsEtag = "";
+        try { status(label("translation_sync_failed")); } catch {}
+        scheduleBulkTranslationsFetch(120, { force: true, skipCache: true });
+        return false;
       }
       return true;
     }
@@ -1789,7 +1827,8 @@
         try { refreshTranslationReader(); } catch {}
         try { refreshLeftRail(); } catch {}
         return bulkTranslations;
-      } catch {
+      } catch (fetchError) {
+        try { console.warn("fetchTranslationsBulk failed", fetchError); } catch {}
         return null;
       } finally {
         bulkTranslationsFetchInFlight = false;
@@ -1999,6 +2038,14 @@
         window.clearTimeout(activeTaskPollTimer);
         activeTaskPollTimer = null;
       }
+      activeTaskStartedAt = 0;
+    }
+    function readerPollDelayMs() {
+      if (!activeTaskStartedAt) return 750;
+      const elapsed = Date.now() - activeTaskStartedAt;
+      if (elapsed < 30000) return 1000;
+      if (elapsed < 120000) return 3000;
+      return 5000;
     }
     async function startReaderTask(action, payload = {}) {
       if (translationTaskAction(action) && translationTaskBusy()) {
@@ -2047,6 +2094,7 @@
       const action = text(asObj(task).action || actionState.action);
       if (!taskId) return;
       stopTaskWatchers();
+      activeTaskStartedAt = Date.now();
       if ("EventSource" in window) {
         try {
           activeTaskSource = new EventSource(apiPath(`/api/${sourcePath()}/tasks/${encodeURIComponent(taskId)}/events`));
@@ -2056,15 +2104,19 @@
           });
           activeTaskSource.onerror = () => {
             stopTaskWatchers();
+            activeTaskStartedAt = Date.now();
             pollReaderTask(taskId, action);
           };
-          activeTaskPollTimer = window.setTimeout(() => pollReaderTask(taskId, action), 2500);
+          activeTaskPollTimer = window.setTimeout(() => pollReaderTask(taskId, action), readerPollDelayMs());
           return;
-        } catch {}
+        } catch (sseError) {
+          try { console.warn("EventSource init failed; falling back to polling", sseError); } catch {}
+        }
       }
       pollReaderTask(taskId, action);
     }
     async function pollReaderTask(taskId, action) {
+      if (!activeTaskStartedAt) activeTaskStartedAt = Date.now();
       try {
         const response = await fetch(apiPath(`/api/${sourcePath()}/tasks/${encodeURIComponent(taskId)}`), {
           credentials: "same-origin",
@@ -2077,7 +2129,7 @@
         handleTaskSnapshot(asObj(payload.task || payload), action);
         const statusValue = text(asObj(payload.task || payload).status);
         if (!["done", "failed", "cancelled"].includes(statusValue)) {
-          activeTaskPollTimer = window.setTimeout(() => pollReaderTask(taskId, action), 750);
+          activeTaskPollTimer = window.setTimeout(() => pollReaderTask(taskId, action), readerPollDelayMs());
         }
       } catch (error) {
         setActionState(action, "error", error && error.message ? error.message : text(error));
@@ -2885,11 +2937,12 @@
     function translationUnits() {
       const units = asArr(args.translation_units).map((row) => asObj(row));
       if (units.length) return units;
-      return translationRowsForPages(contextPages(), 800).map(({ segment, translation, state }) => {
+      return translationRowsForPages(contextPages(), 800).map(({ segment, translation, state }, index) => {
         const obj = asObj(segment);
+        const fallbackKey = `${obj.page || 0}:${obj.order || index + 1}:${text(obj.text).slice(0, 16)}`;
         return {
-          unit_id: text(obj.segment_id || obj.scope_ref || `${obj.page || 0}:${text(obj.text).slice(0, 16)}`),
-          anchor_id: text(obj.segment_id || obj.scope_ref || `${obj.page || 0}:${text(obj.text).slice(0, 16)}`),
+          unit_id: text(obj.segment_id || obj.scope_ref || fallbackKey),
+          anchor_id: text(obj.segment_id || obj.scope_ref || fallbackKey),
           scope_type: text(asObj(translation).scope_type || "segment"),
           scope_ref: text(obj.segment_id || obj.scope_ref),
           segment_id: text(obj.segment_id),
@@ -4575,6 +4628,7 @@
     function setReaderMode(mode) {
       const next = ["pdf", "compare", "translation"].includes(mode) ? mode : "pdf";
       if (readerMode === next) return;
+      const anchorPage = Math.max(1, Number(currentPage || 1));
       readerMode = next;
       const workspace = document.querySelector(".pr-workspace");
       if (workspace) {
@@ -4591,7 +4645,10 @@
       if (readerMode === "translation" && !hasFullTranslationContext()) schedulePayloadRefresh(20, { fullTranslation: true });
       if (!userAnchorLocked()) scheduleReaderStateChanged(true);
       window.setTimeout(() => {
-        renderAround(currentPage, { force: true });
+        renderAround(anchorPage, { force: true });
+        try { scrollToPage(anchorPage, { smooth: false }); } catch (scrollError) {
+          try { console.warn("setReaderMode scrollToPage failed", scrollError); } catch {}
+        }
         placeSelectionDock();
       }, 60);
       setHeight();
@@ -5413,6 +5470,7 @@
         try {
           await withTimeout(state.renderTask.promise, pdfPageRenderTimeoutMs(), "PDF.js render timed out; using image preview fallback.");
           clearPagePreview(pageNumber);
+          clearPageError(pageNumber);
           renderedOk = true;
           state.status = "rendered";
           state.renderedScale = pageScale;
@@ -5448,6 +5506,7 @@
         if (applyPagePreview(pageNumber, viewportSize)) {
           state.status = "preview";
           state.previewScale = currentScale;
+          clearPageError(pageNumber);
         } else {
           state.status = "error";
           state.error = error && error.message ? error.message : text(error);
@@ -5601,8 +5660,45 @@
       if (img) img.classList.remove("visible");
       if (canvas) canvas.classList.remove("pending-fallback");
     }
+    function clearPageError(pageNumber) {
+      const wrap = document.getElementById(`pageWrap-${pageNumber}`);
+      if (!wrap) return;
+      wrap.querySelectorAll(".pr-page-error").forEach((node) => node.remove());
+    }
     function showPageError(pageNumber, message) {
-      status(`${label("pdf_error")} ${message || ""}`.trim());
+      const safeMessage = text(message);
+      status(`${label("pdf_error")} ${safeMessage}`.trim());
+      const wrap = document.getElementById(`pageWrap-${pageNumber}`);
+      if (!wrap) return;
+      clearPageError(pageNumber);
+      const truncated = safeMessage.length > 220 ? safeMessage.slice(0, 220) + "…" : safeMessage;
+      const overlay = document.createElement("div");
+      overlay.className = "pr-page-error";
+      overlay.dataset.page = String(pageNumber);
+      overlay.innerHTML = `
+        <span class="pr-page-error-text" title="${attr(safeMessage)}">${esc(`${label("page")} ${pageNumber}: ${label("pdf_error")}`)}${truncated ? ` <small>${esc(truncated)}</small>` : ""}</span>
+        <span class="pr-page-error-actions">
+          <button type="button" class="pr-page-error-btn" data-page-retry="${attr(String(pageNumber))}">${esc(label("retry"))}</button>
+        </span>
+      `;
+      const retryBtn = overlay.querySelector("[data-page-retry]");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          retryPageRender(pageNumber);
+        });
+      }
+      wrap.appendChild(overlay);
+    }
+    function retryPageRender(pageNumber) {
+      const page = Number(pageNumber || 0);
+      if (!page) return;
+      const state = pageRenderStates.get(page) || {};
+      state.status = "pending";
+      state.error = "";
+      pageRenderStates.set(page, state);
+      clearPageError(page);
+      ensurePageRendered(page, { force: true });
     }
     function withTimeout(promise, ms, message) {
       let timer = null;
@@ -6106,9 +6202,53 @@
       if (!target.closest(".pr-annotation-popover")) maybeCloseAnnotationPopover();
     });
     document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      closeSelectionDock();
-      closeAnnotationPopover();
+      if (event.key === "Escape") {
+        closeSelectionDock();
+        closeAnnotationPopover();
+        return;
+      }
+      const target = event.target;
+      const tag = target && target.tagName ? target.tagName.toLowerCase() : "";
+      const isEditable = tag === "input" || tag === "textarea" || tag === "select" || (target && target.isContentEditable);
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "/" && !isEditable) {
+        const searchInput = document.getElementById("searchInput");
+        if (searchInput) {
+          event.preventDefault();
+          searchInput.focus();
+          searchInput.select?.();
+        }
+        return;
+      }
+      if (isEditable) return;
+      switch (event.key) {
+        case "ArrowLeft":
+        case "PageUp":
+        case "[":
+          event.preventDefault();
+          handleAction("prev");
+          break;
+        case "ArrowRight":
+        case "PageDown":
+        case "]":
+          event.preventDefault();
+          handleAction("next");
+          break;
+        case "+":
+        case "=":
+          event.preventDefault();
+          handleAction("zoomIn");
+          break;
+        case "-":
+        case "_":
+          event.preventDefault();
+          handleAction("zoomOut");
+          break;
+        case "0":
+          event.preventDefault();
+          handleAction("fitWidth");
+          break;
+      }
     });
     async function pageText(pageNumber) {
       if (textCache.has(pageNumber)) return textCache.get(pageNumber);

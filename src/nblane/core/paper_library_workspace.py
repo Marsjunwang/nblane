@@ -37,6 +37,7 @@ from nblane.core.research_papers import (
     trash_paper_library_node,
     translate_full_paper,
     validate_paper_library,
+    _paper_explanation_links,
 )
 from nblane.core.research_sources import (
     SOURCE_STATUSES,
@@ -291,6 +292,14 @@ def _metadata_abstract(metadata: dict[str, object]) -> str:
     return ""
 
 
+def _metadata_explanation_links(metadata: dict[str, object]) -> list[dict[str, str]]:
+    return _paper_explanation_links(
+        metadata.get("explanation_links")
+        or metadata.get("reading_links")
+        or metadata.get("explainers")
+    )
+
+
 def _paper_reading_card(source: Any, row: dict[str, object], metadata: dict[str, object]) -> dict[str, object]:
     reading = getattr(source, "reading", None)
     candidates = [
@@ -495,6 +504,8 @@ def _paper_component_rows(
         source_id = _clean_text(row.get("id"))
         if not source_id:
             continue
+        source = row.get("source")
+        source_metadata = dict(getattr(source, "metadata", {}) or {})
         status = _clean_text(row.get("status"))
         has_pdf = bool(row.get("has_pdf"))
         out.append(
@@ -506,6 +517,7 @@ def _paper_component_rows(
                 "tree_path": _clean_text(row.get("tree_path")) or "Unsorted",
                 "meta": _paper_primary_meta(row),
                 "summary": _short_text(row.get("summary") or row.get("notes"), 220),
+                "explanation_links": _metadata_explanation_links(source_metadata),
                 "badges": [str(item) for item in row.get("badges", []) if _clean_text(item)],
                 "tags": [str(item) for item in row.get("tags", []) if _clean_text(item)],
                 "reader_url": _reader_view_url(profile, source_id, user_id=user_id, reader_base=reader_base) if has_pdf else "",
@@ -563,6 +575,7 @@ def _paper_detail_payload(
     pdf_download_status = _clean_text(source_metadata.get("pdf_download_status") or row.get("pdf_download_status"))
     pdf_download_error = _clean_text(source_metadata.get("pdf_download_error") or row.get("pdf_download_error"))
     collection_refs = list(getattr(source, "library_node_refs", []) or [])
+    explanation_links = _metadata_explanation_links(source_metadata)
 
     return {
         "id": source_id,
@@ -573,6 +586,7 @@ def _paper_detail_payload(
         "notes": _clean_text(getattr(source, "notes", "")) or _clean_text(row.get("notes")),
         "abstract": _metadata_abstract(source_metadata),
         "reading_card": _paper_reading_card(source, row, source_metadata),
+        "explanation_links": explanation_links,
         "url": _clean_text(getattr(source, "url", "")) or _clean_text(row.get("url")),
         "status": _clean_text(getattr(source, "status", "")) or _clean_text(row.get("status")),
         "status_label": _status_label(getattr(source, "status", "") or row.get("status")),
@@ -662,6 +676,8 @@ def _labels() -> dict[str, str]:
         "no_abstract_preview": "No abstract or summary yet.",
         "preview_source": "From {source}",
         "why_relevant": "Why it matters",
+        "explainer_links": "Explainers / reading links",
+        "more_links": "+{count}",
         "open_reader": "Open Reader",
         "open_remote_pdf": "Open remote PDF",
         "paper_policy": "Paper policy",
