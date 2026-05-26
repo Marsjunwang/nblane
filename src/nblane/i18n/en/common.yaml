@@ -1,0 +1,173 @@
+status_locked: Locked
+status_learning: Learning
+status_solid: Solid
+status_expert: Expert
+profile_header: '## Current profile'
+no_profiles_yet: No profiles yet.
+no_profiles_main: No profiles. Create one in the sidebar.
+select_profile_aria: Active profile
+expander_create: ➕ New profile
+profile_name_label: Profile name
+profile_name_ph: e.g. alice
+create: Create
+name_empty: Name cannot be empty.
+name_exists: '''{name}'' already exists.'
+profile_created: Profile '{name}' created.
+ai_not_configured: AI not configured (rule-based only)
+ai_add_key_caption: Set an API key in the sidebar AI / LLM settings, or add `LLM_API_KEY` to `.env`.
+llm_settings_title: AI / LLM
+llm_provider: Provider
+llm_base_url: Base URL
+llm_model: Model
+llm_custom_model: Custom model
+llm_custom_model_choice: Custom…
+llm_api_key: API key
+llm_api_key_help: Session only. Leave blank to keep an existing key from this session or .env.
+llm_ui_lang: Interface language
+llm_reply_lang: Model reply language
+llm_reply_lang_en: English
+llm_reply_lang_zh: Chinese
+llm_configured: 'AI enabled: {label}'
+llm_not_configured: API key is not set.
+llm_session_only: These settings apply to this app session and are not written to disk.
+page_help_short: Guide
+page_help_docs_link: '[Open full guide]({path})'
+page_help_docs_open_inline: Open full guide
+page_help_docs_missing: 'Full guide not found: {path}'
+ai_config_overview_title: AI config map
+ai_config_overview_caption: This view separates deployment-wide runtime, page-level action preferences, Codex scope, and candidate-first write gates.
+ai_scope_global_llm: Global LLM
+ai_scope_page_actions: Page actions
+ai_scope_codex: Codex
+ai_scope_review_gate: Review gate
+ai_scope_ready: ready
+ai_scope_missing: missing
+ai_scope_overrides_count: '{count} override(s)'
+ai_scope_candidate_first: candidate-first writes
+ai_config_overview_llm_title: Global LLM runtime
+ai_config_overview_llm_line: 'Base URL: {provider} · Model: {model}'
+ai_config_overview_llm_scope: API keys are session/env scoped. Page actions only persist non-secret model/backend preferences.
+ai_config_overview_codex_title: Codex runtime
+ai_config_overview_actions_title: Page action preferences
+ai_config_overview_col_page: Page
+ai_config_overview_col_action: Action
+ai_config_overview_col_backend: Backend
+ai_config_overview_col_model: Model
+ai_config_overview_col_source: Source
+ai_config_overview_default_model: app default
+ai_config_overview_profile_override: profile override
+ai_config_overview_app_default: app default
+ai_page_dashboard: Dashboard
+ai_page_evidence: Evidence Review
+ai_page_research: Research
+ai_page_kanban: Kanban
+ai_page_project: Project Board
+codex_settings_title: Codex
+codex_bin: Codex binary
+codex_cloud_env_id: Codex Cloud env id
+codex_model: Codex model override
+codex_attempts: Cloud attempts
+codex_branch: Cloud branch
+codex_timeout: Timeout seconds
+codex_profile_config: 'Profile Codex config for {profile}: `{path}`'
+codex_installed: 'Codex installed: {version}'
+codex_missing: Codex CLI is not installed or not on PATH.
+codex_logged_in: 'Codex login: ready.'
+codex_not_logged_in: Codex login is not ready.
+codex_cloud_configured: Codex Cloud env configured.
+codex_cloud_missing: Set a Codex Cloud env id to submit tasks from Web.
+codex_install: Install
+codex_upgrade: Upgrade
+codex_save_env: Save Codex settings to .env
+codex_save_profile: Save for this profile
+codex_saved_env: Codex settings saved to .env.
+codex_saved_profile: Profile Codex settings saved.
+codex_install_done: Codex install command completed.
+codex_install_failed: Codex install command failed.
+codex_session_only: Auth stays in Codex CLI; nblane only stores non-secret NBLANE_CODEX_* settings.
+codex_scope_hint: Auth and CLI config are shared for this deployment; profile config only stores non-secret preferences.
+kb_ai_backend: Kanban AI Engine
+kb_ai_backend_help: Choose the engine used by Kanban AI actions. Codex uses the local Codex CLI in read-only mode.
+kb_ai_backend_llm: LLM
+kb_ai_backend_codex: Codex
+kb_ai_backend_codex_status: 'Codex: read-only local'
+codex_configure: Configure Codex
+codex_config_dialog_title: Codex Configuration
+codex_status_tab: Status
+codex_api_key_tab: Shared API Key
+codex_cli_config_tab: Shared CLI Config
+codex_profile_config_tab: Profile Preferences
+codex_dialog_close: Close
+codex_current_profile: 'Current profile: `{profile}`'
+codex_web_home: 'Codex home: `{path}`'
+codex_cli_config_path: 'CLI config: `{path}`'
+codex_auth_path: 'Auth file: `{path}`'
+codex_auth_managed: Codex auth for this deployment is managed by Codex CLI at `{path}`. nblane does not display raw auth.json.
+codex_profile_isolated_note: Saving here logs in the shared service-level Codex home used by all Codex actions in this deployment.
+codex_cli_profile_scope_note: This config.toml belongs to the shared service-level Codex home. Per-profile preferences live in codex.yaml.
+codex_terminal_hint: Web Codex uses this service-level CODEX_HOME. Profile config below only stores non-secret preferences such as model, cloud env, and timeout.
+codex_api_key: Codex API key
+codex_api_key_help: Saved through `codex login --with-api-key` with the service-level CODEX_HOME; the key is sent through stdin and not stored by nblane.
+codex_save_api_key: Save API Key
+codex_api_key_saved: Codex API key saved.
+codex_api_key_failed: 'Codex API key was not saved: {error}'
+codex_cli_config_editor: Edit config.toml
+codex_save_cli_config: Save config.toml
+codex_cli_config_saved: 'Saved config.toml. Previous file backup: {backup}'
+codex_cli_config_invalid: 'config.toml was not saved: {error}'
+codex_cli_config_template_note: config.toml does not exist yet. The editor is showing a template.
+codex_config_path: 'Codex profile config: `{path}`'
+codex_config_editor: Edit codex.yaml
+codex_config_reload: Reload from disk
+codex_config_save: Save Codex config
+codex_config_reloaded: Codex config reloaded from disk.
+codex_config_saved: Codex config saved.
+codex_config_invalid: 'Codex config was not saved: {error}'
+codex_config_template_note: codex.yaml does not exist yet. The editor is showing a template.
+merge_llm_status_applied: applied
+merge_llm_status_ignored: ignored
+merge_preview_llm_status_line: 'Preview merge: LLM `status` field — **{mode}**'
+merge_preview_delta_title: Delta vs files on disk (this draft)
+merge_preview_delta_new_evidence: New evidence rows
+merge_preview_delta_tree: Skill tree changes
+merge_preview_delta_none: No new pool rows or node field changes detected.
+merge_preview_yaml_readonly_caption: Read-only YAML below reflects the current merge; toggling status re-merges the same draft without a new LLM call.
+goal_strip_hidden: Goal set
+goal_strip_default_label: Stage goal
+goal_strip_status: Status
+goal_strip_target: Target
+goal_strip_focus: Focus
+goal_status_active: Active
+goal_status_paused: Paused
+goal_status_completed: Completed
+goal_status_archived: Archived
+goal_visibility_visible: Visible
+goal_visibility_discreet: Discreet
+goal_visibility_hidden: Hidden
+goal_visibility_private: Private
+goal_no_current: No current goal set.
+goal_presence_current: Current goal
+goal_presence_details: Goal details
+goal_presence_edit_home: Edit on Home.
+goal_presence_hidden_note: Goal details are hidden on regular pages.
+goal_presence_agent_context_on: Agent context enabled
+goal_presence_agent_context_off: Agent context disabled
+sidebar_nav_title: Workspace
+sidebar_nav_home_group: Home
+sidebar_nav_work_group: Work
+sidebar_nav_growth_group: Growth
+sidebar_nav_output_group: Output
+sidebar_nav_team_group: Team
+sidebar_nav_dashboard: Daily Dashboard
+sidebar_nav_kanban: Kanban
+sidebar_nav_project_board: Project Board
+sidebar_nav_evidence_review: Evidence Review
+sidebar_nav_research: Research
+sidebar_nav_skill_map: Skill Map
+sidebar_nav_gap: Gap Analysis
+sidebar_nav_review: Review
+sidebar_nav_health: Profile Health
+sidebar_nav_agent_activity: Agent Activity
+sidebar_nav_public: Output Studio
+sidebar_nav_public_build: Public Build
+sidebar_nav_team: Team View

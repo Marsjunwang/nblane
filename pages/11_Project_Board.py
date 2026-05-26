@@ -35,9 +35,8 @@ from nblane.core.project_board_sync import (
     sync_project_board_from_kanban,
     sync_project_case_workspace,
 )
-from nblane.core.research_sources import load_research_sources
 from nblane.web_auth import require_login
-from nblane.web_cache import clear_web_cache, load_evidence_pool_raw
+from nblane.web_cache import clear_web_cache, load_evidence_pool_raw, load_research_sources
 from nblane.web_i18n import kanban_section_label, project_board_ui
 from nblane.web_shared import (
     apply_ui_language_from_session,

@@ -1,0 +1,68 @@
+page_title: 差距分析 · nblane
+title: 差距分析
+page_context_line: Agent 操作系统：将任务映射到技能树；结合规则与可选 AI，为与编程 Agent 协作准备下一步。
+page_help_short: 使用说明
+page_help_body: |-
+  ### 差距分析使用流程
+
+  1. 尽量具体描述任务：目标系统、约束、期望结果和未知点。
+  2. 规则匹配适合可解释的关键词覆盖；当任务语言和技能 schema 不一致时，再开启 AI 首轮匹配。
+  3. 任务需要围绕当前阶段目标解释时，勾选 current goal 上下文。
+  4. 先看匹配节点和依赖闭包，再参考建议下一步。
+  5. 只有任务完成且证据存在后，才应用技能状态更新。
+
+  本页是规划视角，不替代证据审阅。
+task_label: 任务描述
+task_placeholder: |-
+  用自然语言描述你想做的任务，例如：
+  复现 PI0.5 在 piper 机械臂上的 VLA 控制
+analyze_button: 分析
+analyze_hint: 输入任务描述并点击「分析」开始。
+spinner_gap: 正在运行差距分析…
+verdict_ok: 可以完成
+verdict_gap: 存在能力缺口
+metric_verdict: 结论
+metric_matches: 匹配节点
+metric_gaps: 缺口节点
+progress_text: 依赖覆盖：{ok}/{total} ({pct:.0%})
+subheader_matches: 匹配到的技能节点
+match_score: 匹配分
+subheader_closure: 前提闭包
+gap_mark_suffix: 缺口
+subheader_next: 建议下一步
+subheader_ai: AI 分析
+ai_disabled_hint: |-
+  配置 LLM_API_KEY 后，AI 将在此处给出：
+  - 每个缺口与任务的关联解释
+  - 最优学习顺序
+  - 本次任务完成后应更新的技能状态
+spinner_ai: AI 分析中…
+learned_caption: 已更新学习关键词（共 {total} 条，分布于 {nodes} 个节点，每节点最多 {max_kw} 条）
+writeback_title: 更新技能状态
+writeback_caption: 选择要更新的节点和新状态，完成任务后一键写回 skill-tree.yaml。
+current_label: 当前
+apply_button: 应用 {n} 项更新
+success_updated: 技能树已更新：
+checkbox_select: 选择
+use_rule_match: 规则关键词重叠
+use_llm_router: AI 首轮匹配到技能节点
+use_goal_context: 使用 current goal 作为分析上下文
+goal_context_used: 本次分析已包含 current goal context。
+goal_context_not_used: 本次分析未包含 current goal context。
+context_source_label: 上下文来源
+context_privacy_label: 上下文隐私：{state}
+result_source_line: 来源：{source}（{kind}）
+manual_node_label: 或手动指定模式中的节点
+manual_node_none: （仅自动匹配）
+gap_error_no_roots: 当前开启的匹配方式未得到任何根节点。请开启 **AI 首轮匹配** 或 **规则重叠**，或在下方选择节点后再次分析。
+gap_error_empty_task: 请填写任务描述。
+gap_error_node_unknown: 该节点 id 不在当前 schema 中。
+match_source_rule: 规则
+match_source_llm: AI
+match_source_both: 规则+AI
+match_source_explicit: 手动
+router_learned_caption: 首轮路由已写入学习关键词。
+subheader_coach_followup: 继续追问（同一会话）
+expander_first_prompt: 首轮完整提示：技能树 + 差距分析（长）
+chat_followup_placeholder: 针对本次差距分析继续提问…
+spinner_ai_followup: 思考中…

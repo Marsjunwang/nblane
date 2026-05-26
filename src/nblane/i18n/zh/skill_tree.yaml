@@ -1,0 +1,74 @@
+page_title: 技能树 · nblane
+title: 技能树
+page_context_line: 私人操作系统：编辑结构化技能、内联证据与本档案的共享证据池。
+page_help_short: 使用说明
+page_help_body: |-
+  ### 技能树使用流程
+
+  1. 把技能状态当作能力 claim，而不是当天心情或主观感觉。
+  2. 轻量记录可写入内联证据；同一证据支撑多个技能时，优先放入共享证据池并用 id 引用。
+  3. 证据强度、置信度、项目引用和公开准备度请在证据审阅里处理。
+  4. 点击保存会写入 skill-tree.yaml，并刷新 SKILL.md 中的生成块。
+  5. 将技能提升到扎实或专家前，先检查证据风险提示。
+
+  技能升级必须能被证据解释。
+error_no_tree: 未找到「{profile}」的 skill-tree.yaml。
+metric_expert: 🔵 专家
+metric_solid: 🟢 扎实
+metric_learning: 🟡 学习中
+metric_locked: ⬜ 锁定
+metric_lit_rate: 点亮率
+progress_overall: 整体点亮：{pct:.0%}
+no_categories: 模式中未找到分类。
+level_l1: L1 · 基础
+level_l2: L2 · 进阶
+level_l3: L3 · 高级
+level_l4: L4 · 专家 / 前沿
+level_n: 等级 {n}
+widget_status: 状态
+widget_note: 备注
+note_placeholder: 上下文 / 证据
+cat_progress: '{cat}：{lit}/{total} 已点亮（{pct:.0%}）'
+save_button: 保存 skill-tree.yaml
+save_caption: 保存 skill-tree.yaml，并同步 SKILL.md 中的生成块。
+saved_synced: 已保存并同步 SKILL.md。
+saved_yaml: 已保存 skill-tree.yaml。
+saved_synced_path: 已保存并同步 SKILL.md。skill-tree.yaml 路径：`{path}`
+saved_yaml_path: 已保存 skill-tree.yaml（SKILL.md 生成块未同步）。文件：`{path}`
+evidence_expander: 证据（{n}）
+evidence_item: 条目
+evidence_type: 类型
+evidence_title: 标题
+evidence_date: 日期
+evidence_url: 链接
+evidence_summary: 摘要
+evidence_add: ＋ 添加证据
+evidence_remove: 删除
+evidence_pin_help: 固定：保持展开此技能的证据区；点其他技能的图钉可切换。
+pool_expander: 证据池（共享目录）
+pool_caption: 在此维护稳定 id，多个技能可通过 evidence_refs 引用。
+pool_id_optional: Id（可空；留空则自动生成）
+pool_add_button: 添加到证据池
+pool_added: 已添加到证据池。
+evidence_refs_label: 引用池 id
+evidence_refs_help: 选择已有池条目挂到此技能。
+pool_empty_hint: 尚无池条目 — 请在上方可折叠区添加。
+pool_list_heading: 已登记条目
+pool_delete_hint: 删除会从当前编辑区移除该行；需点击「保存」写入 YAML。
+pool_prune_refs: 删除时同时从所有技能的 evidence_refs 中移除此池 id
+pool_delete_remove: 删除此行
+pool_delete_blocked: 无法删除 `{pid}` — 以下技能仍引用：{nodes}。请勾选上方选项或先取消引用。
+pool_deleted_session: 已从编辑区移除池条目；请点击**保存**以写入文件。
+evidence_review_link: 打开证据审阅
+evidence_signal_count: '{n} 条 evidence'
+evidence_signal_strength: 强度：{strength}
+evidence_signal_review: 审阅：{status}
+evidence_signal_missing: 缺少 evidence
+evidence_signal_risk: 证据风险：{reason}
+evidence_strength_unrated: 未评级
+evidence_strength_weak: 弱
+evidence_strength_medium: 中
+evidence_strength_strong: 强
+evidence_strength_high_trust: 高可信
+evidence_review_status_needs_review: 待审阅
+evidence_review_status_reviewed: 已审阅

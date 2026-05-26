@@ -44,6 +44,10 @@ include = ["nblane*", "schemas*"]
     "en/*.md",
     "zh/*.md",
 ]
+"nblane.i18n" = [
+    "en/*.yaml",
+    "zh/*.yaml",
+]
 "nblane.kanban_drag_component" = [
     "frontend/static/index.html",
 ]

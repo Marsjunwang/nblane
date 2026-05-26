@@ -1,0 +1,40 @@
+page_title: Team View · nblane
+title: Team View
+page_context_line: 'Team OS: edit shared team.yaml and product pool files under teams/.'
+page_help_short: Guide
+page_help_body: |-
+  ### Team View workflow
+
+  1. Pick the team you are editing; team files live under teams/ and are not filtered by the personal profile.
+  2. Update mission, members, rules, and priorities in team.yaml when the team operating context changes.
+  3. Use product pools to collect shared problems, projects, evidence, methods, and decisions.
+  4. Check the write-owner block before saving so you know which team files will change.
+  5. Personal skill or evidence claims still belong in the selected profile pages, not team.yaml.
+
+  Team View writes team.yaml and product-pool.yaml for the selected team.
+no_teams: No teams found. Create a team under `teams/` from the template.
+team_select: Team
+sub_team: Team Info
+team_name: Team name
+mission: Mission / shared focus
+members: Members (comma-separated)
+rules: Shared rules (one per line)
+priorities: Current priorities (one per line)
+save_team: Save team.yaml
+team_saved: team.yaml saved.
+sub_pool: Product Pool
+items_count: '{n} item(s)'
+field_title: Title
+field_item: Item
+add_pool: Add to {label}
+add_pool_ph: New {label} item...
+add: Add
+save_pool: Save product-pool.yaml
+pool_saved: product-pool.yaml saved.
+write_owner: Write owner
+team_scope: Team scope
+writes: Writes
+view_as_profile: View-as profile
+save_team_path: Save team.yaml -> {path}
+save_pool_path: Save product-pool.yaml -> {path}
+team_profile_scope: Sidebar profile **{profile}** applies to Home, Skill Tree, Gap, and Kanban. Team data is stored under **teams/** and is not filtered by profile.

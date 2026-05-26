@@ -1,0 +1,196 @@
+page_title: 证据审阅 · nblane
+title: 证据审阅
+page_context_line: 审阅已完成工作、证据池条目、技能关联与强度风险，避免技能状态变成没有证据支撑的断言。
+page_help_short: 使用说明
+evidence_ai_short: 证据 AI
+evidence_ai_config_caption: 这些设置只影响当前档案的证据审阅动作：已完成任务到证据草案，以及看板任务理解。
+evidence_ai_backend: 证据 AI 引擎
+evidence_ai_backend_help: LLM 使用全局 AI / LLM 运行时；Codex 使用当前部署共享的 service-level Codex CLI 只读模式。
+evidence_ai_subtasks_model: 已完成任务 → 证据模型
+evidence_ai_subtasks_help: 从所选已完成任务生成可审阅的证据草案。
+evidence_ai_alignment_model: 任务理解模型
+evidence_ai_alignment_help: 在生成草案前，澄清描述不完整的看板任务。
+evidence_ai_codex_model_placeholder: Codex CLI 默认模型
+evidence_ai_config_saved: 证据 AI 配置已保存。
+evidence_ai_default_hint: 应用默认：{backend}
+evidence_help_body: |-
+  ### 证据审阅使用流程
+
+  1. **已完成队列 / 整理**：选择已完成的看板任务，生成可审阅的证据草案，只应用你确认可信的条目。
+  2. **断言工作台**：从已审阅证据按项目、目标、技能、全部证据或手动选择生成可复用公开断言。
+  3. **证据池**：维护证据条目的强度、置信度、审阅状态、公开准备度和引用。
+  4. **技能关联**：把活跃证据绑定到技能节点，避免技能状态没有证据支撑。
+  5. **项目 / 经历引用**：把证据关联到项目案例、经历案例和研究资料。
+  6. **状态风险**：发布或升级前检查扎实/专家技能是否缺少足够强的证据。
+
+  本页 AI 只生成候选，必须经过预览和人工应用才会写入文件。
+save_pool: 保存证据池
+saved_pool: 已保存 evidence-pool.yaml。
+saved_pool_synced: 已保存 evidence-pool.yaml，并同步 SKILL.md。
+metric_done_uncrystallized: 已完成未结晶
+metric_unlinked: 未挂技能
+metric_needs_review: 待审阅
+metric_status_risk: 状态证据风险
+tab_queue: 已完成队列 / 整理
+tab_claims: 断言工作台
+tab_pool: 证据池
+tab_links: 技能关联
+tab_refs: 项目 / 经历引用
+tab_risks: 状态风险
+done_queue_title: 已完成 -> 证据候选
+done_queue_empty: 没有等待证据审阅的已完成任务。
+done_generate: 生成已完成 -> 证据草案
+done_pick: 选择已完成任务
+done_allow_status: 允许 AI 更新状态
+done_allow_status_help: 关闭：只合并 evidence 与引用；有 evidence 的 locked 节点可变为 learning。开启：AI status 仍只允许升级，expert 不会被自动采信。
+done_mark_crystallized: 应用后标记所选已完成任务为已结晶
+done_preview_source: 来源已完成任务：{sources}
+done_no_ai: 未配置 AI。
+done_spinner: 生成证据草案中…
+done_apply_selected: 应用所选
+done_apply_all: 应用全部
+done_applied: 已应用证据草案。
+done_housekeeping_title: 已完成任务整理
+done_housekeeping_caption: 在证据审阅完成后，把已完成任务批量归档或删除。
+done_housekeeping_pick: 选择已完成任务
+done_housekeeping_archive: 归档所选已完成任务
+done_housekeeping_delete: 删除所选已完成任务
+done_housekeeping_confirm_archive: 确认归档所选
+done_housekeeping_confirm_delete: 确认删除所选
+done_housekeeping_uncrystallized_warning: 所选任务中包含未结晶的已完成任务。只有确认它们不需要已完成任务 -> 证据 审阅时才建议归档或删除。
+done_housekeeping_confirm_uncrystallized: 我确认所选未结晶已完成任务可能尚未生成证据
+done_housekeeping_archived: 已归档 {n} 个已完成任务。
+done_housekeeping_deleted: 已删除 {n} 个已完成任务。
+done_housekeeping_empty: 没有可整理的已完成任务。
+done_crystallized_label: 已结晶
+done_uncrystallized_label: 未结晶
+review_rows_title: 需要审阅的池条目
+review_rows_empty: 没有需要审阅的证据条目。
+unlinked_rows_title: 未挂技能的证据
+unlinked_rows_empty: 所有活跃证据都已关联技能。
+claim_candidates_title: 证据 -> 断言候选
+claim_studio_title: 断言工作台
+claim_studio_intro: 从已审阅证据按项目、目标、技能、全量证据或手动选择生成可复用的对外断言。
+claim_studio_caption: 断言保存于 {path}。
+claim_tab_overview: 概览
+claim_tab_project: 按项目
+claim_tab_goal: 按目标
+claim_tab_skill: 按技能
+claim_tab_all: 全部证据
+claim_tab_refresh: 需要刷新
+claim_tab_manual: 手动
+claim_scope_project: 项目
+claim_scope_goal: 目标
+claim_scope_skill: 技能
+claim_scope_empty: 暂无可选范围。
+claim_project_refs: 项目：{refs}
+claim_goal_refs: 目标：{refs}
+claim_metric_accepted: 已确认
+claim_metric_draft: 草稿
+claim_metric_refresh: 需刷新
+claim_metric_unsupported: 缺支撑
+claim_refresh_statuses: 刷新断言状态
+claim_refresh_empty: 没有需要刷新的断言。
+claim_legacy_warning: evidence-pool.yaml 中仍有旧断言。
+claim_migrate_legacy: 迁移旧断言
+claim_migrated: 已迁移 {n} 条断言。
+claim_text: 断言文本
+claim_status: 断言状态
+claim_save: 保存断言
+claim_pick_evidence: 选择证据条目
+claim_generate: 生成断言候选
+claim_candidates_empty: 暂无断言候选。
+claim_existing_title: 已确认断言
+claim_candidates_preview: 断言候选预览
+claim_adopt: 采纳断言
+claim_evidence_refs: 证据：{refs}
+claim_skill_refs: 技能：{refs}
+claim_public_readiness: 公开准备度：{value}
+claim_confidence: 置信度：{value}
+claim_apply_selected: 应用 {n} 条已选断言
+claim_apply_empty: 没有可应用的断言候选。
+claim_applied: 已应用 {n} 条断言。
+pool_add_title: 新增证据条目
+pool_edit_title: 编辑证据条目
+pool_empty: 尚无证据条目。
+pool_deprecate: 软下线
+pool_deprecated: 已软下线证据条目。
+pool_add: 添加证据
+pool_added: 已添加证据条目。
+pool_update: 更新条目
+pool_updated: 已更新证据条目。
+pool_id: 证据 id
+pool_type: 类型
+pool_title: 标题
+pool_date: 日期
+pool_url: 链接
+pool_summary: 摘要
+pool_strength: 强度
+pool_confidence: 置信度
+pool_review_status: 审阅状态
+pool_public_readiness: 公开准备度
+pool_source_refs: 来源引用（每行一项）
+pool_project_refs: 项目引用
+pool_experience_refs: 经历引用
+pool_replaced_by: 替代条目
+pool_title_required: 证据标题不能为空。
+pool_id_exists: 证据 id 已存在：{id}
+link_title: 把证据关联到技能
+link_pick_evidence: 证据条目
+link_pick_skills: 技能
+link_button: 关联所选技能
+link_done: 已把证据关联到所选技能。
+link_empty: 没有可关联的活跃证据条目。
+refs_options_title: 可关联对象
+refs_options_empty: 暂无记录。
+refs_projects: 项目案例
+refs_experiences: 经历案例
+refs_sources: 研究资料
+refs_linker_title: 关联证据到项目 / 经历 / 来源
+refs_manual_source_refs: 研究收件箱之外的手动来源引用
+refs_save: 保存引用
+refs_saved: 已保存证据引用。
+refs_evidence_missing: 未找到证据条目。
+refs_case_editor_title: 项目 / 经历归属
+refs_open_project_board: 打开项目看板
+refs_case_id: ID
+refs_project_title: 项目标题
+refs_experience_organization: 组织 / 公司
+refs_experience_role: 角色
+refs_experience_location: 地点
+refs_status: 状态
+refs_kind: 类型
+refs_visibility: 可见性
+refs_time_range: 时间范围
+refs_summary: 摘要
+refs_goal_refs: 目标引用
+refs_task_refs: 任务引用
+refs_output_refs: 输出引用
+refs_notes: 备注
+refs_add_project: 新增项目案例
+refs_add_experience: 新增经历案例
+refs_case_saved: 已保存案例。
+risk_empty: 没有扎实/专家证据强度风险。
+open_skill_tree: 打开技能树
+strength_unrated: 未评级
+strength_weak: 弱
+strength_medium: 中
+strength_strong: 强
+strength_high_trust: 高可信
+confidence_empty: 未设置
+confidence_low: 低
+confidence_medium: 中
+confidence_high: 高
+review_status_needs_review: 待审阅
+review_status_reviewed: 已审阅
+public_readiness_private: 私有
+public_readiness_draftable: 可整理
+public_readiness_public_ready: 可公开
+public_readiness_published: 已发布
+row_meta: '{type} · {strength} · {review_status}'
+row_usage: 技能：{skills}
+row_unlinked: 未关联技能
+risk_line: '{label} 为 {status}；最高 {highest}，期望 {required}+。'
+merge_preview_title: 变更预览
+merge_preview_pool: 合并后的 evidence-pool 预览
+merge_preview_tree: 合并后的 skill-tree 预览

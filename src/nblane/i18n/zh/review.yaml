@@ -1,0 +1,44 @@
+page_title: 复盘 · nblane
+title: 复盘
+page_context_line: 把周复盘或阶段复盘整理成证据、下一步行动和公开草稿候选。
+page_help_short: 使用说明
+review_help_body: |-
+  ### 复盘使用流程
+
+  1. 选择时间窗口，从活动、已完成任务、学习记录和收件信号生成候选。
+  2. 在 **证据候选** 中，可先保存到 Activity 留痕，也可把确认过的条目应用到证据池；来源 Done 已覆盖时保留 crystallized 标记。
+  3. 在 **下一步行动候选** 中，只保存或应用你决定继续推进的队列项。
+  4. 在 **公开草稿候选** 中创建博客草稿；本页不会发布内容。
+  5. 用 **方法说明** 和 **Agent 活动** 审计候选来源和写入记录。
+
+  复盘是候选生成器；所有文件写入都需要显式选择并应用。
+preset: 时间窗口
+preset_current_week: 本周
+preset_previous_week: 上周
+preset_last_30_days: 最近 30 天
+preset_custom: 自定义
+start_date: 开始
+end_date: 结束
+generate: 生成候选
+summary: 摘要
+done_tasks: 已完成任务
+activity: 活动
+learning: 学习
+inbox: 收件箱
+evidence_candidates: 证据候选
+next_action_candidates: 下一步行动候选
+public_draft_candidates: 公开草稿候选
+method_notes: 方法说明
+agent_activity: Agent 活动
+save_to_activity: 保存所选到活动
+apply_selected: 应用所选
+create_public_drafts: 生成所选草稿
+mark_crystallized: 标记来源已完成任务为已结晶
+no_candidates: 这个时间窗口暂无候选。
+saved: 已保存到活动。
+applied: 已应用。
+failed: 失败
+select_rows: 选择行
+candidate_preview: 预览
+open_activity: 打开 Agent 活动
+public_draft_note: 只创建博客草稿，不会发布。

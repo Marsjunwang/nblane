@@ -1,0 +1,386 @@
+page_title: Kanban · nblane
+title: Kanban
+page_context_line: 'Private OS: weekly execution board. Done items can be draft-ingested into evidence — review each proposal before apply.'
+page_help_short: Guide
+page_help_body: |-
+  ### Kanban workflow
+
+  1. Capture uncertain work into Queue or Inbox; keep Doing small enough to finish this week.
+  2. Use task details for outcome, context, blockers, and links. Subtasks should be checkable execution steps.
+  3. Done is not evidence by itself. Send Done tasks through Evidence Review before they upgrade skills or public claims.
+  4. Personal check-ins record learning and exercise without cluttering execution columns.
+  5. Kanban AI can draft subtasks or clarify vague tasks, but proposals must be accepted before they write to kanban.md.
+
+  Save or autosave writes kanban.md and syncs project-board ownership.
+reload: Reload from file
+save: Save
+saved: Saved to kanban.md
+kb_unsaved_subtasks: Unsaved subtask changes — use Save to write them to kanban.md.
+metric_total: Total
+metric_doing: 🔄 Doing
+metric_done: ✅ Done
+items_count: '{n} item(s)'
+new_task: New task
+new_task_ph: + Add task...
+detail: Detail
+detail_ph: context / why...
+add: Add
+task_field_title: Title
+task_tags: Tags
+kb_tags: Tags
+kb_quick_kind: Add to
+kb_quick_kind_task: Task
+kb_quick_kind_inbox: Inbox
+kb_quick_kind_learning: Learning
+kb_quick_kind_habit: Habit
+details: details
+details_ph: context / outcome / why / blocked by...
+kb_personal_workspace_title: Personal check-ins
+kb_personal_workspace_help: 'Keep this focused: record learning and exercise here, and leave workflow state on the board.'
+kb_tab_learning_checkin: Learning check-in
+kb_tab_exercise_checkin: Exercise check-in
+kb_tab_month_summary: Monthly summary
+kb_checkin_date: Date
+kb_checkin_saved: Check-in saved.
+kb_checkin_deleted: Check-in deleted.
+kb_checkin_delete_missing: That check-in was already gone.
+kb_checkin_delete: Delete
+kb_checkin_delete_help: Remove this check-in from activity-log.yaml.
+kb_checkin_type_learning: Learning
+kb_checkin_type_exercise: Exercise
+kb_checkin_detail_empty: No details
+kb_checkin_links_count: '{count} links'
+kb_checkin_minutes: '{minutes:g} min'
+kb_checkin_strip_title: Recent 14 days
+kb_checkin_today_short: Today
+kb_checkin_strip_learning_short: L{count}
+kb_checkin_strip_exercise_short: E{count}
+kb_checkin_day_help: Open this day to add or delete check-ins.
+kb_checkin_day_records: Day records
+kb_checkin_day_records_empty: No learning/exercise records on this day.
+kb_checkin_add_learning: Add learning
+kb_checkin_add_exercise: Add exercise
+kb_checkin_no_marks: No marks
+kb_summary_records: Monthly records
+kb_summary_records_empty: No learning/exercise records this month.
+kb_tab_today: Today
+kb_tab_exercise: Exercise
+kb_tab_learning: Learning
+kb_tab_habits: Habits
+kb_tab_context: Context
+kb_tab_review: Review
+kb_workspace_view: Workspace view
+kb_personal_tags_hint: Use tags like company/openai, person/sam, project/nblane, or flow/learning.
+kb_today_inbox: Open inbox
+kb_today_learning: Active learning
+kb_today_habits: Habits today
+kb_today_total_habits: Habit catalog
+kb_today_light_help: Use Today for capture and triage; use Activity and Learning for structured details.
+kb_today_add_task: Add Queue task
+kb_today_habit_strip_title: Today habits
+kb_open_learning_detail: Open Learning details
+kb_open_activity_detail: Open Activity details
+kb_capture_title: Title
+kb_capture_source: Source
+kb_capture_note: Note
+kb_capture_url: URL
+kb_capture_inbox_title: Capture to inbox
+kb_capture_inbox_submit: Capture inbox
+kb_capture_learning_title: Capture learning
+kb_capture_learning_submit: Capture learning
+kb_capture_habit_title: Check in a habit
+kb_capture_habit_submit: Record check-in
+kb_tag_companies: Companies
+kb_tag_people: People
+kb_tag_projects: Projects
+kb_tag_other: Other tags
+kb_learning_kind: Resource kind
+kb_learning_status: Status
+kb_learning_takeaway: Takeaway
+kb_learning_next: Next action
+kb_learning_total: Resources
+kb_learning_active: Active
+kb_learning_unread: unread
+kb_learning_completed: Completed
+kb_learning_add_title: Add learning resource
+kb_learning_add_short: Add
+kb_learning_title: Learning
+kb_learning_today_help: Capture papers, interviews, and videos as resources.
+kb_learning_detail: Details
+kb_learning_checkin_note: Learning note
+kb_learning_checkin_note_placeholder: What did you study, and what is worth remembering?
+kb_learning_checkin_links: Links
+kb_learning_checkin_links_placeholder: One link per line.
+kb_learning_checkin_submit: Record learning
+kb_learning_checkin_required: Add a note or at least one link.
+kb_learning_summary: Summary
+kb_learning_summary_placeholder: One or two lines about why this resource matters.
+kb_learning_lines_placeholder: One item per line.
+kb_learning_empty: No matching resources yet.
+kb_learning_takeaways: Takeaways
+kb_learning_next_actions: Next actions
+kb_learning_queue_task: Queue
+kb_learning_kind_paper: Paper
+kb_learning_kind_interview: Interview
+kb_learning_kind_video: Video
+kb_learning_kind_book: Book
+kb_learning_kind_article: Article
+kb_learning_kind_course: Course
+kb_learning_kind_other: Other
+kb_learning_kind_blog: Blog
+kb_learning_kind_repo: Repo
+kb_learning_status_unread: Unread
+kb_learning_status_reading: Reading
+kb_learning_status_processed: Processed
+kb_learning_status_archived: Archived
+kb_open_link: Open link
+kb_filter_all: All
+kb_filter_status: Status filter
+kb_filter_tag: Tag filter
+kb_exercise_title: Exercise
+kb_exercise_today: Today
+kb_exercise_today_help: Keep the daily anchor light; add details in Exercise.
+kb_exercise_quick_checkin: Check in
+kb_exercise_done: Done
+kb_exercise_detail: Details
+kb_exercise_progress: Progress
+kb_exercise_detail_checkin: Detailed check-in
+kb_exercise_type: Type
+kb_exercise_duration: Duration (min)
+kb_exercise_duration_value: '{minutes:g} min'
+kb_exercise_intensity: Intensity
+kb_exercise_checkin_submit: Record exercise
+kb_exercise_7d_checkins: Check-ins (7d)
+kb_exercise_recent: Recent workouts
+kb_exercise_empty: No exercise check-ins yet.
+kb_exercise_type_running: Cardio run
+kb_exercise_type_strength: Strength
+kb_exercise_type_squat: Weighted squat
+kb_exercise_type_rowing: Rowing machine
+kb_exercise_type_mobility: Mobility
+kb_exercise_type_other: Other
+kb_exercise_intensity_easy: Easy
+kb_exercise_intensity_moderate: Moderate
+kb_exercise_intensity_hard: Hard
+kb_summary_month: Month
+kb_summary_learning_count: Learning check-ins
+kb_summary_exercise_count: Exercise check-ins
+kb_summary_learning_days: Learning days
+kb_summary_exercise_days: Exercise days
+kb_calendar_weekdays: Mon,Tue,Wed,Thu,Fri,Sat,Sun
+kb_calendar_learning_short: Learn {count}
+kb_calendar_exercise_short: Exercise {count}
+kb_habit_empty_hint: Add a habit in the Habits view before checking it in here.
+kb_habit_pick: Habit
+kb_habit_count: Count
+kb_habit_related_tasks: Related tasks
+kb_habit_add_title: Add a habit
+kb_habit_kind: Kind
+kb_habit_cadence: Cadence
+kb_habit_target_count: Target count
+kb_habit_target_unit: Target unit
+kb_habit_add_submit: Save habit
+kb_habit_summary_total: Check-ins (7d)
+kb_habit_summary_catalog: Habit catalog
+kb_habit_summary_volume: Recorded volume
+kb_habit_summary_window: Last 7 days of habit progress.
+kb_habit_empty_summary: No habits yet.
+kb_habit_summary_checkins: check-ins
+kb_habit_summary_days: days hit
+kb_habit_summary_streak: streak
+kb_habit_done: Done
+kb_strip_learning_help: Open Learning details for this habit.
+kb_strip_more: More
+kb_context_total_tags: Tracked tags
+kb_context_company_tags: Company tags
+kb_context_people_tags: People tags
+kb_context_namespace: Namespace
+kb_context_pick: Tag
+kb_context_empty: No matching tags yet.
+kb_context_flow_prefix: Workflow facet
+kb_context_source_kanban: Kanban
+kb_context_source_learning: Learning
+kb_context_source_inbox: Inbox
+kb_context_source_habit: Habits
+kb_context_source_empty: No matches
+kb_review_done: Done tasks
+kb_review_crystallized: Crystallized
+kb_review_activity: Activity entries
+kb_review_learning: Learning entries
+kb_review_done_detail: Done this cycle
+kb_review_done_empty: No done tasks yet.
+kb_review_learning_focus: Learning focus
+kb_review_learning_empty: No active learning focus.
+kb_review_activity_focus: Activity pulse
+kb_review_activity_empty: No activity summary yet.
+kb_review_checkins: check-ins
+move_to: Move to
+kb_stay: (stay)
+kb_move_help: Buttons below only change which **column** the task is in (not a “completion status” menu).
+kb_auto_dates: Auto-set started / completed dates on column move
+kb_auto_dates_help: When moving into Doing, sets started_on if empty. When moving into Done, sets completed_on if empty.
+kb_more_fields: More fields
+kb_more_fields_help: Optional notes, dates, or values kept when moving across columns.
+kb_focus_mode: Focus mode (Doing full width; other columns in tabs)
+kb_focus_mode_help: Hides the four-column grid. Use tabs for Queue, Done, and Someday / Maybe when you only want to execute.
+kb_links_preview: Links (click to open)
+kb_subtask_progress: '{done} / {total} subtasks done'
+kb_wip_hint: Doing has {n} tasks — consider limiting work in progress.
+kb_done_column_expander: Show and edit Done ({n})
+kb_done_column_hint: Expand to add, edit, or archive completed tasks.
+kb_drag_title: Drag board
+kb_drag_help: Drag cards across columns or within a column, then apply. The detailed card editor below remains the source for fields.
+kb_drag_applied: Applied the drag-board order.
+kb_drag_stale: Drag order was stale or incomplete; reload and try again.
+kb_done_render_limit: Showing {shown}/{total} Done cards here. Use housekeeping or Done -> evidence above for the full list.
+kb_title_required: Task title is required.
+kb_invalid_date: 'Use YYYY-MM-DD for date fields: {fields}.'
+kb_task_details: Details & subtasks
+kb_edit_task: Edit
+kb_done_editing: Done editing
+kb_tap_title_to_edit: Click the title to edit this task
+kb_read_subtasks_hint: Subtasks — check off when done
+kb_edit_exit_hint: Click outside the board cannot close edit mode. Use "Done editing" below (Enter does not apply to all fields).
+kb_card_actions: ⋯
+kb_card_actions_help: Delete or move this task to another column
+kb_edit_move: ⇄
+kb_edit_move_help: Move this task to another column
+kb_card_delete_hint: Removing a task cannot be undone here.
+kb_delete_card: Delete task
+kb_delete_confirm: Delete this task?
+kb_delete_short: x
+kb_delete_subtask: Delete subtask
+kb_edit_short: Edit
+kb_save_short: Save
+kb_cancel_short: Cancel
+kb_ai_gap: Analyze gap
+kb_ai_gap_short: Gap
+kb_ai_subtasks: Draft subtasks
+kb_ai_subtasks_short: Sub
+kb_ai_done_short: Evd
+kb_ai_backend: Kanban AI
+kb_ai_backend_help: Choose the engine used by Kanban AI actions. Codex uses the local Codex CLI in read-only mode and needs no Kanban-specific configuration.
+kb_ai_backend_llm: LLM
+kb_ai_backend_codex: Codex
+kb_ai_backend_codex_status: 'Codex: read-only local'
+kb_ai_settings_title: Kanban AI Config
+kb_ai_settings_caption: These settings only affect Kanban task clarification and subtask drafting for the current profile. API keys still come from the shared AI / LLM runtime.
+kb_ai_action_task_alignment: Task clarification
+kb_ai_action_task_alignment_help: Suggest candidate interpretations before drafting subtasks for vague tasks.
+kb_ai_action_subtasks: Subtask drafting
+kb_ai_action_subtasks_help: Draft reviewable subtasks from the chosen task interpretation.
+kb_ai_config_backend: Backend
+kb_ai_config_llm_model: LLM model override
+kb_ai_config_codex_model: Codex model override
+kb_ai_config_model_help: Leave blank to use the global/default model.
+kb_ai_effective_config: 'Effective: {backend} · {model}'
+kb_ai_llm_status: 'LLM: {status} · {model}'
+kb_ai_codex_status: 'Codex: {status}'
+kb_ai_configured: configured
+kb_ai_missing_key: missing key
+kb_ai_installed: installed
+kb_ai_missing: missing
+kb_ai_logged_in: logged in
+kb_ai_login_unknown: login unknown
+kb_ai_codex_default: Codex CLI default
+kb_ai_app_default: app default
+kb_ai_save: Save AI preferences
+kb_ai_saved: Kanban AI preferences saved.
+kb_mark_crystallized: Mark crystallized
+kb_crystallize_short: Cry
+kb_crystallize_done_only: Only Done tasks can be crystallized.
+kb_artifact: Artifact
+kb_verification: Verification
+kb_move_to_label: Move to
+kb_confirm_move: Move
+kb_read_new_subtask_ph: New subtask…
+kb_read_add_subtask_expander: Add subtask
+kb_alignment_title: Confirm task understanding
+kb_alignment_custom: Add detail or correction
+kb_alignment_confirm: Use this understanding
+kb_alignment_custom_only: Use only my supplement
+kb_alignment_assumptions: Assumptions
+kb_alignment_style: Subtask style
+kb_alignment_goal: Goal
+kb_alignment_label: Label
+kb_alignment_other: Other
+kb_alignment_other_hint: Use only my note below
+kb_alignment_status: Understanding ready
+kb_alignment_required: Choose an understanding or add a clarification.
+kb_no_alignment_options: No task understanding options were generated.
+kb_discard_draft: Discard draft
+kb_discard_all_drafts: Discard all
+kb_no_selected_drafts: Select at least one draft to apply.
+kb_draft_status: '{count} drafts'
+kb_ai_error_status: AI error
+kb_granularity: Granularity
+kb_granularity_milestone: Milestone
+kb_granularity_checklist: Checklist
+kb_granularity_implementation: Implementation
+kb_no_subtask_proposals: No usable subtask draft was generated.
+kb_subtask_error_generic: No usable subtask draft was generated.
+kb_subtask_error_task_not_found: Kanban task was not found.
+kb_subtask_error_gap_error: Gap analysis could not run for this task.
+kb_subtask_error_llm_error: The model call failed or AI is not configured.
+kb_subtask_error_parse_empty: The model did not return valid JSON subtasks.
+kb_subtask_error_empty_json: The model returned no subtask items.
+kb_subtask_error_invalid_schema: The model returned subtask items without usable titles.
+kb_subtask_error_filtered_vague: The model returned drafts, but every title was too vague. Add a concrete artifact or verification detail in Other and retry.
+kb_subtask_error_filtered_duplicate: The model only returned subtasks that already exist.
+kb_subtask_error_filtered_empty: The model returned drafts, but none passed validation.
+new_context: Context
+new_context_ph: What this is / background
+new_why: Why
+new_why_ph: Why this matters
+new_blocked: Blocked by
+new_blocked_ph: Dependency or blocker
+new_outcome: Outcome
+new_outcome_ph: What you delivered
+field_context: context
+field_why: why
+field_blocked: blocked by
+field_outcome: outcome
+field_started: started_on
+field_completed: completed_on
+kb_project: Project
+kb_milestone: Milestone
+kb_no_project: No project
+kb_no_milestone: No milestone
+subtasks_label: Subtasks (checkbox)
+add_subtask: + Subtask
+crystallized: Crystallized (ingested)
+kb_open_evidence_review: Open Evidence Review
+kb_done_review_hint: Use Evidence Review for Done -> evidence drafts and batch cleanup. Done cards still support single-card archive or delete here.
+kb_archive_card: Archive
+kb_archive_short: Archive
+kb_archive_confirm: Archive this Done task?
+kb_archive_done_only: Only Done tasks can be archived from the board.
+done_bulk_title: Done column housekeeping
+done_bulk_pick: Select Done tasks
+archive_done: Archive selected
+delete_done: Delete selected
+ingest_select_rows: Choose which draft rows to apply
+ingest_adopt_evidence: Adopt evidence row
+ingest_adopt_node: Adopt node update
+ingest_apply_selected: Apply selected rows
+ingest_apply_all: Apply full draft
+ingest_mark_crystallized: After apply, mark source Done tasks as crystallized
+ingest_filter_warn: Subset filter
+ingest_expander: Done → evidence (AI)
+ingest_pick_done: Select Done tasks
+ingest_generate: Generate draft
+ingest_spinner: Calling LLM…
+ingest_allow_status: Allow AI to update node status
+ingest_allow_status_help: 'Off: ignores LLM status fields; only merges refs/evidence; locked nodes with new evidence become learning. On: applies LLM status only when it upgrades or stays at the same tier (never solid→learning, never expert→lower). LLM expert is saved as learning when that is an upgrade. Your YAML expert stays expert.'
+ingest_preview_pool: Merged evidence-pool (preview)
+ingest_preview_tree: Merged skill-tree (preview)
+ingest_apply: Apply to profile
+ingest_applied: 'Applied: pool, skill-tree, and SKILL.md sync.'
+ingest_err: 'Error: {msg}'
+ingest_no_done: No tasks in Done.
+ingest_no_ai: AI not configured. Set LLM_API_KEY in .env.
+ingest_warn: Warnings
+ingest_preview_source_done: 'Draft from Done tasks: {sources}'
+ingest_preview_projects: 'Projects: {projects}'
+ingest_rationale: Rationale
+ingest_excerpt: Source excerpt

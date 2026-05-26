@@ -1,0 +1,68 @@
+page_title: Gap Analysis · nblane
+title: Gap Analysis
+page_context_line: 'Agent OS: map a task to your skill tree; use rules and optional AI to plan next steps with your coding agent.'
+page_help_short: Guide
+page_help_body: |-
+  ### Gap Analysis workflow
+
+  1. Describe the task as concretely as possible: target system, constraints, expected result, and unknowns.
+  2. Use rule matching for deterministic keyword coverage; enable AI routing when the task language does not match the schema well.
+  3. Include current goal context when the task should be interpreted through the active stage goal.
+  4. Read matched nodes and dependency closure before trusting the suggested next steps.
+  5. Apply skill status updates only after the task is actually completed and evidence exists.
+
+  This page is a planning lens. It should not replace Evidence Review.
+task_label: Task description
+task_placeholder: |-
+  Describe your task in natural language, e.g.:
+  Reproduce PI0.5 VLA control on a Piper arm
+analyze_button: Analyze
+analyze_hint: Enter a task description and click Analyze to run.
+spinner_gap: Running gap analysis...
+verdict_ok: Ready
+verdict_gap: Gaps remain
+metric_verdict: Verdict
+metric_matches: Matched nodes
+metric_gaps: Gap nodes
+progress_text: 'Dependency coverage: {ok}/{total} ({pct:.0%})'
+subheader_matches: Matched skill nodes
+match_score: Match score
+subheader_closure: Dependency closure
+gap_mark_suffix: gap
+subheader_next: Suggested next steps
+subheader_ai: AI analysis
+ai_disabled_hint: |-
+  Set LLM_API_KEY in `.env` to enable AI insights:
+  - Why each gap matters for this task
+  - Optimal learning order
+  - Skill status updates after completing the task
+spinner_ai: AI reasoning...
+learned_caption: Learned keywords updated ({total} total across {nodes} nodes, max {max_kw}/node)
+writeback_title: Update skill status
+writeback_caption: Select nodes and new statuses, then apply to write skill-tree.yaml.
+current_label: Current
+apply_button: Apply {n} update(s)
+success_updated: 'Skill tree updated:'
+checkbox_select: Select
+use_rule_match: Rule keyword overlap
+use_llm_router: AI route to skill nodes (first pass)
+use_goal_context: Use current goal context
+goal_context_used: Current goal context is included in this analysis.
+goal_context_not_used: Current goal context is not included.
+context_source_label: Context source
+context_privacy_label: 'Context privacy: {state}'
+result_source_line: 'Source: {source} ({kind})'
+manual_node_label: Or choose a schema node (manual)
+manual_node_none: (automatic only)
+gap_error_no_roots: No roots from the enabled matchers. Turn on **AI route** or **rule overlap**, or pick a node below and analyze again.
+gap_error_empty_task: Enter a task description.
+gap_error_node_unknown: That node id is not in the schema.
+match_source_rule: rule
+match_source_llm: AI
+match_source_both: rule+AI
+match_source_explicit: manual
+router_learned_caption: First-pass router saved keywords to learned store.
+subheader_coach_followup: Follow-up (same session)
+expander_first_prompt: 'First prompt: skill tree + gap analysis (long)'
+chat_followup_placeholder: Ask a follow-up about this gap analysis…
+spinner_ai_followup: Thinking…

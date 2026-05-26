@@ -556,6 +556,75 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             },
         ),
     ),
+    "gap.skill_coach": AIActionSpec(
+        name="gap.skill_coach",
+        owner="gap",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="text",
+        activity_policy="candidate",
+    ),
+    "gap.task_routing": AIActionSpec(
+        name="gap.task_routing",
+        owner="gap",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="candidate",
+        schema=schema_for_keys(
+            ["nodes", "warnings"],
+            properties={
+                "nodes": {"type": "array"},
+                "warnings": {"type": "array"},
+            },
+        ),
+    ),
+    "profile.resume_ingest": AIActionSpec(
+        name="profile.resume_ingest",
+        owner="profile",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="patch",
+        schema=schema_for_keys(
+            ["nodes", "evidence", "narrative", "warnings"],
+            properties={
+                "nodes": {"type": "array"},
+                "evidence": {"type": "array"},
+                "warnings": {"type": "array"},
+            },
+        ),
+    ),
+    "profile.kanban_ingest": AIActionSpec(
+        name="profile.kanban_ingest",
+        owner="profile",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="patch",
+        schema=schema_for_keys(
+            ["nodes", "evidence", "warnings"],
+            properties={
+                "nodes": {"type": "array"},
+                "evidence": {"type": "array"},
+                "warnings": {"type": "array"},
+            },
+        ),
+    ),
+    "output.visual_caption": AIActionSpec(
+        name="output.visual_caption",
+        owner="output",
+        default_backend="direct_llm",
+        fallback_backend="rule_fallback",
+        output_mode="json",
+        activity_policy="candidate",
+        schema=schema_for_keys(
+            ["caption", "alt_text", "warnings"],
+            properties={
+                "warnings": {"type": "array"},
+            },
+        ),
+    ),
 }
 
 

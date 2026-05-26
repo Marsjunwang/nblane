@@ -1,0 +1,173 @@
+status_locked: 锁定
+status_learning: 学习中
+status_solid: 扎实
+status_expert: 专家
+profile_header: '## 当前档案'
+no_profiles_yet: 暂无档案。
+no_profiles_main: 暂无档案，请在侧边栏创建。
+select_profile_aria: 当前档案
+expander_create: ➕ 新建档案
+profile_name_label: 档案名称
+profile_name_ph: 例如 alice
+create: 创建
+name_empty: 名称不能为空。
+name_exists: 「{name}」已存在。
+profile_created: 已创建档案「{name}」。
+ai_not_configured: 未配置 AI（仅规则模式）
+ai_add_key_caption: 可在侧边栏 AI / LLM 设置里填写 API key，也可在 `.env` 中设置 `LLM_API_KEY`。
+llm_settings_title: AI / LLM
+llm_provider: 服务商
+llm_base_url: Base URL
+llm_model: 模型
+llm_custom_model: 自定义模型
+llm_custom_model_choice: 自定义…
+llm_api_key: API key
+llm_api_key_help: 仅当前会话生效。留空会继续使用本会话或 .env 中已有的 key。
+llm_ui_lang: 界面语言
+llm_reply_lang: 模型回复语言
+llm_reply_lang_en: 英文
+llm_reply_lang_zh: 中文
+llm_configured: AI 已启用：{label}
+llm_not_configured: 尚未设置 API key。
+llm_session_only: 这些设置只应用到当前页面会话，不会写入磁盘。
+page_help_short: 使用说明
+page_help_docs_link: '[打开完整说明]({path})'
+page_help_docs_open_inline: 打开完整说明
+page_help_docs_missing: 未找到完整说明：{path}
+ai_config_overview_title: AI 配置地图
+ai_config_overview_caption: 这里把部署级运行时、页面级动作偏好、Codex 生效范围和候选优先写入门槛分开显示。
+ai_scope_global_llm: 全局 LLM
+ai_scope_page_actions: 页面动作
+ai_scope_codex: Codex
+ai_scope_review_gate: 人工确认
+ai_scope_ready: 可用
+ai_scope_missing: 未就绪
+ai_scope_overrides_count: '{count} 个覆盖'
+ai_scope_candidate_first: 候选优先写入
+ai_config_overview_llm_title: 全局 LLM 运行时
+ai_config_overview_llm_line: Base URL：{provider} · 模型：{model}
+ai_config_overview_llm_scope: API key 只来自当前会话或环境变量；页面动作只保存非密钥的模型/后端偏好。
+ai_config_overview_codex_title: Codex 运行时
+ai_config_overview_actions_title: 页面动作偏好
+ai_config_overview_col_page: 页面
+ai_config_overview_col_action: 动作
+ai_config_overview_col_backend: 后端
+ai_config_overview_col_model: 模型
+ai_config_overview_col_source: 来源
+ai_config_overview_default_model: 应用默认
+ai_config_overview_profile_override: 当前档案覆盖
+ai_config_overview_app_default: 应用默认
+ai_page_dashboard: 每日仪表盘
+ai_page_evidence: 证据审阅
+ai_page_research: 研究
+ai_page_kanban: 看板
+ai_page_project: 项目看板
+codex_settings_title: Codex
+codex_bin: Codex binary
+codex_cloud_env_id: Codex Cloud env id
+codex_model: Codex 模型覆盖
+codex_attempts: Cloud attempts
+codex_branch: Cloud 分支
+codex_timeout: 超时时间（秒）
+codex_profile_config: '{profile} 的 Codex 配置文件：`{path}`'
+codex_installed: 已安装 Codex：{version}
+codex_missing: 未安装 Codex CLI，或不在 PATH 中。
+codex_logged_in: Codex 登录：可用。
+codex_not_logged_in: Codex 尚未登录或登录状态不可用。
+codex_cloud_configured: 已配置 Codex Cloud env。
+codex_cloud_missing: 填写 Codex Cloud env id 后，Web 才能提交任务。
+codex_install: 安装
+codex_upgrade: 升级
+codex_save_env: 保存 Codex 设置到 .env
+codex_save_profile: 保存到当前档案
+codex_saved_env: Codex 设置已保存到 .env。
+codex_saved_profile: 当前档案的 Codex 设置已保存。
+codex_install_done: Codex 安装命令已完成。
+codex_install_failed: Codex 安装命令失败。
+codex_session_only: 认证仍由 Codex CLI 管理；nblane 只保存非密钥的 NBLANE_CODEX_* 设置。
+codex_scope_hint: 认证与 CLI 配置属于当前部署共享范围；当前档案只保存非密钥偏好。
+kb_ai_backend: 看板 AI 引擎
+kb_ai_backend_help: 选择看板 AI 动作使用的引擎。Codex 使用本地 Codex CLI 的只读模式。
+kb_ai_backend_llm: LLM
+kb_ai_backend_codex: Codex
+kb_ai_backend_codex_status: Codex：本地只读
+codex_configure: 配置 Codex
+codex_config_dialog_title: Codex 配置
+codex_status_tab: 状态
+codex_api_key_tab: 全局 API Key
+codex_cli_config_tab: 全局 CLI 配置
+codex_profile_config_tab: 当前档案偏好
+codex_dialog_close: 关闭
+codex_current_profile: 当前档案：`{profile}`
+codex_web_home: Codex home：`{path}`
+codex_cli_config_path: CLI 配置：`{path}`
+codex_auth_path: 认证文件：`{path}`
+codex_auth_managed: 当前部署的 Codex 认证由 Codex CLI 管理，文件位于 `{path}`。nblane 不展示 auth.json 原文。
+codex_profile_isolated_note: 这里保存后会登录当前部署共享的 service-level Codex home，所有 Codex 动作都会使用它。
+codex_cli_profile_scope_note: 这个 config.toml 属于当前部署共享的 service-level Codex home；每个档案的非密钥偏好放在 codex.yaml。
+codex_terminal_hint: Web Codex 使用这个 service-level CODEX_HOME。下面的档案配置只保存 model、cloud env、timeout 等非密钥偏好。
+codex_api_key: Codex API key
+codex_api_key_help: 通过 service-level CODEX_HOME 调用 `codex login --with-api-key` 保存；key 通过 stdin 传入，不会由 nblane 存储。
+codex_save_api_key: 保存 API Key
+codex_api_key_saved: Codex API key 已保存。
+codex_api_key_failed: Codex API key 未保存：{error}
+codex_cli_config_editor: 编辑 config.toml
+codex_save_cli_config: 保存 config.toml
+codex_cli_config_saved: config.toml 已保存。上一个文件备份：{backup}
+codex_cli_config_invalid: config.toml 未保存：{error}
+codex_cli_config_template_note: config.toml 还不存在，编辑器当前显示的是新建模板。
+codex_config_path: Codex profile 配置：`{path}`
+codex_config_editor: 编辑 codex.yaml
+codex_config_reload: 从磁盘重载
+codex_config_save: 保存 Codex 配置
+codex_config_reloaded: 已从磁盘重载 Codex 配置。
+codex_config_saved: Codex 配置已保存。
+codex_config_invalid: Codex 配置未保存：{error}
+codex_config_template_note: codex.yaml 还不存在，编辑器当前显示的是新建模板。
+merge_llm_status_applied: 已应用
+merge_llm_status_ignored: 已忽略
+merge_preview_llm_status_line: 预览合并：LLM 的 `status` 字段 — **{mode}**
+merge_preview_delta_title: 与磁盘上文件的差异（本草案）
+merge_preview_delta_new_evidence: 新增证据行
+merge_preview_delta_tree: 技能树变更
+merge_preview_delta_none: 未检测到新的池行或节点字段变化。
+merge_preview_yaml_readonly_caption: 下方 YAML 为只读预览，随当前合并选项即时更新；切换「允许 AI 更新状态」会重算同一草案，无需再次点生成。
+goal_strip_hidden: 目标已设置
+goal_strip_default_label: 阶段目标
+goal_strip_status: 状态
+goal_strip_target: 目标日期
+goal_strip_focus: 当前重点
+goal_status_active: 进行中
+goal_status_paused: 暂停
+goal_status_completed: 已完成
+goal_status_archived: 已归档
+goal_visibility_visible: 完整显示
+goal_visibility_discreet: 低调显示
+goal_visibility_hidden: 只显示已设置
+goal_visibility_private: 私密
+goal_no_current: 尚未设置 current goal。
+goal_presence_current: 当前目标
+goal_presence_details: 目标详情
+goal_presence_edit_home: 在首页编辑。
+goal_presence_hidden_note: 普通页面已隐藏目标详情。
+goal_presence_agent_context_on: 已进入 Agent 上下文
+goal_presence_agent_context_off: 未进入 Agent 上下文
+sidebar_nav_title: 工作区
+sidebar_nav_home_group: 首页
+sidebar_nav_work_group: 工作
+sidebar_nav_growth_group: 成长
+sidebar_nav_output_group: 输出
+sidebar_nav_team_group: 团队
+sidebar_nav_dashboard: 每日仪表盘
+sidebar_nav_kanban: 看板
+sidebar_nav_project_board: 项目看板
+sidebar_nav_evidence_review: 证据审阅
+sidebar_nav_research: 研究工作台
+sidebar_nav_skill_map: 技能地图
+sidebar_nav_gap: 差距分析
+sidebar_nav_review: 复盘
+sidebar_nav_health: 档案体检
+sidebar_nav_agent_activity: Agent 活动
+sidebar_nav_public: 输出工作台
+sidebar_nav_public_build: 公开构建
+sidebar_nav_team: 团队视图

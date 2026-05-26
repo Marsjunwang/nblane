@@ -1,0 +1,74 @@
+page_title: Skill Tree · nblane
+title: Skill Tree
+page_context_line: 'Private OS: edit structured skills, inline evidence, and the shared evidence pool for this profile.'
+page_help_short: Guide
+page_help_body: |-
+  ### Skill Tree workflow
+
+  1. Treat status as a claim about capability, not as a mood marker.
+  2. Add inline evidence for quick notes, or attach stable evidence-pool rows when the same proof supports several skills.
+  3. Use Evidence Review for stronger review status, confidence, project refs, and publish readiness.
+  4. Save writes skill-tree.yaml and refreshes generated SKILL.md blocks.
+  5. Check evidence risk warnings before raising a skill to solid or expert.
+
+  Skill status should move only when evidence can explain why.
+error_no_tree: skill-tree.yaml not found for '{profile}'.
+metric_expert: 🔵 Expert
+metric_solid: 🟢 Solid
+metric_learning: 🟡 Learning
+metric_locked: ⬜ Locked
+metric_lit_rate: Lit rate
+progress_overall: 'Overall lit: {pct:.0%}'
+no_categories: No categories found in schema.
+level_l1: L1 · Foundation
+level_l2: L2 · Intermediate
+level_l3: L3 · Advanced
+level_l4: L4 · Expert / Frontier
+level_n: Level {n}
+widget_status: Status
+widget_note: Note
+note_placeholder: context / evidence
+cat_progress: '{cat}: {lit}/{total} lit ({pct:.0%})'
+save_button: Save skill-tree.yaml
+save_caption: Saves skill-tree.yaml and syncs generated blocks in SKILL.md.
+saved_synced: Saved and synced SKILL.md.
+saved_yaml: Saved skill-tree.yaml.
+saved_synced_path: 'Saved and synced SKILL.md. skill-tree.yaml: `{path}`'
+saved_yaml_path: 'Saved skill-tree.yaml (SKILL.md sync skipped). File: `{path}`'
+evidence_expander: Evidence ({n})
+evidence_item: Item
+evidence_type: Type
+evidence_title: Title
+evidence_date: Date
+evidence_url: URL
+evidence_summary: Summary
+evidence_add: ＋ Add evidence
+evidence_remove: Remove
+evidence_pin_help: 'Pin: keep this skill''s evidence section expanded; click another skill''s pin to switch.'
+pool_expander: Evidence pool (shared catalog)
+pool_caption: Stable ids here may be referenced from many skills via evidence_refs.
+pool_id_optional: Id (optional; auto-generated if empty)
+pool_add_button: Add to pool
+pool_added: Added to evidence pool.
+evidence_refs_label: Pool references
+evidence_refs_help: Choose existing pool rows to attach to this skill.
+pool_empty_hint: No pool rows yet — add entries in the expander above.
+pool_list_heading: Catalogued rows
+pool_delete_hint: Deleting removes the row from this editor; click Save to write YAML.
+pool_prune_refs: 'When deleting: also remove this pool id from all skills (evidence_refs)'
+pool_delete_remove: Delete row
+pool_delete_blocked: 'Cannot delete `{pid}` — still linked from skills: {nodes}. Enable the option above or unlink first.'
+pool_deleted_session: Removed pool row from editor; click **Save** to persist.
+evidence_review_link: Open Evidence Review
+evidence_signal_count: '{n} evidence'
+evidence_signal_strength: 'strength: {strength}'
+evidence_signal_review: 'review: {status}'
+evidence_signal_missing: Missing evidence
+evidence_signal_risk: 'Evidence risk: {reason}'
+evidence_strength_unrated: unrated
+evidence_strength_weak: weak
+evidence_strength_medium: medium
+evidence_strength_strong: strong
+evidence_strength_high_trust: high trust
+evidence_review_status_needs_review: needs review
+evidence_review_status_reviewed: reviewed

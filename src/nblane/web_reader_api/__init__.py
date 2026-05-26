@@ -33,8 +33,10 @@ from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core import reader_tasks
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
+    PaperImportError,
     _paper_search_result_has_downloadable_pdf,
     build_reader_payload,
+    ensure_paper_pdf_downloaded,
     extract_paper_page_text_layer,
     import_paper_pdf,
     import_paper_search_results,
@@ -46,6 +48,7 @@ from nblane.core.research_papers import (
     render_paper_page_preview,
     search_papers,
     search_papers_with_codex,
+    upload_paper_library_pdf,
 )
 from nblane.core.research_sources import add_research_source, load_research_sources, save_research_sources
 from nblane.core.web_preferences import load_web_preferences
@@ -1777,35 +1780,8 @@ def _paper_library_import_upload_pdf(
     payload: bytes,
     filename: str,
     options: dict[str, object],
-) -> str:
-    clean_filename = Path(_clean_text(filename) or "paper.pdf").name
-    title = _clean_text(options.get("title")) or Path(clean_filename).stem or "Uploaded PDF"
-    inbox = load_research_sources(profile_path)
-    source = add_research_source(
-        inbox,
-        title,
-        kind="paper",
-        status=_clean_text(options.get("status")) or "reading",
-        tags=_clean_list(options.get("tags")),
-        visibility=_clean_text(options.get("visibility")) or "private",
-        origin="manual",
-        goal_refs=_clean_list(options.get("goal_refs")),
-        project_refs=_clean_list(options.get("project_refs")),
-        library_node_refs=_clean_list(options.get("library_node_refs")),
-        metadata={"manual_import": "pdf_upload", "uploaded_filename": clean_filename},
-    )
-    save_research_sources(profile_path, inbox)
-    try:
-        import_paper_pdf(profile_path, source.id, payload, clean_filename)
-    except Exception:
-        try:
-            latest = load_research_sources(profile_path)
-            latest.sources = [item for item in latest.sources if item.id != source.id]
-            save_research_sources(profile_path, latest)
-        except Exception:
-            pass
-        raise
-    return source.id
+) -> dict[str, object]:
+    return upload_paper_library_pdf(profile_path, payload, filename, options)
 
 
 @app.post("/api/research/{profile}/paper-library/import")
@@ -1840,7 +1816,10 @@ async def paper_library_import(request: Request, profile: str):
             },
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": "import_failed", "retryable": False},
+        ) from exc
     detail_id = imported[0] if imported else ""
     pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
     message = f"Imported {len(imported)} paper{'s' if len(imported) != 1 else ''}."
@@ -1896,7 +1875,10 @@ async def paper_library_import_url(request: Request, profile: str):
             },
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": "url_import_failed", "retryable": False},
+        ) from exc
     imported = [source_id] if source_id else []
     pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
     message = "Imported paper from URL."
@@ -1920,6 +1902,52 @@ async def paper_library_import_url(request: Request, profile: str):
             "message": message,
             "warnings": pdf_warnings,
             "payload": payload,
+        }
+    )
+
+
+@app.post("/api/research/{profile}/papers/{source_id}/pdf-retry")
+async def paper_library_pdf_retry(request: Request, profile: str, source_id: str):
+    """Re-attempt the open-access PDF download for a previously-failed source."""
+
+    _same_origin_mutation(request)
+    profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
+    body = await _json_body(request)
+    override_url = _clean_text(body.get("pdf_url"))
+    try:
+        outcome = await asyncio.to_thread(
+            ensure_paper_pdf_downloaded,
+            profile_path,
+            source_id,
+            pdf_url=override_url,
+            error_prefix="PDF retry failed",
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": str(exc), "code": "source_not_found", "retryable": False},
+        ) from exc
+    library_payload = await asyncio.to_thread(
+        build_paper_library_payload,
+        profile_path,
+        current_view="all",
+        detail_id=source_id,
+        focus="artifacts",
+        user_id=user.id,
+        reader_base="",
+    )
+    status = _clean_text(outcome.get("status"))
+    ok = status == "downloaded"
+    return JSONResponse(
+        {
+            "ok": ok,
+            "status": status,
+            "source_id": source_id,
+            "error": _clean_text(outcome.get("error")),
+            "asset_ref": _clean_text(outcome.get("asset_ref")),
+            "byte_size": outcome.get("byte_size", 0),
+            "payload": library_payload,
         }
     )
 
@@ -1964,6 +1992,7 @@ async def paper_library_upload_pdf(
     status: str = Form("reading"),
     visibility: str = Form("private"),
     tags: str = Form(""),
+    allow_duplicates: str = Form(""),
 ):
     _same_origin_mutation(request)
     profile_path = _paper_library_profile_dir(profile, request)
@@ -1974,7 +2003,7 @@ async def paper_library_upload_pdf(
     finally:
         await file.close()
     try:
-        source_id = await asyncio.to_thread(
+        outcome = await asyncio.to_thread(
             _paper_library_import_upload_pdf,
             profile_path,
             payload,
@@ -1985,10 +2014,21 @@ async def paper_library_upload_pdf(
                 "tags": tags,
                 "visibility": visibility,
                 "status": status,
+                "allow_duplicates": _clean_text(allow_duplicates).lower() in {"1", "true", "yes"},
             },
         )
+    except PaperImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": exc.code, "retryable": exc.retryable},
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": "import_failed", "retryable": False},
+        ) from exc
+    source_id = _clean_text(outcome.get("source_id"))
+    duplicate = bool(outcome.get("duplicate"))
     library_payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
@@ -2000,12 +2040,18 @@ async def paper_library_upload_pdf(
         user_id=user.id,
         reader_base="",
     )
+    message = (
+        "Already imported. Reusing the existing paper."
+        if duplicate
+        else "Uploaded and imported PDF."
+    )
     return JSONResponse(
         {
             "ok": True,
             "imported": [source_id],
             "source_id": source_id,
-            "message": "Uploaded and imported PDF.",
+            "duplicate": duplicate,
+            "message": message,
             "payload": library_payload,
         }
     )
@@ -2035,9 +2081,20 @@ async def paper_library_pdf_upload(
             filename,
         )
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=404,
+            detail={"message": str(exc), "code": "source_not_found", "retryable": False},
+        ) from exc
+    except PaperImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": exc.code, "retryable": exc.retryable},
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": "invalid_pdf", "retryable": False},
+        ) from exc
     library_payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,

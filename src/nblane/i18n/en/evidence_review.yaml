@@ -1,0 +1,196 @@
+page_title: Evidence Review · nblane
+title: Evidence Review
+page_context_line: Review Done work, evidence-pool rows, skill links, and strength risks before skill status becomes a claim.
+page_help_short: Guide
+evidence_ai_short: Evidence AI
+evidence_ai_config_caption: 'These settings only affect Evidence Review actions for the active profile: Done-to-evidence drafting and Kanban task understanding.'
+evidence_ai_backend: Evidence AI engine
+evidence_ai_backend_help: LLM uses the global AI / LLM runtime. Codex uses the shared service-level Codex CLI in read-only mode.
+evidence_ai_subtasks_model: Done -> evidence model
+evidence_ai_subtasks_help: Generate reviewable evidence drafts from selected Done tasks.
+evidence_ai_alignment_model: Task alignment model
+evidence_ai_alignment_help: Clarify underspecified Kanban cards before drafting.
+evidence_ai_codex_model_placeholder: Codex CLI default
+evidence_ai_config_saved: Evidence AI preferences saved.
+evidence_ai_default_hint: 'App default: {backend}'
+evidence_help_body: |-
+  ### Evidence Review workflow
+
+  1. **Done Queue / Housekeeping**: select completed Kanban tasks, generate a reviewable evidence draft, then apply only the rows you trust.
+  2. **Claim Studio**: turn reviewed evidence into reusable public claims by project, goal, skill, all evidence, or manual selection.
+  3. **Evidence Pool**: edit evidence rows, strength, confidence, review status, and public readiness.
+  4. **Skill Links**: link active evidence to skill nodes so status upgrades stay grounded.
+  5. **Project / Experience Refs**: connect evidence to project cases, experience cases, and research sources.
+  6. **Status Risks**: check solid/expert skills whose evidence strength is too weak before publishing or upgrading claims.
+
+  AI never writes directly without a preview/apply step on this page.
+save_pool: Save evidence pool
+saved_pool: Saved evidence-pool.yaml.
+saved_pool_synced: Saved evidence-pool.yaml and synced SKILL.md.
+metric_done_uncrystallized: Done not crystallized
+metric_unlinked: Unlinked evidence
+metric_needs_review: Needs review
+metric_status_risk: Status evidence risk
+tab_queue: Done Queue / Housekeeping
+tab_claims: Claim Studio
+tab_pool: Evidence Pool
+tab_links: Skill Links
+tab_refs: Project / Experience Refs
+tab_risks: Status Risks
+done_queue_title: Done -> evidence candidates
+done_queue_empty: No Done tasks waiting for evidence review.
+done_generate: Generate Done -> evidence draft
+done_pick: Pick Done tasks
+done_allow_status: Allow AI status updates
+done_allow_status_help: 'Off: merge evidence and refs only; locked nodes with evidence may become learning. On: AI status is still upgrade-only and expert is never trusted automatically.'
+done_mark_crystallized: Mark selected Done tasks crystallized after apply
+done_preview_source: 'Source Done tasks: {sources}'
+done_no_ai: AI is not configured.
+done_spinner: Generating evidence draft...
+done_apply_selected: Apply selected
+done_apply_all: Apply all
+done_applied: Applied evidence draft.
+done_housekeeping_title: Done housekeeping
+done_housekeeping_caption: Archive or delete Done tasks after their evidence review is handled.
+done_housekeeping_pick: Pick Done tasks
+done_housekeeping_archive: Archive selected Done tasks
+done_housekeeping_delete: Delete selected Done tasks
+done_housekeeping_confirm_archive: Confirm archive selected
+done_housekeeping_confirm_delete: Confirm delete selected
+done_housekeeping_uncrystallized_warning: Some selected tasks are not crystallized yet. Archive or delete only if you are sure they do not need Done -> evidence review.
+done_housekeeping_confirm_uncrystallized: I understand the selected uncrystallized Done tasks may not have evidence yet
+done_housekeeping_archived: Archived {n} Done task(s).
+done_housekeeping_deleted: Deleted {n} Done task(s).
+done_housekeeping_empty: No Done tasks to clean up.
+done_crystallized_label: crystallized
+done_uncrystallized_label: uncrystallized
+review_rows_title: Pool rows needing review
+review_rows_empty: No evidence rows need review.
+unlinked_rows_title: Unlinked evidence
+unlinked_rows_empty: All active evidence rows are linked to skills.
+claim_candidates_title: Evidence -> claim candidates
+claim_studio_title: Claim Studio
+claim_studio_intro: Generate reusable public claims from reviewed evidence by project, goal, skill, all evidence, or manual selection.
+claim_studio_caption: Claims are stored in {path}.
+claim_tab_overview: Overview
+claim_tab_project: By Project
+claim_tab_goal: By Goal
+claim_tab_skill: By Skill
+claim_tab_all: All Evidence
+claim_tab_refresh: Needs Refresh
+claim_tab_manual: Manual
+claim_scope_project: Project
+claim_scope_goal: Goal
+claim_scope_skill: Skill
+claim_scope_empty: No scope options yet.
+claim_project_refs: 'Projects: {refs}'
+claim_goal_refs: 'Goals: {refs}'
+claim_metric_accepted: Accepted
+claim_metric_draft: Draft
+claim_metric_refresh: Needs refresh
+claim_metric_unsupported: Unsupported
+claim_refresh_statuses: Refresh claim statuses
+claim_refresh_empty: No claims need refresh.
+claim_legacy_warning: Legacy claims still exist in evidence-pool.yaml.
+claim_migrate_legacy: Migrate legacy claims
+claim_migrated: Migrated {n} claim(s).
+claim_text: Claim text
+claim_status: Claim status
+claim_save: Save claim
+claim_pick_evidence: Pick evidence rows
+claim_generate: Generate claim candidates
+claim_candidates_empty: No claim candidates yet.
+claim_existing_title: Accepted claims
+claim_candidates_preview: Claim candidate preview
+claim_adopt: Adopt claim
+claim_evidence_refs: 'Evidence: {refs}'
+claim_skill_refs: 'Skills: {refs}'
+claim_public_readiness: 'Public readiness: {value}'
+claim_confidence: 'Confidence: {value}'
+claim_apply_selected: Apply {n} selected claim(s)
+claim_apply_empty: No valid claim candidates were applied.
+claim_applied: Applied {n} claim(s).
+pool_add_title: Add evidence row
+pool_edit_title: Edit evidence rows
+pool_empty: No evidence rows yet.
+pool_deprecate: Deprecate
+pool_deprecated: Deprecated evidence row.
+pool_add: Add evidence
+pool_added: Added evidence row.
+pool_update: Update row
+pool_updated: Updated evidence row.
+pool_id: Evidence id
+pool_type: Type
+pool_title: Title
+pool_date: Date
+pool_url: URL
+pool_summary: Summary
+pool_strength: Strength
+pool_confidence: Confidence
+pool_review_status: Review status
+pool_public_readiness: Public readiness
+pool_source_refs: Source refs (one per line)
+pool_project_refs: Project refs
+pool_experience_refs: Experience refs
+pool_replaced_by: Replaced by
+pool_title_required: Evidence title is required.
+pool_id_exists: 'Evidence id already exists: {id}'
+link_title: Link evidence to skills
+link_pick_evidence: Evidence row
+link_pick_skills: Skills
+link_button: Link selected skills
+link_done: Linked evidence to selected skills.
+link_empty: No active evidence rows are available to link.
+refs_options_title: Available ref targets
+refs_options_empty: No records yet.
+refs_projects: Project cases
+refs_experiences: Experience cases
+refs_sources: Research sources
+refs_linker_title: Link evidence to project / experience / source
+refs_manual_source_refs: Manual source refs not in Research Inbox
+refs_save: Save refs
+refs_saved: Saved evidence refs.
+refs_evidence_missing: Evidence row was not found.
+refs_case_editor_title: Project and experience owners
+refs_open_project_board: Open Project Board
+refs_case_id: ID
+refs_project_title: Project title
+refs_experience_organization: Organization
+refs_experience_role: Role
+refs_experience_location: Location
+refs_status: Status
+refs_kind: Kind
+refs_visibility: Visibility
+refs_time_range: Time range
+refs_summary: Summary
+refs_goal_refs: Goal refs
+refs_task_refs: Task refs
+refs_output_refs: Output refs
+refs_notes: Notes
+refs_add_project: Add project case
+refs_add_experience: Add experience case
+refs_case_saved: Saved case.
+risk_empty: No solid/expert evidence-strength risks.
+open_skill_tree: Open Skill Tree
+strength_unrated: unrated
+strength_weak: weak
+strength_medium: medium
+strength_strong: strong
+strength_high_trust: high trust
+confidence_empty: unset
+confidence_low: low
+confidence_medium: medium
+confidence_high: high
+review_status_needs_review: needs review
+review_status_reviewed: reviewed
+public_readiness_private: private
+public_readiness_draftable: draftable
+public_readiness_public_ready: public ready
+public_readiness_published: published
+row_meta: '{type} · {strength} · {review_status}'
+row_usage: 'Skills: {skills}'
+row_unlinked: No linked skills
+risk_line: '{label} is {status}; highest {highest}, expected {required}+.'
+merge_preview_title: Preview delta
+merge_preview_pool: Merged evidence-pool preview
+merge_preview_tree: Merged skill-tree preview

@@ -1,0 +1,79 @@
+page_title: Project Board · nblane
+title: Project Board
+page_context_line: Internal project cases connect goals, tasks, sources, evidence, milestones, and outputs. Public projects still live in projects.yaml.
+page_help_short: Guide
+page_help_body: |-
+  ### Project Board workflow
+
+  1. Create internal project cases for work that connects goals, Kanban tasks, evidence, research sources, milestones, and outputs.
+  2. Keep project status private by default; public project pages still come from the public output layer.
+  3. Link tasks and evidence so Dashboard and Evidence Review can show ownership gaps.
+  4. Add milestones when a project has visible checkpoints. Milestones can own Kanban tasks without changing the task text.
+  5. Use the create-task action only for execution work you intend to track on Kanban.
+
+  This page writes project-board.yaml and may sync task ownership back to kanban.md.
+create_project: Create project
+create_task: Create Kanban task
+project_detail: Project detail
+milestones: Milestones
+add_milestone: Add milestone
+save_project: Save project
+save_milestone: Save milestone
+archive_project: Archive project
+edit: Edit
+saved: Saved project board.
+task_created: Created Kanban task.
+empty_board: No internal projects yet.
+empty_status: No projects in this status.
+select_project: Project
+field_id: ID
+field_title: Title
+field_status: Status
+field_kind: Kind
+field_visibility: Visibility
+field_time_range: Time range
+field_summary: Summary
+field_notes: Notes
+field_goal_refs: Goals
+field_task_refs: Kanban tasks
+field_evidence_refs: Evidence
+field_source_refs: Research sources
+field_experience_refs: Experience cases
+field_output_refs: Outputs
+field_goal_refs_help: Goals explain why the project exists and let Dashboard/Gap Analysis group work by objective.
+field_task_refs_help: Kanban tasks are execution ownership. Tasks linked from Kanban are synced back automatically.
+field_evidence_refs_help: Evidence rows are reviewed facts this project owns or produced. AI can suggest candidates, but saved links stay human-confirmed.
+field_source_refs_help: Research sources are papers, URLs, and imported material that belong to this project.
+field_experience_refs_help: Experience cases that support this project story.
+field_output_refs_help: Outputs or public drafts connected to this project.
+project_refs_hint: Links here are project ownership refs, not copied content. Model-suggested links should still be reviewed before saving.
+project_ai_suggest_refs: AI suggest refs
+project_ai_suggest_help: Ask the model to suggest goal, task, evidence, source, and output refs. Suggestions prefill the form but are not saved until you click Save project.
+project_ai_suggest_running: Suggesting project refs...
+project_ai_suggest_applied: Added {count} suggested ref(s) to the form. Review them before saving.
+project_ai_suggest_none: No new project refs were suggested.
+project_ai_suggest_failed: Project ref suggestion failed.
+project_ai_suggest_summary: '{count} suggested ref(s) are staged in the form.'
+project_missing_reload: Project `{id}` changed or was removed. The latest board was loaded; refresh before editing it again.
+milestone_missing_reload: Milestone `{id}` changed or was removed. Refresh before editing it again.
+field_target: Target
+field_milestone: Milestone
+task_title: Task title
+task_section: Column
+no_milestone: No milestone
+id_help: Leave blank to auto-generate project:<slug>.
+milestone_id_help: Leave blank to auto-generate milestone:<slug>.
+title_required: Title is required.
+duplicate_milestone: 'Milestone id already exists: {id}'
+missing_ref: missing
+claimed_elsewhere_hint: '{count} task(s) already belong to another project and are hidden from this selector.'
+card_counts: Goals {goals} · Tasks {tasks} · Evidence {evidence} · Sources {sources} · Milestones {milestones}
+metric_unassigned_tasks: Unassigned tasks
+metric_unassigned_evidence: Unassigned evidence
+metric_current_goal_projects: Current-goal projects
+unassigned_evidence_hint: '{count} reviewed evidence row(s) are not linked to any project.'
+status_active: Active
+status_paused: Paused
+status_completed: Completed
+status_archived: Archived
+status_planned: Planned

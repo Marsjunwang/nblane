@@ -1,0 +1,81 @@
+page_title: Agent Activity · nblane
+title: Agent Activity
+page_context_line: Review cross-page candidates, patches, writebacks, and failed apply attempts.
+page_help_short: Guide
+page_help_body: |-
+  ### Agent Activity workflow
+
+  1. Treat this page as the audit queue for AI or agent-generated candidates across the app.
+  2. Filter by status, module, kind, or candidate type to find pending and failed work.
+  3. Apply only candidates whose owner page supports safe writeback; otherwise open the owner page and review there.
+  4. Dismiss stale candidates instead of deleting them when you still need audit history.
+  5. Use technical details for debugging failed agent/Codex runs, but use preview and refs for product decisions.
+
+  Activity is the review ledger. It should make AI writes traceable, not invisible.
+status: Status
+kind: Kind
+candidate_type: Candidate type
+source_page: Source page
+target_owner: Target owner
+all: All
+pending: Pending
+applied: Applied
+failed: Failed
+dismissed: Dismissed
+superseded: Superseded
+items: Items
+no_items: No Activity items match the current filters.
+source_group: Source
+module: Module
+all_modules: All modules
+advanced_filters: Advanced filters
+sort: Sort
+sort_updated_desc: Newest first
+sort_updated_asc: Oldest first
+sort_queue: Pending first
+focused_item_notice: 'Focused Activity item: {id}'
+focused_item_highlight: Opened from {source}.
+focused_item_missing: The focused Activity item is not visible with the current filters.
+created: Created
+updated: Updated
+applied_at: Applied
+error_summary: Error
+technical_details: Technical details
+manage_activity: Manage Activity
+visible_items: Visible items
+delete_item: Delete item
+delete_item_confirm: Confirm delete this item
+delete_visible: Delete current view
+delete_visible_confirm: Confirm delete all visible items
+delete_failed_dismissed: Delete failed/dismissed in this module
+delete_failed_dismissed_confirm: Confirm delete failed and dismissed items in this module
+deleted_items: Deleted {count} Activity item(s).
+delete_none: No matching Activity items to delete.
+payload: Payload
+preview: Preview
+refs: Refs
+warnings: Warnings
+changed_paths: Changed paths
+agent_task_result: Agent task result
+agent_harness_filter: Harness result
+agent_harness_filter_all: All
+agent_harness_filter_agent_tasks: Agent tasks only
+agent_harness_filter_codex: Codex
+agent_harness_filter_local_codex: Local Codex
+agent_harness_filter_codex_cloud: Codex Cloud
+agent_harness_filter_opencode: OpenCode
+codex_cloud_title: Codex Cloud
+codex_cloud_task: Cloud task
+codex_cloud_refresh: Refresh status
+codex_cloud_diff: Pull diff candidate
+codex_cloud_refreshing: Refreshing Codex Cloud...
+codex_cloud_diffing: Pulling Codex Cloud diff...
+codex_cloud_refreshed: Codex Cloud status refreshed.
+codex_cloud_diff_ready: Codex Cloud diff is ready for review.
+apply: Apply
+dismiss: Dismiss
+reopen: Reopen
+open_owner: Open owner page
+saved: Saved.
+applied_message: Applied.
+apply_unavailable: Only pending Review candidates can be applied here.

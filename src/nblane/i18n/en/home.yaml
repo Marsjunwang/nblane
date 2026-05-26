@@ -1,0 +1,412 @@
+app_page_title: Home · nblane
+page_context_line: 'Private OS: skills, evidence, and SKILL.md for this profile — all plain files.'
+app_caption: 'Current profile: **{profile}** · Data is plain YAML / Markdown; Git is the source of truth.'
+dashboard_status_overview: Status overview
+dashboard_metric_goal: Current goal
+dashboard_primary_goal: Primary goal
+dashboard_active_goal: Active goal
+dashboard_active_goals_title: Active goals
+dashboard_goal_set: Set
+dashboard_goal_missing: Missing
+dashboard_metric_skill_lit: Lit skills
+dashboard_skill_progress_suffix: solid / expert
+dashboard_metric_doing: Doing
+dashboard_metric_pending_evidence: Evidence to review
+dashboard_metric_health: Health E/W/I
+dashboard_metric_health_help: Errors / warnings / info from Profile Health.
+dashboard_public_not_initialized: Public layer is not initialized yet; this dashboard only links to setup.
+dashboard_doing_title: This week's Doing
+dashboard_doing_empty: No Doing tasks yet. Open Kanban to choose the week's active work.
+dashboard_doing_started: started {date}
+dashboard_doing_blocked: 'Blocked by: {blocked}'
+dashboard_doing_more: +{n} more Doing task(s) on Kanban.
+dashboard_pending_evidence_title: Evidence to organize
+dashboard_done_uncrystallized: Done not crystallized
+dashboard_unlinked_evidence: Unlinked pool rows
+dashboard_needs_review_evidence: Evidence needing review
+dashboard_status_risk_evidence: Skill status evidence risks
+dashboard_pending_evidence_empty: No pending evidence review found.
+dashboard_health_title: Health
+dashboard_health_errors: Errors
+dashboard_health_warnings: Warnings
+dashboard_health_info: Info
+dashboard_health_context_ready: Context ready
+dashboard_health_empty: Profile Health has no issues.
+dashboard_yes: 'Yes'
+dashboard_no: 'No'
+dashboard_output_title: Output
+dashboard_output_empty: Public layer has no summary yet. Open Output Studio to initialize drafts.
+dashboard_public_drafts: Drafts
+dashboard_public_published: Published
+dashboard_public_visibility: Visibility
+dashboard_public_build: Build
+dashboard_public_build_exists: Built
+dashboard_public_build_missing: Not built
+dashboard_public_build_detail: '{pages} HTML page(s) at `{path}`.'
+dashboard_quick_title: Quick actions
+dashboard_priority_goal_title: Current goal
+dashboard_priority_work_title: This week's execution
+dashboard_priority_evidence_title: Evidence to organize
+dashboard_scope_title: Scope
+dashboard_scope_profile: Profile
+dashboard_scope_goal: Goal
+dashboard_scope_ai: AI
+dashboard_scope_health: Health
+dashboard_primary_actions_title: Start here
+dashboard_action_capture: Quick capture
+dashboard_action_capture_help: Capture a source or note into Research.
+dashboard_action_kanban: Open Kanban
+dashboard_action_evidence: Organize evidence
+dashboard_action_output: Generate output
+dashboard_canvas_section_title: Context Canvas
+dashboard_canvas_section_caption: Graph view loads after the stable daily summary.
+dashboard_overview_map_title: Map of now
+dashboard_graph_eyebrow: Context
+dashboard_graph_title: Context Canvas
+dashboard_graph_goal_missing: Set current goal
+dashboard_graph_blocked: Blocked
+dashboard_evidence_inbox_title: Evidence inbox
+dashboard_open_section: Open
+dashboard_goal_create_inline: Create goal
+dashboard_goal_edit_inline: Edit goal
+dashboard_goal_close_form: Close
+dashboard_goal_advanced_fields: Advanced goal fields
+dashboard_ai_ready: AI ready
+dashboard_ai_not_ready: AI off
+dashboard_help_title: Dashboard guide
+dashboard_help_full_doc: Open full Dashboard guide
+dashboard_help_body: |-
+  ### How to read this dashboard
+
+  The top cards answer what you are pursuing now: North Star, primary goal, active goals, and current work.
+
+  The canvas follows the Growth Graph: **Source** is raw material, **Evidence** is reviewable fact, **Claim** is interpretation, **Skill** is capability state, and **Output** is public or reusable expression.
+
+  Use **Capture source** for lightweight notes and links. Captures stay private in Research until reviewed; they do not become evidence or skill status automatically.
+
+  Use **Evidence Review** for Done tasks, unlinked evidence, claim candidates, and status risks. AI can suggest links or summaries, but confirmed facts still require review.
+
+  **Dashboard AI settings** only affect Dashboard actions such as goal-skill matching and graph insights. Research has its own Research AI settings for paper search, translation, Reader, and DeepRead.
+
+  8503 owns safe profile selection and writes. 8502 can host a richer canvas or reader surface when the sidecar is running.
+dashboard_ai_settings_title: Dashboard AI
+dashboard_ai_settings_caption: These settings only affect Dashboard AI actions for the active profile. Research, Kanban, and other pages keep their own page-level AI preferences. API keys are never written here.
+dashboard_ai_action_goal_skill_match: Goal-skill match
+dashboard_ai_action_goal_skill_match_help: Suggest skill nodes for a goal. Candidates must be confirmed before saving.
+dashboard_ai_action_graph_insights: Graph insights
+dashboard_ai_action_graph_insights_help: Summarize graph risks and next actions without changing files.
+dashboard_ai_backend: Backend
+dashboard_ai_llm_model: LLM model
+dashboard_ai_codex_model: Codex model
+dashboard_ai_use_default: Use default
+dashboard_ai_custom_model: Custom model
+dashboard_ai_app_default: App default
+dashboard_ai_codex_default: Codex default
+dashboard_ai_effective: 'Effective: {backend} · {model}'
+dashboard_ai_effective_backend: 'Effective backend: {backend}'
+dashboard_ai_effective_model: 'Effective model: {model}'
+dashboard_ai_test: Test
+dashboard_ai_test_model: Test model
+dashboard_ai_available: available
+dashboard_ai_unavailable: unavailable
+dashboard_ai_llm_unconfigured: LLM API key is not configured.
+dashboard_ai_model_available: Model test succeeded ({seconds}s).
+dashboard_ai_configured: configured
+dashboard_ai_missing: missing
+dashboard_ai_missing_key: missing key
+dashboard_ai_installed: installed
+dashboard_ai_logged_in: logged in
+dashboard_ai_login_unknown: login unknown
+dashboard_ai_llm_status: 'LLM: {status} · {model}'
+dashboard_ai_codex_status: 'Codex: {status}'
+dashboard_ai_save: Save AI settings
+dashboard_ai_saved: Dashboard AI settings saved.
+dashboard_ai_test_goal_skill_match: Test goal-skill model
+dashboard_ai_test_ok: Model test succeeded ({seconds}s).
+dashboard_open_8502_canvas: Open 8502 Canvas
+dashboard_canvas_sidecar_unavailable: 8502 Dashboard Canvas is not reachable at {base}; using the local Dashboard fallback.
+dashboard_canvas_sidecar_link_disabled_help: Start or forward the 8502 Dashboard Canvas sidecar to use this link.
+dashboard_embedded_canvas_title: Embedded canvas
+dashboard_canvas_summary_title: Canvas summary
+dashboard_canvas_summary_caption: The daily dashboard keeps the big canvas folded until you need deeper graph exploration.
+dashboard_canvas_load_embed: Load embedded canvas
+dashboard_graph_hero_title: Live growth graph
+dashboard_graph_hero_caption: A compact 3D map of today's goals, sources, evidence, skills, and outputs.
+dashboard_hero_start_here: Start here
+dashboard_graph_selected_node: Selected node
+dashboard_graph_open_selected: Open selected in 8502
+dashboard_today_focus_title: Today focus
+dashboard_action_queue_title: Action queue
+dashboard_action_review_evidence: Review evidence
+dashboard_action_open_focus: Open current work
+dashboard_action_open_kanban_hint: Choose current work from Kanban.
+dashboard_action_resolve_gap: Resolve gap risk
+dashboard_action_gap_clear: No urgent gap signal.
+dashboard_action_open_output: Open output drafts
+dashboard_action_draft_output: Draft output
+dashboard_action_review_source: Review source
+dashboard_action_capture_source: Capture source
+dashboard_open_research: Open Research
+dashboard_action_why_evidence: Evidence queues are the highest-confidence next review work.
+dashboard_action_why_clear: No urgent queue is blocking the daily path.
+dashboard_action_why_focus: Current Doing work keeps today's actions tied to the active goal.
+dashboard_action_why_focus_empty: Pick one active task before expanding the rest of the system.
+dashboard_action_why_gap: Gap risks can block the current goal if they stay unresolved.
+dashboard_action_why_output: Drafts are ready to turn reviewed work into reusable output.
+dashboard_action_why_output_empty: Create an output only after the review queues have enough support.
+dashboard_capture_more_fields: More fields
+dashboard_canvas_more_filters: More filters
+dashboard_claim_summary: Claims translate reviewed evidence into skill and output assertions.
+north_star_strip_title: North Star
+north_star_empty: No North Star set
+north_star_empty_action: Add North Star
+north_star_hidden_display: North Star set
+north_star_private_display: Private North Star
+north_star_edit_action: Edit Profile Context
+north_star_visibility_visible: Visible
+north_star_visibility_discreet: Discreet
+north_star_visibility_hidden: Hidden
+north_star_visibility_private: Private
+skill_alignment_title: Skill Alignment
+skill_alignment_confirmed: Confirmed links
+skill_alignment_candidates: Candidates
+skill_alignment_no_links: No confirmed skill links yet.
+skill_alignment_no_candidates: Run rule match or AI match to get candidates.
+skill_alignment_rule: Rule match
+skill_alignment_ai: AI match
+skill_alignment_confirm: Confirm links
+skill_alignment_manual_label: Manual add
+skill_alignment_manual_add: Add
+skill_alignment_suggested: suggested
+skill_alignment_gap_hint: Linked locked/learning nodes may need Gap Analysis.
+goal_alignment_goal_missing: No goal found for skill alignment.
+goal_alignment_node_missing: That skill node is not available in the current schema.
+goal_alignment_candidates_ready: '{n} skill candidate(s) ready for review.'
+goal_alignment_links_saved: Goal-skill links saved.
+goal_primary_saved: Primary goal updated.
+goal_archived: Goal archived.
+dashboard_add_active_goal: Add goal
+dashboard_archive_goal: Archive
+dashboard_inspector_empty: Select a node to inspect it.
+dashboard_inspector_node_hint: Open the owner page for details.
+dashboard_inspector_placeholder_hint: This area is still scaffolded and does not have a backing record yet.
+dashboard_inspector_locked_hint: Private or locked details are hidden in this view.
+dashboard_inspector_owner_reserved: Setup state
+dashboard_placeholder_metric: Planned
+dashboard_inspector_setup_title: Choose a real node or finish setup
+dashboard_inspector_setup_hint: This graph is still mostly scaffolded. Start with North Star, then set a current goal.
+dashboard_today_current_focus: Current focus
+dashboard_today_capture_sources: Capture / Sources
+dashboard_today_evidence_review: Evidence review
+dashboard_today_gap_next_action: Gap / Next action
+dashboard_today_output_feedback: Output / Feedback
+dashboard_capture_title: Capture source
+dashboard_capture_submit: Capture
+dashboard_capture_saved: Captured source {id}.
+dashboard_capture_title_required: Capture title is required.
+dashboard_capture_title_placeholder: What did you notice?
+dashboard_capture_raw_text: Note
+dashboard_capture_source: Source URL or origin
+dashboard_capture_tags: Tags
+dashboard_capture_goal: Goal
+dashboard_capture_type: Type
+dashboard_capture_type_note: Note
+dashboard_capture_type_link: Link
+dashboard_capture_type_resource: Resource
+dashboard_capture_type_idea: Idea
+dashboard_source_inbox_title: Source inbox
+dashboard_source_inbox_empty: No source items captured yet.
+dashboard_source_to_evidence_hint: Captured sources stay in inbox until reviewed into evidence candidates.
+dashboard_atomic_evidence_title: Atomic evidence
+dashboard_evidence_candidate_title: Evidence candidates
+dashboard_atomic_evidence_unlinked: Unlinked atomic rows
+dashboard_atomic_evidence_needs_review: Needs review
+dashboard_atomic_evidence_status_risk: Status risks
+dashboard_gap_risk_title: Gap risk
+dashboard_feedback_planned: Feedback surface is still in setup.
+dashboard_graph_loading: Loading graph...
+dashboard_graph_3d_hint: North Star flows through goals, work context, activity, sources, evidence, claims, capability, output, feedback, and governance.
+dashboard_view_canvas: 2D Canvas
+dashboard_view_focus_path: Focus Path
+dashboard_view_attention: Attention
+dashboard_view_3d_graph: 3D Graph
+dashboard_graph_fit: Fit
+dashboard_graph_focus_selected: Focus
+dashboard_open_8503: Open 8503
+dashboard_explore_title: Graph
+dashboard_explore_nodes: Graph nodes
+dashboard_explore_all: All
+dashboard_explore_context: Context
+dashboard_explore_upstream: Upstream
+dashboard_explore_downstream: Downstream
+dashboard_explore_search: Search
+dashboard_explore_search_placeholder: Node, layer, status
+dashboard_explore_hide_placeholders: Hide placeholders
+dashboard_explore_result_count: shown
+dashboard_explore_no_matches: No graph nodes match this filter.
+dashboard_explore_lane_direction: Direction
+dashboard_explore_lane_work_source: Work / Source
+dashboard_explore_lane_evidence_claim: Evidence / Claim
+dashboard_explore_lane_skill_gap: Skill / Gap
+dashboard_explore_lane_output_feedback: Output / Feedback
+dashboard_attention_title: Attention
+dashboard_workbench_title: Workbench
+dashboard_workbench_caption: Today's signals, capture inbox, and quick actions.
+dashboard_canvas_setup_title: The canvas is still in setup
+dashboard_canvas_setup_hint: Add North Star and a current goal first, then capture sources to replace the skeleton.
+dashboard_canvas_missing_north_star: North Star missing
+dashboard_canvas_missing_goal: Current goal missing
+dashboard_canvas_missing_sources: No captured sources yet
+dashboard_canvas_reset_filters: Show all layers
+dashboard_canvas_no_layers: All layers are hidden.
+dashboard_skill_progress_title: Skill Progress
+dashboard_skill_progress_caption: solid + expert lit rate
+dashboard_skill_progress_empty: No skill tree data yet.
+dashboard_skill_lit_rate: Lit rate
+dashboard_skill_status_expert: Expert
+dashboard_skill_status_solid: Solid
+dashboard_skill_status_learning: Learning
+dashboard_skill_status_locked: Locked
+dashboard_node_north_star: North Star
+dashboard_node_goal: Goal
+dashboard_node_skill: Skills
+dashboard_node_task: Tasks
+dashboard_node_project_case: Project Cases
+dashboard_private_project_case: Private project case
+dashboard_node_daily_work: Daily Work
+dashboard_node_research: Research
+dashboard_node_agent_run: Agent Runs
+dashboard_node_source: Sources
+dashboard_private_source: Private source
+dashboard_node_evidence_candidate: Evidence Candidates
+dashboard_node_atomic_evidence: Atomic Evidence
+dashboard_private_evidence: Private evidence
+dashboard_node_composite_evidence: Composite Evidence
+dashboard_node_claim: Claims
+dashboard_private_claim: Private claim
+dashboard_node_evidence: Evidence
+dashboard_node_gap: Gap
+dashboard_node_next_action: Next Action
+dashboard_node_output: Output
+dashboard_node_feedback: Feedback
+dashboard_node_capacity: North Star Capacity
+dashboard_node_health: Health
+dashboard_layer_direction: Direction
+dashboard_layer_objective: Objective
+dashboard_layer_work_context: Work Context
+dashboard_layer_activity: Activity
+dashboard_layer_source: Source
+dashboard_layer_evidence: Evidence
+dashboard_layer_claim: Claim
+dashboard_layer_capability: Capability
+dashboard_layer_output: Output
+dashboard_layer_feedback: Feedback
+dashboard_layer_governance: Governance
+dashboard_set_as_primary: Set as primary
+dashboard_set_primary: Set primary
+quick_skill_tree: Skill Tree
+quick_skill_tree_help: Edit skill status and evidence refs.
+quick_evidence_review: Evidence Review
+quick_evidence_review_help: Review evidence strength, links, and Done crystallization.
+quick_research: Research
+quick_research_help: Capture and triage external sources.
+quick_gap: Gap Analysis
+quick_gap_help: Map a task to skills and gaps.
+quick_kanban: Kanban
+quick_kanban_help: Review Doing, Queue, and Done tasks.
+quick_public_site: Output Studio
+quick_public_site_help: Review drafts and create public output.
+quick_profile_health: Profile Health
+quick_profile_health_help: Inspect validation, sync drift, and evidence risks.
+profile_evidence_import_expander: Batch import profile evidence
+profile_evidence_import_caption: Paste a resume or long bio to draft evidence and skill-tree changes. Review every row before applying.
+profile_context_expander: Profile Context / SKILL.md
+profile_context_caption: Advanced area for long-term human-written profile context. Generated facts stay owned by their source files.
+profile_context_structured_title: Structured profile
+profile_context_narrative_title: Long-term narrative sections
+profile_context_narrative_caption: These sections are human-authored and remain in SKILL.md.
+identity_name: Name
+identity_domain: Domain
+identity_journey: Journey
+identity_current_role: Current Role
+identity_north_star: North Star
+identity_north_star_brief: North Star Brief
+identity_north_star_visibility: North Star Visibility
+profile_section_research_fingerprint: Research Fingerprint
+profile_section_thinking_style: Thinking & Communication Style
+profile_section_growth_log: Growth Log
+profile_section_influence_output: Influence & Output
+save_profile_context: Save Profile Context
+generated_block_preview_title: Generated block preview
+generated_block_owner_hint: '`skill_tree` is owned by skill-tree.yaml / evidence-pool.yaml; `current_focus` is owned by kanban.md. Preview only.'
+generated_block_expander: '{block}'
+generated_block_skill_tree_help: 'Owner: skill-tree.yaml and evidence-pool.yaml.'
+generated_block_kanban_help: 'Owner: kanban.md current focus.'
+generated_block_sync_hint: To refresh generated blocks, run `nblane sync <profile> --write`.
+generated_block_missing: Generated block not found.
+raw_markdown_expander: Raw Markdown
+raw_drift_warning: Raw edits can modify generated blocks and create sync drift. After saving, use Profile Health to check drift.
+tab_overview: 📊 Overview
+tab_editor: ✏️ Structured Editor
+tab_raw: 📝 Raw
+sub_overview: Skill overview
+sub_category: Category breakdown
+goal_module_title: Current Goal
+goal_module_caption: A 4-8 week anchor for gap analysis, evidence review, and output planning.
+goal_create_title: Create current goal
+goal_edit_title: Edit current goal
+goal_reveal_private: Reveal private goal in this session
+goal_private_locked: This goal is private. Reveal it in this session to edit details.
+goal_field_title: Title
+goal_field_label: Discreet label
+goal_field_status: Status
+goal_field_start: Start date
+goal_field_target: Target date
+goal_field_summary: Summary
+goal_field_alignment: North Star alignment
+goal_field_target_skills: Target skills (one per line)
+goal_field_success_criteria: Success criteria (one per line)
+goal_field_focus: This week's focus (one per line)
+goal_field_evidence_refs: Evidence refs (one per line)
+goal_field_task_refs: Task refs (one per line)
+goal_field_output_refs: Output refs (one per line)
+goal_field_notes: Private notes
+goal_field_ui_visibility: UI visibility
+goal_field_agent_context: Include in Agent context
+goal_field_public_output: Allow future public output reference
+goal_public_disabled_caption: P0 stores this flag but public site generation does not read goals.yaml.
+goal_save: Save current goal
+goal_saved: Current goal saved.
+goal_title_required: Title is required.
+goal_preview: Preview
+home_expander_cat: '{cat} — {total} nodes'
+info_no_skill_tree: skill-tree.yaml is not initialized yet. Edit `profiles/{profile}/skill-tree.yaml` to add nodes.
+home_nav_compact: '**Sidebar:** Skill Tree · Gap Analysis · Kanban · Team View. More: `docs/zh/project/status.md`, `docs/zh/product/web-experience.md`.'
+home_nav_expander: Page map (detail)
+home_nav_detail: |-
+  **Page navigation** (left sidebar):
+
+  - **Skill Tree** — Visual tree and status editor
+  - **Gap Analysis** — Task-to-skill matching and gaps
+  - **Kanban** — Task board
+  - **Team View** — Shared team product pool
+warning_no_skill_md: SKILL.md not found.
+gen_caption: This section is auto-generated by `nblane sync`. Edits here will be overwritten.
+gen_suffix: ' *(auto-generated)*'
+save_skill_md: 💾 Save SKILL.md
+home_saved: Saved.
+hint_after_save: After saving, run `nblane context {profile}` for the latest system prompt.
+raw_label: Edit SKILL.md (source for the agent prompt)
+resume_expander: Resume / long text (AI ingest)
+resume_placeholder: Paste resume, project list, or bio…
+resume_generate: Generate draft
+resume_spinner: Calling LLM…
+resume_allow_status: Allow AI to update node status
+resume_allow_status_help: 'Off: ignores LLM status fields; only merges refs/evidence; locked nodes with new evidence become learning. On: applies LLM status only when it upgrades or stays at the same tier (never solid→learning, never expert→lower). LLM expert is saved as learning when that is an upgrade. Your YAML expert stays expert.'
+resume_preview_pool: Merged evidence-pool (preview)
+resume_preview_tree: Merged skill-tree (preview)
+resume_apply: Apply to profile
+resume_applied: 'Applied: pool, skill-tree, and SKILL.md sync.'
+resume_err: 'Error: {msg}'
+resume_no_ai: AI not configured. Set LLM_API_KEY in .env.
+resume_warn: Warnings

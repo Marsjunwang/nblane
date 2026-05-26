@@ -62,7 +62,6 @@ from nblane.core.profile_ingest import (
 from nblane.core.profile_ingest_llm import ingest_resume_json
 from nblane.core.research_sources import (
     add_research_source,
-    load_research_sources,
     save_research_sources,
 )
 from nblane.core.profile_context import (
@@ -83,6 +82,7 @@ from nblane.web_cache import (
     clear_web_cache,
     load_evidence_pool_raw,
     load_goal_book_raw,
+    load_research_sources,
     load_skill_md,
     load_skill_tree_raw,
 )

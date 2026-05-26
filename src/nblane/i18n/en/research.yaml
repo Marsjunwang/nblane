@@ -1,0 +1,229 @@
+page_title: Research · nblane
+title: Research Workspace
+page_context_line: Capture sources, read them into claims/citations, then promote only reviewed candidates.
+page_help_short: Guide
+source_inbox: Source Inbox
+reading_room: Reading Room
+claims_citations: Claims & Citations
+synthesis_drafts: Synthesis Drafts
+connectors: Connectors
+inbox_connectors: Inbox & Connectors
+ai_config: Research AI Config
+ai_config_short: Research AI
+ai_config_caption: 'These settings only affect Research AI actions for the active profile: paper search, translation, Reader, and DeepRead. Other pages keep their own page-level AI preferences.'
+ai_config_translation_model: Current-page translation model
+ai_config_deep_read_model: DeepRead model
+ai_config_use_default: Use app default
+ai_config_custom_model: Custom model
+ai_config_overrides_default: overrides default
+ai_config_saved: AI preferences saved.
+research_help_body: |-
+  ### Research workflow
+
+  1. **Overview**: start with the action queue for reading, extraction, citation, privacy, and synthesis blockers.
+  2. **Paper Library**: import papers, attach PDFs, open Reader, run extraction, translate, annotate, and create paper claims.
+  3. **Claims & Citations**: review research claims and citations before promoting anything to evidence or output.
+  4. **Synthesis / Export**: assemble reviewed claims into draft exports, blog candidates, or project updates.
+  5. **Inbox & Connectors**: capture manual sources, preview evidence candidates, and configure connector discovery. Connector configs do not store secrets.
+
+  Research claims are source-aware working claims. Promotion to Evidence Review or public output remains candidate-first.
+workspace_overview: Workspace overview
+sources_total: Sources
+sources_private: Private
+sources_public: Public
+ready_claims: Ready claims
+drafts_total: Drafts
+connectors_enabled: Enabled connectors
+research_primary_actions: Research actions
+action_add_source: Add source
+action_open_reading: Open reading queue
+action_create_synthesis: Create synthesis
+reading_flow_hint: Read source -> cut chunk -> write claim -> bind citation -> promote candidate.
+claim_boundary_hint: Research claims are not accepted evidence claims. Promotion to evidence or output always stays candidate-first.
+research_workspace: Research Workspace
+research_command_center: Research Command Center
+research_command_center_caption: Sources, reading state, review queues, and export safety in one workspace.
+research_sidecar_disabled: Paper Library sidecar links are disabled; Reader and 8502 workspace buttons will use relative URLs.
+research_sidecar_unavailable: 8502 Paper Library sidecar is not reachable; Reader and Paper Library links are temporarily disabled for {base}.
+research_sidecar_connected: 'Paper Library sidecar: {origin} · {base}'
+paper_library_sidecar_link_disabled_help: Start or forward the 8502 Paper Library sidecar to use this link.
+reader_sidecar_unavailable_fallback: PDF Reader is temporarily unavailable because the 8502 sidecar cannot be reached. Showing text-mode Reader fallback.
+configured: configured
+auto_detected: auto-detected
+private_public_sources: Private / public
+citation_broken: Citation broken
+private_publish_risk: Private publish risk
+stale_translation_warning: Stale translations
+research_sources: Sources
+papers_reading: Reading
+reader: Reader
+extracted: Extracted
+chunks_annotations: Chunks / annotations
+claims_ready: Claims ready
+review_queue: Review queue
+warnings_count: '{count} warnings'
+synthesis_export: Synthesis / Export
+integrity_publish_safety: Integrity & Publish Safety
+work_queues: Work queues
+paper_library: Paper Library
+reading: Reading
+continue: Continue
+needs_extraction: Needs extraction
+parser_status: Parser status
+pdf_missing: PDF missing
+claims_need_review: Claims review
+ai_candidates: AI candidates
+ready_research_claims: Ready claims
+promote_to_evidence: Promote to evidence
+quote_warnings: Quote warnings
+citation_inspector: Citation inspector
+private_sources: Private sources
+recent_papers: Recent
+duplicate_risk: Duplicate risk
+metadata_review: Metadata review
+open_reader: Open Reader
+open_in_paper_library: Open in Library
+open_source_library: Open source
+open_paper_library_workspace: Open Paper Library
+focus_ready_claims: Focus ready claims
+focus_quote_warnings: Focus quote warnings
+focus_export_gate: Focus export gate
+focus_connector_inbox: Connector inbox
+focus_claims: Claims
+claims_focus_saved: Claims review focus updated.
+citations_focus_saved: Citation inspector is focused on quote warnings.
+export_focus_saved: Export gate focus updated.
+connector_focus_saved: Connector inbox focus updated.
+next_actions: Next actions
+next_action: Next action
+no_research_actions: No research actions need attention.
+discovery_updates: Discovery updates
+overview_imported_count: '{count} imported'
+overview_skipped_count: '{count} skipped'
+connector_status_idle: idle
+connector_status_enabled: enabled
+connector_status_disabled: disabled
+connector_status_error: error
+connector_status_failed: failed
+connector_status_ok: ok
+recent_work: Recent work
+chunks: Chunks
+recent_work_empty: No recent paper reading yet.
+ready_to_review: Ready to review
+review_claim: Review claim
+more_claims_hidden: '{count} more claim(s) hidden by this compact view.'
+claims_empty_next_step: Run extraction in Paper Library, then create claim candidates from the Reader.
+prepare_claim_candidates: Prepare claim candidates
+risk_queue: Risk queue
+risk_queue_empty: No publish blockers in the current research queue.
+overview_queue_continue_reading: Continue reading
+overview_queue_run_extraction: Run extraction
+overview_queue_attach_pdf: Attach PDF
+overview_queue_review_candidates: Review candidates
+overview_queue_deduplicate: Deduplicate
+overview_queue_refresh_translations: Refresh translations
+overview_queue_review_visibility: Review visibility
+overview_queue_open_recent: Open recent
+overview_action_continue_reading: Continue reading {count} source(s)
+overview_action_review_claims: Review {count} ready research claim(s)
+overview_action_fix_citations: Fix {count} citation warning(s)
+overview_action_private_risk: Review {count} private source risk(s)
+overview_action_review_drafts: Review {count} synthesis draft(s)
+overview_action_import_sources: Import papers, repos, or web sources
+risk_private_publish: Private publish risk
+risk_broken_citations: Broken citations
+risk_open_export_gate: Open export gate
+risk_open_citation_inspector: Open citation inspector
+badge_unsorted: Unsorted
+badge_pdf_ready: PDF ready
+badge_stale_translation: Stale translation
+badge_private_source: Private source
+badge_needs_structured_extraction: Needs structured extraction
+badge_grobid_unavailable: GROBID unavailable
+badge_fallback_extraction: Fallback extraction
+ready: Ready
+risk: Risk
+reading_mode: Mode
+excerpt: Excerpt
+translation: Translation
+key_points: Key points
+claim_candidates: Claim candidates
+citations: Citations
+synthesis_notes: Synthesis notes
+create_chunk: Create chunk
+chunk_kind: Chunk kind
+chunk_title: Chunk title
+chunk_locator: Locator
+chunk_text: Chunk text
+chunk_refs: Chunk refs
+chunks_empty: No chunks for this source yet.
+create_research_claim: Create research claim
+research_claim_id: Research claim id
+research_claim_type: Claim type
+research_claim_status: Claim status
+research_claim_text: Claim text
+research_claims: Research claims
+claims_empty: No research claims yet.
+human_note: Human note without source/chunk
+rationale: Rationale
+create_citation: Create citation
+citation_quote: Quote
+bibliography: Bibliography
+research_citations: Research citations
+citations_empty: No citations yet.
+create_synthesis_draft: Create synthesis draft
+synthesis_draft_id: Synthesis draft id
+drafts_empty: No synthesis drafts yet.
+blog_candidate_preview: Blog candidate preview
+create_blog_draft: Create blog draft
+body: Body
+connectors_caption: Connector configs do not store tokens, cookies, or API keys.
+connectors_empty: No connectors configured yet.
+configure_connector: Configure connector
+connector_provider: Provider
+connector_id: Connector id
+connector_query: Query / subscription
+connector_enabled: Enabled
+privacy_default: Default visibility
+connector_options: Options YAML
+connector_dry_run: Dry run
+connector_run_now: Run now
+generate_reading_draft: Generate reading draft
+save_reading_annotations: Save reading annotations
+create_evidence_candidate: Create evidence candidate
+evidence_candidate_preview: Evidence candidate preview
+add_source: Add source
+edit_source: Edit source
+source_queue: Source queue
+candidate_preview: Evidence candidate preview
+candidate_preview_help: Read-only draft; this page does not write evidence.
+source_id: Source id
+kind: Kind
+title_label: Title
+url: URL
+status: Status
+captured_at: Captured at
+authors: Authors
+published: Published
+tags: Tags
+goal_refs: Goal refs
+project_refs: Project refs
+experience_refs: Experience refs
+summary: Summary
+notes: Notes
+visibility: Visibility
+save: Save
+create: Create
+saved: Saved source.
+created: Created source {id}.
+title_required: Source title is required.
+empty_status: No sources in this status.
+copy_id: Source id
+discard: Discard
+archive: Archive
+status_inbox: Inbox
+status_reading: Reading
+status_summarized: Summarized
+status_candidate_ready: Candidate ready
+status_archived: Archived
+status_discarded: Discarded

@@ -123,6 +123,29 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Prepare a remote development handoff for an external coding harness. "
         "Return a candidate task, not code changes."
     ),
+    "gap.skill_coach": (
+        "Coach the user on how to close a skill gap for the supplied task. "
+        "Use only the provided profile context and gap nodes. Keep advice "
+        "actionable and grounded; do not invent skills or evidence."
+    ),
+    "gap.task_routing": (
+        "Route the supplied task description onto candidate skill-tree nodes. "
+        "Return only node ids that exist in the supplied schema; add warnings "
+        "for ambiguous routing."
+    ),
+    "profile.resume_ingest": (
+        "Parse the supplied resume text into nblane skill-tree node candidates "
+        "and evidence rows. Do not raise node status without explicit "
+        "permission. Every claim must be traceable to the input text."
+    ),
+    "profile.kanban_ingest": (
+        "Convert supplied finished kanban tasks into evidence and skill-tree "
+        "candidates. Keep entries reviewable; do not invent outcomes."
+    ),
+    "output.visual_caption": (
+        "Generate a short caption and alt text candidate for the supplied "
+        "image intent. Keep it factual and avoid private details."
+    ),
 }
 
 

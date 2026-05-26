@@ -1,0 +1,229 @@
+page_title: Research · nblane
+title: 研究工作台
+page_context_line: 外部资料先沉淀为 source-aware claim / citation；审阅后再进入 evidence 或公开输出。
+page_help_short: 使用说明
+source_inbox: 来源收件箱
+reading_room: 阅读室
+claims_citations: 断言与引用
+synthesis_drafts: 综合草稿
+connectors: 连接器
+inbox_connectors: 收件箱与连接器
+ai_config: Research AI 配置
+ai_config_short: 研究 AI
+ai_config_caption: 这些设置只影响当前 profile 的 Research AI 动作：论文搜索、翻译、Reader 和 DeepRead。其他页面保留自己的页面级 AI 设置。
+ai_config_translation_model: 当前页翻译模型
+ai_config_deep_read_model: DeepRead 模型
+ai_config_use_default: 使用应用默认模型
+ai_config_custom_model: 自定义模型
+ai_config_overrides_default: 覆盖默认
+ai_config_saved: AI 配置已保存。
+research_help_body: |-
+  ### Research 使用流程
+
+  1. **概览**：先看行动队列，处理阅读、解析、引用、隐私和综合导出的阻塞项。
+  2. **论文库**：导入论文、补 PDF、打开 Reader、运行解析、翻译、标注，并生成论文 claim。
+  3. **断言与引用**：先审阅 research claims 和 citations，再推进到 evidence 或输出。
+  4. **综合 / 导出**：把已审阅 claims 组织成综合草稿、博客候选或项目更新。
+  5. **收件箱与连接器**：手动捕捉 sources、预览 evidence 候选、配置连接器发现；连接器配置不保存 token、cookie 或 API key。
+
+  Research claim 是带来源的工作断言；进入 Evidence Review 或公开输出前仍然必须走候选和人工确认。
+workspace_overview: 工作台概览
+sources_total: 来源 Sources
+sources_private: 私有 Private
+sources_public: 公开 Public
+ready_claims: 待审断言
+drafts_total: 草稿
+connectors_enabled: 已启用连接器
+research_primary_actions: 研究动作
+action_add_source: 新增来源
+action_open_reading: 打开待读队列
+action_create_synthesis: 生成 synthesis
+reading_flow_hint: 读 source -> 切 chunk -> 写 claim -> 绑定 citation -> 推进候选。
+claim_boundary_hint: Research claim 不是 accepted evidence claim；进入 evidence 或公开输出前必须先走候选/人工确认。
+research_workspace: 研究工作台
+research_command_center: 研究中控台
+research_command_center_caption: 把来源、阅读状态、审阅队列和发布安全放在同一个工作区。
+research_sidecar_disabled: Paper Library sidecar 链接已关闭；Reader 和 8502 工作区按钮会使用相对 URL。
+research_sidecar_unavailable: 8502 Paper Library sidecar 当前不可达；Reader 和 Paper Library 链接已暂时禁用：{base}。
+research_sidecar_connected: Paper Library sidecar：{origin} · {base}
+paper_library_sidecar_link_disabled_help: 请先启动或转发 8502 Paper Library sidecar，再使用这个链接。
+reader_sidecar_unavailable_fallback: 8502 sidecar 暂时不可达，PDF Reader 无法打开；下面显示 text-mode Reader fallback。
+configured: 已配置
+auto_detected: 自动检测
+private_public_sources: 私有 / 公开
+citation_broken: 引用断裂
+private_publish_risk: 私有发布风险
+stale_translation_warning: 过期翻译
+research_sources: 来源
+papers_reading: 阅读中
+reader: 阅读器
+extracted: 已提取
+chunks_annotations: 片段 / 标注
+claims_ready: 断言待审
+review_queue: 审阅队列
+warnings_count: '{count} 个警告'
+synthesis_export: 综合 / 导出
+integrity_publish_safety: 完整性与发布安全
+work_queues: 工作队列
+paper_library: 论文库
+reading: 阅读中
+continue: 继续
+needs_extraction: 需要解析
+parser_status: 解析状态
+pdf_missing: 缺少 PDF
+claims_need_review: 断言审阅
+ai_candidates: AI 候选
+ready_research_claims: 待审断言
+promote_to_evidence: 推进到证据
+quote_warnings: 引用警告
+citation_inspector: 引用检查器
+private_sources: 私有来源
+recent_papers: 最近阅读
+duplicate_risk: 重复风险
+metadata_review: 元数据审阅
+open_reader: 打开阅读器
+open_in_paper_library: 打开论文库
+open_source_library: 打开来源
+open_paper_library_workspace: 打开论文库
+focus_ready_claims: 聚焦待审断言
+focus_quote_warnings: 聚焦引用警告
+focus_export_gate: 聚焦导出门禁
+focus_connector_inbox: 连接器收件箱
+focus_claims: 断言
+claims_focus_saved: 已更新断言审阅焦点。
+citations_focus_saved: 引用检查器已聚焦到引用警告。
+export_focus_saved: 已更新导出门禁焦点。
+connector_focus_saved: 已更新连接器收件箱焦点。
+next_actions: 下一步动作
+next_action: 下一步动作
+no_research_actions: 当前没有需要处理的研究动作。
+discovery_updates: 发现更新
+overview_imported_count: 已导入 {count}
+overview_skipped_count: 已跳过 {count}
+connector_status_idle: 空闲
+connector_status_enabled: 已启用
+connector_status_disabled: 已停用
+connector_status_error: 出错
+connector_status_failed: 失败
+connector_status_ok: 正常
+recent_work: 最近工作
+chunks: 片段
+recent_work_empty: 还没有最近阅读记录。
+ready_to_review: 待审阅
+review_claim: 审阅断言
+more_claims_hidden: 还有 {count} 条断言未在此紧凑视图中显示。
+claims_empty_next_step: 先在论文库中运行解析，再从阅读器生成断言候选。
+prepare_claim_candidates: 准备断言候选
+risk_queue: 风险队列
+risk_queue_empty: 当前研究队列没有发布阻塞项。
+overview_queue_continue_reading: 继续阅读
+overview_queue_run_extraction: 运行解析
+overview_queue_attach_pdf: 补 PDF
+overview_queue_review_candidates: 审阅候选
+overview_queue_deduplicate: 去重
+overview_queue_refresh_translations: 刷新翻译
+overview_queue_review_visibility: 检查可见性
+overview_queue_open_recent: 打开最近项
+overview_action_continue_reading: 继续阅读 {count} 个来源
+overview_action_review_claims: 审阅 {count} 条待审研究断言
+overview_action_fix_citations: 修复 {count} 个引用警告
+overview_action_private_risk: 检查 {count} 个私有来源风险
+overview_action_review_drafts: 审阅 {count} 份综合草稿
+overview_action_import_sources: 导入论文、代码仓库或网页来源
+risk_private_publish: 私有发布风险
+risk_broken_citations: 断裂引用
+risk_open_export_gate: 打开导出门禁
+risk_open_citation_inspector: 打开引用检查器
+badge_unsorted: 未分类
+badge_pdf_ready: PDF 就绪
+badge_stale_translation: 翻译过期
+badge_private_source: 私有来源
+badge_needs_structured_extraction: 需要结构化解析
+badge_grobid_unavailable: GROBID 不可用
+badge_fallback_extraction: 备用解析
+ready: 就绪
+risk: 风险
+reading_mode: 模式
+excerpt: 摘录
+translation: 翻译
+key_points: 要点
+claim_candidates: 断言候选
+citations: 引用
+synthesis_notes: 综合笔记
+create_chunk: 创建 chunk
+chunk_kind: Chunk 类型
+chunk_title: Chunk 标题
+chunk_locator: 定位
+chunk_text: Chunk 文本
+chunk_refs: Chunk refs
+chunks_empty: 这个来源还没有 chunk。
+create_research_claim: 创建研究断言
+research_claim_id: 研究断言 id
+research_claim_type: 断言类型
+research_claim_status: 断言状态
+research_claim_text: 断言文本
+research_claims: 研究断言
+claims_empty: 暂无研究断言。
+human_note: 无 source/chunk 的人工备注
+rationale: 理由
+create_citation: 创建引用
+citation_quote: 引用摘录
+bibliography: Bibliography
+research_citations: 研究引用
+citations_empty: 暂无引用。
+create_synthesis_draft: 创建综合草稿
+synthesis_draft_id: 综合草稿 id
+drafts_empty: 暂无综合草稿。
+blog_candidate_preview: 博客候选预览
+create_blog_draft: 创建博客草稿
+body: 正文
+connectors_caption: 连接器负责把外部 URL、CSV 或订阅结果导入研究收件箱；配置不保存 token、cookie 或 API key。导入后的论文再进入 Reader。
+connectors_empty: 暂无连接器配置。
+configure_connector: 配置连接器
+connector_provider: 来源类型
+connector_id: 连接器 id
+connector_query: 查询 / 订阅
+connector_enabled: 启用
+privacy_default: 默认可见性
+connector_options: 选项 YAML
+connector_dry_run: 预演
+connector_run_now: 立即同步
+generate_reading_draft: 生成阅读草稿
+save_reading_annotations: 保存阅读标注
+create_evidence_candidate: 生成证据候选
+evidence_candidate_preview: 证据候选预览
+add_source: 新增来源
+edit_source: 编辑来源
+source_queue: 来源队列
+candidate_preview: 证据候选预览
+candidate_preview_help: 只读草稿；本页不会写入 evidence。
+source_id: Source id
+kind: 类型
+title_label: 标题
+url: URL
+status: 状态
+captured_at: 捕捉时间
+authors: 作者
+published: 发布时间
+tags: 标签
+goal_refs: Goal refs
+project_refs: Project refs
+experience_refs: Experience refs
+summary: 摘要
+notes: 备注
+visibility: 可见性
+save: 保存
+create: 创建
+saved: 已保存来源。
+created: 已创建来源 {id}。
+title_required: 来源标题不能为空。
+empty_status: 此状态下暂无来源。
+copy_id: Source id
+discard: 丢弃
+archive: 归档
+status_inbox: 收件箱
+status_reading: 阅读中
+status_summarized: 已总结
+status_candidate_ready: 候选待审
+status_archived: 已归档
+status_discarded: 已丢弃

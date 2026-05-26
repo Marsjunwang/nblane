@@ -805,10 +805,111 @@ __all__ = [
     "generate_paper_review_card",
     "generate_reading_draft",
     "generate_paper_source_guide",
+    "ingest_kanban_done",
+    "ingest_resume_text",
     "recommend_research_sources",
+    "route_task_to_skill_nodes",
     "run_ai_action",
     "run_json",
     "run_text",
+    "run_skill_coach",
+    "run_visual_caption",
     "search_papers_codex",
     "translate_paper_segments",
 ]
+
+
+def run_skill_coach(
+    profile: str,
+    task: str,
+    *,
+    nodes: list[dict[str, Any]] | None = None,
+    history: list[dict[str, Any]] | None = None,
+    context_refs: list[str] | None = None,
+) -> AIActionResult:
+    """Typed helper for ``gap.skill_coach`` (text-mode coach reply)."""
+
+    return run_ai_action(
+        "gap.skill_coach",
+        {
+            "task": task,
+            "nodes": nodes or [],
+            "history": history or [],
+        },
+        profile=profile,
+        context_refs=context_refs or [],
+    )
+
+
+def route_task_to_skill_nodes(
+    profile: str,
+    task: str,
+    *,
+    schema_nodes: list[dict[str, Any]] | None = None,
+    context_refs: list[str] | None = None,
+) -> AIActionResult:
+    """Typed helper for ``gap.task_routing``."""
+
+    return run_ai_action(
+        "gap.task_routing",
+        {"task": task, "schema_nodes": schema_nodes or []},
+        profile=profile,
+        context_refs=context_refs or [],
+    )
+
+
+def ingest_resume_text(
+    profile: str,
+    resume_text: str,
+    *,
+    allow_status_change: bool = False,
+    context_refs: list[str] | None = None,
+) -> AIActionResult:
+    """Typed helper for ``profile.resume_ingest``."""
+
+    return run_ai_action(
+        "profile.resume_ingest",
+        {
+            "resume_text": resume_text,
+            "allow_status_change": allow_status_change,
+        },
+        profile=profile,
+        context_refs=context_refs or [],
+    )
+
+
+def ingest_kanban_done(
+    profile: str,
+    done_tasks: list[dict[str, Any]],
+    *,
+    allow_status_change: bool = False,
+    context_refs: list[str] | None = None,
+) -> AIActionResult:
+    """Typed helper for ``profile.kanban_ingest``."""
+
+    return run_ai_action(
+        "profile.kanban_ingest",
+        {
+            "done_tasks": done_tasks,
+            "allow_status_change": allow_status_change,
+        },
+        profile=profile,
+        context_refs=context_refs or [],
+    )
+
+
+def run_visual_caption(
+    profile: str,
+    intent: str,
+    *,
+    image_ref: str = "",
+    context_refs: list[str] | None = None,
+) -> AIActionResult:
+    """Typed helper for ``output.visual_caption``."""
+
+    return run_ai_action(
+        "output.visual_caption",
+        {"intent": intent, "image_ref": image_ref},
+        profile=profile,
+        context_refs=context_refs or [],
+    )

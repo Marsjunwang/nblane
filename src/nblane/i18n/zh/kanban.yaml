@@ -1,0 +1,386 @@
+page_title: 看板 · nblane
+title: 看板
+page_context_line: 私人操作系统 · 执行面：本周任务看板。「已完成」可经 AI 生成摄入草案，请按条审阅后再写入。
+page_help_short: 使用说明
+page_help_body: |-
+  ### 看板使用流程
+
+  1. 不确定的事项先放入队列或收件区；进行中保持足够小，确保本周能收尾。
+  2. 任务详情写清结果、背景、阻塞和链接；子任务应是可勾选的执行步骤。
+  3. 已完成不等于证据。Done 任务需要进入 Evidence Review，审阅后才支撑技能升级或公开 claim。
+  4. 学习和运动记录放在个人工作台，避免污染执行列。
+  5. 看板 AI 可以生成子任务或澄清模糊任务，但必须确认候选后才会写入 kanban.md。
+
+  保存或自动保存会写入 kanban.md，并同步项目归属到 project-board.yaml。
+reload: 从文件重新加载
+save: 保存
+saved: 已保存到 kanban.md
+kb_unsaved_subtasks: 有未保存的子任务修改，请点「保存」写入 kanban.md。
+metric_total: 总计
+metric_doing: 🔄 进行中
+metric_done: ✅ 已完成
+items_count: '{n} 项'
+new_task: 新任务
+new_task_ph: + 添加任务…
+detail: 详情
+detail_ph: 背景 / 原因…
+add: 添加
+task_field_title: 标题
+task_tags: 标签
+kb_tags: 标签
+kb_quick_kind: 保存到
+kb_quick_kind_task: 任务
+kb_quick_kind_inbox: 收件
+kb_quick_kind_learning: 学习
+kb_quick_kind_habit: 习惯
+details: 详情
+details_ph: 背景 / 结果 / 阻塞…
+kb_personal_workspace_title: 个人工作台
+kb_personal_workspace_help: 这里只记录学习和锻炼；其他流程状态继续放在看板里。
+kb_tab_learning_checkin: 学习打卡
+kb_tab_exercise_checkin: 锻炼打卡
+kb_tab_month_summary: 本月汇总
+kb_checkin_date: 日期
+kb_checkin_saved: 已记录。
+kb_checkin_deleted: 已删除记录。
+kb_checkin_delete_missing: 这条记录已经不存在。
+kb_checkin_delete: 删除
+kb_checkin_delete_help: 从 activity-log.yaml 删除这条打卡记录。
+kb_checkin_type_learning: 学习
+kb_checkin_type_exercise: 锻炼
+kb_checkin_detail_empty: 无详情
+kb_checkin_links_count: '{count} 个链接'
+kb_checkin_minutes: '{minutes:g} 分钟'
+kb_checkin_strip_title: 最近 14 天
+kb_checkin_today_short: 今
+kb_checkin_strip_learning_short: 学{count}
+kb_checkin_strip_exercise_short: 练{count}
+kb_checkin_day_help: 打开这一天，新增或删除打卡。
+kb_checkin_day_records: 当天记录
+kb_checkin_day_records_empty: 这一天还没有学习/锻炼记录。
+kb_checkin_add_learning: 新增学习
+kb_checkin_add_exercise: 新增锻炼
+kb_checkin_no_marks: 未打卡
+kb_summary_records: 本月记录
+kb_summary_records_empty: 本月还没有学习/锻炼记录。
+kb_tab_today: 今天
+kb_tab_exercise: 锻炼
+kb_tab_learning: 学习
+kb_tab_habits: 习惯
+kb_tab_context: 上下文
+kb_tab_review: 复盘
+kb_workspace_view: 工作区视图
+kb_personal_tags_hint: 建议使用 company/openai、person/sam、project/nblane、flow/learning 这样的标签。
+kb_today_inbox: 开放收件
+kb_today_learning: 进行中的学习
+kb_today_habits: 今日打卡
+kb_today_total_habits: 习惯总数
+kb_today_light_help: 今天页只做捕捉和分流；结构化习惯记录与学习心得请进入活动/学习详情。
+kb_today_add_task: 添加 Queue 任务
+kb_today_habit_strip_title: 今日习惯
+kb_open_learning_detail: 打开学习详情
+kb_open_activity_detail: 打开活动详情
+kb_capture_title: 标题
+kb_capture_source: 来源
+kb_capture_note: 备注
+kb_capture_url: 链接
+kb_capture_inbox_title: 快速收入 inbox
+kb_capture_inbox_submit: 收入 inbox
+kb_capture_learning_title: 快速记录学习
+kb_capture_learning_submit: 记录学习
+kb_capture_habit_title: 习惯打卡
+kb_capture_habit_submit: 记录打卡
+kb_tag_companies: 公司
+kb_tag_people: 人物
+kb_tag_projects: 项目
+kb_tag_other: 其他标签
+kb_learning_kind: 资源类型
+kb_learning_status: 状态
+kb_learning_takeaway: 心得
+kb_learning_next: 下一步动作
+kb_learning_total: 学习条目
+kb_learning_active: 进行中
+kb_learning_unread: 未读
+kb_learning_completed: 已完成
+kb_learning_add_title: 新增学习资源
+kb_learning_add_short: 新增
+kb_learning_title: 学习
+kb_learning_today_help: 把论文、采访、视频作为可回看的资源沉淀。
+kb_learning_detail: 详情
+kb_learning_checkin_note: 学习记录
+kb_learning_checkin_note_placeholder: 今天学了什么？哪些内容值得记住？
+kb_learning_checkin_links: 链接列表
+kb_learning_checkin_links_placeholder: 每行一个链接。
+kb_learning_checkin_submit: 记录学习
+kb_learning_checkin_required: 请填写学习记录或至少一个链接。
+kb_learning_summary: 摘要
+kb_learning_summary_placeholder: 用一两句话说明这个资源为什么重要。
+kb_learning_lines_placeholder: 每行一条。
+kb_learning_empty: 还没有匹配的学习条目。
+kb_learning_takeaways: 关键收获
+kb_learning_next_actions: 下一步动作
+kb_learning_queue_task: 入队
+kb_learning_kind_paper: 论文
+kb_learning_kind_interview: 采访
+kb_learning_kind_video: 视频
+kb_learning_kind_book: 书
+kb_learning_kind_article: 文章
+kb_learning_kind_course: 课程
+kb_learning_kind_other: 其他
+kb_learning_kind_blog: 博客
+kb_learning_kind_repo: 代码仓库
+kb_learning_status_unread: 未读
+kb_learning_status_reading: 进行中
+kb_learning_status_processed: 已处理
+kb_learning_status_archived: 已归档
+kb_open_link: 打开链接
+kb_filter_all: 全部
+kb_filter_status: 状态筛选
+kb_filter_tag: 标签筛选
+kb_exercise_title: 锻炼
+kb_exercise_today: 今天
+kb_exercise_today_help: 日常锚点保持轻量；更细记录进入锻炼页。
+kb_exercise_quick_checkin: 锻炼打卡
+kb_exercise_done: 已完成
+kb_exercise_detail: 详情
+kb_exercise_progress: 进度
+kb_exercise_detail_checkin: 详细打卡
+kb_exercise_type: 类型
+kb_exercise_duration: 时长（分钟）
+kb_exercise_duration_value: '{minutes:g} 分钟'
+kb_exercise_intensity: 强度
+kb_exercise_checkin_submit: 记录锻炼
+kb_exercise_7d_checkins: 近 7 天打卡
+kb_exercise_recent: 最近锻炼
+kb_exercise_empty: 还没有锻炼打卡。
+kb_exercise_type_running: 有氧跑步
+kb_exercise_type_strength: 力量训练
+kb_exercise_type_squat: 负重深蹲
+kb_exercise_type_rowing: 划船机
+kb_exercise_type_mobility: 拉伸活动
+kb_exercise_type_other: 其他
+kb_exercise_intensity_easy: 轻松
+kb_exercise_intensity_moderate: 中等
+kb_exercise_intensity_hard: 较累
+kb_summary_month: 月份
+kb_summary_learning_count: 学习次数
+kb_summary_exercise_count: 锻炼次数
+kb_summary_learning_days: 学习天数
+kb_summary_exercise_days: 锻炼天数
+kb_calendar_weekdays: 一,二,三,四,五,六,日
+kb_calendar_learning_short: 学 {count}
+kb_calendar_exercise_short: 练 {count}
+kb_habit_empty_hint: 先在“习惯”视图里新增一个习惯，再回来打卡。
+kb_habit_pick: 习惯
+kb_habit_count: 数量
+kb_habit_related_tasks: 关联任务
+kb_habit_add_title: 新增习惯
+kb_habit_kind: 类别
+kb_habit_cadence: 频率
+kb_habit_target_count: 目标数量
+kb_habit_target_unit: 目标单位
+kb_habit_add_submit: 保存习惯
+kb_habit_summary_total: 近 7 天打卡
+kb_habit_summary_catalog: 习惯总数
+kb_habit_summary_volume: 记录总量
+kb_habit_summary_window: 最近 7 天的习惯进展。
+kb_habit_empty_summary: 还没有习惯。
+kb_habit_summary_checkins: 打卡次数
+kb_habit_summary_days: 命中天数
+kb_habit_summary_streak: 连续次数
+kb_habit_done: 已完成
+kb_strip_learning_help: 打开学习详情记录具体内容。
+kb_strip_more: 更多
+kb_context_total_tags: 追踪标签数
+kb_context_company_tags: 公司标签
+kb_context_people_tags: 人物标签
+kb_context_namespace: 命名空间
+kb_context_pick: 标签
+kb_context_empty: 还没有匹配的标签。
+kb_context_flow_prefix: 流程标签
+kb_context_source_kanban: 看板
+kb_context_source_learning: 学习
+kb_context_source_inbox: Inbox
+kb_context_source_habit: 习惯
+kb_context_source_empty: 暂无匹配
+kb_review_done: 完成任务
+kb_review_crystallized: 已结晶
+kb_review_activity: 活动记录
+kb_review_learning: 学习记录
+kb_review_done_detail: 本轮完成
+kb_review_done_empty: 还没有完成任务。
+kb_review_learning_focus: 学习焦点
+kb_review_learning_empty: 当前没有进行中的学习焦点。
+kb_review_activity_focus: 活动脉搏
+kb_review_activity_empty: 还没有活动摘要。
+kb_review_checkins: 次打卡
+move_to: 移动到
+kb_stay: （留在本列）
+kb_move_help: 下方按钮只改变任务所在**列**，不是「完成状态」菜单。
+kb_auto_dates: 移动列时自动填写开始/结束日期
+kb_auto_dates_help: 移入「进行中」时若 started_on 为空则填当天；移入「已完成」时若 completed_on 为空则填当天。
+kb_more_fields: 更多字段
+kb_more_fields_help: 可选补充、日期，或从其他列带过来需要保留的字段。
+kb_focus_mode: 专注模式（进行中全宽，其余列在标签页）
+kb_focus_mode_help: 隐藏四列并排布局；需要时再在标签中打开「排队」「已完成」「以后再说」。
+kb_links_preview: 链接（点击打开）
+kb_subtask_progress: 子任务 {done} / {total} 已完成
+kb_wip_hint: 「进行中」已有 {n} 项，可考虑控制并行数量（WIP）。
+kb_done_column_expander: 展开查看并编辑「已完成」（{n} 项）
+kb_done_column_hint: 展开后可添加、编辑或配合上方区块归档已完成任务。
+kb_drag_title: 拖拽看板
+kb_drag_help: 可在列内或跨列拖动卡片，然后应用排序。下方详细卡片编辑器仍负责字段内容。
+kb_drag_applied: 已应用拖拽看板顺序。
+kb_drag_stale: 拖拽结果已过期或不完整，请重新加载后再试。
+kb_done_render_limit: 此处仅显示 {shown}/{total} 个「已完成」卡片。完整列表请使用上方整理区或「已完成 → 证据」。
+kb_title_required: 任务标题不能为空。
+kb_invalid_date: 日期字段请使用 YYYY-MM-DD：{fields}。
+kb_task_details: 详情与子任务
+kb_edit_task: 编辑
+kb_done_editing: 收起编辑
+kb_tap_title_to_edit: 点击标题进入编辑
+kb_read_subtasks_hint: 子任务 — 完成后可勾选
+kb_edit_exit_hint: 无法在空白处退出编辑；请点下方「收起编辑」（Enter 不会对所有字段生效）。
+kb_card_actions: ⋯
+kb_card_actions_help: 删除或将任务移到其他列
+kb_edit_move: ⇄
+kb_edit_move_help: 将任务移到其他列
+kb_card_delete_hint: 删除后无法在此恢复。
+kb_delete_card: 删除任务
+kb_delete_confirm: 确定删除这个任务吗？
+kb_delete_short: 删
+kb_delete_subtask: 删除子任务
+kb_edit_short: 改
+kb_save_short: 存
+kb_cancel_short: 取
+kb_ai_gap: 分析缺口
+kb_ai_gap_short: Gap
+kb_ai_subtasks: 拆任务
+kb_ai_subtasks_short: 拆
+kb_ai_done_short: 证
+kb_ai_backend: 看板 AI
+kb_ai_backend_help: 选择看板 AI 动作使用的引擎。Codex 使用本地 Codex CLI 的只读模式，不需要看板内额外配置。
+kb_ai_backend_llm: LLM
+kb_ai_backend_codex: Codex
+kb_ai_backend_codex_status: Codex：本地只读
+kb_ai_settings_title: 看板 AI 配置
+kb_ai_settings_caption: 这些设置只影响当前档案的看板任务理解与拆任务动作。API key 仍由全局 AI / LLM 运行时提供。
+kb_ai_action_task_alignment: 任务理解
+kb_ai_action_task_alignment_help: 为含糊任务先生成候选理解，再进入拆任务。
+kb_ai_action_subtasks: 拆任务
+kb_ai_action_subtasks_help: 基于已确认的任务理解生成可审阅的子任务草案。
+kb_ai_config_backend: 后端
+kb_ai_config_llm_model: LLM 模型覆盖
+kb_ai_config_codex_model: Codex 模型覆盖
+kb_ai_config_model_help: 留空则使用全局/应用默认模型。
+kb_ai_effective_config: 当前生效：{backend} · {model}
+kb_ai_llm_status: LLM：{status} · {model}
+kb_ai_codex_status: Codex：{status}
+kb_ai_configured: 已配置
+kb_ai_missing_key: 缺少 key
+kb_ai_installed: 已安装
+kb_ai_missing: 缺失
+kb_ai_logged_in: 已登录
+kb_ai_login_unknown: 登录状态未知
+kb_ai_codex_default: Codex CLI 默认
+kb_ai_app_default: 应用默认
+kb_ai_save: 保存 AI 配置
+kb_ai_saved: 看板 AI 配置已保存。
+kb_mark_crystallized: 标记已结晶
+kb_crystallize_short: 晶
+kb_crystallize_done_only: 只有「已完成」任务可以标记为已结晶。
+kb_artifact: 产物
+kb_verification: 验证
+kb_move_to_label: 移动到
+kb_confirm_move: 移动
+kb_read_new_subtask_ph: 新子任务…
+kb_read_add_subtask_expander: 添加子任务
+kb_alignment_title: 确认任务理解
+kb_alignment_custom: 补充细节或修正理解
+kb_alignment_confirm: 按这个理解拆解
+kb_alignment_custom_only: 只用我的补充
+kb_alignment_assumptions: 假设
+kb_alignment_style: 拆分风格
+kb_alignment_goal: 目标理解
+kb_alignment_label: 短标签
+kb_alignment_other: 其他理解
+kb_alignment_other_hint: 只使用下方我填写的理解
+kb_alignment_status: 理解待确认
+kb_alignment_required: 请选择一个理解，或补充你的说明。
+kb_no_alignment_options: 未生成可选的任务理解。
+kb_discard_draft: 废弃草案
+kb_discard_all_drafts: 废弃全部
+kb_no_selected_drafts: 请至少选择一个要应用的草案。
+kb_draft_status: '{count} 条草案'
+kb_ai_error_status: AI 出错
+kb_granularity: 粒度
+kb_granularity_milestone: 里程碑
+kb_granularity_checklist: 清单
+kb_granularity_implementation: 实现细节
+kb_no_subtask_proposals: 没有生成可用的子任务草案。
+kb_subtask_error_generic: 没有生成可用的子任务草案。
+kb_subtask_error_task_not_found: 没有找到这个看板任务。
+kb_subtask_error_gap_error: 这个任务的能力缺口分析没有跑通。
+kb_subtask_error_llm_error: 模型调用失败，或 AI 尚未配置。
+kb_subtask_error_parse_empty: 模型没有返回可解析的 JSON 子任务。
+kb_subtask_error_empty_json: 模型返回了 JSON，但没有子任务条目。
+kb_subtask_error_invalid_schema: 模型返回的子任务缺少可用标题。
+kb_subtask_error_filtered_vague: 模型返回了草案，但标题都过泛。请在「其他理解」里补充具体产物或验证方式后重试。
+kb_subtask_error_filtered_duplicate: 模型只返回了已存在的子任务。
+kb_subtask_error_filtered_empty: 模型返回了草案，但没有条目通过校验。
+new_context: 背景
+new_context_ph: 这件事是什么 / 上下文
+new_why: 原因
+new_why_ph: 为什么要做
+new_blocked: 阻塞
+new_blocked_ph: 依赖或阻塞项
+new_outcome: 结果
+new_outcome_ph: 交付或产出
+field_context: 背景 context
+field_why: 原因 why
+field_blocked: 阻塞 blocked by
+field_outcome: 结果 outcome
+field_started: 开始日 started_on
+field_completed: 结束日 completed_on
+kb_project: 项目
+kb_milestone: 里程碑
+kb_no_project: 无项目
+kb_no_milestone: 无里程碑
+subtasks_label: 子任务（可勾选）
+add_subtask: + 子任务
+crystallized: 已结晶（已摄入）
+kb_open_evidence_review: 打开证据审阅
+kb_done_review_hint: 已完成 -> 证据草案与批量整理统一在证据审阅处理；看板已完成卡片这里只保留单卡归档或删除。
+kb_archive_card: 归档
+kb_archive_short: 归档
+kb_archive_confirm: 归档这个 Done 任务？
+kb_archive_done_only: 只有 Done 任务可以在看板中归档。
+done_bulk_title: 「已完成」列整理
+done_bulk_pick: 选择已完成任务
+archive_done: 归档所选
+delete_done: 删除所选
+ingest_select_rows: 选择要应用的草案条目
+ingest_adopt_evidence: 采纳该证据行
+ingest_adopt_node: 采纳该节点更新
+ingest_apply_selected: 应用所选条目
+ingest_apply_all: 应用完整草案
+ingest_mark_crystallized: 应用后将来源「已完成」任务标为已结晶
+ingest_filter_warn: 子集过滤
+ingest_expander: 已完成 → 证据（AI）
+ingest_pick_done: 选择「已完成」任务
+ingest_generate: 生成草案
+ingest_spinner: 调用 AI 中…
+ingest_allow_status: 允许 AI 更新节点状态
+ingest_allow_status_help: 未勾选：合并时忽略 LLM 的 status，只写入证据与引用；有证据的 locked 节点会变为 learning。勾选：仅在「升级或持平」时写入 LLM 的 status（不会 solid→learning，不会把 expert 降级）；LLM 若输出 expert 会按 learning 档参与比较。YAML 里已标 expert 的节点不会被覆盖。
+ingest_preview_pool: 合并后的 evidence-pool（预览）
+ingest_preview_tree: 合并后的 skill-tree（预览）
+ingest_apply: 写入 Profile
+ingest_applied: 已写入：证据池、技能树，并已同步 SKILL.md。
+ingest_err: 错误：{msg}
+ingest_no_done: 「已完成」列为空。
+ingest_no_ai: 未配置 AI。请在 .env 中设置 LLM_API_KEY。
+ingest_warn: 警告
+ingest_preview_source_done: 草案依据的「已完成」任务：{sources}
+ingest_preview_projects: 项目：{projects}
+ingest_rationale: 理由
+ingest_excerpt: 原文摘录

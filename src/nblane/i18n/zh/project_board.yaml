@@ -1,0 +1,79 @@
+page_title: 项目看板 · nblane
+title: 项目看板
+page_context_line: 内部项目案例连接目标、任务、资料、证据、里程碑和输出；公开项目仍由 projects.yaml 管理。
+page_help_short: 使用说明
+page_help_body: |-
+  ### 项目看板使用流程
+
+  1. 为需要跨目标、看板任务、证据、研究资料、里程碑和输出追踪的工作创建内部项目案例。
+  2. 内部项目默认服务于个人工作流；公开项目页仍由公开输出层管理。
+  3. 关联任务和证据后，首页与证据审阅才能识别项目归属缺口。
+  4. 项目有阶段节点时添加里程碑；里程碑可以承接看板任务，不必改写任务正文。
+  5. 只有准备进入执行流的事项才用「新建看板任务」。
+
+  本页会写入 project-board.yaml，并可能把任务归属同步回 kanban.md。
+create_project: 新建项目
+create_task: 新建看板任务
+project_detail: 项目详情
+milestones: 里程碑
+add_milestone: 新增里程碑
+save_project: 保存项目
+save_milestone: 保存里程碑
+archive_project: 归档项目
+edit: 编辑
+saved: 已保存项目看板。
+task_created: 已创建看板任务。
+empty_board: 还没有内部项目。
+empty_status: 这个状态下没有项目。
+select_project: 项目
+field_id: ID
+field_title: 标题
+field_status: 状态
+field_kind: 类型
+field_visibility: 可见性
+field_time_range: 时间范围
+field_summary: 摘要
+field_notes: 备注
+field_goal_refs: 目标
+field_task_refs: 看板任务
+field_evidence_refs: 证据
+field_source_refs: 研究资料
+field_experience_refs: 经历案例
+field_output_refs: 输出
+field_goal_refs_help: 目标说明这个项目服务于哪条阶段目标，用于首页和差距分析按目标归因。
+field_task_refs_help: 看板任务表示执行归属；从看板任务上选择项目后会自动同步回这里。
+field_evidence_refs_help: 证据是这个项目承担或产出的已审阅事实。模型可以建议候选，但保存的关联仍是人工确认后的归属。
+field_source_refs_help: 研究资料是属于这个项目的论文、URL 或导入材料。
+field_experience_refs_help: 支持这个项目叙事的经历案例。
+field_output_refs_help: 与这个项目相关的输出或公开草稿。
+project_refs_hint: 这里的关联表示项目归属，不会复制目标或证据正文；模型建议的关联也需要保存前确认。
+project_ai_suggest_refs: AI 建议关联
+project_ai_suggest_help: 让模型建议目标、任务、证据、资料和输出关联。建议只会预填表单，点击保存项目后才会写入。
+project_ai_suggest_running: 正在建议项目关联...
+project_ai_suggest_applied: 已向表单加入 {count} 个建议关联，请确认后再保存。
+project_ai_suggest_none: 没有新的项目关联建议。
+project_ai_suggest_failed: 项目关联建议失败。
+project_ai_suggest_summary: 表单中已暂存 {count} 个建议关联。
+project_missing_reload: 项目 `{id}` 已变化或被移除。已读取最新看板，请刷新后再编辑。
+milestone_missing_reload: 里程碑 `{id}` 已变化或被移除。请刷新后再编辑。
+field_target: 目标日期
+field_milestone: 里程碑
+task_title: 任务标题
+task_section: 列
+no_milestone: 无里程碑
+id_help: 留空会自动生成 project:<slug>。
+milestone_id_help: 留空会自动生成 milestone:<slug>。
+title_required: 标题不能为空。
+duplicate_milestone: 里程碑 id 已存在：{id}
+missing_ref: 缺失
+claimed_elsewhere_hint: '{count} 个任务已属于其他项目，因此不会出现在这个选择器里。'
+card_counts: 目标 {goals} · 任务 {tasks} · 证据 {evidence} · 资料 {sources} · 里程碑 {milestones}
+metric_unassigned_tasks: 未归属任务
+metric_unassigned_evidence: 未归属证据
+metric_current_goal_projects: 当前目标项目
+unassigned_evidence_hint: '{count} 条已审阅证据尚未关联任何项目。'
+status_active: 进行中
+status_paused: 暂停
+status_completed: 已完成
+status_archived: 已归档
+status_planned: 计划中

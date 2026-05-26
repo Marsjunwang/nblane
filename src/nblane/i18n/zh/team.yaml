@@ -1,0 +1,40 @@
+page_title: 团队视图 · nblane
+title: 团队视图
+page_context_line: 团队操作系统：维护 teams/ 下的 team.yaml 与共享产品池。
+page_help_short: 使用说明
+page_help_body: |-
+  ### 团队视图使用流程
+
+  1. 先选择要编辑的团队；团队文件位于 teams/，不会按个人档案过滤。
+  2. 团队使命、成员、规则和当前优先级变化时，更新 team.yaml。
+  3. 产品池用于沉淀共享问题、项目、证据、方法和决策。
+  4. 保存前查看写入范围，确认本次会修改哪些团队文件。
+  5. 个人技能、个人证据和个人目标仍应回到当前 profile 的页面维护。
+
+  本页写入所选团队的 team.yaml 和 product-pool.yaml。
+no_teams: 未找到团队。请从模板在 `teams/` 下创建团队。
+team_select: 团队
+sub_team: 团队信息
+team_name: 团队名称
+mission: 使命 / 共同关注点
+members: 成员（逗号分隔）
+rules: 共同规则（每行一条）
+priorities: 当前优先级（每行一条）
+save_team: 保存 team.yaml
+team_saved: 已保存 team.yaml。
+sub_pool: 产品池
+items_count: '{n} 项'
+field_title: 标题
+field_item: 条目
+add_pool: 添加到 {label}
+add_pool_ph: 新{label}条目…
+add: 添加
+save_pool: 保存 product-pool.yaml
+pool_saved: 已保存 product-pool.yaml。
+write_owner: 写入归属
+team_scope: 团队范围
+writes: 写入文件
+view_as_profile: 按档案查看
+save_team_path: 保存 team.yaml -> {path}
+save_pool_path: 保存 product-pool.yaml -> {path}
+team_profile_scope: 侧栏所选档案 **{profile}** 用于首页、技能树、差距分析与看板。团队数据在 **teams/** 下，不按档案过滤。

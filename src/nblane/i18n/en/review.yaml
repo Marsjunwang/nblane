@@ -1,0 +1,44 @@
+page_title: Review · nblane
+title: 复盘
+page_context_line: Turn weekly or stage review inputs into evidence, next action, and public draft candidates.
+page_help_short: Guide
+review_help_body: |-
+  ### Review workflow
+
+  1. Pick a time window and generate candidates from activity, Done tasks, learning, and inbox signals.
+  2. In **Evidence candidates**, save selected rows to Activity for traceability or apply them into the evidence pool. Leave crystallization on when the source Done tasks are covered.
+  3. In **Next action candidates**, save or apply only the queue items you want to carry forward.
+  4. In **Public draft candidates**, create draft blog posts; this page never publishes them.
+  5. Use **Method notes** and **Agent Activity** to audit how the candidates were derived.
+
+  Review is a candidate generator. File writes are explicit and selected-row based.
+preset: Window
+preset_current_week: Current week
+preset_previous_week: Previous week
+preset_last_30_days: Last 30 days
+preset_custom: Custom
+start_date: Start
+end_date: End
+generate: Generate candidates
+summary: Summary
+done_tasks: Done tasks
+activity: Activity
+learning: Learning
+inbox: Inbox
+evidence_candidates: Evidence candidates
+next_action_candidates: Next action candidates
+public_draft_candidates: Public draft candidates
+method_notes: Method notes
+agent_activity: Agent Activity
+save_to_activity: Save selected to Activity
+apply_selected: Apply selected
+create_public_drafts: Create selected drafts
+mark_crystallized: Mark source Done tasks crystallized
+no_candidates: No candidates for this window.
+saved: Saved to Activity.
+applied: Applied.
+failed: Failed
+select_rows: Select rows
+candidate_preview: Preview
+open_activity: Open Agent Activity
+public_draft_note: Creates draft blog posts only; it never publishes.

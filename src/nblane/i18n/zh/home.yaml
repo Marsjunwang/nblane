@@ -1,0 +1,412 @@
+app_page_title: 首页 · nblane
+page_context_line: 私人操作系统：本档案的技能、证据与 SKILL.md——均以本地文件为准。
+app_caption: 当前档案：**{profile}** · 数据以 YAML / Markdown 明文存储，Git 是唯一可信来源。
+dashboard_status_overview: 状态概览
+dashboard_metric_goal: 当前目标
+dashboard_primary_goal: 主目标
+dashboard_active_goal: 活跃目标
+dashboard_active_goals_title: 活跃目标
+dashboard_goal_set: 已设置
+dashboard_goal_missing: 未设置
+dashboard_metric_skill_lit: 已点亮技能
+dashboard_skill_progress_suffix: 扎实 / 专家
+dashboard_metric_doing: 进行中
+dashboard_metric_pending_evidence: 待整理证据
+dashboard_metric_health: 健康 E/W/I
+dashboard_metric_health_help: 来自档案体检的错误 / 警告 / 信息数量。
+dashboard_public_not_initialized: 公开层尚未初始化；首页这里只提供入口。
+dashboard_doing_title: 本周进行中
+dashboard_doing_empty: 当前没有进行中任务。打开看板选择本周正在推进的工作。
+dashboard_doing_started: 开始于 {date}
+dashboard_doing_blocked: 阻塞：{blocked}
+dashboard_doing_more: 看板上还有 {n} 个 Doing 任务。
+dashboard_pending_evidence_title: 待整理证据
+dashboard_done_uncrystallized: 已完成但未结晶
+dashboard_unlinked_evidence: 未挂技能的证据
+dashboard_needs_review_evidence: 待审阅证据
+dashboard_status_risk_evidence: 技能状态证据风险
+dashboard_pending_evidence_empty: 没有发现待整理证据。
+dashboard_health_title: 健康摘要
+dashboard_health_errors: 错误
+dashboard_health_warnings: 警告
+dashboard_health_info: 信息
+dashboard_health_context_ready: 上下文就绪
+dashboard_health_empty: Profile Health 未发现问题。
+dashboard_yes: 是
+dashboard_no: 否
+dashboard_output_title: 输出机会
+dashboard_output_empty: 公开层暂无摘要。进入输出工作台初始化草稿。
+dashboard_public_drafts: 草稿
+dashboard_public_published: 已发布
+dashboard_public_visibility: 可见性
+dashboard_public_build: 构建
+dashboard_public_build_exists: 已构建
+dashboard_public_build_missing: 未构建
+dashboard_public_build_detail: '`{path}` 下有 {pages} 个 HTML 页面。'
+dashboard_quick_title: 快捷操作
+dashboard_priority_goal_title: 当前目标
+dashboard_priority_work_title: 本周执行
+dashboard_priority_evidence_title: 待整理证据
+dashboard_scope_title: 当前范围
+dashboard_scope_profile: 档案
+dashboard_scope_goal: 目标
+dashboard_scope_ai: AI
+dashboard_scope_health: 健康
+dashboard_primary_actions_title: 从这里开始
+dashboard_action_capture: 快速捕获
+dashboard_action_capture_help: 把来源、笔记或想法先放入 Research。
+dashboard_action_kanban: 打开看板
+dashboard_action_evidence: 整理证据
+dashboard_action_output: 生成输出
+dashboard_canvas_section_title: 上下文画布
+dashboard_canvas_section_caption: 稳定的每日摘要先显示，图谱画布在下方加载。
+dashboard_overview_map_title: 当前地图
+dashboard_graph_eyebrow: 上下文
+dashboard_graph_title: 上下文画布
+dashboard_graph_goal_missing: 设置当前目标
+dashboard_graph_blocked: 阻塞
+dashboard_evidence_inbox_title: 证据收件箱
+dashboard_open_section: 打开
+dashboard_goal_create_inline: 创建目标
+dashboard_goal_edit_inline: 编辑目标
+dashboard_goal_close_form: 收起
+dashboard_goal_advanced_fields: 高级目标字段
+dashboard_ai_ready: AI 就绪
+dashboard_ai_not_ready: AI 未启用
+dashboard_help_title: 使用说明
+dashboard_help_full_doc: 打开完整 Dashboard 使用说明
+dashboard_help_body: |-
+  ### 如何阅读 Dashboard
+
+  顶部卡片回答当前正在追求什么：长期方向、主目标、活跃目标和当前工作。
+
+  画布遵循成长图谱：**来源** 是原始材料，**证据** 是可审查事实，**断言** 是解释和结论，**技能** 是能力状态，**输出** 是公开或可复用表达。
+
+  用 **捕捉来源** 记录轻量笔记和链接。捕捉内容默认进入研究工作台的私有收件箱；不会自动变成证据，也不会自动改技能状态。
+
+  用 **证据审阅** 处理已完成任务、未链接证据、claim 候选和状态风险。AI 可以生成候选和摘要，但事实确认仍需要人工审阅。
+
+  **本页 AI 设置**只影响首页内的目标-技能匹配和图谱洞察。研究工作台有自己的研究 AI 设置，用于论文搜索、翻译、阅读器和深读。
+
+  8503 负责安全的档案选择与写入；8502 sidecar 启动后可承载更高交互的画布或阅读器界面。
+dashboard_ai_settings_title: 本页 AI 设置
+dashboard_ai_settings_caption: 这些设置只影响当前档案的首页 AI 动作。研究、看板等页面保留自己的页面级 AI 设置；这里不会写入 API key。
+dashboard_ai_action_goal_skill_match: 目标-技能匹配
+dashboard_ai_action_goal_skill_match_help: 为目标建议技能节点。候选必须确认后才会保存。
+dashboard_ai_action_graph_insights: 图谱洞察
+dashboard_ai_action_graph_insights_help: 总结图谱风险和下一步，不直接修改文件。
+dashboard_ai_backend: 后端
+dashboard_ai_llm_model: LLM 模型
+dashboard_ai_codex_model: Codex 模型
+dashboard_ai_use_default: 使用默认
+dashboard_ai_custom_model: 自定义模型
+dashboard_ai_app_default: 应用默认
+dashboard_ai_codex_default: Codex 默认
+dashboard_ai_effective: 实际使用：{backend} · {model}
+dashboard_ai_effective_backend: 实际后端：{backend}
+dashboard_ai_effective_model: 实际模型：{model}
+dashboard_ai_test: 测试
+dashboard_ai_test_model: 测试模型
+dashboard_ai_available: 可用
+dashboard_ai_unavailable: 不可用
+dashboard_ai_llm_unconfigured: LLM API key 未配置。
+dashboard_ai_model_available: 模型测试成功（{seconds}s）。
+dashboard_ai_configured: 已配置
+dashboard_ai_missing: 缺失
+dashboard_ai_missing_key: 缺少 key
+dashboard_ai_installed: 已安装
+dashboard_ai_logged_in: 已登录
+dashboard_ai_login_unknown: 登录状态未知
+dashboard_ai_llm_status: LLM：{status} · {model}
+dashboard_ai_codex_status: Codex：{status}
+dashboard_ai_save: 保存 AI 设置
+dashboard_ai_saved: 首页 AI 设置已保存。
+dashboard_ai_test_goal_skill_match: 测试目标-技能模型
+dashboard_ai_test_ok: 模型测试成功（{seconds}s）。
+dashboard_open_8502_canvas: 打开 8502 画布
+dashboard_canvas_sidecar_unavailable: 8502 画布当前不可达：{base}；已使用本地首页回退视图。
+dashboard_canvas_sidecar_link_disabled_help: 请先启动或转发 8502 画布 sidecar，再使用这个入口。
+dashboard_embedded_canvas_title: 内嵌画布
+dashboard_canvas_summary_title: 画布摘要
+dashboard_canvas_summary_caption: 日常首页先折叠大画布；需要深入探索图谱时再展开或打开 8502 画布。
+dashboard_canvas_load_embed: 加载内嵌画布
+dashboard_graph_hero_title: 实时成长图谱
+dashboard_graph_hero_caption: 用一张紧凑 3D 图把今天的目标、来源、证据、技能和输出串起来。
+dashboard_hero_start_here: 从这里开始
+dashboard_graph_selected_node: 当前节点
+dashboard_graph_open_selected: 在 8502 打开所选节点
+dashboard_today_focus_title: 今日焦点
+dashboard_action_queue_title: 行动队列
+dashboard_action_review_evidence: 整理证据
+dashboard_action_open_focus: 打开当前工作
+dashboard_action_open_kanban_hint: 从看板选择当前正在推进的工作。
+dashboard_action_resolve_gap: 处理缺口风险
+dashboard_action_gap_clear: 当前没有紧急缺口信号。
+dashboard_action_open_output: 打开输出草稿
+dashboard_action_draft_output: 起草输出
+dashboard_action_review_source: 审阅来源
+dashboard_action_capture_source: 捕捉来源
+dashboard_open_research: 打开研究工作台
+dashboard_action_why_evidence: 证据队列是当前最可靠的审阅入口。
+dashboard_action_why_clear: 没有紧急队列阻塞今日主路径。
+dashboard_action_why_focus: 进行中的工作能把今日动作保持在当前目标上。
+dashboard_action_why_focus_empty: 先选定一个活跃任务，再展开其他系统工作。
+dashboard_action_why_gap: 缺口风险如果不处理，会阻塞当前目标。
+dashboard_action_why_output: 草稿可以把已审阅工作转成可复用输出。
+dashboard_action_why_output_empty: 等审阅队列有足够支撑后再创建输出。
+dashboard_capture_more_fields: 更多字段
+dashboard_canvas_more_filters: 更多过滤
+dashboard_claim_summary: 断言会把已审阅证据翻译成可复用的技能与输出结论。
+north_star_strip_title: 长期方向
+north_star_empty: 尚未设置长期方向
+north_star_empty_action: 填写长期方向
+north_star_hidden_display: 已设置长期方向
+north_star_private_display: 私密长期方向
+north_star_edit_action: 编辑档案上下文
+north_star_visibility_visible: 完整显示
+north_star_visibility_discreet: 简略显示
+north_star_visibility_hidden: 隐藏明文
+north_star_visibility_private: 私密
+skill_alignment_title: 目标-技能关联
+skill_alignment_confirmed: 已确认关联
+skill_alignment_candidates: 候选关联
+skill_alignment_no_links: 尚无已确认技能关联。
+skill_alignment_no_candidates: 运行规则匹配或 AI 匹配后选择候选。
+skill_alignment_rule: 规则匹配
+skill_alignment_ai: AI 匹配
+skill_alignment_confirm: 确认关联
+skill_alignment_manual_label: 手动添加
+skill_alignment_manual_add: 添加
+skill_alignment_suggested: 建议
+skill_alignment_gap_hint: 关联到锁定/学习中节点时，建议进入差距分析。
+goal_alignment_goal_missing: 未找到要关联技能的目标。
+goal_alignment_node_missing: 当前 schema 中没有这个技能节点。
+goal_alignment_candidates_ready: 已生成 {n} 个技能候选，请确认。
+goal_alignment_links_saved: 目标-技能关联已保存。
+goal_primary_saved: 主目标已更新。
+goal_archived: 目标已归档。
+dashboard_add_active_goal: 添加目标
+dashboard_archive_goal: 归档
+dashboard_inspector_empty: 选择一个节点查看详情。
+dashboard_inspector_node_hint: 进入归属页面查看完整内容。
+dashboard_inspector_placeholder_hint: 这个区域仍是骨架状态，还没有对应的真实记录。
+dashboard_inspector_locked_hint: 该节点的私密或锁定细节已在当前视图隐藏。
+dashboard_inspector_owner_reserved: 搭建状态
+dashboard_placeholder_metric: 预留
+dashboard_inspector_setup_title: 先完成基础设置，或选择真实节点
+dashboard_inspector_setup_hint: 当前图谱仍以骨架节点为主。建议先补长期方向，再设置当前目标。
+dashboard_today_current_focus: 当前焦点
+dashboard_today_capture_sources: 捕捉 / 来源
+dashboard_today_evidence_review: 证据审阅
+dashboard_today_gap_next_action: 缺口 / 下一步
+dashboard_today_output_feedback: 输出 / 反馈
+dashboard_capture_title: 捕捉来源
+dashboard_capture_submit: 捕捉
+dashboard_capture_saved: 已捕捉来源 {id}。
+dashboard_capture_title_required: 捕捉标题不能为空。
+dashboard_capture_title_placeholder: 你注意到了什么？
+dashboard_capture_raw_text: 备注
+dashboard_capture_source: 来源 URL 或出处
+dashboard_capture_tags: 标签
+dashboard_capture_goal: 目标
+dashboard_capture_type: 类型
+dashboard_capture_type_note: 笔记
+dashboard_capture_type_link: 链接
+dashboard_capture_type_resource: 资源
+dashboard_capture_type_idea: 想法
+dashboard_source_inbox_title: 来源收件箱
+dashboard_source_inbox_empty: 还没有捕捉来源。
+dashboard_source_to_evidence_hint: 捕捉内容先进入收件箱，审阅后再成为证据候选。
+dashboard_atomic_evidence_title: 原子证据
+dashboard_evidence_candidate_title: 证据候选
+dashboard_atomic_evidence_unlinked: 未挂技能的原子证据
+dashboard_atomic_evidence_needs_review: 待审阅
+dashboard_atomic_evidence_status_risk: 状态风险
+dashboard_gap_risk_title: 缺口风险
+dashboard_feedback_planned: 反馈区域仍在搭建中。
+dashboard_graph_loading: 正在加载图谱…
+dashboard_graph_3d_hint: 长期方向依次流向目标、项目容器、活动、来源、证据、断言、能力、输出、反馈与治理。可旋转、缩放；点击节点后在右侧查看。
+dashboard_view_canvas: 2D 画布
+dashboard_view_focus_path: 焦点路径
+dashboard_view_attention: 关注
+dashboard_view_3d_graph: 3D 全局图
+dashboard_graph_fit: 适配视图
+dashboard_graph_focus_selected: 聚焦所选
+dashboard_open_8503: 打开 8503
+dashboard_explore_title: 图谱
+dashboard_explore_nodes: 图谱节点
+dashboard_explore_all: 全部
+dashboard_explore_context: 上下文
+dashboard_explore_upstream: 上游
+dashboard_explore_downstream: 下游
+dashboard_explore_search: 搜索
+dashboard_explore_search_placeholder: 节点、层级、状态
+dashboard_explore_hide_placeholders: 隐藏占位节点
+dashboard_explore_result_count: 个可见
+dashboard_explore_no_matches: 没有符合当前过滤的图谱节点。
+dashboard_explore_lane_direction: 方向
+dashboard_explore_lane_work_source: 工作 / 来源
+dashboard_explore_lane_evidence_claim: 证据 / 断言
+dashboard_explore_lane_skill_gap: 能力 / 缺口
+dashboard_explore_lane_output_feedback: 输出 / 反馈
+dashboard_attention_title: 关注信号
+dashboard_workbench_title: 今日工作台
+dashboard_workbench_caption: 集中查看今天的信号、捕捉入口和快捷操作。
+dashboard_canvas_setup_title: 当前画布仍处于搭建阶段
+dashboard_canvas_setup_hint: 先补长期方向和当前目标，再逐步用真实来源与证据替换骨架。
+dashboard_canvas_missing_north_star: 缺少长期方向
+dashboard_canvas_missing_goal: 缺少当前目标
+dashboard_canvas_missing_sources: 还没有捕捉来源
+dashboard_canvas_reset_filters: 显示全部层
+dashboard_canvas_no_layers: 已隐藏全部层。
+dashboard_skill_progress_title: 技能进度
+dashboard_skill_progress_caption: 扎实 / 专家点亮率
+dashboard_skill_progress_empty: 暂无技能树数据。
+dashboard_skill_lit_rate: 点亮率
+dashboard_skill_status_expert: 专家
+dashboard_skill_status_solid: 扎实
+dashboard_skill_status_learning: 学习中
+dashboard_skill_status_locked: 锁定
+dashboard_node_north_star: 长期方向
+dashboard_node_goal: 目标
+dashboard_node_skill: 技能
+dashboard_node_task: 任务
+dashboard_node_project_case: 项目案例
+dashboard_private_project_case: 私密项目案例
+dashboard_node_daily_work: 日常工作
+dashboard_node_research: 研究
+dashboard_node_agent_run: Agent 运行
+dashboard_node_source: 来源
+dashboard_private_source: 私密来源
+dashboard_node_evidence_candidate: 证据候选
+dashboard_node_atomic_evidence: 原子证据
+dashboard_private_evidence: 私密证据
+dashboard_node_composite_evidence: 组合证据
+dashboard_node_claim: 断言
+dashboard_private_claim: 私密断言
+dashboard_node_evidence: 证据
+dashboard_node_gap: 缺口
+dashboard_node_next_action: 下一步行动
+dashboard_node_output: 输出
+dashboard_node_feedback: 反馈
+dashboard_node_capacity: 方向容量
+dashboard_node_health: 健康
+dashboard_layer_direction: 方向
+dashboard_layer_objective: 目标
+dashboard_layer_work_context: 工作语境
+dashboard_layer_activity: 活动
+dashboard_layer_source: 来源
+dashboard_layer_evidence: 证据
+dashboard_layer_claim: 断言
+dashboard_layer_capability: 能力
+dashboard_layer_output: 输出
+dashboard_layer_feedback: 反馈
+dashboard_layer_governance: 治理
+dashboard_set_as_primary: 设为主目标
+dashboard_set_primary: 设为主目标
+quick_skill_tree: 技能地图
+quick_skill_tree_help: 编辑技能状态与证据引用。
+quick_evidence_review: 证据审阅
+quick_evidence_review_help: 审阅证据强度、技能关联与完成项结晶。
+quick_research: 研究工作台
+quick_research_help: 捕捉和整理外部来源。
+quick_gap: 差距分析
+quick_gap_help: 把任务映射到技能与缺口。
+quick_kanban: 看板
+quick_kanban_help: 查看进行中、队列与已完成任务。
+quick_public_site: 输出工作台
+quick_public_site_help: 查看草稿并生成公开输出。
+quick_profile_health: 档案体检
+quick_profile_health_help: 查看校验、同步漂移与证据风险。
+profile_evidence_import_expander: 批量导入档案证据
+profile_evidence_import_caption: 粘贴简历或长文本，让 AI 生成证据与技能树变更草案；写入前请逐条审阅。
+profile_context_expander: 档案上下文 / SKILL.md
+profile_context_caption: 高级区：维护长期的人写画像与 Agent 上下文；生成事实继续由各归属文件负责。
+profile_context_structured_title: 结构化画像
+profile_context_narrative_title: 长期叙事章节
+profile_context_narrative_caption: 这些章节由人维护，继续写入 SKILL.md。
+identity_name: 姓名
+identity_domain: 领域
+identity_journey: 经历线索
+identity_current_role: 当前角色
+identity_north_star: 长期方向
+identity_north_star_brief: 长期方向摘要
+identity_north_star_visibility: 长期方向可见性
+profile_section_research_fingerprint: 研究指纹
+profile_section_thinking_style: 思考与沟通风格
+profile_section_growth_log: 成长记录
+profile_section_influence_output: 影响力与输出
+save_profile_context: 保存档案上下文
+generated_block_preview_title: 生成块预览
+generated_block_owner_hint: '`skill_tree` 由 skill-tree.yaml / evidence-pool.yaml 负责；`current_focus` 由 kanban.md 负责。此处只读预览。'
+generated_block_expander: '{block}'
+generated_block_skill_tree_help: 归属：skill-tree.yaml 与 evidence-pool.yaml。
+generated_block_kanban_help: 归属：kanban.md 的当前焦点。
+generated_block_sync_hint: 如需刷新生成块，运行 `nblane sync <profile> --write`。
+generated_block_missing: 未找到该生成块。
+raw_markdown_expander: 原始 Markdown
+raw_drift_warning: 原始编辑可能改到生成块并造成同步漂移。保存后请用档案体检检查漂移。
+tab_overview: 📊 概览
+tab_editor: ✏️ 结构化编辑
+tab_raw: 📝 原文
+sub_overview: 技能概览
+sub_category: 按分类
+goal_module_title: 当前目标
+goal_module_caption: 4-8 周阶段目标，用来统一差距分析、证据整理和输出规划。
+goal_create_title: 创建当前目标
+goal_edit_title: 编辑当前目标
+goal_reveal_private: 本会话显示私密目标
+goal_private_locked: 该目标标记为私密。需在本会话显式显示后才能编辑明文细节。
+goal_field_title: 标题
+goal_field_label: 隐私替代标签
+goal_field_status: 状态
+goal_field_start: 开始日期
+goal_field_target: 目标日期
+goal_field_summary: 摘要
+goal_field_alignment: 与长期方向的关系
+goal_field_target_skills: 目标技能（每行一项）
+goal_field_success_criteria: 成功标准（每行一项）
+goal_field_focus: 本周焦点（每行一项）
+goal_field_evidence_refs: 证据引用（每行一项）
+goal_field_task_refs: 任务引用（每行一项）
+goal_field_output_refs: 输出引用（每行一项）
+goal_field_notes: 私密备注
+goal_field_ui_visibility: UI 展示级别
+goal_field_agent_context: 进入 Agent 上下文
+goal_field_public_output: 允许未来公开输出引用
+goal_public_disabled_caption: P0 只保存该字段，公开站构建不会读取 goals.yaml。
+goal_save: 保存当前目标
+goal_saved: 当前目标已保存。
+goal_title_required: 标题不能为空。
+goal_preview: 预览
+home_expander_cat: '{cat} — 共 {total} 个节点'
+info_no_skill_tree: skill-tree.yaml 尚未初始化。请编辑 `profiles/{profile}/skill-tree.yaml` 添加节点。
+home_nav_compact: '**侧栏：** 技能树 · 差距分析 · 看板 · 团队视图。详见 `docs/zh/project/status.md`、`docs/zh/product/web-experience.md`。'
+home_nav_expander: 页面说明（详细）
+home_nav_detail: |-
+  **页面导航**（左侧菜单）：
+
+  - **技能树** — 可视化与状态编辑
+  - **差距分析** — 任务与能力匹配、缺口
+  - **看板** — 当前任务
+  - **团队视图** — 团队共享产品池
+warning_no_skill_md: 未找到 SKILL.md。
+gen_caption: 本节由 `nblane sync` 自动生成，在此编辑会被覆盖。
+gen_suffix: ' （自动生成）'
+save_skill_md: 💾 保存 SKILL.md
+home_saved: 已保存。
+hint_after_save: 保存后运行 `nblane context {profile}` 生成最新系统提示词。
+raw_label: 编辑 SKILL.md（即 Agent 系统提示词的来源）
+resume_expander: 简历 / 长文本（AI 摄入）
+resume_placeholder: 粘贴简历、项目列表或简介…
+resume_generate: 生成草案
+resume_spinner: 调用 AI 中…
+resume_allow_status: 允许 AI 更新节点状态
+resume_allow_status_help: 未勾选：合并时忽略 LLM 的 status，只写入证据与引用；有证据的 locked 节点会变为 learning。勾选：仅在「升级或持平」时写入 LLM 的 status（不会 solid→learning，不会把 expert 降级）；LLM 若输出 expert 会按 learning 档参与比较。YAML 里已标 expert 的节点不会被覆盖。
+resume_preview_pool: 合并后的 evidence-pool（预览）
+resume_preview_tree: 合并后的 skill-tree（预览）
+resume_apply: 写入 Profile
+resume_applied: 已写入：证据池、技能树，并已同步 SKILL.md。
+resume_err: 错误：{msg}
+resume_no_ai: 未配置 AI。请在 .env 中设置 LLM_API_KEY。
+resume_warn: 警告

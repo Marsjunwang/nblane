@@ -1,0 +1,81 @@
+page_title: Agent 活动 · nblane
+title: Agent 活动
+page_context_line: 审查跨页面候选、补丁、写回结果和失败状态。
+page_help_short: 使用说明
+page_help_body: |-
+  ### Agent 活动使用流程
+
+  1. 把这里当作全应用 AI / Agent 候选的审计队列。
+  2. 通过状态、模块、类型和候选类型筛选待处理或失败项。
+  3. 只有 owner 页面支持安全写回的候选才在这里应用；否则打开 owner 页面审阅。
+  4. 仍需要留痕的过期候选请标记丢弃，不要直接删除。
+  5. 技术详情用于排查失败的 Agent / Codex 调用；产品判断优先看预览和引用。
+
+  Agent 活动是审阅账本，目标是让 AI 写入可追踪，而不是隐形发生。
+status: 状态
+kind: 类型
+candidate_type: 候选类型
+source_page: 来源页面
+target_owner: 目标归属
+all: 全部
+pending: 待审阅
+applied: 已应用
+failed: 失败
+dismissed: 已丢弃
+superseded: 已替代
+items: 条目
+no_items: 当前过滤条件下没有活动条目。
+source_group: 来源
+module: 模块
+all_modules: 全部模块
+advanced_filters: 高级筛选
+sort: 排序
+sort_updated_desc: 最新在前
+sort_updated_asc: 最早在前
+sort_queue: 队列优先
+focused_item_notice: 已定位活动条目：{id}
+focused_item_highlight: 从 {source} 跳转而来。
+focused_item_missing: 目标 Activity 条目在当前筛选条件下不可见。
+created: 创建
+updated: 更新
+applied_at: 应用
+error_summary: 错误
+technical_details: 技术详情
+manage_activity: 管理 Activity
+visible_items: 当前可见条目
+delete_item: 删除条目
+delete_item_confirm: 确认删除这个条目
+delete_visible: 删除当前视图
+delete_visible_confirm: 确认删除当前可见条目
+delete_failed_dismissed: 删除本模块失败/已丢弃条目
+delete_failed_dismissed_confirm: 确认删除本模块失败和已丢弃条目
+deleted_items: 已删除 {count} 条 Activity。
+delete_none: 没有匹配的 Activity 可删除。
+payload: Payload
+preview: 预览
+refs: Refs
+warnings: 警告
+changed_paths: 变更文件
+agent_task_result: Agent task 结果
+agent_harness_filter: Harness 结果
+agent_harness_filter_all: 全部
+agent_harness_filter_agent_tasks: 仅 Agent tasks
+agent_harness_filter_codex: Codex
+agent_harness_filter_local_codex: 本地 Codex
+agent_harness_filter_codex_cloud: Codex Cloud
+agent_harness_filter_opencode: OpenCode
+codex_cloud_title: Codex Cloud
+codex_cloud_task: Cloud 任务
+codex_cloud_refresh: 刷新状态
+codex_cloud_diff: 拉取 diff 候选
+codex_cloud_refreshing: 正在刷新 Codex Cloud...
+codex_cloud_diffing: 正在拉取 Codex Cloud diff...
+codex_cloud_refreshed: Codex Cloud 状态已刷新。
+codex_cloud_diff_ready: Codex Cloud diff 已进入审阅。
+apply: 应用
+dismiss: 丢弃
+reopen: 重新打开
+open_owner: 打开 owner 页面
+saved: 已保存。
+applied_message: 已应用。
+apply_unavailable: 这里只能应用 pending 的 Review 候选。

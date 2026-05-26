@@ -786,6 +786,7 @@ class TestWebReaderApi(unittest.TestCase):
             {
                 "NBLANE_READER_TOKEN_SECRET": "test-secret",
                 "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+                "NBLANE_DISABLE_NETWORK_LOOKUPS": "1",
             },
             clear=False,
         ):
@@ -826,6 +827,43 @@ class TestWebReaderApi(unittest.TestCase):
         ):
             profile = self._profile(Path(tmp))
             client = self._client(profile)
+            unique_pdf = PDF_BYTES + b"\n%fresh-payload-" + os.urandom(4)
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                response = client.post(
+                    "/api/research/alice/paper-library/upload",
+                    headers={"Origin": "http://testserver"},
+                    data={
+                        "title": "Local Upload Paper",
+                        "status": "reading",
+                        "visibility": "private",
+                    },
+                    files={"file": ("local-upload.pdf", unique_pdf, "application/pdf")},
+                )
+            body = response.json()
+            source_id = body["source_id"]
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["message"], "Uploaded and imported PDF.")
+        self.assertFalse(body["duplicate"])
+        self.assertEqual(body["payload"]["detail"]["source_id"], source_id)
+        self.assertTrue(body["payload"]["detail"]["has_pdf"])
+        self.assertEqual(source.title, "Local Upload Paper")
+        self.assertEqual(source.status, "reading")
+        self.assertEqual(source.metadata["pdf_download_status"], "downloaded")
+        self.assertTrue(source.metadata["pdf_asset_ref"].endswith("local-upload.pdf"))
+
+    def test_paper_library_upload_returns_existing_source_for_duplicate_pdf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
             with patch("nblane.core.research_sources.git_backup.record_change"):
                 response = client.post(
                     "/api/research/alice/paper-library/upload",
@@ -838,17 +876,11 @@ class TestWebReaderApi(unittest.TestCase):
                     files={"file": ("local-upload.pdf", PDF_BYTES, "application/pdf")},
                 )
             body = response.json()
-            source_id = body["source_id"]
-            source = load_research_sources(profile).by_id()[source_id]
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(body["message"], "Uploaded and imported PDF.")
-        self.assertEqual(body["payload"]["detail"]["source_id"], source_id)
-        self.assertTrue(body["payload"]["detail"]["has_pdf"])
-        self.assertEqual(source.title, "Local Upload Paper")
-        self.assertEqual(source.status, "reading")
-        self.assertEqual(source.metadata["pdf_download_status"], "downloaded")
-        self.assertTrue(source.metadata["pdf_asset_ref"].endswith("local-upload.pdf"))
+        self.assertTrue(body["duplicate"])
+        self.assertIn("Already imported", body["message"])
+        self.assertEqual(body["source_id"], "source:paper:grounded")
 
     def test_paper_library_pdf_upload_attaches_local_file(self) -> None:
         source_id = "source:paper:grounded"

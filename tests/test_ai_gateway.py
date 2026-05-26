@@ -59,6 +59,11 @@ class TestAIGateway(unittest.TestCase):
                 "kanban.subtasks",
                 "project.suggest_refs",
                 "work.remote_dev_task",
+                "gap.skill_coach",
+                "gap.task_routing",
+                "profile.resume_ingest",
+                "profile.kanban_ingest",
+                "output.visual_caption",
             },
         )
 

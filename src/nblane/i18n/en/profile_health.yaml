@@ -1,0 +1,26 @@
+page_title: Profile Health
+title: Profile Health
+page_context_line: Read-only health checks for profile trust, context readiness, and publication risks.
+page_help_short: Guide
+page_help_body: |-
+  ### Profile Health workflow
+
+  1. Use this page as a read-only preflight before publishing, generating output, or trusting profile context.
+  2. Errors are blockers; warnings usually need review; info items explain context quality.
+  3. Follow suggested actions on the owner page instead of editing data here.
+  4. Open Review when you need to turn recent activity into evidence, next actions, or draft output.
+  5. Re-run after evidence, skill tree, project, or public layer edits.
+
+  Health never writes files. It points to the page that should own each fix.
+review_link: Open Review
+review_link_help: Review candidates live in the Review page; Health stays read-only.
+errors: Errors
+warnings: Warnings
+info: Info
+context_ready: Context ready
+'yes': 'Yes'
+'no': 'No'
+no_issues: No health issues found.
+severity_error: ERROR
+severity_warning: WARN
+severity_info: INFO
