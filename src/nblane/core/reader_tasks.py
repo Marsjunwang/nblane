@@ -46,6 +46,11 @@ _TIMEOUT_SECONDS = max(
     30,
     int(os.getenv("NBLANE_READER_TASK_TIMEOUT_SECONDS", "600") or "600"),
 )
+_DEEP_READ_TASK_TIMEOUT_SECONDS = max(
+    _TIMEOUT_SECONDS,
+    7200,
+    int(os.getenv("NBLANE_DEEP_READ_TASK_TIMEOUT_SECONDS", "7200") or "7200"),
+)
 
 
 def start(
@@ -65,6 +70,7 @@ def start(
     _validate_payload_identity(ctx, data)
     cancel_event = threading.Event()
     started_at = time.time()
+    timeout_seconds = _task_timeout_seconds(clean_action, data)
     with _COND:
         _TASKS[clean_task_id] = {
             "task_id": clean_task_id,
@@ -88,6 +94,7 @@ def start(
             },
             "started_at": started_at,
             "updated_at": started_at,
+            "timeout_seconds": timeout_seconds,
             "cancel_event": cancel_event,
         }
         _COND.notify_all()
@@ -161,7 +168,7 @@ def start(
     thread.start()
     watchdog = threading.Thread(
         target=_watchdog_timeout,
-        args=(clean_task_id,),
+        args=(clean_task_id, timeout_seconds),
         name=f"nblane-reader-task-timeout-{clean_task_id}",
         daemon=True,
     )
@@ -529,17 +536,67 @@ def _validate_payload_identity(ctx: ReaderActionContext, payload: dict[str, Any]
         raise ValueError(f"Reader task user mismatch: {payload_user}")
 
 
+def _positive_float(value: object) -> float | None:
+    try:
+        clean = float(value)
+    except (TypeError, ValueError):
+        return None
+    return clean if clean > 0 else None
+
+
+def _payload_bool(payload: dict[str, Any], key: str, default: bool = False) -> bool:
+    if key not in payload:
+        return default
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return default
+
+
+def _task_timeout_seconds(action: str, payload: dict[str, Any]) -> float:
+    explicit = _positive_float(
+        payload.get("reader_task_timeout_seconds")
+        or payload.get("task_timeout_seconds")
+    )
+    if explicit is not None:
+        return max(30.0, explicit)
+    if action == "codex_deep_read":
+        codex_timeout = _positive_float(
+            payload.get("codex_timeout_seconds")
+            or payload.get("timeout_seconds")
+        )
+        if codex_timeout is not None:
+            batched = _payload_bool(
+                payload,
+                "batch_deep_read",
+                default=_payload_bool(payload, "batched_deep_read", True),
+            )
+            call_count_budget = 7.0 if batched else 1.0
+            return max(
+                float(_TIMEOUT_SECONDS),
+                float(_DEEP_READ_TASK_TIMEOUT_SECONDS),
+                codex_timeout * call_count_budget + 600.0,
+            )
+        return float(_DEEP_READ_TASK_TIMEOUT_SECONDS)
+    return float(_TIMEOUT_SECONDS)
+
+
 def _mark_timeout_locked(task_id: str, task: dict[str, Any], now: float) -> None:
     if str(task.get("status") or "") != "running":
         return
     started = float(task.get("started_at", 0.0) or 0.0)
-    if not started or now - started <= _TIMEOUT_SECONDS:
+    timeout_seconds = _positive_float(task.get("timeout_seconds")) or float(_TIMEOUT_SECONDS)
+    if not started or now - started <= timeout_seconds:
         return
     cancel_event = task.get("cancel_event")
     if isinstance(cancel_event, threading.Event):
         cancel_event.set()
     task["status"] = "failed"
-    task["error"] = f"Reader task timed out after {_TIMEOUT_SECONDS} seconds."
+    task["error"] = f"Reader task timed out after {int(timeout_seconds)} seconds."
     task["progress"] = {
         "phase": "failed",
         "label": task["error"],
@@ -552,8 +609,8 @@ def _mark_timeout_locked(task_id: str, task: dict[str, Any], now: float) -> None
     _COND.notify_all()
 
 
-def _watchdog_timeout(task_id: str) -> None:
-    time.sleep(_TIMEOUT_SECONDS)
+def _watchdog_timeout(task_id: str, timeout_seconds: float) -> None:
+    time.sleep(max(0.1, timeout_seconds))
     clean_id = str(task_id or "").strip()
     if not clean_id:
         return

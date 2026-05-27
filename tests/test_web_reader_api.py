@@ -27,6 +27,7 @@ from nblane.core.research_papers import (
     create_paper_annotation,
     import_paper_pdf,
     paper_pdf_asset_path,
+    save_paper_analysis,
     save_paper_pages,
     save_paper_segments,
     text_hash,
@@ -260,6 +261,54 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertTrue(etag and etag.startswith('W/"'))
         self.assertEqual(second.status_code, 304)
         self.assertEqual(second.headers.get("etag"), etag)
+
+    def test_payload_etag_changes_when_analysis_updates(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            client.cookies.set(
+                "nblane_reader_session",
+                mint_reader_token("local", "alice", source_id),
+            )
+            first = client.get(f"/reader/api/{quote(source_id, safe='')}/payload?page=1")
+            etag = first.headers.get("etag")
+            time.sleep(0.01)
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_analysis(
+                    profile,
+                    source_id,
+                    {
+                        "tldr": "Updated analysis.",
+                        "codex_deep_read": {
+                            "findings": [{"text": "Fresh deep read", "refs": ["seg:1"]}],
+                            "reading_plan": [],
+                            "warnings": [],
+                        },
+                        "codex_deep_read_updated": "2026-05-27T10:00:00+08:00",
+                    },
+                )
+            second = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?page=1",
+                headers={"If-None-Match": etag or ""},
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(etag and etag.startswith('W/"'))
+        self.assertEqual(second.status_code, 200)
+        self.assertNotEqual(second.headers.get("etag"), etag)
+        self.assertEqual(second.json()["analysis"]["tldr"], "Updated analysis.")
+        self.assertEqual(
+            second.json()["analysis"]["codex_deep_read"]["findings"][0]["text"],
+            "Fresh deep read",
+        )
 
     def test_translations_bulk_returns_all_segments_with_etag(self) -> None:
         source_id = "source:paper:grounded"
@@ -502,6 +551,14 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("data-jump-segment", response.text)
         self.assertIn("refButtonHtml", response.text)
         self.assertIn("refIdText", response.text)
+        self.assertIn("deepReadSectionHtml", response.text)
+        self.assertIn("deep_section_problem", response.text)
+        self.assertIn("deep_section_experiments", response.text)
+        self.assertIn(".pr-review-flow .pr-list", response.text)
+        self.assertIn(".pr-side .pr-panel", response.text)
+        self.assertIn("overflow: visible;", response.text)
+        self.assertIn("max-height: none;", response.text)
+        self.assertIn("claim\", \"description\", \"finding\", \"result\", \"evidence", response.text)
         # PDF skeleton shimmer
         self.assertIn("startupPdfSkeletonHtml", response.text)
         self.assertIn("data-shell-placeholder", response.text)

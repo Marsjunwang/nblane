@@ -4378,6 +4378,41 @@ class TestResearchPapers(unittest.TestCase):
             self.assertEqual(after.get("codex_deep_read_updated"), "2026-05-26T08:00:00+00:00")
             self.assertEqual(after.get("key_points"), [{"text": "kp1"}])
 
+    def test_save_paper_analysis_refreshes_updated_timestamp(self) -> None:
+        from nblane.core.research_papers import (
+            save_paper_analysis,
+            load_paper_analysis,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.research_workspace.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers._deletion.git_backup.record_change"),
+                patch(
+                    "nblane.core.research_papers._deletion._now",
+                    side_effect=[
+                        "2026-05-27T01:00:00+00:00",
+                        "2026-05-27T01:05:00+00:00",
+                    ],
+                ),
+            ):
+                save_paper_analysis(
+                    profile,
+                    "source:paper:grounded",
+                    {"tldr": "First pass"},
+                )
+                save_paper_analysis(
+                    profile,
+                    "source:paper:grounded",
+                    {"tldr": "Second pass"},
+                )
+
+            after = load_paper_analysis(profile, "source:paper:grounded")
+            self.assertEqual(after.get("tldr"), "Second pass")
+            self.assertEqual(after.get("updated"), "2026-05-27T01:05:00+00:00")
+
     def test_save_paper_analysis_replace_clears_preserved_keys(self) -> None:
         from nblane.core.research_papers import (
             save_paper_analysis,

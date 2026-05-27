@@ -176,6 +176,25 @@ class TestReaderTasks(unittest.TestCase):
         self.assertEqual(final["status"], "done")
         self.assertEqual(final["progress"]["label"], "Analysis saved")
 
+    def test_codex_deep_read_task_timeout_is_high_for_batched_runs(self) -> None:
+        self.assertGreaterEqual(reader_tasks._task_timeout_seconds("codex_deep_read", {}), 7200)
+        self.assertGreaterEqual(
+            reader_tasks._task_timeout_seconds(
+                "codex_deep_read",
+                {"batch_deep_read": True, "codex_timeout_seconds": 1200},
+            ),
+            9000,
+        )
+
+    def test_codex_deep_read_task_timeout_keeps_explicit_reader_override(self) -> None:
+        self.assertEqual(
+            reader_tasks._task_timeout_seconds(
+                "codex_deep_read",
+                {"reader_task_timeout_seconds": 45, "codex_timeout_seconds": 1200},
+            ),
+            45,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

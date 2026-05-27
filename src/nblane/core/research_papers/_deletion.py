@@ -111,8 +111,8 @@ def save_paper_analysis(
     payload = {
         "schema_version": "1.0",
         "source_id": source_id,
-        "updated": _now(),
         **merged,
+        "updated": _now(),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(path, yaml.dump(payload, allow_unicode=True, default_flow_style=False, sort_keys=False))

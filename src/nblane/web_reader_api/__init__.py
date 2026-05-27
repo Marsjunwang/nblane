@@ -480,6 +480,20 @@ def _reader_ui() -> dict[str, str]:
         "analyze_paper": "分析论文",
         "deep_read": "深读",
         "deep_read_empty": "暂无可靠深读发现。",
+        "deep_section_takeaway": "一句话结论",
+        "deep_section_findings": "关键发现",
+        "deep_section_problem": "问题与动机",
+        "deep_section_context": "背景与缺口",
+        "deep_section_contributions": "核心贡献",
+        "deep_section_method": "方法与机制",
+        "deep_section_metrics": "指标与公式",
+        "deep_section_experiments": "实验与结果",
+        "deep_section_limitations": "局限",
+        "deep_section_project_relevance": "项目相关性",
+        "deep_section_open_questions": "开放问题",
+        "deep_section_section_summaries": "分节摘要",
+        "deep_section_terms": "关键术语",
+        "deep_section_reading_plan": "阅读计划",
         "warnings": "警告",
         "searching": "正在搜索...",
         "no_match": "未找到匹配",
@@ -870,7 +884,17 @@ def _payload_etag(payload: dict[str, object], *, target_lang: str) -> str:
             value = str(row.get("created") or row.get("updated") or "")
             if value > last_touched:
                 last_touched = value
-    fingerprint_parts = [fingerprint, target_lang, last_touched, *map(str, counters)]
+    analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
+    try:
+        analysis_marker = hashlib.sha1(
+            json.dumps(analysis, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+    except Exception:
+        analysis_marker = "|".join(
+            str(analysis.get(key) or "")
+            for key in ("updated", "codex_deep_read_updated")
+        )
+    fingerprint_parts = [fingerprint, target_lang, last_touched, analysis_marker, *map(str, counters)]
     digest = hashlib.sha1("|".join(fingerprint_parts).encode("utf-8")).hexdigest()[:16]
     return f'W/"{digest}"'
 

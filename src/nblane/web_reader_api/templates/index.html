@@ -1091,6 +1091,9 @@
       background: var(--paper);
       overflow: hidden;
     }
+    .pr-side .pr-panel {
+      overflow: visible;
+    }
     .pr-panel-head {
       display: flex;
       align-items: center;
@@ -1217,6 +1220,16 @@
     .pr-ref-chip[data-ref-kind="chunk"] { background: rgba(192, 132, 252, .12); border-color: rgba(192, 132, 252, .35); color: #6d28d9; }
     .pr-ref-chip[data-ref-kind="annotation"] { background: rgba(251, 191, 36, .15); border-color: rgba(251, 191, 36, .45); color: #92400e; }
     .pr-list { display: grid; gap: 7px; max-height: 360px; overflow: auto; }
+    .pr-review-flow {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      min-height: 0;
+    }
+    .pr-review-flow .pr-list {
+      max-height: none;
+      overflow: visible;
+    }
     .pr-item {
       display: grid;
       gap: 4px;
@@ -1380,6 +1393,20 @@
       analyze_paper: "Analyze Paper",
       deep_read: "Deep read",
       deep_read_empty: "No reliable deep-read findings yet.",
+      deep_section_takeaway: "Takeaway",
+      deep_section_findings: "Key findings",
+      deep_section_problem: "Problem & motivation",
+      deep_section_context: "Context & gap",
+      deep_section_contributions: "Contributions",
+      deep_section_method: "Method & mechanism",
+      deep_section_metrics: "Metrics & formulas",
+      deep_section_experiments: "Experiments & results",
+      deep_section_limitations: "Limitations",
+      deep_section_project_relevance: "Project relevance",
+      deep_section_open_questions: "Open questions",
+      deep_section_section_summaries: "Section summaries",
+      deep_section_terms: "Key terms",
+      deep_section_reading_plan: "Reading plan",
       warnings: "Warnings",
       searching: "Searching...",
       no_match: "No match",
@@ -3829,7 +3856,20 @@
     function reviewItemText(value) {
       if (value && typeof value === "object") {
         const obj = asObj(value);
-        return text(obj.text || obj.summary || obj.reason || obj.title || obj.metric);
+        const term = text(obj.term || obj.name);
+        const definition = text(obj.definition || obj.meaning);
+        if (term && definition) return `${term}: ${definition}`;
+        const metric = text(obj.metric);
+        const metricValue = text(obj.value ?? obj.score ?? obj.formula);
+        if (metric && metricValue) return `${metric}: ${metricValue}`;
+        for (const key of ["text", "summary", "claim", "description", "finding", "result", "evidence", "reason", "title", "question", "answer", "method", "step"]) {
+          const clean = text(obj[key]).trim();
+          if (clean) return clean;
+        }
+        const detailRows = asArr(obj.details || obj.points || obj.items)
+          .map((row) => reviewItemText(row))
+          .filter(Boolean);
+        if (detailRows.length) return detailRows.join(" ");
       }
       return text(value);
     }
@@ -3852,7 +3892,19 @@
           refs.push(ref);
         }
       };
-      asArr(obj.refs || obj.cited_segment_refs || obj.cited_refs).forEach(addRef);
+      [
+        "refs",
+        "evidence_refs",
+        "cited_refs",
+        "cited_segment_refs",
+        "cited_chunk_refs",
+        "cited_annotation_refs",
+        "segment_refs",
+        "chunk_refs",
+        "annotation_refs",
+      ].forEach((key) => {
+        asArr(obj[key]).forEach(addRef);
+      });
       ["segment_id", "segment_ref", "scope_ref", "chunk_id", "annotation_id"].forEach((key) => {
         addRef(obj[key]);
       });
@@ -3894,24 +3946,101 @@
       const segmentAttr = kind === "segment" ? ` data-jump-segment="${attr(clean)}"` : "";
       return `<button class="pr-ref-chip" data-jump-ref="${attr(clean)}"${segmentAttr} data-ref-kind="${attr(kind)}" data-page="${page || ""}" title="${attr(clean)}">${esc(labelText)}</button>`;
     }
-    function listHtml(values) {
+    function listHtml(values, options = {}) {
       const items = asArr(values);
       const rows = items.map((value) => ({
         body: reviewItemText(value),
         refs: reviewItemRefs(value),
       })).filter((row) => row.body);
       if (!rows.length) return "";
+      const itemClass = text(asObj(options).itemClass);
       return `<div class="pr-list">${rows.map((row) => `
-        <div class="pr-item">
+        <div class="pr-item ${attr(itemClass)}">
           <div class="pr-item-title">${esc(row.body)}</div>
           ${row.refs.length ? `<div class="pr-ref-row">${row.refs.map((ref) => refButtonHtml(ref)).join("")}</div>` : ""}
         </div>
       `).join("")}</div>`;
     }
     function reviewSectionHtml(title, values, className = "") {
-      const body = Array.isArray(values) ? listHtml(values) : (text(values) ? `<div class="pr-list"><div class="pr-item ${attr(className)}"><div class="pr-item-title">${esc(values)}</div></div></div>` : "");
+      const itemClass = text(className);
+      const body = Array.isArray(values)
+        ? listHtml(values, { itemClass })
+        : (values && typeof values === "object")
+          ? listHtml([values], { itemClass })
+          : (text(values) ? `<div class="pr-list"><div class="pr-item ${attr(itemClass)}"><div class="pr-item-title">${esc(values)}</div></div></div>` : "");
       if (!body) return "";
       return `<section class="pr-review-section"><div class="pr-panel-head">${esc(title)}</div>${body}</section>`;
+    }
+    function deepReadSectionHtml(deepRead) {
+      const obj = asObj(deepRead);
+      if (!Object.keys(obj).length) return "";
+      const hasValue = (value) => {
+        if (Array.isArray(value)) return value.some((row) => reviewItemText(row));
+        if (value && typeof value === "object") return Boolean(reviewItemText(value));
+        return Boolean(text(value).trim());
+      };
+      const mergedValue = (keys) => {
+        const picked = [];
+        for (const key of keys) {
+          const value = obj[key];
+          if (Array.isArray(value)) {
+            picked.push(...value);
+          } else if (value && typeof value === "object") {
+            picked.push(value);
+          } else if (text(value).trim()) {
+            picked.push(text(value));
+          }
+        }
+        if (!picked.length) return [];
+        return picked;
+      };
+      const richKeys = [
+        "takeaway",
+        "problem",
+        "motivation",
+        "context",
+        "contributions",
+        "method",
+        "mechanism",
+        "metrics",
+        "experiments",
+        "results",
+        "limitations",
+        "project_relevance",
+        "open_questions",
+        "section_summaries",
+        "terms",
+      ];
+      const hasRichDeepRead = richKeys.some((key) => hasValue(obj[key]));
+      const sections = [
+        [["takeaway"], "deep_section_takeaway"],
+        [["problem", "motivation"], "deep_section_problem"],
+        [["context"], "deep_section_context"],
+        [["contributions"], "deep_section_contributions"],
+        [["method", "mechanism"], "deep_section_method"],
+        [["metrics"], "deep_section_metrics"],
+        [["experiments", "results"], "deep_section_experiments"],
+        [["limitations"], "deep_section_limitations"],
+        [["project_relevance"], "deep_section_project_relevance"],
+        [["open_questions"], "deep_section_open_questions"],
+        [["section_summaries"], "deep_section_section_summaries"],
+        [["terms"], "deep_section_terms"],
+        [["reading_plan"], "deep_section_reading_plan"],
+      ];
+      if (!hasRichDeepRead && hasValue(obj.findings)) {
+        sections.splice(1, 0, [["findings"], "deep_section_findings"]);
+      }
+      const chunks = [];
+      for (const [keys, labelKey] of sections) {
+        const value = mergedValue(keys);
+        const body = reviewSectionHtml(label(labelKey), value);
+        if (!body) continue;
+        chunks.push(body);
+      }
+      const warnings = reviewSectionHtml(label("warnings"), obj.warnings, "pr-warning-item");
+      if (warnings) chunks.push(warnings);
+      if (chunks.length) return chunks.join("");
+      return `<section class="pr-review-section"><div class="pr-panel-head">${esc(label("deep_read"))}</div><div class="pr-list"><div class="pr-item"><div class="pr-item-title">${esc(label("deep_read_empty"))}</div></div></div></section>`;
     }
     function analysisBodyHtml() {
       const analysis = analysisObj();
@@ -3954,21 +4083,13 @@
       }
       const deepRead = asObj(analysis.codex_deep_read || {});
       if (Object.keys(deepRead).length) {
-        const plan = listHtml(deepRead.reading_plan);
-        const findings = listHtml(deepRead.findings);
-        if (findings) {
-          chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">Findings</div>${findings}</section>`);
-        } else {
-          chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">${esc(label("deep_read"))}</div><div class="pr-list"><div class="pr-item"><div class="pr-item-title">${esc(label("deep_read_empty"))}</div></div></div></section>`);
-        }
-        if (plan) chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">Reading Plan</div>${plan}</section>`);
-        const warnings = listHtml(deepRead.warnings);
-        if (warnings) chunks.push(`<section class="pr-review-section"><div class="pr-panel-head">${esc(label("warnings"))}</div>${warnings.replaceAll('class="pr-item"', 'class="pr-item pr-warning-item"')}</section>`);
+        chunks.push(deepReadSectionHtml(deepRead));
       }
       if (latest && !hasAnalysis) {
         chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(latest)}</div></div>`);
       }
-      return chunks.join("") || `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      const body = chunks.join("") || `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      return `<div class="pr-review-flow">${body}</div>`;
     }
     function aiRows() {
       return asArr(args.ai_results || args.ai_responses || args.analysis || args.ai);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -131,6 +132,13 @@ def _payload_int(payload: dict[str, Any], key: str, default: int = 0) -> int:
         return default
 
 
+def _payload_float(payload: dict[str, Any], key: str, default: float = 0.0) -> float:
+    try:
+        return float(payload.get(key) or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def _payload_bool(payload: dict[str, Any], key: str, default: bool = False) -> bool:
     if key not in payload:
         return default
@@ -213,59 +221,147 @@ def _question_context_segments(payload: dict[str, Any], segment_rows) -> list[di
     return _compact_segments_for_deep_read(whole_paper_payload, segment_rows)
 
 
-def _balanced_paper_segments(segment_rows, *, limit: int) -> list:
-    """Sample segments across the paper instead of only the first pages."""
+def _balanced_paper_segment_indexes(count: int, *, limit: int) -> list[int]:
+    """Return indexes sampled across a paper instead of only the first pages."""
 
-    rows = list(segment_rows)
-    if len(rows) <= limit:
-        return rows
+    if count <= limit:
+        return list(range(count))
     selected_indexes: set[int] = set()
     front_count = min(8, max(1, limit // 5))
     for index in range(front_count):
         selected_indexes.add(index)
     remaining = max(0, limit - len(selected_indexes))
     if remaining:
-        span = max(1, len(rows) - 1)
+        span = max(1, count - 1)
         for step in range(remaining):
             index = round(step * span / max(1, remaining - 1))
-            selected_indexes.add(min(len(rows) - 1, max(0, index)))
+            selected_indexes.add(min(count - 1, max(0, index)))
             if len(selected_indexes) >= limit:
                 break
+    return sorted(selected_indexes)[:limit]
+
+
+def _balanced_paper_segments(segment_rows, *, limit: int) -> list:
+    """Sample segments across the paper instead of only the first pages."""
+
+    rows = list(segment_rows)
+    return [rows[index] for index in _balanced_paper_segment_indexes(len(rows), limit=limit)]
+
+
+_DEEP_READ_SECTION_PRIORITY: tuple[tuple[int, tuple[str, ...]], ...] = (
+    (0, ("abstract", "摘要")),
+    (1, ("introduction", "intro", "background", "背景", "引言")),
+    (2, ("related", "prior", "literature", "相关")),
+    (3, ("method", "methods", "approach", "model", "architecture", "算法", "方法", "模型")),
+    (4, ("experiment", "evaluation", "benchmark", "dataset", "实验", "评估", "数据")),
+    (5, ("result", "analysis", "ablation", "study", "结果", "分析", "消融")),
+    (6, ("discussion", "limitation", "future", "讨论", "局限")),
+    (7, ("conclusion", "结论")),
+)
+
+
+def _segment_section_label(segment: Any) -> str:
+    """Return a compact section label for a paper segment."""
+
+    path = getattr(segment, "section_path", []) or []
+    if isinstance(path, (list, tuple)):
+        parts = [str(item or "").strip() for item in path if str(item or "").strip()]
+        if parts:
+            return " / ".join(parts)
+    locator = str(getattr(segment, "locator", "") or "").strip()
+    if "§" in locator:
+        return locator.rsplit("§", 1)[-1].strip() or "Unsectioned"
+    return "Unsectioned"
+
+
+def _deep_read_section_priority(label: str) -> int:
+    """Rank recognizable paper sections for deep-read context sampling."""
+
+    lower = str(label or "").lower()
+    for priority, needles in _DEEP_READ_SECTION_PRIORITY:
+        if any(needle in lower for needle in needles):
+            return priority
+    return 50
+
+
+def _section_aware_paper_segments(segment_rows, *, limit: int) -> list:
+    """Sample the whole paper while reserving coverage for major sections."""
+
+    rows = list(segment_rows)
+    if len(rows) <= limit:
+        return rows
+
+    selected_indexes: set[int] = set()
+
+    def add(index: int) -> None:
+        if 0 <= index < len(rows) and len(selected_indexes) < limit:
+            selected_indexes.add(index)
+
+    for index in range(min(6, len(rows))):
+        add(index)
+    for index in range(max(0, len(rows) - 4), len(rows)):
+        add(index)
+
+    buckets: dict[str, list[int]] = {}
+    for index, segment in enumerate(rows):
+        label = _segment_section_label(segment)
+        buckets.setdefault(label, []).append(index)
+
+    ranked = sorted(
+        buckets.items(),
+        key=lambda item: (
+            _deep_read_section_priority(item[0]),
+            item[1][0] if item[1] else len(rows),
+        ),
+    )
+    for label, indexes in ranked:
+        priority = _deep_read_section_priority(label)
+        quota = 3 if priority <= 7 else 1
+        positions = [0]
+        if quota >= 2 and len(indexes) > 2:
+            positions.append(len(indexes) // 2)
+        if quota >= 3 and len(indexes) > 1:
+            positions.append(len(indexes) - 1)
+        for position in positions:
+            add(indexes[position])
+            if len(selected_indexes) >= limit:
+                break
+        if len(selected_indexes) >= limit:
+            break
+
+    for index in _balanced_paper_segment_indexes(len(rows), limit=limit):
+        add(index)
+        if len(selected_indexes) >= limit:
+            break
+
     return [rows[index] for index in sorted(selected_indexes)[:limit]]
 
 
-def _compact_segments_for_deep_read(
-    payload: dict[str, Any],
-    segment_rows,
+def _deep_read_sections_covered(rows: list[dict[str, Any]]) -> list[str]:
+    """Return stable section labels represented in a deep-read context."""
+
+    labels: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        path = row.get("section_path") if isinstance(row, dict) else []
+        if isinstance(path, (list, tuple)):
+            label = " / ".join(str(item or "").strip() for item in path if str(item or "").strip())
+        else:
+            label = str(path or "").strip()
+        if not label:
+            label = "Unsectioned"
+        if label not in seen:
+            seen.add(label)
+            labels.append(label)
+    return labels
+
+
+def _compact_picked_segments(
+    picked,
     *,
-    limit: int = 40,
-    char_limit: int = 24_000,
+    limit: int,
+    char_limit: int,
 ) -> list[dict[str, Any]]:
-    full_paper = _payload_bool(payload, "full_paper") or _payload_text(payload, "scope") == "paper"
-    refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
-    visible_pages = set()
-    if not full_paper:
-        visible_pages = {
-            int(item)
-            for item in payload.get("visible_pages", [])
-            if str(item).strip().isdigit()
-        } if isinstance(payload.get("visible_pages"), list) else set()
-    primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
-    if not full_paper and not refs and not visible_pages and primary_page:
-        visible_pages = {primary_page}
-    if full_paper and not refs:
-        limit = 80
-        char_limit = 60_000
-        picked = _balanced_paper_segments(segment_rows, limit=limit)
-    else:
-        picked = [
-            segment
-            for segment in segment_rows
-            if (refs and segment.segment_id in refs)
-            or (visible_pages and segment.page in visible_pages)
-        ]
-    if not picked:
-        picked = list(segment_rows[:limit])
     rows: list[dict[str, Any]] = []
     total_chars = 0
     for segment in picked:
@@ -291,6 +387,190 @@ def _compact_segments_for_deep_read(
             }
         )
     return rows
+
+
+def _compact_segments_for_deep_read(
+    payload: dict[str, Any],
+    segment_rows,
+    *,
+    limit: int = 40,
+    char_limit: int = 24_000,
+) -> list[dict[str, Any]]:
+    full_paper = _payload_bool(payload, "full_paper") or _payload_text(payload, "scope") == "paper"
+    refs = set(_payload_list(payload, "segment_refs", "segment_ids", "segment_id"))
+    visible_pages = set()
+    if not full_paper:
+        visible_pages = {
+            int(item)
+            for item in payload.get("visible_pages", [])
+            if str(item).strip().isdigit()
+        } if isinstance(payload.get("visible_pages"), list) else set()
+    primary_page = _payload_int(payload, "primary_page", _payload_int(payload, "page", 0))
+    if not full_paper and not refs and not visible_pages and primary_page:
+        visible_pages = {primary_page}
+    if full_paper and not refs:
+        limit = 80
+        char_limit = 60_000
+        picked = _section_aware_paper_segments(segment_rows, limit=limit)
+    else:
+        picked = [
+            segment
+            for segment in segment_rows
+            if (refs and segment.segment_id in refs)
+            or (visible_pages and segment.page in visible_pages)
+        ]
+    if not picked:
+        picked = list(segment_rows[:limit])
+    return _compact_picked_segments(picked, limit=limit, char_limit=char_limit)
+
+
+def _deep_read_batch_group(segment: Any) -> str:
+    label = _segment_section_label(segment)
+    priority = _deep_read_section_priority(label)
+    if priority <= 1:
+        return "问题与动机"
+    if priority == 2:
+        return "相关工作与缺口"
+    if priority == 3:
+        return "方法与机制"
+    if priority in {4, 5}:
+        return "实验与结果"
+    if priority in {6, 7}:
+        return "局限与结论"
+    return "其它证据"
+
+
+def _deep_read_section_batches(
+    segment_rows,
+    *,
+    max_batches: int = 6,
+    segment_limit: int = 24,
+    char_limit: int = 18_000,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Any]] = {}
+    order = ["问题与动机", "相关工作与缺口", "方法与机制", "实验与结果", "局限与结论", "其它证据"]
+    for segment in segment_rows:
+        grouped.setdefault(_deep_read_batch_group(segment), []).append(segment)
+
+    batches: list[dict[str, Any]] = []
+    for label in order:
+        rows = grouped.get(label) or []
+        if not rows:
+            continue
+        picked = _section_aware_paper_segments(rows, limit=min(segment_limit, len(rows)))
+        compact = _compact_picked_segments(picked, limit=segment_limit, char_limit=char_limit)
+        if not compact:
+            continue
+        batches.append(
+            {
+                "label": label,
+                "segments": compact,
+                "source_segments": len(rows),
+                "sections_covered": _deep_read_sections_covered(compact),
+                "pages_covered": sorted(
+                    {
+                        int(row.get("page") or 0)
+                        for row in compact
+                        if int(row.get("page") or 0) > 0
+                    }
+                ),
+            }
+        )
+    return batches[:max_batches]
+
+
+def _explicit_codex_timeout(payload: dict[str, Any]) -> float:
+    return _payload_float(payload, "codex_timeout_seconds") or _payload_float(payload, "timeout_seconds")
+
+
+def _adaptive_deep_read_timeout_seconds(
+    *,
+    source_segments: int,
+    supplied_segments: int,
+    pages: int,
+    mode: str = "single",
+    batch_count: int = 0,
+) -> int:
+    if mode == "batch":
+        return int(max(300, min(540, 120 + supplied_segments * 8 + pages * 4)))
+    if mode == "synthesis":
+        return int(max(420, min(720, 240 + batch_count * 70 + supplied_segments * 2)))
+    return int(max(420, min(900, 180 + supplied_segments * 4 + pages * 5 + source_segments * 1.5)))
+
+
+def _copy_deep_read_runtime_options(source: dict[str, Any], target: dict[str, Any]) -> None:
+    for key in (
+        "codex_timeout_seconds",
+        "timeout_seconds",
+        "codex_idle_timeout_seconds",
+        "idle_timeout_seconds",
+        "codex_model",
+        "deep_read_model",
+        "codex_home_policy",
+    ):
+        value = source.get(key)
+        if value not in (None, "", []):
+            target[key] = value
+
+
+def _deep_read_payload_pages(rows: list[dict[str, Any]]) -> list[int]:
+    return sorted(
+        {
+            int(row.get("page") or 0)
+            for row in rows
+            if int(row.get("page") or 0) > 0
+        }
+    )
+
+
+def _deep_read_report_text(report: dict[str, Any], *, limit: int = 4000) -> str:
+    picked: dict[str, Any] = {}
+    for key in (
+        "takeaway",
+        "problem",
+        "motivation",
+        "context",
+        "contributions",
+        "method",
+        "mechanism",
+        "metrics",
+        "experiments",
+        "results",
+        "limitations",
+        "project_relevance",
+        "open_questions",
+        "section_summaries",
+        "terms",
+        "findings",
+        "reading_plan",
+        "warnings",
+        "cited_segment_refs",
+    ):
+        if key in report:
+            picked[key] = report.get(key)
+    text = json.dumps(picked, ensure_ascii=False, sort_keys=True)
+    return text[:limit]
+
+
+def _deep_read_batch_chunks(batch_reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for index, report in enumerate(batch_reports, start=1):
+        label = _payload_text(report, "batch_label") or f"batch {index}"
+        chunks.append(
+            {
+                "chunk_id": f"deep-read-batch:{index}",
+                "title": label,
+                "kind": "deep_read_batch",
+                "text": _deep_read_report_text(report),
+                "locator": label,
+                "metadata": {
+                    "batch_index": index,
+                    "batch_label": label,
+                    "cited_segment_refs": _payload_list(report, "cited_segment_refs", "segment_refs"),
+                },
+            }
+        )
+    return chunks
 
 
 def _compact_chunks_for_deep_read(chunk_rows, *, limit: int = 20) -> list[dict[str, Any]]:
@@ -1532,6 +1812,7 @@ def _handle_reader_action_inner(
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
         compact_segments = _compact_segments_for_deep_read(payload, segment_rows)
+        full_paper_scope = _payload_bool(payload, "full_paper", True) or (_payload_text(payload, "scope") or "paper") == "paper"
         emit_deepread_progress(
             "compacting",
             f"Compacting {len(compact_segments)} segments for deep read…",
@@ -1544,39 +1825,175 @@ def _handle_reader_action_inner(
             current=2,
             total=5,
         )
-        ai_result = deep_read_paper_codex(
-            ctx.profile_name,
-            source_id,
-            payload={
-                "source": _compact_source_for_deep_read(source, source_id),
-                "segments": compact_segments,
-                "chunks": _compact_chunks_for_deep_read(chunk_rows),
-                "annotations": _compact_annotations_for_deep_read(annotation_rows),
-                "question": _payload_text(payload, "question", "prompt", "text"),
-                "reading_goal": _payload_text(payload, "reading_goal", "goal"),
-                "scope": _payload_text(payload, "scope") or "paper",
-                "full_paper": _payload_bool(payload, "full_paper", True),
-                "paper_context": {
-                    "source_segments": len(segment_rows),
-                    "supplied_segments": len(compact_segments),
-                    "pages_covered": sorted(
-                        {
-                            int(row.get("page") or 0)
-                            for row in compact_segments
-                            if int(row.get("page") or 0) > 0
-                        }
-                    ),
-                },
-                "page": _payload_int(payload, "page"),
-                "visible_pages": payload.get("visible_pages")
-                if isinstance(payload.get("visible_pages"), list)
-                else [],
-                "locator": _payload_text(payload, "locator"),
+        total_pages = max([int(getattr(row, "page", 0) or 0) for row in segment_rows] + [0])
+        deep_read_payload = {
+            "source": _compact_source_for_deep_read(source, source_id),
+            "segments": compact_segments,
+            "chunks": _compact_chunks_for_deep_read(chunk_rows),
+            "annotations": _compact_annotations_for_deep_read(annotation_rows),
+            "question": _payload_text(payload, "question", "prompt", "text"),
+            "reading_goal": _payload_text(payload, "reading_goal", "goal"),
+            "scope": _payload_text(payload, "scope") or "paper",
+            "full_paper": _payload_bool(payload, "full_paper", True),
+            "paper_context": {
+                "source_segments": len(segment_rows),
+                "supplied_segments": len(compact_segments),
+                "segment_budget": {"segments": 80, "chars": 60_000}
+                if full_paper_scope
+                else {"segments": 40, "chars": 24_000},
+                "truncated": bool(full_paper_scope and len(compact_segments) < len(segment_rows)),
+                "sections_covered": _deep_read_sections_covered(compact_segments),
+                "pages_covered": _deep_read_payload_pages(compact_segments),
             },
-            require_review=True,
-        )
+            "page": _payload_int(payload, "page"),
+            "visible_pages": payload.get("visible_pages")
+            if isinstance(payload.get("visible_pages"), list)
+            else [],
+            "locator": _payload_text(payload, "locator"),
+        }
+        _copy_deep_read_runtime_options(payload, deep_read_payload)
+        explicit_codex_timeout = _explicit_codex_timeout(payload)
+        if not explicit_codex_timeout:
+            deep_read_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
+                source_segments=len(segment_rows),
+                supplied_segments=len(compact_segments),
+                pages=total_pages,
+            )
+
+        if "batch_deep_read" in payload:
+            use_batched_deep_read = _payload_bool(payload, "batch_deep_read", False)
+        elif "batched_deep_read" in payload:
+            use_batched_deep_read = _payload_bool(payload, "batched_deep_read", False)
+        else:
+            use_batched_deep_read = bool(full_paper_scope and len(segment_rows) > 110)
+        use_batched_deep_read = use_batched_deep_read and full_paper_scope
+
+        ai_result = None
+        batch_reports: list[dict[str, Any]] = []
+        deepread_warnings: list[str] = []
+        if use_batched_deep_read:
+            section_batches = _deep_read_section_batches(segment_rows)
+            if len(section_batches) >= 2:
+                batch_total = len(section_batches)
+                for batch_index, batch in enumerate(section_batches, start=1):
+                    batch_segments = batch.get("segments") if isinstance(batch.get("segments"), list) else []
+                    batch_label = _payload_text(batch, "label") or f"batch {batch_index}"
+                    emit_deepread_progress(
+                        "reading_batch",
+                        f"Deep reading section batch {batch_index}/{batch_total}: {batch_label}",
+                        current=batch_index,
+                        total=batch_total + 2,
+                    )
+                    batch_payload = {
+                        "source": _compact_source_for_deep_read(source, source_id),
+                        "segments": batch_segments,
+                        "chunks": [],
+                        "annotations": _compact_annotations_for_deep_read(annotation_rows, limit=8),
+                        "question": _payload_text(payload, "question", "prompt", "text"),
+                        "reading_goal": (
+                            _payload_text(payload, "reading_goal", "goal")
+                            or "先生成本章节/批次的可引用深读笔记，稍后统一综合。"
+                        ),
+                        "scope": "section_batch",
+                        "full_paper": False,
+                        "paper_context": {
+                            "mode": "section_batch",
+                            "batch_label": batch_label,
+                            "batch_index": batch_index,
+                            "batch_count": batch_total,
+                            "source_segments": len(segment_rows),
+                            "batch_source_segments": int(batch.get("source_segments") or len(batch_segments)),
+                            "supplied_segments": len(batch_segments),
+                            "segment_budget": {"segments": 24, "chars": 18_000},
+                            "truncated": int(batch.get("source_segments") or 0) > len(batch_segments),
+                            "sections_covered": list(batch.get("sections_covered") or []),
+                            "pages_covered": list(batch.get("pages_covered") or []),
+                        },
+                    }
+                    _copy_deep_read_runtime_options(payload, batch_payload)
+                    if not explicit_codex_timeout:
+                        batch_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
+                            source_segments=int(batch.get("source_segments") or len(batch_segments)),
+                            supplied_segments=len(batch_segments),
+                            pages=len(batch.get("pages_covered") or []),
+                            mode="batch",
+                        )
+                    batch_result = deep_read_paper_codex(
+                        ctx.profile_name,
+                        source_id,
+                        payload=batch_payload,
+                        require_review=True,
+                    )
+                    batch_structured = batch_result.structured if isinstance(batch_result.structured, dict) else {}
+                    deepread_warnings.extend(str(item) for item in getattr(batch_result, "warnings", []) or [])
+                    deepread_warnings.extend(str(item) for item in batch_structured.get("warnings") or [])
+                    if batch_result.ok and batch_structured:
+                        batch_structured = dict(batch_structured)
+                        batch_structured["batch_label"] = batch_label
+                        batch_structured["batch_index"] = batch_index
+                        batch_structured["batch_count"] = batch_total
+                        batch_reports.append(batch_structured)
+                    else:
+                        error = getattr(batch_result, "error", "") or "section batch returned no structured output"
+                        deepread_warnings.append(f"Deep-read batch {batch_index}/{batch_total} failed: {error}")
+
+            if batch_reports:
+                emit_deepread_progress(
+                    "synthesizing",
+                    f"Synthesizing {len(batch_reports)} section deep reads…",
+                    current=len(batch_reports) + 1,
+                    total=len(batch_reports) + 2,
+                )
+                synthesis_payload = dict(deep_read_payload)
+                synthesis_payload["chunks"] = _compact_chunks_for_deep_read(chunk_rows) + _deep_read_batch_chunks(batch_reports)
+                synthesis_payload["batch_reports"] = batch_reports
+                synthesis_payload["reading_goal"] = (
+                    _payload_text(payload, "reading_goal", "goal")
+                    or "把分章节/分批深读笔记综合成一份 Moonlight-style 完整阅读报告。"
+                )
+                synthesis_payload["paper_context"] = {
+                    **dict(deep_read_payload.get("paper_context") or {}),
+                    "mode": "synthesis",
+                    "batch_count": len(batch_reports),
+                    "batch_labels": [_payload_text(row, "batch_label") for row in batch_reports],
+                    "batch_reading": True,
+                }
+                if not explicit_codex_timeout:
+                    synthesis_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
+                        source_segments=len(segment_rows),
+                        supplied_segments=len(compact_segments),
+                        pages=total_pages,
+                        mode="synthesis",
+                        batch_count=len(batch_reports),
+                    )
+                ai_result = deep_read_paper_codex(
+                    ctx.profile_name,
+                    source_id,
+                    payload=synthesis_payload,
+                    require_review=True,
+                )
+
+        if ai_result is None:
+            ai_result = deep_read_paper_codex(
+                ctx.profile_name,
+                source_id,
+                payload=deep_read_payload,
+                require_review=True,
+            )
         emit_deepread_progress("structuring", "Structuring findings + reading plan…", current=3, total=5)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+        if structured and batch_reports:
+            structured = dict(structured)
+            structured["batch_reading"] = {
+                "enabled": True,
+                "batch_count": len(batch_reports),
+                "batch_labels": [_payload_text(row, "batch_label") for row in batch_reports],
+            }
+            existing_warnings = [str(item) for item in structured.get("warnings") or []]
+            for warning in deepread_warnings:
+                if warning and warning not in existing_warnings:
+                    existing_warnings.append(warning)
+            structured["warnings"] = existing_warnings
         if ai_result.ok and structured:
             emit_deepread_progress("saving", "Saving deep-read result…", current=4, total=5)
             analysis = load_paper_analysis(profile, source_id)
@@ -1603,7 +2020,7 @@ def _handle_reader_action_inner(
                 "analysis": load_paper_analysis(profile, source_id),
                 "artifact_summary": artifact_summary,
             },
-            warnings=artifact_warnings + list(ai_result.warnings),
+            warnings=artifact_warnings + deepread_warnings + list(ai_result.warnings),
             message=message,
         )
 

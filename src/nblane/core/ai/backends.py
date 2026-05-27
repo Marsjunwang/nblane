@@ -858,24 +858,7 @@ def fallback_structured(
             [warning],
         )
     if action == "research.paper_deep_read_codex":
-        refs = _paper_refs(request, payload)
-        warnings = [warning]
-        if not any(refs.values()):
-            warnings.append("No cited refs were provided for deep reading.")
-        return (
-            {
-                "reading_plan": [
-                    "Review supplied metadata, segments, chunks, and annotations.",
-                    "Extract candidate findings with cited refs only.",
-                    "Return uncertainties and follow-up questions for human review.",
-                ],
-                "findings": [],
-                **refs,
-                "warnings": warnings,
-                "ref": _paper_ref(request, payload),
-            },
-            warnings,
-        )
+        return _deep_read_fallback_structured(request, payload, warning)
     if action == "research.paper_compare_codex":
         refs = _paper_refs(request, payload)
         warnings = [warning]
@@ -1236,6 +1219,284 @@ def _section_summaries(segments: list[Any]) -> list[dict[str, Any]]:
             }
         )
     return summaries
+
+
+def _deep_read_fallback_structured(
+    request: AIActionRequest,
+    payload: dict[str, Any],
+    warning: str,
+) -> tuple[dict[str, Any], list[str]]:
+    refs = _paper_refs(request, payload)
+    segments = [item for item in _list_payload(payload, "segments", "items") if isinstance(item, dict)]
+    warnings = [warning]
+    if not segments:
+        warnings.append("No supplied paper segments were available for fallback deep reading.")
+        return (
+            {
+                "takeaway": "",
+                "reading_plan": [
+                    "重新准备 Reader 结构化文本后再运行深读。",
+                    "确保 payload 中包含 Abstract/Introduction/Method/Results 等可追溯 segments。",
+                    "在 Codex 可用时重新生成完整 Moonlight 风格解读。",
+                ],
+                "findings": [],
+                **refs,
+                "warnings": warnings,
+                "ref": _paper_ref(request, payload),
+            },
+            warnings,
+        )
+
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    title = _clean_text(source.get("title") or payload.get("title") or _paper_ref(request, payload))
+    all_segment_refs = _merge_refs(refs["cited_segment_refs"])
+    if not all_segment_refs:
+        all_segment_refs = _merge_refs(*[_deep_segment_ref(segment) for segment in segments])
+        refs["cited_segment_refs"] = all_segment_refs
+
+    abstract = _deep_pick_segment(segments, ["abstract"])
+    intro = _deep_pick_segment(segments, ["introduction", "intro", "background"]) or abstract or segments[0]
+    method = _deep_pick_segment(
+        segments,
+        ["method", "model", "architecture", "approach", "attention", "algorithm"],
+    )
+    metric = _deep_pick_segment(
+        segments,
+        ["metric", "bleu", "accuracy", "perplexity", "loss", "formula", "equation", "score"],
+    )
+    experiment = _deep_pick_segment(
+        segments,
+        ["experiment", "evaluation", "result", "benchmark", "dataset", "table"],
+    )
+    conclusion = _deep_pick_segment(
+        segments,
+        ["conclusion", "discussion", "limitation", "future", "ablation"],
+    )
+
+    takeaway_source = abstract or intro or segments[0]
+    takeaway_sentence = _deep_sentence(takeaway_source)
+    takeaway = (
+        f"从提供片段看，{title or '这篇论文'}的核心线索是：{takeaway_sentence}"
+        if takeaway_sentence
+        else f"从提供片段看，{title or '这篇论文'}需要结合原文继续核对核心贡献。"
+    )
+
+    problem = []
+    motivation = []
+    context = []
+    contributions = []
+    method_rows = []
+    mechanism = []
+    metrics = []
+    experiments = []
+    results = []
+    limitations = []
+    project_relevance = []
+    open_questions = []
+    findings = []
+
+    intro_item = _deep_item(
+        f"问题定义/研究入口：{_deep_sentence(intro)}",
+        [_deep_segment_ref(intro)],
+    )
+    if intro_item:
+        problem.append(intro_item)
+        findings.append(intro_item)
+
+    if abstract and abstract is not intro:
+        motivation.append(
+            _deep_item(
+                f"动机与重要性需要从摘要开始核对：{_deep_sentence(abstract)}",
+                [_deep_segment_ref(abstract)],
+            )
+        )
+
+    context.append(
+        _deep_item(
+            "fallback 只能基于 Reader 已供应的结构化片段组织阅读报告；未覆盖的章节需要回到原文核对。",
+            all_segment_refs[:3],
+        )
+    )
+
+    if method:
+        item = _deep_item(
+            f"方法线索：{_deep_sentence(method)}",
+            [_deep_segment_ref(method)],
+        )
+        method_rows.append(item)
+        mechanism.append(
+            _deep_item(
+                f"机制/实现细节应从该段继续向前后文追踪：{_deep_sentence(method)}",
+                [_deep_segment_ref(method)],
+            )
+        )
+        findings.append(item)
+
+    if metric:
+        metrics.append(
+            _deep_item(
+                f"指标或公式线索：{_deep_sentence(metric)}",
+                [_deep_segment_ref(metric)],
+            )
+        )
+
+    if experiment:
+        exp_item = _deep_item(
+            f"实验设置或结果线索：{_deep_sentence(experiment)}",
+            [_deep_segment_ref(experiment)],
+        )
+        experiments.append(exp_item)
+        results.append(
+            _deep_item(
+                f"结果解读需要围绕该证据继续核对表格、指标和对比对象：{_deep_sentence(experiment)}",
+                [_deep_segment_ref(experiment)],
+            )
+        )
+        findings.append(exp_item)
+
+    if conclusion:
+        limitations.append(
+            _deep_item(
+                f"局限/结论线索：{_deep_sentence(conclusion)}",
+                [_deep_segment_ref(conclusion)],
+            )
+        )
+    else:
+        open_questions.append(
+            _deep_item(
+                "提供片段中没有清晰的局限或未来工作证据；需要检查 Discussion/Conclusion。",
+                all_segment_refs[:3],
+            )
+        )
+
+    contributions.append(
+        _deep_item(
+            "核心贡献需要以摘要、引言和方法段的交叉证据为准；fallback 已列出可追踪起点。",
+            _merge_refs(
+                _deep_segment_ref(abstract),
+                _deep_segment_ref(intro),
+                _deep_segment_ref(method),
+            )[:3],
+        )
+    )
+    project_relevance.append(
+        _deep_item(
+            "项目相关性暂不做外推；请把方法和实验段与当前项目目标逐条比对。",
+            _merge_refs(_deep_segment_ref(method), _deep_segment_ref(experiment))[:2],
+        )
+    )
+    open_questions.append(
+        _deep_item(
+            "哪些结论依赖特定数据集、指标或消融实验？需要回到实验表格和设置逐项核对。",
+            _merge_refs(_deep_segment_ref(metric), _deep_segment_ref(experiment))[:2] or all_segment_refs[:2],
+        )
+    )
+
+    reading_plan = [
+        _deep_item("先读 Abstract/Introduction，确认问题定义、任务边界和论文声称的贡献。", [_deep_segment_ref(intro)]),
+        _deep_item("再读 Method/Architecture，画出模块和信息流，区分论文声称与实现机制。", [_deep_segment_ref(method)]),
+        _deep_item("随后读 Experiments/Results，核对数据集、指标、baseline、消融和真实验证。", [_deep_segment_ref(experiment)]),
+        _deep_item(
+            "最后读 Limitations/Conclusion，把不确定点写成后续问题。",
+            [_deep_segment_ref(conclusion)] if _deep_segment_ref(conclusion) else all_segment_refs[-2:],
+        ),
+    ]
+    reading_plan = [item for item in reading_plan if item]
+
+    warnings.append(
+        "Codex 未返回完整深读时已使用 deterministic fallback；以下内容是可追溯阅读骨架，不替代人工核对。"
+    )
+
+    structured = {
+        "takeaway": takeaway,
+        "problem": [item for item in problem if item],
+        "motivation": [item for item in motivation if item],
+        "context": [item for item in context if item],
+        "contributions": [item for item in contributions if item],
+        "method": [item for item in method_rows if item],
+        "mechanism": [item for item in mechanism if item],
+        "metrics": [item for item in metrics if item],
+        "experiments": [item for item in experiments if item],
+        "results": [item for item in results if item],
+        "limitations": [item for item in limitations if item],
+        "project_relevance": [item for item in project_relevance if item],
+        "open_questions": [item for item in open_questions if item],
+        "section_summaries": _section_summaries(segments),
+        "terms": _deep_terms(title, segments),
+        "reading_plan": reading_plan,
+        "findings": [item for item in findings if item],
+        **refs,
+        "warnings": warnings,
+        "ref": _paper_ref(request, payload),
+    }
+    return structured, warnings
+
+
+def _deep_segment_ref(segment: Any) -> str:
+    if not isinstance(segment, dict):
+        return ""
+    return _clean_text(
+        segment.get("segment_id")
+        or segment.get("id")
+        or segment.get("ref")
+        or segment.get("scope_ref")
+    )
+
+
+def _deep_section_text(segment: dict[str, Any]) -> str:
+    path = segment.get("section_path")
+    if isinstance(path, list):
+        return " ".join(_clean_text(item) for item in path if _clean_text(item))
+    return _clean_text(path or segment.get("section") or segment.get("locator"))
+
+
+def _deep_pick_segment(segments: list[dict[str, Any]], terms: list[str]) -> dict[str, Any] | None:
+    lowered_terms = [term.lower() for term in terms if term]
+    for segment in segments:
+        haystack = f"{_deep_section_text(segment)} {_clean_text(segment.get('kind'))} {_clean_text(segment.get('text'))}".lower()
+        if any(term in haystack for term in lowered_terms):
+            return segment
+    return None
+
+
+def _deep_sentence(segment: dict[str, Any] | None) -> str:
+    if not isinstance(segment, dict):
+        return ""
+    text = _clean_text(segment.get("text") or segment.get("source_text") or segment.get("summary"))
+    return _first_sentence(text)
+
+
+def _deep_item(text: str, refs: list[str] | tuple[str, ...] | None = None) -> dict[str, Any]:
+    clean = _clean_text(text)
+    if not clean:
+        return {}
+    merged_refs = _merge_refs(list(refs or []))[:4]
+    item: dict[str, Any] = {"text": clean}
+    if merged_refs:
+        item["refs"] = merged_refs
+    return item
+
+
+def _deep_terms(title: str, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    stop = {"THE", "AND", "FOR", "WITH", "FROM", "THIS", "THAT", "OF"}
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for segment in segments[:16]:
+        text = f"{title} {_deep_section_text(segment)} {_clean_text(segment.get('text'))}"
+        for token in re.findall(r"\b[A-Z][A-Za-z0-9/-]{2,}\b", text):
+            if token.upper() in stop or token in seen:
+                continue
+            seen.add(token)
+            found.append(
+                {
+                    "term": token,
+                    "definition": "fallback 标记出的论文关键词；请结合原文定义核对。",
+                    "refs": [_deep_segment_ref(segment)] if _deep_segment_ref(segment) else [],
+                }
+            )
+            if len(found) >= 8:
+                return found
+    return found
 
 
 def _default_review_scores() -> dict[str, float]:
