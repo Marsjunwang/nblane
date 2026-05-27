@@ -258,25 +258,27 @@
       display: grid;
       --pr-compare-left: 50%;
       --pr-panel-width: 340px;
+      --pr-panel-min-width: 220px;
+      --pr-reader-min-width: 300px;
       --pr-rail-width: 250px;
-      grid-template-columns: var(--pr-rail-width) minmax(420px, 1fr) minmax(280px, var(--pr-panel-width));
+      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
       gap: 10px;
       min-height: 0;
       overflow: hidden;
     }
-    .pr-workspace.left-rail-collapsed { --pr-rail-width: 44px; }
-    .pr-workspace.panel-collapsed { grid-template-columns: var(--pr-rail-width) minmax(420px, 1fr) 44px; }
+    .pr-workspace.left-rail-collapsed { --pr-rail-width: 44px; --pr-reader-min-width: 360px; }
+    .pr-workspace.panel-collapsed { grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) 44px; }
     .pr-workspace.reader-mode-compare {
-      grid-template-columns: var(--pr-rail-width) minmax(320px, var(--pr-compare-left)) 8px minmax(320px, 1fr) minmax(280px, var(--pr-panel-width));
+      grid-template-columns: var(--pr-rail-width) minmax(260px, var(--pr-compare-left)) 8px minmax(260px, 1fr) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
     }
     .pr-workspace.reader-mode-compare.panel-collapsed {
-      grid-template-columns: var(--pr-rail-width) minmax(320px, var(--pr-compare-left)) 8px minmax(320px, 1fr) 44px;
+      grid-template-columns: var(--pr-rail-width) minmax(260px, var(--pr-compare-left)) 8px minmax(260px, 1fr) 44px;
     }
     .pr-workspace.reader-mode-translation {
-      grid-template-columns: var(--pr-rail-width) minmax(420px, 1fr) minmax(280px, var(--pr-panel-width));
+      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
     }
     .pr-workspace.reader-mode-translation.panel-collapsed {
-      grid-template-columns: var(--pr-rail-width) minmax(420px, 1fr) 44px;
+      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) 44px;
     }
     .pr-workspace.reader-mode-translation .pr-viewer { display: none; }
     .pr-workspace.reader-mode-pdf .pr-translation-reader,
@@ -1108,12 +1110,14 @@
     .pr-panel-body { display: grid; gap: 8px; padding: 10px; }
     .pr-panel-resize {
       position: absolute;
-      left: -6px;
+      left: 0;
       top: 0;
       bottom: 0;
-      width: 10px;
+      width: 18px;
       cursor: col-resize;
-      z-index: 4;
+      z-index: 8;
+      pointer-events: auto;
+      touch-action: none;
     }
     .pr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
     .pr-tab {
@@ -1538,6 +1542,12 @@
     let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
+    const PANEL_MIN_WIDTH = 220;
+    const PANEL_DEFAULT_WIDTH = 340;
+    const PANEL_MAX_WIDTH = 920;
+    const PANEL_STACKED_MARGIN = 24;
+    const PANEL_READER_MIN_WIDTH = 300;
+    const PANEL_COMPARE_MIN_WIDTH = 520;
     let activeTaskStartedAt = 0;
     let preparationTaskStartedFor = "";
     let optimisticAnnotations = [];
@@ -2494,6 +2504,53 @@
         prefer_grobid: true,
       });
     }
+    function panelViewportFallbackMax() {
+      const width = Math.max(0, Number(window.innerWidth || 0));
+      if (!width) return PANEL_MAX_WIDTH;
+      if (width <= 1080) {
+        return Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width - PANEL_STACKED_MARGIN));
+      }
+      const railWidth = leftRailCollapsed ? 44 : 250;
+      const centerReserve = readerMode === "compare" ? PANEL_COMPARE_MIN_WIDTH + 8 : PANEL_READER_MIN_WIDTH;
+      const gapReserve = readerMode === "compare" ? 40 : 20;
+      return Math.max(
+        PANEL_MIN_WIDTH,
+        Math.min(PANEL_MAX_WIDTH, Math.floor(width - railWidth - centerReserve - gapReserve))
+      );
+    }
+    function panelWidthBounds() {
+      const workspace = document.querySelector(".pr-workspace");
+      const fallbackMax = panelViewportFallbackMax();
+      if (!workspace) return { min: PANEL_MIN_WIDTH, max: fallbackMax };
+      const box = workspace.getBoundingClientRect();
+      if (!Number.isFinite(box.width) || box.width <= 0) return { min: PANEL_MIN_WIDTH, max: fallbackMax };
+      if (box.width <= 1080) {
+        return {
+          min: PANEL_MIN_WIDTH,
+          max: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, Math.floor(box.width - PANEL_STACKED_MARGIN))),
+        };
+      }
+      const styles = window.getComputedStyle(workspace);
+      const gap = Number.parseFloat(styles.columnGap || styles.gap || "10") || 10;
+      const rail = document.getElementById("leftRail");
+      const railBox = rail ? rail.getBoundingClientRect() : null;
+      const railWidth = railBox && Number.isFinite(railBox.width) && railBox.width > 0
+        ? railBox.width
+        : leftRailCollapsed ? 44 : 250;
+      const centerReserve = readerMode === "compare" ? PANEL_COMPARE_MIN_WIDTH + 8 : PANEL_READER_MIN_WIDTH;
+      const gapReserve = readerMode === "compare" ? gap * 4 : gap * 2;
+      const max = Math.floor(box.width - railWidth - centerReserve - gapReserve);
+      return {
+        min: PANEL_MIN_WIDTH,
+        max: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, max)),
+      };
+    }
+    function clampPanelWidth(value) {
+      const raw = Number(value);
+      const numeric = Number.isFinite(raw) ? raw : PANEL_DEFAULT_WIDTH;
+      const bounds = panelWidthBounds();
+      return Math.max(bounds.min, Math.min(bounds.max, Math.round(numeric)));
+    }
     function localStateKey() {
       return `nblane:reader:${sourceId() || text(READER_BOOT.sourceId || "source")}:state`;
     }
@@ -2730,7 +2787,8 @@
       if (!["notes", "translation", "review", "claims"].includes(activeTab)) activeTab = "notes";
       syncDockFromArgs();
       const dockVisible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
-      const workspaceStyle = `--pr-compare-left:${Math.max(20, Math.min(80, compareSplitRatio))}%;--pr-panel-width:${Math.max(280, Math.min(560, panelWidth))}px;`;
+      panelWidth = clampPanelWidth(panelWidth);
+      const workspaceStyle = `--pr-compare-left:${Math.max(20, Math.min(80, compareSplitRatio))}%;--pr-panel-width:${panelWidth}px;`;
       document.getElementById("root").innerHTML = `
         <section class="pr-shell ${fullscreenActive ? "fullscreen" : ""}" id="readerShell">
           <header class="pr-toolbar">
@@ -4787,6 +4845,7 @@
         workspace.classList.toggle("reader-mode-pdf", readerMode === "pdf");
         workspace.classList.toggle("reader-mode-compare", readerMode === "compare");
         workspace.classList.toggle("reader-mode-translation", readerMode === "translation");
+        updateWorkspaceSizing();
       }
       document.querySelectorAll("[data-mode]").forEach((button) => {
         button.classList.toggle("active", button.dataset.mode === readerMode);
@@ -4817,7 +4876,8 @@
       const workspace = document.querySelector(".pr-workspace");
       if (!workspace) return;
       workspace.style.setProperty("--pr-compare-left", `${Math.max(20, Math.min(80, compareSplitRatio))}%`);
-      workspace.style.setProperty("--pr-panel-width", `${Math.max(280, Math.min(560, panelWidth))}px`);
+      panelWidth = clampPanelWidth(panelWidth);
+      workspace.style.setProperty("--pr-panel-width", `${panelWidth}px`);
     }
     function wireResizeHandles() {
       const workspace = document.querySelector(".pr-workspace");
@@ -4851,7 +4911,7 @@
           const startX = event.clientX;
           const start = panelWidth;
           const onMove = (moveEvent) => {
-            panelWidth = Math.max(280, Math.min(560, Math.round(start - (moveEvent.clientX - startX))));
+            panelWidth = clampPanelWidth(start - (moveEvent.clientX - startX));
             updateWorkspaceSizing();
           };
           const onUp = () => {
@@ -5193,6 +5253,7 @@
       if (action === "toggleLeftRail") {
         leftRailCollapsed = !leftRailCollapsed;
         document.querySelector(".pr-workspace")?.classList.toggle("left-rail-collapsed", leftRailCollapsed);
+        updateWorkspaceSizing();
         refreshLeftRail();
         scheduleViewportUpdate();
         scheduleReaderStateChanged(true);
@@ -6568,7 +6629,7 @@
       notesFilterCurrentPage = typeof local.notes_filter_current_page === "boolean" ? local.notes_filter_current_page : false;
       syncDockUiFromLocal(local);
       compareSplitRatio = Math.max(25, Math.min(75, Number(settings().compare_split_ratio || local.compare_split_ratio || args.compare_split_ratio || 50)));
-      panelWidth = Math.max(280, Math.min(560, Number(settings().panel_width || local.panel_width || args.panel_width || 340)));
+      panelWidth = clampPanelWidth(Number(settings().panel_width || local.panel_width || args.panel_width || PANEL_DEFAULT_WIDTH));
       if (!["pdf", "compare", "translation"].includes(readerMode)) readerMode = "pdf";
       requestedPreviews = new Set();
       requestedTextLayers = new Set();
@@ -6834,6 +6895,7 @@
     window.addEventListener("resize", () => {
       if (resizeTimer) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
+        updateWorkspaceSizing();
         rerenderForScale();
         placeSelectionDock();
         if (readerMode !== "pdf") {
