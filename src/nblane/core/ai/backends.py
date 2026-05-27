@@ -273,7 +273,7 @@ class LocalReadonlyCodexBackend:
         )
         if model:
             config = replace(config, model=model)
-        reasoning_effort = _codex_reasoning_effort_override(request.payload) if enable_search else ""
+        reasoning_effort = _codex_reasoning_effort_for_action(request.action, request.payload)
         result = codex_adapter.run_readonly_codex_prompt(
             codex_profile,
             codex_prompt,
@@ -529,15 +529,22 @@ def _stream_llm_action(request: AIActionRequest) -> bool:
     return configured not in {"0", "false", "no", "off"}
 
 
-def _codex_reasoning_effort_override(payload: dict[str, Any]) -> str:
-    """Return the requested Codex reasoning effort for paper search."""
-
+def _explicit_codex_reasoning_effort(payload: dict[str, Any]) -> str:
     clean = _clean_text(
         payload.get("codex_reasoning_effort")
         or payload.get("reasoning_effort")
     ).lower()
     if clean in {"low", "medium", "high", "xhigh"}:
         return clean
+    return ""
+
+
+def _codex_reasoning_effort_override(payload: dict[str, Any]) -> str:
+    """Return the requested Codex reasoning effort for paper search."""
+
+    explicit = _explicit_codex_reasoning_effort(payload)
+    if explicit:
+        return explicit
     depth = _clean_text(
         payload.get("codex_search_depth")
         or payload.get("search_depth")
@@ -552,6 +559,19 @@ def _codex_reasoning_effort_override(payload: dict[str, Any]) -> str:
         if _clean_text(value).lower() in {"1", "true", "yes", "on"}:
             return "xhigh"
     return "medium"
+
+
+def _codex_reasoning_effort_for_action(action: str, payload: dict[str, Any]) -> str:
+    """Return the Codex reasoning effort to use for a local read-only action."""
+
+    explicit = _explicit_codex_reasoning_effort(payload)
+    if explicit:
+        return explicit
+    if action == "research.paper_search_codex":
+        return _codex_reasoning_effort_override(payload)
+    if action == "research.paper_deep_read_codex":
+        return "high"
+    return ""
 
 
 def _codex_home_policy(payload: dict[str, Any]) -> str:

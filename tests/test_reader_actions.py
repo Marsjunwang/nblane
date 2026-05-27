@@ -923,6 +923,7 @@ class TestReaderActions(unittest.TestCase):
         self.assertIn("Conclusion", paper_context["sections_covered"])
         self.assertEqual(captured_payload["codex_timeout_seconds"], 2)
         self.assertEqual(captured_payload["codex_idle_timeout_seconds"], 1)
+        self.assertEqual(captured_payload["codex_reasoning_effort"], "high")
 
     def test_codex_deep_read_keeps_legacy_findings_schema(self) -> None:
         ai_result = SimpleNamespace(
@@ -1053,8 +1054,10 @@ class TestReaderActions(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(batch_calls), 4)
         self.assertEqual(len(synthesis_calls), 1)
-        self.assertGreaterEqual(int(batch_calls[0]["codex_timeout_seconds"]), 300)
-        self.assertGreaterEqual(int(synthesis_calls[0]["codex_timeout_seconds"]), 420)
+        self.assertGreaterEqual(int(batch_calls[0]["codex_timeout_seconds"]), 420)
+        self.assertGreaterEqual(int(synthesis_calls[0]["codex_timeout_seconds"]), 900)
+        self.assertEqual(batch_calls[0]["codex_reasoning_effort"], "high")
+        self.assertEqual(synthesis_calls[0]["codex_reasoning_effort"], "high")
         synthesis_context = synthesis_calls[0]["paper_context"]
         self.assertIsInstance(synthesis_context, dict)
         self.assertTrue(synthesis_context["batch_reading"])

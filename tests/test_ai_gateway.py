@@ -369,6 +369,47 @@ class TestAIGateway(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(run.call_args.kwargs["config"].model, "gpt-5.1-codex")
+        self.assertEqual(run.call_args.kwargs["reasoning_effort"], "high")
+
+    def test_deep_read_codex_respects_reasoning_effort_override(self) -> None:
+        """Payload overrides still win over the deep-read high default."""
+
+        reply = """
+        {
+          "reading_plan": [],
+          "findings": [],
+          "cited_segment_refs": [],
+          "cited_chunk_refs": [],
+          "cited_annotation_refs": [],
+          "warnings": [],
+          "ref": "paper:1"
+        }
+        """
+        readonly = SimpleNamespace(
+            ok=True,
+            output=reply,
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with patch(
+            "nblane.core.codex_adapter.run_readonly_codex_prompt",
+            return_value=readonly,
+        ) as run:
+            result = run_ai_action(
+                "research.paper_deep_read_codex",
+                {
+                    "source_id": "source:paper:1",
+                    "codex_reasoning_effort": "xhigh",
+                },
+                profile="",
+                require_review=False,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(run.call_args.kwargs["reasoning_effort"], "xhigh")
 
     def test_local_readonly_codex_backend_passes_timeout_override(self) -> None:
         """UI actions can cap read-only Codex latency before fallback."""

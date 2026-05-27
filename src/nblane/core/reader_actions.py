@@ -492,10 +492,10 @@ def _adaptive_deep_read_timeout_seconds(
     batch_count: int = 0,
 ) -> int:
     if mode == "batch":
-        return int(max(300, min(540, 120 + supplied_segments * 8 + pages * 4)))
+        return int(max(420, min(900, 180 + supplied_segments * 10 + pages * 8)))
     if mode == "synthesis":
-        return int(max(420, min(720, 240 + batch_count * 70 + supplied_segments * 2)))
-    return int(max(420, min(900, 180 + supplied_segments * 4 + pages * 5 + source_segments * 1.5)))
+        return int(max(900, min(1800, 480 + batch_count * 120 + supplied_segments * 5)))
+    return int(max(900, min(1800, 300 + supplied_segments * 6 + pages * 10 + source_segments * 2)))
 
 
 def _copy_deep_read_runtime_options(source: dict[str, Any], target: dict[str, Any]) -> None:
@@ -507,10 +507,18 @@ def _copy_deep_read_runtime_options(source: dict[str, Any], target: dict[str, An
         "codex_model",
         "deep_read_model",
         "codex_home_policy",
+        "codex_reasoning_effort",
+        "reasoning_effort",
     ):
         value = source.get(key)
         if value not in (None, "", []):
             target[key] = value
+
+
+def _ensure_deep_read_reasoning_effort(payload: dict[str, Any]) -> None:
+    if payload.get("codex_reasoning_effort") in (None, "", []):
+        if payload.get("reasoning_effort") in (None, "", []):
+            payload["codex_reasoning_effort"] = "high"
 
 
 def _deep_read_payload_pages(rows: list[dict[str, Any]]) -> list[int]:
@@ -1852,6 +1860,7 @@ def _handle_reader_action_inner(
             "locator": _payload_text(payload, "locator"),
         }
         _copy_deep_read_runtime_options(payload, deep_read_payload)
+        _ensure_deep_read_reasoning_effort(deep_read_payload)
         explicit_codex_timeout = _explicit_codex_timeout(payload)
         if not explicit_codex_timeout:
             deep_read_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
@@ -1911,6 +1920,7 @@ def _handle_reader_action_inner(
                         },
                     }
                     _copy_deep_read_runtime_options(payload, batch_payload)
+                    _ensure_deep_read_reasoning_effort(batch_payload)
                     if not explicit_codex_timeout:
                         batch_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
                             source_segments=int(batch.get("source_segments") or len(batch_segments)),
