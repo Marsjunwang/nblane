@@ -3911,25 +3911,94 @@
       `);
       return rows.length ? `<div class="pr-score-grid">${rows.join("")}</div>` : "";
     }
-    function reviewItemText(value) {
+    function reviewCleanText(value) {
+      const clean = text(value).trim();
+      return clean === "[object Object]" ? "" : clean;
+    }
+    function reviewItemText(value, depth = 0) {
+      if (Array.isArray(value)) {
+        return value.map((row) => reviewItemText(row, depth + 1)).filter(Boolean).join(" ");
+      }
       if (value && typeof value === "object") {
+        if (depth > 4) return "";
         const obj = asObj(value);
-        const term = text(obj.term || obj.name);
-        const definition = text(obj.definition || obj.meaning);
+        const label = ["section", "heading", "section_title", "title", "label", "name"]
+          .map((key) => reviewCleanText(obj[key]))
+          .find(Boolean) || "";
+        const term = reviewCleanText(obj.term || obj.name);
+        const definition = reviewItemText(obj.definition ?? obj.meaning, depth + 1);
         if (term && definition) return `${term}: ${definition}`;
-        const metric = text(obj.metric);
-        const metricValue = text(obj.value ?? obj.score ?? obj.formula);
+        const metric = reviewCleanText(obj.metric);
+        const metricValue = reviewItemText(obj.value ?? obj.score ?? obj.formula, depth + 1);
         if (metric && metricValue) return `${metric}: ${metricValue}`;
-        for (const key of ["text", "summary", "claim", "description", "finding", "result", "evidence", "reason", "title", "question", "answer", "method", "step"]) {
-          const clean = text(obj[key]).trim();
-          if (clean) return clean;
+        const labeledValue = reviewItemText(obj.value, depth + 1);
+        if (label && labeledValue && labeledValue !== label) return `${label}: ${labeledValue}`;
+        for (const key of [
+          "text",
+          "summary",
+          "claim",
+          "description",
+          "finding",
+          "result",
+          "evidence",
+          "reason",
+          "question",
+          "answer",
+          "method",
+          "step",
+          "content",
+          "message",
+          "note",
+          "why",
+          "how",
+          "limitation",
+          "problem",
+          "motivation",
+          "contribution",
+          "takeaway",
+          "analysis",
+          "interpretation",
+        ]) {
+          const clean = reviewItemText(obj[key], depth + 1).trim();
+          if (clean) return label && clean !== label ? `${label}: ${clean}` : clean;
         }
         const detailRows = asArr(obj.details || obj.points || obj.items)
-          .map((row) => reviewItemText(row))
+          .map((row) => reviewItemText(row, depth + 1))
           .filter(Boolean);
-        if (detailRows.length) return detailRows.join(" ");
+        if (detailRows.length) {
+          const body = detailRows.join(" ");
+          return label && body !== label ? `${label}: ${body}` : body;
+        }
+        if (label) return label;
+        const metadataKeys = new Set([
+          "refs",
+          "evidence_refs",
+          "cited_refs",
+          "cited_segment_refs",
+          "cited_chunk_refs",
+          "cited_annotation_refs",
+          "segment_refs",
+          "chunk_refs",
+          "annotation_refs",
+          "segment_id",
+          "segment_ref",
+          "scope_ref",
+          "chunk_id",
+          "annotation_id",
+          "id",
+          "page",
+          "order",
+          "source",
+          "type",
+        ]);
+        const fallbackRows = Object.keys(obj)
+          .filter((key) => !metadataKeys.has(key))
+          .map((key) => reviewItemText(obj[key], depth + 1))
+          .filter(Boolean);
+        if (fallbackRows.length) return [...new Set(fallbackRows)].slice(0, 4).join(" ");
+        return "";
       }
-      return text(value);
+      return reviewCleanText(value);
     }
     function refIdText(value) {
       if (value && typeof value === "object") {

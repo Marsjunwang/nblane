@@ -566,7 +566,12 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn(".pr-side .pr-panel", response.text)
         self.assertIn("overflow: visible;", response.text)
         self.assertIn("max-height: none;", response.text)
-        self.assertIn("claim\", \"description\", \"finding\", \"result\", \"evidence", response.text)
+        self.assertIn("reviewCleanText", response.text)
+        self.assertIn("const metadataKeys = new Set", response.text)
+        self.assertIn('"content"', response.text)
+        self.assertIn('"message"', response.text)
+        self.assertIn('"limitation"', response.text)
+        self.assertIn('"motivation"', response.text)
         # PDF skeleton shimmer
         self.assertIn("startupPdfSkeletonHtml", response.text)
         self.assertIn("data-shell-placeholder", response.text)
