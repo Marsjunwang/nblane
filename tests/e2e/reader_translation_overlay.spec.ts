@@ -219,6 +219,34 @@ test("late page preview does not move placed overlay blocks", async ({ page }) =
   expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(1);
 });
 
+test("side panel resize rail matches compare divider and spans workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const payload = readerPayload(false);
+  payload.settings = { ...payload.settings, reader_mode: "compare", side_panel_default: "open" };
+  await renderReader(page, payload);
+
+  const workspaceBox = await measuredBox(page, ".pr-workspace");
+  const compareBox = await measuredBox(page, "#compareDivider");
+  const panelBox = await measuredBox(page, "#panelResize");
+
+  expect(Math.abs(compareBox.height - workspaceBox.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(panelBox.height - workspaceBox.height)).toBeLessThanOrEqual(1);
+  expect(panelBox.width).toBeGreaterThanOrEqual(7);
+  expect(panelBox.width).toBeLessThanOrEqual(9);
+
+  const panelStyle = await page.locator("#panelResize").evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return {
+      backgroundImage: style.backgroundImage,
+      cursor: style.cursor,
+      touchAction: style.touchAction,
+    };
+  });
+  expect(panelStyle.backgroundImage).toContain("linear-gradient");
+  expect(panelStyle.cursor).toBe("col-resize");
+  expect(panelStyle.touchAction).toBe("none");
+});
+
 test("pdf reader creates a bounded page window on first render", async ({ page }) => {
   const payload = readerPayload(false);
   payload.settings.reader_mode = "pdf";
@@ -341,4 +369,3 @@ test("bulk translations endpoint hydrates overlay across all pages", async ({ pa
     page.locator('.pr-translation-page-shell[data-page-shell="2"]'),
   ).toHaveCount(1);
 });
-

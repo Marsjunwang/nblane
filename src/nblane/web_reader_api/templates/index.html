@@ -261,7 +261,8 @@
       --pr-panel-min-width: 220px;
       --pr-reader-min-width: 300px;
       --pr-rail-width: 250px;
-      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
+      --pr-resize-rail-width: 8px;
+      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) var(--pr-resize-rail-width) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
       gap: 10px;
       min-height: 0;
       overflow: hidden;
@@ -269,13 +270,13 @@
     .pr-workspace.left-rail-collapsed { --pr-rail-width: 44px; --pr-reader-min-width: 360px; }
     .pr-workspace.panel-collapsed { grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) 44px; }
     .pr-workspace.reader-mode-compare {
-      grid-template-columns: var(--pr-rail-width) minmax(260px, var(--pr-compare-left)) 8px minmax(260px, 1fr) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
+      grid-template-columns: var(--pr-rail-width) minmax(260px, var(--pr-compare-left)) var(--pr-resize-rail-width) minmax(260px, 1fr) var(--pr-resize-rail-width) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
     }
     .pr-workspace.reader-mode-compare.panel-collapsed {
-      grid-template-columns: var(--pr-rail-width) minmax(260px, var(--pr-compare-left)) 8px minmax(260px, 1fr) 44px;
+      grid-template-columns: var(--pr-rail-width) minmax(260px, var(--pr-compare-left)) var(--pr-resize-rail-width) minmax(260px, 1fr) 44px;
     }
     .pr-workspace.reader-mode-translation {
-      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
+      grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) var(--pr-resize-rail-width) minmax(var(--pr-panel-min-width), var(--pr-panel-width));
     }
     .pr-workspace.reader-mode-translation.panel-collapsed {
       grid-template-columns: var(--pr-rail-width) minmax(var(--pr-reader-min-width), 1fr) 44px;
@@ -284,11 +285,22 @@
     .pr-workspace.reader-mode-pdf .pr-translation-reader,
     .pr-workspace.reader-mode-pdf .pr-compare-divider,
     .pr-workspace.reader-mode-translation .pr-compare-divider { display: none; }
-    .pr-compare-divider {
+    .pr-compare-divider,
+    .pr-panel-resize {
+      align-self: stretch;
+      min-height: 0;
       cursor: col-resize;
       border-radius: 999px;
       background: linear-gradient(90deg, transparent 2px, rgba(33, 104, 91, .28) 2px, rgba(33, 104, 91, .28) 6px, transparent 6px);
+      touch-action: none;
     }
+    .pr-compare-divider:hover,
+    .pr-compare-divider.resizing,
+    .pr-panel-resize:hover,
+    .pr-panel-resize.resizing {
+      background: linear-gradient(90deg, transparent 1px, rgba(33, 104, 91, .46) 1px, rgba(33, 104, 91, .46) 7px, transparent 7px);
+    }
+    .pr-workspace.panel-collapsed .pr-panel-resize { display: none; }
     .pr-left-rail {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
@@ -1108,17 +1120,7 @@
       font-weight: 850;
     }
     .pr-panel-body { display: grid; gap: 8px; padding: 10px; }
-    .pr-panel-resize {
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 18px;
-      cursor: col-resize;
-      z-index: 8;
-      pointer-events: auto;
-      touch-action: none;
-    }
+    .pr-panel-resize { z-index: 8; }
     .pr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
     .pr-tab {
       min-height: 34px;
@@ -1356,6 +1358,7 @@
       .pr-workspace.reader-mode-translation .pr-viewer { display: none; }
       .pr-viewer { min-height: 540px; }
       .pr-translation-reader { min-height: 420px; }
+      .pr-panel-resize { display: none; }
       .pr-side, .pr-side.collapsed { height: auto; min-height: 0; overflow: visible; }
       .pr-side.collapsed .pr-panel { display: none; }
       .pr-side.collapsed .pr-side-rail { display: inline-flex; }
@@ -2835,8 +2838,8 @@
             </section>
             <div class="pr-compare-divider" id="compareDivider" data-resize="compare" title="Resize compare panes"></div>
             <section class="pr-translation-reader" id="translationReader">${translationReaderHtml()}</section>
+            <div class="pr-panel-resize" id="panelResize" data-resize="panel" title="${attr(label("panel"))}"></div>
             <aside class="pr-side ${sidePanelCollapsed ? "collapsed" : ""}">
-              <div class="pr-panel-resize" id="panelResize" data-resize="panel" title="${attr(label("panel"))}"></div>
               <button class="pr-icon-button pr-side-rail" data-action="togglePanel" title="${attr(label("panel"))}">&lt;</button>
               <section class="pr-panel">
                 <div class="pr-tabs">
@@ -4954,6 +4957,7 @@
       if (workspace && compareHandle) {
         compareHandle.addEventListener("pointerdown", (event) => {
           event.preventDefault();
+          compareHandle.classList.add("resizing");
           const startX = event.clientX;
           const start = compareSplitRatio;
           const box = workspace.getBoundingClientRect();
@@ -4963,6 +4967,7 @@
             updateWorkspaceSizing();
           };
           const onUp = () => {
+            compareHandle.classList.remove("resizing");
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
             persistLocalState();
@@ -4977,6 +4982,7 @@
         panelHandle.addEventListener("pointerdown", (event) => {
           if (sidePanelCollapsed) return;
           event.preventDefault();
+          panelHandle.classList.add("resizing");
           const startX = event.clientX;
           const start = panelWidth;
           const onMove = (moveEvent) => {
@@ -4984,6 +4990,7 @@
             updateWorkspaceSizing();
           };
           const onUp = () => {
+            panelHandle.classList.remove("resizing");
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
             persistLocalState();
