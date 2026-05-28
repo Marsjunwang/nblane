@@ -95,6 +95,7 @@ _UI_LANG_WIDGET_KEY = "_nblane_ui_lang"
 _LLM_REPLY_LANG_KEY = "nblane_llm_reply_lang"
 _LLM_REPLY_LANG_WIDGET_KEY = "_nblane_llm_reply_lang"
 _LLM_PREFS_PROFILE_KEY = "_nblane_llm_prefs_profile"
+_LLM_PREFS_DIRTY_KEY = "_nblane_llm_prefs_dirty"
 _CODEX_BIN_KEY = "bin"
 _CODEX_CLOUD_ENV_KEY = "cloud_env"
 _CODEX_MODEL_KEY = "model"
@@ -157,6 +158,12 @@ def _sync_language_widget_to_persistent(
     value = st.session_state.get(widget_key)
     if value in ("en", "zh"):
         st.session_state[session_key] = value
+        _mark_llm_preferences_dirty()
+
+
+def _mark_llm_preferences_dirty() -> None:
+    """Mark sidebar LLM preferences as explicitly changed by the user."""
+    st.session_state[_LLM_PREFS_DIRTY_KEY] = True
 
 
 def _prepare_language_widget(
@@ -259,7 +266,11 @@ def _llm_model_options(provider: str) -> list[str]:
 
 def _ensure_llm_session_defaults(profile: str = "") -> None:
     """Seed sidebar LLM widgets from the current runtime config."""
-    if profile and st.session_state.get(_LLM_PREFS_PROFILE_KEY) != profile:
+    profile_changed = bool(
+        profile
+        and st.session_state.get(_LLM_PREFS_PROFILE_KEY) != profile
+    )
+    if profile_changed:
         for key in (
             _LLM_PROVIDER_KEY,
             _LLM_LAST_PROVIDER_KEY,
@@ -270,6 +281,7 @@ def _ensure_llm_session_defaults(profile: str = "") -> None:
             _UI_LANG_WIDGET_KEY,
             _LLM_REPLY_LANG_KEY,
             _LLM_REPLY_LANG_WIDGET_KEY,
+            _LLM_PREFS_DIRTY_KEY,
         ):
             st.session_state.pop(key, None)
         st.session_state[_LLM_PREFS_PROFILE_KEY] = profile
@@ -301,18 +313,26 @@ def _ensure_llm_session_defaults(profile: str = "") -> None:
     ui_lang = str(llm_prefs.get("ui_lang") or "").strip() or ui_lang
     reply_lang = str(llm_prefs.get("reply_lang") or "").strip() or reply_lang
     model_options = _llm_model_options(provider)
+    custom_model = str(llm_prefs.get("custom_model") or model)
+    model_choice = model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE
+
+    # Keep widgets aligned with the persisted profile/default config until the
+    # user changes a sidebar LLM control. This prevents stale browser sessions
+    # from writing old provider values back into web-preferences.yaml.
+    if profile_changed or not st.session_state.get(_LLM_PREFS_DIRTY_KEY):
+        st.session_state[_LLM_PROVIDER_KEY] = provider
+        st.session_state[_LLM_LAST_PROVIDER_KEY] = provider
+        st.session_state[_LLM_BASE_URL_KEY] = base_url
+        st.session_state[_LLM_CUSTOM_MODEL_KEY] = custom_model
+        st.session_state[_LLM_MODEL_CHOICE_KEY] = model_choice
+        st.session_state[_UI_LANG_KEY] = ui_lang
+        st.session_state[_LLM_REPLY_LANG_KEY] = reply_lang
 
     st.session_state.setdefault(_LLM_PROVIDER_KEY, provider)
     st.session_state.setdefault(_LLM_LAST_PROVIDER_KEY, provider)
     st.session_state.setdefault(_LLM_BASE_URL_KEY, base_url)
-    st.session_state.setdefault(
-        _LLM_CUSTOM_MODEL_KEY,
-        str(llm_prefs.get("custom_model") or model),
-    )
-    st.session_state.setdefault(
-        _LLM_MODEL_CHOICE_KEY,
-        model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE,
-    )
+    st.session_state.setdefault(_LLM_CUSTOM_MODEL_KEY, custom_model)
+    st.session_state.setdefault(_LLM_MODEL_CHOICE_KEY, model_choice)
     st.session_state.setdefault(_UI_LANG_KEY, ui_lang)
     st.session_state.setdefault(_LLM_REPLY_LANG_KEY, reply_lang)
     apply_ui_language_from_session()
@@ -670,6 +690,7 @@ def render_llm_settings(profile: str = "") -> None:
             u["llm_provider"],
             provider_names,
             key=_LLM_PROVIDER_KEY,
+            on_change=_mark_llm_preferences_dirty,
         )
         _sync_llm_provider_preset()
         provider = st.session_state.get(_LLM_PROVIDER_KEY, provider)
@@ -678,6 +699,7 @@ def render_llm_settings(profile: str = "") -> None:
         base_url = st.text_input(
             u["llm_base_url"],
             key=_LLM_BASE_URL_KEY,
+            on_change=_mark_llm_preferences_dirty,
         ).strip()
 
         model_options = _llm_model_options(provider)
@@ -690,11 +712,13 @@ def render_llm_settings(profile: str = "") -> None:
                 else value
             ),
             key=_LLM_MODEL_CHOICE_KEY,
+            on_change=_mark_llm_preferences_dirty,
         )
         if model_choice == _LLM_CUSTOM_MODEL_CHOICE:
             model = st.text_input(
                 u["llm_custom_model"],
                 key=_LLM_CUSTOM_MODEL_KEY,
+                on_change=_mark_llm_preferences_dirty,
             ).strip()
         else:
             model = model_choice
@@ -753,7 +777,7 @@ def render_llm_settings(profile: str = "") -> None:
             ui_lang=ui_lang,
             reply_lang=reply_lang,
         )
-        if profile:
+        if profile and st.session_state.get(_LLM_PREFS_DIRTY_KEY):
             _persist_llm_preferences(
                 profile=profile,
                 provider=provider,
@@ -763,6 +787,7 @@ def render_llm_settings(profile: str = "") -> None:
                 ui_lang=ui_lang,
                 reply_lang=reply_lang,
             )
+            st.session_state[_LLM_PREFS_DIRTY_KEY] = False
 
         if llm_client.is_configured():
             st.caption(
