@@ -681,12 +681,13 @@ function skillSegments(counts, total) {
   });
 }
 
-function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal, canEditGoals = true, canSelectGoals = true, showToday = true }) {
+function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal, canEditGoals = true, canSelectGoals = true, showToday = true, selectedGoalId = "" }) {
   const ui = payload.ui;
   const northStar = payload.northStar;
   const primary = goalDisplay(payload.primaryGoal, ui);
   const primaryId = primaryGoalId(payload);
   const activeGoals = asArray(payload.activeGoals);
+  const secondaryGoals = activeGoals.filter((goal) => !goal.isPrimary);
   const northStarText =
     northStar.locked || northStar.visibility === "private"
       ? label(ui, "north_star_private_display", "Private North Star")
@@ -731,7 +732,19 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
               {primaryMeta.length ? primaryMeta.map((item) => (
                 <span key={item} className="hd-context-badge">{item}</span>
               )) : (
-                <span className="hd-context-badge">{label(ui, "goal_no_current", "No current goal set.")}</span>
+                <>
+                  <span className="hd-context-badge">{label(ui, "goal_no_current", "No current goal set.")}</span>
+                  {canEditGoals ? (
+                    <button
+                      className="hd-ghost hd-context-empty-cta"
+                      type="button"
+                      data-action="open-goal-form"
+                      onClick={onCreateGoal}
+                    >
+                      {label(ui, "dashboard_add_active_goal", "Add goal")}
+                    </button>
+                  ) : null}
+                </>
               )}
             </div>
           )}
@@ -740,13 +753,14 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
         <div className="hd-context-goals">
           <div className="hd-context-goals-head">
             <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
-            <span className="hd-context-count">{activeGoals.length}</span>
+            <span className="hd-context-count">{secondaryGoals.length}</span>
           </div>
           <div className="hd-goal-rail">
-            {activeGoals.length ? activeGoals.map((goal) => {
+            {secondaryGoals.length ? secondaryGoals.map((goal) => {
               const display = goalDisplay(goal, ui);
-              const className = `hd-goal-pill ${goal.isPrimary ? "primary" : ""}`;
-              const title = `${display.title} · ${goal.isPrimary ? label(ui, "dashboard_primary_goal", "Primary") : label(ui, `goal_status_${display.status}`, display.status || "active")}`;
+              const isSelected = Boolean(goal.id) && goal.id === selectedGoalId;
+              const className = `hd-goal-pill${isSelected ? " selected" : ""}`;
+              const title = `${display.title} · ${label(ui, `goal_status_${display.status}`, display.status || "active")}`;
               return canSelectGoals ? (
                 <button
                   key={goal.id || display.title}
@@ -754,6 +768,7 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
                   type="button"
                   data-action="select-goal"
                   data-goal-id={goal.id}
+                  aria-pressed={isSelected}
                   title={title}
                   onClick={() => onSelectGoal(goal.id)}
                 >
@@ -772,7 +787,7 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
                   <strong>{display.title}</strong>
                 </span>
               );
-            }) : <span className="hd-empty-inline">{label(ui, "goal_no_current", "No current goal set.")}</span>}
+            }) : <span className="hd-empty-inline">{label(ui, "dashboard_no_secondary_goals", "Only the primary goal is active.")}</span>}
           </div>
         </div>
       </div>
@@ -2647,6 +2662,7 @@ function HomeCaptureForm({ payload, onEmit, className = "" }) {
   const currentGoalId = primaryGoalId(payload);
   const sourceActive = Number(payload.sources.active_total || 0);
   const formClassName = ["hd-capture-form", className].filter(Boolean).join(" ");
+  const [justSaved, setJustSaved] = useState(false);
 
   function submit(event) {
     event.preventDefault();
@@ -2656,6 +2672,7 @@ function HomeCaptureForm({ payload, onEmit, className = "" }) {
     }
     onEmit(captureInboxSubmitEvent(draft));
     event.currentTarget.reset();
+    setJustSaved(true);
   }
 
   return (
@@ -2687,6 +2704,10 @@ function HomeCaptureForm({ payload, onEmit, className = "" }) {
         <button className="hd-primary" type="submit" data-action="capture-source">{label(ui, "dashboard_capture_submit", "Capture")}</button>
       </div>
 
+      {justSaved ? (
+        <p className="hd-capture-saved" role="status">{label(ui, "dashboard_capture_saved_hint", "Captured. Organizing into inbox…")}</p>
+      ) : null}
+
       <details className="hd-capture-more">
         <summary>{label(ui, "dashboard_capture_more_fields", "More fields")}</summary>
         <label>
@@ -2710,7 +2731,7 @@ function HomeCaptureForm({ payload, onEmit, className = "" }) {
   );
 }
 
-function SkillProgressCard({ payload, className = "" }) {
+function SkillProgressCard({ payload, onEmit, className = "" }) {
   const ui = payload.ui;
   const counts = payload.charts.skills.counts || {};
   const totalCount = Math.max(0, Number(payload.charts.skills.total) || 0);
@@ -2723,6 +2744,7 @@ function SkillProgressCard({ payload, className = "" }) {
     ? `${label(ui, "dashboard_skill_progress_caption", "solid + expert lit rate")} · ${formatPercent(litRate)}`
     : label(ui, "dashboard_skill_progress_empty", "No skill tree data yet.");
   const cardClassName = ["hd-summary-card", "hd-skill-card", className].filter(Boolean).join(" ");
+  const skillMapLink = quickLink(payload, "skill_map", "pages/1_Skill_Tree.py", label(ui, "quick_skill_map", "Skill Map"));
 
   return (
     <article className={cardClassName}>
@@ -2731,6 +2753,17 @@ function SkillProgressCard({ payload, className = "" }) {
           <span className="hd-eyebrow">{label(ui, "dashboard_skill_progress_title", "Skill Progress")}</span>
           <h4>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</h4>
           <p className="hd-skill-head-copy">{summaryMessage}</p>
+          {!total && onEmit ? (
+            <button
+              className="hd-ghost hd-skill-empty-cta"
+              type="button"
+              data-action="navigate"
+              data-target={skillMapLink.path}
+              onClick={() => onEmit(navigationEvent(skillMapLink.path))}
+            >
+              {label(ui, "dashboard_skill_empty_cta", "Open Skill Map")}
+            </button>
+          ) : null}
         </div>
         <span className="hd-summary-chip">{label(ui, "dashboard_skill_lit_rate", "Lit rate")}: {formatPercent(litRate)}</span>
       </div>
@@ -2851,11 +2884,12 @@ function ActionQueue({ payload, onEmit, className = "" }) {
   );
 }
 
-function Workbench({ payload, onEmit, readOnly = false }) {
+function Workbench({ payload, onEmit, readOnly = false, showActionQueue = true }) {
   const ui = payload.ui;
   const metrics = dashboardMetrics(payload);
   const quickLinks = asArray(payload.quickLinks);
   const urgentHealth = metrics.healthAlerts > 0;
+  const layoutClassName = showActionQueue ? "hd-workbench-layout" : "hd-workbench-layout no-queue";
 
   return (
     <section className="hd-workbench">
@@ -2866,16 +2900,16 @@ function Workbench({ payload, onEmit, readOnly = false }) {
         </div>
       </header>
 
-      <div className="hd-workbench-layout">
+      <div className={layoutClassName}>
         {!readOnly ? <HomeCaptureForm payload={payload} onEmit={onEmit} className="hd-workbench-capture" /> : null}
 
-        <ActionQueue payload={payload} onEmit={onEmit} className="hd-workbench-queue" />
+        {showActionQueue ? <ActionQueue payload={payload} onEmit={onEmit} className="hd-workbench-queue" /> : null}
 
-        {urgentHealth ? <HealthSummaryPanel payload={payload} className="hd-workbench-health urgent" /> : null}
+        <SkillProgressCard payload={payload} onEmit={onEmit} className="hd-workbench-skill" />
 
-        <SkillProgressCard payload={payload} className="hd-workbench-skill" />
+        <HealthSummaryPanel payload={payload} className={`hd-workbench-health ${urgentHealth ? "urgent" : "secondary"}`} />
 
-        <section className={`hd-side-panel hd-workbench-quick ${urgentHealth ? "after-health" : ""}`}>
+        <section className="hd-side-panel hd-workbench-quick">
           <details className="hd-quick-details">
             <summary className="hd-quick-summary">
               <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
@@ -2890,8 +2924,6 @@ function Workbench({ payload, onEmit, readOnly = false }) {
             </div>
           </details>
         </section>
-
-        {!urgentHealth ? <HealthSummaryPanel payload={payload} className="hd-workbench-health secondary" /> : null}
       </div>
     </section>
   );
@@ -2973,6 +3005,11 @@ function Dashboard({ args }) {
     setSelectedNodeId(nodeId);
     setGoalEditor(null);
   };
+
+  const selectedGoalId = useMemo(() => {
+    const node = payload.graph.nodes.find((item) => item.id === selectedNodeId && item.type === "goal");
+    return node ? node.recordId : "";
+  }, [payload, selectedNodeId]);
 
   const inlineGoal = goalEditor?.mode === "edit" ? goalById(payload, goalEditor.goalId) : null;
   const inlineGoalEditor = !readOnlyCanvas && useDailyGraphHero && goalEditor?.mode && (
@@ -3089,20 +3126,12 @@ function Dashboard({ args }) {
         canEditGoals={!readOnlyCanvas}
         canSelectGoals={!readOnlyCanvas}
         showToday={!useDailyGraphHero}
+        selectedGoalId={selectedGoalId}
       />
       {inlineGoalEditor}
 
-      {args.standalone ? (
-        <>
-          {canvasSurface}
-          <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} />
-        </>
-      ) : (
-        <>
-          {canvasSurface}
-          <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} />
-        </>
-      )}
+      {canvasSurface}
+      <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} showActionQueue={!useDailyGraphHero} />
         </>
       )}
     </main>

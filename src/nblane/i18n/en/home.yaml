@@ -264,6 +264,9 @@ dashboard_canvas_no_layers: All layers are hidden.
 dashboard_skill_progress_title: Skill Progress
 dashboard_skill_progress_caption: solid + expert lit rate
 dashboard_skill_progress_empty: No skill tree data yet.
+dashboard_skill_empty_cta: Open Skill Map
+dashboard_no_secondary_goals: Only the primary goal is active.
+dashboard_capture_saved_hint: Captured. Organizing into inbox…
 dashboard_skill_lit_rate: Lit rate
 dashboard_skill_status_expert: Expert
 dashboard_skill_status_solid: Solid

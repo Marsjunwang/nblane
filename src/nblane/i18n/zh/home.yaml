@@ -264,6 +264,9 @@ dashboard_canvas_no_layers: 已隐藏全部层。
 dashboard_skill_progress_title: 技能进度
 dashboard_skill_progress_caption: 扎实 / 专家点亮率
 dashboard_skill_progress_empty: 暂无技能树数据。
+dashboard_skill_empty_cta: 打开技能地图
+dashboard_no_secondary_goals: 当前只有主目标。
+dashboard_capture_saved_hint: 已捕获，正在整理进收件箱…
 dashboard_skill_lit_rate: 点亮率
 dashboard_skill_status_expert: 专家
 dashboard_skill_status_solid: 扎实
