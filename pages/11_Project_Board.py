@@ -15,6 +15,7 @@ from nblane.core.experience import load_experience_book
 from nblane.core.goals import load_goal_book
 from nblane.core.io import (
     KANBAN_DOING,
+    KANBAN_DONE,
     KANBAN_QUEUE,
     KanbanTask,
     parse_kanban,
@@ -158,6 +159,26 @@ def _task_rows() -> list[dict[str, str]]:
                 }
             )
     return rows
+
+
+def _task_section_index() -> dict[str, str]:
+    """Map task id -> kanban section label key for completion math."""
+    index: dict[str, str] = {}
+    sections = parse_kanban(selected)
+    for section, tasks in sections.items():
+        for task in tasks:
+            if task.id:
+                index[task.id] = section
+    return index
+
+
+def _milestone_completion(milestone, task_index: dict[str, str]) -> tuple[int, int]:
+    """Return (done, total) for a milestone's linked kanban tasks."""
+    refs = [ref for ref in milestone.task_refs if ref]
+    if not refs:
+        return 0, 0
+    done = sum(1 for ref in refs if task_index.get(ref) == KANBAN_DONE)
+    return done, len(refs)
 
 
 def _task_options_for_case(case_id: str) -> dict[str, str]:
@@ -779,9 +800,24 @@ def _render_project_form(board: ProjectBoard, case) -> None:
 
 def _render_milestones(board: ProjectBoard, case) -> None:
     st.subheader(ui["milestones"])
+    task_index = _task_section_index()
     for milestone in case.milestones:
         original_milestone = _clone(milestone)
-        with st.expander(f"{milestone.title or milestone.id} · {milestone.status}"):
+        _done, _total = _milestone_completion(milestone, task_index)
+        if _total:
+            _pct = round(_done / _total * 100)
+            _progress = ui["milestone_completion"].format(
+                done=_done, total=_total, pct=_pct
+            )
+            _label = (
+                f"{milestone.title or milestone.id} · "
+                f"{milestone.status} · {_progress}"
+            )
+        else:
+            _label = f"{milestone.title or milestone.id} · {milestone.status}"
+        with st.expander(_label):
+            if _total:
+                st.progress(_done / _total, text=_progress)
             with st.form(_state_key(f"milestone:{case.id}:{milestone.id}")):
                 title = st.text_input(ui["field_title"], value=milestone.title)
                 status = st.selectbox(

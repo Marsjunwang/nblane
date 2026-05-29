@@ -325,7 +325,7 @@ def _capture_home_research_source(profile: str, payload: dict) -> None:
     refresh_file_snapshots([_research_sources_path])
     stash_git_backup_results()
     clear_web_cache()
-    st.success(ui["dashboard_capture_saved"].format(id=item.id))
+    st.session_state["_home_capture_hint"] = item.id
     st.rerun()
 
 
@@ -1631,9 +1631,19 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> bool:
 
 
 def _page_link(path: str, label: str, *, help_text: str = "") -> None:
-    """Render a Streamlit page link with a Markdown fallback."""
+    """Render a Streamlit page link with a Markdown fallback.
+
+    The dashboard is a callable page with no file path, so "app.py" (the
+    entrypoint) is not a valid st.page_link target under st.navigation. Swap it
+    for the live StreamlitPage object stashed by main() when available.
+    """
+    target: object = path
+    if path == "app.py":
+        home_page = st.session_state.get("_nblane_home_page")
+        if home_page is not None:
+            target = home_page
     try:
-        st.page_link(path, label=label, help=help_text or None)
+        st.page_link(target, label=label, help=help_text or None)
     except Exception:
         suffix = f" — {help_text}" if help_text else ""
         st.markdown(f"- **{label}** `{path}`{suffix}")
@@ -2429,6 +2439,23 @@ def _render_dashboard_top_actions(profile: str) -> None:
             )
 
 
+def _render_home_capture_hint() -> None:
+    """Show a persistent next-step guide after a capture (survives rerun)."""
+    captured_id = st.session_state.pop("_home_capture_hint", None)
+    if not captured_id:
+        return
+    st.success(ui["dashboard_capture_saved"].format(id=captured_id))
+    hint_l, hint_r = st.columns([3, 1], vertical_alignment="center")
+    with hint_l:
+        st.caption(ui["dashboard_capture_next_hint"])
+    with hint_r:
+        st.page_link(
+            "pages/7_Research.py",
+            label=ui["dashboard_capture_next_link"],
+            icon=":material/travel_explore:",
+        )
+
+
 def _render_home_page() -> None:
     """Render the Daily Dashboard page."""
     _prepare_home_state()
@@ -2440,6 +2467,8 @@ def _render_home_page() -> None:
         st.caption(ui["page_context_line"])
     with action_col:
         _render_dashboard_top_actions(selected)
+
+    _render_home_capture_hint()
 
     profile_context_requested = _profile_context_open_requested(selected)
     if profile_context_requested:
@@ -2467,14 +2496,19 @@ def _render_home_page() -> None:
 
 def _navigation_pages() -> dict[str, list[st.Page]]:
     """Return the grouped sidebar navigation."""
+    home_page = st.Page(
+        _render_home_page,
+        title=ui["sidebar_nav_dashboard"],
+        icon=":material/dashboard:",
+        default=True,
+    )
+    # Stash the live page object so _page_link can link to the dashboard:
+    # it is a callable page (no file path), so st.page_link needs the
+    # StreamlitPage object, not the "app.py" entrypoint filename.
+    st.session_state["_nblane_home_page"] = home_page
     return {
         ui["sidebar_nav_home_group"]: [
-            st.Page(
-                _render_home_page,
-                title=ui["sidebar_nav_dashboard"],
-                icon=":material/dashboard:",
-                default=True,
-            ),
+            home_page,
         ],
         ui["sidebar_nav_work_group"]: [
             st.Page(
@@ -2542,6 +2576,13 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 "pages/4_Team_View.py",
                 title=ui["sidebar_nav_team"],
                 icon=":material/groups:",
+            ),
+        ],
+        ui["sidebar_nav_system_group"]: [
+            st.Page(
+                "pages/12_Settings.py",
+                title=ui.get("sidebar_nav_settings", "Settings"),
+                icon=":material/settings:",
             ),
         ],
     }

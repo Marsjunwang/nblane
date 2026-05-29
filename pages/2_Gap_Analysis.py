@@ -12,6 +12,7 @@ from nblane.core.gap_context import (
 from nblane.core import learned_keywords as lk_store
 from nblane.core import llm as llm_client
 from nblane.core.review_actions import record_writeback_activity
+from nblane.core.task_intake import create_learning_task
 from nblane.core.io import (
     STATUSES,
     profile_dir,
@@ -209,6 +210,7 @@ if "gap_coach_messages" not in st.session_state:
 selected = select_profile()
 ui = gap_ui()
 render_git_backup_notices()
+
 _tree_path = profile_dir(selected) / "skill-tree.yaml"
 ensure_file_snapshot(_tree_path)
 
@@ -525,7 +527,9 @@ with left:
 with right:
     st.subheader(ui["subheader_ai"])
     if not ai_enabled:
-        st.info(ui["ai_disabled_hint"])
+        st.subheader(ui["manual_gap_fallback_title"], divider=False, anchor=False)
+        st.markdown(ui["manual_gap_fallback_body"])
+        st.caption(ui["ai_add_key_caption"])
     else:
         msgs = st.session_state.gap_coach_messages
         fold_first_user = bool(
@@ -566,132 +570,173 @@ st.divider()
 # -- Write-back panel (card-based) ----------------------------
 
 if result.gaps:
-    st.subheader(ui["writeback_title"])
-    st.caption(ui["writeback_caption"])
+    with st.expander(ui["writeback_expander_label"], expanded=False):
+        st.caption(ui["writeback_expander_hint"])
 
-    tree = load_skill_tree_raw(selected)
-    if tree is not None:
-        existing: dict[str, dict] = {
-            n["id"]: n
-            for n in (tree.get("nodes") or [])
-        }
-
-        updates: dict[str, str] = {}
-
-        for gap_id in result.gaps:
-            cur = existing.get(gap_id, {}).get(
-                "status", "locked"
-            )
-            options = [
-                s for s in STATUSES if s != cur
-            ]
-
-            with st.container(border=True):
-                gc1, gc2, gc3, gc4 = st.columns(
-                    [1, 3, 2, 2]
-                )
-                with gc1:
-                    checked = st.checkbox(
-                        ui["checkbox_select"],
-                        key=f"wb_{gap_id}",
-                        label_visibility="collapsed",
-                    )
-                with gc2:
-                    em = skill_status_emoji(cur)
-                    em_pre = f"{em} " if em else ""
-                    st.markdown(
-                        f"{em_pre}**{gap_id}**"
-                    )
-                with gc3:
-                    cur_disp = status_label(ui, cur)
-                    st.caption(
-                        f"{ui['current_label']}: {cur_disp}"
-                    )
-                with gc4:
-                    new_status = st.selectbox(
-                        "→",
-                        options,
-                        index=min(
-                            1, len(options) - 1
-                        ),
-                        key=f"ws_{gap_id}",
-                        label_visibility="collapsed",
-                        format_func=lambda s, u=ui: status_label(
-                            u, s
-                        ),
-                    )
-                if checked:
-                    updates[gap_id] = new_status
-
-        if updates and st.button(
-            ui["apply_button"].format(n=len(updates)),
-            type="primary",
-        ):
-            assert_files_current([_tree_path])
-            nodes = list(tree.get("nodes") or [])
-            node_index = {
-                n["id"]: i
-                for i, n in enumerate(nodes)
+        tree = load_skill_tree_raw(selected)
+        if tree is not None:
+            existing: dict[str, dict] = {
+                n["id"]: n
+                for n in (tree.get("nodes") or [])
             }
-            for nid, new_st in updates.items():
-                if nid in node_index:
-                    nodes[node_index[nid]][
-                        "status"
-                    ] = new_st
+
+            updates: dict[str, str] = {}
+
+            for gap_id in result.gaps:
+                cur = existing.get(gap_id, {}).get(
+                    "status", "locked"
+                )
+                options = [
+                    s for s in STATUSES if s != cur
+                ]
+
+                with st.container(border=True):
+                    gc1, gc2, gc3, gc4 = st.columns(
+                        [1, 3, 2, 2]
+                    )
+                    with gc1:
+                        checked = st.checkbox(
+                            ui["checkbox_select"],
+                            key=f"wb_{gap_id}",
+                            label_visibility="collapsed",
+                        )
+                    with gc2:
+                        em = skill_status_emoji(cur)
+                        em_pre = f"{em} " if em else ""
+                        st.markdown(
+                            f"{em_pre}**{gap_id}**"
+                        )
+                    with gc3:
+                        cur_disp = status_label(ui, cur)
+                        st.caption(
+                            f"{ui['current_label']}: {cur_disp}"
+                        )
+                    with gc4:
+                        new_status = st.selectbox(
+                            "→",
+                            options,
+                            index=min(
+                                1, len(options) - 1
+                            ),
+                            key=f"ws_{gap_id}",
+                            label_visibility="collapsed",
+                            format_func=lambda s, u=ui: status_label(
+                                u, s
+                            ),
+                        )
+                    if checked:
+                        updates[gap_id] = new_status
+
+            if updates and st.button(
+                ui["apply_button"].format(n=len(updates)),
+                type="primary",
+            ):
+                assert_files_current([_tree_path])
+                nodes = list(tree.get("nodes") or [])
+                node_index = {
+                    n["id"]: i
+                    for i, n in enumerate(nodes)
+                }
+                for nid, new_st in updates.items():
+                    if nid in node_index:
+                        nodes[node_index[nid]][
+                            "status"
+                        ] = new_st
+                    else:
+                        nodes.append(
+                            {
+                                "id": nid,
+                                "status": new_st,
+                            }
+                        )
+                tree["nodes"] = nodes
+                try:
+                    save_skill_tree(selected, tree)
+                    record_writeback_activity(
+                        selected,
+                        source_page="Gap Analysis",
+                        target_owner="skill_tree",
+                        candidate_type="status_update",
+                        source_ref="gap:skill_status",
+                        title="Applied Gap skill status writeback",
+                        summary=", ".join(f"{k}->{v}" for k, v in updates.items()),
+                        refs={
+                            "skill_refs": list(updates.keys()),
+                            "files": [str(_tree_path)],
+                        },
+                        payload={"updates": dict(updates)},
+                        changed_paths=[_tree_path],
+                        status="applied",
+                    )
+                    clear_web_cache()
+                    refresh_file_snapshots([_tree_path])
+                    stash_git_backup_results()
+                    st.success(
+                        ui["success_updated"]
+                        + " "
+                        + ", ".join(
+                            f"{k}→{v}"
+                            for k, v in updates.items()
+                        )
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    record_writeback_activity(
+                        selected,
+                        source_page="Gap Analysis",
+                        target_owner="skill_tree",
+                        candidate_type="status_update",
+                        source_ref="gap:skill_status",
+                        title="Failed Gap skill status writeback",
+                        summary=", ".join(f"{k}->{v}" for k, v in updates.items()),
+                        refs={
+                            "skill_refs": list(updates.keys()),
+                            "files": [str(_tree_path)],
+                        },
+                        payload={"updates": dict(updates)},
+                        error=str(exc),
+                        status="failed",
+                    )
+                    stash_git_backup_results()
+                    st.error(str(exc))
+
+            st.divider()
+            if st.button(
+                ui["gap_task_button"].format(n=len(updates)),
+                key="gap_create_tasks",
+                disabled=not updates,
+            ):
+                if not updates:
+                    st.warning(ui["gap_task_none_selected"])
                 else:
-                    nodes.append(
-                        {
-                            "id": nid,
-                            "status": new_st,
-                        }
+                    task_context = (result.task or "").strip()
+                    for gap_id in updates:
+                        create_learning_task(
+                            selected,
+                            title=f"{ui['gap_task_title_prefix']}: {gap_id}",
+                            context=task_context,
+                            why=ui["gap_task_why_default"],
+                            outcome=ui["gap_task_outcome_default"],
+                            tags=["gap", "learning", gap_id],
+                        )
+                    record_writeback_activity(
+                        selected,
+                        source_page="Gap Analysis",
+                        target_owner="kanban",
+                        candidate_type="learning_task",
+                        source_ref="gap:create_tasks",
+                        title="Created learning tasks from gaps",
+                        summary=", ".join(updates.keys()),
+                        refs={"skill_refs": list(updates.keys())},
+                        status="applied",
                     )
-            tree["nodes"] = nodes
-            try:
-                save_skill_tree(selected, tree)
-                record_writeback_activity(
-                    selected,
-                    source_page="Gap Analysis",
-                    target_owner="skill_tree",
-                    candidate_type="status_update",
-                    source_ref="gap:skill_status",
-                    title="Applied Gap skill status writeback",
-                    summary=", ".join(f"{k}->{v}" for k, v in updates.items()),
-                    refs={
-                        "skill_refs": list(updates.keys()),
-                        "files": [str(_tree_path)],
-                    },
-                    payload={"updates": dict(updates)},
-                    changed_paths=[_tree_path],
-                    status="applied",
-                )
-                clear_web_cache()
-                refresh_file_snapshots([_tree_path])
-                stash_git_backup_results()
-                st.success(
-                    ui["success_updated"]
-                    + " "
-                    + ", ".join(
-                        f"{k}→{v}"
-                        for k, v in updates.items()
+                    clear_web_cache()
+                    stash_git_backup_results()
+                    st.success(
+                        ui["gap_task_created"].format(n=len(updates))
                     )
-                )
-                st.rerun()
-            except Exception as exc:
-                record_writeback_activity(
-                    selected,
-                    source_page="Gap Analysis",
-                    target_owner="skill_tree",
-                    candidate_type="status_update",
-                    source_ref="gap:skill_status",
-                    title="Failed Gap skill status writeback",
-                    summary=", ".join(f"{k}->{v}" for k, v in updates.items()),
-                    refs={
-                        "skill_refs": list(updates.keys()),
-                        "files": [str(_tree_path)],
-                    },
-                    payload={"updates": dict(updates)},
-                    error=str(exc),
-                    status="failed",
-                )
-                stash_git_backup_results()
-                st.error(str(exc))
+                    st.page_link(
+                        "pages/3_Kanban.py",
+                        label=ui["gap_task_goto_kanban"],
+                        icon=":material/view_kanban:",
+                    )

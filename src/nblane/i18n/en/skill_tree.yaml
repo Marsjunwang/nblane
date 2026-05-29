@@ -13,6 +13,9 @@ page_help_body: |-
 
   Skill status should move only when evidence can explain why.
 error_no_tree: skill-tree.yaml not found for '{profile}'.
+st_empty_next_steps: "No skill tree yet. Generate one from existing material to start tracking growth:"
+st_empty_seed_from_evidence: Generate from Evidence Review
+st_empty_generate_from_gap: Generate from Gap Analysis
 metric_expert: 🔵 Expert
 metric_solid: 🟢 Solid
 metric_learning: 🟡 Learning

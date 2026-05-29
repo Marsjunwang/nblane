@@ -195,6 +195,10 @@ evidence_candidate_preview: 证据候选预览
 add_source: 新增来源
 edit_source: 编辑来源
 source_queue: 来源队列
+source_task_button: ➕ 创建关联任务
+source_task_created: 已在看板 Queue 创建任务「{title}」。
+source_task_goto_kanban: 打开看板查看
+source_task_title_prefix: 研读
 candidate_preview: 证据候选预览
 candidate_preview_help: 只读草稿；本页不会写入 evidence。
 source_id: Source id

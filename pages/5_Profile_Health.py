@@ -24,6 +24,7 @@ require_login()
 selected = select_profile()
 ui = profile_health_ui()
 render_git_backup_notices()
+
 report = analyze_profile_health(selected)
 counts = report.summary_counts
 

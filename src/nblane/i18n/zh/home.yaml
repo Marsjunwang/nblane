@@ -203,6 +203,8 @@ dashboard_today_output_feedback: 输出 / 反馈
 dashboard_capture_title: 捕捉来源
 dashboard_capture_submit: 捕捉
 dashboard_capture_saved: 已捕捉来源 {id}。
+dashboard_capture_next_hint: 已入收件箱，去研究工作台整理或转成证据。
+dashboard_capture_next_link: 打开研究工作台
 dashboard_capture_title_required: 捕捉标题不能为空。
 dashboard_capture_title_placeholder: 你注意到了什么？
 dashboard_capture_raw_text: 备注

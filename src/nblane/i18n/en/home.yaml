@@ -203,6 +203,8 @@ dashboard_today_output_feedback: Output / Feedback
 dashboard_capture_title: Capture source
 dashboard_capture_submit: Capture
 dashboard_capture_saved: Captured source {id}.
+dashboard_capture_next_hint: Saved to inbox — sort it in Research or turn it into evidence.
+dashboard_capture_next_link: Open Research Workspace
 dashboard_capture_title_required: Capture title is required.
 dashboard_capture_title_placeholder: What did you notice?
 dashboard_capture_raw_text: Note

@@ -3,6 +3,9 @@ status_learning: 学习中
 status_solid: 扎实
 status_expert: 专家
 profile_header: '## 当前档案'
+sidebar_ai_ready: 'AI 已启用：{label}'
+sidebar_ai_off: 未配置 AI
+sidebar_nav_settings: 设置
 no_profiles_yet: 暂无档案。
 no_profiles_main: 暂无档案，请在侧边栏创建。
 select_profile_aria: 当前档案
@@ -158,6 +161,7 @@ sidebar_nav_work_group: 工作
 sidebar_nav_growth_group: 成长
 sidebar_nav_output_group: 输出
 sidebar_nav_team_group: 团队
+sidebar_nav_system_group: 系统
 sidebar_nav_dashboard: 每日仪表盘
 sidebar_nav_kanban: 看板
 sidebar_nav_project_board: 项目看板

@@ -673,12 +673,55 @@ def _render_ai_config_overview(profile: str, u: dict[str, str]) -> None:
         st.table(rows)
 
 
-def render_llm_settings(profile: str = "") -> None:
-    """Render app-wide LLM settings in the Streamlit sidebar."""
+def _session_llm_model() -> str:
+    """Derive the active model from the session model-choice widgets."""
+    model_choice = st.session_state.get(_LLM_MODEL_CHOICE_KEY)
+    if model_choice == _LLM_CUSTOM_MODEL_CHOICE:
+        return str(st.session_state.get(_LLM_CUSTOM_MODEL_KEY, "") or "").strip()
+    return str(model_choice or "").strip()
+
+
+def ensure_llm_session(profile: str = "") -> None:
+    """Seed and apply the LLM/Codex runtime config without rendering UI.
+
+    The settings *widgets* now live on a dedicated Settings page, but every
+    page still needs the process-wide ``llm_client`` configured from the
+    persisted profile preferences / session state. This replays the same side
+    effects ``render_llm_settings`` used to perform inline on each page:
+    seed session defaults, then push them into the LLM client. An empty API
+    key is passed through as ``None`` so the env / .env key is preserved.
+    """
+    _ensure_llm_session_defaults(profile)
+    _ensure_codex_session_defaults(profile)
+    _apply_llm_sidebar_config(
+        base_url=str(st.session_state.get(_LLM_BASE_URL_KEY, "") or "").strip(),
+        model=_session_llm_model(),
+        api_key=str(st.session_state.get(_LLM_API_KEY_KEY, "") or "").strip(),
+        ui_lang=str(st.session_state.get(_UI_LANG_KEY, "") or ""),
+        reply_lang=str(st.session_state.get(_LLM_REPLY_LANG_KEY, "") or ""),
+    )
+    _apply_codex_sidebar_config(profile)
+
+
+def _render_sidebar_ai_status(u: dict[str, str]) -> None:
+    """Compact AI status indicator. Settings live in the bottom nav group."""
+    if llm_client.is_configured():
+        st.caption(
+            "🟢 "
+            + u.get("sidebar_ai_ready", "AI ready: {label}").format(
+                label=llm_client.model_label()
+            )
+        )
+    else:
+        st.caption("⚪ " + u.get("sidebar_ai_off", "AI not configured"))
+
+
+def render_llm_settings(profile: str = "", *, expanded: bool = False) -> None:
+    """Render app-wide LLM settings. Used on the dedicated Settings page."""
     _ensure_llm_session_defaults(profile)
     u = common_ui()
 
-    with st.expander(u["llm_settings_title"]):
+    with st.expander(u["llm_settings_title"], expanded=expanded):
         if profile:
             _render_ai_config_overview(profile, u)
             _render_kanban_ai_backend_selector(profile, u)
@@ -1671,7 +1714,8 @@ def select_profile() -> str:
             _PERSIST_KEY,
             profiles[0] if profiles else "",
         )
-        render_llm_settings(selected_profile)
+        ensure_llm_session(selected_profile)
+        _render_sidebar_ai_status(u)
         if not st.session_state.get("_nblane_native_navigation", False):
             _hide_streamlit_builtin_pages_nav()
             render_workspace_navigation()

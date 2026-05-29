@@ -323,6 +323,7 @@ require_login()
 selected = select_profile()
 ui = skill_tree_ui()
 render_git_backup_notices()
+
 _pdir = profile_dir(selected)
 for _path in (
     _pdir / "skill-tree.yaml",
@@ -355,6 +356,20 @@ if tree is None:
     st.error(
         ui["error_no_tree"].format(profile=selected)
     )
+    st.markdown(ui["st_empty_next_steps"])
+    _seed_l, _seed_r = st.columns(2)
+    with _seed_l:
+        st.page_link(
+            "pages/2_Evidence_Review.py",
+            label=ui["st_empty_seed_from_evidence"],
+            icon=":material/fact_check:",
+        )
+    with _seed_r:
+        st.page_link(
+            "pages/2_Gap_Analysis.py",
+            label=ui["st_empty_generate_from_gap"],
+            icon=":material/insights:",
+        )
     st.stop()
 
 schema_name = tree.get("schema", "")

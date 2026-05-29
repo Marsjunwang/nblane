@@ -2175,6 +2175,7 @@ require_login()
 selected = select_profile()
 ui = kanban_ui()
 render_git_backup_notices()
+
 _pdir = profile_dir(selected)
 _kanban_path = _pdir / "kanban.md"
 _archive_path = _pdir / "kanban-archive.md"
@@ -2367,7 +2368,16 @@ done_entry_l, done_entry_r = st.columns(
     gap="medium",
     vertical_alignment="center",
 )
+_done_pending = sum(
+    1
+    for task in sections.get(KANBAN_DONE, [])
+    if not getattr(task, "crystallized", False)
+)
 with done_entry_l:
+    if _done_pending:
+        st.markdown(
+            f"**{ui.get('kb_done_pending_badge', '⚡ {n} done, awaiting crystallization').format(n=_done_pending)}**"
+        )
     st.caption(
         ui.get(
             "kb_done_review_hint",

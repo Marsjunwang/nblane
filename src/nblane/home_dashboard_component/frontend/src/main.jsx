@@ -547,7 +547,7 @@ function actionQueueItems(payload) {
   const evidence = quickLink(payload, "evidence_review", "pages/2_Evidence_Review.py", label(ui, "quick_evidence_review", "Evidence Review"));
   const gap = quickLink(payload, "gap", "pages/2_Gap_Analysis.py", label(ui, "quick_gap", "Gap Analysis"));
   const output = quickLink(payload, "public_site", "pages/6_Output_Studio.py", label(ui, "quick_public_site", "Output Studio"));
-  return [
+  const items = [
     {
       id: "evidence",
       count: metrics.evidenceAttention,
@@ -611,6 +611,21 @@ function actionQueueItems(payload) {
       tone: metrics.outputDrafts ? "" : "muted",
     },
   ];
+  // Priority sort: urgent (warning) first, then neutral, then muted/empty.
+  // Within the same tone, higher counts lead so "what to do first" is obvious.
+  const toneRank = { warning: 0, "": 1, muted: 2 };
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const ta = toneRank[a.item.tone] ?? 1;
+      const tb = toneRank[b.item.tone] ?? 1;
+      if (ta !== tb) return ta - tb;
+      const ca = Number(a.item.count) || 0;
+      const cb = Number(b.item.count) || 0;
+      if (ca !== cb) return cb - ca;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.item);
 }
 
 function TodayFocusStrip({ payload, onEmit }) {
@@ -2857,38 +2872,6 @@ function Workbench({ payload, onEmit, readOnly = false }) {
         <ActionQueue payload={payload} onEmit={onEmit} className="hd-workbench-queue" />
 
         {urgentHealth ? <HealthSummaryPanel payload={payload} className="hd-workbench-health urgent" /> : null}
-
-        <article className="hd-summary-card hd-workbench-focus">
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_current_focus", "Current focus")}</span>
-          <strong>{metrics.doingTotal}</strong>
-          <p>{metrics.doing.slice(0, 2).map((item) => cleanText(item.title)).join(" / ") || label(ui, "dashboard_doing_empty", "No Doing tasks yet.")}</p>
-        </article>
-
-        <article className="hd-summary-card hd-workbench-evidence">
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_evidence_review", "Evidence review")}</span>
-          <strong>{metrics.evidenceAttention}</strong>
-          <p>
-            {label(ui, "dashboard_done_uncrystallized", "Done not crystallized")}: {metrics.evidenceCandidates}
-            {" · "}
-            {label(ui, "dashboard_atomic_evidence_unlinked", "Unlinked atomic rows")}: {metrics.unlinkedAtomic}
-            {" · "}
-            {label(ui, "dashboard_atomic_evidence_needs_review", "Needs review")}: {metrics.needsReview}
-            {" · "}
-            {label(ui, "dashboard_atomic_evidence_status_risk", "Status risks")}: {metrics.statusRisk}
-          </p>
-        </article>
-
-        <article className="hd-summary-card hd-workbench-gap">
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_gap_next_action", "Gap / Next action")}</span>
-          <strong>{metrics.gapRisk}</strong>
-          <p>{label(ui, "dashboard_gap_risk_title", "Gap risk")}</p>
-        </article>
-
-        <article className="hd-summary-card hd-workbench-output">
-          <span className="hd-eyebrow">{label(ui, "dashboard_today_output_feedback", "Output / Feedback")}</span>
-          <strong>{metrics.outputDrafts}</strong>
-          <p>{label(ui, "dashboard_public_published", "Published")}: {metrics.published}</p>
-        </article>
 
         <SkillProgressCard payload={payload} className="hd-workbench-skill" />
 

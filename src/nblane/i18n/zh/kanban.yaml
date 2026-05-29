@@ -350,6 +350,8 @@ subtasks_label: 子任务（可勾选）
 add_subtask: + 子任务
 crystallized: 已结晶（已摄入）
 kb_open_evidence_review: 打开证据审阅
+kb_done_pending_badge: "⚡ {n} 条已完成待沉淀"
+kb_done_pending_none: 已完成卡片都已沉淀。
 kb_done_review_hint: 已完成 -> 证据草案与批量整理统一在证据审阅处理；看板已完成卡片这里只保留单卡归档或删除。
 kb_archive_card: 归档
 kb_archive_short: 归档

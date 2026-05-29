@@ -43,6 +43,13 @@ writeback_caption: Select nodes and new statuses, then apply to write skill-tree
 current_label: Current
 apply_button: Apply {n} update(s)
 success_updated: 'Skill tree updated:'
+gap_task_button: ➕ Create learning tasks for selected gaps ({n})
+gap_task_created: Created {n} learning task(s) in the kanban Queue.
+gap_task_goto_kanban: Open Kanban
+gap_task_none_selected: Select the gap nodes you want to close first.
+gap_task_title_prefix: Close skill gap
+gap_task_why_default: This node is a gap for the current task and must be closed to proceed.
+gap_task_outcome_default: Node reaches "Learning / Solid" status.
 checkbox_select: Select
 use_rule_match: Rule keyword overlap
 use_llm_router: AI route to skill nodes (first pass)
@@ -66,3 +73,9 @@ subheader_coach_followup: Follow-up (same session)
 expander_first_prompt: 'First prompt: skill tree + gap analysis (long)'
 chat_followup_placeholder: Ask a follow-up about this gap analysis…
 spinner_ai_followup: Thinking…
+writeback_expander_label: Review gaps & update skill status
+writeback_expander_hint: Expand to review identified gaps and propose skill status updates. You can select nodes and update their statuses before writing back to skill-tree.yaml.
+manual_gap_fallback_title: Manual gap review
+manual_gap_fallback_body: |-
+  Without AI, you can still manually review the matched nodes and dependency closure above, then use the expander below to update skill statuses directly.
+  This is useful for quick iterations on well-known task patterns.

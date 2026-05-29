@@ -14,6 +14,7 @@ from nblane.core.research_sources import (
     save_research_sources,
     update_research_source,
 )
+from nblane.core.task_intake import create_learning_task
 from nblane.web_cache import clear_web_cache, load_research_sources
 from nblane.web_shared import (
     assert_files_current,
@@ -234,11 +235,45 @@ def _render_source_queue(ctx, inbox) -> None:
                         st.caption(source.url)
                     if source.summary:
                         st.caption(source.summary)
-                    _render_source_form(ctx, 
+                    _render_source_task_button(ctx, source)
+                    _render_source_form(ctx,
                         inbox,
                         source=source,
                         prefix=f"research_source_edit_{selected}_{source.id}",
                     )
+
+
+def _render_source_task_button(ctx, source) -> None:
+    """Create a kanban task linked to a research source (closes the loop)."""
+    ui = ctx.ui
+    selected = ctx.selected
+    if st.button(
+        ui.get("source_task_button", "➕ Create linked task"),
+        key=f"research_source_task_{selected}_{source.id}",
+    ):
+        prefix = ui.get("source_task_title_prefix", "Read")
+        title = f"{prefix}: {source.title or source.id}"
+        context_parts = [p for p in (source.url, source.summary) if p]
+        context_parts.append(f"source: {source.id}")
+        task = create_learning_task(
+            selected,
+            title=title,
+            context="\n".join(context_parts),
+            tags=["research", source.id],
+        )
+        clear_web_cache()
+        stash_git_backup_results()
+        st.success(
+            ui.get(
+                "source_task_created",
+                'Created task "{title}".',
+            ).format(title=task.title)
+        )
+        st.page_link(
+            "pages/3_Kanban.py",
+            label=ui.get("source_task_goto_kanban", "Open Kanban"),
+            icon=":material/view_kanban:",
+        )
 
 
 def _render_candidate_preview(ctx, inbox) -> None:

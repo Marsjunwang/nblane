@@ -13,6 +13,9 @@ page_help_body: |-
 
   技能升级必须能被证据解释。
 error_no_tree: 未找到「{profile}」的 skill-tree.yaml。
+st_empty_next_steps: 还没有技能树。从已有材料生成一棵，开始追踪成长：
+st_empty_seed_from_evidence: 从证据评审生成
+st_empty_generate_from_gap: 从差距分析生成
 metric_expert: 🔵 专家
 metric_solid: 🟢 扎实
 metric_learning: 🟡 学习中

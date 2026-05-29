@@ -195,6 +195,10 @@ evidence_candidate_preview: Evidence candidate preview
 add_source: Add source
 edit_source: Edit source
 source_queue: Source queue
+source_task_button: ➕ Create linked task
+source_task_created: 'Created task "{title}" in the kanban Queue.'
+source_task_goto_kanban: Open Kanban
+source_task_title_prefix: Read
 candidate_preview: Evidence candidate preview
 candidate_preview_help: Read-only draft; this page does not write evidence.
 source_id: Source id

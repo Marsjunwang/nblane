@@ -43,6 +43,13 @@ writeback_caption: 选择要更新的节点和新状态，完成任务后一键�
 current_label: 当前
 apply_button: 应用 {n} 项更新
 success_updated: 技能树已更新：
+gap_task_button: ➕ 为选中缺口创建学习任务（{n}）
+gap_task_created: 已在看板 Queue 创建 {n} 个学习任务。
+gap_task_goto_kanban: 打开看板查看
+gap_task_none_selected: 请先勾选要补齐的缺口节点。
+gap_task_title_prefix: 补齐技能
+gap_task_why_default: 该节点是当前任务的缺口，需补齐后才能胜任。
+gap_task_outcome_default: 节点状态达到「学习中 / 扎实」。
 checkbox_select: 选择
 use_rule_match: 规则关键词重叠
 use_llm_router: AI 首轮匹配到技能节点
@@ -66,3 +73,9 @@ subheader_coach_followup: 继续追问（同一会话）
 expander_first_prompt: 首轮完整提示：技能树 + 差距分析（长）
 chat_followup_placeholder: 针对本次差距分析继续提问…
 spinner_ai_followup: 思考中…
+writeback_expander_label: 查看缺口与更新技能状态
+writeback_expander_hint: 展开以查看识别到的缺口，并提议更新技能状态。你可以选择节点并更新其状态后写回 skill-tree.yaml。
+manual_gap_fallback_title: 手工缺口评审
+manual_gap_fallback_body: |-
+  即使没有 AI，你也可以手动查看上方的匹配节点和依赖闭包，然后在下方展开框中直接更新技能状态。
+  这对已知任务模式的快速迭代很有帮助。

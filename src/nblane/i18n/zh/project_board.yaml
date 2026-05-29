@@ -16,6 +16,7 @@ create_project: 新建项目
 create_task: 新建看板任务
 project_detail: 项目详情
 milestones: 里程碑
+milestone_completion: 完成 {done}/{total}（{pct}%）
 add_milestone: 新增里程碑
 save_project: 保存项目
 save_milestone: 保存里程碑

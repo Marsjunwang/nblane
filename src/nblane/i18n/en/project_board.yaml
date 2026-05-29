@@ -16,6 +16,7 @@ create_project: Create project
 create_task: Create Kanban task
 project_detail: Project detail
 milestones: Milestones
+milestone_completion: "{done}/{total} done ({pct}%)"
 add_milestone: Add milestone
 save_project: Save project
 save_milestone: Save milestone

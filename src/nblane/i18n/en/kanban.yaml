@@ -350,6 +350,8 @@ subtasks_label: Subtasks (checkbox)
 add_subtask: + Subtask
 crystallized: Crystallized (ingested)
 kb_open_evidence_review: Open Evidence Review
+kb_done_pending_badge: "⚡ {n} done, awaiting crystallization"
+kb_done_pending_none: All Done cards are crystallized.
 kb_done_review_hint: Use Evidence Review for Done -> evidence drafts and batch cleanup. Done cards still support single-card archive or delete here.
 kb_archive_card: Archive
 kb_archive_short: Archive
