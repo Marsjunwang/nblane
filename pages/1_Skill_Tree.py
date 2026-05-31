@@ -24,6 +24,11 @@ from nblane.core.io import (
     schema_node_index,
 )
 from nblane.core.models import EVIDENCE_TYPES, EvidencePool
+from nblane.core.skill_tree_edit import (
+    rows_dirty,
+    rows_to_nodes,
+    serialize_rows_for_dirty,
+)
 from nblane.core.sync import write_generated_blocks
 from nblane.web_cache import (
     clear_web_cache,
@@ -123,61 +128,6 @@ def _build_rows(
     return rows
 
 
-def _rows_to_nodes(rows: list[dict]) -> list[dict]:
-    """Convert edited rows back to skill-tree nodes list."""
-    out: list[dict] = []
-    for r in rows:
-        has_inline = bool(r.get("evidence"))
-        has_refs = bool(r.get("evidence_refs"))
-        has_ev = has_inline or has_refs
-        if (
-            r.get("status") == "locked"
-            and not r.get("note")
-            and not has_ev
-        ):
-            continue
-        node: dict = {
-            "id": r["id"],
-            "status": r["status"],
-        }
-        if r.get("note"):
-            node["note"] = r["note"]
-        evs = r.get("evidence") or []
-        cleaned: list[dict] = []
-        for ev in evs:
-            if not isinstance(ev, dict):
-                continue
-            title = str(ev.get("title", "") or "").strip()
-            et = str(ev.get("type", "practice") or "practice")
-            if et not in EVIDENCE_TYPES:
-                et = "practice"
-            if not title:
-                continue
-            item = {"type": et, "title": title}
-            for k in ("date", "url", "summary"):
-                v = str(ev.get(k, "") or "").strip()
-                if v:
-                    item[k] = v
-            cleaned.append(item)
-        if cleaned:
-            node["evidence"] = cleaned
-        refs_in = r.get("evidence_refs") or []
-        uniq: list[str] = []
-        seen: set[str] = set()
-        if isinstance(refs_in, list):
-            for x in refs_in:
-                if not isinstance(x, str) or not x.strip():
-                    continue
-                key = x.strip()
-                if key not in seen:
-                    seen.add(key)
-                    uniq.append(key)
-        if uniq:
-            node["evidence_refs"] = uniq
-        out.append(node)
-    return out
-
-
 def _save_and_sync(
     profile: str,
     tree: dict,
@@ -190,7 +140,7 @@ def _save_and_sync(
     Returns a message for ``st.success`` after rerun (toast survives
     ``st.rerun()`` via session state).
     """
-    nodes = _rows_to_nodes(rows)
+    nodes = rows_to_nodes(rows)
     new_tree = dict(tree)
     new_tree["nodes"] = nodes
     pdir = profile_dir(profile)
@@ -282,6 +232,7 @@ def _session_rows(
         st.session_state[_ST_EDITOR] = {
             "profile": profile,
             "rows": rows,
+            "baseline": serialize_rows_for_dirty(rows),
         }
         st.session_state.pop(_ST_EV_FOCUS, None)
     return st.session_state[_ST_EDITOR]["rows"]
@@ -295,9 +246,11 @@ def _refresh_session_rows_from_disk(
     tree_after = load_skill_tree_raw(profile)
     if tree_after is None:
         return
+    new_rows = _build_rows(tree_after, index)
     st.session_state[_ST_EDITOR] = {
         "profile": profile,
-        "rows": _build_rows(tree_after, index),
+        "rows": new_rows,
+        "baseline": serialize_rows_for_dirty(new_rows),
     }
     raw_pool = load_evidence_pool_raw(profile)
     pool_list: list[dict] = []
@@ -429,6 +382,7 @@ with _head_r:
         st.rerun()
 
 st.caption(ui["save_caption"])
+_unsaved_slot = st.empty()
 
 st.page_link(
     EVIDENCE_REVIEW_PAGE,
@@ -755,3 +709,10 @@ for cat_tab, cat in zip(cat_tabs, categories):
                                 }
                             )
                             st.rerun()
+
+
+# Computed at end of run so it reflects this run's row edits, which the
+# editor widgets above apply after the Save button / caption are rendered.
+_baseline = st.session_state.get(_ST_EDITOR, {}).get("baseline")
+if rows_dirty(_baseline, rows):
+    _unsaved_slot.caption(ui["unsaved_changes"])

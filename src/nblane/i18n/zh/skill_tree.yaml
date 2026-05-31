@@ -34,6 +34,7 @@ note_placeholder: 上下文 / 证据
 cat_progress: '{cat}：{lit}/{total} 已点亮（{pct:.0%}）'
 save_button: 保存 skill-tree.yaml
 save_caption: 保存 skill-tree.yaml，并同步 SKILL.md 中的生成块。
+unsaved_changes: 有未保存的改动，请点「保存」写入 skill-tree.yaml。
 saved_synced: 已保存并同步 SKILL.md。
 saved_yaml: 已保存 skill-tree.yaml。
 saved_synced_path: 已保存并同步 SKILL.md。skill-tree.yaml 路径：`{path}`

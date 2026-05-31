@@ -34,6 +34,7 @@ note_placeholder: context / evidence
 cat_progress: '{cat}: {lit}/{total} lit ({pct:.0%})'
 save_button: Save skill-tree.yaml
 save_caption: Saves skill-tree.yaml and syncs generated blocks in SKILL.md.
+unsaved_changes: Unsaved changes — use Save to write them to skill-tree.yaml.
 saved_synced: Saved and synced SKILL.md.
 saved_yaml: Saved skill-tree.yaml.
 saved_synced_path: 'Saved and synced SKILL.md. skill-tree.yaml: `{path}`'
