@@ -22,6 +22,12 @@ save_project: 保存项目
 save_milestone: 保存里程碑
 archive_project: 归档项目
 edit: 编辑
+select: 选择
+select_project_hint: 从左侧选择一个项目查看和编辑详情。
+card_selected_badge: ✓ 当前
+links_section: 关联引用
+tab_basic: 基本信息
+tab_milestones_tasks: 里程碑与任务
 saved: 已保存项目看板。
 task_created: 已创建看板任务。
 empty_board: 还没有内部项目。

@@ -557,12 +557,13 @@ def _summary_metrics(board: ProjectBoard) -> None:
         ):
             unassigned_evidence += 1
 
-    cols = st.columns(7)
+    status_cols = st.columns(4)
     for idx, status in enumerate(PROJECT_STATUSES):
-        cols[idx].metric(ui[f"status_{status}"], counts.get(status, 0))
-    cols[4].metric(ui["metric_unassigned_tasks"], unassigned_tasks)
-    cols[5].metric(ui["metric_unassigned_evidence"], unassigned_evidence)
-    cols[6].metric(ui["metric_current_goal_projects"], goal_count)
+        status_cols[idx].metric(ui[f"status_{status}"], counts.get(status, 0))
+    gap_cols = st.columns(3)
+    gap_cols[0].metric(ui["metric_unassigned_tasks"], unassigned_tasks)
+    gap_cols[1].metric(ui["metric_unassigned_evidence"], unassigned_evidence)
+    gap_cols[2].metric(ui["metric_current_goal_projects"], goal_count)
     if unassigned_evidence:
         st.info(
             ui["unassigned_evidence_hint"].format(count=unassigned_evidence)
@@ -609,11 +610,12 @@ def _render_create_project(board: ProjectBoard) -> None:
         )
         if case is None:
             return
-        st.session_state[_state_key("selected_project")] = case.id
+        st.session_state[_state_key("selected_project_active")] = case.id
         st.rerun()
 
 
 def _render_project_board(board: ProjectBoard) -> None:
+    active_id = st.session_state.get(_state_key("selected_project_active"))
     status_tabs = st.tabs([ui[f"status_{status}"] for status in PROJECT_STATUSES])
     for tab, status in zip(status_tabs, PROJECT_STATUSES):
         with tab:
@@ -622,10 +624,14 @@ def _render_project_board(board: ProjectBoard) -> None:
                 st.caption(ui["empty_status"])
                 continue
             for case in rows:
+                is_active = case.id == active_id
                 with st.container(border=True):
                     c1, c2 = st.columns([5, 1])
                     with c1:
-                        st.markdown(f"**{case.title or case.id}**")
+                        badge = (
+                            f"{ui['card_selected_badge']} " if is_active else ""
+                        )
+                        st.markdown(f"**{badge}{case.title or case.id}**")
                         st.caption(
                             " · ".join(
                                 item
@@ -649,18 +655,19 @@ def _render_project_board(board: ProjectBoard) -> None:
                         )
                     with c2:
                         if st.button(
-                            ui["edit"],
-                            key=_state_key(f"edit:{case.id}"),
+                            ui["select"],
+                            key=_state_key(f"select:{case.id}"),
                             use_container_width=True,
+                            type="primary" if is_active else "secondary",
+                            disabled=is_active,
                         ):
                             st.session_state[
-                                _state_key("selected_project")
+                                _state_key("selected_project_active")
                             ] = case.id
                             st.rerun()
 
 
 def _render_project_form(board: ProjectBoard, case) -> None:
-    st.subheader(ui["project_detail"])
     original_case = _clone(case)
     task_options = _task_options_for_case(case.id)
     option_maps = {
@@ -730,48 +737,49 @@ def _render_project_form(board: ProjectBoard, case) -> None:
         time_range = st.text_input(ui["field_time_range"], value=case.time_range)
         summary = st.text_area(ui["field_summary"], value=case.summary, height=90)
         notes = st.text_area(ui["field_notes"], value=case.notes, height=90)
-        goal_refs = _multiselect_refs(
-            ui["field_goal_refs"],
-            case.goal_refs,
-            option_maps["goal_refs"],
-            key=_state_key(f"goals:{case.id}"),
-            help_text=ui["field_goal_refs_help"],
-        )
-        task_refs = _multiselect_refs(
-            ui["field_task_refs"],
-            case.task_refs,
-            option_maps["task_refs"],
-            key=_state_key(f"tasks:{case.id}"),
-            help_text=ui["field_task_refs_help"],
-        )
-        evidence_refs = _multiselect_refs(
-            ui["field_evidence_refs"],
-            case.evidence_refs,
-            option_maps["evidence_refs"],
-            key=_state_key(f"evidence:{case.id}"),
-            help_text=ui["field_evidence_refs_help"],
-        )
-        source_refs = _multiselect_refs(
-            ui["field_source_refs"],
-            case.source_refs,
-            option_maps["source_refs"],
-            key=_state_key(f"sources:{case.id}"),
-            help_text=ui["field_source_refs_help"],
-        )
-        experience_refs = _multiselect_refs(
-            ui["field_experience_refs"],
-            case.experience_refs,
-            _experience_options(),
-            key=_state_key(f"experiences:{case.id}"),
-            help_text=ui.get("field_experience_refs_help", ""),
-        )
-        output_refs = _multiselect_refs(
-            ui["field_output_refs"],
-            case.output_refs,
-            option_maps["output_refs"],
-            key=_state_key(f"outputs:{case.id}"),
-            help_text=ui.get("field_output_refs_help", ""),
-        )
+        with st.expander(ui["links_section"], expanded=False):
+            goal_refs = _multiselect_refs(
+                ui["field_goal_refs"],
+                case.goal_refs,
+                option_maps["goal_refs"],
+                key=_state_key(f"goals:{case.id}"),
+                help_text=ui["field_goal_refs_help"],
+            )
+            task_refs = _multiselect_refs(
+                ui["field_task_refs"],
+                case.task_refs,
+                option_maps["task_refs"],
+                key=_state_key(f"tasks:{case.id}"),
+                help_text=ui["field_task_refs_help"],
+            )
+            evidence_refs = _multiselect_refs(
+                ui["field_evidence_refs"],
+                case.evidence_refs,
+                option_maps["evidence_refs"],
+                key=_state_key(f"evidence:{case.id}"),
+                help_text=ui["field_evidence_refs_help"],
+            )
+            source_refs = _multiselect_refs(
+                ui["field_source_refs"],
+                case.source_refs,
+                option_maps["source_refs"],
+                key=_state_key(f"sources:{case.id}"),
+                help_text=ui["field_source_refs_help"],
+            )
+            experience_refs = _multiselect_refs(
+                ui["field_experience_refs"],
+                case.experience_refs,
+                _experience_options(),
+                key=_state_key(f"experiences:{case.id}"),
+                help_text=ui.get("field_experience_refs_help", ""),
+            )
+            output_refs = _multiselect_refs(
+                ui["field_output_refs"],
+                case.output_refs,
+                option_maps["output_refs"],
+                key=_state_key(f"outputs:{case.id}"),
+                help_text=ui.get("field_output_refs_help", ""),
+            )
         submitted = st.form_submit_button(ui["save_project"], type="primary")
     if submitted:
         clean_title = title.strip()
@@ -965,6 +973,28 @@ def _render_create_task(board: ProjectBoard, case) -> None:
         st.rerun()
 
 
+def _resolve_selected_project(board: ProjectBoard) -> str | None:
+    active = st.session_state.get(_state_key("selected_project_active"))
+    if active and active in board.by_id():
+        return active
+    return None
+
+
+def _render_project_detail(board: ProjectBoard, case) -> None:
+    tabs = st.tabs([ui["tab_basic"], ui["tab_milestones_tasks"]])
+    with tabs[0]:
+        _render_project_form(board, case)
+        if case.status != "archived":
+            if st.button(ui["archive_project"], type="secondary"):
+                original_case = _clone(case)
+                submitted_case = replace(original_case, status="archived")
+                _sync_case_update_and_refresh(original_case, submitted_case)
+                st.rerun()
+    with tabs[1]:
+        _render_milestones(board, case)
+        _render_create_task(board, case)
+
+
 def main() -> None:
     board = load_project_board(selected)
     head_l, head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")
@@ -987,31 +1017,16 @@ def main() -> None:
         st.info(ui["empty_board"])
         return
 
-    _render_project_board(board)
-    st.divider()
-
-    options = {case.id: case.title or case.id for case in board.project_cases if case.id}
-    selected_id = st.session_state.get(_state_key("selected_project"))
-    if selected_id not in options:
-        selected_id = next(iter(options))
-    selected_id = st.selectbox(
-        ui["select_project"],
-        list(options),
-        index=list(options).index(selected_id),
-        format_func=lambda pid: options[pid],
-        key=_state_key("selected_project"),
-    )
-    case = next(case for case in board.project_cases if case.id == selected_id)
-    _render_project_form(board, case)
-    _render_milestones(board, case)
-    _render_create_task(board, case)
-
-    if case.status != "archived":
-        if st.button(ui["archive_project"], type="secondary"):
-            original_case = _clone(case)
-            submitted_case = replace(original_case, status="archived")
-            _sync_case_update_and_refresh(original_case, submitted_case)
-            st.rerun()
+    left, right = st.columns([2, 3], gap="large")
+    with left:
+        _render_project_board(board)
+    with right:
+        selected_id = _resolve_selected_project(board)
+        if selected_id is None:
+            st.info(ui["select_project_hint"])
+        else:
+            case = board.by_id()[selected_id]
+            _render_project_detail(board, case)
 
 
 if __name__ == "__main__":

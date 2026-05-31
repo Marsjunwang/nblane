@@ -22,6 +22,12 @@ save_project: Save project
 save_milestone: Save milestone
 archive_project: Archive project
 edit: Edit
+select: Select
+select_project_hint: Select a project on the left to view and edit details.
+card_selected_badge: ✓ Selected
+links_section: Linked refs
+tab_basic: Basics
+tab_milestones_tasks: Milestones & tasks
 saved: Saved project board.
 task_created: Created Kanban task.
 empty_board: No internal projects yet.
