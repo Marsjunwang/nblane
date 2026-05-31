@@ -9,6 +9,8 @@ dist/
 build/
 .venv/
 .streamlit/
+!.streamlit/
+!.streamlit/config.toml
 node_modules/
 .dev-data/
 .dev-assets/

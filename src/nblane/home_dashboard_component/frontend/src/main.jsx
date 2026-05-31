@@ -45,7 +45,7 @@ const SKILL_RING_RADIUS = 52;
 
 const NODE_COLORS = {
   north_star: "#6b4fb3",
-  goal: "#256b5d",
+  goal: "#21685b",
   project_case: "#6f7b82",
   skill: "#2f6fed",
   gap: "#9f1d1d",
@@ -59,7 +59,7 @@ const NODE_COLORS = {
   evidence_candidate: "#6b4fb3",
   atomic_evidence: "#6b4fb3",
   composite_evidence: "#6b4fb3",
-  claim: "#256b5d",
+  claim: "#21685b",
   output: "#b35a34",
   feedback: "#2f9e73",
   capacity: "#68716f",
@@ -73,7 +73,7 @@ const EDGE_COLORS = {
   source_to_candidate: "#b35a34",
   review: "#6b4fb3",
   derives: "#8b6f20",
-  supports: "#256b5d",
+  supports: "#21685b",
   drives: "#2f6fed",
   produces: "#b35a34",
   feedback: "#2f9e73",
