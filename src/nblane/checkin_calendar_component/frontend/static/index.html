@@ -8,6 +8,25 @@
     :root {
       color-scheme: light;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ink: #17211f;
+      --muted: #60716e;
+      --line: #d8e0dc;
+      --paper: #ffffff;
+      --soft: #f6f8f7;
+      --danger: #9f1d1d;
+      --select-bg: #eef2ff;
+      --select-border: #4f46e5;
+      --select-text: #312e81;
+      --select-hover-border: #c7d2fe;
+      --select-hover-text: #1d4ed8;
+      --learning-bg: #bfdbfe;
+      --learning-border: #93c5fd;
+      --learning-text: #1e40af;
+      --learning-soft: #eff6ff;
+      --exercise-bg: #bbf7d0;
+      --exercise-border: #86efac;
+      --exercise-text: #166534;
+      --exercise-soft: #f0fdf4;
     }
     * { box-sizing: border-box; }
     html,
@@ -46,10 +65,10 @@
     }
     .kb-cal-nav-btn {
       align-items: center;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
+      background: var(--soft);
+      border: 1px solid var(--line);
       border-radius: 5px;
-      color: #334155;
+      color: var(--muted);
       display: flex;
       font-size: 2rem;
       font-weight: 900;
@@ -61,15 +80,15 @@
     }
     .kb-cal-nav-btn:hover,
     .kb-cal-title:hover {
-      background: #eef2ff;
-      border-color: #c7d2fe;
-      color: #1d4ed8;
+      background: var(--select-bg);
+      border-color: var(--select-hover-border);
+      color: var(--select-hover-text);
     }
     .kb-cal-title {
       background: transparent;
       border: 1px solid transparent;
       border-radius: 5px;
-      color: #0f172a;
+      color: var(--ink);
       font-size: 1.08rem;
       font-weight: 900;
       height: 1.55rem;
@@ -86,7 +105,7 @@
       min-height: 0;
     }
     .kb-cal-weekday {
-      color: #64748b;
+      color: var(--muted);
       font-size: 1rem;
       font-weight: 900;
       line-height: 1.05rem;
@@ -105,40 +124,40 @@
       display: block;
     }
     .kb-cal-day {
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
+      background: var(--paper);
+      border: 1px solid var(--line);
       border-radius: 3px;
-      color: #334155;
+      color: var(--muted);
       display: block;
       overflow: hidden;
       position: relative;
     }
     .kb-cal-day:hover {
-      background: #f8fafc;
-      border-color: #94a3b8;
-      color: #0f172a;
+      background: var(--soft);
+      border-color: var(--line);
+      color: var(--ink);
     }
     .kb-cal-day.selected {
-      background: #eef2ff;
-      border-color: #4f46e5;
-      color: #312e81;
+      background: var(--select-bg);
+      border-color: var(--select-border);
+      color: var(--select-text);
     }
     .kb-cal-day.today .kb-cal-num {
-      color: #be123c;
+      color: var(--danger);
       font-weight: 900;
     }
     .kb-cal-day.has-learning,
     .kb-cal-day.has-exercise {
-      background: #fbfdff;
-      border-color: #cbd5e1;
+      background: var(--soft);
+      border-color: var(--line);
     }
     .kb-cal-day.has-learning.has-exercise {
-      background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+      background: linear-gradient(135deg, var(--learning-soft) 0%, var(--exercise-soft) 100%);
     }
     .kb-cal-day.selected.has-learning,
     .kb-cal-day.selected.has-exercise {
-      background: #eef2ff;
-      border-color: #4f46e5;
+      background: var(--select-bg);
+      border-color: var(--select-border);
     }
     .kb-cal-num {
       align-items: center;
@@ -177,17 +196,17 @@
       width: 50%;
     }
     .kb-cal-badge.learning {
-      background: #bfdbfe;
-      border-color: #93c5fd;
-      color: #1e40af;
+      background: var(--learning-bg);
+      border-color: var(--learning-border);
+      color: var(--learning-text);
       right: 0;
       top: 0;
     }
     .kb-cal-badge.exercise {
-      background: #bbf7d0;
-      border-color: #86efac;
+      background: var(--exercise-bg);
+      border-color: var(--exercise-border);
       bottom: 0;
-      color: #166534;
+      color: var(--exercise-text);
       right: 0;
     }
   </style>

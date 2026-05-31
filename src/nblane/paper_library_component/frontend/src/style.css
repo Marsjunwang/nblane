@@ -206,10 +206,10 @@ select {
 .paper-discovery-import,
 .paper-discovery-cancel {
   min-height: 36px;
-  border: 1px solid #ef4444;
+  border: 1px solid #9f1d1d;
   border-radius: 8px;
   padding: 8px 12px;
-  background: #ef4444;
+  background: #9f1d1d;
   color: #ffffff;
   cursor: pointer;
   font-weight: 760;
@@ -303,11 +303,11 @@ select {
 }
 
 .paper-discovery-message {
-  border: 1px solid rgba(37, 99, 235, 0.16);
+  border: 1px solid rgba(33, 104, 91, 0.16);
   border-radius: 8px;
   padding: 8px 10px;
-  background: rgba(37, 99, 235, 0.06);
-  color: #1d4ed8;
+  background: rgba(33, 104, 91, 0.06);
+  color: #21685b;
   font-size: 12px;
   font-weight: 650;
 }
@@ -327,10 +327,10 @@ select {
 .paper-discovery-progress {
   display: grid;
   gap: 7px;
-  border: 1px solid rgba(37, 99, 235, 0.16);
+  border: 1px solid rgba(33, 104, 91, 0.16);
   border-radius: 8px;
   padding: 9px 10px;
-  background: rgba(37, 99, 235, 0.05);
+  background: rgba(33, 104, 91, 0.05);
   color: #243b53;
   font-size: 11px;
   line-height: 1.45;
@@ -360,14 +360,14 @@ select {
   overflow: hidden;
   height: 6px;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.12);
+  background: rgba(33, 104, 91, 0.12);
 }
 
 .paper-discovery-progress-track span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #2563eb;
+  background: #21685b;
   transition: width 0.22s ease;
 }
 
@@ -516,7 +516,7 @@ select {
 .paper-discovery-explainers {
   display: grid;
   gap: 4px;
-  border-left: 3px solid rgba(37, 99, 235, 0.28);
+  border-left: 3px solid rgba(33, 104, 91, 0.28);
   padding-left: 8px;
 }
 
@@ -578,11 +578,11 @@ select {
 }
 
 .paper-discovery-links a {
-  border: 1px solid rgba(36, 99, 235, 0.16);
+  border: 1px solid rgba(33, 104, 91, 0.16);
   border-radius: 7px;
   padding: 4px 8px;
-  background: rgba(36, 99, 235, 0.06);
-  color: #1d4ed8;
+  background: rgba(33, 104, 91, 0.06);
+  color: #21685b;
   font-size: 12px;
   font-weight: 720;
   text-decoration: none;
@@ -646,18 +646,18 @@ select {
 
 .paper-workspace-controls button:hover,
 .paper-detail-actions button:hover:not(:disabled) {
-  border-color: rgba(36, 99, 235, 0.28);
+  border-color: rgba(33, 104, 91, 0.28);
   background: #f7fafc;
 }
 
 .paper-workspace-notice,
 .paper-workspace-loading,
 .paper-workspace-diagnostics {
-  border: 1px solid rgba(37, 99, 235, 0.16);
+  border: 1px solid rgba(33, 104, 91, 0.16);
   border-radius: 8px;
   padding: 8px 10px;
-  background: rgba(37, 99, 235, 0.06);
-  color: #1d4ed8;
+  background: rgba(33, 104, 91, 0.06);
+  color: #21685b;
   font-size: 12px;
 }
 
@@ -672,10 +672,10 @@ select {
 .paper-workspace-task-progress {
   display: grid;
   gap: 7px;
-  border: 1px solid rgba(15, 118, 110, 0.18);
+  border: 1px solid rgba(33, 104, 91, 0.18);
   border-radius: 8px;
   padding: 9px 10px;
-  background: rgba(15, 118, 110, 0.06);
+  background: rgba(33, 104, 91, 0.06);
   color: #243b53;
   font-size: 11px;
   line-height: 1.45;
@@ -711,14 +711,14 @@ select {
   overflow: hidden;
   height: 6px;
   border-radius: 999px;
-  background: rgba(15, 118, 110, 0.13);
+  background: rgba(33, 104, 91, 0.13);
 }
 
 .paper-workspace-task-progress-track span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #0f766e;
+  background: #21685b;
   transition: width 0.22s ease;
 }
 
@@ -850,8 +850,8 @@ select {
 }
 
 .paper-tree-row.is-active {
-  background: rgba(36, 99, 235, 0.08);
-  border-color: rgba(36, 99, 235, 0.2);
+  background: rgba(33, 104, 91, 0.08);
+  border-color: rgba(33, 104, 91, 0.2);
 }
 
 .paper-tree-row:hover {
@@ -859,8 +859,8 @@ select {
 }
 
 .paper-tree-row.is-drop-before {
-  border-top-color: #2563eb;
-  box-shadow: inset 0 2px 0 #2563eb;
+  border-top-color: #21685b;
+  box-shadow: inset 0 2px 0 #21685b;
 }
 
 .paper-tree-row.is-drop-into {
@@ -869,8 +869,8 @@ select {
 }
 
 .paper-tree-row.is-drop-after {
-  border-bottom-color: #2563eb;
-  box-shadow: inset 0 -2px 0 #2563eb;
+  border-bottom-color: #21685b;
+  box-shadow: inset 0 -2px 0 #21685b;
 }
 
 .paper-tree-row[draggable="true"] {
@@ -921,7 +921,7 @@ select {
 }
 
 .paper-tree-row.is-view .paper-tree-icon {
-  background: #2f6fed;
+  background: #21685b;
 }
 
 .paper-tree-row.is-collection .paper-tree-icon,
@@ -1000,7 +1000,7 @@ select {
 }
 
 .paper-tree-menu button:hover:not(:disabled) {
-  background: rgba(36, 99, 235, 0.08);
+  background: rgba(33, 104, 91, 0.08);
 }
 
 .paper-tree-menu button:disabled {
@@ -1080,8 +1080,8 @@ select {
 }
 
 .paper-tree-dialog-actions button.is-primary {
-  border-color: #2563eb;
-  background: #2563eb;
+  border-color: #21685b;
+  background: #21685b;
   color: #ffffff;
 }
 
@@ -1238,18 +1238,18 @@ select {
 }
 
 .paper-list-card:hover {
-  border-color: rgba(36, 99, 235, 0.24);
+  border-color: rgba(33, 104, 91, 0.24);
   box-shadow: 0 5px 16px rgba(31, 41, 55, 0.08);
 }
 
 .paper-list-card.is-active {
-  border-color: rgba(36, 99, 235, 0.56);
-  background: rgba(36, 99, 235, 0.04);
+  border-color: rgba(33, 104, 91, 0.56);
+  background: rgba(33, 104, 91, 0.04);
 }
 
 .paper-list-card.is-deep-linked {
-  border-color: rgba(239, 68, 68, 0.64);
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.13), 0 9px 22px rgba(31, 41, 55, 0.1);
+  border-color: rgba(159, 29, 29, 0.64);
+  box-shadow: 0 0 0 2px rgba(159, 29, 29, 0.13), 0 9px 22px rgba(31, 41, 55, 0.1);
 }
 
 .paper-list-card.is-selected {
@@ -1315,9 +1315,9 @@ select {
 
 .paper-card-status.is-reading,
 .paper-detail-status.is-reading {
-  border-color: rgba(37, 99, 235, 0.2);
-  background: rgba(37, 99, 235, 0.08);
-  color: #1d4ed8;
+  border-color: rgba(33, 104, 91, 0.2);
+  background: rgba(33, 104, 91, 0.08);
+  color: #21685b;
 }
 
 .paper-card-status.is-archived,
@@ -1413,8 +1413,8 @@ select {
 
 .paper-card-link:hover,
 .paper-reading-link:hover {
-  border-color: rgba(37, 99, 235, 0.32);
-  color: #1d4ed8;
+  border-color: rgba(33, 104, 91, 0.32);
+  color: #21685b;
 }
 
 .paper-card-link strong,
@@ -1453,11 +1453,11 @@ select {
 
 .paper-return-link {
   justify-self: start;
-  border: 1px solid rgba(36, 99, 235, 0.16);
+  border: 1px solid rgba(33, 104, 91, 0.16);
   border-radius: 7px;
   padding: 5px 8px;
-  background: rgba(36, 99, 235, 0.06);
-  color: #1d4ed8;
+  background: rgba(33, 104, 91, 0.06);
+  color: #21685b;
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
@@ -1510,10 +1510,10 @@ select {
 .paper-deep-link-hint {
   display: grid;
   gap: 3px;
-  border: 1px solid rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(159, 29, 29, 0.18);
   border-radius: 8px;
   padding: 9px 10px;
-  background: rgba(239, 68, 68, 0.06);
+  background: rgba(159, 29, 29, 0.06);
 }
 
 .paper-deep-link-hint span {
@@ -1562,8 +1562,8 @@ select {
 
 .paper-detail-actions button.is-primary {
   grid-column: 1 / -1;
-  border-color: #ef4444;
-  background: #ef4444;
+  border-color: #9f1d1d;
+  background: #9f1d1d;
   color: #ffffff;
 }
 
@@ -1608,8 +1608,8 @@ select {
 }
 
 .paper-detail-actions button.is-suggested {
-  border-color: #dc2626;
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.14);
+  border-color: #9f1d1d;
+  box-shadow: 0 0 0 2px rgba(159, 29, 29, 0.14);
 }
 
 .paper-detail-actions button:disabled,
@@ -1626,10 +1626,10 @@ select {
 }
 
 .paper-detail-section.is-focused {
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(159, 29, 29, 0.2);
   border-radius: 8px;
   padding: 10px;
-  background: rgba(239, 68, 68, 0.045);
+  background: rgba(159, 29, 29, 0.045);
 }
 
 .paper-detail-section-title {
@@ -1675,7 +1675,7 @@ select {
 .paper-reading-links {
   display: grid;
   gap: 5px;
-  border-left: 3px solid rgba(37, 99, 235, 0.24);
+  border-left: 3px solid rgba(33, 104, 91, 0.24);
   padding-left: 9px;
 }
 
@@ -1687,7 +1687,7 @@ select {
 }
 
 .paper-detail-section a {
-  color: #2563eb;
+  color: #21685b;
   font-size: 12px;
   text-decoration: none;
 }

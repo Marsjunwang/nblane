@@ -543,8 +543,8 @@ def _render_paper_library_styles() -> None:
   background: rgba(255, 255, 255, 0.82);
 }
 .paper-card-active {
-  border-color: rgba(33, 115, 220, 0.7);
-  background: rgba(33, 115, 220, 0.06);
+  border-color: rgba(33, 104, 91, 0.7);
+  background: rgba(33, 104, 91, 0.06);
 }
 .paper-title {
   font-weight: 700;
@@ -587,14 +587,14 @@ def _render_paper_library_styles() -> None:
   color: rgb(146, 64, 14);
 }
 .paper-badge-alert {
-  border-color: rgba(220, 38, 38, 0.24);
-  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(159, 29, 29, 0.24);
+  background: rgba(159, 29, 29, 0.08);
   color: rgb(153, 27, 27);
 }
 .paper-badge-tag {
-  border-color: rgba(37, 99, 235, 0.18);
-  background: rgba(37, 99, 235, 0.075);
-  color: rgb(30, 64, 175);
+  border-color: rgba(33, 104, 91, 0.18);
+  background: rgba(33, 104, 91, 0.075);
+  color: rgb(23, 77, 67);
 }
 .paper-detail-title {
   font-size: 1.05rem;
