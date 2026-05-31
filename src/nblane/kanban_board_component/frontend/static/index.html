@@ -115,6 +115,29 @@
       background: var(--soft);
     }
     .kb-column.is-over { outline: 2px dashed rgba(33, 104, 91, .45); outline-offset: -5px; }
+    .kb-column.is-stage-queue { border-left: 3px solid var(--info); }
+    .kb-column.is-stage-doing { border-left: 3px solid var(--accent); background: var(--soft-strong); }
+    .kb-column.is-stage-done { border-left: 3px solid #9fcabc; }
+    .kb-column.is-stage-side { opacity: .82; border-left: 3px solid var(--line); }
+    .kb-column.is-stage-side .kb-column-head strong { color: var(--muted); }
+    .kb-stage-step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      margin-right: 6px;
+      border-radius: 999px;
+      background: var(--muted);
+      color: #fff;
+      font-size: .68rem;
+      font-weight: 850;
+      flex: 0 0 auto;
+      vertical-align: middle;
+    }
+    .kb-column.is-stage-doing .kb-stage-step { background: var(--accent); }
+    .kb-head-meta { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .kb-pill.warn { border-color: #ead5ab; background: #fff7e8; color: var(--warn); }
     .kb-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
     .kb-column-head strong { min-width: 0; overflow: hidden; font-size: .92rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
     .kb-count, .kb-pill {
@@ -211,6 +234,34 @@
       background: #fff0f0;
     }
     .kb-quick-actions { justify-content: flex-start; min-height: 28px; }
+    .kb-menu {
+      display: grid;
+      gap: 2px;
+      margin-top: 2px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .kb-menu button {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      width: 100%;
+      min-height: 30px;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      font-size: .8rem;
+      font-weight: 750;
+      text-align: left;
+    }
+    .kb-menu button:hover { background: var(--accent-soft); color: var(--accent-strong); }
+    .kb-menu button.danger { color: var(--danger); }
+    .kb-menu button.danger:hover { background: #fff0f0; color: var(--danger); }
     .kb-move-control {
       display: inline-grid;
       grid-template-columns: minmax(90px, 150px) 32px;
@@ -271,6 +322,17 @@
     .kb-field span, .kb-section-title { color: var(--muted); font-size: .74rem; font-weight: 800; text-transform: uppercase; }
     .kb-field textarea { min-height: 64px; resize: vertical; line-height: 1.4; }
     .kb-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .kb-detail details { display: grid; gap: 10px; }
+    .kb-detail details > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .74rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 4px 0;
+      list-style: revert;
+    }
+    .kb-detail details[open] > summary { margin-bottom: 2px; }
     .kb-subtasks { display: grid; gap: 7px; }
     .kb-check-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; min-height: 26px; color: var(--ink); font-size: .84rem; line-height: 1.35; overflow-wrap: anywhere; }
     .kb-check-row input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
@@ -430,6 +492,13 @@
     const SET_HEIGHT = "streamlit:setFrameHeight";
     const RENDER = "streamlit:render";
     const DEFAULT_ORDER = ["Doing", "Queue", "Done", "Someday / Maybe"];
+    const STAGE_META = {
+      "Queue": { step: "①", cls: "is-stage-queue" },
+      "Doing": { step: "②", cls: "is-stage-doing" },
+      "Done": { step: "③", cls: "is-stage-done" },
+      "Someday / Maybe": { step: "", cls: "is-stage-side" },
+    };
+    const WIP_LIMIT = 5;
     const DEFAULT_LABELS = {
       add: "Add",
       archive_confirm: "Archive this Done task?",
@@ -471,10 +540,14 @@
       delete_task: "Delete task",
       details: "Details",
       done_uncrystallized: "Done, not crystallized",
+      done_pending_badge: "⚡ {n} done, awaiting crystallization",
       edit: "Edit",
       edit_short: "Edit",
       empty: "No tasks",
       error: "Error",
+      kb_card_actions: "⋯",
+      kb_more_fields: "More fields",
+      kb_wip_hint: "Doing has {n} tasks — consider limiting work in progress.",
       gap_missing: "Gaps remain",
       gap_next: "Next steps",
       gap_ok: "Can solve",
@@ -518,6 +591,8 @@
     let quickSection = "";
     let clickTimer = 0;
     let eventSeq = 0;
+    let openMenuId = "";
+    let menuOutsideBound = false;
 
     function send(type, data) {
       window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
@@ -1026,18 +1101,8 @@
       `;
     }
     function quickActionsHtml(task) {
-      const doneActions = task.section === "Done" ? `
-        ${actionButton("archive_done", "archive_short", "archive_done")}
-      ` : "";
-      const crystallizeAction = task.section === "Done" && !task.crystallized
-        ? actionButton("crystallize", "crystallize_short", "crystallize")
-        : "";
       return `
         <div class="kb-quick-actions">
-          ${actionButton("ai_gap", "ai_gap_short", "ai_gap")}
-          ${actionButton("ai_subtasks", "ai_subtasks_short", "ai_subtasks")}
-          ${doneActions}
-          ${crystallizeAction}
           ${moveControlHtml(task)}
         </div>
       `;
@@ -1046,16 +1111,43 @@
       const title = editing
         ? `<input class="kb-title-input" data-field="title" value="${attr(task.title)}" aria-label="${attr(label("title"))}">`
         : `<span class="kb-card-title">${esc(task.title || label("untitled"))}</span>`;
-      const editControls = editing
-        ? `${actionButton("cancel_edit", "cancel_short", "cancel", "kb-head-button")}${actionButton("save", "save_short", "save", "kb-head-button primary")}`
-        : `${actionButton("edit", "edit_short", "edit", "kb-head-button primary")}`;
+      if (editing) {
+        return `
+          <div class="kb-card-head">
+            ${title}
+            <div class="kb-head-actions">
+              ${actionButton("cancel_edit", "cancel_short", "cancel", "kb-head-button")}
+              ${actionButton("save", "save_short", "save", "kb-head-button primary")}
+            </div>
+          </div>
+        `;
+      }
+      const menuToggle = `<button type="button" class="kb-head-button" data-menu-toggle data-task-id="${attr(task.id)}" title="${attr(label("kb_card_actions"))}" aria-label="${attr(label("kb_card_actions"))}" aria-expanded="${task.id === openMenuId ? "true" : "false"}">⋯</button>`;
       return `
         <div class="kb-card-head">
           ${title}
           <div class="kb-head-actions">
-            ${editControls}
-            ${actionButton("delete", "delete_short", "delete_task", "kb-head-button danger")}
+            ${actionButton("edit", "edit_short", "edit", "kb-head-button primary")}
+            ${menuToggle}
           </div>
+        </div>
+      `;
+    }
+    function menuItem(action, fullKey, extraClass) {
+      const full = label(fullKey || action);
+      return `<button type="button" class="${extraClass || ""}" data-action="${attr(action)}" aria-label="${attr(full)}">${esc(full)}</button>`;
+    }
+    function cardMenuHtml(task) {
+      if (task.id !== openMenuId || task.id === editingId) return "";
+      const doneItems = task.section === "Done"
+        ? `${menuItem("archive_done", "archive_done")}${task.crystallized ? "" : menuItem("crystallize", "crystallize")}`
+        : "";
+      return `
+        <div class="kb-menu" role="menu">
+          ${menuItem("ai_gap", "ai_gap")}
+          ${menuItem("ai_subtasks", "ai_subtasks")}
+          ${doneItems}
+          ${menuItem("delete", "delete_task", "danger")}
         </div>
       `;
     }
@@ -1105,32 +1197,24 @@
             </div>
           `).join("")
         : `<div class="kb-status">${esc(label("empty"))}</div>`;
-      return `
-        <div class="kb-detail">
+      const textField = (key, value) => `
           <label class="kb-field">
-            <span>${esc(label("context"))}</span>
-            <textarea data-field="context" aria-label="${attr(label("context"))}">${esc(task.context)}</textarea>
-          </label>
+            <span>${esc(label(key))}</span>
+            <textarea data-field="${attr(key)}" aria-label="${attr(label(key))}">${esc(value)}</textarea>
+          </label>`;
+      const parts = {
+        context: textField("context", task.context),
+        why: textField("why", task.why),
+        blocked_by: textField("blocked_by", task.blocked_by),
+        outcome: textField("outcome", task.outcome),
+        tags: `
+          <label class="kb-field">
+            <span>${esc(label("tags"))}</span>
+            <input type="text" data-field="tags" value="${attr(task.tags)}" aria-label="${attr(label("tags"))}">
+          </label>`,
+        project: projectFields,
+        dates: `
           <div class="kb-grid-2">
-            <label class="kb-field">
-              <span>${esc(label("why"))}</span>
-              <textarea data-field="why" aria-label="${attr(label("why"))}">${esc(task.why)}</textarea>
-            </label>
-            <label class="kb-field">
-              <span>${esc(label("blocked_by"))}</span>
-              <textarea data-field="blocked_by" aria-label="${attr(label("blocked_by"))}">${esc(task.blocked_by)}</textarea>
-            </label>
-          </div>
-          <label class="kb-field">
-            <span>${esc(label("outcome"))}</span>
-            <textarea data-field="outcome" aria-label="${attr(label("outcome"))}">${esc(task.outcome)}</textarea>
-          </label>
-	          <label class="kb-field">
-	            <span>${esc(label("tags"))}</span>
-	            <input type="text" data-field="tags" value="${attr(task.tags)}" aria-label="${attr(label("tags"))}">
-	          </label>
-	          ${projectFields}
-	          <div class="kb-grid-2">
             <label class="kb-field">
               <span>${esc(label("started_on"))}</span>
               <input type="date" data-field="started_on" value="${attr(task.started_on)}" aria-label="${attr(label("started_on"))}">
@@ -1139,11 +1223,13 @@
               <span>${esc(label("completed_on"))}</span>
               <input type="date" data-field="completed_on" value="${attr(task.completed_on)}" aria-label="${attr(label("completed_on"))}">
             </label>
-          </div>
+          </div>`,
+        notes: `
           <label class="kb-field">
             <span>${esc(label("details"))}</span>
             <textarea data-field="notes" aria-label="${attr(label("details"))}">${esc(task.notes)}</textarea>
-          </label>
+          </label>`,
+        subtasks: `
           <div class="kb-subtasks">
             <div class="kb-section-title">${esc(label("subtasks"))}</div>
             ${subtaskRows}
@@ -1151,12 +1237,34 @@
               <input data-new-subtask placeholder="${attr(label("new_subtask"))}" aria-label="${attr(label("new_subtask"))}">
               <button type="button" class="kb-icon-button" data-action="add_subtask" aria-label="${attr(label("new_subtask"))}">+</button>
             </div>
-          </div>
-          ${aiPanelHtml(task, true)}
+          </div>`,
+        links: `
           <div class="kb-subtasks">
             <div class="kb-section-title">${esc(label("links"))}</div>
             <div class="kb-chips">${linksHtml(task)}</div>
-          </div>
+          </div>`,
+      };
+      const primaryByStage = {
+        "Queue": ["why", "tags"],
+        "Doing": ["context", "blocked_by", "subtasks"],
+        "Done": ["outcome", "dates", "tags"],
+      };
+      const restOrder = ["context", "why", "blocked_by", "outcome", "tags", "project", "dates", "notes", "subtasks"];
+      const primaryKeys = primaryByStage[task.section] || ["context", "tags"];
+      const primaryHtml = primaryKeys.map((key) => parts[key] || "").join("");
+      const restHtml = restOrder
+        .filter((key) => !primaryKeys.includes(key))
+        .map((key) => parts[key] || "")
+        .join("");
+      return `
+        <div class="kb-detail">
+          ${primaryHtml}
+          <details>
+            <summary>${esc(label("kb_more_fields"))}</summary>
+            ${restHtml}
+          </details>
+          ${aiPanelHtml(task, true)}
+          ${parts.links}
         </div>
       `;
     }
@@ -1193,6 +1301,7 @@
             ${compactSubtasksHtml(task, task.subtasks.length)}
             <span class="kb-card-meta">${meta.join("")}</span>
             ${quickActionsHtml(task)}
+            ${cardMenuHtml(task)}
             ${editing ? detailEditHtml(task) : readExtraHtml(task, selected)}
           `}
         </article>
@@ -1200,11 +1309,18 @@
     }
     function renderColumn(section, options) {
       const compactCards = Boolean(options && options.compactCards);
+      const stage = STAGE_META[section.key] || { step: "", cls: "" };
+      const stepPill = stage.step
+        ? `<span class="kb-stage-step">${esc(stage.step)}</span>`
+        : "";
+      const wipWarn = (section.key === "Doing" && section.tasks.length > WIP_LIMIT)
+        ? `<span class="kb-pill warn" title="${attr(label("kb_wip_hint").replace("{n}", String(section.tasks.length)))}">WIP ${section.tasks.length}</span>`
+        : "";
       return `
-        <section class="kb-column ${compactCards ? "is-focus-rail" : ""}" data-section="${attr(section.key)}" aria-label="${attr(section.label)}">
+        <section class="kb-column ${stage.cls} ${compactCards ? "is-focus-rail" : ""}" data-section="${attr(section.key)}" aria-label="${attr(section.label)}">
           <div class="kb-column-head">
-            <strong>${esc(section.label)}</strong>
-            <span class="kb-count">${section.tasks.length}</span>
+            <strong>${stepPill}${esc(section.label)}</strong>
+            <span class="kb-head-meta">${wipWarn}<span class="kb-count">${section.tasks.length}</span></span>
           </div>
           <div class="kb-card-list" data-section="${attr(section.key)}">
             ${section.tasks.length ? section.tasks.map((task) => renderCard(task, { compact: compactCards })).join("") : `<div class="kb-empty">${esc(label("empty"))}</div>`}
@@ -1250,9 +1366,9 @@
       if (!tasks.length) return "";
       return `
         <section class="kb-uncrystallized">
-          <div class="kb-section-title">${esc(label("done_uncrystallized"))}</div>
+          <div class="kb-section-title">${esc(label("done_pending_badge").replace("{n}", String(tasks.length)))}</div>
           <div class="kb-chips">
-            ${tasks.map((task) => `<button type="button" class="kb-chip warn action" data-crystallize-id="${attr(task.id)}" aria-label="${attr(label("crystallize"))}">${esc(task.title)}</button>`).join("")}
+            ${tasks.map((task) => `<button type="button" class="kb-chip warn action" data-crystallize-id="${attr(task.id)}" title="${attr(label("crystallize"))}" aria-label="${attr(label("crystallize"))}">${esc(task.title)}</button>`).join("")}
           </div>
         </section>
       `;
@@ -1263,6 +1379,7 @@
       if (!quickSection) quickSection = board.find((s) => s.key === "Queue")?.key || board[0]?.key || "";
       if (!selectedId || !findTask(selectedId)) selectedId = board[0]?.tasks[0]?.id || "";
       if (editingId && !findTask(editingId)) editingId = "";
+      if (openMenuId && (!findTask(openMenuId) || openMenuId === editingId)) openMenuId = "";
       root.innerHTML = `
         <main class="kb-shell">
           <div class="kb-topbar">
@@ -1346,6 +1463,27 @@
       return out;
     }
     function wire() {
+      if (!menuOutsideBound) {
+        document.addEventListener("click", (event) => {
+          if (!openMenuId) return;
+          if (event.target.closest("[data-menu-toggle]") || event.target.closest(".kb-menu")) return;
+          openMenuId = "";
+          render();
+        });
+        menuOutsideBound = true;
+      }
+      document.querySelectorAll("[data-menu-toggle]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const taskId = button.dataset.taskId;
+          openMenuId = openMenuId === taskId ? "" : taskId;
+          if (openMenuId) selectedId = openMenuId;
+          render();
+        });
+      });
+      document.querySelectorAll(".kb-detail details").forEach((node) => {
+        node.addEventListener("toggle", setHeight);
+      });
       const quick = document.querySelector(".kb-quick");
       if (quick) {
         quick.addEventListener("submit", (event) => {
@@ -1453,6 +1591,7 @@
         panel.querySelectorAll("[data-action]").forEach((button) => {
           button.addEventListener("click", () => {
             const action = button.dataset.action;
+            if (button.closest(".kb-menu")) openMenuId = "";
             if (action === "save") {
               const card = collectEditCard(panel);
               editingId = "";

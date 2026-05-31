@@ -862,6 +862,16 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
                 "kb_done_uncrystallized",
                 "Done, not crystallized",
             ),
+            "done_pending_badge": ui.get(
+                "kb_done_pending_badge",
+                "⚡ {n} done, awaiting crystallization",
+            ),
+            "kb_card_actions": ui.get("kb_card_actions", "⋯"),
+            "kb_more_fields": ui.get("kb_more_fields", "More fields"),
+            "kb_wip_hint": ui.get(
+                "kb_wip_hint",
+                "Doing has {n} tasks — consider limiting work in progress.",
+            ),
             "edit": ui.get("kb_edit_task", "Edit"),
             "edit_short": ui.get("kb_edit_short", "Edit"),
             "empty": ui.get("ingest_no_done", "No tasks."),
@@ -2368,16 +2378,7 @@ done_entry_l, done_entry_r = st.columns(
     gap="medium",
     vertical_alignment="center",
 )
-_done_pending = sum(
-    1
-    for task in sections.get(KANBAN_DONE, [])
-    if not getattr(task, "crystallized", False)
-)
 with done_entry_l:
-    if _done_pending:
-        st.markdown(
-            f"**{ui.get('kb_done_pending_badge', '⚡ {n} done, awaiting crystallization').format(n=_done_pending)}**"
-        )
     st.caption(
         ui.get(
             "kb_done_review_hint",
