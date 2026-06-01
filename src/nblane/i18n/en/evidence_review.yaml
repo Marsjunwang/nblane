@@ -79,6 +79,8 @@ claim_tab_skill: By Skill
 claim_tab_all: All Evidence
 claim_tab_refresh: Needs Refresh
 claim_tab_manual: Manual
+claim_generate_tab: Generate
+claim_generate_scope_label: Generate scope
 claim_scope_project: Project
 claim_scope_goal: Goal
 claim_scope_skill: Skill

@@ -1114,15 +1114,19 @@ def _render_pool_form(
 
 def _render_pool_editor(review: dict) -> None:
     entries = _pool_entries()
-    st.subheader(ui["pool_add_title"])
-    new_row, add_submitted, _ = _render_pool_form(
-        entries,
-        prefix=f"evidence_review_add_{selected}",
-    )
-    if add_submitted and new_row is not None:
-        entries.append(new_row)
-        _save_pool(entries, ui["pool_added"])
-        st.rerun()
+    toast_key = "evidence_review_pool_added_toast"
+    if st.session_state.pop(toast_key, False):
+        st.toast(ui["pool_added"], icon="✅")
+    with st.expander(ui["pool_add_title"], expanded=False):
+        new_row, add_submitted, _ = _render_pool_form(
+            entries,
+            prefix=f"evidence_review_add_{selected}",
+        )
+        if add_submitted and new_row is not None:
+            entries.append(new_row)
+            _save_pool(entries, ui["pool_added"])
+            st.session_state[toast_key] = True
+            st.rerun()
 
     st.subheader(ui["pool_edit_title"])
     if not entries:
@@ -1581,25 +1585,26 @@ def _render_claim_studio(review: dict) -> None:
     claim_tabs = st.tabs(
         [
             ui.get("claim_tab_overview", "Overview"),
-            ui.get("claim_tab_project", "By Project"),
-            ui.get("claim_tab_goal", "By Goal"),
-            ui.get("claim_tab_skill", "By Skill"),
-            ui.get("claim_tab_all", "All Evidence"),
+            ui.get("claim_generate_tab", "Generate"),
             ui.get("claim_tab_refresh", "Needs Refresh"),
-            ui.get("claim_tab_manual", "Manual"),
         ]
     )
     with claim_tabs[0]:
         _render_claim_overview(review)
     with claim_tabs[1]:
-        _render_claim_scope_generator(review, "project")
+        scope = st.segmented_control(
+            ui.get("claim_generate_scope_label", "Generate scope"),
+            options=["project", "goal", "skill", "all", "manual"],
+            format_func=lambda s: ui.get(f"claim_tab_{s}", s.title()),
+            default="project",
+            key=f"claim_gen_scope_{selected}",
+        )
+        scope = scope or "project"
+        if scope == "manual":
+            _render_claim_manual(review)
+        else:
+            _render_claim_scope_generator(review, scope)
     with claim_tabs[2]:
-        _render_claim_scope_generator(review, "goal")
-    with claim_tabs[3]:
-        _render_claim_scope_generator(review, "skill")
-    with claim_tabs[4]:
-        _render_claim_scope_generator(review, "all")
-    with claim_tabs[5]:
         stale = [
             claim
             for claim in (review.get("claim_rows") or [])
@@ -1614,8 +1619,6 @@ def _render_claim_studio(review: dict) -> None:
                 st.caption(" · ".join(_claim_meta(claim)))
                 if claim.get("stale_reason"):
                     st.warning(str(claim.get("stale_reason")))
-    with claim_tabs[6]:
-        _render_claim_manual(review)
 
 
 def _render_claim_candidates(review: dict) -> None:

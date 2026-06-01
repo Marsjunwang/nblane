@@ -18,6 +18,11 @@ task_placeholder: |-
   复现 PI0.5 在 piper 机械臂上的 VLA 控制
 analyze_button: 分析
 analyze_hint: 输入任务描述并点击「分析」开始。
+gap_empty_title: 如何开始
+gap_empty_steps: |-
+  1. 在左侧选择上下文来源(目标、项目或自由文本)。
+  2. 描述你想承担的任务。
+  3. 点击「分析」查看匹配的技能与差距。
 spinner_gap: 正在运行差距分析…
 verdict_ok: 可以完成
 verdict_gap: 存在能力缺口

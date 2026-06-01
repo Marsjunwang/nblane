@@ -18,6 +18,11 @@ task_placeholder: |-
   Reproduce PI0.5 VLA control on a Piper arm
 analyze_button: Analyze
 analyze_hint: Enter a task description and click Analyze to run.
+gap_empty_title: How to start
+gap_empty_steps: |-
+  1. Pick a context source (goal, project, or free text) on the left.
+  2. Describe the task you want to take on.
+  3. Click Analyze to see matched skills and gaps.
 spinner_gap: Running gap analysis...
 verdict_ok: Ready
 verdict_gap: Gaps remain

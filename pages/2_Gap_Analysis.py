@@ -43,13 +43,6 @@ from nblane.web_shared import (
 
 apply_ui_language_from_session()
 
-_STATUS_COLOR = {
-    "expert": "#1a73e8",
-    "solid": "#34a853",
-    "learning": "#fbbc04",
-    "locked": "#dadce0",
-}
-
 _AI_SYSTEM_EN = """\
 You are a learning coach helping a robotics engineer \
 grow their skills.
@@ -416,6 +409,8 @@ if run and can_run:
         st.session_state.gap_coach_messages = []
 elif st.session_state.gap_result is None:
     st.info(ui["analyze_hint"])
+    st.subheader(ui["gap_empty_title"])
+    st.markdown(ui["gap_empty_steps"])
     st.stop()
 
 result = st.session_state.gap_result

@@ -252,15 +252,14 @@ class TestEvidenceReview(unittest.TestCase):
         self.assertIn("kanban_ai_backend(selected)", source)
 
     def test_page_exposes_claim_studio_scopes(self) -> None:
-        """Claim Studio replaces selected-evidence-only claim candidates."""
+        """Claim Studio exposes all generation scopes via the scope selector."""
         source = Path("pages/2_Evidence_Review.py").read_text(encoding="utf-8")
 
         self.assertIn("_render_claim_studio", source)
-        self.assertIn("claim_tab_project", source)
-        self.assertIn("claim_tab_goal", source)
-        self.assertIn("claim_tab_skill", source)
-        self.assertIn("claim_tab_refresh", source)
-        self.assertIn("claim_tab_manual", source)
+        self.assertIn('options=["project", "goal", "skill", "all", "manual"]', source)
+        self.assertIn("claim_generate_scope_label", source)
+        self.assertIn("_render_claim_scope_generator", source)
+        self.assertIn("_render_claim_manual", source)
         self.assertIn("generate_claim_candidates_for_scope", source)
         self.assertIn("apply_claim_candidates_to_book", source)
         self.assertIn("migrate_legacy_claims", source)

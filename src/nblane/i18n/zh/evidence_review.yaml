@@ -79,6 +79,8 @@ claim_tab_skill: 按技能
 claim_tab_all: 全部证据
 claim_tab_refresh: 需要刷新
 claim_tab_manual: 手动
+claim_generate_tab: 生成
+claim_generate_scope_label: 生成范围
 claim_scope_project: 项目
 claim_scope_goal: 目标
 claim_scope_skill: 技能
