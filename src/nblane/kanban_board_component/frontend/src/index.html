@@ -322,7 +322,8 @@
     .kb-field span, .kb-section-title { color: var(--muted); font-size: .74rem; font-weight: 800; text-transform: uppercase; }
     .kb-field textarea { min-height: 64px; resize: vertical; line-height: 1.4; }
     .kb-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .kb-detail details { display: grid; gap: 10px; }
+    .kb-detail details { display: block; }
+    .kb-detail details > *:not(summary) { margin-top: 10px; }
     .kb-detail details > summary {
       cursor: pointer;
       color: var(--muted);
@@ -332,7 +333,7 @@
       padding: 4px 0;
       list-style: revert;
     }
-    .kb-detail details[open] > summary { margin-bottom: 2px; }
+    .kb-detail details[open] > summary { margin-bottom: 10px; }
     .kb-subtasks { display: grid; gap: 7px; }
     .kb-check-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; min-height: 26px; color: var(--ink); font-size: .84rem; line-height: 1.35; overflow-wrap: anywhere; }
     .kb-check-row input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); }

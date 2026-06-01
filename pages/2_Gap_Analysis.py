@@ -217,11 +217,11 @@ with _head_l:
     st.caption(ui["page_context_line"])
 with _head_goal:
     render_current_goal_strip(selected, compact=True, align="right")
-render_page_help(
-    ui,
-    key=f"gap_help:{selected}",
-    docs_path="docs/zh/guides/gap-analysis.md",
-)
+    render_page_help(
+        ui,
+        key=f"gap_help:{selected}",
+        docs_path="docs/zh/guides/gap-analysis.md",
+    )
 
 tree_for_opts = load_skill_tree_raw(selected)
 schema_name_opts = (
@@ -238,13 +238,9 @@ index_opts = (
 node_id_list = sorted(index_opts.keys())
 
 col_left, col_right_top = st.columns([3, 1])
+ai_enabled = llm_client.is_configured()
 with col_right_top:
-    ai_enabled = llm_client.is_configured()
-    if ai_enabled:
-        st.success(
-            f"AI: {llm_client.model_label()}", icon="🤖"
-        )
-    else:
+    if not ai_enabled:
         render_llm_unavailable(ui)
 
 with col_left:
