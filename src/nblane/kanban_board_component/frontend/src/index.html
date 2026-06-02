@@ -594,6 +594,7 @@
     let eventSeq = 0;
     let openMenuId = "";
     let menuOutsideBound = false;
+    let openMoreFieldsByTask = {};
 
     function send(type, data) {
       window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
@@ -1260,7 +1261,7 @@
       return `
         <div class="kb-detail">
           ${primaryHtml}
-          <details>
+          <details data-more-fields-task="${attr(task.id)}" ${openMoreFieldsByTask[task.id] ? "open" : ""}>
             <summary>${esc(label("kb_more_fields"))}</summary>
             ${restHtml}
           </details>
@@ -1483,7 +1484,11 @@
         });
       });
       document.querySelectorAll(".kb-detail details").forEach((node) => {
-        node.addEventListener("toggle", setHeight);
+        node.addEventListener("toggle", () => {
+          const taskId = text(node.dataset.moreFieldsTask || "");
+          if (taskId) openMoreFieldsByTask[taskId] = Boolean(node.open);
+          setHeight();
+        });
       });
       const quick = document.querySelector(".kb-quick");
       if (quick) {
@@ -1505,7 +1510,9 @@
         });
       });
       document.querySelectorAll(".kb-card").forEach((card) => {
-        const isInteractive = (target) => Boolean(target.closest("input, textarea, select, button, a, label"));
+        const isInteractive = (target) => Boolean(
+          target.closest("input, textarea, select, button, a, label, summary, details"),
+        );
         card.addEventListener("click", (event) => {
           if (isInteractive(event.target)) return;
           const taskId = card.dataset.taskId;
