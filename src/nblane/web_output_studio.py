@@ -19,6 +19,7 @@ import yaml
 from schemas.blocknote_doc import coerce_blocks
 from schemas.editor_events import validate_editor_event
 from nblane.core import llm as llm_client
+from nblane.core import jd_match
 
 try:
     from nblane.public_blog_editor_component import (
@@ -75,6 +76,7 @@ from nblane.core.public_site import (
     draft_project_update_from_claims,
     draft_resume_for_target,
     format_blog_document,
+    generate_resume_files,
     init_public_layer,
     insert_blog_snippet,
     load_blog_posts,
@@ -236,6 +238,22 @@ def _ui() -> dict[str, str]:
             "target": "目标岗位 / 方向",
             "draft_resume": "生成定制简历草稿",
             "draft_resume_bullets_from_claims": "从断言生成简历要点候选",
+            "jd_match_title": "JD 匹配分析与简历优化",
+            "jd_resume_select": "选择现有简历",
+            "jd_resume_md": "简历内容（可编辑）",
+            "jd_paste": "粘贴目标 JD（职位描述）",
+            "jd_analyze": "分析 JD 匹配",
+            "jd_gen_resume": "生成一页纸定制简历",
+            "jd_save": "保存到 generated",
+            "jd_use_resume": "回填到编辑框",
+            "jd_use_resume_done": "已回填到上方简历编辑框，可重新分析。",
+            "jd_recompress": "再压缩一页",
+            "jd_too_long": "当前内容偏长，可能超过一页。可点击「再压缩一页」。",
+            "jd_len_caption": "约 {chars} 字符 / {lines} 行（一页约 ≤3500 字符，仅供参考，真实分页需导出后确认）",
+            "jd_resume_empty": "未找到现有简历文件，可直接在下方粘贴简历内容。",
+            "jd_followup_placeholder": "针对分析或简历提出优化反馈……",
+            "jd_feedback_active": "下次生成将纳入你的最新反馈：{feedback}",
+            "jd_not_configured": "需配置 AI / LLM API Key 才能使用 JD 匹配分析。",
             "project_id": "项目 ID",
             "draft_update": "生成项目更新草稿",
             "draft_update_from_claims": "从断言生成项目更新草稿",
@@ -560,6 +578,22 @@ def _ui() -> dict[str, str]:
         "target": "Target role / direction",
         "draft_resume": "Draft targeted resume",
         "draft_resume_bullets_from_claims": "Draft resume bullets from claims",
+        "jd_match_title": "JD match analysis & resume tailoring",
+        "jd_resume_select": "Select an existing resume",
+        "jd_resume_md": "Resume content (editable)",
+        "jd_paste": "Paste the target JD (job description)",
+        "jd_analyze": "Analyze JD match",
+        "jd_gen_resume": "Generate one-page tailored resume",
+        "jd_save": "Save to generated",
+        "jd_use_resume": "Use as resume input",
+        "jd_use_resume_done": "Loaded into the resume editor above; re-analyze when ready.",
+        "jd_recompress": "Compress to one page",
+        "jd_too_long": "Content looks long and may exceed one page. Try \"Compress to one page\".",
+        "jd_len_caption": "~{chars} chars / {lines} lines (one page is ~≤3500 chars; rough guide — confirm after export)",
+        "jd_resume_empty": "No existing resume file found; paste resume content below.",
+        "jd_followup_placeholder": "Give feedback to refine the analysis or resume…",
+        "jd_feedback_active": "Next generation will incorporate your latest feedback: {feedback}",
+        "jd_not_configured": "Configure an AI / LLM API key to use JD match analysis.",
         "project_id": "Project ID",
         "draft_update": "Draft project update",
         "draft_update_from_claims": "Draft project update from claims",
@@ -6508,6 +6542,183 @@ def _render_blog_tab(
             st.error(str(exc))
 
 
+def _render_jd_match_section(selected: str, ui: dict[str, str]) -> None:
+    """JD match analysis + one-page resume tailoring inside the resume tab."""
+    ai_enabled = llm_client.is_configured()
+    if not ai_enabled:
+        st.caption(ui["jd_not_configured"])
+
+    widget_key = f"jd_resume_md:{selected}"
+    paths = jd_match.list_resume_md_files(selected)
+    if paths:
+        chosen = st.selectbox(
+            ui["jd_resume_select"],
+            options=paths,
+            format_func=lambda p: f"{p.parent.name}/{p.name}",
+            key=f"jd_resume_pick:{selected}",
+        )
+        last_pick_key = f"jd_resume_last_pick:{selected}"
+        if st.session_state.get(last_pick_key) != str(chosen):
+            st.session_state[last_pick_key] = str(chosen)
+            st.session_state[widget_key] = jd_match.read_resume_md(chosen)
+    else:
+        st.caption(ui["jd_resume_empty"])
+        st.session_state.setdefault(widget_key, "")
+
+    pending_key = f"jd_resume_pending:{selected}"
+    if pending_key in st.session_state:
+        st.session_state[widget_key] = st.session_state.pop(pending_key)
+
+    resume_md = st.text_area(
+        ui["jd_resume_md"],
+        height=200,
+        key=widget_key,
+    )
+    if st.session_state.pop(f"jd_use_done:{selected}", False):
+        st.success(ui["jd_use_resume_done"])
+    jd_text = st.text_area(
+        ui["jd_paste"],
+        height=160,
+        key=f"jd_text:{selected}",
+    )
+
+    can_analyze = ai_enabled and bool(jd_text.strip()) and bool(resume_md.strip())
+    if st.button(
+        f"🔍 {ui['jd_analyze']}",
+        type="primary",
+        disabled=not can_analyze,
+        key=f"jd_analyze_btn:{selected}",
+    ):
+        with st.spinner(ui["jd_analyze"]):
+            analysis = jd_match.analyze_jd(
+                selected,
+                resume_md=resume_md,
+                jd_text=jd_text,
+            )
+        st.session_state[f"jd_analysis:{selected}"] = analysis
+        st.session_state.pop(f"jd_resume_preview:{selected}", None)
+        st.session_state.pop(f"jd_feedback:{selected}", None)
+        st.session_state[f"jd_chat:{selected}"] = [
+            {"role": "assistant", "content": analysis}
+        ]
+
+    analysis = st.session_state.get(f"jd_analysis:{selected}", "")
+    if not analysis:
+        return
+    st.markdown(analysis)
+    _render_jd_resume_block(selected, ui, resume_md, jd_text, analysis)
+    _render_jd_followup_chat(selected, ui, resume_md, jd_text, analysis)
+
+
+def _render_jd_resume_block(
+    selected: str,
+    ui: dict[str, str],
+    resume_md: str,
+    jd_text: str,
+    analysis: str,
+) -> None:
+    """Generate / preview / save the one-page tailored resume."""
+    feedback = str(st.session_state.get(f"jd_feedback:{selected}", "")).strip()
+    if feedback:
+        st.caption(ui["jd_feedback_active"].format(feedback=feedback))
+    gen_col, strict_col = st.columns([3, 2])
+    with gen_col:
+        gen = st.button(
+            ui["jd_gen_resume"],
+            key=f"jd_gen_btn:{selected}",
+            disabled=not llm_client.is_configured(),
+        )
+    preview_key = f"jd_resume_preview:{selected}"
+    with strict_col:
+        strict = st.button(
+            ui["jd_recompress"],
+            key=f"jd_strict_btn:{selected}",
+            disabled=not st.session_state.get(preview_key),
+        )
+    if gen or strict:
+        with st.spinner(ui["jd_gen_resume"]):
+            md = jd_match.generate_one_page_resume_md(
+                selected,
+                resume_md=resume_md,
+                jd_text=jd_text,
+                analysis_md=analysis,
+                feedback_notes=feedback,
+                stricter=strict,
+            )
+        st.session_state[preview_key] = md
+
+    preview = st.session_state.get(preview_key, "")
+    if not preview:
+        return
+    st.markdown(preview)
+    chars = len(preview)
+    st.caption(
+        ui["jd_len_caption"].format(
+            chars=chars, lines=preview.count("\n") + 1
+        )
+    )
+    if chars > 3800:
+        st.warning(ui["jd_too_long"])
+    save_col, use_col = st.columns(2)
+    with save_col:
+        if st.button(ui["jd_save"], type="primary", key=f"jd_save_btn:{selected}"):
+            target = jd_text.strip().splitlines()[0] if jd_text.strip() else ""
+            try:
+                html_path, md_path = generate_resume_files(
+                    selected,
+                    target=target,
+                    markdown_text=preview,
+                )
+                stash_git_backup_results()
+                clear_web_cache()
+                st.success(f"{html_path}\n{md_path}")
+            except Exception as exc:
+                st.error(str(exc))
+    with use_col:
+        if st.button(ui["jd_use_resume"], key=f"jd_use_btn:{selected}"):
+            st.session_state[f"jd_resume_pending:{selected}"] = preview
+            st.session_state.pop(f"jd_analysis:{selected}", None)
+            st.session_state.pop(f"jd_resume_preview:{selected}", None)
+            st.session_state.pop(f"jd_feedback:{selected}", None)
+            st.session_state[f"jd_use_done:{selected}"] = True
+            st.rerun()
+
+
+def _render_jd_followup_chat(
+    selected: str,
+    ui: dict[str, str],
+    resume_md: str,
+    jd_text: str,
+    analysis: str,
+) -> None:
+    """Feedback-driven multi-turn refinement chat with full grounding context."""
+    if not llm_client.is_configured():
+        return
+    msgs = st.session_state.get(f"jd_chat:{selected}", [])
+    for m in msgs:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+    prompt = st.chat_input(
+        ui["jd_followup_placeholder"],
+        key=f"jd_chat_input:{selected}",
+    )
+    if prompt:
+        msgs.append({"role": "user", "content": prompt})
+        system = jd_match.build_followup_system(
+            selected,
+            resume_md=resume_md,
+            jd_text=jd_text,
+            analysis_md=analysis,
+            resume_preview=st.session_state.get(f"jd_resume_preview:{selected}", ""),
+        )
+        with st.spinner(ui["jd_analyze"]):
+            reply = llm_client.chat_messages(system, msgs)
+        msgs.append({"role": "assistant", "content": reply})
+        st.session_state[f"jd_chat:{selected}"] = msgs
+        st.session_state[f"jd_feedback:{selected}"] = prompt
+        st.rerun()
+
+
 def main() -> None:
     """Render the Output Studio page."""
     ui = _ui()
@@ -6672,6 +6883,9 @@ def main() -> None:
                     ),
                     language="yaml",
                 )
+        st.divider()
+        with st.expander(ui["jd_match_title"], expanded=False):
+            _render_jd_match_section(selected, ui)
 
     with tab_curation:
         st.caption(ui["curation_caption"])

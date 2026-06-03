@@ -15,6 +15,27 @@ from nblane.core.models import (
 )
 from nblane.core.validate import ALLOWED_STATUS
 
+_NODE_UPDATE_ID_ALIASES = (
+    "node_id",
+    "skill_id",
+    "skill_node_id",
+    "target_node_id",
+)
+
+
+def _normalize_node_update_row(row: dict) -> dict:
+    """Return a node update row with common LLM id aliases normalized."""
+    out = dict(row)
+    node_id = str(out.get("id", "") or "").strip()
+    if node_id:
+        return out
+    for key in _NODE_UPDATE_ID_ALIASES:
+        alias_value = str(out.get(key, "") or "").strip()
+        if alias_value:
+            out["id"] = alias_value
+            break
+    return out
+
 
 def parse_ingest_patch(data: dict | None) -> IngestPatch:
     """Coerce arbitrary dict into :class:`IngestPatch`."""
@@ -31,7 +52,7 @@ def parse_ingest_patch(data: dict | None) -> IngestPatch:
     if isinstance(raw_nodes, list):
         for item in raw_nodes:
             if isinstance(item, dict):
-                nodes.append(item)
+                nodes.append(_normalize_node_update_row(item))
     return IngestPatch(
         evidence_entries=entries,
         node_updates=nodes,

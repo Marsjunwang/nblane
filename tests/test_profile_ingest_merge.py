@@ -105,6 +105,27 @@ class TestParseIngestPatch(unittest.TestCase):
             ["project:demo"],
         )
 
+    def test_node_update_id_aliases_are_normalized(self) -> None:
+        """LLM node_id aliases become the canonical id field."""
+        raw = {
+            "node_updates": [
+                {
+                    "node_id": "ros2_basics",
+                    "evidence_refs": ["first_1"],
+                },
+                {
+                    "id": "",
+                    "skill_id": "experiment_design",
+                    "evidence_refs": ["ev_demo"],
+                },
+            ],
+        }
+
+        p = parse_ingest_patch(raw)
+
+        self.assertEqual(p.node_updates[0]["id"], "ros2_basics")
+        self.assertEqual(p.node_updates[1]["id"], "experiment_design")
+
 
 class TestMergeIngestPatch(unittest.TestCase):
     """merge_ingest_patch updates pool then tree."""
@@ -193,6 +214,58 @@ class TestMergeIngestPatch(unittest.TestCase):
         self.assertIn(eid, refs)
         self.assertFalse(
             any("dropped" in w for w in m.warnings),
+            msg=m.warnings,
+        )
+
+    def test_node_id_alias_updates_tree(self) -> None:
+        """LLM node_id aliases are merged instead of skipped."""
+        pool = {
+            "profile": "t",
+            "evidence_entries": [],
+        }
+        tree = {
+            "profile": "t",
+            "schema": "robotics-engineer",
+            "updated": "2026-01-01",
+            "nodes": [
+                {"id": "ros2_basics", "status": "locked"},
+            ],
+        }
+        patch = {
+            "evidence_entries": [
+                {
+                    "type": "project",
+                    "title": "Bringup demo",
+                    "date": "2026-03",
+                }
+            ],
+            "node_updates": [
+                {
+                    "node_id": "ros2_basics",
+                    "evidence_refs": ["first_1"],
+                    "status": "learning",
+                }
+            ],
+        }
+
+        m = merge_ingest_patch(
+            "t",
+            pool,
+            tree,
+            patch,
+            allow_status_change=True,
+        )
+
+        self.assertTrue(m.ok)
+        assert m.merged_pool is not None
+        assert m.merged_tree is not None
+        eid = m.merged_pool["evidence_entries"][0].get("id")
+        nodes = m.merged_tree.get("nodes") or []
+        n0 = next(x for x in nodes if x.get("id") == "ros2_basics")
+        self.assertIn(eid, n0.get("evidence_refs") or [])
+        self.assertEqual(n0.get("status"), "learning")
+        self.assertFalse(
+            any("without id" in w for w in m.warnings),
             msg=m.warnings,
         )
 
