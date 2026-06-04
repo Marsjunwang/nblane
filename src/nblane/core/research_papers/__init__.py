@@ -1357,6 +1357,17 @@ def ensure_paper_reading_artifacts(
     marker = _clean_text(source_metadata.get("reading_artifacts_pdf_sha256"))
     pdf_changed = bool(marker and pdf_fingerprint and marker != pdf_fingerprint)
     current_structure_backend = _clean_text(source_metadata.get("structure_backend"))
+    recent_grobid_failure = _metadata_has_recent_grobid_failure(source_metadata, pdf_fingerprint)
+    if (
+        recent_grobid_failure
+        and prefer_grobid
+        and not force_grobid
+        and _metadata_has_grobid_unavailability_failure(source_metadata)
+    ):
+        try:
+            recent_grobid_failure = not bool(grobid_readiness().get("available"))
+        except Exception:
+            recent_grobid_failure = True
     skip_recent_grobid_failure = bool(
         prefer_grobid
         and not force_grobid
@@ -1365,7 +1376,7 @@ def ensure_paper_reading_artifacts(
         and pages
         and segments
         and not pdf_changed
-        and _metadata_has_recent_grobid_failure(source_metadata, pdf_fingerprint)
+        and recent_grobid_failure
     )
     needs_pages = not pages or pdf_changed
     needs_segments = (
@@ -1515,6 +1526,16 @@ def ensure_paper_reading_artifacts(
 
 
 
+def _grobid_readiness_timeout_seconds() -> float:
+    configured = _positive_float(os.getenv("NBLANE_GROBID_READINESS_TIMEOUT_SECONDS"))
+    return configured if configured is not None else 3.0
+
+
+def _grobid_readiness_attempts() -> int:
+    configured = _positive_int(os.getenv("NBLANE_GROBID_READINESS_ATTEMPTS"))
+    return max(1, min(5, configured if configured is not None else 3))
+
+
 def grobid_readiness(url: str | None = None) -> dict[str, object]:
     """Return display-ready readiness information for a GROBID service."""
 
@@ -1522,48 +1543,53 @@ def grobid_readiness(url: str | None = None) -> dict[str, object]:
     endpoint = base.rstrip("/") + "/api/isalive"
     badges: list[str] = []
     badge_details: list[dict[str, str]] = []
-    try:
-        with urllib.request.urlopen(endpoint, timeout=2) as response:
-            status_code = int(getattr(response, "status", 200))
-            body = response.read(64).decode("utf-8", errors="ignore").strip().lower()
-    except Exception as exc:
-        message = f"GROBID unavailable: {exc}"
-        _append_badge(badges, badge_details, "grobid_unavailable", detail=message)
-        return {
-            "available": False,
-            "status": "unavailable",
-            "url": base,
-            "endpoint": endpoint,
-            "message": message,
-            "badges": badges,
-            "badge_details": badge_details,
-        }
-    alive = status_code < 500 and (not body or "true" in body or "alive" in body)
-    if not alive:
-        message = f"GROBID unavailable: isalive returned HTTP {status_code}"
-        if body:
-            message += f" with body {body[:80]}"
-        _append_badge(badges, badge_details, "grobid_unavailable", detail=message)
-        return {
-            "available": False,
-            "status": "unavailable",
-            "url": base,
-            "endpoint": endpoint,
-            "http_status": status_code,
-            "message": message,
-            "badges": badges,
-            "badge_details": badge_details,
-        }
-    return {
-        "available": True,
-        "status": "available",
+    attempts = _grobid_readiness_attempts()
+    timeout = _grobid_readiness_timeout_seconds()
+    last_status_code = 0
+    last_message = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(endpoint, timeout=timeout) as response:
+                status_code = int(getattr(response, "status", 200))
+                body = response.read(64).decode("utf-8", errors="ignore").strip().lower()
+        except Exception as exc:
+            last_message = f"GROBID unavailable: {exc}"
+        else:
+            alive = status_code < 500 and (not body or "true" in body or "alive" in body)
+            if alive:
+                return {
+                    "available": True,
+                    "status": "available",
+                    "url": base,
+                    "endpoint": endpoint,
+                    "http_status": status_code,
+                    "attempts": attempt,
+                    "message": "GROBID available.",
+                    "badges": badges,
+                    "badge_details": badge_details,
+                }
+            last_status_code = status_code
+            last_message = f"GROBID unavailable: isalive returned HTTP {status_code}"
+            if body:
+                last_message += f" with body {body[:80]}"
+        if attempt < attempts:
+            time.sleep(min(1.0, 0.25 * attempt))
+    if attempts > 1 and last_message:
+        last_message = f"{last_message} after {attempts} attempts"
+    _append_badge(badges, badge_details, "grobid_unavailable", detail=last_message)
+    response: dict[str, object] = {
+        "available": False,
+        "status": "unavailable",
         "url": base,
         "endpoint": endpoint,
-        "http_status": status_code,
-        "message": "GROBID available.",
+        "message": last_message,
+        "attempts": attempts,
         "badges": badges,
         "badge_details": badge_details,
     }
+    if last_status_code:
+        response["http_status"] = last_status_code
+    return response
 
 
 def grobid_available(url: str | None = None) -> bool:
@@ -7806,6 +7832,23 @@ def _metadata_has_recent_grobid_failure(metadata: dict[str, object], pdf_fingerp
     if failed_at <= 0:
         return True
     return (time.time() - failed_at) < cooldown
+
+
+def _metadata_has_grobid_unavailability_failure(metadata: dict[str, object]) -> bool:
+    status = _clean_text(metadata.get("grobid_status")).casefold()
+    available = metadata.get("grobid_available")
+    last_error_detail = _clean_text(metadata.get("grobid_last_error_detail")).casefold()
+    if "grobid extraction failed" in last_error_detail or "timed out" in last_error_detail:
+        return False
+    warnings = " ".join(_clean_list(metadata.get("structured_extraction_warnings"))).casefold()
+    notices = " ".join(_clean_list(metadata.get("structured_extraction_notices"))).casefold()
+    marker = f"{warnings} {notices}"
+    return (
+        status == "unavailable"
+        or available is False
+        or "grobid 当前不可用" in marker
+        or "grobid unavailable" in marker
+    )
 
 
 def _paper_search_imported_refs(profile: str | Path) -> list[dict[str, str]]:

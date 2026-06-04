@@ -39,6 +39,7 @@ from nblane.core.research_papers import (
     extract_paper_segments,
     format_research_citations,
     get_stable_pdf_url,
+    grobid_readiness,
     grobid_tei_to_bibliography,
     grobid_tei_to_segments,
     import_paper_pdf,
@@ -3754,6 +3755,39 @@ class TestResearchPapers(unittest.TestCase):
         )
         self.assertIn("GROBID unavailable", diagnostics["badges"])
 
+    def test_grobid_readiness_retries_transient_failure(self) -> None:
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size):
+                return b"true"
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "NBLANE_GROBID_READINESS_ATTEMPTS": "2",
+                    "NBLANE_GROBID_READINESS_TIMEOUT_SECONDS": "0.01",
+                },
+            ),
+            patch("nblane.core.research_papers.time.sleep"),
+            patch(
+                "nblane.core.research_papers.urllib.request.urlopen",
+                side_effect=[TimeoutError("first probe timed out"), FakeResponse()],
+            ) as urlopen_mock,
+        ):
+            status = grobid_readiness("http://grobid.example")
+
+        self.assertTrue(status["available"])
+        self.assertEqual(status["attempts"], 2)
+        self.assertEqual(urlopen_mock.call_count, 2)
+
     def test_fallback_segments_clear_needs_structured_extraction_badge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
@@ -3931,6 +3965,91 @@ class TestResearchPapers(unittest.TestCase):
         extract_mock.assert_not_called()
         self.assertIn("Fallback ready", diagnostics["badges"])
         self.assertNotIn(source_id, [row["id"] for row in needs_extraction_rows])
+
+    def test_run_extraction_retries_recent_grobid_unavailable_when_service_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                source_id,
+                metadata={
+                    "pdf_asset_ref": "papers/demo.pdf",
+                    "pdf_sha256": "abc123",
+                    "reading_artifacts_pdf_sha256": "abc123",
+                    "reading_artifacts_status": "fallback",
+                    "structure_backend": "pymupdf_fallback",
+                    "structured_extracted_at": "2999-01-01T00:00:00+00:00",
+                    "structured_extraction_notices": ["GROBID 当前不可用，已自动切换到文本降级方案。"],
+                    "grobid_status": "unavailable",
+                    "grobid_available": False,
+                },
+            )
+
+            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto"):
+                self.assertEqual(backend, "grobid")
+                segments = [
+                    PaperSegment(
+                        segment_id="seg:source-paper-grounded:00001",
+                        source_id=source_id_arg,
+                        page=1,
+                        order=1,
+                        text="GROBID paragraph.",
+                    )
+                ]
+                save_paper_segments(profile_arg, source_id_arg, segments)
+                source_inbox = load_research_sources(profile_arg)
+                update_research_source(
+                    source_inbox,
+                    source_id_arg,
+                    metadata={
+                        "structure_backend": "grobid",
+                        "structured_extraction_notices": [],
+                        "grobid_status": "available",
+                        "grobid_available": True,
+                    },
+                )
+                save_research_sources(profile_arg, source_inbox)
+                return segments
+
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                save_research_sources(profile, inbox)
+                save_paper_pages(profile, source_id, [PaperPage(source_id=source_id, page=1, text="Page text.")])
+                save_paper_segments(
+                    profile,
+                    source_id,
+                    [
+                        PaperSegment(
+                            segment_id="seg:source-paper-grounded:00001",
+                            source_id=source_id,
+                            page=1,
+                            order=1,
+                            text="Fallback paragraph.",
+                        )
+                    ],
+                )
+                with (
+                    patch(
+                        "nblane.core.research_papers.grobid_readiness",
+                        return_value={"available": True, "status": "available"},
+                    ) as readiness_mock,
+                    patch(
+                        "nblane.core.research_papers.extract_paper_segments",
+                        side_effect=fake_grobid_segments,
+                    ) as extract_mock,
+                ):
+                    result = ensure_paper_reading_artifacts(profile, source_id)
+
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(result["structure_backend"], "grobid")
+        self.assertEqual(source.metadata["structure_backend"], "grobid")
+        readiness_mock.assert_called_once()
+        extract_mock.assert_called_once()
 
     def test_force_grobid_upgrade_bypasses_recent_timeout_cooldown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

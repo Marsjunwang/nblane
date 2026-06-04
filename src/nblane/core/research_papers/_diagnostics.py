@@ -104,33 +104,64 @@ def _normalized_quote_text(value: str) -> str:
     return re.sub(r"\s+", " ", _clean_text(value)).casefold()
 
 
-def paper_citation_diagnostics(
+def _paper_citation_diagnostics_by_source(
     profile: str | Path,
-    source_id: str = "",
-) -> list[str]:
-    """Return citation diagnostics that need paper-reading UI attention."""
+    *,
+    chunks: list[ResearchChunk] | None = None,
+    citations: list[ResearchCitation] | None = None,
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Return quote/source diagnostics once, grouped by related source id."""
 
-    chunks = {chunk.id: chunk for chunk in load_chunks(_profile_root(profile))}
-    diagnostics: list[str] = []
-    clean_source = _clean_text(source_id)
-    for citation in load_research_citations(_profile_root(profile)):
-        chunk = chunks.get(citation.chunk_id)
-        if clean_source and citation.source_id != clean_source and (
-            chunk is None or chunk.source_id != clean_source
-        ):
-            continue
+    chunk_rows = chunks if chunks is not None else load_chunks(_profile_root(profile))
+    citation_rows = citations if citations is not None else load_research_citations(_profile_root(profile))
+    chunk_map = {chunk.id: chunk for chunk in chunk_rows}
+    by_source: dict[str, list[str]] = {}
+    all_diagnostics: list[str] = []
+
+    def source_refs(citation: ResearchCitation, chunk: ResearchChunk | None) -> list[str]:
+        refs: list[str] = []
+        if citation.source_id:
+            _append_unique(refs, citation.source_id)
+        if chunk is not None and chunk.source_id:
+            _append_unique(refs, chunk.source_id)
+        return refs
+
+    def add(message: str, refs: list[str]) -> None:
+        _append_unique(all_diagnostics, message)
+        for ref in refs:
+            bucket = by_source.setdefault(ref, [])
+            _append_unique(bucket, message)
+
+    for citation in citation_rows:
+        chunk = chunk_map.get(citation.chunk_id)
+        refs = source_refs(citation, chunk)
         if chunk is not None and citation.source_id and citation.source_id != chunk.source_id:
-            diagnostics.append(
-                f"{citation.id}: source {citation.source_id} does not match chunk source {chunk.source_id}"
+            add(
+                f"{citation.id}: source {citation.source_id} does not match chunk source {chunk.source_id}",
+                refs,
             )
         if not citation.quote or chunk is None:
             continue
         quote = _normalized_quote_text(citation.quote)
         chunk_text = _normalized_quote_text(chunk.text)
         if quote and chunk_text and quote not in chunk_text:
-            diagnostics.append(
-                f"{citation.id}: quote does not match chunk {citation.chunk_id}"
+            add(
+                f"{citation.id}: quote does not match chunk {citation.chunk_id}",
+                refs,
             )
+    return by_source, all_diagnostics
+
+
+def paper_citation_diagnostics(
+    profile: str | Path,
+    source_id: str = "",
+) -> list[str]:
+    """Return citation diagnostics that need paper-reading UI attention."""
+
+    clean_source = _clean_text(source_id)
+    by_source, diagnostics = _paper_citation_diagnostics_by_source(profile)
+    if clean_source:
+        return list(by_source.get(clean_source, []))
     return diagnostics
 
 
@@ -164,6 +195,7 @@ def paper_source_diagnostics(
     workspace_diagnostics: list[str] | None = None,
     library_diagnostics: list[str] | None = None,
     duplicate_risk_refs: dict[str, list[str]] | None = None,
+    citation_diagnostics_by_source: dict[str, list[str]] | None = None,
 ) -> dict[str, object]:
     """Return display-ready diagnostics and badges for one paper source."""
 
@@ -197,7 +229,11 @@ def paper_source_diagnostics(
     ]
     citation_diagnostics = [
         *workspace_diagnostics,
-        *paper_citation_diagnostics(profile, source.id),
+        *(
+            citation_diagnostics_by_source.get(source.id, [])
+            if citation_diagnostics_by_source is not None
+            else paper_citation_diagnostics(profile, source.id)
+        ),
     ]
     duplicate_refs = (
         duplicate_risk_refs
@@ -314,8 +350,22 @@ def paper_diagnostics(
 
     inbox = load_research_sources(_profile_root(profile))
     grobid_status = _pkg.grobid_readiness() if include_grobid else None
+    workspace_diagnostics = validate_research_workspace(_profile_root(profile))
+    library_diagnostics = validate_paper_library(profile)
+    duplicate_risk_refs = _duplicate_risk_refs(inbox)
+    citation_diagnostics_by_source, _ = _paper_citation_diagnostics_by_source(profile)
     source_diagnostics = [
-        paper_source_diagnostics(profile, source.id, grobid_status=grobid_status)
+        paper_source_diagnostics(
+            profile,
+            source.id,
+            grobid_status=grobid_status,
+            inbox=inbox,
+            source=source,
+            workspace_diagnostics=workspace_diagnostics,
+            library_diagnostics=library_diagnostics,
+            duplicate_risk_refs=duplicate_risk_refs,
+            citation_diagnostics_by_source=citation_diagnostics_by_source,
+        )
         for source in inbox.sources
         if source.kind == "paper"
     ]
@@ -343,6 +393,11 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
     workspace_diagnostics = validate_research_workspace(_profile_root(profile))
     library_diagnostics = validate_paper_library(profile)
     duplicate_risk_refs = _duplicate_risk_refs(inbox)
+    citation_diagnostics_by_source, _ = _paper_citation_diagnostics_by_source(
+        profile,
+        chunks=chunks,
+        citations=citations,
+    )
     claim_counts: dict[str, int] = {}
     citation_counts: dict[str, int] = {}
     chunk_counts: dict[str, int] = {}
@@ -376,6 +431,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
                 workspace_diagnostics=workspace_diagnostics,
                 library_diagnostics=library_diagnostics,
                 duplicate_risk_refs=duplicate_risk_refs,
+                citation_diagnostics_by_source=citation_diagnostics_by_source,
             )
             if is_paper
             else {"badges": []}
@@ -469,27 +525,37 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
     return rows
 
 
-def paper_overview(profile: str | Path) -> dict[str, object]:
+def paper_overview(
+    profile: str | Path,
+    *,
+    inbox: ResearchSourceInbox | None = None,
+    rows: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     """Compute Overview metrics and integrity warnings."""
 
-    inbox = load_research_sources(_profile_root(profile))
+    if inbox is None:
+        inbox = load_research_sources(_profile_root(profile))
     papers = [source for source in inbox.sources if source.kind == "paper"]
-    rows = paper_rows(profile)
+    rows = list(rows) if rows is not None else paper_rows(profile)
     claims = load_research_claims(_profile_root(profile))
     ready_claims = [claim for claim in claims if claim.status == "ready"]
     promoted_claims = [claim for claim in claims if claim.status == "promoted"]
-    stale_translations = 0
-    for source in papers:
-        stale_translations += sum(1 for row in load_paper_translations(profile, source.id) if row.status == "stale")
-    workspace_diagnostics = validate_research_workspace(_profile_root(profile))
-    library_diagnostics = validate_paper_library(profile)
-    quote_diagnostics = paper_citation_diagnostics(_profile_root(profile))
-    citation_broken = [
-        item
-        for item in [*workspace_diagnostics, *library_diagnostics]
-        if "citation" in item or "chunk" in item or "source ref" in item or "library node" in item
-    ] + quote_diagnostics
-    source_diagnostics = [paper_source_diagnostics(profile, source.id) for source in papers]
+    source_diagnostics = [
+        row.get("diagnostics")
+        for row in rows
+        if isinstance(row.get("diagnostics"), dict)
+    ]
+    stale_translations = sum(
+        int(diagnostic.get("stale_translation_count") or 0)
+        for diagnostic in source_diagnostics
+    )
+    citation_broken: list[str] = []
+    for diagnostic in source_diagnostics:
+        for item in [
+            *_clean_list(diagnostic.get("citation_diagnostics")),
+            *_clean_list(diagnostic.get("library_diagnostics")),
+        ]:
+            _append_unique(citation_broken, item)
     badge_counts: dict[str, int] = {}
     for diagnostic in source_diagnostics:
         for badge in diagnostic.get("badges") or []:

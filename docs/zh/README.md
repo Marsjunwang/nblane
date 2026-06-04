@@ -17,7 +17,7 @@ source_of_truth: true
 | 产品 / 项目管理 | [核心闭环](product/core-loop.md) -> [路线图](product/roadmap.md) -> [当前状态](project/status.md) -> [里程碑](project/milestones.md) -> [问题与风险](project/issues.md) |
 | 开发者 | [架构总览](architecture/overview.md) -> [数据契约](architecture/data-contracts.md) -> [模块总览图](architecture/module-map.md) -> [CLI 参考](reference/cli.md) -> [MCP 参考](reference/mcp.md) |
 | Agent / 集成方 | [AI 架构](architecture/ai-architecture.md) -> [Agent Harness 集成](reference/agent-harness.md) -> [MCP 参考](reference/mcp.md) |
-| 运维 / 发布 | [腾讯云部署](guides/deployment-tencent-cloud.md) -> [存储演进](architecture/storage.md) -> [公开站点](guides/public-site.md) |
+| 运维 / 发布 | [腾讯云部署](guides/deployment-tencent-cloud.md) -> [Mihomo 代理部署](guides/mihomo-deployment.md) -> [存储演进](architecture/storage.md) -> [公开站点](guides/public-site.md) |
 
 ## 文档地图
 
@@ -61,6 +61,7 @@ source_of_truth: true
 | [public-site.md](guides/public-site.md) | 公开资料、博客、简历、项目、静态构建 |
 | [blog-editor.md](guides/blog-editor.md) | Blog 编辑器、AI patch、视觉候选、发布检查 |
 | [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 腾讯云小团队部署 |
+| [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理完整部署与运维 |
 
 ### Reference
 

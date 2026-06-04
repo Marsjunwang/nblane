@@ -24,6 +24,7 @@ from nblane.core.profile_io import profile_dir
 from nblane.core.research_sources import (
     RESEARCH_DIRNAME,
     ResearchSource,
+    ResearchSourceInbox,
     load_research_sources,
 )
 from nblane.core.yaml_io import _load_yaml_dict
@@ -1983,9 +1984,38 @@ def _overview_internal_target(surface: str, **values: object) -> dict[str, objec
     return target
 
 
-def build_research_overview_payload(profile: str | Path) -> dict[str, Any]:
+def _overview_paper_row_matches_view(row: dict[str, object], view_id: str) -> bool:
+    badges = {str(item) for item in row.get("badges", []) if str(item).strip()}
+    status = str(row.get("status") or "")
+    visibility = str(row.get("visibility") or "")
+    if view_id == "reading":
+        return status == "reading"
+    if view_id == "needs_extraction":
+        return bool(row.get("has_pdf")) and "Needs structured extraction" in badges
+    if view_id == "no_pdf":
+        return not bool(row.get("has_pdf"))
+    if view_id == "claims_need_review":
+        return status == "candidate_ready" or "AI candidates" in badges
+    if view_id == "duplicate_risk":
+        return "Duplicate risk" in badges
+    if view_id == "stale_translation":
+        return "Stale translation" in badges
+    if view_id == "private":
+        return visibility == "private"
+    if view_id == "recent":
+        return bool(row.get("last_read"))
+    return True
+
+
+def build_research_overview_payload(
+    profile: str | Path,
+    *,
+    inbox: ResearchSourceInbox | None = None,
+    paper_rows_all: list[dict[str, object]] | None = None,
+) -> dict[str, Any]:
     """Build an action-oriented Research Workspace overview payload."""
-    inbox = load_research_sources(_profile_root(profile))
+    if inbox is None:
+        inbox = load_research_sources(_profile_root(profile))
     sources = inbox.by_id()
     chunks = load_chunks(profile)
     claims = load_research_claims(profile)
@@ -2047,9 +2077,12 @@ def build_research_overview_payload(profile: str | Path) -> dict[str, Any]:
     try:
         from nblane.core.research_papers import paper_rows as _paper_rows
 
+        all_rows = list(paper_rows_all) if paper_rows_all is not None else _paper_rows(profile, view="all")
+        paper_rows_by_view["all"] = all_rows
         for view_id, *_ in paper_queue_specs:
-            paper_rows_by_view[view_id] = _paper_rows(profile, view=view_id)
-        paper_rows_by_view["all"] = _paper_rows(profile, view="all")
+            paper_rows_by_view[view_id] = [
+                row for row in all_rows if _overview_paper_row_matches_view(row, view_id)
+            ]
     except Exception:
         paper_rows_by_view = {}
 

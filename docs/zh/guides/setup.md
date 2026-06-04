@@ -119,9 +119,8 @@ codex login
 ### 可选：安装 mihomo 代理
 
 国内服务器在下载 GitHub release、arXiv PDF、Playwright 浏览器或访问部分海外
-LLM / 论文源时可能很慢。可以安装
-[MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo/releases) 作为本机代理，
-再让终端和生产 systemd 服务走 `127.0.0.1:7890`。
+LLM / 论文源时可能很慢。完整部署步骤见
+[Mihomo 代理部署](mihomo-deployment.md)；下面保留最小快速参考。
 
 订阅地址通常包含 token，应按密钥处理，不要写进公开仓库、截图或提交记录。下面用
 `<SUB_URL>` 表示你的订阅 URL。

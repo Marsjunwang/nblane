@@ -729,11 +729,11 @@ def _render_workspace_overview(ctx, inbox) -> None:
     _pdir = ctx.pdir
     ui = ctx.ui
     _render_research_overview_styles()
-    overview = paper_overview(_pdir)
-    command = build_research_overview_payload(_pdir)
+    all_paper_rows = _cached_paper_rows(_pdir, view="all")
+    overview = paper_overview(_pdir, inbox=inbox, rows=all_paper_rows)
+    command = build_research_overview_payload(_pdir, inbox=inbox, paper_rows_all=all_paper_rows)
     connector_rows = list(load_connectors(_pdir).get("connectors") or [])
     enabled_connectors = [row for row in connector_rows if bool(row.get("enabled", True))]
-    all_paper_rows = _cached_paper_rows(_pdir, view="all")
     row_by_id = {str(row.get("id") or ""): row for row in all_paper_rows}
     source_ids = {source.id for source in inbox.sources}
     funnel = command.get("funnel_counts") or {}
@@ -1140,5 +1140,4 @@ def _render_workspace_overview(ctx, inbox) -> None:
             st.session_state[f"research_export_focus:{selected}"] = "risk_queue"
             _set_overview_notice(ctx, _l(ui, "export_focus_saved", "Export gate focus updated."))
             st.rerun()
-
 
