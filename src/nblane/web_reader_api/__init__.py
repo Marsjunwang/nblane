@@ -29,6 +29,17 @@ from nblane.core.paper_library_workspace import (
     handle_paper_library_event,
 )
 from nblane.core.profile_io import list_profiles, profile_dir
+from nblane.core import ai_stream_tasks
+from nblane.core.blog_workspace import (
+    build_blog_workspace_payload,
+    handle_blog_workspace_event,
+)
+from nblane.core.public_site import (
+    PublicSiteError,
+    build_public_site,
+    load_blog_post,
+    publish_blog_text,
+)
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core import reader_tasks
 from nblane.core.research_papers import (
@@ -80,6 +91,8 @@ PAPER_LIBRARY_FRONTEND_DIR = PACKAGE_DIR.parent / "paper_library_component" / "f
 PAPER_LIBRARY_ASSET_DIR = PAPER_LIBRARY_FRONTEND_DIR / "assets"
 HOME_DASHBOARD_FRONTEND_DIR = PACKAGE_DIR.parent / "home_dashboard_component" / "frontend" / "static"
 HOME_DASHBOARD_ASSET_DIR = HOME_DASHBOARD_FRONTEND_DIR / "assets"
+BLOG_EDITOR_FRONTEND_DIR = PACKAGE_DIR.parent / "public_blog_editor_component" / "frontend" / "static"
+BLOG_EDITOR_ASSET_DIR = BLOG_EDITOR_FRONTEND_DIR / "assets"
 _PAPER_LIBRARY_SEARCH_JOBS: dict[str, dict[str, object]] = {}
 _PAPER_LIBRARY_SEARCH_JOBS_LOCK = threading.Lock()
 _PAPER_LIBRARY_EVENT_JOBS: dict[str, dict[str, object]] = {}
@@ -1004,6 +1017,244 @@ async def paper_library_asset(file_name: str):
         raise HTTPException(status_code=404, detail="asset not found")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.post("/api/blog/{profile}/posts/{slug}/publish")
+async def blog_publish(request: Request, profile: str, slug: str):
+    """Publish one blog post after full publish-time validation.
+
+    Accepts an optional ``{meta, body, blocks_json}`` body to publish unsaved
+    structured text; otherwise publishes the post as already stored on disk.
+    """
+    _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
+    clean_slug = _clean_text(slug)
+    if not clean_slug:
+        raise HTTPException(status_code=400, detail="slug is required")
+    body = await _json_body(request)
+    has_inline_text = isinstance(body.get("meta"), dict) and isinstance(body.get("body"), str)
+    try:
+        if has_inline_text:
+            blocks = body.get("blocks_json")
+            path = await asyncio.to_thread(
+                publish_blog_text,
+                profile,
+                clean_slug,
+                dict(body["meta"]),
+                str(body["body"]),
+                blocks_json=blocks if isinstance(blocks, list) else None,
+            )
+        else:
+            post = await asyncio.to_thread(load_blog_post, profile, clean_slug)
+            path = await asyncio.to_thread(
+                publish_blog_text,
+                profile,
+                clean_slug,
+                dict(post.meta),
+                post.body,
+                blocks_json=post.blocks_json,
+            )
+    except PublicSiteError as exc:
+        return JSONResponse(
+            {"ok": False, "errors": str(exc).split("\n")},
+            status_code=422,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "slug": clean_slug, "path": str(path), "status": "published"})
+
+
+@app.post("/api/site/{profile}/build")
+async def site_build(request: Request, profile: str):
+    """Build the static public site for a profile.
+
+    Optional body fields: ``include_drafts`` (bool), ``base_url`` (str).
+    """
+    _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
+    body = await _json_body(request)
+    include_drafts = _clean_bool(body.get("include_drafts"), default=False)
+    base_url = _clean_text(body.get("base_url"))
+    try:
+        result = await asyncio.to_thread(
+            build_public_site,
+            profile,
+            include_drafts=include_drafts,
+            base_url=base_url,
+        )
+    except PublicSiteError as exc:
+        return JSONResponse(
+            {"ok": False, "errors": str(exc).split("\n")},
+            status_code=422,
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "output_dir": str(result.output_dir),
+            "page_count": len(result.pages),
+            "pages": [str(page) for page in result.pages],
+        }
+    )
+
+
+def _blog_editor_index_html(config: dict[str, object]) -> str:
+    """Return the built blog editor index.html, host-adapted for standalone use.
+
+    Rewrites the vite-relative ``./assets/`` references to the served
+    ``/blog-editor/assets/`` path and injects the standalone bootstrap config.
+    """
+    index_path = BLOG_EDITOR_FRONTEND_DIR / "index.html"
+    html = index_path.read_text(encoding="utf-8")
+    html = html.replace('"./assets/', '"/blog-editor/assets/')
+    bootstrap = (
+        "<script>window.__NBLANE_BLOG_STANDALONE__ = "
+        + json.dumps(config, ensure_ascii=False)
+        + ";</script>"
+    )
+    return html.replace("</head>", bootstrap + "</head>", 1)
+
+
+@app.get("/blog-editor")
+async def blog_editor_view(request: Request, profile: str = "", slug: str = ""):
+    clean_profile = str(profile or "").strip() or _default_profile_name()
+    if clean_profile:
+        _paper_library_profile_dir(clean_profile, request)
+    if not (BLOG_EDITOR_FRONTEND_DIR / "index.html").is_file():
+        raise HTTPException(status_code=404, detail="blog editor build not found")
+    streamlit_base = (
+        os.getenv("NBLANE_STREAMLIT_BASE_URL", "http://127.0.0.1:8503").strip()
+        or "http://127.0.0.1:8503"
+    )
+    config = {
+        "profile": clean_profile,
+        "slug": str(slug or "").strip(),
+        "apiBase": "",
+        "streamlitBase": streamlit_base,
+        "standalone": True,
+    }
+    response = Response(content=_blog_editor_index_html(config), media_type="text/html")
+    _apply_handoff_cookie(response, request)
+    return response
+
+
+@app.get("/blog-editor/assets/{file_name}")
+async def blog_editor_asset(file_name: str):
+    if "/" in file_name or "\\" in file_name:
+        raise HTTPException(status_code=404, detail="asset not found")
+    path = BLOG_EDITOR_ASSET_DIR / file_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="asset not found")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/blog/{profile}/workspace")
+async def blog_workspace_payload(
+    request: Request,
+    profile: str,
+    slug: str = "",
+    status: str = "all",
+):
+    """Return the standalone blog editor's initial payload from disk."""
+    _paper_library_profile_dir(profile, request)
+    try:
+        payload = await asyncio.to_thread(
+            build_blog_workspace_payload,
+            profile,
+            active_slug=slug,
+            status_filter=status,
+        )
+    except PublicSiteError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "payload": payload})
+
+
+@app.post("/api/blog/{profile}/events")
+async def blog_events(request: Request, profile: str):
+    """Dispatch one React Blog Editor event against the public layer.
+
+    Returns ``{ok, handled, ...}``. When ``handled`` is False the action is
+    outside this host's scope (e.g. AI generation) and the client should fall
+    back to the Streamlit editor for that operation.
+    """
+    _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
+    body = await _json_body(request)
+    event = body.get("event") if isinstance(body.get("event"), dict) else body
+    try:
+        result = await asyncio.to_thread(handle_blog_workspace_event, profile, event)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result.handled:
+        # Action is outside this host's scope (e.g. AI generation).
+        return JSONResponse(result.to_dict(), status_code=422)
+    # ``run_check`` is read-only validation: ``ok=False`` reports findings, not a
+    # request failure, so it returns 200. Mutating actions that fail return 422.
+    if not result.ok and result.action != "run_check":
+        return JSONResponse(result.to_dict(), status_code=422)
+    return JSONResponse(result.to_dict())
+
+
+@app.post("/api/blog/{profile}/ai/start")
+async def blog_ai_start(request: Request, profile: str):
+    """Start an inline AI patch stream and return its initial snapshot.
+
+    Backed by the same in-memory ``ai_stream_tasks`` registry used by the
+    Streamlit host, so the lifecycle (start/poll/cancel) is identical.
+    """
+    _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
+    body = await _json_body(request)
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    slug = _clean_text(payload.get("slug"))
+    if not slug:
+        raise HTTPException(status_code=400, detail="slug is required")
+    selected_block = payload.get("selected_block")
+    if not isinstance(selected_block, dict):
+        selected_block = {}
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    task_id = _clean_text(payload.get("stream_id") or payload.get("event_id")) or (
+        f"ai-stream-{uuid.uuid4().hex[:12]}"
+    )
+    ai_stream_tasks.cleanup()
+    snapshot = await asyncio.to_thread(
+        ai_stream_tasks.start_ai_patch_stream,
+        task_id=task_id,
+        profile=profile,
+        slug=slug,
+        meta=meta,
+        markdown=_clean_text(payload.get("markdown")) if isinstance(payload.get("markdown"), str) else str(payload.get("markdown") or ""),
+        selected_block=selected_block,
+        operation=_clean_text(payload.get("operation")) or "polish",
+        prompt=str(payload.get("prompt") or ""),
+        visual_kind=_clean_text(payload.get("visual_kind")),
+    )
+    return JSONResponse({"ok": True, "stream": snapshot, "stream_id": task_id})
+
+
+@app.get("/api/blog/{profile}/ai/poll")
+async def blog_ai_poll(request: Request, profile: str, stream_id: str = ""):
+    """Return the current snapshot for an inline AI patch stream."""
+    _paper_library_profile_dir(profile, request)
+    clean_id = _clean_text(stream_id)
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="stream_id is required")
+    snapshot = await asyncio.to_thread(ai_stream_tasks.snapshot, clean_id)
+    return JSONResponse({"ok": True, "stream": snapshot})
+
+
+@app.post("/api/blog/{profile}/ai/cancel")
+async def blog_ai_cancel(request: Request, profile: str):
+    """Request cancellation of an inline AI patch stream."""
+    _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
+    body = await _json_body(request)
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    clean_id = _clean_text(payload.get("stream_id"))
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="stream_id is required")
+    snapshot = await asyncio.to_thread(ai_stream_tasks.cancel, clean_id)
+    return JSONResponse({"ok": True, "stream": snapshot})
 
 
 @app.get("/api/research/{profile}/paper-library")

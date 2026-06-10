@@ -2291,3 +2291,46 @@ textarea:read-only {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Standalone (Reader API / 18502) full-page host */
+.nb-standalone-root {
+  min-height: 100vh;
+}
+
+.nb-standalone-loading,
+.nb-standalone-error {
+  padding: 24px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.nb-standalone-error {
+  color: #b91c1c;
+}
+
+.nb-standalone-notice {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid transparent;
+}
+
+.nb-standalone-notice.warn {
+  background: #fffbeb;
+  color: #92400e;
+  border-bottom-color: #fde68a;
+}
+
+.nb-standalone-notice.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-bottom-color: #fecaca;
+}
+
+.nb-standalone-notice.ok {
+  background: #ecfdf5;
+  color: #065f46;
+  border-bottom-color: #a7f3d0;
+}

@@ -128,7 +128,7 @@ except ImportError:  # pragma: no cover - optional while core API lands in paral
     restore_public_library_node = None
     trash_public_library_node = None
 from nblane.core.io import profile_dir
-from nblane.web_auth import require_login
+from nblane.web_auth import require_login, _sidecar_auth_base
 from nblane.web_cache import clear_web_cache
 from nblane.web_shared import (
     apply_ui_language_from_session,
@@ -185,6 +185,8 @@ def _ui() -> dict[str, str]:
             "validate": "校验",
             "public_errors": "公开层校验错误",
             "new_blog": "新建博客草稿",
+            "open_full_editor": "在全屏编辑器中打开",
+            "open_full_editor_help": "在独立页面（Reader 服务）中编辑，写作手感更顺滑。",
             "title_label": "标题",
             "create": "创建",
             "publish": "发布",
@@ -525,6 +527,8 @@ def _ui() -> dict[str, str]:
         "validate": "Validate",
         "public_errors": "Public layer validation errors",
         "new_blog": "New blog draft",
+        "open_full_editor": "Open in full-screen editor",
+        "open_full_editor_help": "Edit on a standalone page (Reader service) for a smoother writing experience.",
         "title_label": "Title",
         "create": "Create",
         "publish": "Publish",
@@ -6278,6 +6282,24 @@ def _render_blog_right_panel(
         )
 
 
+def _render_blog_full_editor_link(*, selected: str, ui: dict[str, str]) -> None:
+    """Render a link to the standalone full-screen blog editor (Reader service)."""
+    try:
+        base = _sidecar_auth_base()
+    except Exception:
+        return
+    if not base:
+        return
+    from urllib.parse import quote
+
+    url = f"{base}/blog-editor?profile={quote(selected)}"
+    st.link_button(
+        ui["open_full_editor"],
+        url,
+        help=ui["open_full_editor_help"],
+    )
+
+
 def _render_blog_tab(
     *,
     selected: str,
@@ -6287,6 +6309,8 @@ def _render_blog_tab(
     """Render the public blog writing workflow."""
     blog_dir = root / BLOG_DIRNAME
     blog_dir.mkdir(parents=True, exist_ok=True)
+
+    _render_blog_full_editor_link(selected=selected, ui=ui)
 
     status_key = f"blog_status_filter:{selected}"
     status_filter = st.session_state.get(status_key, ui["all_statuses"])

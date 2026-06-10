@@ -6692,5 +6692,292 @@ function ConnectedEditor() {
   return <LegacyMarkdownEditor args={args} />;
 }
 
+// --------------------------------------------------------------------------
+// Standalone (Reader API / 18502) bootstrap
+// --------------------------------------------------------------------------
+
+function standaloneBlogConfig() {
+  const config = window.__NBLANE_BLOG_STANDALONE__;
+  return config && typeof config === "object" ? config : null;
+}
+
+// Actions handled by the standalone Reader API event endpoint. Anything else
+// (AI generation, visual assets, inline media upload) still requires the
+// Streamlit host, so we surface a hint instead of silently dropping it.
+const STANDALONE_HANDLED_ACTIONS = new Set([
+  "select_post",
+  "save_post",
+  "publish_request",
+  "run_check",
+  "create_post",
+  "preview_post",
+  "generate_ai_candidate",
+  "draft_from_evidence",
+  "draft_from_claims",
+  "draft_from_done",
+  "delete_media",
+  "convert_media_video",
+  "upload_media",
+  "library_upload_media",
+  "library_attach_existing",
+  "library_select_node",
+  "library_create_folder",
+  "library_create_post",
+  "library_rename_node",
+  "library_move_node",
+  "library_reorder_node",
+  "library_trash_node",
+  "library_restore_node",
+  "library_permanent_delete_node",
+]);
+
+// Mutations that change the post list / library tree / content on disk and so
+// require a fresh payload fetch afterward.
+const STANDALONE_REFRESH_ACTIONS = new Set([
+  "save_post",
+  "publish_request",
+  "create_post",
+  "draft_from_evidence",
+  "draft_from_claims",
+  "draft_from_done",
+  "delete_media",
+  "convert_media_video",
+  "upload_media",
+  "library_upload_media",
+  "library_attach_existing",
+  "library_create_folder",
+  "library_create_post",
+  "library_rename_node",
+  "library_move_node",
+  "library_reorder_node",
+  "library_trash_node",
+  "library_restore_node",
+  "library_permanent_delete_node",
+]);
+
+function StandaloneEditor({ config }) {
+  const profile = cleanText(config.profile);
+  const apiBase = cleanText(config.apiBase).replace(/\/+$/, "");
+  const [args, setArgs] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState(null);
+  const [validationState, setValidationState] = useState(null);
+  // Transient overlay state merged into ShellEditor args without a full refetch.
+  const [overlay, setOverlay] = useState({});
+  const activeSlugRef = useRef(cleanText(config.slug));
+  const statusFilterRef = useRef("all");
+
+  const fetchPayload = useCallback(
+    async (slug) => {
+      const params = new URLSearchParams();
+      if (slug) {
+        params.set("slug", slug);
+      }
+      params.set("status", statusFilterRef.current || "all");
+      const url = `${apiBase}/api/blog/${encodeURIComponent(profile)}/workspace?${params.toString()}`;
+      const resp = await fetch(url, { credentials: "include" });
+      if (!resp.ok) {
+        throw new Error(`workspace ${resp.status}`);
+      }
+      const data = await resp.json();
+      return data.payload || {};
+    },
+    [apiBase, profile],
+  );
+
+  const loadInto = useCallback(
+    async (slug) => {
+      const payload = await fetchPayload(slug);
+      activeSlugRef.current = cleanText(payload.active_slug) || slug || "";
+      setOverlay({});
+      setValidationState(null);
+      setArgs({
+        ...payload,
+        mode: "shell",
+        editable: true,
+        math_safe: true,
+        document_id: `${profile}:${activeSlugRef.current}`,
+        height: window.innerHeight - 8,
+      });
+    },
+    [fetchPayload, profile],
+  );
+
+  useEffect(() => {
+    loadInto(activeSlugRef.current).catch((err) => setError(String(err)));
+  }, [loadInto]);
+
+  // Intercept ShellEditor's Streamlit.setComponentValue calls and route them to
+  // the Reader API. ShellEditor itself stays host-agnostic.
+  useEffect(() => {
+    const original = Streamlit.setComponentValue;
+    const originalHeight = Streamlit.setFrameHeight;
+    Streamlit.setFrameHeight = () => {};
+
+    const postEvent = (event) =>
+      fetch(`${apiBase}/api/blog/${encodeURIComponent(profile)}/events`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event }),
+      }).then(async (resp) => ({ resp, data: await resp.json().catch(() => ({})) }));
+
+    // AI inline stream lifecycle → dedicated start/poll/cancel endpoints backed
+    // by the shared in-memory ai_stream_tasks registry.
+    const aiFetch = (suffix, init) =>
+      fetch(`${apiBase}/api/blog/${encodeURIComponent(profile)}/ai/${suffix}`, {
+        credentials: "include",
+        ...init,
+      }).then(async (resp) => ({ resp, data: await resp.json().catch(() => ({})) }));
+
+    Streamlit.setComponentValue = (event) => {
+      const action = cleanText(event && event.action);
+      if (!action) {
+        return;
+      }
+      const payload = (event && event.payload) || {};
+
+      if (action === "filter_posts") {
+        statusFilterRef.current = cleanText(payload.status_filter) || "all";
+        loadInto(activeSlugRef.current).catch((err) => setError(String(err)));
+        return;
+      }
+      if (action === "select_post") {
+        loadInto(cleanText(payload.slug)).catch((err) => setError(String(err)));
+        return;
+      }
+
+      // ---- Inline AI stream control ----
+      if (action === "ai_inline_action") {
+        aiFetch("start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload }),
+        })
+          .then(({ resp, data }) => {
+            if (!resp.ok || data.ok === false) {
+              setNotice({ tone: "error", text: `AI 启动失败 (${resp.status})` });
+              return;
+            }
+            setOverlay((cur) => ({ ...cur, ai_stream: data.stream }));
+          })
+          .catch((err) => setNotice({ tone: "error", text: String(err) }));
+        return;
+      }
+      if (action === "ai_stream_poll") {
+        const streamId = cleanText(payload.stream_id);
+        if (!streamId) return;
+        aiFetch(`poll?stream_id=${encodeURIComponent(streamId)}`, { method: "GET" })
+          .then(({ data }) => setOverlay((cur) => ({ ...cur, ai_stream: data.stream })))
+          .catch(() => {});
+        return;
+      }
+      if (action === "cancel_ai_stream") {
+        const streamId = cleanText(payload.stream_id);
+        if (!streamId) return;
+        aiFetch("cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload: { stream_id: streamId } }),
+        })
+          .then(({ data }) => setOverlay((cur) => ({ ...cur, ai_stream: data.stream })))
+          .catch(() => {});
+        return;
+      }
+      // Patch apply/reject are editor-local in standalone mode: the patch text is
+      // already in the payload, so just clear the stream overlay and let the
+      // editor's own state machine fold it into the document.
+      if (action === "apply_ai_patch" || action === "reject_ai_patch") {
+        setOverlay((cur) => ({ ...cur, ai_stream: null }));
+        return;
+      }
+
+      if (!STANDALONE_HANDLED_ACTIONS.has(action)) {
+        setNotice({
+          tone: "warn",
+          text: `“${action}” 暂未在独立编辑器中支持，请在 Streamlit 工作台中操作。`,
+        });
+        return;
+      }
+
+      postEvent(event)
+        .then(async ({ resp, data }) => {
+          // run_check is read-only validation: route findings into the Check
+          // panel rather than treating ok=false as a request failure.
+          if (action === "run_check") {
+            setValidationState({
+              errors: Array.isArray(data.errors) ? data.errors : [],
+              warnings: Array.isArray(data.warnings) ? data.warnings : [],
+              quality: Array.isArray(data.quality) ? data.quality : [],
+            });
+            setNotice(null);
+            return;
+          }
+          if (!resp.ok || data.ok === false) {
+            const errs = Array.isArray(data.errors) ? data.errors.join("; ") : `事件失败 (${resp.status})`;
+            setNotice({ tone: "error", text: errs });
+            return;
+          }
+          setNotice(null);
+          const nextSlug = cleanText(data.slug) || activeSlugRef.current;
+          if (action === "preview_post") {
+            setOverlay((cur) => ({ ...cur, preview_html: data.preview_html || "" }));
+            return;
+          }
+          if (action === "generate_ai_candidate") {
+            setOverlay((cur) => ({
+              ...cur,
+              ai_candidates: [data.candidate, ...(cur.ai_candidates || [])].filter(Boolean),
+            }));
+            return;
+          }
+          if (action === "publish_request") {
+            setNotice({ tone: "ok", text: "已发布。" });
+          }
+          if (STANDALONE_REFRESH_ACTIONS.has(action)) {
+            await loadInto(nextSlug);
+          }
+        })
+        .catch((err) => setNotice({ tone: "error", text: String(err) }));
+    };
+    return () => {
+      Streamlit.setComponentValue = original;
+      Streamlit.setFrameHeight = originalHeight;
+    };
+  }, [apiBase, profile, loadInto]);
+
+  if (error) {
+    return (
+      <div className="nb-standalone-error" role="alert">
+        加载失败：{error}
+      </div>
+    );
+  }
+  if (!args) {
+    return <div className="nb-standalone-loading">加载中…</div>;
+  }
+  const shellArgs = {
+    ...args,
+    ...overlay,
+    ...(validationState ? { validation_state: validationState } : {}),
+  };
+  return (
+    <div className="nb-standalone-root">
+      {notice ? (
+        <div className={`nb-standalone-notice ${notice.tone}`} role="status">
+          {notice.text}
+        </div>
+      ) : null}
+      <ShellEditor args={shellArgs} />
+    </div>
+  );
+}
+
 const root = createRoot(document.getElementById("root"));
-root.render(<ConnectedEditor />);
+const standaloneConfig = standaloneBlogConfig();
+if (standaloneConfig) {
+  root.render(<StandaloneEditor config={standaloneConfig} />);
+} else {
+  root.render(<ConnectedEditor />);
+}
+

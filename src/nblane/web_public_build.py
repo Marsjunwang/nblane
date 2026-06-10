@@ -10,8 +10,11 @@ from nblane.core.public_site import (
     PROJECTS_FILENAME,
     PUBLIC_PROFILE_FILENAME,
     RESUME_SOURCE_FILENAME,
+    PublicSiteError,
     build_public_site,
     init_public_layer,
+    load_blog_posts,
+    publish_blog_post,
     render_public_site_preview,
     validate_public_layer,
 )
@@ -64,6 +67,14 @@ def _ui() -> dict[str, str]:
             "preview_page": "预览页面",
             "preview_warnings": "预览提示",
             "built": "已构建：{path}",
+            "publish_section": "发布草稿并构建",
+            "publish_section_help": "勾选要发布的草稿，一键发布后立即构建静态站。",
+            "publish_no_drafts": "没有待发布的草稿。",
+            "publish_select": "待发布草稿",
+            "publish_and_build": "发布并构建",
+            "publish_none_selected": "请先勾选至少一篇草稿。",
+            "published_ok": "已发布 {count} 篇草稿。",
+            "publish_failed": "发布失败：{slug}",
         }
     return {
             "page_title": "Public Build · nblane",
@@ -94,6 +105,14 @@ def _ui() -> dict[str, str]:
         "preview_page": "Preview page",
         "preview_warnings": "Preview warnings",
         "built": "Built: {path}",
+        "publish_section": "Publish drafts and build",
+        "publish_section_help": "Select drafts to publish, then publish and build the static site in one step.",
+        "publish_no_drafts": "No drafts waiting to publish.",
+        "publish_select": "Drafts to publish",
+        "publish_and_build": "Publish and build",
+        "publish_none_selected": "Select at least one draft first.",
+        "published_ok": "Published {count} draft(s).",
+        "publish_failed": "Failed to publish: {slug}",
     }
 
 
@@ -141,6 +160,58 @@ def _render_site_preview(selected: str, *, include_drafts: bool, ui: dict[str, s
         format_func=lambda page: _preview_label(page, preview.page_titles),
     )
     components.html(preview.pages[selected_page], height=760, scrolling=True)
+
+
+def _render_publish_and_build(
+    selected: str,
+    *,
+    out_dir: str,
+    include_drafts: bool,
+    base_url: str,
+    ui: dict[str, str],
+) -> None:
+    """List drafts and publish the selected ones, then build in one step."""
+    st.subheader(ui["publish_section"])
+    st.caption(ui["publish_section_help"])
+    drafts = [
+        post
+        for post in load_blog_posts(selected, include_drafts=True)
+        if post.status == "draft"
+    ]
+    if not drafts:
+        st.info(ui["publish_no_drafts"])
+        return
+
+    options = {f"{post.title} ({post.slug})": post.slug for post in drafts}
+    chosen_labels = st.multiselect(ui["publish_select"], list(options.keys()))
+    chosen_slugs = [options[label] for label in chosen_labels]
+
+    if st.button(ui["publish_and_build"], type="primary"):
+        if not chosen_slugs:
+            st.warning(ui["publish_none_selected"])
+            return
+        published = 0
+        for slug in chosen_slugs:
+            try:
+                publish_blog_post(selected, slug)
+                published += 1
+            except PublicSiteError as exc:
+                st.error(ui["publish_failed"].format(slug=slug))
+                st.error(str(exc))
+                return
+        st.success(ui["published_ok"].format(count=published))
+        stash_git_backup_results()
+        clear_web_cache()
+        try:
+            result = build_public_site(
+                selected,
+                out_dir=out_dir,
+                include_drafts=include_drafts,
+                base_url=base_url,
+            )
+            st.success(ui["built"].format(path=result.output_dir))
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def main() -> None:
@@ -206,6 +277,15 @@ def main() -> None:
                     st.success(ui["built"].format(path=result.output_dir))
                 except Exception as exc:
                     st.error(str(exc))
+
+    st.divider()
+    _render_publish_and_build(
+        selected,
+        out_dir=out_dir,
+        include_drafts=include_drafts,
+        base_url=base_url,
+        ui=ui,
+    )
 
     st.divider()
     _render_site_preview(selected, include_drafts=include_drafts, ui=ui)
