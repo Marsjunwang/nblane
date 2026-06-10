@@ -76,7 +76,11 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Answer the question only from supplied paper refs. If no supporting "
         "refs are present, return a warning and do not guess. When payload "
         "scope is paper/full_paper, treat the supplied segments as a compact "
-        "whole-paper context and cite the refs that support the answer."
+        "whole-paper context and cite the refs that support the answer. When "
+        "payload.history is present it holds prior question/answer turns in "
+        "order; treat them as conversation context so follow-up questions like "
+        "'why' or 'and that?' resolve against the earlier turns. Reply in the "
+        "language of the current question."
     ),
     "research.paper_claim_extract": (
         "Extract claim candidates only from supplied paper context. Every "

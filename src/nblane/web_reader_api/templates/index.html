@@ -1120,6 +1120,37 @@
       font-weight: 850;
     }
     .pr-panel-body { display: grid; gap: 8px; padding: 10px; }
+    .pr-qa-thread { display: grid; gap: 8px; max-height: 320px; overflow: auto; }
+    .pr-qa-thread:empty { display: none; }
+    .pr-qa-turn { display: grid; gap: 4px; }
+    .pr-qa-q {
+      align-self: end;
+      max-width: 92%;
+      justify-self: end;
+      padding: 6px 9px;
+      border-radius: 10px 10px 2px 10px;
+      background: var(--accent, #21685b);
+      color: #fff;
+      font-size: .8rem;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .pr-qa-a {
+      max-width: 96%;
+      padding: 6px 9px;
+      border-radius: 10px 10px 10px 2px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      font-size: .8rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .pr-qa-a.pending { color: var(--muted); font-style: italic; }
+    .pr-qa-context { font-size: .72rem; color: var(--muted); }
+    .pr-qa-context summary { cursor: pointer; }
+    .pr-qa-context-body { padding: 3px 0 0 2px; overflow-wrap: anywhere; }
     .pr-panel-resize { z-index: 8; }
     .pr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
     .pr-tab {
@@ -1248,7 +1279,7 @@
       text-align: left;
     }
     .pr-item:hover { border-color: rgba(33, 104, 91, .45); background: #fbfdfc; }
-    .pr-item-title { font-size: .8rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+    .pr-item-title { font-size: .8rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; white-space: pre-wrap; }
     .pr-item-meta { color: var(--muted); font-size: .73rem; line-height: 1.25; overflow-wrap: anywhere; }
     .pr-item-snippet {
       color: var(--ink);
@@ -1395,6 +1426,12 @@
       translate_visible_pages: "Visible pages",
       explain_selection: "Explain",
       ask_paper: "Ask",
+      ask_followup: "Ask follow-up",
+      clear_chat: "Clear",
+      qa_context: "Context",
+      qa_context_pages: "Pages",
+      qa_context_segments: "Segments",
+      qa_thinking: "Thinking...",
       save_progress: "Save progress",
       review_card: "Analyze Paper",
       analyze_paper: "Analyze Paper",
@@ -1542,6 +1579,9 @@
     let dockState = { mode: "idle", status: "", selected_text: "", result: "", pending: false, selection_hash: "" };
     let dockUiState = { dock_position: null, dock_pinned: false, dock_layout: "selection" };
     let dockDragState = null;
+    // Multi-turn Ask conversation: ordered {question, answer, context} turns.
+    let qaHistory = [];
+    let qaPending = null;
     let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
@@ -1968,6 +2008,65 @@
       if (Object.keys(data).length) return JSON.stringify(data, null, 2);
       return text(result && result.message);
     }
+    function askPaperContext(result) {
+      const data = asObj(result && result.data);
+      const ctx = asObj(data.context || asObj(data.structured).context);
+      return Object.keys(ctx).length ? ctx : null;
+    }
+    function qaContextHtml(ctx) {
+      const obj = asObj(ctx);
+      if (!Object.keys(obj).length) return "";
+      const pages = asArr(obj.pages_covered).filter((p) => Number(p) > 0);
+      const bits = [];
+      if (Number(obj.supplied_segments) > 0) {
+        bits.push(`${esc(label("qa_context_segments"))}: ${Number(obj.supplied_segments)}`);
+      }
+      if (pages.length) {
+        const shown = pages.slice(0, 12).join(", ") + (pages.length > 12 ? "…" : "");
+        bits.push(`${esc(label("qa_context_pages"))}: ${esc(shown)}`);
+      }
+      if (!bits.length) return "";
+      return `<details class="pr-qa-context"><summary>${esc(label("qa_context"))}</summary><div class="pr-qa-context-body">${bits.join(" · ")}</div></details>`;
+    }
+    function qaThreadHtml() {
+      const turns = qaHistory.slice();
+      const rows = turns.map((turn) => `
+        <div class="pr-qa-turn">
+          <div class="pr-qa-q">${esc(text(turn.question))}</div>
+          <div class="pr-qa-a">${esc(text(turn.answer))}</div>
+          ${qaContextHtml(turn.context)}
+        </div>`);
+      if (qaPending) {
+        rows.push(`
+        <div class="pr-qa-turn">
+          <div class="pr-qa-q">${esc(text(qaPending.question))}</div>
+          <div class="pr-qa-a pending">${esc(label("qa_thinking"))}</div>
+        </div>`);
+      }
+      return rows.join("");
+    }
+    function askPanelHtml() {
+      return `
+        <div class="pr-panel-head">
+          <span>${esc(label("ask_paper"))}</span>
+          ${qaHistory.length ? `<button class="pr-icon-button pr-dock-mini" data-action="clearAsk" title="${attr(label("clear_chat"))}">x</button>` : ""}
+        </div>
+        <div class="pr-panel-body">
+          <div class="pr-qa-thread" id="qaThread">${qaThreadHtml()}</div>
+          <textarea class="pr-textarea" id="questionInput" rows="3" placeholder="${attr(label("question"))}"></textarea>
+          <button class="pr-button primary" data-action="askQuestion" ${qaPending ? "disabled" : ""}>${esc(qaHistory.length ? label("ask_followup") : label("ask_paper"))}</button>
+        </div>`;
+    }
+    function refreshAsk() {
+      const panel = document.getElementById("askPanel");
+      if (!panel) return;
+      panel.innerHTML = askPanelHtml();
+      panel.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", () => handleAction(button.dataset.action));
+      });
+      const thread = document.getElementById("qaThread");
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    }
     function actionButtonSelector(action) {
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
@@ -2236,6 +2335,10 @@
         progress: asObj(task.progress),
         event_id: text(task.event_id || actionState.event_id),
       });
+      if (action === "ask_paper" && qaPending) {
+        qaPending = null;
+        refreshAsk();
+      }
       if (asObj(task.refresh).payload) {
         await loadReaderPayload({ preserveView: true });
       }
@@ -2320,7 +2423,14 @@
           dockState.result = translationTextFromResult(result) || text(data.summary && data.summary.message);
         } else if (action === "ask_paper") {
           setActionState(action, ok ? "done" : "error", primaryMessage);
-          dockState.result = askPaperResultText(result);
+          const answer = askPaperResultText(result);
+          dockState.result = answer;
+          const question = qaPending ? qaPending.question : dockState.selected_text;
+          qaPending = null;
+          if (ok && question) {
+            qaHistory.push({ question, answer, context: askPaperContext(result) });
+          }
+          refreshAsk();
         } else {
           dockState.result = JSON.stringify(data.structured || data.summary || data, null, 2);
         }
@@ -2850,13 +2960,7 @@
                 </div>
                 <div class="pr-panel-body" id="sideBody">${sideBodyHtml()}</div>
               </section>
-              <section class="pr-panel">
-                <div class="pr-panel-head">${esc(label("ask_paper"))}</div>
-                <div class="pr-panel-body">
-                  <textarea class="pr-textarea" id="questionInput" rows="3" placeholder="${attr(label("question"))}"></textarea>
-                  <button class="pr-button primary" data-action="askQuestion">${esc(label("ask_paper"))}</button>
-                </div>
-              </section>
+              <section class="pr-panel" id="askPanel">${askPanelHtml()}</section>
             </aside>
           </main>
           <section id="annotationPopoverMount">${annotationPopoverHtml()}</section>
@@ -3920,10 +4024,13 @@
     }
     function reviewItemText(value, depth = 0) {
       if (Array.isArray(value)) {
-        return value.map((row) => reviewItemText(row, depth + 1)).filter(Boolean).join(" ");
+        const parts = value.map((row) => reviewItemText(row, depth + 1)).filter(Boolean);
+        // Join nested list rows with newlines so multi-point findings keep
+        // their structure instead of collapsing into one long line.
+        return parts.join(depth >= 1 ? "\n" : " ");
       }
       if (value && typeof value === "object") {
-        if (depth > 4) return "";
+        if (depth > 8) return "";
         const obj = asObj(value);
         const label = ["section", "heading", "section_title", "title", "label", "name"]
           .map((key) => reviewCleanText(obj[key]))
@@ -3969,7 +4076,7 @@
           .map((row) => reviewItemText(row, depth + 1))
           .filter(Boolean);
         if (detailRows.length) {
-          const body = detailRows.join(" ");
+          const body = detailRows.join("\n");
           return label && body !== label ? `${label}: ${body}` : body;
         }
         if (label) return label;
@@ -3998,7 +4105,7 @@
           .filter((key) => !metadataKeys.has(key))
           .map((key) => reviewItemText(obj[key], depth + 1))
           .filter(Boolean);
-        if (fallbackRows.length) return [...new Set(fallbackRows)].slice(0, 4).join(" ");
+        if (fallbackRows.length) return [...new Set(fallbackRows)].join("\n");
         return "";
       }
       return reviewCleanText(value);
@@ -5356,10 +5463,21 @@
       }
       if (action === "askQuestion") {
         const question = text(document.getElementById("questionInput")?.value).trim();
-        if (!question) return;
+        if (!question || qaPending) return;
+        qaPending = { question };
+        const history = qaHistory.map((turn) => ({ question: turn.question, answer: turn.answer }));
+        const input = document.getElementById("questionInput");
+        if (input) input.value = "";
         dockState = { mode: "ai", status: label("ask_paper"), selected_text: question, result: "", pending: true, selection_hash: "" };
         refreshDock();
-        return startReaderTask("ask_paper", { question, page: currentPage, locator: `p. ${currentPage}` });
+        refreshAsk();
+        return startReaderTask("ask_paper", { question, history, page: currentPage, locator: `p. ${currentPage}` });
+      }
+      if (action === "clearAsk") {
+        qaHistory = [];
+        qaPending = null;
+        refreshAsk();
+        return;
       }
       if (action === "translateFull") {
         setReaderMode("translation");
@@ -6171,6 +6289,14 @@
         });
       });
     }
+    // A single English word (optionally hyphenated/apostrophed) is eligible
+    // for the instant dictionary translation, mirroring local_dict.is_lookupable
+    // on the backend. Double-clicking such a word should translate it at once.
+    function isSingleWordSelection(value) {
+      const clean = text(value).trim();
+      if (!clean || clean.length > 32) return false;
+      return /^[A-Za-z][A-Za-z'-]*$/.test(clean);
+    }
     async function handleSelection() {
       selectingText = false;
       lastSelectionEndedAt = Date.now();
@@ -6231,6 +6357,11 @@
       };
       renderSelectionBar();
       if (emitPassiveEvents()) emitAction("selection_created", currentSelection);
+      // Auto-translate a single word so a double-click shows its meaning (with
+      // phonetics) instantly, without a second click on the Translate button.
+      if (isSingleWordSelection(selectedText)) {
+        handleAction("translate");
+      }
     }
     function pageNumberForPoint(x, y) {
       const elements = document.elementsFromPoint(x, y);
@@ -6317,6 +6448,11 @@
       return hits.length ? hits[0].unit : null;
     }
     async function handleTextDoubleClick(event) {
+      // In pure PDF reading, let the browser's native double-click word
+      // selection stand (the mouseup handler turns it into the translate
+      // bar). Don't yank the reader into compare mode or auto-translate the
+      // segment — translation on demand via selection is enough here.
+      if (readerMode === "pdf") return;
       const page = Number(event.currentTarget?.dataset?.page || pageNumberForPoint(event.clientX, event.clientY) || currentPage || 0);
       const unit = layoutUnitAtPoint(page, event.clientX, event.clientY);
       if (!unit) {
@@ -6332,8 +6468,7 @@
       if (!anchorId) return;
       const intentSeq = beginUserAnchorIntent(anchorId);
       setStickyUserAnchor(anchorId);
-      if (readerMode === "pdf") setReaderMode("compare");
-      else refreshTranslationReader();
+      refreshTranslationReader();
       const scrollPromise = Promise.resolve(setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false }));
       persistLocalState();
       scheduleReaderStateChanged(true);

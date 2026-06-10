@@ -279,8 +279,8 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
     "research.paper_qa": AIActionSpec(
         name="research.paper_qa",
         owner="research",
-        default_backend="direct_llm",
-        fallback_backend="rule_fallback",
+        default_backend="local_codex_readonly",
+        fallback_backend="direct_llm",
         output_mode="json",
         activity_policy="candidate",
         schema=schema_for_keys(

@@ -30,7 +30,7 @@ AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "research.paper_explain_selection": "llm",
     "research.paper_source_guide": "llm",
     "research.paper_review_card": "llm",
-    "research.paper_qa": "llm",
+    "research.paper_qa": "codex",
     "research.paper_claim_extract": "llm",
     "research.paper_deep_read_codex": "codex",
     "research.paper_compare_codex": "codex",

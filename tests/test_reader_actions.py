@@ -210,6 +210,124 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(result.data["translation_text"], "重要段落")
         self.assertEqual(translations[0].translated_text, "重要段落")
 
+    def test_translate_selection_single_word_uses_local_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch(
+                    "nblane.core.reader_actions.translate_paper_segments",
+                    side_effect=AssertionError("LLM must not be called for dict hits"),
+                ),
+                patch(
+                    "nblane.core.local_dict.lookup",
+                    return_value="n. 模型, 模范",
+                ),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {"selected_text": "model", "page": 1, "target_lang": "zh"},
+                )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["translation_source"], "local_dict")
+        self.assertEqual(result.data["translation_text"], "n. 模型, 模范")
+
+    def test_translate_single_word_uses_local_dict_even_with_segment_refs(self) -> None:
+        # A real in-text word selection always carries the segment ref it falls
+        # within; the dictionary fast path must still apply for single words.
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch(
+                    "nblane.core.reader_actions.translate_paper_segments",
+                    side_effect=AssertionError("LLM must not be called for dict hits"),
+                ),
+                patch(
+                    "nblane.core.local_dict.lookup",
+                    return_value="n. 梯度",
+                ),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {
+                        "selected_text": "gradient",
+                        "page": 1,
+                        "target_lang": "zh",
+                        "segment_refs": ["seg:0007"],
+                    },
+                )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["translation_source"], "local_dict")
+        self.assertEqual(result.data["translation_text"], "n. 梯度")
+
+    def test_translate_multiword_selection_with_segment_refs_uses_llm(self) -> None:
+        # Multi-word selections with a segment ref keep the whole-segment LLM
+        # path so durable per-segment translation rows stay correct.
+        ai_result = SimpleNamespace(
+            structured={"translations": [{"segment_id": "seg:0007", "translated_text": "神经网络策略"}]},
+            warnings=[],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch(
+                    "nblane.core.reader_actions.translate_paper_segments",
+                    return_value=ai_result,
+                ) as llm,
+                patch(
+                    "nblane.core.local_dict.lookup",
+                    side_effect=AssertionError("dictionary must not handle phrases"),
+                ),
+            ):
+                handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {
+                        "selected_text": "neural network policy",
+                        "page": 1,
+                        "target_lang": "zh",
+                        "segment_refs": ["seg:0007"],
+                    },
+                )
+
+        self.assertEqual(llm.call_count, 1)
+
+    def test_translate_selection_reuses_cached_translation(self) -> None:
+        ai_result = SimpleNamespace(
+            structured={"translations": [{"segment_id": "", "translated_text": "渐变"}]},
+            warnings=[],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            payload = {
+                "selected_text": "this exact phrase",
+                "page": 1,
+                "target_lang": "zh",
+            }
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch(
+                    "nblane.core.reader_actions.translate_paper_segments",
+                    return_value=ai_result,
+                ) as llm,
+                patch("nblane.core.local_dict.lookup", return_value=None),
+            ):
+                first = handle_reader_action(ctx, "translate_selection", dict(payload))
+                self.assertEqual(llm.call_count, 1)
+                # Second identical request should hit the cache, not the LLM.
+                second = handle_reader_action(ctx, "translate_selection", dict(payload))
+                self.assertEqual(llm.call_count, 1)
+
+        self.assertEqual(first.data["translation_text"], "渐变")
+        self.assertEqual(second.data["translation_text"], "渐变")
+        self.assertEqual(second.data.get("translation_source"), "cache")
+
     def test_translate_visible_pages_returns_summary_and_warns_for_unsavable_rows(self) -> None:
         wrong_hash = text_hash("Wrong passage")
         ai_result = SimpleNamespace(
@@ -774,8 +892,36 @@ class TestReaderActions(unittest.TestCase):
             with patch("nblane.core.reader_actions.answer_paper_question", return_value=ai_result):
                 result = handle_reader_action(ctx, "ask_paper", {"question": "Why?"})
 
-        self.assertEqual(result.data["structured"], {"answer": "42"})
+        self.assertEqual(result.data["structured"]["answer"], "42")
+        self.assertEqual(result.data["structured"]["question"], "Why?")
+        self.assertIn("context", result.data)
+        self.assertEqual(result.data["context"]["history_turns"], 0)
         self.assertEqual(result.warnings, ["check"])
+
+    def test_ask_paper_threads_history_to_backend(self) -> None:
+        ai_result = SimpleNamespace(structured={"answer": "follow"}, warnings=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            _, ctx = self._profile(Path(tmp))
+            with patch(
+                "nblane.core.reader_actions.answer_paper_question",
+                return_value=ai_result,
+            ) as ask:
+                handle_reader_action(
+                    ctx,
+                    "ask_paper",
+                    {
+                        "question": "And why does that matter?",
+                        "history": [
+                            {"question": "What is it?", "answer": "A method."},
+                            {"question": "ignored-blank", "answer": ""},
+                        ],
+                    },
+                )
+
+        history = ask.call_args.kwargs["history"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["question"], "What is it?")
+        self.assertEqual(history[0]["answer"], "A method.")
 
     def test_ask_paper_uses_whole_paper_context_without_selection(self) -> None:
         ai_result = SimpleNamespace(structured={"answer": "whole"}, warnings=[])

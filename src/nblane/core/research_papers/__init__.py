@@ -2676,6 +2676,48 @@ def _reader_outline_from_structure_units(units: list[PaperStructureUnit]) -> lis
     return outline
 
 
+def _merge_reader_outlines(
+    structure_outline: list[dict[str, object]],
+    segment_outline: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Combine the GROBID structure outline with the segment-derived outline.
+
+    GROBID often yields only a handful of top-level headings, which previously
+    shadowed the richer segment outline entirely. Keep the structure entries as
+    anchors and fill in segment headings that land on pages the structure
+    outline does not already cover, so deep sections are not lost.
+    """
+
+    if not structure_outline:
+        return segment_outline
+    if not segment_outline:
+        return structure_outline
+
+    def _norm_title(item: dict[str, object]) -> str:
+        return " ".join(_clean_text(str(item.get("title") or "")).lower().split())
+
+    seen_titles = {_norm_title(item) for item in structure_outline}
+    covered_pages = {int(item.get("page") or 0) for item in structure_outline}
+    structure_page_span = max(covered_pages) if covered_pages else 0
+
+    merged = list(structure_outline)
+    for item in segment_outline:
+        title = _norm_title(item)
+        if not title or title in seen_titles:
+            continue
+        page = int(item.get("page") or 0)
+        # Add segment headings whose page is sparsely covered by the structure
+        # outline, or that extend past the last structure heading.
+        nearby = sum(1 for p in covered_pages if abs(p - page) <= 1)
+        if nearby >= 2 and page <= structure_page_span:
+            continue
+        seen_titles.add(title)
+        merged.append(item)
+
+    merged.sort(key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0)))
+    return merged
+
+
 _COMMON_OUTLINE_HEADINGS = {
     "abstract",
     "introduction",
@@ -2798,7 +2840,7 @@ def _outline_titles_from_segment_lines(segment: PaperSegment) -> list[tuple[str,
                 if clean_key not in seen:
                     seen.add(clean_key)
                     results.append((title, _outline_level_for_title(title), line_no * 10))
-    return results[:12]
+    return results[:40]
 
 
 def _outline_level_for_title(title: str) -> int:
@@ -2824,7 +2866,9 @@ def _section_marker_allowed(marker: str) -> bool:
     first = clean.split(".", 1)[0]
     if not first.isdigit() or int(first) <= 0:
         return False
-    return len(first) <= 1
+    # Allow one- and two-digit top-level section numbers (1-49) so sections
+    # 10, 11, 12+ are not dropped. Reject larger values (e.g. years like 2024).
+    return len(first) <= 2 and int(first) <= 49
 
 
 def _line_looks_like_outline_heading(line: str, *, numbered: bool, page: int, marker: str = "") -> bool:
@@ -5375,7 +5419,10 @@ def build_reader_payload(
         if isinstance(row, dict)
     }
     all_segments = load_paper_segments(profile, source_id)
-    outline = _reader_outline_from_structure_units(all_structure_units) or _reader_outline_from_segments(all_segments)
+    outline = _merge_reader_outlines(
+        _reader_outline_from_structure_units(all_structure_units),
+        _reader_outline_from_segments(all_segments),
+    )
     reader_preparation = _reader_preparation_summary(source, all_pages, all_segments)
     has_paged_segments = any(segment.page > 0 for segment in all_segments)
     segments = [

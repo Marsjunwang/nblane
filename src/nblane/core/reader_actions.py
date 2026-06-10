@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from nblane.core import git_backup
+from nblane.core import local_dict
 from nblane.core.ai import (
     answer_paper_question,
     deep_read_paper_codex,
@@ -219,6 +220,25 @@ def _question_context_segments(payload: dict[str, Any], segment_rows) -> list[di
     whole_paper_payload["full_paper"] = True
     whole_paper_payload.setdefault("scope", "paper")
     return _compact_segments_for_deep_read(whole_paper_payload, segment_rows)
+
+
+def _question_history(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Normalize prior Ask turns from the payload into compact Q/A pairs."""
+
+    raw = payload.get("history")
+    if not isinstance(raw, list):
+        return []
+    turns: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        question = _payload_text(item, "question", "q", "prompt")
+        answer = _payload_text(item, "answer", "a", "response")
+        if not question and not answer:
+            continue
+        turns.append({"question": question[:2000], "answer": answer[:4000]})
+    # Keep only the most recent turns to bound the prompt size.
+    return turns[-8:]
 
 
 def _balanced_paper_segment_indexes(count: int, *, limit: int) -> list[int]:
@@ -831,6 +851,109 @@ def _layout_translation_payload(unit: dict[str, Any], source_id: str) -> dict[st
         "row_span": unit.get("row_span"),
         "col_span": unit.get("col_span"),
     }
+
+
+def _fast_translation_result(
+    profile: str,
+    source_id: str,
+    selected_text: str,
+    target_lang: str,
+    payload: dict[str, Any],
+) -> "ReaderActionResult | None":
+    """Return a cached or dictionary translation without calling the LLM.
+
+    Applies to single-word selections (dictionary glossable) and to any
+    selection whose exact text was translated before (cache hit). Returns
+    None when no fast path applies, so the caller falls back to the LLM.
+    """
+
+    clean = (selected_text or "").strip()
+    if not clean:
+        return None
+    # A real in-text word selection always carries the segment ref(s) it
+    # falls within. Only bail to the whole-segment LLM path for multi-word
+    # selections; single words go through the dictionary/cache fast path even
+    # when a segment ref is present, since they should not overwrite the
+    # durable per-segment translation rows (the row below is selection-scoped).
+    if _payload_list(payload, "segment_refs", "segment_ids", "segment_id"):
+        if not local_dict.is_lookupable(clean):
+            return None
+
+    selected_hash = (
+        _payload_text(payload, "selected_text_hash", "text_hash", "source_hash")
+        or text_hash(clean)
+    )
+
+    cached_text = _cached_selection_translation(
+        profile, source_id, selected_hash, target_lang
+    )
+    source = "cache"
+    if not cached_text and target_lang in {"zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw"}:
+        gloss = local_dict.lookup(clean)
+        if gloss:
+            cached_text = gloss
+            source = "local_dict"
+    if not cached_text:
+        return None
+
+    row = normalize_translation_row(
+        {
+            "scope_type": "selection",
+            "scope_ref": selected_hash,
+            "segment_id": "",
+            "source_hash": selected_hash,
+            "source_text": clean,
+            "target_lang": target_lang,
+            "translated_text": cached_text,
+            "generated_by": source,
+        },
+        source_id=source_id,
+        target_lang=target_lang,
+    )
+    if source == "local_dict":
+        # Persist dictionary glosses so later edits/reviews see a durable row.
+        try:
+            upsert_paper_translations(profile, source_id, [row])
+        except Exception:
+            pass
+    return ReaderActionResult(
+        data={
+            "structured": {"translations": [row]},
+            "translations": [row],
+            "translation_text": cached_text,
+            "saved": 0,
+            "translation_source": source,
+        },
+        warnings=[],
+        message="",
+    )
+
+
+def _cached_selection_translation(
+    profile: str,
+    source_id: str,
+    selected_hash: str,
+    target_lang: str,
+) -> str:
+    """Return a previously stored selection translation for this text hash."""
+
+    if not selected_hash:
+        return ""
+    try:
+        rows = load_paper_translations(profile, source_id)
+    except Exception:
+        return ""
+    for translation in rows:
+        if (translation.target_lang or "zh") != target_lang:
+            continue
+        if (translation.scope_type or "") != "selection":
+            continue
+        if (translation.source_hash or translation.scope_ref) != selected_hash:
+            continue
+        text = (translation.translated_text or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _blank_translation_backend_warning(ai_result: Any, translations: list[dict[str, Any]]) -> str:
@@ -1603,6 +1726,13 @@ def _handle_reader_action_inner(
     if action in {TRANSLATE_SELECTION, "translate_segment"}:
         selected_text = _selection_text(payload, segment_rows)
         target_lang = _payload_text(payload, "target_lang", "language") or "zh"
+        # Fast paths for single-selection translation: reuse a prior cached
+        # translation, or an offline dictionary gloss, to avoid the LLM.
+        fast = _fast_translation_result(
+            profile, source_id, selected_text, target_lang, payload
+        )
+        if fast is not None:
+            return fast
         translation_payload = dict(payload)
         if action == TRANSLATE_SELECTION and selected_text:
             for key in ("segment_refs", "segment_ids", "segment_id", "scope_refs", "scope_ref"):
@@ -1709,11 +1839,27 @@ def _handle_reader_action_inner(
             raise ValueError("Reader question cannot be blank.")
         qa_segments = _question_context_segments(payload, segment_rows)
         has_selection_scope = bool(_selection_segments(payload, segment_rows))
+        history = _question_history(payload)
         source = load_research_sources(profile).by_id().get(source_id)
+        pages_covered = sorted(
+            {
+                int(row.get("page") or 0)
+                for row in qa_segments
+                if int(row.get("page") or 0) > 0
+            }
+        )
+        paper_context = {
+            "source_segments": len(segment_rows),
+            "supplied_segments": len(qa_segments),
+            "pages_covered": pages_covered,
+            "scope": "selection" if has_selection_scope else "paper",
+            "history_turns": len(history),
+        }
         ai_result = answer_paper_question(
             ctx.profile_name,
             source_id,
             question,
+            history=history or None,
             payload={
                 "source": _compact_source_for_deep_read(source, source_id),
                 "segments": qa_segments,
@@ -1721,21 +1867,14 @@ def _handle_reader_action_inner(
                 "chunks": [row.to_dict() for row in chunk_rows[:30]],
                 "scope": "selection" if has_selection_scope else "paper",
                 "full_paper": not has_selection_scope,
-                "paper_context": {
-                    "source_segments": len(segment_rows),
-                    "supplied_segments": len(qa_segments),
-                    "pages_covered": sorted(
-                        {
-                            int(row.get("page") or 0)
-                            for row in qa_segments
-                            if int(row.get("page") or 0) > 0
-                        }
-                    ),
-                },
+                "paper_context": paper_context,
             },
         )
+        structured = dict(ai_result.structured or {})
+        structured.setdefault("question", question)
+        structured["context"] = paper_context
         return ReaderActionResult(
-            data={"structured": ai_result.structured or {}},
+            data={"structured": structured, "context": paper_context},
             warnings=list(ai_result.warnings),
         )
 

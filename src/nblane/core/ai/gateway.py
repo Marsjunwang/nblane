@@ -377,6 +377,7 @@ def answer_paper_question(
     source_id: str,
     question: str,
     *,
+    history: list[dict[str, Any]] | None = None,
     context_refs: list[str] | None = None,
     payload: dict[str, Any] | None = None,
     require_review: bool = True,
@@ -385,6 +386,8 @@ def answer_paper_question(
 
     body = dict(payload or {})
     body.update({"source_id": source_id, "question": question})
+    if history:
+        body["history"] = history
     body, preferred_backend = _with_action_ai_preferences(
         profile,
         "research.paper_qa",

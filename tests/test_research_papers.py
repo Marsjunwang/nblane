@@ -22,7 +22,9 @@ from nblane.core.research_papers import (
     PaperStructureUnit,
     _paper_search_query_variants,
     _paper_translation_batches,
+    _merge_reader_outlines,
     _reader_outline_from_segments,
+    _reader_outline_from_structure_units,
     build_reader_payload,
     build_paper_layout_units,
     build_paper_structure_units,
@@ -2233,6 +2235,58 @@ class TestResearchPapers(unittest.TestCase):
         )
         self.assertNotIn("1 Example University", [row["title"] for row in outline])
         self.assertNotIn("Dataset", [row["title"] for row in outline])
+
+    def test_reader_outline_keeps_two_digit_section_numbers(self) -> None:
+        source_id = "source:paper:many-sections"
+        outline = _reader_outline_from_segments(
+            [
+                PaperSegment(
+                    segment_id="seg:page-2",
+                    source_id=source_id,
+                    page=2,
+                    order=1,
+                    text="\n".join(
+                        [
+                            "9 Ablation Studies",
+                            "We vary each component.",
+                            "10 Limitations",
+                            "The method has limits.",
+                            "11 Conclusion",
+                            "We conclude here.",
+                        ]
+                    ),
+                    kind="paragraph",
+                ),
+            ]
+        )
+        titles = [row["title"] for row in outline]
+        self.assertIn("9 Ablation Studies", titles)
+        self.assertIn("10 Limitations", titles)
+        self.assertIn("11 Conclusion", titles)
+
+    def test_merge_reader_outlines_fills_sparse_structure(self) -> None:
+        structure = [
+            {"title": "Abstract", "page": 1, "order": 1, "level": 1},
+            {"title": "Conclusion", "page": 8, "order": 80, "level": 1},
+        ]
+        segments = [
+            {"title": "3.1 Method", "page": 3, "order": 30, "level": 2},
+            {"title": "3.2 Training", "page": 4, "order": 40, "level": 2},
+            {"title": "Conclusion", "page": 8, "order": 81, "level": 1},
+        ]
+        merged = _merge_reader_outlines(structure, segments)
+        titles = [row["title"] for row in merged]
+        self.assertIn("3.1 Method", titles)
+        self.assertIn("3.2 Training", titles)
+        self.assertEqual(titles.count("Conclusion"), 1)
+        pages = [int(row["page"]) for row in merged]
+        self.assertEqual(pages, sorted(pages))
+
+    def test_merge_reader_outlines_handles_empty_inputs(self) -> None:
+        only_struct = [{"title": "Abstract", "page": 1, "order": 1, "level": 1}]
+        only_seg = [{"title": "1 Intro", "page": 1, "order": 1, "level": 1}]
+        self.assertEqual(_merge_reader_outlines(only_struct, []), only_struct)
+        self.assertEqual(_merge_reader_outlines([], only_seg), only_seg)
 
     def test_get_stable_pdf_url_uses_fingerprint_cache_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
