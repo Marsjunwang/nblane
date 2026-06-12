@@ -24,6 +24,33 @@ evidence_help_body: |-
   6. **状态风险**：发布或升级前检查扎实/专家技能是否缺少足够强的证据。
 
   本页 AI 只生成候选，必须经过预览和人工应用才会写入文件。
+
+  ---
+
+  ### 强度（strength）怎么判断
+
+  强度衡量「这条证据有多硬、多可核验」，由强到弱四级：
+
+  - **高信任 high_trust**：顶级论文（一作 / 会议期刊 / arXiv）且含可核验发表信息。
+  - **强 strong**：论文、可复制的开源链接（GitHub/GitLab、org/repo、PR/release），或相对基线的量化指标（如 +X% AP、延迟 A→B）。
+  - **中 medium**：真实的交付 / 复现 / 工程事实，但没有上面那些可核验亮点。
+  - **弱 weak**：主要靠推断、描述含糊，或缺少可核验细节。
+
+  **强度的用途**：它决定一个技能能声称到什么等级——
+  - 技能标 **扎实（solid）** 至少需要 **中（medium）+** 强度的证据；
+  - 技能标 **专家（expert）** 至少需要 **强（strong）+** 强度的证据。
+
+  「状态风险」tab 就是按这个规则报警：技能等级声称过高、但证据强度不够时会被标出。
+
+  ### 置信度（confidence）怎么判断
+
+  置信度衡量「你对这条证据的真实性、以及上面那个强度评级有多确定」，三级：
+
+  - **高 high**：证据直接可核验（有链接 / 论文 / 明确数字），强度评级几乎不会错。
+  - **中 medium**：基本可信，但需要一点推断，或细节不全。
+  - **低 low**：主要靠推测，来源或细节存疑。
+
+  置信度目前不参与自动判断，是给人和后续断言筛选用的参考信号。
 save_pool: 保存证据池
 saved_pool: 已保存 evidence-pool.yaml。
 saved_pool_synced: 已保存 evidence-pool.yaml，并同步 SKILL.md。
@@ -47,6 +74,10 @@ done_mark_crystallized: 应用后标记所选已完成任务为已结晶
 done_preview_source: 来源已完成任务：{sources}
 done_no_ai: 未配置 AI。
 done_spinner: 生成证据草案中…
+done_grade_hint: AI 已预填证据强度与信心，审阅时确认或微调即可，无需另去证据池手填。
+done_col_adopt: 采用
+done_col_evidence: 证据
+done_node_refs: 证据
 done_apply_selected: 应用所选
 done_apply_all: 应用全部
 done_applied: 已应用证据草案。
@@ -143,6 +174,30 @@ link_pick_skills: 技能
 link_button: 关联所选技能
 link_done: 已把证据关联到所选技能。
 link_empty: 没有可关联的活跃证据条目。
+link_by_skill: 以技能为中心
+link_by_evidence: 以证据为中心
+link_skill_empty: 技能树里还没有节点。
+link_skill_gap: ⚠ 有 {n} 个技能声称的状态超出了证据支撑
+link_skill_pick: 选择技能
+link_skill_col_evidence: 证据
+link_skill_current: 已关联：{ids}
+link_skill_evidence_pick: 要关联的证据
+link_attach_to_skill: 关联到该技能
+link_inline_skills: 技能
+link_inline_placeholder: 关联到技能…
+link_inline_attach: 关联
+pool_inline_hint: 直接在表格里改强度/置信度/审阅状态/公开度，改完点“保存表格修改”一次落盘；勾选行可批量改。
+pool_pick: ✓
+pool_bulk_field: 批量字段
+pool_bulk_value: 设为
+pool_bulk_apply: 应用到选中（{n}）
+pool_bulk_done: 已更新 {n} 行
+pool_save_edits: 保存表格修改
+pool_edits_saved: 已保存证据池。
+pool_edits_done: 已保存 {n} 行
+pool_no_changes: 没有改动
+pool_edit_detail: 编辑单条完整字段（摘要/链接/引用/废弃）
+pool_detail_pick: 选择一条
 refs_options_title: 可关联对象
 refs_options_empty: 暂无记录。
 refs_projects: 项目案例

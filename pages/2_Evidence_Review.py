@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from dataclasses import replace
 
+import pandas as pd
 import streamlit as st
 import yaml
 
@@ -22,7 +23,10 @@ from nblane.core.claims import (
 )
 from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.evidence_review import (
+    apply_pool_edits,
     build_evidence_review,
+    bulk_set_pool_field,
+    link_skill_to_evidence_nodes,
     normalize_evidence_strength,
 )
 from nblane.core.experience import (
@@ -611,6 +615,21 @@ def _link_evidence_to_skills(evidence_id: str, skill_ids: list[str]) -> None:
     _save_tree(tree, ui["link_done"])
 
 
+def _link_skill_to_evidence(skill_id: str, evidence_ids: list[str]) -> None:
+    """Attach several evidence refs to a single skill node."""
+    tree = load_skill_tree_raw(selected)
+    if not isinstance(tree, dict):
+        st.error("skill-tree.yaml not found.")
+        return
+    nodes = [
+        dict(node)
+        for node in (tree.get("nodes") or [])
+        if isinstance(node, dict)
+    ]
+    tree["nodes"] = link_skill_to_evidence_nodes(nodes, skill_id, evidence_ids)
+    _save_tree(tree, ui["link_done"])
+
+
 def _render_done_ingest(review: dict) -> None:
     st.subheader(ui["done_queue_title"])
     sections = parse_kanban(selected)
@@ -679,26 +698,66 @@ def _render_done_ingest(review: dict) -> None:
     parsed = parse_ingest_patch(raw_patch)
     include_evidence: list[bool] = []
     include_nodes: list[bool] = []
+    # Collected human-confirmed grades, written back to raw_patch before apply
+    # so the merge preview and the saved pool reflect what the reviewer chose.
+    graded_evidence: list[tuple[int, str, str]] = []
+
+    node_labels = schema_node_labels(load_skill_tree_raw(selected))
+
+    strength_options = ["", *EVIDENCE_STRENGTHS]
+    confidence_options = ["", *EVIDENCE_CONFIDENCES]
 
     st.markdown(f"**{ui['review_rows_title']}**")
+    st.caption(ui.get("done_grade_hint", ""))
+    if parsed.evidence_entries:
+        h1, h2, h3 = st.columns([6, 2, 2])
+        h1.caption(ui.get("done_col_evidence", "证据"))
+        h2.caption(ui["pool_strength"])
+        h3.caption(ui["pool_confidence"])
     for idx, row in enumerate(parsed.evidence_entries):
         title = str(row.get("title", "") or "")[:90]
-        c1, c2 = st.columns([1, 5])
+        c1, c2, c3 = st.columns([6, 2, 2], vertical_alignment="center")
         with c1:
             include_evidence.append(
                 st.checkbox(
-                    "Adopt",
+                    title or f"evidence {idx + 1}",
                     value=True,
                     key=f"evidence_review_ev_{selected}_{idx}",
-                    label_visibility="collapsed",
                 )
             )
+        ai_strength = str(row.get("strength", "") or "")
+        if ai_strength not in strength_options:
+            ai_strength = ""
+        ai_confidence = str(row.get("confidence", "") or "")
+        if ai_confidence not in confidence_options:
+            ai_confidence = ""
         with c2:
-            st.caption(title or f"evidence {idx + 1}")
+            chosen_strength = st.selectbox(
+                ui["pool_strength"],
+                strength_options,
+                index=strength_options.index(ai_strength),
+                format_func=_strength_label,
+                key=f"evidence_review_ev_strength_{selected}_{idx}",
+                label_visibility="collapsed",
+            )
+        with c3:
+            chosen_confidence = st.selectbox(
+                ui["pool_confidence"],
+                confidence_options,
+                index=confidence_options.index(ai_confidence),
+                format_func=_confidence_label,
+                key=f"evidence_review_ev_confidence_{selected}_{idx}",
+                label_visibility="collapsed",
+            )
+        graded_evidence.append((idx, chosen_strength, chosen_confidence))
 
     for idx, row in enumerate(parsed.node_updates):
         node_id = str(row.get("id", "") or "")
-        c1, c2 = st.columns([1, 5])
+        label = node_labels.get(node_id, node_id)
+        status = str(row.get("status", "") or "")
+        refs = row.get("evidence_refs") or []
+        ref_text = ", ".join(str(r) for r in refs) if isinstance(refs, list) else ""
+        c1, c2 = st.columns([1, 8], vertical_alignment="center")
         with c1:
             include_nodes.append(
                 st.checkbox(
@@ -709,7 +768,28 @@ def _render_done_ingest(review: dict) -> None:
                 )
             )
         with c2:
-            st.caption(f"`{node_id}`")
+            meta = f"`{node_id}`"
+            if status:
+                meta += f" · {status}"
+            if ref_text:
+                meta += f" · {ui.get('done_node_refs', 'evidence')}: {ref_text}"
+            st.caption(f"{label}  —  {meta}")
+
+    # Write human-confirmed grades back to the patch so filter/merge/apply use
+    # them. Reviewing means confirming the AI grade, not refilling it later.
+    raw_entries = raw_patch.get("evidence_entries")
+    if isinstance(raw_entries, list):
+        for idx, strength_value, confidence_value in graded_evidence:
+            if idx >= len(raw_entries) or not isinstance(raw_entries[idx], dict):
+                continue
+            if strength_value:
+                raw_entries[idx]["strength"] = strength_value
+            else:
+                raw_entries[idx].pop("strength", None)
+            if confidence_value:
+                raw_entries[idx]["confidence"] = confidence_value
+            else:
+                raw_entries[idx].pop("confidence", None)
 
     filtered, warnings = filter_ingest_patch(
         raw_patch,
@@ -1195,34 +1275,282 @@ def _render_pool_editor(review: dict) -> None:
     pages_key = f"evidence_review_pool_pages_{selected}"
     visible_pairs = _paginated_show(indexed_entries, key=pages_key, page_size=20)
 
-    for index, row in visible_pairs:
+    st.caption(ui.get("pool_inline_hint", ""))
+
+    # Build the editable table from the visible page. Edits are matched back to
+    # entries by id (not row position), so pagination/sort can't misroute them.
+    strength_opts = ["", *EVIDENCE_STRENGTHS]
+    confidence_opts = ["", *EVIDENCE_CONFIDENCES]
+    review_opts = list(EVIDENCE_REVIEW_STATUSES)
+    readiness_opts = list(EVIDENCE_PUBLIC_READINESS)
+
+    table_rows = []
+    for _index, row in visible_pairs:
+        rid = str(row.get("id", "") or "")
         title = _row_label(row)
         if bool(row.get("deprecated", False)):
-            title = f"{title} (deprecated)"
-        with st.expander(title, expanded=False):
-            next_row, updated, deprecated = _render_pool_form(
-                entries,
-                row=row,
-                prefix=f"evidence_review_edit_{selected}_{index}",
+            title = f"{title} ⚠"
+        table_rows.append(
+            {
+                "_pick": False,
+                "id": rid,
+                "title": title,
+                "strength": str(row.get("strength", "") or ""),
+                "confidence": str(row.get("confidence", "") or ""),
+                "review_status": str(
+                    row.get("review_status", "needs_review") or "needs_review"
+                ),
+                "public_readiness": str(
+                    row.get("public_readiness", "private") or "private"
+                ),
+            }
+        )
+    df = pd.DataFrame(
+        table_rows,
+        columns=[
+            "_pick",
+            "id",
+            "title",
+            "strength",
+            "confidence",
+            "review_status",
+            "public_readiness",
+        ],
+    )
+
+    editor_key = f"evidence_review_pool_editor_{selected}"
+    edited = st.data_editor(
+        df,
+        key=editor_key,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "_pick": st.column_config.CheckboxColumn(
+                ui.get("pool_pick", "✓"), default=False, width="small"
+            ),
+            "id": st.column_config.TextColumn(ui["pool_id"], disabled=True),
+            "title": st.column_config.TextColumn(
+                ui["pool_title"], disabled=True, width="large"
+            ),
+            "strength": st.column_config.SelectboxColumn(
+                ui["pool_strength"], options=strength_opts
+            ),
+            "confidence": st.column_config.SelectboxColumn(
+                ui["pool_confidence"], options=confidence_opts
+            ),
+            "review_status": st.column_config.SelectboxColumn(
+                ui["pool_review_status"], options=review_opts
+            ),
+            "public_readiness": st.column_config.SelectboxColumn(
+                ui["pool_public_readiness"], options=readiness_opts
+            ),
+        },
+        column_order=[
+            "_pick",
+            "title",
+            "strength",
+            "confidence",
+            "review_status",
+            "public_readiness",
+            "id",
+        ],
+    )
+
+    # --- Bulk apply to picked rows ---
+    picked_ids = [
+        str(r["id"])
+        for r in edited.to_dict("records")
+        if r.get("_pick") and str(r.get("id", ""))
+    ]
+    b1, b2, b3 = st.columns([2, 3, 2])
+    with b1:
+        bulk_field = st.selectbox(
+            ui.get("pool_bulk_field", "Bulk field"),
+            options=["review_status", "strength", "confidence", "public_readiness"],
+            format_func=lambda f: ui.get(f"pool_{f}", f),
+            key=f"evidence_review_pool_bulk_field_{selected}",
+        )
+    with b2:
+        bulk_value_opts = {
+            "review_status": review_opts,
+            "strength": strength_opts,
+            "confidence": confidence_opts,
+            "public_readiness": readiness_opts,
+        }[bulk_field]
+        bulk_value = st.selectbox(
+            ui.get("pool_bulk_value", "Set to"),
+            options=bulk_value_opts,
+            key=f"evidence_review_pool_bulk_value_{selected}",
+        )
+    with b3:
+        bulk_label = ui.get("pool_bulk_apply", "Apply to selected ({n})")
+        if st.button(
+            bulk_label.format(n=len(picked_ids)),
+            disabled=not picked_ids,
+            key=f"evidence_review_pool_bulk_btn_{selected}",
+        ):
+            _, changed = bulk_set_pool_field(
+                entries, picked_ids, bulk_field, bulk_value
             )
-            if next_row is None:
-                continue
-            entries[index] = next_row
-            _save_pool(
-                entries,
-                ui["pool_deprecated"] if deprecated else ui["pool_updated"],
+            _save_pool(entries, ui.get("pool_edits_saved", "Saved."))
+            st.toast(
+                ui.get("pool_bulk_done", "Updated {n} rows").format(n=changed),
+                icon="✅",
             )
             st.rerun()
+
+    # --- Save inline edits (batched, no per-cell rerun) ---
+    if st.button(
+        ui.get("pool_save_edits", "Save table edits"),
+        type="primary",
+        key=f"evidence_review_pool_save_edits_{selected}",
+    ):
+        edits: dict[str, dict[str, str]] = {}
+        for rec in edited.to_dict("records"):
+            rid = str(rec.get("id", ""))
+            if not rid:
+                continue
+            edits[rid] = {
+                "strength": str(rec.get("strength", "") or ""),
+                "confidence": str(rec.get("confidence", "") or ""),
+                "review_status": str(rec.get("review_status", "") or ""),
+                "public_readiness": str(rec.get("public_readiness", "") or ""),
+            }
+        _, changed = apply_pool_edits(entries, edits)
+        if changed:
+            _save_pool(entries, ui.get("pool_edits_saved", "Saved."))
+            st.toast(
+                ui.get("pool_edits_done", "Saved {n} rows").format(n=changed),
+                icon="✅",
+            )
+            st.rerun()
+        else:
+            st.toast(ui.get("pool_no_changes", "No changes"), icon="ℹ️")
+
     _paginated_controls(indexed_entries, key=pages_key, page_size=20)
+
+    # --- Deep edit one row (summary / url / refs / deprecate) ---
+    with st.expander(ui.get("pool_edit_detail", "Edit full details of one row"), expanded=False):
+        id_to_index = {
+            str(row.get("id", "")): index for index, row in indexed_entries
+        }
+        detail_id = st.selectbox(
+            ui.get("pool_detail_pick", "Pick a row"),
+            options=[str(row.get("id", "")) for _i, row in visible_pairs],
+            format_func=lambda rid: next(
+                (_row_label(row) for _i, row in visible_pairs if str(row.get("id", "")) == rid),
+                rid,
+            ),
+            key=f"evidence_review_pool_detail_{selected}",
+        )
+        if detail_id and detail_id in id_to_index:
+            target_index = id_to_index[detail_id]
+            next_row, updated, deprecated = _render_pool_form(
+                entries,
+                row=entries[target_index],
+                prefix=f"evidence_review_edit_{selected}_{target_index}",
+            )
+            if next_row is not None:
+                entries[target_index] = next_row
+                _save_pool(
+                    entries,
+                    ui["pool_deprecated"] if deprecated else ui["pool_updated"],
+                )
+                st.rerun()
 
 
 def _render_links(review: dict) -> None:
     rows = list(review.get("evidence_rows") or [])
-    skill_options = list(review.get("skill_options") or [])
     st.subheader(ui["link_title"])
     if not rows:
         st.caption(ui["link_empty"])
         return
+    by_skill_tab, by_evidence_tab = st.tabs(
+        [
+            ui.get("link_by_skill", "By skill"),
+            ui.get("link_by_evidence", "By evidence"),
+        ]
+    )
+    with by_skill_tab:
+        _render_links_by_skill(review)
+    with by_evidence_tab:
+        _render_links_by_evidence(review)
+
+
+def _render_links_by_skill(review: dict) -> None:
+    """Skill-centric view: pick a skill, see its gap, bulk-attach evidence."""
+    summaries = list(review.get("skill_summaries") or [])
+    all_rows = list(review.get("all_evidence_rows") or review.get("evidence_rows") or [])
+    if not summaries:
+        st.caption(ui.get("link_skill_empty", "No skills in the tree yet."))
+        return
+
+    # Gaps first: skills claiming a status their evidence can't support.
+    def _gap_sort(s: dict) -> tuple:
+        return (0 if s.get("risk_level") else 1, -int(s.get("evidence_count") or 0))
+
+    ordered = sorted(summaries, key=_gap_sort)
+    risky = [s for s in ordered if s.get("risk_level")]
+    if risky:
+        st.caption(
+            ui.get("link_skill_gap", "⚠ {n} skills claim a status above their evidence").format(
+                n=len(risky)
+            )
+        )
+
+    def _skill_opt_label(sid: str) -> str:
+        s = next((x for x in ordered if str(x.get("id", "")) == sid), None)
+        if not s:
+            return sid
+        flag = "⚠ " if s.get("risk_level") else ""
+        return (
+            f"{flag}{s.get('label', sid)} · {s.get('status', '')} · "
+            f"{ui.get('link_skill_col_evidence', 'evidence')}={s.get('evidence_count', 0)}"
+        )
+
+    skill_id = st.selectbox(
+        ui.get("link_skill_pick", "Pick a skill"),
+        options=[str(s.get("id", "")) for s in ordered],
+        format_func=_skill_opt_label,
+        key=f"evidence_review_link_skill_pick_{selected}",
+    )
+    chosen = next((s for s in ordered if str(s.get("id", "")) == skill_id), {})
+    if chosen.get("risk_reason"):
+        st.warning(chosen["risk_reason"])
+
+    already = {str(r) for r in (chosen.get("active_evidence_refs") or [])}
+    candidates = [
+        row for row in all_rows if str(row.get("id", "")) not in already
+    ]
+    if already:
+        st.caption(
+            ui.get("link_skill_current", "Already linked: {ids}").format(
+                ids=", ".join(sorted(already))
+            )
+        )
+    evidence_ids = st.multiselect(
+        ui.get("link_skill_evidence_pick", "Evidence to attach"),
+        options=[str(row.get("id", "")) for row in candidates],
+        format_func=lambda eid: next(
+            (_row_label(row) for row in candidates if str(row.get("id", "")) == eid),
+            eid,
+        ),
+        key=f"evidence_review_link_skill_ev_{selected}",
+    )
+    if st.button(
+        ui.get("link_attach_to_skill", "Attach to skill"),
+        type="primary",
+        disabled=not (skill_id and evidence_ids),
+        key=f"evidence_review_link_skill_btn_{selected}",
+    ):
+        _link_skill_to_evidence(skill_id, evidence_ids)
+        st.rerun()
+
+
+def _render_links_by_evidence(review: dict) -> None:
+    """Evidence-centric view (original) + in-place unlinked actions."""
+    rows = list(review.get("evidence_rows") or [])
+    skill_options = list(review.get("skill_options") or [])
     evidence_id = st.selectbox(
         ui["link_pick_evidence"],
         options=[str(row.get("id", "")) for row in rows],
@@ -1263,9 +1591,41 @@ def _render_links(review: dict) -> None:
     unlinked = list(review.get("unlinked") or [])
     if not unlinked:
         st.caption(ui["unlinked_rows_empty"])
+    skill_opt_ids = [str(option.get("id", "")) for option in skill_options]
+
+    def _skill_fmt(sid: str) -> str:
+        return next(
+            (
+                _skill_label(option)
+                for option in skill_options
+                if str(option.get("id", "")) == sid
+            ),
+            sid,
+        )
+
     unlinked_links_key = f"evidence_review_links_unlinked_pages_{selected}"
     for row in _paginated_show(unlinked, key=unlinked_links_key):
-        st.caption(f"- `{row['id']}` {row['title']}")
+        rid = str(row["id"])
+        uc1, uc2, uc3 = st.columns([3, 4, 1], vertical_alignment="center")
+        with uc1:
+            st.caption(f"`{rid}` {row['title']}")
+        with uc2:
+            picks = st.multiselect(
+                ui.get("link_inline_skills", "Skills"),
+                options=skill_opt_ids,
+                format_func=_skill_fmt,
+                key=f"evidence_review_unlinked_skills_{selected}_{rid}",
+                label_visibility="collapsed",
+                placeholder=ui.get("link_inline_placeholder", "Attach to skills…"),
+            )
+        with uc3:
+            if st.button(
+                ui.get("link_inline_attach", "Link"),
+                disabled=not picks,
+                key=f"evidence_review_unlinked_btn_{selected}_{rid}",
+            ):
+                _link_evidence_to_skills(rid, picks)
+                st.rerun()
     _paginated_controls(unlinked, key=unlinked_links_key)
 
 

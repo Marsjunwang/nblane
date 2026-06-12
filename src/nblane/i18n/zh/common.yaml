@@ -124,6 +124,7 @@ codex_config_editor: 编辑 codex.yaml
 codex_config_reload: 从磁盘重载
 codex_config_save: 保存 Codex 配置
 codex_config_reloaded: 已从磁盘重载 Codex 配置。
+file_conflict_reload: 重新加载最新版本
 codex_config_saved: Codex 配置已保存。
 codex_config_invalid: Codex 配置未保存：{error}
 codex_config_template_note: codex.yaml 还不存在，编辑器当前显示的是新建模板。
@@ -157,10 +158,11 @@ goal_presence_agent_context_on: 已进入 Agent 上下文
 goal_presence_agent_context_off: 未进入 Agent 上下文
 sidebar_nav_title: 工作区
 sidebar_nav_home_group: 首页
-sidebar_nav_work_group: 工作
-sidebar_nav_growth_group: 成长
+sidebar_nav_work_group: 每日
+sidebar_nav_growth_group: 构建
 sidebar_nav_output_group: 输出
-sidebar_nav_team_group: 团队
+sidebar_nav_team_group: 协作
+sidebar_nav_review_group: 回顾
 sidebar_nav_system_group: 系统
 sidebar_nav_dashboard: 每日仪表盘
 sidebar_nav_kanban: 看板

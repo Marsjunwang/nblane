@@ -1564,20 +1564,17 @@ def render_workspace_navigation() -> None:
         (
             u["sidebar_nav_work_group"],
             [
-                ("pages/11_Project_Board.py", u["sidebar_nav_project_board"]),
                 ("pages/3_Kanban.py", u["sidebar_nav_kanban"]),
-                ("pages/2_Gap_Analysis.py", u["sidebar_nav_gap"]),
                 ("pages/7_Research.py", u["sidebar_nav_research"]),
-                ("pages/2_Evidence_Review.py", u["sidebar_nav_evidence_review"]),
+                ("pages/11_Project_Board.py", u["sidebar_nav_project_board"]),
             ],
         ),
         (
             u["sidebar_nav_growth_group"],
             [
                 ("pages/1_Skill_Tree.py", u["sidebar_nav_skill_map"]),
-                ("pages/8_Review.py", u["sidebar_nav_review"]),
-                ("pages/5_Profile_Health.py", u["sidebar_nav_health"]),
-                ("pages/9_Agent_Activity.py", u["sidebar_nav_agent_activity"]),
+                ("pages/2_Evidence_Review.py", u["sidebar_nav_evidence_review"]),
+                ("pages/2_Gap_Analysis.py", u["sidebar_nav_gap"]),
             ],
         ),
         (
@@ -1589,7 +1586,17 @@ def render_workspace_navigation() -> None:
         ),
         (
             u["sidebar_nav_team_group"],
-            [("pages/4_Team_View.py", u["sidebar_nav_team"])],
+            [
+                ("pages/4_Team_View.py", u["sidebar_nav_team"]),
+                ("pages/9_Agent_Activity.py", u["sidebar_nav_agent_activity"]),
+            ],
+        ),
+        (
+            u["sidebar_nav_review_group"],
+            [
+                ("pages/8_Review.py", u["sidebar_nav_review"]),
+                ("pages/5_Profile_Health.py", u["sidebar_nav_health"]),
+            ],
         ),
     ]
     with st.expander(u["sidebar_nav_title"], expanded=True):
@@ -1932,24 +1939,61 @@ def ensure_file_snapshot(path: Path) -> FileSnapshot:
     return remember_file_snapshot(path)
 
 
+def _file_conflict(path: Path, *, label: str | None = None) -> str | None:
+    """Return a conflict message if *path* changed since load, else None."""
+    snap = ensure_file_snapshot(path)
+    try:
+        assert_unchanged(path, snap, label=label)
+    except FileConflictError as exc:
+        return str(exc)
+    return None
+
+
 def assert_file_snapshot_current(
     path: Path,
     *,
     label: str | None = None,
 ) -> None:
-    """Stop the Streamlit run if *path* changed since it was loaded."""
-    snap = ensure_file_snapshot(path)
-    try:
-        assert_unchanged(path, snap, label=label)
-    except FileConflictError as exc:
-        st.error(str(exc))
-        st.stop()
+    """Stop the Streamlit run if *path* changed since it was loaded.
+
+    On conflict, offer a "reload latest" button that re-reads the file and
+    refreshes the stored fingerprint, then reruns. This is the recoverable
+    path: a plain page refresh does NOT help because the stale snapshot lives
+    in session_state, which survives reruns.
+    """
+    _render_conflict_guard({path: _file_conflict(path, label=label)})
+
+
+def _render_conflict_guard(conflicts: dict[Path, str | None]) -> None:
+    """Show errors + a single reload button for any conflicting paths, then stop.
+
+    No-op when nothing conflicts. The reload button refreshes the stored
+    fingerprint for every conflicting path at once and reruns, so a multi-file
+    write recovers in one click.
+    """
+    bad = {path: msg for path, msg in conflicts.items() if msg}
+    if not bad:
+        return
+    for msg in bad.values():
+        st.error(msg)
+    reload_label = str(
+        common_ui().get("file_conflict_reload", "Reload latest version")
+    )
+    button_key = "nblane_reload_conflict:" + "|".join(
+        sorted(str(p.resolve()) for p in bad)
+    )
+    if st.button(reload_label, key=button_key):
+        for path in bad:
+            remember_file_snapshot(path)
+        st.rerun()
+    st.stop()
 
 
 def assert_files_current(paths: list[Path]) -> None:
     """Check multiple file snapshots before a multi-file write."""
-    for path in paths:
-        assert_file_snapshot_current(path, label=path.name)
+    _render_conflict_guard(
+        {path: _file_conflict(path, label=path.name) for path in paths}
+    )
 
 
 def refresh_file_snapshots(paths: list[Path]) -> None:

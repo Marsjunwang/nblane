@@ -24,6 +24,33 @@ evidence_help_body: |-
   6. **Status Risks**: check solid/expert skills whose evidence strength is too weak before publishing or upgrading claims.
 
   AI never writes directly without a preview/apply step on this page.
+
+  ---
+
+  ### How strength is judged
+
+  Strength measures how hard and verifiable a piece of evidence is, from strongest to weakest:
+
+  - **high_trust**: top-venue paper (first author / conference-journal / arXiv) with verifiable publication details.
+  - **strong**: a paper, a copyable open-source link (GitHub/GitLab, org/repo, PR/release), or quantitative metrics vs a baseline (e.g. +X% AP, latency A→B).
+  - **medium**: real delivery / reproduction / engineering fact, but without the verifiable highlights above.
+  - **weak**: mostly inferred, vague, or missing verifiable detail.
+
+  **What strength is for**: it gates how high a skill may claim its status —
+  - a **solid** skill needs at least **medium+** strength evidence;
+  - an **expert** skill needs at least **strong+** strength evidence.
+
+  The Status Risks tab flags exactly this: a skill claiming a status higher than its linked evidence supports.
+
+  ### How confidence is judged
+
+  Confidence measures how sure you are about the evidence itself and the strength grade above, in three levels:
+
+  - **high**: directly verifiable (link / paper / explicit numbers); the strength grade is almost certainly right.
+  - **medium**: largely trustworthy but needs some inference, or details are incomplete.
+  - **low**: mostly speculative; source or details are questionable.
+
+  Confidence does not drive any automatic check today — it is a reference signal for humans and downstream claim filtering.
 save_pool: Save evidence pool
 saved_pool: Saved evidence-pool.yaml.
 saved_pool_synced: Saved evidence-pool.yaml and synced SKILL.md.
@@ -47,6 +74,10 @@ done_mark_crystallized: Mark selected Done tasks crystallized after apply
 done_preview_source: 'Source Done tasks: {sources}'
 done_no_ai: AI is not configured.
 done_spinner: Generating evidence draft...
+done_grade_hint: AI pre-filled evidence strength and confidence. Confirm or tweak here during review — no need to refill them in the evidence pool.
+done_col_adopt: Adopt
+done_col_evidence: Evidence
+done_node_refs: evidence
 done_apply_selected: Apply selected
 done_apply_all: Apply all
 done_applied: Applied evidence draft.
@@ -143,6 +174,30 @@ link_pick_skills: Skills
 link_button: Link selected skills
 link_done: Linked evidence to selected skills.
 link_empty: No active evidence rows are available to link.
+link_by_skill: By skill
+link_by_evidence: By evidence
+link_skill_empty: No skill nodes in the tree yet.
+link_skill_gap: ⚠ {n} skills claim a status above their evidence
+link_skill_pick: Pick a skill
+link_skill_col_evidence: evidence
+link_skill_current: 'Already linked: {ids}'
+link_skill_evidence_pick: Evidence to attach
+link_attach_to_skill: Attach to skill
+link_inline_skills: Skills
+link_inline_placeholder: Attach to skills…
+link_inline_attach: Link
+pool_inline_hint: Edit strength/confidence/review status/readiness right in the table, then click “Save table edits” once. Tick rows to bulk-edit.
+pool_pick: ✓
+pool_bulk_field: Bulk field
+pool_bulk_value: Set to
+pool_bulk_apply: Apply to selected ({n})
+pool_bulk_done: Updated {n} rows
+pool_save_edits: Save table edits
+pool_edits_saved: Saved evidence pool.
+pool_edits_done: Saved {n} rows
+pool_no_changes: No changes
+pool_edit_detail: Edit full details of one row (summary/url/refs/deprecate)
+pool_detail_pick: Pick a row
 refs_options_title: Available ref targets
 refs_options_empty: No records yet.
 refs_projects: Project cases

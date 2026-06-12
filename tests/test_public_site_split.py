@@ -52,30 +52,43 @@ class TestPublicSiteSplit(unittest.TestCase):
         self.assertIn('"pages/6_Output_Studio.py"', app_text)
         self.assertIn('"pages/10_Public_Build.py"', app_text)
         nav_text = app_text.split("def _navigation_pages", 1)[1]
+        # Daily (work) group: doing-the-work pages only.
         work_order = [
-            nav_text.index('"pages/11_Project_Board.py"'),
             nav_text.index('"pages/3_Kanban.py"'),
-            nav_text.index('"pages/2_Gap_Analysis.py"'),
             nav_text.index('"pages/7_Research.py"'),
-            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+            nav_text.index('"pages/11_Project_Board.py"'),
         ]
         self.assertEqual(work_order, sorted(work_order))
+        # Build (growth) group: capability-building trio, Evidence beside Skill Tree.
         growth_order = [
             nav_text.index('"pages/1_Skill_Tree.py"'),
-            nav_text.index('"pages/8_Review.py"'),
-            nav_text.index('"pages/5_Profile_Health.py"'),
-            nav_text.index('"pages/9_Agent_Activity.py"'),
+            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+            nav_text.index('"pages/2_Gap_Analysis.py"'),
         ]
         self.assertEqual(growth_order, sorted(growth_order))
+        # Evidence Review sits in the Build group, after Skill Tree and before
+        # the Output group (so it is no longer in the Daily group).
+        self.assertLess(
+            nav_text.index('"pages/1_Skill_Tree.py"'),
+            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+        )
+        self.assertLess(
+            nav_text.index("EVIDENCE_REVIEW_PAGE"),
+            nav_text.index('"pages/6_Output_Studio.py"'),
+        )
         fallback_nav = shared_text.split("def render_workspace_navigation", 1)[1]
         fallback_work_order = [
-            fallback_nav.index('"pages/11_Project_Board.py"'),
             fallback_nav.index('"pages/3_Kanban.py"'),
-            fallback_nav.index('"pages/2_Gap_Analysis.py"'),
             fallback_nav.index('"pages/7_Research.py"'),
-            fallback_nav.index('"pages/2_Evidence_Review.py"'),
+            fallback_nav.index('"pages/11_Project_Board.py"'),
         ]
         self.assertEqual(fallback_work_order, sorted(fallback_work_order))
+        fallback_growth_order = [
+            fallback_nav.index('"pages/1_Skill_Tree.py"'),
+            fallback_nav.index('"pages/2_Evidence_Review.py"'),
+            fallback_nav.index('"pages/2_Gap_Analysis.py"'),
+        ]
+        self.assertEqual(fallback_growth_order, sorted(fallback_growth_order))
 
     def test_validate_public_layer_blocks_private_research_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

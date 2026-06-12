@@ -314,6 +314,40 @@ class TestMergeIngestPatch(unittest.TestCase):
         self.assertEqual(row["public_readiness"], "draftable")
         self.assertEqual(row["source_refs"], ["kanban:done_ship"])
 
+    def test_out_of_domain_strength_is_dropped(self) -> None:
+        """Parser whitelist drops bad strength so a human refills it.
+
+        The kanban prompt now asks the model to pre-grade strength; this is
+        the safety net that keeps an out-of-range value (e.g. a hallucinated
+        grade) from polluting the pool.
+        """
+        pool = {"profile": "t", "evidence_entries": []}
+        tree = {
+            "profile": "t",
+            "schema": "robotics-engineer",
+            "updated": "2026-01-01",
+            "nodes": [{"id": "ros2_basics", "status": "locked"}],
+        }
+        patch = {
+            "evidence_entries": [
+                {
+                    "type": "project",
+                    "title": "Graded demo",
+                    "strength": "legendary",  # not in EVIDENCE_STRENGTHS
+                    "confidence": "high",
+                }
+            ],
+            "node_updates": [{"id": "ros2_basics", "evidence_refs": ["first_1"]}],
+        }
+
+        merged = merge_ingest_patch("t", pool, tree, patch)
+
+        self.assertTrue(merged.ok)
+        assert merged.merged_pool is not None
+        row = merged.merged_pool["evidence_entries"][0]
+        self.assertNotIn("strength", row)
+        self.assertEqual(row["confidence"], "high")
+
     def test_status_ignored_by_default(self) -> None:
         """status in patch is ignored unless allow_status_change."""
         pool = {

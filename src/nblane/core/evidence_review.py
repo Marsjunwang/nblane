@@ -99,6 +99,141 @@ def normalize_public_readiness(value: object) -> str:
     return raw if raw in EVIDENCE_PUBLIC_READINESS else "private"
 
 
+# Editable pool fields the bulk/inline editors are allowed to touch. Keeping
+# this explicit prevents the table editor from clobbering ids, refs, etc.
+POOL_EDITABLE_FIELDS: dict[str, tuple[str, ...]] = {
+    "strength": EVIDENCE_STRENGTHS,
+    "confidence": EVIDENCE_CONFIDENCES,
+    "review_status": EVIDENCE_REVIEW_STATUSES,
+    "public_readiness": EVIDENCE_PUBLIC_READINESS,
+}
+
+
+def apply_pool_edits(
+    entries: list[dict[str, Any]],
+    edits: dict[str, dict[str, str]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Apply per-id field edits to pool *entries*.
+
+    *edits* maps evidence id -> {field: new_value}. Only fields in
+    ``POOL_EDITABLE_FIELDS`` are applied, and only values inside each field's
+    whitelist (an empty string clears the field). Rows are matched by id, not
+    position, so pagination/sort order cannot misroute an edit. Returns the
+    updated entries (same list object) and the count of rows changed.
+    """
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in entries:
+        if isinstance(row, dict):
+            rid = str(row.get("id", "") or "").strip()
+            if rid:
+                by_id[rid] = row
+    changed = 0
+    for rid, fields in edits.items():
+        row = by_id.get(str(rid).strip())
+        if row is None or not isinstance(fields, dict):
+            continue
+        row_changed = False
+        for field, value in fields.items():
+            allowed = POOL_EDITABLE_FIELDS.get(field)
+            if allowed is None:
+                continue
+            clean = str(value or "").strip()
+            if clean and clean not in allowed:
+                continue
+            current = str(row.get(field, "") or "").strip()
+            if clean == current:
+                continue
+            if clean:
+                row[field] = clean
+            else:
+                row.pop(field, None)
+            row_changed = True
+        if row_changed:
+            changed += 1
+    return entries, changed
+
+
+def bulk_set_pool_field(
+    entries: list[dict[str, Any]],
+    ids: list[str],
+    field: str,
+    value: str,
+) -> tuple[list[dict[str, Any]], int]:
+    """Set one editable *field* to *value* on every row whose id is in *ids*.
+
+    Validated against ``POOL_EDITABLE_FIELDS``; an unknown field or
+    out-of-domain value is a no-op. Returns the entries and the change count.
+    """
+    allowed = POOL_EDITABLE_FIELDS.get(field)
+    if allowed is None:
+        return entries, 0
+    clean = str(value or "").strip()
+    if clean and clean not in allowed:
+        return entries, 0
+    target = {str(i).strip() for i in ids if str(i).strip()}
+    if not target:
+        return entries, 0
+    changed = 0
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("id", "") or "").strip()
+        if rid not in target:
+            continue
+        current = str(row.get(field, "") or "").strip()
+        if clean == current:
+            continue
+        if clean:
+            row[field] = clean
+        else:
+            row.pop(field, None)
+        changed += 1
+    return entries, changed
+
+
+def link_skill_to_evidence_nodes(
+    nodes: list[dict[str, Any]],
+    skill_id: str,
+    evidence_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Attach *evidence_ids* to one skill node, mirroring per-evidence linking.
+
+    Creates the node (status ``learning``) if missing, de-dupes refs, and
+    preserves existing refs. Returns the (possibly extended) node list. Pure:
+    operates on the given list of node dicts, no IO.
+    """
+    skill = str(skill_id or "").strip()
+    new_refs = [str(e).strip() for e in evidence_ids if str(e).strip()]
+    if not skill or not new_refs:
+        return nodes
+    by_id: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        if isinstance(node, dict):
+            nid = str(node.get("id", "") or "").strip()
+            if nid:
+                by_id[nid] = node
+    node = by_id.get(skill)
+    if node is None:
+        nodes.append(
+            {
+                "id": skill,
+                "status": "learning",
+                "evidence_refs": list(dict.fromkeys(new_refs)),
+            }
+        )
+        return nodes
+    refs = [
+        str(ref).strip()
+        for ref in (node.get("evidence_refs") or [])
+        if str(ref).strip()
+    ]
+    for ref in new_refs:
+        if ref not in refs:
+            refs.append(ref)
+    node["evidence_refs"] = refs
+    return nodes
+
+
 def _pool_entries(profile: str | Path) -> list[dict[str, Any]]:
     raw = io_facade.load_evidence_pool_raw(profile) or {}
     entries = raw.get("evidence_entries") or []

@@ -9,9 +9,12 @@ from pathlib import Path
 import yaml
 
 from nblane.core.evidence_review import (
+    apply_pool_edits,
     build_evidence_review,
+    bulk_set_pool_field,
     evidence_status_risks,
     evidence_usage_index,
+    link_skill_to_evidence_nodes,
     skill_evidence_summaries,
 )
 
@@ -21,6 +24,76 @@ def _write_yaml(path: Path, data: dict) -> None:
         yaml.dump(data, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+
+
+class TestPoolEditHelpers(unittest.TestCase):
+    """Pure helpers backing inline + bulk pool editing."""
+
+    def test_apply_pool_edits_matches_by_id(self) -> None:
+        entries = [
+            {"id": "e1", "title": "A", "strength": "weak"},
+            {"id": "e2", "title": "B"},
+        ]
+        _, changed = apply_pool_edits(
+            entries,
+            {
+                "e1": {"strength": "strong", "review_status": "reviewed"},
+                "e2": {"confidence": "high"},
+            },
+        )
+        self.assertEqual(changed, 2)
+        self.assertEqual(entries[0]["strength"], "strong")
+        self.assertEqual(entries[0]["review_status"], "reviewed")
+        self.assertEqual(entries[1]["confidence"], "high")
+
+    def test_apply_pool_edits_rejects_bad_field_and_value(self) -> None:
+        entries = [{"id": "e1", "strength": "medium"}]
+        _, changed = apply_pool_edits(
+            entries,
+            {"e1": {"strength": "legendary", "id": "hacked"}},
+        )
+        # out-of-domain strength ignored, id is not an editable field
+        self.assertEqual(changed, 0)
+        self.assertEqual(entries[0]["strength"], "medium")
+        self.assertEqual(entries[0]["id"], "e1")
+
+    def test_apply_pool_edits_empty_clears_field(self) -> None:
+        entries = [{"id": "e1", "strength": "strong"}]
+        _, changed = apply_pool_edits(entries, {"e1": {"strength": ""}})
+        self.assertEqual(changed, 1)
+        self.assertNotIn("strength", entries[0])
+
+    def test_bulk_set_pool_field(self) -> None:
+        entries = [
+            {"id": "e1"},
+            {"id": "e2", "review_status": "reviewed"},
+            {"id": "e3"},
+        ]
+        _, changed = bulk_set_pool_field(
+            entries, ["e1", "e2", "e3"], "review_status", "reviewed"
+        )
+        # e2 already reviewed -> only e1, e3 change
+        self.assertEqual(changed, 2)
+        self.assertTrue(all(r["review_status"] == "reviewed" for r in entries))
+
+    def test_bulk_set_pool_field_rejects_bad_value(self) -> None:
+        entries = [{"id": "e1"}]
+        _, changed = bulk_set_pool_field(entries, ["e1"], "strength", "nope")
+        self.assertEqual(changed, 0)
+
+    def test_link_skill_to_evidence_creates_node(self) -> None:
+        nodes: list[dict] = []
+        link_skill_to_evidence_nodes(nodes, "ros2_basics", ["e1", "e2"])
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0]["id"], "ros2_basics")
+        self.assertEqual(nodes[0]["status"], "learning")
+        self.assertEqual(nodes[0]["evidence_refs"], ["e1", "e2"])
+
+    def test_link_skill_to_evidence_dedupes(self) -> None:
+        nodes = [{"id": "nav2", "status": "solid", "evidence_refs": ["e1"]}]
+        link_skill_to_evidence_nodes(nodes, "nav2", ["e1", "e2", "e2"])
+        self.assertEqual(nodes[0]["evidence_refs"], ["e1", "e2"])
+        self.assertEqual(nodes[0]["status"], "solid")  # untouched
 
 
 class TestEvidenceReview(unittest.TestCase):

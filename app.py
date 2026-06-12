@@ -2512,19 +2512,9 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
         ],
         ui["sidebar_nav_work_group"]: [
             st.Page(
-                "pages/11_Project_Board.py",
-                title=ui["sidebar_nav_project_board"],
-                icon=":material/account_tree:",
-            ),
-            st.Page(
                 "pages/3_Kanban.py",
                 title=ui["sidebar_nav_kanban"],
                 icon=":material/view_kanban:",
-            ),
-            st.Page(
-                "pages/2_Gap_Analysis.py",
-                title=ui["sidebar_nav_gap"],
-                icon=":material/troubleshoot:",
             ),
             st.Page(
                 "pages/7_Research.py",
@@ -2532,9 +2522,9 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 icon=":material/travel_explore:",
             ),
             st.Page(
-                EVIDENCE_REVIEW_PAGE,
-                title=ui["sidebar_nav_evidence_review"],
-                icon=":material/fact_check:",
+                "pages/11_Project_Board.py",
+                title=ui["sidebar_nav_project_board"],
+                icon=":material/account_tree:",
             ),
         ],
         ui["sidebar_nav_growth_group"]: [
@@ -2544,19 +2534,14 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 icon=":material/account_tree:",
             ),
             st.Page(
-                "pages/8_Review.py",
-                title=ui["sidebar_nav_review"],
-                icon=":material/rate_review:",
+                EVIDENCE_REVIEW_PAGE,
+                title=ui["sidebar_nav_evidence_review"],
+                icon=":material/fact_check:",
             ),
             st.Page(
-                "pages/5_Profile_Health.py",
-                title=ui["sidebar_nav_health"],
-                icon=":material/health_and_safety:",
-            ),
-            st.Page(
-                "pages/9_Agent_Activity.py",
-                title=ui["sidebar_nav_agent_activity"],
-                icon=":material/history:",
+                "pages/2_Gap_Analysis.py",
+                title=ui["sidebar_nav_gap"],
+                icon=":material/troubleshoot:",
             ),
         ],
         ui["sidebar_nav_output_group"]: [
@@ -2576,6 +2561,23 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 "pages/4_Team_View.py",
                 title=ui["sidebar_nav_team"],
                 icon=":material/groups:",
+            ),
+            st.Page(
+                "pages/9_Agent_Activity.py",
+                title=ui["sidebar_nav_agent_activity"],
+                icon=":material/history:",
+            ),
+        ],
+        ui["sidebar_nav_review_group"]: [
+            st.Page(
+                "pages/8_Review.py",
+                title=ui["sidebar_nav_review"],
+                icon=":material/rate_review:",
+            ),
+            st.Page(
+                "pages/5_Profile_Health.py",
+                title=ui["sidebar_nav_health"],
+                icon=":material/health_and_safety:",
             ),
         ],
         ui["sidebar_nav_system_group"]: [

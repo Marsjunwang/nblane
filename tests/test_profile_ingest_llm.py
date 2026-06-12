@@ -7,7 +7,23 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from nblane.core.models import KanbanTask
-from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+from nblane.core.profile_ingest_llm import (
+    _system_prompt_kanban_en,
+    _system_prompt_kanban_zh,
+    ingest_kanban_done_json,
+)
+
+
+class TestKanbanPromptGrading(unittest.TestCase):
+    """Kanban Done prompt asks the model to pre-grade evidence."""
+
+    def test_prompt_requests_strength_and_confidence(self) -> None:
+        for prompt in (_system_prompt_kanban_zh(), _system_prompt_kanban_en()):
+            self.assertIn("strength", prompt)
+            self.assertIn("confidence", prompt)
+            # Strength value domain must be spelled out so the model stays
+            # inside the parser's whitelist.
+            self.assertIn("high_trust", prompt)
 
 
 class TestProfileIngestLlm(unittest.TestCase):

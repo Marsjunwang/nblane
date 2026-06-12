@@ -88,6 +88,6 @@ def assert_unchanged(
     name = label or str(path)
     raise FileConflictError(
         f"{name} changed on disk after this page loaded. "
-        "Refresh the page before saving so nblane does not overwrite "
-        "someone else's update."
+        "Reload the latest version before saving so nblane does not "
+        "overwrite someone else's update."
     )

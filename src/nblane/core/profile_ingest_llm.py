@@ -172,6 +172,46 @@ def _kanban_evidence_contract_en() -> str:
     )
 
 
+def _evidence_grading_zh() -> str:
+    """Ask the model to pre-grade evidence strength/confidence (kanban)."""
+    return (
+        "### evidence_entries 字段（除 id/type/title/date/url/summary/source_excerpt 外）\n\n"
+        "每条 evidence_entries 还应给出**预判**字段，供人工审阅时确认或微调：\n"
+        "- strength（证据强度，取值仅限 weak | medium | strong | high_trust）：\n"
+        "  · strong/high_trust — 论文（会议/期刊/arxiv/一作）、可复制的开源链接"
+        "（GitHub/GitLab、org/repo、PR/release）、或相对基线的量化指标。\n"
+        "  · medium — 真实交付/复现/工程事实，但无上述可核验亮点。\n"
+        "  · weak — 主要靠推断、描述含糊或缺可核验细节。\n"
+        "- confidence（你对该判断的信心，取值仅限 low | medium | high）：\n"
+        "  · high — 证据直接可核验（有链接/论文/明确数字），强度评级几乎不会错。\n"
+        "  · medium — 基本可信，但需要一点推断或细节不全。\n"
+        "  · low — 主要靠推测，来源或细节存疑。\n"
+        "判断口径与下文 status 规则一致；无把握时**省略**该字段（留给人工填）。\n\n"
+    )
+
+
+def _evidence_grading_en() -> str:
+    """English variant of the evidence pre-grading guidance."""
+    return (
+        "### evidence_entries fields (besides id/type/title/date/url/summary/source_excerpt)\n\n"
+        "Each evidence_entries item should also include **pre-graded** fields "
+        "for humans to confirm or tweak during review:\n"
+        "- strength (evidence strength, only one of weak | medium | strong | high_trust):\n"
+        "  · strong/high_trust — paper (venue/journal/arxiv/first author), a "
+        "copyable open-source link (GitHub/GitLab, org/repo, PR/release), or "
+        "quantitative metrics vs a baseline.\n"
+        "  · medium — real delivery/reproduction/engineering fact without the "
+        "verifiable highlights above.\n"
+        "  · weak — mostly inferred, vague, or missing verifiable detail.\n"
+        "- confidence (your confidence in the grade, only one of low | medium | high):\n"
+        "  · high — directly verifiable (link/paper/explicit numbers); the grade is almost certainly right.\n"
+        "  · medium — largely trustworthy but needs some inference or details are incomplete.\n"
+        "  · low — mostly speculative; source or details are questionable.\n"
+        "Use the same bar as the status rules below; **omit** the field when "
+        "unsure (a human will fill it).\n\n"
+    )
+
+
 def _status_rubric_kanban_zh() -> str:
     """Stricter solid rules for kanban (resume keeps shared rubric)."""
     return (
@@ -220,7 +260,8 @@ def _system_prompt_kanban_zh() -> str:
         "node_updates 每项字段：id（必须是 Allowed nodes 中的技能节点 id；"
         "字段名必须写作 id，禁止写 node_id、skill_id 或 node）、"
         "evidence_refs、status、rationale。\n\n"
-        "### 出处（必填）\n\n"
+        + _evidence_grading_zh()
+        + "### 出处（必填）\n\n"
         "- evidence_entries 每项必须含 **source_excerpt**：从对应 Done 任务原文"
         "（title/context/outcome/notes/subtask）中**照抄或极短摘录**一两句，"
         "证明该条证据不是臆测。\n"
@@ -245,7 +286,8 @@ def _system_prompt_kanban_en() -> str:
         "Each node_updates item fields: id (must be an allowed skill node id; "
         "the field name must be exactly id, not node_id, skill_id, or node), "
         "evidence_refs, status, rationale.\n\n"
-        "### Provenance (required)\n\n"
+        + _evidence_grading_en()
+        + "### Provenance (required)\n\n"
         "- Each evidence_entries item MUST include **source_excerpt**: "
         "a short literal quote from the Done task (title/context/outcome/"
         "notes/subtasks) proving the row is grounded.\n"
