@@ -133,16 +133,89 @@ def _split_markdown_atomic_blocks(markdown: str) -> list[str]:
     return blocks
 
 
+def _split_oversized_block(block: str, max_chars: int) -> list[str]:
+    """Split a single block that exceeds *max_chars* into smaller pieces.
+
+    Code fences (```` ``` ````) and display-math (``$$``) blocks are returned
+    whole — splitting them would corrupt syntax, so they rely on the per-call
+    token ceiling instead. Plain prose is split progressively: first on newlines,
+    then on sentence boundaries, then on a hard character cut as a last resort.
+    Reorganize is format-only, so an imperfect split boundary is harmless once
+    the reorganized pieces are concatenated.
+    """
+
+    if len(block) <= max_chars:
+        return [block]
+    stripped = block.lstrip()
+    if stripped.startswith("```") or stripped.startswith("~~~") or stripped.startswith("$$"):
+        return [block]
+
+    # Build candidate fragments by newline, then sentence boundaries, so we never
+    # cut mid-line/mid-sentence unless a single sentence already exceeds the cap.
+    units = block.split("\n")
+    pieces: list[str] = []
+    for unit in units:
+        if len(unit) <= max_chars:
+            pieces.append(unit)
+            continue
+        # Split long line on sentence enders (CJK 。！？ and ASCII .!?).
+        parts = re.split(r"(?<=[。！？!?\.])\s*", unit)
+        buffer = ""
+        for part in parts:
+            if not part:
+                continue
+            if len(part) > max_chars:
+                # A single sentence still too long: hard character cut.
+                if buffer:
+                    pieces.append(buffer)
+                    buffer = ""
+                for i in range(0, len(part), max_chars):
+                    pieces.append(part[i : i + max_chars])
+                continue
+            if not buffer:
+                buffer = part
+            elif len(buffer) + len(part) <= max_chars:
+                buffer = f"{buffer}{part}"
+            else:
+                pieces.append(buffer)
+                buffer = part
+        if buffer:
+            pieces.append(buffer)
+
+    # Greedily repack the pieces (joined by newlines) up to the limit.
+    chunks: list[str] = []
+    current = ""
+    for piece in pieces:
+        if not current:
+            current = piece
+        elif len(current) + 1 + len(piece) <= max_chars:
+            current = f"{current}\n{piece}"
+        else:
+            chunks.append(current)
+            current = piece
+    if current:
+        chunks.append(current)
+    return [chunk for chunk in chunks if chunk.strip()] or [block]
+
+
 def _chunk_markdown(markdown: str, max_chars: int) -> list[str]:
     """Greedily pack atomic blocks into chunks of at most *max_chars*.
 
-    A single block larger than *max_chars* (e.g. a long code block) becomes its
-    own chunk rather than being split, since splitting it would corrupt syntax.
+    Atomic blocks (split on blank lines) are packed together; any block that on
+    its own exceeds *max_chars* is first broken down by :func:`_split_oversized_block`
+    so a document with little/no blank-line structure (e.g. a few very long
+    paragraphs) still chunks instead of degenerating into one giant segment.
     """
 
-    blocks = _split_markdown_atomic_blocks(markdown)
-    if not blocks:
+    raw_blocks = _split_markdown_atomic_blocks(markdown)
+    if not raw_blocks:
         return []
+    blocks: list[str] = []
+    for block in raw_blocks:
+        if len(block) > max_chars:
+            blocks.extend(_split_oversized_block(block, max_chars))
+        else:
+            blocks.append(block)
     chunks: list[str] = []
     current = ""
     for block in blocks:
@@ -551,13 +624,17 @@ def _reorganize_document(
         return _strip_code_fence(raw).strip(), truncated
 
     # Long document: chunk so each call stays well under the output ceiling.
-    # ~3 chars/token for mixed text; target ~55% of the ceiling per chunk so the
-    # reorganized output (slightly longer than input) still fits comfortably.
-    max_chars = max(1200, int(ceiling * 3 * 0.55))
+    # ~3 chars/token for mixed text; target ~40% of the ceiling per chunk so each
+    # reorganized fragment generates quickly (well under the client timeout) and
+    # never risks hitting the model output cap.
+    max_chars = max(1200, int(ceiling * 3 * 0.40))
     chunks = _chunk_markdown(markdown, max_chars)
     if len(chunks) <= 1:
         chunks = [markdown]
     total = len(chunks)
+    # Each fragment generates independently; give it a generous timeout so a
+    # multi-chunk document does not trip the client/stream watchdog mid-run.
+    chunk_timeout = max(llm_client.timeout_seconds(), 180.0)
     fragment_note = (
         " This is ONE FRAGMENT of a larger document being reorganized in order. "
         "Reorganize only this fragment's formatting. Do NOT add a document title, "
@@ -588,7 +665,8 @@ def _reorganize_document(
             stream=stream_callback is not None,
             stream_callback=stream_callback,
             model=model,
-            max_tokens=max(ceiling, chunk_estimate + 256),
+            max_tokens=min(ceiling, chunk_estimate + 512),
+            timeout=chunk_timeout,
             meta_out=chat_meta,
         )
         if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):

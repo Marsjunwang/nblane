@@ -138,6 +138,25 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertIn(f"reorganized-{len(calls)}", fallback)
         self.assertEqual(patch_payload["block_patches"], [])
 
+    def test_chunk_markdown_splits_oversized_blocks_without_blank_lines(self) -> None:
+        # A long body with almost no blank lines (one giant paragraph) must still
+        # chunk down — this was the bug where the whole doc became one segment.
+        giant = "这是一段很长的中文内容，没有空行。" * 400  # ~7600 chars, single block
+        markdown = f"# 标题\n{giant}"
+        chunks = ai_dispatcher._chunk_markdown(markdown, max_chars=1000)
+        self.assertGreater(len(chunks), 3)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 1000)
+        # No content is dropped.
+        self.assertIn("没有空行", "".join(chunks))
+
+    def test_chunk_markdown_keeps_long_code_block_whole(self) -> None:
+        code = "```python\n" + "\n".join(f"x{i} = {i}" for i in range(300)) + "\n```"
+        chunks = ai_dispatcher._chunk_markdown(code, max_chars=500)
+        # Code fences are never split: the oversized fence stays one chunk.
+        self.assertEqual(len(chunks), 1)
+        self.assertTrue(chunks[0].startswith("```python"))
+
     def test_outline_patch_includes_structured_blocks_and_markdown(self) -> None:
         raw_outline = "## Problem\n- Constraint\n\n## Solution\n- Step"
         with patch("nblane.core.ai_dispatcher.llm_client.chat", return_value=raw_outline):

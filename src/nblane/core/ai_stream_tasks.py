@@ -15,7 +15,7 @@ _LOCK = threading.RLock()
 _TTL_SECONDS = 20 * 60
 _TIMEOUT_SECONDS = max(
     30,
-    int(os.getenv("NBLANE_AI_STREAM_TIMEOUT_SECONDS", "240") or "240"),
+    int(os.getenv("NBLANE_AI_STREAM_TIMEOUT_SECONDS", "600") or "600"),
 )
 
 
