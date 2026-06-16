@@ -226,6 +226,7 @@ class AIBlogPhase4Tests(unittest.TestCase):
             "tone": "tone",
             "outline": "outline",
             "expand_section": "expand",
+            "reorganize": "reorganize",
             "formula": "nl_to_latex",
             "visual": "visual",
             "meta": "meta",

@@ -33,6 +33,11 @@ _DEFAULT_MODEL = "qwen3.6-plus"
 _DEFAULT_UI_LANG = "en"
 _DEFAULT_REPLY_LANG = "en"
 _DEFAULT_TIMEOUT_SECONDS = 90.0
+# OpenAI-compatible gateways (DashScope qwen in particular) cap the output at a
+# low default (~2000 tokens) when ``max_tokens`` is omitted, which silently
+# truncates long generations such as a whole-document reorganize. Send an
+# explicit, generous ceiling instead. Override via ``LLM_MAX_TOKENS``.
+_DEFAULT_MAX_TOKENS = 8192
 
 _BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
 _API_KEY: str = os.getenv("LLM_API_KEY", "")
@@ -139,6 +144,21 @@ def timeout_seconds() -> float:
     return max(5.0, value)
 
 
+def max_tokens_default() -> int:
+    """Return the default output token ceiling for chat completions.
+
+    Reads ``LLM_MAX_TOKENS`` from the environment; falls back to
+    ``_DEFAULT_MAX_TOKENS``. Sending an explicit ceiling avoids the silent
+    low-default truncation some gateways apply when ``max_tokens`` is omitted.
+    """
+
+    try:
+        value = int(os.getenv("LLM_MAX_TOKENS", str(_DEFAULT_MAX_TOKENS)))
+    except ValueError:
+        value = _DEFAULT_MAX_TOKENS
+    return max(256, value)
+
+
 def reply_language() -> str:
     """Return the configured reply language code ('en' or 'zh').
 
@@ -166,11 +186,16 @@ def chat(
     stream_callback: Callable[[str], None] | None = None,
     model: str | None = None,
     timeout: float | None = None,
+    max_tokens: int | None = None,
+    meta_out: dict | None = None,
 ) -> str:
     """Send a single-turn chat and return the reply text.
 
     Returns an error string (not raises) on failure so
     callers can display it gracefully in the UI.
+
+    When *meta_out* is provided it is populated with response metadata such as
+    ``finish_reason`` so callers can detect length-truncated output.
     """
     if not is_configured():
         return (
@@ -191,13 +216,16 @@ def chat(
             model=str(model or "").strip() or _MODEL,
             temperature=temperature,
             stream=use_stream,
+            max_tokens=max_tokens if max_tokens is not None else max_tokens_default(),
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
         )
         if use_stream:
-            return _collect_stream_text(response, stream_callback)
+            return _collect_stream_text(response, stream_callback, meta_out=meta_out)
+        if meta_out is not None:
+            meta_out["finish_reason"] = _clean_finish_reason(response)
         content = response.choices[0].message.content
         return content if content is not None else ""
     except Exception as exc:
@@ -213,6 +241,8 @@ def chat_messages(
     stream_callback: Callable[[str], None] | None = None,
     model: str | None = None,
     timeout: float | None = None,
+    max_tokens: int | None = None,
+    meta_out: dict | None = None,
 ) -> str:
     """Multi-turn chat: *system* plus *messages* (user/assistant only).
 
@@ -249,26 +279,51 @@ def chat_messages(
             model=str(model or "").strip() or _MODEL,
             temperature=temperature,
             stream=use_stream,
+            max_tokens=max_tokens if max_tokens is not None else max_tokens_default(),
             messages=api_messages,
         )
         if use_stream:
-            return _collect_stream_text(response, stream_callback)
+            return _collect_stream_text(response, stream_callback, meta_out=meta_out)
+        if meta_out is not None:
+            meta_out["finish_reason"] = _clean_finish_reason(response)
         out = response.choices[0].message.content
         return out if out is not None else ""
     except Exception as exc:
         return f"LLM error: {exc}"
 
 
+def _clean_finish_reason(response: object) -> str:
+    """Extract ``finish_reason`` from a non-streamed completion, if present."""
+
+    try:
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return ""
+        return str(getattr(choices[0], "finish_reason", "") or "")
+    except Exception:
+        return ""
+
+
 def _collect_stream_text(
     response: object,
     stream_callback: Callable[[str], None] | None,
+    *,
+    meta_out: dict | None = None,
 ) -> str:
-    """Collect OpenAI-compatible streaming chunks into final text."""
+    """Collect OpenAI-compatible streaming chunks into final text.
+
+    When *meta_out* is provided, records the final ``finish_reason`` so callers
+    can detect length-truncated output (``finish_reason == "length"``).
+    """
     chunks: list[str] = []
+    finish_reason = ""
     for chunk in response:  # type: ignore[operator]
         choices = getattr(chunk, "choices", None)
         if not choices:
             continue
+        reason = getattr(choices[0], "finish_reason", None)
+        if reason:
+            finish_reason = str(reason)
         delta = getattr(choices[0], "delta", None)
         content = getattr(delta, "content", None)
         if content is None and isinstance(delta, dict):
@@ -279,4 +334,6 @@ def _collect_stream_text(
         chunks.append(text)
         if stream_callback is not None:
             stream_callback(text)
+    if meta_out is not None:
+        meta_out["finish_reason"] = finish_reason
     return "".join(chunks)

@@ -41,6 +41,53 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertFalse(block["props"]["accepted"])
         self.assertEqual(block["props"]["ai_source_id"], "task-1")
 
+    def test_reorganize_replaces_whole_document_without_block_patches(self) -> None:
+        raw = "# Title\n\nClean body.\n\n## Section\nMore."
+        captured: dict[str, object] = {}
+
+        def fake_chat(*_args, **kwargs):
+            captured.update(kwargs)
+            return raw
+
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", side_effect=fake_chat):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={"title": "Draft"},
+                markdown="messy body " * 50,
+                selected_block={"cursor_block_id": "b1"},
+                operation="reorganize",
+            )
+
+        self.assertEqual(patch_payload["operation"], "reorganize")
+        # Whole-document rewrite: no per-block patches, full body in fallback.
+        self.assertEqual(patch_payload["block_patches"], [])
+        self.assertIn("Clean body.", patch_payload["markdown_fallback"])
+        self.assertFalse(patch_payload["warnings"])
+        # Output ceiling must exceed the low default so long articles aren't cut.
+        self.assertIsNotNone(captured.get("max_tokens"))
+        self.assertGreaterEqual(int(captured["max_tokens"]), len("messy body " * 50))
+
+    def test_reorganize_warns_when_output_truncated(self) -> None:
+        def fake_chat(*_args, **kwargs):
+            meta_out = kwargs.get("meta_out")
+            if meta_out is not None:
+                meta_out["finish_reason"] = "length"
+            return "# Title\n\nHalf-written"
+
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", side_effect=fake_chat):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={},
+                markdown="long body " * 100,
+                selected_block={"cursor_block_id": "b1"},
+                operation="reorganize",
+            )
+
+        self.assertTrue(patch_payload["warnings"])
+        self.assertIn("cut off", patch_payload["warnings"][0].lower())
+
     def test_outline_patch_includes_structured_blocks_and_markdown(self) -> None:
         raw_outline = "## Problem\n- Constraint\n\n## Solution\n- Step"
         with patch("nblane.core.ai_dispatcher.llm_client.chat", return_value=raw_outline):

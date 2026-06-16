@@ -442,6 +442,15 @@ def generate_ai_patch(
         prompt=prompt,
         visual_kind=clean_visual_kind,
     )
+    # Reorganize rewrites the WHOLE document, so the output is at least as long
+    # as the input. Request a ceiling sized to the source (CJK is ~1 token/char,
+    # so use chars + headroom) instead of the low default that silently truncates
+    # long articles to a half-aligned result.
+    reorganize_max_tokens: int | None = None
+    if clean_operation == "reorganize":
+        estimated = len(markdown) + 1024
+        reorganize_max_tokens = max(llm_client.max_tokens_default(), estimated)
+    chat_meta: dict[str, Any] = {}
     raw = llm_client.chat(
         system,
         user,
@@ -449,6 +458,8 @@ def generate_ai_patch(
         stream=stream_callback is not None,
         stream_callback=stream_callback,
         model=clean_model or None,
+        max_tokens=reorganize_max_tokens,
+        meta_out=chat_meta,
     )
     if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
         raise RuntimeError(raw)
@@ -458,6 +469,14 @@ def generate_ai_patch(
     ai_model = llm_client.model_label()
     raw_text = _strip_code_fence(raw).strip()
     warnings: list[str] = []
+    if _clean_text(chat_meta.get("finish_reason")).strip().lower() == "length":
+        # The model hit the output token ceiling: the result is truncated, not a
+        # complete rewrite. Warn rather than silently replacing the document with
+        # a half-finished body.
+        warnings.append(
+            "AI output was cut off at the model's token limit; the result may be "
+            "incomplete. Try again, raise LLM_MAX_TOKENS, or split the document."
+        )
     assets: list[AIAsset] = []
     block_patches: list[AIBlockPatch] = []
     visual_payload: dict[str, Any] | None = None
