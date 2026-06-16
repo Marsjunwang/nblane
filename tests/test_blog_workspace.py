@@ -207,6 +207,34 @@ class BlogWorkspaceTests(unittest.TestCase):
             slugs = {p["slug"] for p in payload["posts"]}
             self.assertNotIn("2026-05-01-first", slugs)
 
+    def test_permanent_delete_virtual_post_removes_file(self) -> None:
+        # A virtual post is a markdown file on disk with no library node yet
+        # (id "post:<route>"). Deleting it must materialize then purge the file.
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            md_path = profile / "blog" / "2026-05-01-first.md"
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                self.assertTrue(md_path.exists())
+                result = bw.handle_blog_workspace_event(
+                    "alice",
+                    {
+                        "action": "library_permanent_delete_node",
+                        "payload": {
+                            "node_id": "post:2026-05-01-first",
+                            "ref": "blog/2026-05-01-first.md",
+                            "parent_id": "root",
+                            "title": "First Post",
+                            "delete_files": True,
+                            "trash_first": True,
+                        },
+                    },
+                )
+                self.assertTrue(result.ok, result.errors)
+                self.assertFalse(md_path.exists())
+                payload = bw.build_blog_workspace_payload("alice")
+            slugs = {p["slug"] for p in payload["posts"]}
+            self.assertNotIn("2026-05-01-first", slugs)
+
 
 if __name__ == "__main__":
     unittest.main()

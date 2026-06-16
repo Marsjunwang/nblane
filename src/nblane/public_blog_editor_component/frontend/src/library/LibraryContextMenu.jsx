@@ -70,6 +70,11 @@ export function LibraryContextMenu({
     const virtual = isVirtualNode(node);
     const trashed = node.status === "trashed";
     const disabledBase = !canMutate || root || virtual;
+    // Virtual posts (on disk, not in the library yaml) can still be deleted:
+    // the backend materializes them before purging. Only block when the node
+    // is the root or mutations are disabled.
+    const virtualPost = virtual && type === "post";
+    const disabledDestructive = !canMutate || root || (virtual && !virtualPost);
     const make = (key, label, handler, disabled = false, danger = false) => ({
       key,
       label,
@@ -153,7 +158,7 @@ export function LibraryContextMenu({
           "purge-active",
           labels.library_delete_forever || "Delete forever",
           () => onAction?.("purge-active", node),
-          disabledBase || capabilities.permanent_delete_node === false,
+          disabledDestructive || capabilities.permanent_delete_node === false,
           true,
         ),
       );

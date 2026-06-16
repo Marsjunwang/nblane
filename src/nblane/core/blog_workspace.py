@@ -667,10 +667,28 @@ def handle_blog_workspace_event(name: str, event: dict) -> BlogEventResult:
 
     if action == "library_permanent_delete_node":
         node_id = _clean_text(payload.get("node_id"))
+        ref = _clean_text(payload.get("ref"))
+        delete_files = bool(payload.get("delete_files", False))
+        trash_first = bool(payload.get("trash_first", False))
+        # Virtual posts (markdown on disk, not yet in the library yaml) carry an
+        # ``post:<route>`` id and no real node. Materialize them first so the
+        # standard trash + purge flow can remove both the node and the file.
+        is_virtual = not node_id or node_id.startswith("post:")
         try:
+            if is_virtual:
+                if not ref:
+                    raise ValueError("missing ref for virtual post deletion")
+                result = ps.attach_existing_public_library_node(
+                    name,
+                    _clean_text(payload.get("parent_id")) or None,
+                    ref,
+                    _clean_text(payload.get("title")),
+                )
+                node_id = _result_node_id(result) or node_id
+                trash_first = True
             # Active nodes (e.g. a freshly created post) must be trashed before
             # they can be purged; the editor signals this via trash_first.
-            if bool(payload.get("trash_first", False)):
+            if trash_first:
                 try:
                     ps.trash_public_library_node(
                         name,
@@ -683,7 +701,7 @@ def handle_blog_workspace_event(name: str, event: dict) -> BlogEventResult:
             ps.purge_public_library_node(
                 name,
                 node_id,
-                delete_files=bool(payload.get("delete_files", False)),
+                delete_files=delete_files,
             )
         except Exception as exc:
             return BlogEventResult(ok=False, action=action, errors=[str(exc)])

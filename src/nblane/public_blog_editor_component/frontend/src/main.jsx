@@ -2882,6 +2882,9 @@ function PublicLibraryTreePanel({
             close();
             await onAction("library_permanent_delete_node", {
               node_id: treeNodeId(node),
+              ref: cleanText(node?.ref || node?.route || node?.slug || ""),
+              parent_id: cleanText(node?.parent_id || "root") || "root",
+              title: treeNodeTitle(node),
               delete_files: true,
               trash_first: dialogState.kind === "purge-active",
             });
