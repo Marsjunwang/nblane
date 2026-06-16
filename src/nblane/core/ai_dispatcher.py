@@ -60,6 +60,106 @@ def _strip_code_fence(value: str) -> str:
     return text
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough output-token estimate for *text*.
+
+    CJK characters are ~1 token each; Latin/whitespace runs ~1 token per ~3.5
+    chars. Overestimating slightly is fine — it only decides whether to chunk.
+    """
+
+    clean = _clean_text(text)
+    if not clean:
+        return 0
+    cjk = sum(1 for ch in clean if "㐀" <= ch <= "鿿" or "豈" <= ch <= "﫿")
+    other = len(clean) - cjk
+    return cjk + (other + 2) // 3
+
+
+def _split_markdown_atomic_blocks(markdown: str) -> list[str]:
+    """Split *markdown* into atomic blocks on blank lines.
+
+    Fenced code blocks (```` ``` ````) and display-math blocks (``$$``) are kept
+    whole even when they contain blank lines, so chunking never severs a code or
+    formula block down the middle.
+    """
+
+    lines = _clean_text(markdown).split("\n")
+    blocks: list[str] = []
+    current: list[str] = []
+    fence = ""  # active code fence marker, "" when outside a fence
+    in_math = False
+
+    def _flush() -> None:
+        if current:
+            chunk = "\n".join(current).strip("\n")
+            if chunk.strip():
+                blocks.append(chunk)
+            current.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        fence_match = re.match(r"^(`{3,}|~{3,})", stripped)
+        if fence:
+            current.append(line)
+            if fence_match and stripped.startswith(fence[0] * 3):
+                fence = ""
+            continue
+        if fence_match:
+            _flush()
+            fence = fence_match.group(1)
+            current.append(line)
+            continue
+        # Display-math block delimited by lines that are exactly ``$$``.
+        if stripped == "$$":
+            if in_math:
+                current.append(line)
+                in_math = False
+                continue
+            _flush()
+            in_math = True
+            current.append(line)
+            continue
+        if in_math:
+            current.append(line)
+            continue
+        if not stripped:
+            _flush()
+            continue
+        current.append(line)
+    if fence or in_math:
+        # Unterminated fence/math: keep the trailing content as one block.
+        pass
+    _flush()
+    return blocks
+
+
+def _chunk_markdown(markdown: str, max_chars: int) -> list[str]:
+    """Greedily pack atomic blocks into chunks of at most *max_chars*.
+
+    A single block larger than *max_chars* (e.g. a long code block) becomes its
+    own chunk rather than being split, since splitting it would corrupt syntax.
+    """
+
+    blocks = _split_markdown_atomic_blocks(markdown)
+    if not blocks:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for block in blocks:
+        if not current:
+            current = block
+            continue
+        if len(current) + 2 + len(block) <= max_chars:
+            current = f"{current}\n\n{block}"
+        else:
+            chunks.append(current)
+            current = block
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+
 def _json_for_comment(value: dict[str, Any]) -> str:
     """Return a JSON payload that is safe inside an HTML comment."""
 
@@ -398,6 +498,108 @@ def _markdown_for_operation(
     return text
 
 
+def _reorganize_document(
+    *,
+    system: str,
+    instruction: str,
+    meta: dict[str, Any],
+    markdown: str,
+    target: AIPatchTarget,
+    prompt: str,
+    model: str | None,
+    stream_callback: Callable[[str], None] | None,
+) -> tuple[str, bool]:
+    """Reorganize the WHOLE document, chunking long bodies to dodge truncation.
+
+    Reorganize is a *format-only* transform (heading levels, paragraphs, code
+    fences, math, tables, punctuation) — a per-block change that never rewrites
+    across block boundaries — so a long document can be split into independent
+    chunks, each reorganized, then concatenated, without altering meaning.
+
+    Returns ``(reorganized_markdown, truncated)`` where *truncated* is True if
+    any chunk hit the model output ceiling.
+    """
+
+    ceiling = llm_client.max_tokens_default()
+    estimated_out = _estimate_tokens(markdown) + 256
+    # If the whole rewrite comfortably fits the model's output ceiling, do it in
+    # one pass (preserves the simplest behaviour for short/medium articles).
+    if estimated_out <= int(ceiling * 0.85):
+        user = _build_user_prompt(
+            operation="reorganize",
+            instruction=instruction,
+            meta=meta,
+            markdown=markdown,
+            target=target,
+            prompt=prompt,
+            visual_kind="",
+        )
+        chat_meta: dict[str, Any] = {}
+        raw = llm_client.chat(
+            system,
+            user,
+            temperature=0.25,
+            stream=stream_callback is not None,
+            stream_callback=stream_callback,
+            model=model,
+            max_tokens=max(ceiling, estimated_out + 256),
+            meta_out=chat_meta,
+        )
+        if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
+            raise RuntimeError(raw)
+        truncated = _clean_text(chat_meta.get("finish_reason")).strip().lower() == "length"
+        return _strip_code_fence(raw).strip(), truncated
+
+    # Long document: chunk so each call stays well under the output ceiling.
+    # ~3 chars/token for mixed text; target ~55% of the ceiling per chunk so the
+    # reorganized output (slightly longer than input) still fits comfortably.
+    max_chars = max(1200, int(ceiling * 3 * 0.55))
+    chunks = _chunk_markdown(markdown, max_chars)
+    if len(chunks) <= 1:
+        chunks = [markdown]
+    total = len(chunks)
+    fragment_note = (
+        " This is ONE FRAGMENT of a larger document being reorganized in order. "
+        "Reorganize only this fragment's formatting. Do NOT add a document title, "
+        "introduction, or conclusion, do NOT repeat content, and continue the "
+        "existing heading hierarchy. Output only the reorganized fragment."
+    )
+    results: list[str] = []
+    truncated_any = False
+    for index, chunk in enumerate(chunks):
+        if stream_callback is not None:
+            stream_callback(f"\n\n[reorganizing part {index + 1}/{total}]\n\n")
+        chunk_instruction = instruction if index == 0 else instruction + fragment_note
+        user = _build_user_prompt(
+            operation="reorganize",
+            instruction=chunk_instruction,
+            meta=meta if index == 0 else {},
+            markdown=chunk,
+            target=target,
+            prompt=prompt,
+            visual_kind="",
+        )
+        chunk_estimate = _estimate_tokens(chunk) + 256
+        chat_meta = {}
+        raw = llm_client.chat(
+            system,
+            user,
+            temperature=0.25,
+            stream=stream_callback is not None,
+            stream_callback=stream_callback,
+            model=model,
+            max_tokens=max(ceiling, chunk_estimate + 256),
+            meta_out=chat_meta,
+        )
+        if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
+            raise RuntimeError(raw)
+        if _clean_text(chat_meta.get("finish_reason")).strip().lower() == "length":
+            truncated_any = True
+        results.append(_strip_code_fence(raw).strip())
+    combined = "\n\n".join(part for part in results if part).strip()
+    return combined, truncated_any
+
+
 def generate_ai_patch(
     *,
     profile: str,
@@ -433,53 +635,57 @@ def generate_ai_patch(
         lang,
         clean_visual_kind,
     )
-    user = _build_user_prompt(
-        operation=clean_operation,
-        instruction=instruction,
-        meta=meta,
-        markdown=markdown,
-        target=target,
-        prompt=prompt,
-        visual_kind=clean_visual_kind,
-    )
-    # Reorganize rewrites the WHOLE document, so the output is at least as long
-    # as the input. Request a ceiling sized to the source (CJK is ~1 token/char,
-    # so use chars + headroom) instead of the low default that silently truncates
-    # long articles to a half-aligned result.
-    reorganize_max_tokens: int | None = None
-    if clean_operation == "reorganize":
-        estimated = len(markdown) + 1024
-        reorganize_max_tokens = max(llm_client.max_tokens_default(), estimated)
-    chat_meta: dict[str, Any] = {}
-    raw = llm_client.chat(
-        system,
-        user,
-        temperature=0.25,
-        stream=stream_callback is not None,
-        stream_callback=stream_callback,
-        model=clean_model or None,
-        max_tokens=reorganize_max_tokens,
-        meta_out=chat_meta,
-    )
-    if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
-        raise RuntimeError(raw)
-
     patch_id = f"ai-{uuid.uuid4().hex[:12]}"
     ai_source_id = _clean_text(source_event_id).strip() or patch_id
     ai_model = llm_client.model_label()
-    raw_text = _strip_code_fence(raw).strip()
     warnings: list[str] = []
-    if _clean_text(chat_meta.get("finish_reason")).strip().lower() == "length":
-        # The model hit the output token ceiling: the result is truncated, not a
-        # complete rewrite. Warn rather than silently replacing the document with
-        # a half-finished body.
-        warnings.append(
-            "AI output was cut off at the model's token limit; the result may be "
-            "incomplete. Try again, raise LLM_MAX_TOKENS, or split the document."
-        )
     assets: list[AIAsset] = []
     block_patches: list[AIBlockPatch] = []
     visual_payload: dict[str, Any] | None = None
+
+    if clean_operation == "reorganize":
+        # Reorganize handles its own chunking for long documents; produce the
+        # full reorganized body and skip the generic single-call path below.
+        reorganized, truncated = _reorganize_document(
+            system=system,
+            instruction=instruction,
+            meta=meta,
+            markdown=markdown,
+            target=target,
+            prompt=prompt,
+            model=clean_model or None,
+            stream_callback=stream_callback,
+        )
+        raw = reorganized
+        raw_text = reorganized
+        if truncated:
+            warnings.append(
+                "Part of the AI output was cut off at the model's token limit; "
+                "the result may be incomplete. Try again or raise LLM_MAX_TOKENS."
+            )
+    else:
+        user = _build_user_prompt(
+            operation=clean_operation,
+            instruction=instruction,
+            meta=meta,
+            markdown=markdown,
+            target=target,
+            prompt=prompt,
+            visual_kind=clean_visual_kind,
+        )
+        chat_meta: dict[str, Any] = {}
+        raw = llm_client.chat(
+            system,
+            user,
+            temperature=0.25,
+            stream=stream_callback is not None,
+            stream_callback=stream_callback,
+            model=clean_model or None,
+            meta_out=chat_meta,
+        )
+        if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
+            raise RuntimeError(raw)
+        raw_text = _strip_code_fence(raw).strip()
 
     def _emit_progress(message: str) -> None:
         if stream_callback is not None:

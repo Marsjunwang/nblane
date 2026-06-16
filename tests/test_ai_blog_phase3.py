@@ -88,6 +88,56 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertTrue(patch_payload["warnings"])
         self.assertIn("cut off", patch_payload["warnings"][0].lower())
 
+    def test_chunk_markdown_keeps_code_and_math_blocks_intact(self) -> None:
+        code_block = "```python\nx = 1\n\ny = 2\n```"
+        math_block = "$$\na^2 + b^2\n\n= c^2\n$$"
+        markdown = f"# Title\n\nIntro paragraph.\n\n{code_block}\n\nMiddle.\n\n{math_block}\n\nEnd."
+        blocks = ai_dispatcher._split_markdown_atomic_blocks(markdown)
+        # The fenced code block and the $$ math block survive as single atoms
+        # even though they contain blank lines internally.
+        self.assertIn(code_block, blocks)
+        self.assertIn(math_block, blocks)
+
+    def test_chunk_markdown_packs_blocks_under_limit(self) -> None:
+        markdown = "\n\n".join(f"Paragraph number {i} with text." for i in range(20))
+        chunks = ai_dispatcher._chunk_markdown(markdown, max_chars=120)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            # A chunk may exceed the limit only when a single block already does.
+            self.assertTrue(len(chunk) <= 120 or "\n\n" not in chunk)
+        # Concatenation preserves every paragraph.
+        rejoined = "\n\n".join(chunks)
+        self.assertIn("Paragraph number 0", rejoined)
+        self.assertIn("Paragraph number 19", rejoined)
+
+    def test_reorganize_chunks_long_document_and_concatenates(self) -> None:
+        # A document far larger than the output ceiling must be split into
+        # multiple LLM calls and concatenated, not truncated to one call.
+        calls: list[str] = []
+
+        def fake_chat(_system, user, *_args, **_kwargs):
+            calls.append(user)
+            # Echo a marker so we can verify each fragment contributes output.
+            return f"reorganized-{len(calls)}"
+
+        with patch("nblane.core.ai_dispatcher.llm_client.max_tokens_default", return_value=512), patch(
+            "nblane.core.ai_dispatcher.llm_client.chat", side_effect=fake_chat
+        ):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={"title": "Draft"},
+                markdown="\n\n".join(f"Paragraph {i} body text here." for i in range(200)),
+                selected_block={"cursor_block_id": "b1"},
+                operation="reorganize",
+            )
+
+        self.assertGreater(len(calls), 1)  # actually chunked
+        fallback = patch_payload["markdown_fallback"]
+        self.assertIn("reorganized-1", fallback)
+        self.assertIn(f"reorganized-{len(calls)}", fallback)
+        self.assertEqual(patch_payload["block_patches"], [])
+
     def test_outline_patch_includes_structured_blocks_and_markdown(self) -> None:
         raw_outline = "## Problem\n- Constraint\n\n## Solution\n- Step"
         with patch("nblane.core.ai_dispatcher.llm_client.chat", return_value=raw_outline):
