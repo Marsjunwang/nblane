@@ -2447,7 +2447,7 @@ _active_section = st.segmented_control(
     label_visibility="collapsed",
 )
 _active_section = _active_section or "queue"
-for _key, _label, _render in _NAV_SECTIONS:
-    if _key == _active_section:
-        _render(review_payload)
+for _section_key, _section_label, _section_render in _NAV_SECTIONS:
+    if _section_key == _active_section:
+        _section_render(review_payload)
         break
