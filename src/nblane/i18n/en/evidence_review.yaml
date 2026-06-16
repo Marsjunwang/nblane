@@ -78,6 +78,12 @@ done_grade_hint: AI pre-filled evidence strength and confidence. Confirm or twea
 done_col_adopt: Adopt
 done_col_evidence: Evidence
 done_node_refs: evidence
+kanban_source_title: Kanban source
+kanban_source_empty: No kanban task linked (manual entry or generated earlier).
+kanban_source_excerpt: Excerpt
+kanban_source_meta: 'started {started} · completed {completed}'
+kanban_source_missing: 'No kanban task found for {ref} (may have been deleted).'
+nav_section_label: Workspace
 done_apply_selected: Apply selected
 done_apply_all: Apply all
 done_applied: Applied evidence draft.

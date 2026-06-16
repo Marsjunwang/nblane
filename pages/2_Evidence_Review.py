@@ -22,6 +22,12 @@ from nblane.core.claims import (
     save_claim_book,
 )
 from nblane.core.evidence_pool_id import new_evidence_id
+from nblane.core.kanban_archive import (
+    add_kanban_refs_to_ingest_patch,
+    find_kanban_tasks_by_ref,
+    kanban_ref_id,
+    kanban_refs_for_tasks,
+)
 from nblane.core.evidence_review import (
     apply_pool_edits,
     build_evidence_review,
@@ -404,13 +410,16 @@ def _compact_row(row: dict) -> dict:
         value = str(row.get(key, "") or "").strip()
         if value:
             out[key] = value
+    source_excerpt = str(row.get("source_excerpt", "") or "").strip()
+    if source_excerpt:
+        out["source_excerpt"] = source_excerpt
     review_status = str(row.get("review_status", "") or "").strip()
     if review_status:
         out["review_status"] = review_status
     public_readiness = str(row.get("public_readiness", "") or "").strip()
     if public_readiness:
         out["public_readiness"] = public_readiness
-    for ref_key in ("source_refs", "project_refs", "experience_refs"):
+    for ref_key in ("source_refs", "project_refs", "experience_refs", "kanban_refs"):
         raw_refs = row.get(ref_key) or []
         if not isinstance(raw_refs, list):
             continue
@@ -429,6 +438,68 @@ def _row_label(row: dict) -> str:
     eid = str(row.get("id", "") or "").strip()
     title = str(row.get("title", "") or "").strip()
     return f"{eid} - {title}" if title else eid
+
+
+def _render_kanban_source(row: dict, *, key: str) -> None:
+    """Show the originating kanban task(s) for one evidence row.
+
+    Resolves ``kanban_refs`` live from kanban.md / kanban-archive.md so the
+    reviewer can recall what was actually done, with the AI ``source_excerpt``
+    quote as a fallback when the task can no longer be found.
+    """
+    refs = [
+        str(r).strip()
+        for r in (row.get("kanban_refs") or [])
+        if str(r).strip()
+    ]
+    excerpt = str(row.get("source_excerpt", "") or "").strip()
+    if not refs and not excerpt:
+        return
+    with st.expander(ui.get("kanban_source_title", "Kanban source"), expanded=False):
+        tasks = find_kanban_tasks_by_ref(selected, refs) if refs else []
+        found_ids = {str(getattr(t, "id", "") or "").strip() for t in tasks}
+        for task in tasks:
+            title = str(getattr(task, "title", "") or "").strip()
+            st.markdown(f"**{title}**")
+            meta_bits = []
+            context = str(getattr(task, "context", "") or "").strip()
+            outcome = str(getattr(task, "outcome", "") or "").strip()
+            if context:
+                meta_bits.append(f"context: {context}")
+            if outcome:
+                meta_bits.append(f"outcome: {outcome}")
+            for bit in meta_bits:
+                st.caption(bit)
+            started = str(getattr(task, "started_on", "") or "").strip()
+            completed = str(getattr(task, "completed_on", "") or "").strip()
+            if started or completed:
+                st.caption(
+                    ui.get(
+                        "kanban_source_meta",
+                        "started {started} · completed {completed}",
+                    ).format(started=started or "—", completed=completed or "—")
+                )
+            subtasks = [
+                st_item
+                for st_item in (getattr(task, "subtasks", []) or [])
+                if str(getattr(st_item, "title", "") or "").strip()
+            ]
+            for st_item in subtasks:
+                mark = "x" if getattr(st_item, "done", False) else " "
+                st.caption(f"- [{mark}] {st_item.title}")
+        for ref in refs:
+            rid = kanban_ref_id(ref)
+            if rid and rid not in found_ids:
+                st.caption(
+                    ui.get(
+                        "kanban_source_missing",
+                        "No kanban task found for {ref}.",
+                    ).format(ref=rid)
+                )
+        if excerpt:
+            st.caption(f"{ui.get('kanban_source_excerpt', 'Excerpt')}: {excerpt}")
+        if not refs and not tasks and not excerpt:
+            st.caption(ui.get("kanban_source_empty", "No kanban task linked."))
 
 
 def _skill_label(option: dict) -> str:
@@ -675,6 +746,9 @@ def _render_done_ingest(review: dict) -> None:
                 elif patch is not None:
                     source_projects = project_refs_for_tasks(chosen)
                     patch = add_project_refs_to_ingest_patch(patch, source_projects)
+                    patch = add_kanban_refs_to_ingest_patch(
+                        patch, kanban_refs_for_tasks(chosen)
+                    )
                     st.session_state[f"evidence_review_patch_{selected}"] = patch
                     st.session_state[f"evidence_review_done_titles_{selected}"] = [
                         task.title for task in chosen
@@ -750,6 +824,7 @@ def _render_done_ingest(review: dict) -> None:
                 label_visibility="collapsed",
             )
         graded_evidence.append((idx, chosen_strength, chosen_confidence))
+        _render_kanban_source(row, key=f"done_kanban_src_{selected}_{idx}")
 
     for idx, row in enumerate(parsed.node_updates):
         node_id = str(row.get("id", "") or "")
@@ -1445,6 +1520,10 @@ def _render_pool_editor(review: dict) -> None:
         )
         if detail_id and detail_id in id_to_index:
             target_index = id_to_index[detail_id]
+            _render_kanban_source(
+                entries[target_index],
+                key=f"pool_kanban_src_{selected}_{target_index}",
+            )
             next_row, updated, deprecated = _render_pool_form(
                 entries,
                 row=entries[target_index],
@@ -2346,25 +2425,29 @@ m2.metric(ui["metric_unlinked"], summary.get("unlinked_count", 0))
 m3.metric(ui["metric_needs_review"], summary.get("needs_review_count", 0))
 m4.metric(ui["metric_status_risk"], summary.get("status_risk_count", 0))
 
-tabs = st.tabs(
-    [
-        ui["tab_queue"],
-        ui["tab_claims"],
-        ui["tab_pool"],
-        ui["tab_links"],
-        ui["tab_refs"],
-        ui["tab_risks"],
-    ]
+# A session-state-backed segmented control replaces st.tabs here: st.tabs is
+# client-only and resets to the first tab on every st.rerun() (which the pool's
+# bulk/save buttons trigger), snapping the reviewer back to the Done Queue. The
+# segmented control persists the active section across reruns via its key.
+_NAV_SECTIONS = [
+    ("queue", ui["tab_queue"], _render_done_ingest),
+    ("claims", ui["tab_claims"], _render_claim_candidates),
+    ("pool", ui["tab_pool"], _render_pool_editor),
+    ("links", ui["tab_links"], _render_links),
+    ("refs", ui["tab_refs"], _render_refs),
+    ("risks", ui["tab_risks"], _render_risks),
+]
+_nav_labels = {key: label for key, label, _ in _NAV_SECTIONS}
+_active_section = st.segmented_control(
+    ui.get("nav_section_label", "Workspace"),
+    options=[key for key, _, _ in _NAV_SECTIONS],
+    format_func=lambda key: _nav_labels.get(key, key),
+    default="queue",
+    key=f"evidence_review_active_section_{selected}",
+    label_visibility="collapsed",
 )
-with tabs[0]:
-    _render_done_ingest(review_payload)
-with tabs[1]:
-    _render_claim_candidates(review_payload)
-with tabs[2]:
-    _render_pool_editor(review_payload)
-with tabs[3]:
-    _render_links(review_payload)
-with tabs[4]:
-    _render_refs(review_payload)
-with tabs[5]:
-    _render_risks(review_payload)
+_active_section = _active_section or "queue"
+for _key, _label, _render in _NAV_SECTIONS:
+    if _key == _active_section:
+        _render(review_payload)
+        break

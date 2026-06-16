@@ -83,6 +83,8 @@ class EvidenceRecord:
     source_refs: list[str] = field(default_factory=list)
     project_refs: list[str] = field(default_factory=list)
     experience_refs: list[str] = field(default_factory=list)
+    kanban_refs: list[str] = field(default_factory=list)
+    source_excerpt: str = ""
     deprecated: bool = False
     replaced_by: str = ""
 
@@ -133,6 +135,14 @@ class EvidenceRecord:
             ]
             if isinstance(d.get("experience_refs"), list)
             else [],
+            kanban_refs=[
+                str(item).strip()
+                for item in (d.get("kanban_refs") or [])
+                if item is not None and str(item).strip()
+            ]
+            if isinstance(d.get("kanban_refs"), list)
+            else [],
+            source_excerpt=str(d.get("source_excerpt", "") or ""),
             deprecated=bool(d.get("deprecated", False)),
             replaced_by=str(d.get("replaced_by", "") or ""),
         )
@@ -164,6 +174,10 @@ class EvidenceRecord:
             out["project_refs"] = list(self.project_refs)
         if self.experience_refs:
             out["experience_refs"] = list(self.experience_refs)
+        if self.kanban_refs:
+            out["kanban_refs"] = list(self.kanban_refs)
+        if self.source_excerpt:
+            out["source_excerpt"] = self.source_excerpt
         if self.deprecated:
             out["deprecated"] = True
         if self.replaced_by:

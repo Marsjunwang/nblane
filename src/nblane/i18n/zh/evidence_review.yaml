@@ -78,6 +78,12 @@ done_grade_hint: AI 已预填证据强度与信心，审阅时确认或微调即
 done_col_adopt: 采用
 done_col_evidence: 证据
 done_node_refs: 证据
+kanban_source_title: 看板出处
+kanban_source_empty: 该证据未关联看板任务（可能为手动录入或更早生成）。
+kanban_source_excerpt: 原文摘录
+kanban_source_meta: '开始 {started} · 完成 {completed}'
+kanban_source_missing: 找不到 {ref} 对应的看板任务（可能已被删除）。
+nav_section_label: 工作区
 done_apply_selected: 应用所选
 done_apply_all: 应用全部
 done_applied: 已应用证据草案。

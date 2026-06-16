@@ -192,6 +192,9 @@ def _normalize_evidence_row(row: dict) -> dict | None:
         val = row.get(key)
         if val is not None and str(val).strip():
             out[key] = str(val).strip()
+    source_excerpt = row.get("source_excerpt")
+    if source_excerpt is not None and str(source_excerpt).strip():
+        out["source_excerpt"] = str(source_excerpt).strip()
     strength = str(row.get("strength", "") or "").strip()
     if strength in EVIDENCE_STRENGTHS:
         out["strength"] = strength
@@ -222,6 +225,15 @@ def _normalize_evidence_row(row: dict) -> dict | None:
         ]
         if refs:
             out["project_refs"] = refs
+    kanban_refs = row.get("kanban_refs")
+    if isinstance(kanban_refs, list):
+        refs = [
+            str(item).strip()
+            for item in kanban_refs
+            if str(item).strip()
+        ]
+        if refs:
+            out["kanban_refs"] = refs
     if row.get("deprecated") is True:
         out["deprecated"] = True
     rb = str(row.get("replaced_by", "") or "").strip()
