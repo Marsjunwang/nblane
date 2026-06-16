@@ -59,6 +59,18 @@ class BlogWorkspaceTests(unittest.TestCase):
                 payload = bw.build_blog_workspace_payload("alice", status_filter="published")
         self.assertTrue(all(p["status"] == "published" for p in payload["posts"]))
 
+    def test_active_slug_resolves_by_route(self) -> None:
+        # The library tree selects posts by route; the payload builder must
+        # resolve that route back to the post so the document loads.
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                payload = bw.build_blog_workspace_payload("alice")
+                route = payload["posts"][0]["route"]
+                loaded = bw.build_blog_workspace_payload("alice", active_slug=route)
+        self.assertEqual(loaded["active_slug"], payload["posts"][0]["slug"])
+        self.assertTrue(loaded["initial_markdown"])
+
     def test_select_post_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))

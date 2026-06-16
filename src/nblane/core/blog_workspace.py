@@ -266,7 +266,12 @@ def build_blog_workspace_payload(
         posts = [post for post in posts if post.status == clean_filter]
 
     by_slug = {post.slug: post for post in posts}
+    by_route = {getattr(post, "route", post.slug): post for post in posts}
     slug = _clean_text(active_slug)
+    # The library tree selects by route, which can differ from the leaf slug for
+    # nested posts. Resolve either form back to the canonical slug.
+    if slug not in by_slug and slug in by_route:
+        slug = by_route[slug].slug
     if slug not in by_slug and posts:
         slug = posts[0].slug
 

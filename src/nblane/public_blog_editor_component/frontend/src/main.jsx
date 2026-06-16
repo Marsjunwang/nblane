@@ -6983,6 +6983,24 @@ function StandaloneEditor({ config }) {
         loadInto(cleanText(payload.slug)).catch((err) => setError(String(err)));
         return;
       }
+      // Library tree clicks emit library_select_node. For post nodes this must
+      // load the document (the backend handler only echoes the node id), so
+      // intercept it here instead of POSTing to the no-op events endpoint.
+      if (action === "library_select_node") {
+        const isPost =
+          cleanText(payload.type) === "post" ||
+          cleanText(payload.legacy_action) === "select_post";
+        const slug = cleanText(
+          payload.slug ||
+            payload.route ||
+            (payload.select_post && payload.select_post.slug) ||
+            "",
+        );
+        if (isPost && slug) {
+          loadInto(slug).catch((err) => setError(String(err)));
+        }
+        return;
+      }
 
       // ---- Inline AI stream control ----
       if (action === "ai_inline_action") {
