@@ -187,6 +187,35 @@ textarea:read-only {
   flex-wrap: nowrap;
 }
 
+.nb-ai-model-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--nb-ink-soft, var(--nb-ink));
+}
+
+.nb-ai-model-picker-label {
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.nb-ai-model-picker .nb-select {
+  min-height: 34px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-paper);
+  color: var(--nb-ink);
+  font-size: 0.82rem;
+  font-weight: 650;
+  padding: 0 8px;
+}
+
+.nb-ai-model-picker .nb-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .nb-button,
 .nb-icon-button,
 .nb-mobile-tabs button,

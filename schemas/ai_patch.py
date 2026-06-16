@@ -17,6 +17,7 @@ AIOperation = Literal[
     "tone",
     "outline",
     "expand_section",
+    "reorganize",
     "formula",
     "visual",
     "meta",

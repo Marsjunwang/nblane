@@ -92,6 +92,19 @@ const SUPPORTED_PATCH_BLOCK_TYPES = new Set([
   "ai_loading_block",
 ]);
 const AI_PROMPT_REQUIRED_OPERATIONS = new Set(["formula", "visual"]);
+// Operations that rewrite the WHOLE document: their markdown_fallback replaces
+// the entire editor body rather than being appended at a block.
+const AI_WHOLE_DOCUMENT_OPERATIONS = new Set(["reorganize"]);
+// Lightweight model picker options. Empty value = server default (LLM_MODEL).
+// Persisted per-profile in localStorage so each writer keeps their pick.
+const AI_MODEL_OPTIONS = [
+  { value: "", labelKey: "ai_model_default" },
+  { value: "qwen3.6-plus", labelKey: "" },
+  { value: "qwen3-max", labelKey: "" },
+  { value: "qwen-plus", labelKey: "" },
+  { value: "qwen-turbo", labelKey: "" },
+];
+const AI_MODEL_STORAGE_PREFIX = "nb-blog-ai-model:";
 const WRITE_ACTIONS = new Set([
   "markdown_changed",
   "save_post",
@@ -135,6 +148,8 @@ const DEFAULT_LABELS = {
   ai_action_formula: "LaTeX",
   ai_action_outline: "Outline",
   ai_action_polish: "Polish",
+  ai_action_reorganize: "Reorganize",
+  ai_action_reorganize_hint: "Reorganize the whole document's formatting without deleting content",
   ai_action_shorten: "Shorten",
   ai_action_tone: "Tone",
   ai_action_translate: "Translate",
@@ -151,6 +166,8 @@ const DEFAULT_LABELS = {
   ai_patch_regenerate: "Regenerate",
   ai_patch_reject: "Reject",
   ai_patch_target: "Target",
+  ai_model_label: "AI model",
+  ai_model_default: "Default",
   ai_stream_cancel: "Cancel",
   ai_stream_cancelled: "Cancelled",
   ai_stream_failed: "AI generation failed",
@@ -444,6 +461,35 @@ function persistLayout(storageKey, state) {
   }
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
+  } catch (_err) {
+    // localStorage can be unavailable in private browsing or embedded contexts.
+  }
+}
+
+function readStoredAIModel(profileKey) {
+  if (!profileKey || typeof window === "undefined") {
+    return "";
+  }
+  try {
+    return cleanText(
+      window.localStorage.getItem(AI_MODEL_STORAGE_PREFIX + profileKey) || "",
+    );
+  } catch (_err) {
+    return "";
+  }
+}
+
+function persistAIModel(profileKey, model) {
+  if (!profileKey || typeof window === "undefined") {
+    return;
+  }
+  try {
+    const key = AI_MODEL_STORAGE_PREFIX + profileKey;
+    if (model) {
+      window.localStorage.setItem(key, model);
+    } else {
+      window.localStorage.removeItem(key);
+    }
   } catch (_err) {
     // localStorage can be unavailable in private browsing or embedded contexts.
   }
@@ -3147,6 +3193,12 @@ function ShellEditor(props) {
   const [outlineVersion, setOutlineVersion] = useState(0);
   const [treeUiVersion, setTreeUiVersion] = useState(0);
 
+  const aiModelProfileKey = cleanText(args.profile || documentId || "default");
+  const [aiModel, setAiModel] = useState(() =>
+    readStoredAIModel(aiModelProfileKey),
+  );
+  const aiModelRef = useRef(aiModel);
+
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
   const loadedInitialMarkdownRef = useRef(null);
@@ -3255,6 +3307,19 @@ function ShellEditor(props) {
   useEffect(() => {
     setStatusFilter(initialStatusFilter);
   }, [initialStatusFilter]);
+
+  // Keep the AI model ref in sync and persist the writer's pick per profile.
+  useEffect(() => {
+    aiModelRef.current = aiModel;
+    persistAIModel(aiModelProfileKey, aiModel);
+  }, [aiModel, aiModelProfileKey]);
+
+  // Re-read the stored model when the active profile changes.
+  useEffect(() => {
+    const stored = readStoredAIModel(aiModelProfileKey);
+    aiModelRef.current = stored;
+    setAiModel(stored);
+  }, [aiModelProfileKey]);
 
   useEffect(() => {
     if (largePreview.key && !largePreviewRow) {
@@ -4010,8 +4075,31 @@ function ShellEditor(props) {
     onComplete: (stream) => {
       if (stream.status !== "running") {
         const patch = asObject(stream.patch);
-        if (stream.status === "done" && cleanText(patch.operation).trim()) {
-          updateAILoadingBlock(stream);
+        const operation = cleanText(patch.operation).trim();
+        if (stream.status === "done" && operation) {
+          if (AI_WHOLE_DOCUMENT_OPERATIONS.has(operation.toLowerCase())) {
+            // Whole-document rewrites have no inline anchor block; surface the
+            // patch directly in the candidate panel for before/after review.
+            const normalized = normalizeAIPatch(patch);
+            if (normalized) {
+              const id = aiPatchId(normalized);
+              setPatchCandidates((current) => {
+                const withoutDuplicate = current.filter(
+                  (candidate, index) => aiPatchId(candidate, index) !== id,
+                );
+                return [normalized, ...withoutDuplicate].slice(0, 8);
+              });
+              applyLayoutLocal((current) => ({
+                ...current,
+                right_open: true,
+                active_right_tab: "AI",
+                focus_mode: false,
+              }));
+              setMobileView("Tools");
+            }
+          } else {
+            updateAILoadingBlock(stream);
+          }
         } else {
           removeAILoadingBlock(stream.task_id);
         }
@@ -4253,7 +4341,10 @@ function ShellEditor(props) {
     }
     const markdownBeforeAI = await getCurrentMarkdown();
     const streamId = cleanText(request.stream_id).trim() || makeAIStreamId(documentId, operation);
-    insertAILoadingBlock(streamId, operation, selectionContext, request.visual_kind);
+    const isWholeDocument = AI_WHOLE_DOCUMENT_OPERATIONS.has(operation.toLowerCase());
+    if (!isWholeDocument) {
+      insertAILoadingBlock(streamId, operation, selectionContext, request.visual_kind);
+    }
     setPendingAIAction({
       operation,
       trigger: cleanText(request.trigger || "inline"),
@@ -4278,6 +4369,7 @@ function ShellEditor(props) {
       visual_kind: cleanText(request.visual_kind),
       selected_block: selectionContext,
       stream_id: streamId,
+      model: cleanText(request.model || aiModelRef.current),
       markdown: markdownBeforeAI,
       dirty: computeDirty(markdownBeforeAI, draftMetaRef.current),
     });
@@ -4372,18 +4464,32 @@ function ShellEditor(props) {
     }
     let markdown = latestMarkdownRef.current;
     const fallback = cleanText(normalized.markdown_fallback).trim();
-    const blockPatchMarkdown = await applyBlockPatches(normalized);
-    if (blockPatchMarkdown !== null) {
-      markdown = blockPatchMarkdown;
-    } else if (blockOnly) {
-      setError("Block patch could not be applied in the editor.");
-      return;
-    } else if (fallback) {
-      markdown = await insertMarkdown(
-        fallback,
-        patchDefaultPlacement(normalized),
-        { target: normalized.target },
-      );
+    const isWholeDocument = AI_WHOLE_DOCUMENT_OPERATIONS.has(
+      cleanText(normalized.operation).toLowerCase(),
+    );
+    if (isWholeDocument) {
+      // Reorganize and similar rewrite the entire body: replace the document
+      // wholesale from markdown_fallback instead of patching/appending blocks.
+      if (!fallback) {
+        setError("AI returned no document content.");
+        return;
+      }
+      markdown = await replaceEditorMarkdown(fallback);
+      setDirty(computeDirty(markdown, nextMeta));
+    } else {
+      const blockPatchMarkdown = await applyBlockPatches(normalized);
+      if (blockPatchMarkdown !== null) {
+        markdown = blockPatchMarkdown;
+      } else if (blockOnly) {
+        setError("Block patch could not be applied in the editor.");
+        return;
+      } else if (fallback) {
+        markdown = await insertMarkdown(
+          fallback,
+          patchDefaultPlacement(normalized),
+          { target: normalized.target },
+        );
+      }
     }
     if (removeAILoadingBlockForPatch(normalized)) {
       markdown = await getCurrentMarkdown();
@@ -4740,6 +4846,34 @@ function ShellEditor(props) {
           >
             {label(labels, "publish")}
           </button>
+          <button
+            type="button"
+            className="nb-button"
+            disabled={!editable || Boolean(pendingAIAction)}
+            title={label(labels, "ai_action_reorganize_hint", "")}
+            onClick={() => handleAIInlineAction({ operation: "reorganize" })}
+          >
+            {label(labels, "ai_action_reorganize", "Reorganize")}
+          </button>
+          <label className="nb-ai-model-picker" title={label(labels, "ai_model_label", "AI model")}>
+            <span className="nb-ai-model-picker-label">
+              {label(labels, "ai_model_label", "AI model")}
+            </span>
+            <select
+              className="nb-select"
+              value={aiModel}
+              disabled={Boolean(pendingAIAction)}
+              onChange={(event) => setAiModel(cleanText(event.target.value))}
+            >
+              {AI_MODEL_OPTIONS.map((option) => (
+                <option key={option.value || "__default__"} value={option.value}>
+                  {option.labelKey
+                    ? label(labels, option.labelKey, option.value)
+                    : option.value}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="nb-toolbar-actions compact">
           <button

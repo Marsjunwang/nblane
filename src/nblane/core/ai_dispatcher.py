@@ -210,6 +210,7 @@ def _operation(value: object, visual_kind: str = "") -> str:
         "tone",
         "outline",
         "expand_section",
+        "reorganize",
         "formula",
         "visual",
         "meta",
@@ -293,6 +294,8 @@ def _build_user_prompt(
         for block in target.surrounding_blocks
         if isinstance(block, dict)
     ]
+    # Whole-document operations need the full body, not a truncated excerpt.
+    article_excerpt = markdown if operation == "reorganize" else _trim(markdown, 2200)
     payload = {
         "operation": operation,
         "instruction": instruction,
@@ -304,7 +307,7 @@ def _build_user_prompt(
         "tags": meta.get("tags") if isinstance(meta.get("tags"), list) else [],
         "target_text": context,
         "surrounding_blocks": surrounding,
-        "article_excerpt": _trim(markdown, 2200),
+        "article_excerpt": article_excerpt,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -406,6 +409,7 @@ def generate_ai_patch(
     prompt: str = "",
     visual_kind: str = "",
     source_event_id: str = "",
+    model: str = "",
     stream_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Generate an AI patch candidate without mutating the document."""
@@ -416,6 +420,7 @@ def generate_ai_patch(
     if clean_visual_kind in {"diagram", "mermaid", "flowchart", "sequence", "state", "class", "mindmap"}:
         clean_visual_kind = "diagram"
     clean_operation = _operation(operation, clean_visual_kind)
+    clean_model = _clean_text(model).strip()
     target = _target_from_selection(selected_block)
     if (
         clean_operation in {"formula", "visual"}
@@ -443,6 +448,7 @@ def generate_ai_patch(
         temperature=0.25,
         stream=stream_callback is not None,
         stream_callback=stream_callback,
+        model=clean_model or None,
     )
     if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
         raise RuntimeError(raw)
@@ -625,7 +631,10 @@ def generate_ai_patch(
         ai_model=ai_model,
         visual_payload=visual_payload,
     ).strip()
-    if not block_patches:
+    # ``reorganize`` rewrites the WHOLE document: keep block_patches empty so the
+    # editor applies markdown_fallback as a full-document replacement rather than
+    # touching a single block.
+    if not block_patches and clean_operation != "reorganize":
         block_patches = [
             _block_patch(
                 clean_operation,

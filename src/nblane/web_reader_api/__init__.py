@@ -1228,6 +1228,7 @@ async def blog_ai_start(request: Request, profile: str):
         operation=_clean_text(payload.get("operation")) or "polish",
         prompt=str(payload.get("prompt") or ""),
         visual_kind=_clean_text(payload.get("visual_kind")),
+        model=_clean_text(payload.get("model")),
     )
     return JSONResponse({"ok": True, "stream": snapshot, "stream_id": task_id})
 

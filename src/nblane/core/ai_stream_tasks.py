@@ -74,6 +74,7 @@ def start_ai_patch_stream(
     operation: str,
     prompt: str,
     visual_kind: str,
+    model: str = "",
 ) -> dict[str, Any]:
     """Start an AI patch generation task and return its initial snapshot."""
     clean_task_id = str(task_id or "").strip() or f"ai-stream-{uuid.uuid4().hex[:12]}"
@@ -117,6 +118,7 @@ def start_ai_patch_stream(
                 prompt=prompt,
                 visual_kind=visual_kind,
                 source_event_id=clean_task_id,
+                model=model,
                 stream_callback=append_delta,
             )
             with _LOCK:

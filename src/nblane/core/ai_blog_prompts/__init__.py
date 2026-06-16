@@ -23,6 +23,7 @@ REQUIRED_PROMPTS = (
     "translate",
     "tone",
     "outline",
+    "reorganize",
     "nl_to_latex",
     "diagram",
     "caption",
