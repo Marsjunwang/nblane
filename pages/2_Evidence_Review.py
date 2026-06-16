@@ -1352,6 +1352,54 @@ def _render_pool_editor(review: dict) -> None:
 
     st.caption(ui.get("pool_inline_hint", ""))
 
+    # Quick-select toggles the table's _pick column for the visible page in one
+    # click. Because st.data_editor keeps its own widget state, applying a new
+    # default requires a fresh editor key, so each quick-select bumps a revision
+    # counter; manual toggles between bumps are preserved.
+    pick_mode_key = f"evidence_review_pool_pickmode_{selected}"
+    editor_rev_key = f"evidence_review_pool_editor_rev_{selected}"
+    pick_mode = st.session_state.get(pick_mode_key)
+    editor_rev = int(st.session_state.get(editor_rev_key, 0))
+
+    qs1, qs2, qs3, _qs_spacer = st.columns([2, 2, 2, 3])
+    with qs1:
+        if st.button(
+            ui.get("pool_pick_page_all", "Select page"),
+            key=f"evidence_review_pool_pick_all_{selected}",
+            use_container_width=True,
+        ):
+            st.session_state[pick_mode_key] = "all"
+            st.session_state[editor_rev_key] = editor_rev + 1
+            st.rerun()
+    with qs2:
+        if st.button(
+            ui.get("pool_pick_page_needs", "Select needs-review"),
+            key=f"evidence_review_pool_pick_needs_{selected}",
+            use_container_width=True,
+        ):
+            st.session_state[pick_mode_key] = "needs_review"
+            st.session_state[editor_rev_key] = editor_rev + 1
+            st.rerun()
+    with qs3:
+        if st.button(
+            ui.get("pool_pick_clear", "Clear selection"),
+            key=f"evidence_review_pool_pick_clear_{selected}",
+            use_container_width=True,
+        ):
+            st.session_state[pick_mode_key] = "none"
+            st.session_state[editor_rev_key] = editor_rev + 1
+            st.rerun()
+
+    def _default_pick(row: dict) -> bool:
+        if pick_mode == "all":
+            return True
+        if pick_mode == "needs_review":
+            return (
+                str(row.get("review_status", "needs_review") or "needs_review")
+                == "needs_review"
+            )
+        return False
+
     # Build the editable table from the visible page. Edits are matched back to
     # entries by id (not row position), so pagination/sort can't misroute them.
     strength_opts = ["", *EVIDENCE_STRENGTHS]
@@ -1367,7 +1415,7 @@ def _render_pool_editor(review: dict) -> None:
             title = f"{title} ⚠"
         table_rows.append(
             {
-                "_pick": False,
+                "_pick": _default_pick(row),
                 "id": rid,
                 "title": title,
                 "strength": str(row.get("strength", "") or ""),
@@ -1393,7 +1441,7 @@ def _render_pool_editor(review: dict) -> None:
         ],
     )
 
-    editor_key = f"evidence_review_pool_editor_{selected}"
+    editor_key = f"evidence_review_pool_editor_{selected}_{editor_rev}"
     edited = st.data_editor(
         df,
         key=editor_key,
@@ -1473,6 +1521,32 @@ def _render_pool_editor(review: dict) -> None:
                 icon="✅",
             )
             st.rerun()
+
+    # --- Apply bulk field to ALL filtered entries (across pages, ignoring the
+    # per-page _pick checkboxes). This is the "do it in one shot" path: filter
+    # with the search box, then set every match without paging through 20 at a
+    # time. Picks above only cover the visible page.
+    all_filtered_ids = [
+        str(row.get("id", "") or "")
+        for _i, row in indexed_entries
+        if str(row.get("id", "") or "")
+    ]
+    all_label = ui.get("pool_bulk_apply_all", "Apply to ALL filtered ({n})")
+    if st.button(
+        all_label.format(n=len(all_filtered_ids)),
+        disabled=not all_filtered_ids,
+        key=f"evidence_review_pool_bulk_all_btn_{selected}",
+    ):
+        _, changed = bulk_set_pool_field(
+            entries, all_filtered_ids, bulk_field, bulk_value
+        )
+        _save_pool(entries, ui.get("pool_edits_saved", "Saved."))
+        st.toast(
+            ui.get("pool_bulk_done", "Updated {n} rows").format(n=changed),
+            icon="✅",
+        )
+        st.rerun()
+    st.caption(ui.get("pool_bulk_all_hint", ""))
 
     # --- Save inline edits (batched, no per-cell rerun) ---
     if st.button(

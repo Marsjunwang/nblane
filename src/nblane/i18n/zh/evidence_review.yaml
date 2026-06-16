@@ -192,11 +192,16 @@ link_attach_to_skill: 关联到该技能
 link_inline_skills: 技能
 link_inline_placeholder: 关联到技能…
 link_inline_attach: 关联
-pool_inline_hint: 直接在表格里改强度/置信度/审阅状态/公开度，改完点“保存表格修改”一次落盘；勾选行可批量改。
+pool_inline_hint: 直接在表格里改强度/置信度/审阅状态/公开度，改完点“保存表格修改”一次落盘；用下方按钮可一键勾选本页（全选 / 仅待复核），或对全部筛选结果批量套用。
 pool_pick: ✓
 pool_bulk_field: 批量字段
 pool_bulk_value: 设为
 pool_bulk_apply: 应用到选中（{n}）
+pool_bulk_apply_all: 应用到全部筛选结果（{n}）
+pool_bulk_all_hint: 对当前搜索筛选出的所有行套用批量字段/值——跨所有分页，忽略上方勾选框。
+pool_pick_page_all: ☑ 全选本页
+pool_pick_page_needs: ☑ 本页待复核
+pool_pick_clear: ☐ 清空选择
 pool_bulk_done: 已更新 {n} 行
 pool_save_edits: 保存表格修改
 pool_edits_saved: 已保存证据池。
