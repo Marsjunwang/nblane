@@ -167,6 +167,46 @@ class BlogWorkspaceTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(result.handled)
 
+    def test_permanent_delete_active_post_removes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            md_path = profile / "blog" / "2026-05-01-first.md"
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                # Reconcile so the active post gets a library node id.
+                public_site.reconcile_public_library("alice")
+                tree = public_site.list_public_library_tree("alice")
+                node_id = ""
+
+                def _walk(nodes: list) -> None:
+                    nonlocal node_id
+                    for node in nodes:
+                        if node.get("type") == "post" and "first" in (
+                            node.get("ref", "") + node.get("route", "")
+                        ):
+                            node_id = node.get("id", "")
+                        _walk(node.get("children", []) or [])
+
+                _walk(tree.get("children", []) if isinstance(tree, dict) else tree)
+                self.assertTrue(node_id, "active post node id not found")
+
+                result = bw.handle_blog_workspace_event(
+                    "alice",
+                    {
+                        "action": "library_permanent_delete_node",
+                        "payload": {
+                            "node_id": node_id,
+                            "delete_files": True,
+                            "trash_first": True,
+                        },
+                    },
+                )
+                self.assertTrue(result.ok, result.errors)
+                # The markdown file must be gone so the post does not reappear.
+                self.assertFalse(md_path.exists())
+                payload = bw.build_blog_workspace_payload("alice")
+            slugs = {p["slug"] for p in payload["posts"]}
+            self.assertNotIn("2026-05-01-first", slugs)
+
 
 if __name__ == "__main__":
     unittest.main()

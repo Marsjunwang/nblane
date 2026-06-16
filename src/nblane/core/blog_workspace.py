@@ -666,8 +666,25 @@ def handle_blog_workspace_event(name: str, event: dict) -> BlogEventResult:
         return BlogEventResult(action=action)
 
     if action == "library_permanent_delete_node":
+        node_id = _clean_text(payload.get("node_id"))
         try:
-            ps.purge_public_library_node(name, _clean_text(payload.get("node_id")))
+            # Active nodes (e.g. a freshly created post) must be trashed before
+            # they can be purged; the editor signals this via trash_first.
+            if bool(payload.get("trash_first", False)):
+                try:
+                    ps.trash_public_library_node(
+                        name,
+                        node_id,
+                        recursive=bool(payload.get("recursive", True)),
+                    )
+                except Exception as exc:
+                    if "trash" not in str(exc).lower():
+                        raise
+            ps.purge_public_library_node(
+                name,
+                node_id,
+                delete_files=bool(payload.get("delete_files", False)),
+            )
         except Exception as exc:
             return BlogEventResult(ok=False, action=action, errors=[str(exc)])
         return BlogEventResult(action=action)
