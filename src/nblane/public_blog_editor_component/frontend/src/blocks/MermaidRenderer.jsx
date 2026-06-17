@@ -85,11 +85,53 @@ function splitOneLineFlowchart(body) {
   return statements;
 }
 
+function convertEscapedNewlines(text) {
+  // A literal `\n` inside a label/quote is a line break (<br/>); at the top
+  // level it separates statements (real newline). Mirrors the Python
+  // _convert_mermaid_escaped_newlines so editor + reader agree.
+  let out = "";
+  let quote = "";
+  let square = 0;
+  let curly = 0;
+  let paren = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\\" && text[index + 1] === "n") {
+      out += quote || square || curly || paren ? "<br/>" : "\n";
+      index += 1;
+      continue;
+    }
+    const char = text[index];
+    if (quote) {
+      out += char;
+      if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    } else if (char === "[") {
+      square += 1;
+    } else if (char === "]" && square > 0) {
+      square -= 1;
+    } else if (char === "{") {
+      curly += 1;
+    } else if (char === "}" && curly > 0) {
+      curly -= 1;
+    } else if (char === "(") {
+      paren += 1;
+    } else if (char === ")" && paren > 0) {
+      paren -= 1;
+    }
+    out += char;
+  }
+  return out;
+}
+
 function normalizeMermaidSource(value) {
-  const source = cleanText(value)
-    .replace(/\\r\\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .replace(/\\u002d/g, "-")
+  const source = convertEscapedNewlines(
+    cleanText(value).replace(/\\r\\n/g, "\n").replace(/\\u002d/g, "-"),
+  )
     .trim()
     .replace(/[，。]+$/u, "");
   if (!source || source.includes("\n")) {

@@ -288,6 +288,39 @@ function closesFence(line, fence) {
   return line.trimStart().startsWith(fence);
 }
 
+function mermaidFenceLang(line) {
+  const match = /^([`~]{3,})\s*mermaid\s*$/iu.exec(line.trim());
+  return match ? match[1] : "";
+}
+
+function collectMermaidFence(lines, start) {
+  const fence = mermaidFenceLang(lines[start]);
+  if (!fence) {
+    return null;
+  }
+  const body = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (closesFence(lines[index], fence)) {
+      const source = body.join("\n").trim();
+      if (!source) {
+        return null;
+      }
+      return {
+        block: visualBlock({
+          asset_type: "diagram",
+          visual_kind: "flowchart",
+          mermaid: source,
+          status: "accepted",
+          accepted: true,
+        }),
+        nextIndex: index + 1,
+      };
+    }
+    body.push(lines[index]);
+  }
+  return null;
+}
+
 function oneLineMath(line, open, close) {
   const trimmed = line.trim();
   if (!trimmed.startsWith(open) || !trimmed.endsWith(close)) {
@@ -353,6 +386,13 @@ export function splitMarkdownSpecialBlocks(markdown) {
 
     const nextFence = isFenceStart(line);
     if (nextFence) {
+      const mermaidFence = collectMermaidFence(lines, index);
+      if (mermaidFence) {
+        flushPending();
+        segments.push({ kind: "block", block: mermaidFence.block });
+        index = mermaidFence.nextIndex;
+        continue;
+      }
       fence = nextFence;
       pending.push(line);
       index += 1;

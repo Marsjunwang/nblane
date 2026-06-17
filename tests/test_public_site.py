@@ -1212,6 +1212,40 @@ class TestPublicSite(unittest.TestCase):
         self.assertIn("B --&gt;|校验成功| C[成功进入首页]", html)
         self.assertIn("B --&gt;|校验失败| D[失败提示错误]", html)
 
+    def test_fenced_mermaid_block_renders_as_mermaid_runtime(self) -> None:
+        """Fenced ```mermaid code blocks become mermaid.js-ready <pre> blocks."""
+        body = (
+            "# Title\n\n"
+            "```mermaid\n"
+            "flowchart LR\n"
+            "  A[Start] --> B[End]\n"
+            "```\n"
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertNotIn("language-mermaid", html)
+        self.assertIn("flowchart LR", html)
+        self.assertIn("A[Start] --&gt; B[End]", html)
+        self.assertIn("<noscript><svg", html)
+
+    def test_fenced_mermaid_in_label_newline_becomes_break(self) -> None:
+        """A literal \\n inside a node label becomes <br/>, not a real newline."""
+        body = (
+            "```mermaid\n"
+            r"flowchart LR A[相机图像\nhead / wrist] --> B[策略]"
+            "\n```\n"
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn('<pre class="mermaid">', html)
+        # In-label \n collapses to an escaped <br/> inside the label brackets.
+        self.assertIn("相机图像&lt;br/&gt;head / wrist", html)
+        # The edge separator is a real newline, so the two statements split.
+        self.assertIn("A[相机图像&lt;br/&gt;head / wrist] --&gt; B[策略]", html)
+
     def test_blog_preview_page_includes_mermaid_runtime_when_needed(self) -> None:
         """Full public pages load Mermaid only when diagram blocks are present."""
         body = public_site._markdown_to_html(

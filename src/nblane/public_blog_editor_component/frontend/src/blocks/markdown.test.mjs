@@ -37,6 +37,34 @@ test("does not parse directives inside fenced code", () => {
   assert.match(segments[0].value, /::video\[Clip\]/u);
 });
 
+test("parses fenced mermaid as a diagram visual block", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "Intro.\n\n```mermaid\nflowchart LR\n  A[Start] --> B[End]\n```\n\nOutro.",
+  );
+
+  assert.equal(segments.length, 3);
+  assert.equal(segments[0].value, "Intro.");
+  assert.equal(segments[1].kind, "block");
+  assert.equal(segments[1].block.type, "visual_block");
+  assert.equal(segments[1].block.props.asset_type, "diagram");
+  assert.equal(segments[1].block.props.visual_kind, "flowchart");
+  assert.equal(
+    segments[1].block.props.mermaid,
+    "flowchart LR\n  A[Start] --> B[End]",
+  );
+  assert.equal(segments[2].value, "Outro.");
+});
+
+test("leaves non-mermaid fenced code as markdown", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "```python\nprint('hi')\n```",
+  );
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].kind, "markdown");
+  assert.match(segments[0].value, /print\('hi'\)/u);
+});
+
 test("parses display math as math blocks", () => {
   const segments = splitMarkdownSpecialBlocks(
     "Before.\n\n$$\nJ(\\theta)=\\sum_t r_t\n$$\n\nAfter.",

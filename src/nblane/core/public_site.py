@@ -3070,79 +3070,195 @@ def _render_mermaid_static_svg(source: str) -> str:
     )
 
 
+def _convert_mermaid_escaped_newlines(text: str) -> str:
+    r"""Resolve literal ``\n`` escapes inside a Mermaid source.
+
+    A ``\n`` *inside* a node label / quote (e.g. ``A[line1\nline2]``) is a label
+    line break and becomes ``<br/>``; a ``\n`` at the top level is a statement
+    separator and becomes a real newline. LLM-flattened diagrams mix both, and
+    blindly converting every ``\n`` to a newline (the old behaviour) split node
+    labels mid-text and corrupted the diagram.
+    """
+
+    out: list[str] = []
+    quote = ""
+    square = curly = paren = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if text[i : i + 2] == "\\n":
+            inside = bool(quote or square or curly or paren)
+            out.append("<br/>" if inside else "\n")
+            i += 2
+            continue
+        if quote:
+            out.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in {"'", '"', "`"}:
+            quote = ch
+        elif ch == "[":
+            square += 1
+        elif ch == "]" and square:
+            square -= 1
+        elif ch == "{":
+            curly += 1
+        elif ch == "}" and curly:
+            curly -= 1
+        elif ch == "(":
+            paren += 1
+        elif ch == ")" and paren:
+            paren -= 1
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _normalize_mermaid_source(source: str) -> str:
     """Normalize common one-line Mermaid flowcharts produced by LLMs."""
 
     text = (
         str(source or "")
         .replace("\\r\\n", "\n")
-        .replace("\\n", "\n")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
         .replace("\\u002d", "-")
-        .strip()
-        .rstrip("，。")
     )
+    text = _convert_mermaid_escaped_newlines(text).strip().rstrip("，。")
     if "\n" in text:
+        # Already multi-line: statements are separated, keep as-is.
         return text
-    match = re.match(r"^(?P<header>(?:flowchart|graph)\s+(?:TB|TD|BT|LR|RL))\s+(?P<body>.+)$", text, re.I)
+    match = re.match(
+        r"^(?P<header>(?:flowchart|graph)\s+(?:TB|TD|BT|LR|RL))\s+(?P<body>.+)$",
+        text,
+        re.I,
+    )
     if not match:
         return text
     statements = _split_one_line_mermaid_flowchart(match.group("body").strip())
     if not statements:
         return text
-    return "\n".join([match.group("header"), *(f"  {statement}" for statement in statements)])
+    lines = [match.group("header")]
+    indent = "  "
+    for statement in statements:
+        lower = statement.lower()
+        if lower == "end":
+            indent = "  "
+        lines.append(f"{indent}{statement}")
+        if lower.startswith("subgraph"):
+            indent = "    "
+    return "\n".join(lines)
+
+
+# Mermaid edge connectors: -->, ---, ==>, -.->, <-->, x--x, o--o, ~~~, with an
+# optional |label| on either side.
+_MERMAID_CONNECTOR_RE = re.compile(
+    r"^(?:\|[^|]*\|)?"
+    r"(?:<?-{2,}>?|<?={2,}>?|<?-\.+-?>?|x-{2,}x?|o-{2,}o?|~{3,})"
+    r"(?:\|[^|]*\|)?$"
+)
+
+
+def _mermaid_top_level_words(body: str) -> list[str]:
+    """Split a one-line Mermaid body into words, keeping bracketed spans whole."""
+
+    words: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    square = curly = paren = 0
+    for ch in body:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in {"'", '"', "`"}:
+            quote = ch
+            buf.append(ch)
+            continue
+        if ch == "[":
+            square += 1
+        elif ch == "]" and square:
+            square -= 1
+        elif ch == "{":
+            curly += 1
+        elif ch == "}" and curly:
+            curly -= 1
+        elif ch == "(":
+            paren += 1
+        elif ch == ")" and paren:
+            paren -= 1
+        if ch.isspace() and not (square or curly or paren):
+            if buf:
+                words.append("".join(buf))
+                buf = []
+            continue
+        buf.append(ch)
+    if buf:
+        words.append("".join(buf))
+    return words
 
 
 def _split_one_line_mermaid_flowchart(body: str) -> list[str]:
+    """Break a flattened one-line flowchart body into per-statement lines.
+
+    Handles ``subgraph``/``end`` containers, standalone node declarations, and
+    edge chains (``A --> B --> C``) that the LLM collapsed onto a single line.
+    """
+
+    words = _mermaid_top_level_words(body)
     statements: list[str] = []
-    start = 0
-    quote = ""
-    square = curly = paren = 0
-    for index, char in enumerate(body):
-        if quote:
-            if char == quote:
-                quote = ""
+    current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            joined = " ".join(current).strip().rstrip(";")
+            if joined:
+                statements.append(joined)
+            current.clear()
+
+    i = 0
+    total = len(words)
+    while i < total:
+        word = words[i]
+        lower = word.lower()
+        if lower == "subgraph":
+            flush()
+            if i + 1 < total:
+                statements.append(f"subgraph {words[i + 1]}".rstrip(";"))
+                i += 2
+            else:
+                statements.append("subgraph")
+                i += 1
             continue
-        if char in {"'", '"', "`"}:
-            quote = char
+        if lower == "end":
+            flush()
+            statements.append("end")
+            i += 1
             continue
-        if char == "[":
-            square += 1
+        if lower == "direction" and i + 1 < total:
+            flush()
+            statements.append(f"direction {words[i + 1]}")
+            i += 2
             continue
-        if char == "]" and square:
-            square -= 1
+        if _MERMAID_CONNECTOR_RE.match(word):
+            current.append(word)
+            i += 1
             continue
-        if char == "{":
-            curly += 1
-            continue
-        if char == "}" and curly:
-            curly -= 1
-            continue
-        if char == "(":
-            paren += 1
-            continue
-        if char == ")" and paren:
-            paren -= 1
-            continue
-        if not char.isspace() or square or curly or paren:
-            continue
-        previous = body[index - 1] if index > 0 else ""
-        if not re.match(r"[\w\]\}\)]", previous, re.I):
-            continue
-        rest = body[index:].lstrip()
-        if re.match(
-            r"^[A-Za-z_][\w-]*(?:\s*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\)))?\s*(?:-->|---|--|==>|-\.\->|-\.)",
-            rest,
-        ):
-            statement = body[start:index].strip().rstrip(";")
-            if statement:
-                statements.append(statement)
-            start = len(body) - len(rest)
-    tail = body[start:].strip().rstrip(";")
-    if tail:
-        statements.append(tail)
+        # A node/token: extend the current edge chain, else start a new statement.
+        if current and _MERMAID_CONNECTOR_RE.match(current[-1]):
+            current.append(word)
+        else:
+            flush()
+            current.append(word)
+        i += 1
+    flush()
     if len(statements) == 1 and ";" in statements[0]:
         statements = [part.strip() for part in statements[0].split(";") if part.strip()]
-    return statements
+    return [statement for statement in statements if statement]
 
 
 def _render_visual_block_comment(payload: dict) -> str:
@@ -3830,6 +3946,33 @@ def validate_public_layer(
     return result
 
 
+_FENCED_MERMAID_HTML_RE = re.compile(
+    r'<pre><code class="language-mermaid">(?P<body>.*?)</code></pre>',
+    re.DOTALL,
+)
+
+
+def _convert_fenced_mermaid_html(rendered: str) -> str:
+    """Turn fenced ```mermaid code blocks into mermaid.js-ready ``<pre>`` blocks.
+
+    The Markdown library renders ```` ```mermaid ```` as
+    ``<pre><code class="language-mermaid">…escaped source…</code></pre>``; the
+    browser-side ``mermaid.run`` only targets ``.mermaid``. We rewrite those to
+    ``<pre class="mermaid">`` (normalizing one-line/flattened sources) and attach
+    a static SVG fallback for no-JS readers.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        source = _normalize_mermaid_source(html.unescape(match.group("body")))
+        block = f'<pre class="mermaid">{html.escape(source)}</pre>'
+        static_fallback = _render_mermaid_static_svg(source)
+        if static_fallback:
+            block += f"<noscript>{static_fallback}</noscript>"
+        return block
+
+    return _FENCED_MERMAID_HTML_RE.sub(replace, rendered)
+
+
 def _markdown_to_html(text: str) -> str:
     text = _replace_ai_loading_comments(text)
     text = _replace_math_block_comments(text)
@@ -3844,6 +3987,7 @@ def _markdown_to_html(text: str) -> str:
             extensions=["extra", "sane_lists"],
             output_format="html5",
         )
+        rendered = _convert_fenced_mermaid_html(rendered)
         return _sanitize_html_url_attrs(
             _restore_markdown_math(rendered, math_blocks, inline_math)
         )
