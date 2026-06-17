@@ -1212,6 +1212,23 @@ class TestPublicSite(unittest.TestCase):
         self.assertIn("B --&gt;|校验成功| C[成功进入首页]", html)
         self.assertIn("B --&gt;|校验失败| D[失败提示错误]", html)
 
+    def test_single_line_mermaid_keeps_spaced_edge_labels_intact(self) -> None:
+        """A pipe edge label with spaces must not split the edge chain."""
+        body = (
+            '<!-- nblane:visual_block {"asset_type":"diagram",'
+            '"visual_kind":"flowchart",'
+            '"mermaid":"flowchart LR Env -->|transition 轨迹数据| Replay '
+            'Replay --> SAC",'
+            '"caption":"Flow"} -->'
+        )
+
+        html = public_site._markdown_to_html(body)
+
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertIn("Env --&gt;|transition 轨迹数据| Replay", html)
+        # The label space must not have broken the edge onto separate lines.
+        self.assertNotIn("Env\n", html)
+
     def test_fenced_mermaid_block_renders_as_mermaid_runtime(self) -> None:
         """Fenced ```mermaid code blocks become mermaid.js-ready <pre> blocks."""
         body = (

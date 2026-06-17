@@ -3169,6 +3169,7 @@ def _mermaid_top_level_words(body: str) -> list[str]:
     buf: list[str] = []
     quote = ""
     square = curly = paren = 0
+    pipe = False
     for ch in body:
         if quote:
             buf.append(ch)
@@ -3177,6 +3178,10 @@ def _mermaid_top_level_words(body: str) -> list[str]:
             continue
         if ch in {"'", '"', "`"}:
             quote = ch
+            buf.append(ch)
+            continue
+        if ch == "|":
+            pipe = not pipe
             buf.append(ch)
             continue
         if ch == "[":
@@ -3191,7 +3196,7 @@ def _mermaid_top_level_words(body: str) -> list[str]:
             paren += 1
         elif ch == ")" and paren:
             paren -= 1
-        if ch.isspace() and not (square or curly or paren):
+        if ch.isspace() and not (square or curly or paren or pipe):
             if buf:
                 words.append("".join(buf))
                 buf = []
