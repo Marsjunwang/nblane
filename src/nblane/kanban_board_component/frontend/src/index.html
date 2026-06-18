@@ -47,7 +47,21 @@
       background: rgba(255, 255, 255, .96);
       box-shadow: 0 2px 10px rgba(23, 33, 31, .05);
     }
-    .kb-quick { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(140px, 190px) 38px; gap: 8px; }
+    .kb-quick { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(140px, 190px) 38px 38px; gap: 8px; }
+    .kb-quick-more { grid-column: 1 / -1; display: grid; gap: 8px; }
+    .kb-quick-more textarea {
+      width: 100%;
+      min-height: 52px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: inherit;
+      resize: vertical;
+    }
+    .kb-quick-more textarea:focus { border-color: rgba(33, 104, 91, .55); }
     .kb-quick input,
     .kb-quick select,
     .kb-field input,
@@ -572,6 +586,7 @@
       ai_error_status: "AI error",
       open_activity: "Open Activity",
       quick_add: "Quick add",
+      quick_add_more: "More fields",
       save: "Save",
       save_short: "Save",
       section: "Section",
@@ -590,6 +605,7 @@
     let editingId = "";
     let focusSection = "";
     let quickSection = "";
+    let quickMoreOpen = false;
     let clickTimer = 0;
     let eventSeq = 0;
     let openMenuId = "";
@@ -1390,7 +1406,13 @@
               <select name="quick-section" aria-label="${attr(label("section"))}">
                 ${board.map((section) => `<option value="${attr(section.key)}" ${section.key === quickSection ? "selected" : ""}>${esc(section.label)}</option>`).join("")}
               </select>
+              <button type="button" class="kb-icon-button" data-quick-more aria-label="${attr(label("quick_add_more"))}" title="${attr(label("quick_add_more"))}" aria-expanded="${quickMoreOpen ? "true" : "false"}">⋯</button>
               <button class="kb-icon-button primary" type="submit" aria-label="${attr(label("add"))}">+</button>
+              ${quickMoreOpen ? `
+              <div class="kb-quick-more">
+                <textarea name="quick-context" rows="2" placeholder="${attr(label("context"))}" aria-label="${attr(label("context"))}"></textarea>
+                <textarea name="quick-notes" rows="2" placeholder="${attr(label("details"))}" aria-label="${attr(label("details"))}"></textarea>
+              </div>` : ""}
             </form>
             <div class="kb-status">${esc(text(aiState().status || ""))}</div>
           </div>
@@ -1497,11 +1519,27 @@
           const title = quick.elements["quick-title"].value.trim();
           const section = quick.elements["quick-section"].value;
           quickSection = section;
-          if (title) emit("quick_add", { section, title });
+          if (!title) return;
+          const payload = { section, title };
+          const contextEl = quick.elements["quick-context"];
+          const notesEl = quick.elements["quick-notes"];
+          if (contextEl && contextEl.value.trim()) payload.context = contextEl.value.trim();
+          if (notesEl && notesEl.value.trim()) payload.notes = notesEl.value.trim();
+          quickMoreOpen = false;
+          emit("quick_add", payload);
         });
         quick.elements["quick-section"].addEventListener("change", (event) => {
           quickSection = event.target.value;
         });
+        const moreBtn = quick.querySelector("[data-quick-more]");
+        if (moreBtn) {
+          moreBtn.addEventListener("click", () => {
+            quickMoreOpen = !quickMoreOpen;
+            render();
+            const focusTarget = document.querySelector('.kb-quick [name="quick-context"]');
+            if (focusTarget) focusTarget.focus();
+          });
+        }
       }
       document.querySelectorAll("[data-focus-section]").forEach((button) => {
         button.addEventListener("click", () => {

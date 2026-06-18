@@ -144,6 +144,8 @@ def normalize_web_preferences(
         "kanban": {
             "subtask_granularity": granularity,
             "subtask_style_hint": _clean_text(kanban.get("subtask_style_hint")),
+            "focus_mode": _clean_bool(kanban.get("focus_mode"), default=False),
+            "auto_dates": _clean_bool(kanban.get("auto_dates"), default=True),
         },
     }
 
@@ -269,6 +271,28 @@ def _strip_secret_keys(value: Any) -> Any:
 
 def _clean_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _clean_bool(value: object, *, default: bool) -> bool:
+    """Coerce a stored preference to bool, falling back to *default*.
+
+    Missing values (``None``) read as the default so a freshly created
+    preferences file keeps the intended defaults; explicit strings like
+    ``"false"``/``"0"``/``"no"`` are honored.
+    """
+
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    return default
 
 
 def _language(value: object) -> str:

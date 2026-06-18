@@ -16,11 +16,6 @@ from nblane.checkin_calendar_component import st_checkin_calendar
 from nblane.core import codex_adapter
 from nblane.core import gap as gap_engine
 from nblane.core import llm as llm_client
-from nblane.core.file_state import (
-    FileConflictError,
-    assert_unchanged,
-    snapshot_file,
-)
 from nblane.core.kanban_io import (
     KANBAN_BOARD_SECTIONS,
     apply_kanban_reorder,
@@ -35,6 +30,7 @@ from nblane.core.kanban_events import (
     discard_task_ai_state as _discard_task_ai_state,
     event_subtask_index as _event_subtask_index,
     invalid_kanban_card_date_fields as _invalid_card_date_fields,
+    split_kanban_details,
     subtask_proposals_from_payload as _subtask_proposals_from_payload,
 )
 from nblane.core.kanban_ai import (
@@ -92,7 +88,6 @@ from nblane.web_linkify import extract_plain_urls
 from nblane.web_auth import require_login
 from nblane.web_shared import (
     apply_ui_language_from_session,
-    assert_files_current,
     current_goal_agent_context,
     ensure_file_snapshot,
     refresh_file_snapshots,
@@ -137,6 +132,31 @@ def _load_into_state(profile: str) -> None:
     )
 
 
+def _view_pref_key(profile: str, name: str) -> str:
+    """Session key for a persisted board view toggle (focus_mode/auto_dates)."""
+    return f"kanban_{name}_{profile}"
+
+
+def _init_view_prefs(profile: str) -> None:
+    """Seed focus_mode/auto_dates session state from web-preferences once.
+
+    A Streamlit checkbox with a ``key`` only honors ``value`` on the first
+    frame, so we instead initialize session_state directly from the persisted
+    preferences when the keys are absent. Reruns keep the user's live choice.
+    """
+    kanban_prefs = load_web_preferences(profile).get("kanban", {})
+    for name, default in (("focus_mode", False), ("auto_dates", True)):
+        key = _view_pref_key(profile, name)
+        if key not in st.session_state:
+            st.session_state[key] = bool(kanban_prefs.get(name, default))
+
+
+def _persist_view_pref(profile: str, name: str) -> None:
+    """on_change callback: persist one board view toggle to web-preferences."""
+    value = bool(st.session_state.get(_view_pref_key(profile, name)))
+    update_web_preferences(profile, {"kanban": {name: value}})
+
+
 def _get_sections(profile: str) -> dict[str, list[KanbanTask]]:
     """Get kanban sections from session state."""
     key = _state_key(profile)
@@ -153,10 +173,15 @@ def _auto_save(
     profile: str,
     sections: dict[str, list[KanbanTask]],
 ) -> None:
-    """Persist changes to kanban.md."""
+    """Persist changes to kanban.md.
+
+    The board auto-saves on every interaction, so it uses last-write-wins
+    rather than the manual-editor conflict guard: blocking here would discard
+    in-memory edits and pop the "reload latest" prompt on every save. Each
+    write is still committed via git_backup, so history stays recoverable.
+    """
     path = profile_dir(profile) / "kanban.md"
     project_path = profile_dir(profile) / "project-board.yaml"
-    assert_files_current([path, project_path])
     ensured = ensure_kanban_task_ids(sections, profile)
     sections.clear()
     sections.update(ensured)
@@ -250,58 +275,42 @@ def _auto_save_subtask_toggle(
     done: bool,
     ui: dict[str, str],
 ) -> bool:
-    """Persist one read-mode subtask checkbox against latest kanban.md."""
-    path = profile_dir(profile) / "kanban.md"
-    for attempt in range(2):
-        before = snapshot_file(path)
-        latest_sections = ensure_kanban_task_ids(
-            parse_kanban(profile),
-            profile,
-        )
-        try:
-            index = int(subtask_index)
-        except (TypeError, ValueError):
-            index = -1
-        updated_sections, ok = _apply_subtask_toggle_for_page(
-            latest_sections,
-            task_id,
-            index,
-            subtask_title,
-            done,
-        )
-        if not ok:
-            _sync_kanban_sections_state(profile, sections, latest_sections)
-            refresh_file_snapshots([path])
-            st.warning(ui["kb_drag_stale"])
-            return False
-        if updated_sections == latest_sections:
-            _sync_kanban_sections_state(profile, sections, latest_sections)
-            refresh_file_snapshots([path])
-            clear_web_cache()
-            _clear_kanban_dirty(profile)
-            return True
-        try:
-            assert_unchanged(path, before, label=path.name)
-        except FileConflictError:
-            if attempt == 0:
-                continue
-            latest_sections = ensure_kanban_task_ids(
-                parse_kanban(profile),
-                profile,
-            )
-            _sync_kanban_sections_state(profile, sections, latest_sections)
-            refresh_file_snapshots([path])
-            st.warning(ui["kb_drag_stale"])
-            return False
+    """Persist one read-mode subtask checkbox against latest kanban.md.
 
-        save_kanban(profile, updated_sections)
+    Reads the freshest kanban.md, merges this single checkbox onto it, and
+    writes back (last-write-wins). Because the toggle is applied to the latest
+    on-disk sections rather than a stale snapshot, a concurrent edit elsewhere
+    is preserved instead of triggering a conflict that drops the checkbox.
+    """
+    path = profile_dir(profile) / "kanban.md"
+    latest_sections = ensure_kanban_task_ids(
+        parse_kanban(profile),
+        profile,
+    )
+    try:
+        index = int(subtask_index)
+    except (TypeError, ValueError):
+        index = -1
+    updated_sections, ok = _apply_subtask_toggle_for_page(
+        latest_sections,
+        task_id,
+        index,
+        subtask_title,
+        done,
+    )
+    if not ok:
+        _sync_kanban_sections_state(profile, sections, latest_sections)
         refresh_file_snapshots([path])
+        st.warning(ui["kb_drag_stale"])
+        return False
+    if updated_sections != latest_sections:
+        save_kanban(profile, updated_sections)
         stash_git_backup_results()
-        clear_web_cache()
-        _clear_kanban_dirty(profile)
-        _sync_kanban_sections_state(profile, sections, updated_sections)
-        return True
-    return False
+    refresh_file_snapshots([path])
+    clear_web_cache()
+    _clear_kanban_dirty(profile)
+    _sync_kanban_sections_state(profile, sections, updated_sections)
+    return True
 
 
 def _mark_done_crystallized(
@@ -920,6 +929,7 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             "gap_missing": ui.get("verdict_gap", "Gaps remain"),
             "html_lang": llm_client.ui_language(),
             "quick_add": ui.get("kb_quick_add", "+ Add task"),
+            "quick_add_more": ui.get("kb_quick_add_more", "More fields"),
             "move_to": ui.get("kb_move_to_label", ui.get("move_to", "Move to")),
             "project": ui.get("kb_project", "Project"),
             "milestone": ui.get("kb_milestone", "Milestone"),
@@ -1746,6 +1756,12 @@ def _handle_board_event(
         if section not in KANBAN_BOARD_SECTIONS:
             section = KANBAN_QUEUE
         task = KanbanTask(title=title)
+        context = str(payload.get("context") or "").strip()
+        if context:
+            task = replace(task, context=context)
+        notes = payload.get("notes")
+        if notes is not None and str(notes).strip():
+            task = replace(task, details=split_kanban_details(notes))
         if section == KANBAN_DONE:
             task = replace(task, done=True)
             if auto_dates:
@@ -1850,7 +1866,6 @@ def _handle_board_event(
         kanban_path = pdir / "kanban.md"
         archive_path = pdir / "kanban-archive.md"
         project_path = pdir / "project-board.yaml"
-        assert_files_current([archive_path, kanban_path, project_path])
         updated = archive_kanban_done_tasks(profile, sections, [idx])
         sync_project_board_from_kanban(profile, updated)
         refresh_file_snapshots([archive_path, kanban_path, project_path])
@@ -2258,17 +2273,20 @@ with header_left:
         vertical_alignment="bottom",
     )
     with settings_col:
+        _init_view_prefs(selected)
         auto_dates = st.checkbox(
             ui["kb_auto_dates"],
-            value=True,
-            key=f"kanban_auto_dates_{selected}",
+            key=_view_pref_key(selected, "auto_dates"),
             help=ui["kb_auto_dates_help"],
+            on_change=_persist_view_pref,
+            args=(selected, "auto_dates"),
         )
         focus_mode = st.checkbox(
             ui["kb_focus_mode"],
-            value=False,
-            key=f"kanban_focus_{selected}",
+            key=_view_pref_key(selected, "focus_mode"),
             help=ui["kb_focus_mode_help"],
+            on_change=_persist_view_pref,
+            args=(selected, "focus_mode"),
         )
         actions_col, _actions_spacer = st.columns(
             [1, 2],
@@ -2282,7 +2300,11 @@ with header_left:
                 vertical_alignment="bottom",
             )
             with reload_col:
-                if st.button(ui["reload"], use_container_width=True):
+                if st.button(
+                    ui["reload"],
+                    use_container_width=True,
+                    help=ui.get("kb_reload_help"),
+                ):
                     _load_into_state(selected)
                     _clear_kanban_dirty(selected)
                     _bump_kanban_widget_epoch(selected)

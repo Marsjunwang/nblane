@@ -32,6 +32,33 @@ class TestWebPreferences(unittest.TestCase):
         self.assertIn("research.paper_translate", prefs["ai"]["actions"])
         self.assertEqual(prefs["ai"]["actions"]["research.paper_translate"]["backend"], "")
         self.assertEqual(prefs["kanban"]["subtask_granularity"], "")
+        # Board view toggles default to focus off, auto-dates on.
+        self.assertFalse(prefs["kanban"]["focus_mode"])
+        self.assertTrue(prefs["kanban"]["auto_dates"])
+
+    def test_kanban_view_toggles_round_trip(self) -> None:
+        """focus_mode/auto_dates persist as bools through normalization."""
+
+        normalized = normalize_web_preferences(
+            {"kanban": {"focus_mode": True, "auto_dates": False}},
+            profile="alice",
+        )
+        self.assertIs(normalized["kanban"]["focus_mode"], True)
+        self.assertIs(normalized["kanban"]["auto_dates"], False)
+        # String-ish stored values coerce; unknown values fall back to default.
+        coerced = normalize_web_preferences(
+            {"kanban": {"focus_mode": "true", "auto_dates": "0"}},
+            profile="alice",
+        )
+        self.assertIs(coerced["kanban"]["focus_mode"], True)
+        self.assertIs(coerced["kanban"]["auto_dates"], False)
+        fallback = normalize_web_preferences(
+            {"kanban": {"focus_mode": "maybe"}},
+            profile="alice",
+        )
+        self.assertIs(fallback["kanban"]["focus_mode"], False)
+        self.assertIs(fallback["kanban"]["auto_dates"], True)
+
 
     def test_save_and_load_profile_scoped_preferences(self) -> None:
         """LLM and Kanban usage preferences are stored per profile."""

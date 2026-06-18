@@ -13,6 +13,9 @@ page_help_body: |-
 
   Save or autosave writes kanban.md and syncs project-board ownership.
 reload: Reload from file
+kb_reload_help: Discards unsaved local edits and reloads the latest kanban.md from disk. The board itself autosaves, so you rarely need this.
+kb_quick_add: + Add task
+kb_quick_add_more: More fields (background / notes)
 save: Save
 saved: Saved to kanban.md
 kb_unsaved_subtasks: Unsaved subtask changes — use Save to write them to kanban.md.

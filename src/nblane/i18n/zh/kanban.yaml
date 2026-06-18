@@ -13,6 +13,9 @@ page_help_body: |-
 
   保存或自动保存会写入 kanban.md，并同步项目归属到 project-board.yaml。
 reload: 从文件重新加载
+kb_reload_help: 丢弃未保存的本地修改，从磁盘重新载入最新的 kanban.md。看板本身会自动保存，通常无需点这里。
+kb_quick_add: + 添加任务
+kb_quick_add_more: 更多字段（背景 / 备注）
 save: 保存
 saved: 已保存到 kanban.md
 kb_unsaved_subtasks: 有未保存的子任务修改，请点「保存」写入 kanban.md。
