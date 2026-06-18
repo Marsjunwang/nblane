@@ -14,6 +14,10 @@ page_help_body: |-
   本页会写入 project-board.yaml，并可能把任务归属同步回 kanban.md。
 create_project: 新建项目
 create_task: 新建看板任务
+project_tasks: 项目任务
+project_tasks_empty: 这个项目还没有任务，用上方表单创建第一个。
+task_move_help: 切换列会即时保存（进行中自动记开始日期，已完成自动记完成日期）。
+task_row_saved: 已更新任务。
 project_detail: 项目详情
 milestones: 里程碑
 milestone_completion: 完成 {done}/{total}（{pct}%）

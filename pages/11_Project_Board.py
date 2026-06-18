@@ -19,6 +19,7 @@ from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_QUEUE,
+    KANBAN_SECTIONS,
     KanbanTask,
     parse_kanban,
     profile_dir,
@@ -181,6 +182,51 @@ def _milestone_completion(milestone, task_index: dict[str, str]) -> tuple[int, i
         return 0, 0
     done = sum(1 for ref in refs if task_index.get(ref) == KANBAN_DONE)
     return done, len(refs)
+
+
+def _case_task_ids(case) -> set[str]:
+    """Task ids owned by this project (via project_id or the case task_refs)."""
+    owned = {row["id"] for row in _task_rows() if row.get("project_id") == case.id}
+    owned.update(ref for ref in case.task_refs if ref)
+    return owned
+
+
+def _case_tasks_by_section() -> dict[str, list[tuple[str, KanbanTask]]]:
+    """Map kanban section -> [(section, task)] preserving board order."""
+    out: dict[str, list[tuple[str, KanbanTask]]] = {}
+    for section, tasks in parse_kanban(selected).items():
+        for task in tasks:
+            out.setdefault(section, []).append((section, task))
+    return out
+
+
+def _move_task_section_and_refresh(task_id: str, target_section: str) -> None:
+    """Move a task to another kanban column (last-write-wins, no hard guard)."""
+    sections = parse_kanban(selected)
+    found: KanbanTask | None = None
+    for name, tasks in sections.items():
+        for idx, task in enumerate(tasks):
+            if task.id and task.id == task_id:
+                found = tasks.pop(idx)
+                break
+        if found is not None:
+            break
+    if found is None:
+        return
+    if target_section == KANBAN_DOING and not found.started_on:
+        found = replace(found, started_on=date.today().isoformat())
+    if target_section == KANBAN_DONE and not found.completed_on:
+        found = replace(found, completed_on=date.today().isoformat(), done=True)
+    if target_section != KANBAN_DONE and found.done:
+        found = replace(found, done=False)
+    sections.setdefault(target_section, []).append(found)
+    save_kanban(selected, sections)
+    sync_project_board_from_kanban(selected, parse_kanban(selected))
+    stash_git_backup_results()
+    clear_web_cache()
+    refresh_file_snapshots([_kanban_path, _project_path])
+    st.toast(ui["task_row_saved"])
+    st.rerun(scope="fragment")
 
 
 def _task_options_for_case(case_id: str) -> dict[str, str]:
@@ -893,7 +939,7 @@ def _render_milestones(board: ProjectBoard, case) -> None:
                     original_milestone,
                     updated,
                 )
-                st.rerun()
+                st.rerun(scope="fragment")
 
     with st.expander(ui["add_milestone"], expanded=not case.milestones):
         with st.form(_state_key(f"add_milestone:{case.id}")):
@@ -920,11 +966,56 @@ def _render_milestones(board: ProjectBoard, case) -> None:
                     summary=summary.strip(),
                 ),
             )
-            st.rerun()
+            st.rerun(scope="fragment")
+
+
+def _render_project_tasks(board: ProjectBoard, case) -> None:
+    st.subheader(ui["project_tasks"])
+    owned_ids = _case_task_ids(case)
+    if not owned_ids:
+        st.caption(ui["project_tasks_empty"])
+        return
+    st.caption(ui["task_move_help"])
+    milestone_label = {"": ui["no_milestone"]}
+    for milestone in case.milestones:
+        if milestone.id:
+            milestone_label[milestone.id] = milestone.title or milestone.id
+    by_section = _case_tasks_by_section()
+    rows: list[tuple[str, KanbanTask]] = []
+    for section in KANBAN_SECTIONS:
+        for sec, task in by_section.get(section, []):
+            if task.id and task.id in owned_ids:
+                rows.append((sec, task))
+    if not rows:
+        st.caption(ui["project_tasks_empty"])
+        return
+    for section, task in rows:
+        c_title, c_section = st.columns([3, 2])
+        with c_title:
+            mid = task.milestone_id or ""
+            tag = milestone_label.get(mid, mid) if mid else ""
+            label = f"**{task.title or task.id}**"
+            if tag:
+                label += f"  ·  {tag}"
+            st.markdown(label)
+        with c_section:
+            choice = st.selectbox(
+                ui["task_section"],
+                list(KANBAN_SECTIONS),
+                index=KANBAN_SECTIONS.index(section)
+                if section in KANBAN_SECTIONS
+                else 0,
+                format_func=kanban_section_label,
+                key=_state_key(f"task_move:{task.id}"),
+                label_visibility="collapsed",
+            )
+        if choice != section:
+            _move_task_section_and_refresh(task.id, choice)
 
 
 def _render_create_task(board: ProjectBoard, case) -> None:
-    with st.expander(ui["create_task"]):
+    has_tasks = bool(_case_task_ids(case))
+    with st.expander(ui["create_task"], expanded=not has_tasks):
         with st.form(_state_key(f"create_task:{case.id}")):
             title = st.text_input(ui["task_title"])
             col_section, col_milestone = st.columns(2)
@@ -975,7 +1066,6 @@ def _render_create_task(board: ProjectBoard, case) -> None:
         if not clean_title:
             st.error(ui["title_required"])
             return
-        assert_files_current([_kanban_path])
         latest_board = load_project_board(selected)
         if _case_by_id(latest_board, case.id) is None:
             st.error(ui["project_missing_reload"].format(id=case.id))
@@ -1000,8 +1090,8 @@ def _render_create_task(board: ProjectBoard, case) -> None:
         stash_git_backup_results()
         clear_web_cache()
         refresh_file_snapshots([_kanban_path, _project_path])
-        st.success(ui["task_created"])
-        st.rerun()
+        st.toast(ui["task_created"])
+        st.rerun(scope="fragment")
 
 
 def _resolve_selected_project(board: ProjectBoard) -> str | None:
@@ -1009,6 +1099,25 @@ def _resolve_selected_project(board: ProjectBoard) -> str | None:
     if active and active in board.by_id():
         return active
     return None
+
+
+@st.fragment
+def _milestones_tasks_fragment(case_id: str) -> None:
+    """Isolated rerun region for the Milestones & tasks tab.
+
+    Reloads board/case fresh on each fragment rerun so create-task,
+    the task list, and milestone edits reflect the latest disk state
+    without a full-page rerun (keeps scroll position and other tabs).
+    """
+    board = load_project_board(selected)
+    case = _case_by_id(board, case_id)
+    if case is None:
+        st.warning(ui["project_missing_reload"].format(id=case_id))
+        return
+    _render_create_task(board, case)
+    _render_project_tasks(board, case)
+    st.divider()
+    _render_milestones(board, case)
 
 
 def _render_project_detail(board: ProjectBoard, case) -> None:
@@ -1022,8 +1131,7 @@ def _render_project_detail(board: ProjectBoard, case) -> None:
                 _sync_case_update_and_refresh(original_case, submitted_case)
                 st.rerun()
     with tabs[1]:
-        _render_milestones(board, case)
-        _render_create_task(board, case)
+        _milestones_tasks_fragment(case.id)
 
 
 def main() -> None:

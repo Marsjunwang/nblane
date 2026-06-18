@@ -14,6 +14,10 @@ page_help_body: |-
   This page writes project-board.yaml and may sync task ownership back to kanban.md.
 create_project: Create project
 create_task: Create Kanban task
+project_tasks: Project tasks
+project_tasks_empty: No tasks yet for this project — create the first one with the form above.
+task_move_help: Switching columns saves instantly (Doing auto-records the start date, Done the completion date).
+task_row_saved: Task updated.
 project_detail: Project detail
 milestones: Milestones
 milestone_completion: "{done}/{total} done ({pct}%)"
