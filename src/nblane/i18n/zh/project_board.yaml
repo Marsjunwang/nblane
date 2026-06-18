@@ -68,6 +68,15 @@ field_milestone: 里程碑
 task_title: 任务标题
 task_section: 列
 no_milestone: 无里程碑
+task_field_context: 背景
+task_field_context_help: 这个任务的来龙去脉或前置信息，便于以后回看。
+task_field_why: 动机
+task_field_why_help: 为什么做这个任务，它服务于项目的哪个目的。
+task_field_notes: 备注 / 明细
+task_field_notes_help: 每行一条，会保存为任务的明细条目。
+task_field_tags: 标签
+task_field_tags_help: 用逗号或空格分隔的标签，便于检索。
+task_started_hint: 放入「进行中」会自动记录今天为开始时间。
 id_help: 留空会自动生成 project:<slug>。
 milestone_id_help: 留空会自动生成 milestone:<slug>。
 title_required: 标题不能为空。

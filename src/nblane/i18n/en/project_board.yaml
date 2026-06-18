@@ -68,6 +68,15 @@ field_milestone: Milestone
 task_title: Task title
 task_section: Column
 no_milestone: No milestone
+task_field_context: Context
+task_field_context_help: Background or prior information for this task, useful when revisiting later.
+task_field_why: Motivation
+task_field_why_help: Why this task matters and which project purpose it serves.
+task_field_notes: Notes / details
+task_field_notes_help: One per line; saved as the task's detail entries.
+task_field_tags: Tags
+task_field_tags_help: Comma- or space-separated tags for easier search.
+task_started_hint: Placing it in "Doing" auto-records today as the start date.
 id_help: Leave blank to auto-generate project:<slug>.
 milestone_id_help: Leave blank to auto-generate milestone:<slug>.
 title_required: Title is required.

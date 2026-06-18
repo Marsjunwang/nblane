@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from dataclasses import replace
+from datetime import date
 
 import streamlit as st
 import yaml
@@ -13,6 +14,7 @@ from nblane.core import llm as llm_client
 from nblane.core.ai.gateway import run_ai_action
 from nblane.core.experience import load_experience_book
 from nblane.core.goals import load_goal_book
+from nblane.core.kanban_events import split_kanban_details
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -925,11 +927,13 @@ def _render_create_task(board: ProjectBoard, case) -> None:
     with st.expander(ui["create_task"]):
         with st.form(_state_key(f"create_task:{case.id}")):
             title = st.text_input(ui["task_title"])
-            section = st.selectbox(
-                ui["task_section"],
-                [KANBAN_QUEUE, KANBAN_DOING],
-                format_func=kanban_section_label,
-            )
+            col_section, col_milestone = st.columns(2)
+            with col_section:
+                section = st.selectbox(
+                    ui["task_section"],
+                    [KANBAN_QUEUE, KANBAN_DOING],
+                    format_func=kanban_section_label,
+                )
             milestone_options = {
                 "": ui["no_milestone"],
                 **{
@@ -938,11 +942,32 @@ def _render_create_task(board: ProjectBoard, case) -> None:
                     if milestone.id
                 },
             }
-            milestone_id = st.selectbox(
-                ui["field_milestone"],
-                list(milestone_options),
-                format_func=lambda mid: milestone_options[mid],
+            with col_milestone:
+                milestone_id = st.selectbox(
+                    ui["field_milestone"],
+                    list(milestone_options),
+                    format_func=lambda mid: milestone_options[mid],
+                )
+            context = st.text_area(
+                ui["task_field_context"],
+                height=70,
+                help=ui["task_field_context_help"],
             )
+            why = st.text_area(
+                ui["task_field_why"],
+                height=70,
+                help=ui["task_field_why_help"],
+            )
+            notes = st.text_area(
+                ui["task_field_notes"],
+                height=90,
+                help=ui["task_field_notes_help"],
+            )
+            tags = st.text_input(
+                ui["task_field_tags"],
+                help=ui["task_field_tags_help"],
+            )
+            st.caption(ui["task_started_hint"])
             submitted = st.form_submit_button(ui["create_task"], type="primary")
         if not submitted:
             return
@@ -957,13 +982,19 @@ def _render_create_task(board: ProjectBoard, case) -> None:
             refresh_file_snapshots([_project_path])
             st.stop()
         sections = parse_kanban(selected)
-        sections.setdefault(section, []).append(
-            KanbanTask(
-                title=clean_title,
-                project_id=case.id,
-                milestone_id=milestone_id,
-            )
+        task = KanbanTask(
+            title=clean_title,
+            project_id=case.id,
+            milestone_id=milestone_id,
+            context=context.strip(),
+            why=why.strip(),
+            tags=tags.strip(),
         )
+        if notes.strip():
+            task = replace(task, details=split_kanban_details(notes))
+        if section == KANBAN_DOING:
+            task = replace(task, started_on=date.today().isoformat())
+        sections.setdefault(section, []).append(task)
         save_kanban(selected, sections)
         sync_project_board_from_kanban(selected, parse_kanban(selected))
         stash_git_backup_results()
