@@ -51,6 +51,13 @@
     .pb-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
     .pb-field { display: grid; gap: 4px; }
     .pb-field label { font-size: 12px; color: var(--muted); font-weight: 600; }
+    .pb-date-range {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .pb-date-part { display: grid; gap: 4px; min-width: 0; }
+    .pb-date-part span { font-size: 11px; color: var(--muted); font-weight: 600; }
     .pb-field input, .pb-field textarea, .pb-field select {
       width: 100%;
       padding: 8px 10px;
@@ -156,6 +163,8 @@
       field_kind: "Kind",
       field_visibility: "Visibility",
       field_time_range: "Time range",
+      tl_range_start: "From",
+      tl_range_end: "To",
       field_summary: "Summary",
       field_notes: "Notes",
       field_target: "Target date",
@@ -249,6 +258,28 @@
       return !optionList(field).some((o) => o.id === id);
     }
     function statusLabel(value) { return label(`status_${value}`) || value; }
+    function dateParts(value) {
+      const matches = text(value).match(/\d{4}-\d{2}-\d{2}/g) || [];
+      let start = matches[0] || "";
+      let end = matches[1] || "";
+      if (start && end && end < start) {
+        const tmp = start;
+        start = end;
+        end = tmp;
+      }
+      return { start, end };
+    }
+    function formatDateRange(start, end) {
+      let a = text(start).trim();
+      let b = text(end).trim();
+      if (a && b && b < a) {
+        const tmp = a;
+        a = b;
+        b = tmp;
+      }
+      if (a && b) return a === b ? a : `${a}/${b}`;
+      return a || b;
+    }
 
     function chipsHtml(scope, msId, field, selected) {
       const sel = asArr(selected);
@@ -287,6 +318,20 @@
         : `<input data-act="field" data-scope="${scope}" data-ms="${esc(msId)}" data-field="${field}" value="${esc(value)}" />`;
       return `<div class="pb-field"><label for="${id}">${esc(label(lblKey))}</label>${tag}</div>`;
     }
+    function dateRangeField(scope, msId, field, lblKey, value, fallback) {
+      const manual = dateParts(value);
+      const derived = dateParts(fallback);
+      const useDerived = !text(value).trim();
+      const start = manual.start || (useDerived ? derived.start : "");
+      const end = manual.end || (useDerived ? derived.end : "");
+      return `<div class="pb-field"><label>${esc(label(lblKey))}</label>`
+        + `<div class="pb-date-range" data-scope="${scope}" data-ms="${esc(msId)}" data-field="${field}">`
+        + `<label class="pb-date-part"><span>${esc(label("tl_range_start"))}</span>`
+        + `<input type="date" data-act="date-range" data-part="start" value="${esc(start)}" /></label>`
+        + `<label class="pb-date-part"><span>${esc(label("tl_range_end"))}</span>`
+        + `<input type="date" data-act="date-range" data-part="end" value="${esc(end)}" /></label>`
+        + `</div></div>`;
+    }
     function selectField(scope, msId, field, lblKey, value, opts, useStatus) {
       const rows = opts.map((o) => {
         const txt = useStatus ? statusLabel(o) : o;
@@ -321,7 +366,7 @@
             ${selectField("basics", "", "kind", "field_kind", d.kind, KIND_OPTS, false)}
             ${selectField("basics", "", "visibility", "field_visibility", d.visibility, VIS_OPTS, false)}
           </div>
-          ${inputField("basics", "", "time_range", "field_time_range", d.time_range, "text")}
+          ${dateRangeField("basics", "", "time_range", "field_time_range", d.time_range, d.derived_time_range)}
           ${inputField("basics", "", "summary", "field_summary", d.summary, "area")}
           ${inputField("basics", "", "notes", "field_notes", d.notes, "area")}
           <div class="pb-muted">${esc(label("links_section"))}</div>
@@ -416,6 +461,16 @@
         el.addEventListener("input", () => {
           syncField(el.dataset.scope, el.dataset.ms, el.dataset.field, el.value, false);
           // dirty dot only; avoid full re-render to keep focus
+          refreshDirtyDots();
+        });
+      });
+      document.querySelectorAll('[data-act="date-range"]').forEach((el) => {
+        el.addEventListener("input", () => {
+          const wrap = el.closest(".pb-date-range");
+          if (!wrap) return;
+          const start = wrap.querySelector('[data-part="start"]')?.value || "";
+          const end = wrap.querySelector('[data-part="end"]')?.value || "";
+          syncField(wrap.dataset.scope, wrap.dataset.ms, wrap.dataset.field, formatDateRange(start, end), false);
           refreshDirtyDots();
         });
       });

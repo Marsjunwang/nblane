@@ -10,6 +10,7 @@ from nblane.core.project_board_events import (
     count_no_anchor_tasks,
     task_anchor,
     task_owned_by_case,
+    timeline_date_range,
     timeline_tasks,
 )
 
@@ -85,6 +86,28 @@ class TimelineTasksTests(unittest.TestCase):
             ("Queue", _task(id="f", project_id="project:other")),  # not owned, not counted
         ]
         self.assertEqual(count_no_anchor_tasks(self.case, live), 2)
+
+    def test_timeline_date_range_uses_earliest_and_latest_task_dates(self) -> None:
+        rows = [
+            {
+                "anchor": "2026-04-15",
+                "started_on": "2026-04-01",
+                "completed_on": "2026-04-15",
+            },
+            {
+                "anchor": "2026-05-10",
+                "started_on": "2026-05-02",
+                "completed_on": "",
+            },
+        ]
+        self.assertEqual(timeline_date_range(rows), "2026-04-01/2026-05-10")
+
+    def test_timeline_date_range_ignores_invalid_dates(self) -> None:
+        rows = [
+            {"anchor": "2026-99-99", "started_on": "", "completed_on": ""},
+            {"anchor": "2026-05-10", "started_on": "", "completed_on": ""},
+        ]
+        self.assertEqual(timeline_date_range(rows), "2026-05-10")
 
 
 if __name__ == "__main__":

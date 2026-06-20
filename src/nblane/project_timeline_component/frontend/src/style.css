@@ -103,7 +103,7 @@ svg.tl-svg { display: block; width: 100%; height: auto; touch-action: none; }
 .tl-pt { cursor: pointer; }
 .tl-pt-done { fill: var(--ok); stroke: var(--ok); }
 .tl-pt-doing { fill: var(--accent); stroke: var(--accent); }
-.tl-pt-archived { fill: var(--paper); stroke: var(--archive); }
+.tl-pt-archived { fill: var(--paper); stroke: var(--muted); stroke-width: 2; stroke-dasharray: 2.5 2; }
 .tl-pt-sel { stroke: var(--ink); stroke-width: 2.5; }
 .tl-ms-marker { fill: var(--warn); stroke: var(--paper); stroke-width: 1; cursor: pointer; }
 .tl-ms-text { fill: var(--warn); font-size: 10px; font-weight: 600; }
@@ -132,6 +132,9 @@ svg.tl-svg { display: block; width: 100%; height: auto; touch-action: none; }
   outline: 0; background: var(--paper); color: var(--ink);
 }
 .tl-field textarea { min-height: 56px; resize: vertical; }
+.tl-date-range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tl-date-part { display: grid; gap: 3px; min-width: 0; }
+.tl-date-part span { font-size: 11px; color: var(--muted); font-weight: 600; }
 .tl-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tl-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .tl-detail-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }

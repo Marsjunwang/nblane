@@ -71,6 +71,41 @@ function cleanText(value, fallback = "") {
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
+function dateParts(value) {
+  const matches = cleanText(value).match(/\d{4}-\d{2}-\d{2}/g) || [];
+  let start = matches[0] || "";
+  let end = matches[1] || "";
+  if (start && end && end < start) {
+    [start, end] = [end, start];
+  }
+  return { start, end };
+}
+function formatDateRange(start, end) {
+  let a = cleanText(start).trim();
+  let b = cleanText(end).trim();
+  if (a && b && b < a) {
+    [a, b] = [b, a];
+  }
+  if (a && b) return a === b ? a : `${a}/${b}`;
+  return a || b;
+}
+function projectTaskDateRange(project) {
+  const dates = [];
+  for (const t of asArray(project?.tasks)) {
+    for (const key of ["started_on", "completed_on", "anchor"]) {
+      const ms = parseISO(t?.[key]);
+      if (ms != null) dates.push(ms);
+    }
+  }
+  if (!dates.length) return "";
+  return formatDateRange(toISO(Math.min(...dates)), toISO(Math.max(...dates)));
+}
+function projectDerivedTimeRange(project) {
+  return cleanText(project?.case?.derived_time_range).trim() || projectTaskDateRange(project);
+}
+function projectDisplayTimeRange(project) {
+  return cleanText(project?.case?.time_range).trim() || projectDerivedTimeRange(project);
+}
 
 /* ---- Streamlit bridge ---- */
 function sendBack(type, payload) {
@@ -190,10 +225,37 @@ function ChipSelect({ labelText, options, selected, onChange }) {
   );
 }
 
+function DateRangeFields({ labels, value, fallback, onChange }) {
+  const manual = dateParts(value);
+  const derived = dateParts(fallback);
+  const useDerived = !cleanText(value).trim();
+  const start = manual.start || (useDerived ? derived.start : "");
+  const end = manual.end || (useDerived ? derived.end : "");
+  const update = (part, nextValue) => {
+    onChange(formatDateRange(part === "start" ? nextValue : start, part === "end" ? nextValue : end));
+  };
+  return (
+    <div className="tl-field">
+      <label>{label(labels, "field_time_range", "Time range")}</label>
+      <div className="tl-date-range">
+        <label className="tl-date-part">
+          <span>{label(labels, "tl_range_start", "From")}</span>
+          <input type="date" value={start} onChange={(e) => update("start", e.target.value)} />
+        </label>
+        <label className="tl-date-part">
+          <span>{label(labels, "tl_range_end", "To")}</span>
+          <input type="date" value={end} onChange={(e) => update("end", e.target.value)} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 /* ---- project full-info / basics editor ---- */
 function BasicsForm({ project, labels, emit, onClose }) {
   const c = project.case || {};
   const optionMaps = project.option_maps || {};
+  const fallbackTimeRange = projectDerivedTimeRange(project);
   const [form, setForm] = useState(() => ({
     title: c.title || "",
     status: c.status || "active",
@@ -246,10 +308,12 @@ function BasicsForm({ project, labels, emit, onClose }) {
           </select>
         </div>
       </div>
-      <div className="tl-field">
-        <label>{label(labels, "field_time_range", "Time range")}</label>
-        <input value={form.time_range} onChange={(e) => set("time_range", e.target.value)} />
-      </div>
+      <DateRangeFields
+        labels={labels}
+        value={form.time_range}
+        fallback={fallbackTimeRange}
+        onChange={(next) => set("time_range", next)}
+      />
       <div className="tl-field">
         <label>{label(labels, "field_summary", "Summary")}</label>
         <textarea value={form.summary} onChange={(e) => set("summary", e.target.value)} />
@@ -586,6 +650,7 @@ function ProjectRow({
   const tasks = asArray(project.tasks);
   const milestones = asArray(project.milestones);
   const noDateCount = Number(project.no_date_count || 0);
+  const displayTimeRange = projectDisplayTimeRange(project);
   const xOf = (ms) => msToX(ms, dom.start, dom.end, width, PAD_L, PAD_R);
 
   const pointClass = (t) => {
@@ -621,7 +686,7 @@ function ProjectRow({
         <div className="tl-row-title">{c.title || c.id}</div>
         <div className="tl-row-sub">
           <span className="tl-chip">{label(labels, `status_${c.status}`, c.status)}</span>
-          {c.time_range ? <span className="tl-row-range">{c.time_range}</span> : null}
+          {displayTimeRange ? <span className="tl-row-range">{displayTimeRange}</span> : null}
         </div>
         {c.summary ? <div className="tl-row-summary">{c.summary}</div> : null}
       </div>
@@ -821,6 +886,9 @@ function App() {
     for (const p of projects) {
       for (const t of asArray(p.tasks)) if (t.anchor) dates.push(t.anchor);
       for (const m of asArray(p.milestones)) if (m.date) dates.push(m.date);
+      const rangeParts = dateParts(p.case?.time_range);
+      if (rangeParts.start) dates.push(rangeParts.start);
+      if (rangeParts.end) dates.push(rangeParts.end);
     }
     const data = buildDomain(dates, todayMs);
     const rs = parseISO(range.start);

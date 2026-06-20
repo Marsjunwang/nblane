@@ -39,8 +39,10 @@ from nblane.core.project_board_events import (
     case_from_event,
     case_payload,
     count_no_anchor_tasks,
+    format_date_range,
     milestone_from_event,
     milestone_payload,
+    timeline_date_range,
     timeline_tasks,
 )
 from nblane.core.project_board_sync import (
@@ -120,6 +122,29 @@ def _clean_list(values: object) -> list[str]:
             seen.add(clean)
             out.append(clean)
     return out
+
+
+def _time_range_dates(value: object) -> tuple[date | None, date | None]:
+    dates: list[date] = []
+    for raw in re.findall(r"\d{4}-\d{2}-\d{2}", str(value or "")):
+        try:
+            dates.append(date.fromisoformat(raw))
+        except ValueError:
+            continue
+        if len(dates) >= 2:
+            break
+    if not dates:
+        return None, None
+    if len(dates) == 1:
+        return dates[0], None
+    start, end = dates[0], dates[1]
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _date_input_value(value: date | None):
+    return value if value is not None else None
 
 
 def _slug(value: str, fallback: str = "milestone") -> str:
@@ -763,6 +788,7 @@ def _component_labels() -> dict[str, str]:
         "archive_project", "milestones", "missing_ref", "title_required",
         "status_active", "status_paused", "status_completed", "status_archived",
         "status_planned", "milestone_id_help", "duplicate_milestone",
+        "tl_range_start", "tl_range_end",
     )
     out = {key: ui[key] for key in keys if key in ui}
     extra = {
@@ -1074,8 +1100,10 @@ def _timeline_payload(case) -> dict:
     for m in case.milestones:
         done, total = _milestone_completion(m, task_index)
         milestones.append(milestone_payload(m, done=done, total=total))
+    payload = _case_payload(case)
+    payload["derived_time_range"] = timeline_date_range(rows)
     return {
-        "case": _case_payload(case),
+        "case": payload,
         "tasks": rows,
         "milestones": milestones,
         "no_date_count": count_no_anchor_tasks(case, live),
@@ -1118,6 +1146,7 @@ def _project_timeline_entry(case, live, archived, task_index) -> dict:
         milestones.append(milestone_payload(m, done=done, total=total))
     payload = _case_payload(case)
     payload.update(_pending_ref_overlay(case))
+    payload["derived_time_range"] = timeline_date_range(rows)
     return {
         "case": payload,
         "tasks": rows,
@@ -1240,6 +1269,13 @@ def _render_basics_component(case) -> None:
     _render_ref_suggest_strip(case)
     payload = _case_payload(case)
     payload.update(_pending_ref_overlay(case))
+    rows = timeline_tasks(
+        case,
+        _live_section_tasks(),
+        _archive_tasks(selected),
+        archived_section=KANBAN_DONE,
+    )
+    payload["derived_time_range"] = timeline_date_range(rows)
     event = st_project_board(
         case=payload,
         option_maps=_case_option_maps(case),
@@ -1334,7 +1370,21 @@ def _render_project_form(board: ProjectBoard, case) -> None:
                 if case.visibility in PROJECT_VISIBILITIES
                 else 0,
             )
-        time_range = st.text_input(ui["field_time_range"], value=case.time_range)
+        start_date, end_date = _time_range_dates(case.time_range)
+        st.caption(ui["field_time_range"])
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            time_start = st.date_input(
+                ui["tl_range_start"],
+                value=_date_input_value(start_date),
+                key=_state_key(f"time_start:{case.id}"),
+            )
+        with tc2:
+            time_end = st.date_input(
+                ui["tl_range_end"],
+                value=_date_input_value(end_date),
+                key=_state_key(f"time_end:{case.id}"),
+            )
         summary = st.text_area(ui["field_summary"], value=case.summary, height=90)
         notes = st.text_area(ui["field_notes"], value=case.notes, height=90)
         with st.expander(ui["links_section"], expanded=False):
@@ -1392,7 +1442,10 @@ def _render_project_form(board: ProjectBoard, case) -> None:
             status=status,
             kind=kind,
             visibility=visibility,
-            time_range=time_range.strip(),
+            time_range=format_date_range(
+                time_start.isoformat() if isinstance(time_start, date) else "",
+                time_end.isoformat() if isinstance(time_end, date) else "",
+            ),
             summary=summary.strip(),
             notes=notes.strip(),
             goal_refs=goal_refs,

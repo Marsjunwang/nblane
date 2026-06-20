@@ -9,6 +9,8 @@ unit-tested without importing the page or Streamlit.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
+import re
 
 from nblane.core.models import KanbanTask
 from nblane.core.project_board import ProjectCase, ProjectMilestone
@@ -32,6 +34,7 @@ CASE_REF_FIELDS = (
 )
 MILESTONE_SIMPLE_FIELDS = ("title", "status", "target", "date", "summary")
 MILESTONE_REF_FIELDS = ("task_refs", "evidence_refs", "source_refs", "output_refs")
+ISO_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
 
 def clean_ref_list(values: object) -> list[str]:
@@ -46,6 +49,50 @@ def clean_ref_list(values: object) -> list[str]:
             seen.add(clean)
             out.append(clean)
     return out
+
+
+def clean_iso_date(value: object) -> str:
+    """Return the leading YYYY-MM-DD date, or blank when absent."""
+    match = ISO_DATE_RE.match(str(value or "").strip())
+    if not match:
+        return ""
+    clean = match.group(1)
+    try:
+        date.fromisoformat(clean)
+    except ValueError:
+        return ""
+    return clean
+
+
+def format_date_range(start: str, end: str) -> str:
+    """Format a compact project date range for project-board payloads."""
+    clean_start = clean_iso_date(start)
+    clean_end = clean_iso_date(end)
+    if clean_start and clean_end and clean_end < clean_start:
+        clean_start, clean_end = clean_end, clean_start
+    if clean_start and clean_end:
+        return clean_start if clean_start == clean_end else f"{clean_start}/{clean_end}"
+    return clean_start or clean_end
+
+
+def timeline_date_range(rows: list[dict]) -> str:
+    """Infer a project's date range from its timeline task rows.
+
+    The range uses the earliest and latest available task dates, considering
+    started_on, completed_on, and anchor so a long-running task contributes both
+    ends when both dates are present.
+    """
+    dates: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in ("started_on", "completed_on", "anchor"):
+            clean = clean_iso_date(row.get(key))
+            if clean:
+                dates.append(clean)
+    if not dates:
+        return ""
+    return format_date_range(min(dates), max(dates))
 
 
 def case_payload(case: ProjectCase) -> dict:
