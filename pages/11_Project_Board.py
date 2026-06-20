@@ -6,6 +6,7 @@ import re
 from copy import deepcopy
 from dataclasses import replace
 from datetime import date
+from html import escape
 
 import streamlit as st
 import yaml
@@ -628,6 +629,15 @@ def _sync_milestone_add_and_refresh(case_id: str, milestone: ProjectMilestone) -
     _sync_latest_and_refresh(latest_board, case_id)
 
 
+def _summary_chip(label: str, value: int, *, tone: str = "default") -> str:
+    return (
+        f'<span class="pb-summary-chip pb-summary-chip--{tone}">'
+        f'<span class="pb-summary-label">{escape(str(label))}</span>'
+        f'<strong>{escape(str(value))}</strong>'
+        "</span>"
+    )
+
+
 def _summary_metrics(board: ProjectBoard) -> None:
     counts = {status: 0 for status in PROJECT_STATUSES}
     for case in board.project_cases:
@@ -651,17 +661,115 @@ def _summary_metrics(board: ProjectBoard) -> None:
         ):
             unassigned_evidence += 1
 
-    status_cols = st.columns(4)
-    for idx, status in enumerate(PROJECT_STATUSES):
-        status_cols[idx].metric(ui[f"status_{status}"], counts.get(status, 0))
-    gap_cols = st.columns(3)
-    gap_cols[0].metric(ui["metric_unassigned_tasks"], unassigned_tasks)
-    gap_cols[1].metric(ui["metric_unassigned_evidence"], unassigned_evidence)
-    gap_cols[2].metric(ui["metric_current_goal_projects"], goal_count)
-    if unassigned_evidence:
-        st.info(
-            ui["unassigned_evidence_hint"].format(count=unassigned_evidence)
+    status_html = "".join(
+        _summary_chip(ui[f"status_{status}"], counts.get(status, 0))
+        for status in PROJECT_STATUSES
+    )
+    gap_html = "".join(
+        (
+            _summary_chip(
+                ui["metric_unassigned_tasks"],
+                unassigned_tasks,
+                tone="risk" if unassigned_tasks else "quiet",
+            ),
+            _summary_chip(
+                ui["metric_unassigned_evidence"],
+                unassigned_evidence,
+                tone="risk" if unassigned_evidence else "quiet",
+            ),
+            _summary_chip(
+                ui["metric_current_goal_projects"],
+                goal_count,
+                tone="goal",
+            ),
         )
+    )
+    evidence_hint = (
+        f'<span class="pb-summary-note">'
+        f'{escape(ui["unassigned_evidence_hint"].format(count=unassigned_evidence))}'
+        "</span>"
+        if unassigned_evidence
+        else ""
+    )
+    st.markdown(
+        f"""
+<style>
+.pb-summary {{
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem .45rem;
+  margin: .35rem 0 .7rem;
+  padding: .35rem .45rem;
+}}
+.pb-summary-group {{
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}}
+.pb-summary-group + .pb-summary-group {{
+  border-left: 1px solid #e2e8f0;
+  padding-left: .45rem;
+}}
+.pb-summary-chip {{
+  align-items: baseline;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  color: #0f172a;
+  display: inline-flex;
+  gap: .32rem;
+  min-height: 1.65rem;
+  padding: .12rem .52rem;
+}}
+.pb-summary-chip--quiet {{
+  background: #ffffff;
+}}
+.pb-summary-chip--risk {{
+  background: #fff7ed;
+  border-color: #fed7aa;
+}}
+.pb-summary-chip--goal {{
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}}
+.pb-summary-label {{
+  color: #64748b;
+  font-size: .76rem;
+  line-height: 1.15;
+  white-space: nowrap;
+}}
+.pb-summary-chip strong {{
+  font-size: .95rem;
+  line-height: 1;
+}}
+.pb-summary-note {{
+  color: #9a3412;
+  font-size: .76rem;
+  line-height: 1.2;
+  padding: 0 .25rem;
+}}
+@media (max-width: 760px) {{
+  .pb-summary {{
+    gap: .3rem;
+  }}
+  .pb-summary-group + .pb-summary-group {{
+    border-left: 0;
+    padding-left: 0;
+  }}
+}}
+</style>
+<div class="pb-summary">
+  <span class="pb-summary-group">{status_html}</span>
+  <span class="pb-summary-group">{gap_html}</span>
+  {evidence_hint}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_create_project(board: ProjectBoard) -> None:
@@ -1761,7 +1869,7 @@ def main() -> None:
     render_page_help(
         ui,
         key=f"project_board_help:{selected}",
-        docs_path="docs/zh/guides/project-board.md",
+        docs_path=f"docs/{llm_client.ui_language()}/guides/project-board.md",
     )
 
     _summary_metrics(board)
