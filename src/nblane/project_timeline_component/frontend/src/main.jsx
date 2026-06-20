@@ -61,7 +61,7 @@ function colorForProject(pid, projects) {
   if (idx < 0) return PROJECT_COLORS[0];
   return PROJECT_COLORS[idx % PROJECT_COLORS.length];
 }
-const REVIEW_WINDOW_OPTS = [3, 4, 5];
+const REVIEW_WINDOW_OPTS = [3, 4, 5, 6, 8];
 
 function cleanText(value, fallback = "") {
   if (value == null) return fallback;
@@ -462,11 +462,11 @@ function EditForm({ kind, initial, labels, settings, onSubmit, onCancel, onDelet
 }
 
 /* ---- shared task detail body (DetailPanel + review window reuse this) ---- */
-function TaskDetailBody({ t, project, labels, emit }) {
+function TaskDetailBody({ t, project, labels, emit, compact = false }) {
   const cid = project?.case?.id;
   const sectionLabel = label(labels, `section_${t.section}`, t.section);
-  return (
-    <>
+  const body = (
+    <div className={`tl-task-detail${compact ? " tl-task-detail-compact" : ""}`}>
       <div className="tl-detail-meta">
         <span className={`tl-chip tl-chip-${t.done ? "done" : t.archived ? "archived" : "doing"}`}>
           {sectionLabel}
@@ -485,25 +485,25 @@ function TaskDetailBody({ t, project, labels, emit }) {
         <div className="tl-read-line"><strong>{label(labels, "tl_date", "Date")}</strong>{t.anchor}</div>
       )}
       {t.why && (
-        <div className="tl-read-block">
+        <div className="tl-read-block tl-read-block-why">
           <span className="tl-read-label">{label(labels, "task_field_why", "Why")}</span>
           <p>{t.why}</p>
         </div>
       )}
       {t.context && (
-        <div className="tl-read-block">
+        <div className="tl-read-block tl-read-block-context">
           <span className="tl-read-label">{label(labels, "task_field_context", "Context")}</span>
           <p>{t.context}</p>
         </div>
       )}
       {t.outcome && (
-        <div className="tl-read-block">
+        <div className="tl-read-block tl-read-block-outcome">
           <span className="tl-read-label">{label(labels, "task_field_outcome", "Outcome")}</span>
           <p>{t.outcome}</p>
         </div>
       )}
       {asArray(t.subtasks).length > 0 && (
-        <div className="tl-read-block">
+        <div className="tl-read-block tl-read-block-subtasks">
           <span className="tl-read-label">
             {label(labels, "task_subtasks", "Subtasks")}
             {" "}({asArray(t.subtasks).filter((s) => s.done).length}/{asArray(t.subtasks).length})
@@ -526,8 +526,9 @@ function TaskDetailBody({ t, project, labels, emit }) {
           </button>
         </div>
       )}
-    </>
+    </div>
   );
+  return body;
 }
 
 /* ---- review window: full detail for every task in the current window ---- */
@@ -558,7 +559,7 @@ function ReviewDetail({ tasks, cursor, windowSize, labels, projects, emit, onClo
               <span className="tl-detail-title">{t.title || t.id}</span>
               <span className="tl-review-card-project" style={{ color }}>{t._ptitle}</span>
             </div>
-            <TaskDetailBody t={t} project={proj} labels={labels} emit={emit} />
+            <TaskDetailBody t={t} project={proj} labels={labels} emit={emit} compact />
           </div>
         );
       })}
@@ -1102,7 +1103,7 @@ function App() {
         </div>
       )}
 
-      <div className="tl-layout">
+      <div className={`tl-layout${reviewMode ? " is-review" : ""}`}>
         <div className="tl-main" ref={mainRef} onDoubleClick={onDoubleClick}>
           {!reviewMode && (
             <div className="tl-ticks-header">
