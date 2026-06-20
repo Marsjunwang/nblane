@@ -662,11 +662,20 @@
       justify-items: center;
       max-width: 100%;
     }
-    .pr-translation-page {
+    .pr-translation-page-frame {
       position: relative;
       width: var(--pr-page-width, 760px);
       height: var(--pr-page-height, 980px);
       max-width: 100%;
+    }
+    .pr-translation-page {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: var(--pr-page-base-width, 760px);
+      height: var(--pr-page-base-height, 980px);
+      transform: scale(var(--pr-page-scale, 1));
+      transform-origin: 0 0;
       overflow: hidden;
       border: 1px solid rgba(23, 33, 31, .12);
       background: #fff;
@@ -3731,9 +3740,9 @@
     }
     function translationPageViewportSize(pageNumber) {
       const base = translationPageBaseSize(pageNumber);
-      const pageScale = scaleForTranslationPage(pageNumber);
-      const width = Math.max(180, base.width * pageScale);
-      const height = Math.max(220, base.height * pageScale);
+      const displayScale = scaleForTranslationPage(pageNumber);
+      const width = Math.max(180, base.width * displayScale);
+      const height = Math.max(220, base.height * displayScale);
       return {
         page: Number(pageNumber || 1),
         baseWidth: base.width,
@@ -3741,7 +3750,8 @@
         rotation: base.rotation,
         width,
         height,
-        scale: pageScale,
+        scale: 1,
+        displayScale,
       };
     }
     function clampUnit(value, min = 0, max = 1) {
@@ -3787,10 +3797,10 @@
       rects.forEach((rect) => {
         const normalized = normalizedRect(rect, size);
         if (!normalized) return;
-        const x = normalized.x * size.width;
-        const y = normalized.y * size.height;
-        const w = normalized.w * size.width;
-        const h = normalized.h * size.height;
+        const x = normalized.x * size.baseWidth;
+        const y = normalized.y * size.baseHeight;
+        const w = normalized.w * size.baseWidth;
+        const h = normalized.h * size.baseHeight;
         left = Math.min(left, x);
         top = Math.min(top, y);
         right = Math.max(right, x + w);
@@ -3868,12 +3878,14 @@
         </section>
       ` : "";
       return `
-        <section class="pr-translation-page-shell" data-page-shell="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
-          <section class="pr-translation-page overlay" data-page="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px">
-            <div class="pr-translation-layer pr-translation-preview-layer">${previewHtml}</div>
-            <div class="pr-translation-layer pr-translation-overlay-layer">${overlayBody}</div>
-            <div class="pr-translation-page-label">${esc(label("page"))} ${Number(pageNumber || 0)}</div>
-          </section>
+        <section class="pr-translation-page-shell" data-page-shell="${Number(pageNumber || 0)}" style="--pr-page-width:${Math.round(size.width)}px;--pr-page-height:${Math.round(size.height)}px;--pr-page-base-width:${size.baseWidth}px;--pr-page-base-height:${size.baseHeight}px;--pr-page-scale:${size.displayScale.toFixed(4)}">
+          <div class="pr-translation-page-frame">
+            <section class="pr-translation-page overlay" data-page="${Number(pageNumber || 0)}">
+              <div class="pr-translation-layer pr-translation-preview-layer">${previewHtml}</div>
+              <div class="pr-translation-layer pr-translation-overlay-layer">${overlayBody}</div>
+              <div class="pr-translation-page-label">${esc(label("page"))} ${Number(pageNumber || 0)}</div>
+            </section>
+          </div>
           ${fallbackHtml}
         </section>
       `;
@@ -3916,7 +3928,10 @@
         if (translationResizeTimer) window.clearTimeout(translationResizeTimer);
         translationResizeTimer = window.setTimeout(() => {
           translationResizeTimer = null;
-          try { refreshTranslationReader({ preserveScroll: true }); } catch {}
+          try {
+            if (translationLayoutMode() === "overlay" && updateTranslationPageScales()) return;
+            refreshTranslationReader({ preserveScroll: true });
+          } catch {}
         }, 140);
       });
       try { translationResizeObserver.observe(reader); } catch {}
@@ -3926,6 +3941,20 @@
       if (!scrollEl || translationScrollWired.has(scrollEl)) return;
       scrollEl.addEventListener("scroll", () => syncCompareScroll("translation"), { passive: true });
       translationScrollWired.add(scrollEl);
+    }
+    function updateTranslationPageScales() {
+      if (translationLayoutMode() !== "overlay") return false;
+      const shells = document.querySelectorAll(".pr-translation-page-shell");
+      if (!shells.length) return false;
+      shells.forEach((shell) => {
+        const pageNumber = Number(shell.dataset.pageShell || 0);
+        const base = translationPageBaseSize(pageNumber);
+        const s = scaleForTranslationPage(pageNumber);
+        shell.style.setProperty("--pr-page-scale", s.toFixed(4));
+        shell.style.setProperty("--pr-page-width", `${Math.round(base.width * s)}px`);
+        shell.style.setProperty("--pr-page-height", `${Math.round(base.height * s)}px`);
+      });
+      return true;
     }
     function refreshTranslationReader(options = {}) {
       const el = document.getElementById("translationReader");
@@ -7110,7 +7139,11 @@
         rerenderForScale();
         placeSelectionDock();
         if (readerMode !== "pdf") {
-          try { refreshTranslationReader({ preserveScroll: true }); } catch {}
+          try {
+            if (!(translationLayoutMode() === "overlay" && updateTranslationPageScales())) {
+              refreshTranslationReader({ preserveScroll: true });
+            }
+          } catch {}
         }
       }, 180);
     });
