@@ -97,3 +97,45 @@ status_paused: 暂停
 status_completed: 已完成
 status_archived: 已归档
 status_planned: 计划中
+pb_no_options: 没有匹配项
+pb_pick_placeholder: 搜索以添加…
+pb_saving: 保存中…
+pb_completion: 完成 {done}/{total}（{pct}%）
+pb_new_milestone: 新里程碑
+field_date: 日期
+tl_date: 日期
+tl_today: 今天
+tl_add_task: 加任务
+tl_add_milestone: 加里程碑
+tl_zoom_hint: 滚轮缩放 · 双击复位 · 右键删除
+tl_delete_confirm: 确定删除这一项？
+tl_no_date_tasks: '{n} 个任务无日期，未在时间轴上显示。'
+tl_to_evidence: 沉淀为证据
+tl_started: 开始
+tl_completed: 完成
+task_field_outcome: 成果
+task_subtasks: 子任务数
+tl_review_mode: 评审模式
+tl_review_pick: 选择项目：
+tl_review_window: 窗口
+tl_review_keys: ↑↓ 逐个 · ←→ 翻页
+tl_review_empty: 该范围内没有任务。
+tl_full_info: 项目全量信息
+tl_show_archived: 显示已归档项目
+tl_select_hint: 点击项目行查看详情
+tl_range_start: 起
+tl_range_end: 止
+tl_range_reset: 重置
+kind_internal: 内部
+kind_research: 研究
+kind_work: 工作
+kind_side_project: 副业
+kind_learning: 学习
+visibility_private: 私有
+visibility_public: 公开
+cancel: 取消
+save: 保存
+section_Queue: 待办
+section_Doing: 进行中
+section_Done: 已完成
+"section_Someday / Maybe": 也许某天

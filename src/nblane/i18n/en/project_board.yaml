@@ -97,3 +97,45 @@ status_paused: Paused
 status_completed: Completed
 status_archived: Archived
 status_planned: Planned
+pb_no_options: No matches
+pb_pick_placeholder: Search to add…
+pb_saving: Saving…
+pb_completion: '{done}/{total} done ({pct}%)'
+pb_new_milestone: New milestone
+field_date: Date
+tl_date: Date
+tl_today: Today
+tl_add_task: Add task
+tl_add_milestone: Add milestone
+tl_zoom_hint: Scroll to zoom · double-click to reset · right-click to delete
+tl_delete_confirm: Delete this item?
+tl_no_date_tasks: '{n} task(s) have no date and are not shown on the timeline.'
+tl_to_evidence: Distill to evidence
+tl_started: Started
+tl_completed: Completed
+task_field_outcome: Outcome
+task_subtasks: Subtasks
+tl_review_mode: Review mode
+tl_review_pick: 'Pick projects:'
+tl_review_window: Window
+tl_review_keys: ↑↓ step · ←→ page
+tl_review_empty: No tasks in range.
+tl_full_info: Project info
+tl_show_archived: Show archived projects
+tl_select_hint: Click a project row to see details
+tl_range_start: From
+tl_range_end: To
+tl_range_reset: Reset
+kind_internal: Internal
+kind_research: Research
+kind_work: Work
+kind_side_project: Side project
+kind_learning: Learning
+visibility_private: Private
+visibility_public: Public
+cancel: Cancel
+save: Save
+section_Queue: Queue
+section_Doing: Doing
+section_Done: Done
+"section_Someday / Maybe": Someday / Maybe

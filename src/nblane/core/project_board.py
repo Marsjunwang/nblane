@@ -117,6 +117,7 @@ class ProjectMilestone:
     title: str
     status: str = "planned"
     target: str = ""
+    date: str = ""
     summary: str = ""
     task_refs: list[str] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
@@ -137,6 +138,7 @@ class ProjectMilestone:
                 "planned",
             ),
             target=_clean_text(data.get("target")),
+            date=_clean_text(data.get("date")),
             summary=_clean_text(data.get("summary")),
             task_refs=_clean_list(data.get("task_refs")),
             evidence_refs=_clean_list(data.get("evidence_refs")),
@@ -151,7 +153,7 @@ class ProjectMilestone:
             "title": self.title,
             "status": self.status,
         }
-        for key in ("target", "summary"):
+        for key in ("target", "date", "summary"):
             value = getattr(self, key)
             if value:
                 out[key] = value

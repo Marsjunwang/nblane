@@ -113,6 +113,16 @@ def normalize_web_preferences(
     paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
     actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
     kanban = source.get("kanban") if isinstance(source.get("kanban"), dict) else {}
+    project_board = (
+        source.get("project_board")
+        if isinstance(source.get("project_board"), dict)
+        else {}
+    )
+    timeline_range = (
+        project_board.get("timeline_range")
+        if isinstance(project_board.get("timeline_range"), dict)
+        else {}
+    )
     backend = _clean_text(ai.get("kanban_backend"))
     ui_lang = _language(llm.get("ui_lang"))
     reply_lang = _language(llm.get("reply_lang"))
@@ -146,6 +156,12 @@ def normalize_web_preferences(
             "subtask_style_hint": _clean_text(kanban.get("subtask_style_hint")),
             "focus_mode": _clean_bool(kanban.get("focus_mode"), default=False),
             "auto_dates": _clean_bool(kanban.get("auto_dates"), default=True),
+        },
+        "project_board": {
+            "timeline_range": {
+                "start": _iso_date(timeline_range.get("start")),
+                "end": _iso_date(timeline_range.get("end")),
+            },
         },
     }
 
@@ -298,6 +314,15 @@ def _clean_bool(value: object, *, default: bool) -> bool:
 def _language(value: object) -> str:
     clean = _clean_text(value).lower()
     return clean if clean in _LANGUAGES else ""
+
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _iso_date(value: object) -> str:
+    """Keep only well-formed ISO date strings (YYYY-MM-DD); else empty."""
+    clean = _clean_text(value)
+    return clean if _ISO_DATE_RE.match(clean) else ""
 
 
 __all__ = [

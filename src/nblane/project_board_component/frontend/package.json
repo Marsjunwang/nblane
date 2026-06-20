@@ -1,0 +1,13 @@
+{
+  "name": "nblane-project-board-component",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "verify": "node build.mjs --verify"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -134,6 +134,7 @@ class TestProjectBoard(unittest.TestCase):
                                 title="First benchmark",
                                 status="active",
                                 target="2026-06",
+                                date="2026-06-30",
                                 summary="Run first closed-loop benchmark.",
                                 task_refs=["task_a", "task_b", "task_a"],
                                 evidence_refs=["ev_1", "ev_2"],
@@ -166,6 +167,10 @@ class TestProjectBoard(unittest.TestCase):
         self.assertEqual(len(case.milestones), 1)
         self.assertEqual(case.milestones[0].task_refs, ["task_a", "task_b"])
         self.assertEqual(case.milestones[0].evidence_refs, ["ev_1", "ev_2"])
+        self.assertEqual(case.milestones[0].date, "2026-06-30")
+        self.assertEqual(
+            saved["project_cases"][0]["milestones"][0]["date"], "2026-06-30"
+        )
 
     def test_duplicate_id_rejected(self) -> None:
         board = ProjectBoard(profile="alice")

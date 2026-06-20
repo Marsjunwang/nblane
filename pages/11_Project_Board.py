@@ -35,10 +35,31 @@ from nblane.core.project_board import (
     add_project_case,
     load_project_board,
 )
+from nblane.core.project_board_events import (
+    case_from_event,
+    case_payload,
+    count_no_anchor_tasks,
+    milestone_from_event,
+    milestone_payload,
+    timeline_tasks,
+)
 from nblane.core.project_board_sync import (
     sync_project_board_from_kanban,
     sync_project_case_workspace,
 )
+from nblane.core.web_preferences import (
+    load_web_preferences,
+    update_web_preferences,
+)
+from nblane.project_board_component import (
+    project_board_component_available,
+    st_project_board,
+)
+from nblane.project_timeline_component import (
+    project_timeline_component_available,
+    st_project_timeline,
+)
+from nblane.core.kanban_archive import _archive_tasks
 from nblane.web_auth import require_login
 from nblane.web_cache import clear_web_cache, load_evidence_pool_raw, load_research_sources
 from nblane.web_i18n import kanban_section_label, project_board_ui
@@ -715,6 +736,537 @@ def _render_project_board(board: ProjectBoard) -> None:
                             st.rerun()
 
 
+def _ref_rows(options: dict[str, str], selected: list[str]) -> list[dict[str, str]]:
+    """Build [{id,label}] option rows, including any selected-but-missing ids."""
+    merged = _with_unknown_options([s for s in selected if s], options)
+    return [{"id": rid, "label": rlabel} for rid, rlabel in merged.items()]
+
+
+def _case_option_maps(case) -> dict[str, list[dict[str, str]]]:
+    return {
+        "goal_refs": _ref_rows(_goal_options(), case.goal_refs),
+        "task_refs": _ref_rows(_task_options_for_case(case.id), case.task_refs),
+        "evidence_refs": _ref_rows(_evidence_options(), case.evidence_refs),
+        "source_refs": _ref_rows(_source_options(), case.source_refs),
+        "experience_refs": _ref_rows(_experience_options(), case.experience_refs),
+        "output_refs": _ref_rows(_output_options(), case.output_refs),
+    }
+
+
+def _component_labels() -> dict[str, str]:
+    keys = (
+        "tab_basic", "field_id", "field_title", "field_status", "field_kind",
+        "field_visibility", "field_time_range", "field_summary", "field_notes",
+        "field_target", "field_goal_refs", "field_task_refs", "field_evidence_refs",
+        "field_source_refs", "field_experience_refs", "field_output_refs",
+        "links_section", "save_project", "save_milestone", "add_milestone",
+        "archive_project", "milestones", "missing_ref", "title_required",
+        "status_active", "status_paused", "status_completed", "status_archived",
+        "status_planned", "milestone_id_help", "duplicate_milestone",
+    )
+    out = {key: ui[key] for key in keys if key in ui}
+    extra = {
+        "no_options": "pb_no_options",
+        "pick_placeholder": "pb_pick_placeholder",
+        "saving": "pb_saving",
+        "completion": "pb_completion",
+        "new_milestone": "pb_new_milestone",
+    }
+    for front_key, ui_key in extra.items():
+        if ui_key in ui:
+            out[front_key] = ui[ui_key]
+    return out
+
+
+def _milestones_payload(case) -> list[dict]:
+    task_index = _task_section_index()
+    out: list[dict] = []
+    for m in case.milestones:
+        done, total = _milestone_completion(m, task_index)
+        out.append(milestone_payload(m, done=done, total=total))
+    return out
+
+
+def _case_payload(case) -> dict:
+    return case_payload(case)
+
+
+def _event_seen(event_id: str) -> bool:
+    """Dedup component events by id (frontend resends the last value on rerun)."""
+    if not event_id:
+        return False
+    key = _state_key("pb_event_id")
+    if st.session_state.get(key) == event_id:
+        return True
+    st.session_state[key] = event_id
+    return False
+
+
+def _apply_basics_event(case, fields: dict) -> None:
+    original_case = _clone(case)
+    try:
+        submitted = case_from_event(original_case, fields)
+    except ValueError:
+        st.error(ui["title_required"])
+        return
+    _sync_case_update_and_refresh(original_case, submitted)
+
+
+def _apply_milestone_save_event(case, milestone_id: str, fields: dict) -> None:
+    original = _milestone_by_id(case, milestone_id)
+    if original is None:
+        st.error(ui["milestone_missing_reload"].format(id=milestone_id))
+        return
+    try:
+        updated = milestone_from_event(_clone(original), fields)
+    except ValueError:
+        st.error(ui["title_required"])
+        return
+    _sync_milestone_update_and_refresh(case.id, _clone(original), updated)
+
+
+def _apply_milestone_add_event(case, fields: dict) -> None:
+    title = str(fields.get("title", "") or "").strip()
+    if not title:
+        st.error(ui["title_required"])
+        return
+    clean_id = str(fields.get("id", "") or "").strip() or _next_milestone_id(case, title)
+    if any(item.id == clean_id for item in case.milestones):
+        st.error(ui["duplicate_milestone"].format(id=clean_id))
+        return
+    _sync_milestone_add_and_refresh(
+        case.id,
+        ProjectMilestone(
+            id=clean_id,
+            title=title,
+            target=str(fields.get("target", "") or "").strip(),
+            date=str(fields.get("date", "") or "").strip(),
+            summary=str(fields.get("summary", "") or "").strip(),
+        ),
+    )
+
+
+def _apply_milestone_delete_event(case, milestone_id: str) -> None:
+    latest_board = load_project_board(selected)
+    latest_case = _case_by_id(latest_board, case.id)
+    if latest_case is None:
+        st.error(ui["project_missing_reload"].format(id=case.id))
+        refresh_file_snapshots([_project_path])
+        return
+    before = len(latest_case.milestones)
+    latest_case.milestones = [
+        m for m in latest_case.milestones if m.id != milestone_id
+    ]
+    if len(latest_case.milestones) == before:
+        return
+    _sync_latest_and_refresh(latest_board, latest_case.id)
+
+
+def _apply_task_add_event(case, fields: dict) -> None:
+    title = str(fields.get("title", "") or "").strip()
+    if not title:
+        st.error(ui["title_required"])
+        return
+    latest_board = load_project_board(selected)
+    if _case_by_id(latest_board, case.id) is None:
+        st.error(ui["project_missing_reload"].format(id=case.id))
+        refresh_file_snapshots([_project_path])
+        return
+    section = str(fields.get("section") or KANBAN_QUEUE)
+    if section not in KANBAN_SECTIONS:
+        section = KANBAN_QUEUE
+    anchor = str(fields.get("date", "") or "").strip() or date.today().isoformat()
+    task = KanbanTask(
+        title=title,
+        project_id=case.id,
+        milestone_id=str(fields.get("milestone_id", "") or ""),
+        context=str(fields.get("context", "") or "").strip(),
+    )
+    if section == KANBAN_DONE:
+        task = replace(task, started_on=anchor, completed_on=anchor, done=True)
+    else:
+        # Queue / Doing / Someday: store the chosen date as started_on so the
+        # task always has a timeline anchor and shows up immediately.
+        task = replace(task, started_on=anchor)
+    sections = parse_kanban(selected)
+    sections.setdefault(section, []).append(task)
+    _save_kanban_and_refresh(sections, ui["task_created"])
+
+
+def _apply_task_save_event(case, task_id: str, fields: dict) -> None:
+    title = str(fields.get("title", "") or "").strip()
+    if not title:
+        st.error(ui["title_required"])
+        return
+    sections = parse_kanban(selected)
+    for _name, tasks in sections.items():
+        for idx, task in enumerate(tasks):
+            if task.id and task.id == task_id:
+                tasks[idx] = replace(
+                    task,
+                    title=title,
+                    context=str(fields.get("context", "") or "").strip(),
+                    milestone_id=str(
+                        fields.get("milestone_id", task.milestone_id) or ""
+                    ),
+                )
+                _save_kanban_and_refresh(sections, ui["task_row_saved"])
+                return
+
+
+def _apply_task_delete_event(case, task_id: str) -> None:
+    sections = parse_kanban(selected)
+    removed = False
+    for _name, tasks in sections.items():
+        for idx, task in enumerate(tasks):
+            if task.id and task.id == task_id:
+                tasks.pop(idx)
+                removed = True
+                break
+        if removed:
+            break
+    if removed:
+        _save_kanban_and_refresh(sections, ui["task_row_saved"])
+
+
+def _save_kanban_and_refresh(sections, toast_msg: str) -> None:
+    """Persist kanban edits (last-write-wins) and sync the project board."""
+    save_kanban(selected, sections)
+    sync_project_board_from_kanban(selected, parse_kanban(selected))
+    stash_git_backup_results()
+    clear_web_cache()
+    refresh_file_snapshots([_kanban_path, _project_path])
+    st.toast(toast_msg)
+
+
+def _open_evidence_for_task(task_id: str) -> None:
+    """Jump to Evidence Review carrying the task ref (distill-to-evidence flow)."""
+    if not task_id:
+        return
+    st.query_params["kanban_task"] = task_id
+    st.query_params["source_page"] = "Project Board"
+    try:
+        st.switch_page("pages/2_Evidence_Review.py")
+    except Exception:
+        st.info(ui.get("tl_to_evidence", "Distill to evidence"))
+
+
+def _timeline_range_pref() -> dict[str, str]:
+    """Read the persisted timeline date range ({start,end}) from web-preferences."""
+    prefs = load_web_preferences(selected).get("project_board", {})
+    rng = prefs.get("timeline_range", {}) if isinstance(prefs, dict) else {}
+    if not isinstance(rng, dict):
+        return {"start": "", "end": ""}
+    return {
+        "start": str(rng.get("start", "") or ""),
+        "end": str(rng.get("end", "") or ""),
+    }
+
+
+def _apply_set_range_event(payload: dict) -> None:
+    """Persist a user-chosen timeline start/end (empty values reset to default)."""
+    start = str(payload.get("start", "") or "").strip()
+    end = str(payload.get("end", "") or "").strip()
+    update_web_preferences(
+        selected,
+        {"project_board": {"timeline_range": {"start": start, "end": end}}},
+    )
+    clear_web_cache()
+
+
+def _apply_suggest_refs_event(case) -> None:
+    """Run the LLM ref suggester and stash results for confirm-not-fill overlay."""
+    option_maps = {
+        "goal_refs": _goal_options(),
+        "task_refs": _task_options_for_case(case.id),
+        "evidence_refs": _evidence_options(),
+        "source_refs": _source_options(),
+        "output_refs": _output_options(),
+    }
+    with st.spinner(ui["project_ai_suggest_running"]):
+        state = _suggest_project_refs(case, option_maps)
+    st.session_state[_state_key(f"ai_ref_suggestions:{case.id}")] = state
+    if state.get("ok"):
+        added = _apply_project_ref_suggestions(
+            case,
+            state.get("suggestions") if isinstance(state.get("suggestions"), dict) else {},
+        )
+        if added:
+            st.toast(ui["project_ai_suggest_applied"].format(count=added))
+        else:
+            st.toast(ui["project_ai_suggest_none"])
+    else:
+        st.error(str(state.get("error") or ui["project_ai_suggest_failed"]))
+
+
+def _handle_project_event(event: dict | None, case=None) -> bool:
+    """Apply one event from the custom project board / timeline component.
+
+    Multi-project timeline events carry the project id in the payload; when
+    ``case`` is omitted we resolve it from ``payload["id"]`` / ``["project_id"]``
+    against the latest board. Returns True if the event was handled.
+    """
+    if not isinstance(event, dict):
+        return False
+    action = str(event.get("action") or "")
+    if not action or _event_seen(str(event.get("event_id") or "")):
+        return False
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+
+    # set_range carries no project id -- persist the timeline range preference.
+    if action == "set_range":
+        _apply_set_range_event(payload)
+        return True
+
+    # Resolve the target case from the payload when not passed in explicitly.
+    if case is None:
+        project_id = str(payload.get("id") or payload.get("project_id") or "")
+        case = _case_by_id(load_project_board(selected), project_id)
+        if case is None:
+            return False
+
+    if action == "save_basics":
+        _apply_basics_event(case, fields)
+    elif action == "suggest_refs":
+        _apply_suggest_refs_event(case)
+    elif action == "archive_project":
+        original_case = _clone(case)
+        _sync_case_update_and_refresh(original_case, replace(original_case, status="archived"))
+    elif action == "save_milestone":
+        _apply_milestone_save_event(case, str(payload.get("milestone_id") or ""), fields)
+    elif action == "add_milestone":
+        _apply_milestone_add_event(case, fields)
+    elif action == "delete_milestone":
+        _apply_milestone_delete_event(case, str(payload.get("milestone_id") or ""))
+    elif action == "add_task":
+        _apply_task_add_event(case, fields)
+    elif action == "save_task":
+        _apply_task_save_event(case, str(payload.get("task_id") or ""), fields)
+    elif action == "delete_task":
+        _apply_task_delete_event(case, str(payload.get("task_id") or ""))
+    elif action == "move_task_section":
+        _move_task_section_and_refresh(
+            str(payload.get("task_id") or ""), str(payload.get("section") or "")
+        )
+    elif action == "open_evidence_for_task":
+        _open_evidence_for_task(str(payload.get("task_id") or ""))
+    else:
+        return False
+    return True
+
+
+def _live_section_tasks() -> list:
+    """All live kanban tasks as [(section, task)] for timeline aggregation."""
+    rows = []
+    for section, tasks in parse_kanban(selected).items():
+        for task in tasks:
+            rows.append((section, task))
+    return rows
+
+
+def _timeline_payload(case) -> dict:
+    live = _live_section_tasks()
+    archived = _archive_tasks(selected)
+    rows = timeline_tasks(case, live, archived, archived_section=KANBAN_DONE)
+    task_index = _task_section_index()
+    milestones = []
+    for m in case.milestones:
+        done, total = _milestone_completion(m, task_index)
+        milestones.append(milestone_payload(m, done=done, total=total))
+    return {
+        "case": _case_payload(case),
+        "tasks": rows,
+        "milestones": milestones,
+        "no_date_count": count_no_anchor_tasks(case, live),
+        "labels": _timeline_labels(),
+        "settings": {
+            "lang": llm_client.ui_language(),
+            "today": date.today().isoformat(),
+        },
+    }
+
+
+def _timeline_labels() -> dict[str, str]:
+    keys = (
+        "field_id", "field_title", "field_status", "field_kind", "field_visibility",
+        "field_time_range", "field_target", "field_date", "field_summary", "field_notes",
+        "field_goal_refs", "field_task_refs", "field_evidence_refs", "field_source_refs",
+        "field_experience_refs", "field_output_refs", "links_section",
+        "task_title", "task_section", "task_field_context", "milestones",
+        "edit", "cancel", "save", "save_project", "archive_project", "delete_task",
+        "status_active", "status_paused", "status_completed", "status_archived",
+        "status_planned",
+        "kind_internal", "kind_research", "kind_work", "kind_side_project", "kind_learning",
+        "visibility_private", "visibility_public",
+        "project_ai_suggest_refs", "project_ai_suggest_help",
+        "tl_date", "tl_today", "tl_add_task", "tl_add_milestone", "tl_zoom_hint",
+        "tl_delete_confirm", "tl_no_date_tasks", "tl_to_evidence",
+        "tl_full_info", "tl_show_archived", "tl_select_hint",
+        "tl_range_start", "tl_range_end", "tl_range_reset",
+        "section_Queue", "section_Doing", "section_Done", "section_Someday / Maybe",
+    )
+    return {key: ui[key] for key in keys if key in ui}
+
+
+def _project_timeline_entry(case, live, archived, task_index) -> dict:
+    """Build one project's {case, tasks, milestones, no_date_count, option_maps}."""
+    rows = timeline_tasks(case, live, archived, archived_section=KANBAN_DONE)
+    milestones = []
+    for m in case.milestones:
+        done, total = _milestone_completion(m, task_index)
+        milestones.append(milestone_payload(m, done=done, total=total))
+    payload = _case_payload(case)
+    payload.update(_pending_ref_overlay(case))
+    return {
+        "case": payload,
+        "tasks": rows,
+        "milestones": milestones,
+        "no_date_count": count_no_anchor_tasks(case, live),
+        "option_maps": _case_option_maps(case),
+    }
+
+
+def _multi_timeline_payload(board: ProjectBoard, *, show_archived: bool) -> dict:
+    """Payload for the multi-project timeline: one entry per (filtered) project."""
+    live = _live_section_tasks()
+    archived = _archive_tasks(selected)
+    task_index = _task_section_index()
+    projects = [
+        _project_timeline_entry(case, live, archived, task_index)
+        for case in board.project_cases
+        if show_archived or case.status != "archived"
+    ]
+    return {
+        "projects": projects,
+        "range": _timeline_range_pref(),
+        "labels": _timeline_labels(),
+        "settings": {
+            "lang": llm_client.ui_language(),
+            "today": date.today().isoformat(),
+        },
+    }
+
+
+def _render_multi_timeline(board: ProjectBoard) -> None:
+    show_archived = bool(
+        st.session_state.get(_state_key("tl_show_archived"), False)
+    )
+    st.checkbox(
+        ui["tl_show_archived"],
+        key=_state_key("tl_show_archived"),
+    )
+    event = st_project_timeline(
+        payload=_multi_timeline_payload(board, show_archived=show_archived),
+        key=_state_key("pt_multi"),
+        height=720,
+    )
+    if _handle_project_event(event):
+        st.rerun()
+
+
+def _render_timeline_component(case) -> None:
+    event = st_project_timeline(
+        payload=_timeline_payload(case),
+        key=_state_key(f"pt:{case.id}"),
+        height=640,
+    )
+    if _handle_project_event(event, case):
+        st.rerun(scope="fragment")
+
+
+def _render_ref_suggest_strip(case) -> None:
+    """AI suggest-refs button + summary, shared by the component basics path."""
+    option_maps = {
+        "goal_refs": _goal_options(),
+        "task_refs": _task_options_for_case(case.id),
+        "evidence_refs": _evidence_options(),
+        "source_refs": _source_options(),
+        "output_refs": _output_options(),
+    }
+    blocked = _claimed_elsewhere_count(case.id)
+    if blocked:
+        st.caption(ui["claimed_elsewhere_hint"].format(count=blocked))
+    st.caption(ui["project_refs_hint"])
+    suggest_cols = st.columns([1, 2.5])
+    with suggest_cols[0]:
+        if st.button(
+            ui["project_ai_suggest_refs"],
+            key=_state_key(f"ai_suggest_refs:{case.id}"),
+            help=ui["project_ai_suggest_help"],
+            use_container_width=True,
+        ):
+            with st.spinner(ui["project_ai_suggest_running"]):
+                state = _suggest_project_refs(case, option_maps)
+            st.session_state[_state_key(f"ai_ref_suggestions:{case.id}")] = state
+            if state.get("ok"):
+                added = _apply_project_ref_suggestions(
+                    case,
+                    state.get("suggestions") if isinstance(state.get("suggestions"), dict) else {},
+                )
+                if added:
+                    st.success(ui["project_ai_suggest_applied"].format(count=added))
+                    st.rerun()
+                st.info(ui["project_ai_suggest_none"])
+            else:
+                st.error(str(state.get("error") or ui["project_ai_suggest_failed"]))
+    with suggest_cols[1]:
+        _render_project_ref_suggestion_state(case)
+
+
+def _pending_ref_overlay(case) -> dict[str, list[str]]:
+    """Merge AI-suggested refs stored in session_state over the saved refs.
+
+    Suggestions are pre-filled (not yet persisted); the component shows them as
+    chips so the user confirms with Save -- keeps confirm-not-fill semantics.
+    """
+    field_to_key = {
+        "goal_refs": "goals",
+        "task_refs": "tasks",
+        "evidence_refs": "evidence",
+        "source_refs": "sources",
+        "experience_refs": "experiences",
+        "output_refs": "outputs",
+    }
+    out: dict[str, list[str]] = {}
+    for field, key_name in field_to_key.items():
+        pending = st.session_state.get(_state_key(f"{key_name}:{case.id}"))
+        if isinstance(pending, list):
+            out[field] = _clean_list(pending)
+    return out
+
+
+def _render_basics_component(case) -> None:
+    _render_ref_suggest_strip(case)
+    payload = _case_payload(case)
+    payload.update(_pending_ref_overlay(case))
+    event = st_project_board(
+        case=payload,
+        option_maps=_case_option_maps(case),
+        milestones=[],
+        labels=_component_labels(),
+        settings={"sections": ["basics"], "lang": llm_client.ui_language()},
+        key=_state_key(f"pb_basics:{case.id}"),
+        height=720,
+    )
+    if _handle_project_event(event, case):
+        st.rerun()
+
+
+def _render_milestones_component(case) -> None:
+    event = st_project_board(
+        case=_case_payload(case),
+        option_maps=_case_option_maps(case),
+        milestones=_milestones_payload(case),
+        labels=_component_labels(),
+        settings={"sections": ["milestones"], "lang": llm_client.ui_language()},
+        key=_state_key(f"pb_milestones:{case.id}"),
+        height=560,
+    )
+    if _handle_project_event(event, case):
+        st.rerun(scope="fragment")
+
+
 def _render_project_form(board: ProjectBoard, case) -> None:
     original_case = _clone(case)
     task_options = _task_options_for_case(case.id)
@@ -1114,22 +1666,31 @@ def _milestones_tasks_fragment(case_id: str) -> None:
     if case is None:
         st.warning(ui["project_missing_reload"].format(id=case_id))
         return
+    if project_timeline_component_available():
+        _render_timeline_component(case)
+        return
     _render_create_task(board, case)
     _render_project_tasks(board, case)
     st.divider()
-    _render_milestones(board, case)
+    if project_board_component_available():
+        _render_milestones_component(case)
+    else:
+        _render_milestones(board, case)
 
 
 def _render_project_detail(board: ProjectBoard, case) -> None:
     tabs = st.tabs([ui["tab_basic"], ui["tab_milestones_tasks"]])
     with tabs[0]:
-        _render_project_form(board, case)
-        if case.status != "archived":
-            if st.button(ui["archive_project"], type="secondary"):
-                original_case = _clone(case)
-                submitted_case = replace(original_case, status="archived")
-                _sync_case_update_and_refresh(original_case, submitted_case)
-                st.rerun()
+        if project_board_component_available():
+            _render_basics_component(case)
+        else:
+            _render_project_form(board, case)
+            if case.status != "archived":
+                if st.button(ui["archive_project"], type="secondary"):
+                    original_case = _clone(case)
+                    submitted_case = replace(original_case, status="archived")
+                    _sync_case_update_and_refresh(original_case, submitted_case)
+                    st.rerun()
     with tabs[1]:
         _milestones_tasks_fragment(case.id)
 
@@ -1156,6 +1717,11 @@ def main() -> None:
         st.info(ui["empty_board"])
         return
 
+    if project_timeline_component_available():
+        _render_multi_timeline(board)
+        return
+
+    # Fallback: legacy list + detail layout when the component bundle is absent.
     left, right = st.columns([2, 3], gap="large")
     with left:
         _render_project_board(board)
