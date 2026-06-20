@@ -13,6 +13,7 @@ from nblane.core import auth as auth_core
 from nblane.core import git_backup
 from nblane.core.profile_io import list_profiles
 from nblane.core.team_io import list_teams
+from nblane.web_page_shell import ensure_wide_page_shell
 
 _SESSION_USER_ID = "_nblane_auth_user_id"
 _SIDECAR_AUTH_SYNC_KEY = "_nblane_sidecar_auth_sync"
@@ -194,6 +195,7 @@ def _render_login(users: dict[str, auth_core.User]) -> None:
 
 def require_login() -> auth_core.User:
     """Require a logged-in user and return it."""
+    ensure_wide_page_shell()
     if not auth_enabled():
         user = _local_user()
         git_backup.start_operation(user.id)

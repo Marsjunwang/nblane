@@ -48,6 +48,7 @@ from nblane.web_auth import (
 )
 from nblane.web_cache import load_goal_book_raw, load_skill_md
 from nblane.web_i18n import common_ui
+from nblane.web_page_shell import ensure_wide_page_shell
 
 
 def _template_score(name: str) -> int:
@@ -1644,6 +1645,7 @@ def select_profile() -> str:
     Includes a "Create new profile" form. Uses a non-widget
     session-state key so the selection survives page navigation.
     """
+    ensure_wide_page_shell()
     profiles = allowed_profiles()
     u = common_ui()
 
