@@ -10,9 +10,11 @@ import yaml
 
 from nblane.core.evidence_review import (
     apply_pool_edits,
+    apply_project_ref_inferences,
     build_evidence_review,
     bulk_set_pool_field,
     evidence_status_risks,
+    evidence_project_ref_candidates,
     evidence_usage_index,
     link_skill_to_evidence_nodes,
     skill_evidence_summaries,
@@ -272,6 +274,109 @@ class TestEvidenceReview(unittest.TestCase):
             any(row["id"] == "ev_old" for row in review["evidence_rows"])
         )
 
+    def test_project_ref_candidates_infer_from_kanban_tasks(self) -> None:
+        """Reviewed evidence can inherit project refs from live/archive tasks."""
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = Path(tmp_s) / "alice"
+            profile.mkdir()
+            (profile / "kanban.md").write_text(
+                "# alice · Kanban\n\n"
+                "## Done\n\n"
+                "- [x] Live demo\n"
+                "  - id: task_live\n"
+                "  - project_id: project:demo\n"
+                "- [x] Other project\n"
+                "  - id: task_other\n"
+                "  - project_id: project:other\n"
+                "- [x] No project\n"
+                "  - id: task_no_project\n",
+                encoding="utf-8",
+            )
+            (profile / "kanban-archive.md").write_text(
+                "# alice · Kanban archive\n\n"
+                "## Archived · 2026-05-01\n\n"
+                "- [x] Archived demo\n"
+                "  - id: task_arch\n"
+                "  - project_id: project:archive\n",
+                encoding="utf-8",
+            )
+            entries = [
+                {
+                    "id": "ev_live",
+                    "title": "Live evidence",
+                    "review_status": "reviewed",
+                    "kanban_refs": ["kanban:task_live"],
+                },
+                {
+                    "id": "ev_arch",
+                    "title": "Archived evidence",
+                    "review_status": "reviewed",
+                    "kanban_refs": ["kanban:task_arch"],
+                },
+                {
+                    "id": "ev_conflict",
+                    "title": "Conflict evidence",
+                    "review_status": "reviewed",
+                    "kanban_refs": ["kanban:task_live", "kanban:task_other"],
+                },
+                {
+                    "id": "ev_no_project",
+                    "title": "No project evidence",
+                    "review_status": "reviewed",
+                    "kanban_refs": ["kanban:task_no_project"],
+                },
+                {
+                    "id": "ev_existing",
+                    "title": "Already linked",
+                    "review_status": "reviewed",
+                    "project_refs": ["project:existing"],
+                    "kanban_refs": ["kanban:task_live"],
+                },
+                {
+                    "id": "ev_needs_review",
+                    "title": "Not reviewed",
+                    "kanban_refs": ["kanban:task_live"],
+                },
+            ]
+            _write_yaml(
+                profile / "evidence-pool.yaml",
+                {"profile": "alice", "evidence_entries": entries},
+            )
+
+            candidates = evidence_project_ref_candidates(profile)
+            by_id = {str(item["id"]): item for item in candidates}
+            entries, changed = apply_project_ref_inferences(
+                entries,
+                candidates,
+                ["ev_live", "ev_arch", "ev_conflict", "ev_no_project"],
+            )
+
+        self.assertEqual(
+            set(by_id),
+            {"ev_live", "ev_arch", "ev_conflict", "ev_no_project"},
+        )
+        self.assertEqual(by_id["ev_live"]["status"], "single_project")
+        self.assertEqual(
+            by_id["ev_live"]["inferred_project_refs"],
+            ["project:demo"],
+        )
+        self.assertEqual(
+            by_id["ev_arch"]["inferred_project_refs"],
+            ["project:archive"],
+        )
+        self.assertEqual(by_id["ev_conflict"]["status"], "multiple_projects")
+        self.assertEqual(
+            by_id["ev_conflict"]["inferred_project_refs"],
+            ["project:demo", "project:other"],
+        )
+        self.assertEqual(by_id["ev_no_project"]["status"], "no_project")
+        self.assertEqual(changed, 2)
+        updated = {str(row["id"]): row for row in entries}
+        self.assertEqual(updated["ev_live"]["project_refs"], ["project:demo"])
+        self.assertEqual(updated["ev_arch"]["project_refs"], ["project:archive"])
+        self.assertNotIn("project_refs", updated["ev_conflict"])
+        self.assertNotIn("project_refs", updated["ev_no_project"])
+
     def test_usage_index_tracks_skill_refs(self) -> None:
         """Evidence ids reverse-map to linked skill nodes."""
         with tempfile.TemporaryDirectory() as tmp_s:
@@ -336,6 +441,14 @@ class TestEvidenceReview(unittest.TestCase):
         self.assertIn("generate_claim_candidates_for_scope", source)
         self.assertIn("apply_claim_candidates_to_book", source)
         self.assertIn("migrate_legacy_claims", source)
+
+    def test_page_exposes_project_ref_backfill(self) -> None:
+        """Project-ref backfill is owned by Evidence Review, not Project Board."""
+        source = Path("pages/2_Evidence_Review.py").read_text(encoding="utf-8")
+
+        self.assertIn("_render_project_ref_backfill", source)
+        self.assertIn("apply_project_ref_inferences", source)
+        self.assertIn("refs_project_backfill_title", source)
 
 
 if __name__ == "__main__":

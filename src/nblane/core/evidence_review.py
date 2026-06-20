@@ -13,6 +13,7 @@ from nblane.core.claims import (
 from nblane.core import io as io_facade
 from nblane.core.io import KANBAN_DONE, STATUSES, schema_node_index
 from nblane.core.experience import load_experience_book
+from nblane.core.kanban_archive import find_kanban_tasks_by_ref, kanban_ref_id
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
     EVIDENCE_PUBLIC_READINESS,
@@ -64,6 +65,19 @@ def _clean_string_list(raw: object) -> list[str]:
             continue
         seen.add(text)
         out.append(text)
+    return out
+
+
+def _merge_string_lists(*groups: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            clean = str(item or "").strip()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            out.append(clean)
     return out
 
 
@@ -353,6 +367,123 @@ def evidence_usage_index(profile: str | Path) -> dict[str, list[dict[str, str]]]
     return usage
 
 
+def infer_project_refs_from_kanban(
+    profile: str | Path,
+    row: dict[str, Any],
+) -> dict[str, object]:
+    """Infer evidence project ownership from linked Kanban task refs.
+
+    Returns a pure candidate payload. Only a single inferred project is
+    considered auto-applicable; multiple project ids are intentionally left for
+    human choice.
+    """
+    evidence_id = str(row.get("id", "") or "").strip()
+    refs = _clean_string_list(row.get("kanban_refs"))
+    existing_projects = _clean_string_list(row.get("project_refs"))
+    tasks = find_kanban_tasks_by_ref(profile, refs) if refs else []
+    found_ids = {
+        str(getattr(task, "id", "") or "").strip()
+        for task in tasks
+        if str(getattr(task, "id", "") or "").strip()
+    }
+    task_rows: list[dict[str, str]] = []
+    project_refs: list[str] = []
+    for task in tasks:
+        task_id = str(getattr(task, "id", "") or "").strip()
+        title = str(getattr(task, "title", "") or "").strip()
+        project_id = str(getattr(task, "project_id", "") or "").strip()
+        task_rows.append(
+            {
+                "id": task_id,
+                "title": title,
+                "project_id": project_id,
+            }
+        )
+        if project_id and project_id not in project_refs:
+            project_refs.append(project_id)
+    missing_task_refs = [
+        rid
+        for rid in (kanban_ref_id(ref) for ref in refs)
+        if rid and rid not in found_ids
+    ]
+    if not refs:
+        status = "no_kanban_refs"
+    elif len(project_refs) == 1:
+        status = "single_project"
+    elif len(project_refs) > 1:
+        status = "multiple_projects"
+    elif not tasks:
+        status = "missing_task"
+    else:
+        status = "no_project"
+    return {
+        "id": evidence_id,
+        "title": str(row.get("title", "") or ""),
+        "kanban_refs": refs,
+        "existing_project_refs": existing_projects,
+        "inferred_project_refs": project_refs,
+        "can_apply": status == "single_project",
+        "status": status,
+        "tasks": task_rows,
+        "missing_task_refs": missing_task_refs,
+    }
+
+
+def evidence_project_ref_candidates(profile: str | Path) -> list[dict[str, object]]:
+    """Return reviewed evidence rows whose project refs can be checked.
+
+    Candidate rows are active, reviewed, currently missing ``project_refs``, and
+    carry at least one ``kanban_refs`` entry.
+    """
+    candidates: list[dict[str, object]] = []
+    for row in _pool_entries(profile):
+        if bool(row.get("deprecated", False)):
+            continue
+        if normalize_review_status(row.get("review_status")) != "reviewed":
+            continue
+        if _clean_string_list(row.get("project_refs")):
+            continue
+        if not _clean_string_list(row.get("kanban_refs")):
+            continue
+        candidates.append(infer_project_refs_from_kanban(profile, row))
+    return candidates
+
+
+def apply_project_ref_inferences(
+    entries: list[dict[str, Any]],
+    candidates: list[dict[str, object]],
+    evidence_ids: list[str],
+) -> tuple[list[dict[str, Any]], int]:
+    """Apply unambiguous project-ref candidates to matching evidence rows."""
+    target_ids = {
+        str(eid or "").strip()
+        for eid in evidence_ids
+        if str(eid or "").strip()
+    }
+    if not target_ids:
+        return entries, 0
+    by_id: dict[str, list[str]] = {}
+    for candidate in candidates:
+        cid = str(candidate.get("id", "") or "").strip()
+        refs = _clean_string_list(candidate.get("inferred_project_refs"))
+        if cid and len(refs) == 1:
+            by_id[cid] = refs
+    changed = 0
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        row_id = str(row.get("id", "") or "").strip()
+        inferred = by_id.get(row_id)
+        if row_id not in target_ids or not inferred:
+            continue
+        existing = _clean_string_list(row.get("project_refs"))
+        merged = _merge_string_lists(existing, inferred)
+        if merged != existing:
+            row["project_refs"] = merged
+            changed += 1
+    return entries, changed
+
+
 def _highest_strength(
     records: list[dict[str, Any]],
     inline_count: int,
@@ -548,6 +679,7 @@ def _evidence_row_payload(
         "source_refs": _clean_string_list(row.get("source_refs")),
         "project_refs": _clean_string_list(row.get("project_refs")),
         "experience_refs": _clean_string_list(row.get("experience_refs")),
+        "kanban_refs": _clean_string_list(row.get("kanban_refs")),
         "deprecated": bool(row.get("deprecated", False)),
         "replaced_by": str(row.get("replaced_by", "") or ""),
         "skill_refs": [item["id"] for item in used_by],
@@ -585,6 +717,7 @@ def build_evidence_review(profile: str | Path) -> dict[str, object]:
     status_risks = evidence_status_risks(profile)
     done_uncrystallized = _done_uncrystallized(profile)
     skill_summaries = skill_evidence_summaries(profile)
+    project_ref_candidates = evidence_project_ref_candidates(profile)
     skill_options = [
         {
             "id": str(item.get("id", "")),
@@ -601,12 +734,16 @@ def build_evidence_review(profile: str | Path) -> dict[str, object]:
             "needs_review_count": len(needs_review),
             "status_risk_count": len(status_risks),
             "total_entries": len(active_rows),
+            "project_ref_candidate_count": sum(
+                1 for item in project_ref_candidates if item.get("can_apply")
+            ),
         },
         "done_uncrystallized": done_uncrystallized,
         "evidence_rows": active_rows,
         "all_evidence_rows": rows,
         "unlinked": unlinked,
         "needs_review": needs_review,
+        "project_ref_candidates": project_ref_candidates,
         "status_risks": status_risks,
         "skill_summaries": skill_summaries,
         "skill_options": skill_options,

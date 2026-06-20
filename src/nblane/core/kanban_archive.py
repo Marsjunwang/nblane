@@ -87,26 +87,44 @@ def add_kanban_refs_to_ingest_patch(
     return out
 
 
-def _archive_tasks(profile: str) -> list[KanbanTask]:
+def _archive_tasks(profile: str | Path) -> list[KanbanTask]:
     """Parse kanban-archive.md into Done tasks (best effort)."""
-    path = profile_dir(profile) / KANBAN_ARCHIVE_FILENAME
+    if isinstance(profile, Path):
+        path = profile / KANBAN_ARCHIVE_FILENAME
+        profile_name = profile.name
+    else:
+        path = profile_dir(profile) / KANBAN_ARCHIVE_FILENAME
+        profile_name = profile
     if not isinstance(path, Path) or not path.exists():
         return []
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         return []
     normalized = _ARCHIVE_HEADING_RE.sub(f"## {KANBAN_DONE}", text)
-    sections = parse_kanban_text(normalized, profile)
+    sections = parse_kanban_text(normalized, profile_name)
     return list(sections.get(KANBAN_DONE) or [])
 
 
-def _all_lookup_tasks(profile: str) -> list[KanbanTask]:
+def _all_lookup_tasks(profile: str | Path) -> list[KanbanTask]:
     """Live kanban tasks (all sections) plus archived tasks."""
     tasks: list[KanbanTask] = []
-    try:
-        sections = parse_kanban(profile)
-    except Exception:
-        sections = {}
+    if isinstance(profile, Path):
+        path = profile / "kanban.md"
+        if path.exists():
+            try:
+                sections = parse_kanban_text(
+                    path.read_text(encoding="utf-8"),
+                    profile.name,
+                )
+            except Exception:
+                sections = {}
+        else:
+            sections = {}
+    else:
+        try:
+            sections = parse_kanban(profile)
+        except Exception:
+            sections = {}
     for section_tasks in sections.values():
         tasks.extend(section_tasks)
     tasks.extend(_archive_tasks(profile))
@@ -114,7 +132,7 @@ def _all_lookup_tasks(profile: str) -> list[KanbanTask]:
 
 
 def find_kanban_tasks_by_ref(
-    profile: str,
+    profile: str | Path,
     refs: Iterable[str],
 ) -> list[KanbanTask]:
     """Resolve kanban refs to KanbanTask records (id match, title fallback).

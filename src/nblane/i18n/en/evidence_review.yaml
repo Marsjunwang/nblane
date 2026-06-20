@@ -214,6 +214,23 @@ refs_options_empty: No records yet.
 refs_projects: Project cases
 refs_experiences: Experience cases
 refs_sources: Research sources
+refs_project_backfill_title: Backfill project refs from Kanban
+refs_project_backfill_caption: Reviewed evidence with kanban refs can inherit the project from its source task when the task ownership is unambiguous. Conflicts stay manual.
+refs_project_backfill_empty: No reviewed evidence with kanban refs is missing project refs.
+refs_project_backfill_pick: Evidence rows to backfill
+refs_project_backfill_apply: Apply project refs
+refs_project_backfill_saved: Backfilled project refs for {n} evidence row(s).
+refs_project_backfill_no_auto: No unambiguous project refs can be applied automatically.
+refs_project_backfill_manual_title: Needs manual project choice ({n})
+refs_project_backfill_col_evidence: Evidence
+refs_project_backfill_col_project: Project
+refs_project_backfill_col_tasks: Kanban tasks
+refs_project_backfill_col_status: Status
+refs_project_backfill_status_single_project: Ready
+refs_project_backfill_status_multiple_projects: Multiple projects
+refs_project_backfill_status_no_project: Task has no project
+refs_project_backfill_status_missing_task: Task not found
+refs_project_backfill_status_no_kanban_refs: No kanban refs
 refs_linker_title: Link evidence to project / experience / source
 refs_manual_source_refs: Manual source refs not in Research Inbox
 refs_save: Save refs

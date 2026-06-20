@@ -90,6 +90,28 @@ class TestKanbanRefHelpers(unittest.TestCase):
         self.assertEqual(found[0].outcome, "bench built, code shared")
         self.assertEqual(len(found[0].subtasks), 2)
 
+    def test_find_tasks_accepts_profile_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "p"
+            prof.mkdir(parents=True)
+            (prof / "kanban.md").write_text(
+                "# p · Kanban\n\n"
+                "## Done\n\n"
+                "- [x] Live task\n"
+                "  - id: kb_live\n"
+                "  - project_id: project:demo\n",
+                encoding="utf-8",
+            )
+            (prof / "kanban-archive.md").write_text(_ARCHIVE, encoding="utf-8")
+
+            found = find_kanban_tasks_by_ref(
+                prof,
+                ["kanban:kb_live", "kanban:kb_pi05"],
+            )
+
+        self.assertEqual([task.id for task in found], ["kb_live", "kb_pi05"])
+        self.assertEqual(found[0].project_id, "project:demo")
+
 
 if __name__ == "__main__":
     unittest.main()

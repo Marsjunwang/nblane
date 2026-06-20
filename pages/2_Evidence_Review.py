@@ -30,6 +30,7 @@ from nblane.core.kanban_archive import (
 )
 from nblane.core.evidence_review import (
     apply_pool_edits,
+    apply_project_ref_inferences,
     build_evidence_review,
     bulk_set_pool_field,
     link_skill_to_evidence_nodes,
@@ -2197,6 +2198,158 @@ def _render_case_options(review: dict) -> None:
                 st.caption(f"- `{option.get('id', '')}` {option.get('label', '')}")
 
 
+def _project_ref_option_label(project_id: str, options: list[dict]) -> str:
+    for option in options:
+        if str(option.get("id", "") or "") == project_id:
+            return _option_label(option)
+    return project_id
+
+
+def _project_backfill_task_text(candidate: dict) -> str:
+    tasks = (
+        candidate.get("tasks")
+        if isinstance(candidate.get("tasks"), list)
+        else []
+    )
+    pieces: list[str] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        title = str(task.get("title", "") or task.get("id", "") or "").strip()
+        project_id = str(task.get("project_id", "") or "").strip()
+        if project_id:
+            pieces.append(f"{title} -> {project_id}")
+        elif title:
+            pieces.append(title)
+    missing = [
+        str(ref).strip()
+        for ref in (candidate.get("missing_task_refs") or [])
+        if str(ref).strip()
+    ]
+    for ref in missing:
+        pieces.append(f"{ref} (?)")
+    return " / ".join(pieces)
+
+
+def _render_project_ref_backfill(review: dict) -> None:
+    """Backfill evidence project refs from linked Kanban task ownership."""
+    candidates = [
+        item
+        for item in (review.get("project_ref_candidates") or [])
+        if isinstance(item, dict)
+    ]
+    st.subheader(ui["refs_project_backfill_title"])
+    st.caption(ui["refs_project_backfill_caption"])
+    if not candidates:
+        st.caption(ui["refs_project_backfill_empty"])
+        return
+
+    project_options = list(review.get("project_options") or [])
+    auto_candidates = [item for item in candidates if bool(item.get("can_apply"))]
+    manual_candidates = [
+        item for item in candidates if not bool(item.get("can_apply"))
+    ]
+
+    if auto_candidates:
+        candidate_ids = [str(item.get("id", "") or "") for item in auto_candidates]
+        by_id = {str(item.get("id", "") or ""): item for item in auto_candidates}
+        selected_ids = st.multiselect(
+            ui["refs_project_backfill_pick"],
+            options=candidate_ids,
+            default=candidate_ids,
+            format_func=lambda eid: _row_label(by_id.get(eid, {})),
+            key=f"evidence_review_project_backfill_pick_{selected}",
+        )
+        rows = []
+        for item in auto_candidates:
+            eid = str(item.get("id", "") or "")
+            if eid not in set(selected_ids):
+                continue
+            inferred = [
+                str(ref).strip()
+                for ref in (item.get("inferred_project_refs") or [])
+                if str(ref).strip()
+            ]
+            rows.append(
+                {
+                    ui.get("refs_project_backfill_col_evidence", "Evidence"): (
+                        _row_label(item)
+                    ),
+                    ui.get("refs_project_backfill_col_project", "Project"): ", ".join(
+                        _project_ref_option_label(ref, project_options)
+                        for ref in inferred
+                    ),
+                    ui.get("refs_project_backfill_col_tasks", "Kanban tasks"): (
+                        _project_backfill_task_text(item)
+                    ),
+                }
+            )
+        if rows:
+            st.dataframe(
+                pd.DataFrame(rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+        if st.button(
+            ui["refs_project_backfill_apply"],
+            type="primary",
+            disabled=not selected_ids,
+            key=f"evidence_review_project_backfill_apply_{selected}",
+        ):
+            entries = _pool_entries()
+            entries, changed = apply_project_ref_inferences(
+                entries,
+                candidates,
+                list(selected_ids),
+            )
+            if changed:
+                _save_pool(
+                    entries,
+                    ui["refs_project_backfill_saved"].format(n=changed),
+                )
+                st.rerun()
+            st.info(ui["pool_no_changes"])
+    else:
+        st.caption(ui["refs_project_backfill_no_auto"])
+
+    if manual_candidates:
+        with st.expander(
+            ui["refs_project_backfill_manual_title"].format(
+                n=len(manual_candidates)
+            ),
+            expanded=False,
+        ):
+            rows = []
+            for item in manual_candidates:
+                inferred = [
+                    str(ref).strip()
+                    for ref in (item.get("inferred_project_refs") or [])
+                    if str(ref).strip()
+                ]
+                rows.append(
+                    {
+                        ui.get("refs_project_backfill_col_evidence", "Evidence"): (
+                            _row_label(item)
+                        ),
+                        ui.get("refs_project_backfill_col_status", "Status"): ui.get(
+                            f"refs_project_backfill_status_{item.get('status', '')}",
+                            str(item.get("status", "")),
+                        ),
+                        ui.get("refs_project_backfill_col_project", "Project"): (
+                            ", ".join(inferred) or "-"
+                        ),
+                        ui.get("refs_project_backfill_col_tasks", "Kanban tasks"): (
+                            _project_backfill_task_text(item) or "-"
+                        ),
+                    }
+                )
+            st.dataframe(
+                pd.DataFrame(rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+
 def _render_evidence_ref_linker(review: dict) -> None:
     """Edit evidence row refs to project, experience, and source records."""
     rows = list(review.get("evidence_rows") or [])
@@ -2441,6 +2594,8 @@ def _render_case_editor() -> None:
 def _render_refs(review: dict) -> None:
     """Render project/experience/source refs tooling."""
     _render_case_options(review)
+    st.divider()
+    _render_project_ref_backfill(review)
     st.divider()
     _render_evidence_ref_linker(review)
     st.divider()

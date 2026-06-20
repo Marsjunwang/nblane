@@ -214,6 +214,23 @@ refs_options_empty: 暂无记录。
 refs_projects: 项目案例
 refs_experiences: 经历案例
 refs_sources: 研究资料
+refs_project_backfill_title: 从看板任务补齐项目引用
+refs_project_backfill_caption: 带有看板引用的已审阅证据，可以在来源任务项目归属无歧义时继承项目；多项目冲突仍需手动选择。
+refs_project_backfill_empty: 没有带看板引用且缺项目引用的已审阅证据。
+refs_project_backfill_pick: 要补齐的证据条目
+refs_project_backfill_apply: 应用项目引用
+refs_project_backfill_saved: 已为 {n} 条证据补齐项目引用。
+refs_project_backfill_no_auto: 没有可自动应用的无歧义项目引用。
+refs_project_backfill_manual_title: 需要手动选择项目（{n}）
+refs_project_backfill_col_evidence: 证据
+refs_project_backfill_col_project: 项目
+refs_project_backfill_col_tasks: 看板任务
+refs_project_backfill_col_status: 状态
+refs_project_backfill_status_single_project: 可应用
+refs_project_backfill_status_multiple_projects: 多个项目
+refs_project_backfill_status_no_project: 任务没有项目
+refs_project_backfill_status_missing_task: 找不到任务
+refs_project_backfill_status_no_kanban_refs: 没有看板引用
 refs_linker_title: 关联证据到项目 / 经历 / 来源
 refs_manual_source_refs: 研究收件箱之外的手动来源引用
 refs_save: 保存引用
