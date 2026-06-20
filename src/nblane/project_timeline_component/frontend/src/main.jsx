@@ -627,6 +627,27 @@ function TicksHeader({ dom, width, ticks, todayMs }) {
   );
 }
 
+function TimelineLegend({ labels }) {
+  const items = [
+    { key: "doing", labelKey: "tl_legend_doing", fallback: "In progress task" },
+    { key: "done", labelKey: "tl_legend_done", fallback: "Done task" },
+    { key: "archived", labelKey: "tl_legend_archived", fallback: "Archived task" },
+    { key: "milestone", labelKey: "tl_legend_milestone", fallback: "Milestone" },
+    { key: "today", labelKey: "tl_legend_today", fallback: "Today" },
+  ];
+  return (
+    <div className="tl-legend" aria-label={label(labels, "tl_legend_title", "Legend")}>
+      <span className="tl-legend-title">{label(labels, "tl_legend_title", "Legend")}</span>
+      {items.map((item) => (
+        <span className="tl-legend-item" key={item.key}>
+          <span className={`tl-legend-swatch tl-legend-${item.key}`} aria-hidden="true" />
+          {label(labels, item.labelKey, item.fallback)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /* ---- one project row: left label + right svg track ---- */
 function ProjectRow({
   project,
@@ -1050,6 +1071,8 @@ function App() {
           )}
         </div>
       </div>
+
+      <TimelineLegend labels={labels} />
 
       {reviewMode && (
         <div className="tl-review-bar">

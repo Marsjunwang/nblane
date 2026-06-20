@@ -126,6 +126,12 @@ tl_select_hint: 点击项目行查看详情
 tl_range_start: 起
 tl_range_end: 止
 tl_range_reset: 重置
+tl_legend_title: 图例
+tl_legend_doing: 进行中任务
+tl_legend_done: 已完成任务
+tl_legend_archived: 已归档任务
+tl_legend_milestone: 里程碑
+tl_legend_today: 今天
 kind_internal: 内部
 kind_research: 研究
 kind_work: 工作

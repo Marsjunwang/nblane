@@ -126,6 +126,12 @@ tl_select_hint: Click a project row to see details
 tl_range_start: From
 tl_range_end: To
 tl_range_reset: Reset
+tl_legend_title: Legend
+tl_legend_doing: In progress task
+tl_legend_done: Done task
+tl_legend_archived: Archived task
+tl_legend_milestone: Milestone
+tl_legend_today: Today
 kind_internal: Internal
 kind_research: Research
 kind_work: Work

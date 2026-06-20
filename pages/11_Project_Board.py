@@ -1132,6 +1132,8 @@ def _timeline_labels() -> dict[str, str]:
         "tl_delete_confirm", "tl_no_date_tasks", "tl_to_evidence",
         "tl_full_info", "tl_show_archived", "tl_select_hint",
         "tl_range_start", "tl_range_end", "tl_range_reset",
+        "tl_legend_title", "tl_legend_doing", "tl_legend_done",
+        "tl_legend_archived", "tl_legend_milestone", "tl_legend_today",
         "section_Queue", "section_Doing", "section_Done", "section_Someday / Maybe",
     )
     return {key: ui[key] for key in keys if key in ui}
