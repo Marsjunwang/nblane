@@ -31,6 +31,7 @@ from nblane.core.kanban_archive import (
 from nblane.core.evidence_review import (
     apply_pool_edits,
     apply_project_ref_inferences,
+    build_evidence_editor_payload,
     build_evidence_review,
     bulk_set_pool_field,
     link_skill_to_evidence_nodes,
@@ -69,7 +70,20 @@ from nblane.core.profile_ingest import (
     run_ingest_patch,
     schema_node_labels,
 )
-from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+from nblane.core.profile_ingest_llm import (
+    ingest_kanban_done_json,
+    reformat_evidence,
+)
+from nblane.core.evidence_migrate import (
+    backfill_row,
+    migrate_evidence_pool,
+    refresh_from_crystallized_tasks,
+)
+from nblane.core.evidence_from_output import evidence_row_from_output
+from nblane.evidence_editor_component import (
+    evidence_editor_component_available,
+    st_evidence_editor,
+)
 from nblane.core.project_board_sync import (
     add_project_refs_to_ingest_patch,
     project_refs_for_tasks,
@@ -414,6 +428,20 @@ def _compact_row(row: dict) -> dict:
     source_excerpt = str(row.get("source_excerpt", "") or "").strip()
     if source_excerpt:
         out["source_excerpt"] = source_excerpt
+    # v2 provenance scalars (strip outer whitespace, keep inner newlines).
+    for key in (
+        "origin",
+        "origin_ref",
+        "origin_detail",
+        "language",
+        "original_language",
+        "original_content_hash",
+        "original_content",
+        "formatted_content",
+    ):
+        value = str(row.get(key, "") or "").strip()
+        if value:
+            out[key] = value
     review_status = str(row.get("review_status", "") or "").strip()
     if review_status:
         out["review_status"] = review_status
@@ -2620,6 +2648,387 @@ def _render_risks(review: dict) -> None:
     st.page_link("pages/1_Skill_Tree.py", label=ui["open_skill_tree"])
 
 
+# --- Evidence v2 React editor: event handling + section render --------------
+
+
+def _event_seen(event_id: str) -> bool:
+    """Dedup component events by id (frontend resends last value on rerun)."""
+    if not event_id:
+        return False
+    key = f"evidence_editor_event_id_{selected}"
+    if st.session_state.get(key) == event_id:
+        return True
+    st.session_state[key] = event_id
+    return False
+
+
+def _editor_pool_by_id(entries: list[dict]) -> dict[str, int]:
+    return {
+        str(row.get("id", "") or "").strip(): idx
+        for idx, row in enumerate(entries)
+        if str(row.get("id", "") or "").strip()
+    }
+
+
+# v2 fields the editor is allowed to write back on save_evidence.
+_EDITOR_SAVE_FIELDS = (
+    "title",
+    "summary",
+    "formatted_content",
+    "source_excerpt",
+    "type",
+    "date",
+    "url",
+    "strength",
+    "confidence",
+    "review_status",
+    "public_readiness",
+    "language",
+    "origin",
+    "origin_ref",
+    "origin_detail",
+    "project_refs",
+)
+
+
+def _apply_save_evidence(eid: str, fields: dict) -> bool:
+    entries = _pool_entries()
+    by_id = _editor_pool_by_id(entries)
+    if eid not in by_id:
+        return False
+    row = dict(entries[by_id[eid]])
+    for key in _EDITOR_SAVE_FIELDS:
+        if key not in fields:
+            continue
+        if key == "project_refs":
+            row[key] = [
+                str(r).strip()
+                for r in (fields.get(key) or [])
+                if str(r).strip()
+            ]
+        else:
+            row[key] = str(fields.get(key, "") or "")
+    entries[by_id[eid]] = _compact_row(row)
+    _save_pool(entries, ui.get("ee_saved", "Saved."))
+    return True
+
+
+def _apply_add_evidence(fields: dict) -> bool:
+    entries = _pool_entries()
+    existing = {
+        str(r.get("id", "") or "").strip()
+        for r in entries
+        if str(r.get("id", "") or "").strip()
+    }
+    title = str(fields.get("title", "") or "").strip()
+    if not title:
+        return False
+    new_id = new_evidence_id(title, existing)
+    row = {
+        "id": new_id,
+        "type": str(fields.get("type", "") or "practice"),
+        "title": title,
+        "origin": str(fields.get("origin", "") or "manual_daily"),
+        "review_status": "needs_review",
+        "public_readiness": str(fields.get("public_readiness", "") or "private"),
+    }
+    for key in (
+        "summary",
+        "original_content",
+        "formatted_content",
+        "origin_detail",
+        "date",
+    ):
+        val = str(fields.get(key, "") or "").strip()
+        if val:
+            row[key] = val
+    refs = [str(r).strip() for r in (fields.get("project_refs") or []) if str(r).strip()]
+    if refs:
+        row["project_refs"] = refs
+    # Backfill v2 derived fields (language / hash) deterministically.
+    row, _, _ = backfill_row(
+        row, profile=selected, target_lang=llm_client.reply_language()
+    )
+    entries.append(_compact_row(row))
+    _save_pool(entries, ui.get("ee_added", "Evidence added."))
+    return True
+
+
+def _apply_deprecate(eid: str, replaced_by: str = "") -> bool:
+    entries = _pool_entries()
+    by_id = _editor_pool_by_id(entries)
+    if eid not in by_id:
+        return False
+    row = dict(entries[by_id[eid]])
+    row["deprecated"] = True
+    if replaced_by:
+        row["replaced_by"] = replaced_by
+    entries[by_id[eid]] = _compact_row(row)
+    _save_pool(entries, ui.get("ee_deprecated", "Evidence deprecated."))
+    return True
+
+
+def _apply_link_project(eid: str, project_refs: list) -> bool:
+    return _apply_save_evidence(eid, {"project_refs": project_refs})
+
+
+def _apply_migration(ids: list | None) -> bool:
+    entries = _pool_entries()
+    result = migrate_evidence_pool(
+        selected, entries=entries, target_lang=llm_client.reply_language()
+    )
+    if ids:
+        id_set = set(ids)
+        before_by_id = _editor_pool_by_id(entries)
+        merged = list(entries)
+        for item in result["per_row"]:
+            rid = item["id"]
+            if rid in id_set and rid in before_by_id and item["changed"]:
+                merged[before_by_id[rid]] = item["after"]
+        new_entries = [_compact_row(r) for r in merged]
+    else:
+        if result["changed_count"] == 0:
+            st.info(ui.get("ee_migration_none", "Nothing to migrate."))
+            return False
+        new_entries = [_compact_row(r) for r in result["entries"]]
+    _save_pool(
+        new_entries,
+        ui.get("ee_migration_done", "Migration applied ({n} rows).").format(
+            n=result["changed_count"]
+        ),
+    )
+    return True
+
+
+def _apply_refresh_crystallized(task_ids: list | None) -> bool:
+    entries = _pool_entries()
+    result = refresh_from_crystallized_tasks(selected, entries=entries)
+    proposals = result.get("proposals") or []
+    if task_ids:
+        proposals = [p for p in proposals if p.get("task_id") in set(task_ids)]
+    if not proposals:
+        st.info(ui.get("ee_crystallized_none", "No crystallized tasks to refresh."))
+        return False
+    by_id = _editor_pool_by_id(entries)
+    existing = {
+        str(r.get("id", "") or "").strip()
+        for r in entries
+        if str(r.get("id", "") or "").strip()
+    }
+    changed = 0
+    for prop in proposals:
+        if prop["kind"] == "update" and prop.get("evidence_id") in by_id:
+            row = dict(entries[by_id[prop["evidence_id"]]])
+            for key in (
+                "origin",
+                "origin_ref",
+                "original_content",
+                "original_content_hash",
+                "original_language",
+            ):
+                if not str(row.get(key, "") or "").strip() and prop.get(key):
+                    row[key] = prop[key]
+            if not row.get("kanban_refs"):
+                row["kanban_refs"] = prop.get("kanban_refs") or []
+            entries[by_id[prop["evidence_id"]]] = _compact_row(row)
+            changed += 1
+        elif prop["kind"] == "new":
+            new_id = new_evidence_id(prop.get("title", "") or "task", existing)
+            existing.add(new_id)
+            row = {
+                "id": new_id,
+                "type": "practice",
+                "title": prop.get("title", "") or new_id,
+                "origin": "kanban_task",
+                "origin_ref": prop.get("origin_ref", ""),
+                "kanban_refs": prop.get("kanban_refs") or [],
+                "original_content": prop.get("original_content", ""),
+                "original_content_hash": prop.get("original_content_hash", ""),
+                "original_language": prop.get("original_language", ""),
+                "language": llm_client.reply_language(),
+                "review_status": "needs_review",
+                "public_readiness": "private",
+            }
+            if prop.get("project_refs"):
+                row["project_refs"] = prop["project_refs"]
+            entries.append(_compact_row(row))
+            changed += 1
+    _save_pool(
+        entries,
+        ui.get("ee_crystallized_done", "Refreshed {n} from tasks.").format(n=changed),
+    )
+    return True
+
+
+def _apply_create_from_output(output_id: str) -> bool:
+    import yaml as _yaml
+
+    entries = _pool_entries()
+    existing = {
+        str(r.get("id", "") or "").strip()
+        for r in entries
+        if str(r.get("id", "") or "").strip()
+    }
+    out_path = _pdir / "outputs.yaml"
+    output = None
+    if out_path.exists():
+        data = _yaml.safe_load(out_path.read_text(encoding="utf-8")) or {}
+        for o in data.get("outputs") or []:
+            if isinstance(o, dict) and str(o.get("id", "")) == output_id:
+                output = o
+                break
+    if output is None:
+        st.warning(ui.get("ee_output_missing", "Output not found."))
+        return False
+    row = evidence_row_from_output(
+        output,
+        profile=selected,
+        existing_ids=existing,
+        target_lang=llm_client.reply_language(),
+    )
+    entries.append(_compact_row(row))
+    _save_pool(entries, ui.get("ee_output_created", "Evidence created from output."))
+    return True
+
+
+def _apply_backfill_project_refs(ids: list | None) -> bool:
+    review = build_evidence_review(selected)
+    candidates = [
+        item
+        for item in (review.get("project_ref_candidates") or [])
+        if isinstance(item, dict) and bool(item.get("can_apply"))
+    ]
+    if not candidates:
+        st.info(ui.get("refs_project_backfill_no_auto", "No auto candidates."))
+        return False
+    chosen = ids or [str(c.get("id", "") or "") for c in candidates]
+    entries = _pool_entries()
+    entries, changed = apply_project_ref_inferences(entries, candidates, chosen)
+    if not changed:
+        st.info(ui.get("pool_no_changes", "No changes."))
+        return False
+    _save_pool(
+        entries,
+        ui.get("refs_project_backfill_saved", "Linked {n}.").format(n=changed),
+    )
+    return True
+
+
+def _apply_request_ai_reformat(eid: str) -> bool:
+    row = next((r for r in _pool_entries() if str(r.get("id")) == eid), None)
+    if row is None:
+        return False
+    proposal, err = reformat_evidence(
+        selected, row, target_lang=llm_client.reply_language()
+    )
+    if err or not proposal:
+        st.warning(err or ui.get("ee_reformat_failed", "Reformat failed."))
+        return False
+    st.session_state[f"evidence_editor_reformat_{selected}"] = {
+        "id": eid,
+        "fields": proposal,
+    }
+    return True
+
+
+def _apply_confirm_ai_reformat(eid: str, fields: dict) -> bool:
+    ok = _apply_save_evidence(eid, fields)
+    st.session_state.pop(f"evidence_editor_reformat_{selected}", None)
+    return ok
+
+
+def _apply_create_project_from_evidence(suggestion: dict) -> bool:
+    """Stash the suggestion for Project Board create-form prefill, then jump."""
+    st.session_state["project_board_create_prefill"] = {
+        "title": str(suggestion.get("suggested_title", "") or ""),
+        "id": str(suggestion.get("suggested_id", "") or "").replace("project:", ""),
+        "kind": str(suggestion.get("kind", "") or "work"),
+        "visibility": str(suggestion.get("visibility", "") or "private"),
+        "summary": str(suggestion.get("summary", "") or ""),
+        "evidence_ids": list(suggestion.get("evidence_ids") or []),
+    }
+    st.switch_page("pages/11_Project_Board.py")
+    return False
+
+
+def _handle_evidence_event(event: dict | None) -> bool:
+    """Apply one event from the React evidence editor. Returns True if saved."""
+    if not isinstance(event, dict):
+        return False
+    action = str(event.get("action") or "")
+    if not action or _event_seen(str(event.get("event_id") or "")):
+        return False
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+    eid = str(payload.get("id") or "")
+
+    if action == "save_evidence":
+        return _apply_save_evidence(eid, fields)
+    if action == "add_evidence":
+        return _apply_add_evidence(fields)
+    if action == "deprecate_evidence":
+        return _apply_deprecate(eid, str(payload.get("replaced_by") or ""))
+    if action == "link_project":
+        return _apply_link_project(eid, payload.get("project_refs") or [])
+    if action == "backfill_project_refs":
+        return _apply_backfill_project_refs(payload.get("ids"))
+    if action == "apply_migration":
+        return _apply_migration(payload.get("ids"))
+    if action == "refresh_from_crystallized_tasks":
+        return _apply_refresh_crystallized(payload.get("task_ids"))
+    if action == "request_ai_reformat":
+        return _apply_request_ai_reformat(eid)
+    if action == "confirm_ai_reformat":
+        return _apply_confirm_ai_reformat(eid, fields)
+    if action == "create_from_output":
+        return _apply_create_from_output(str(payload.get("output_id") or ""))
+    if action == "create_project_from_evidence":
+        sug = (
+            payload.get("suggestion")
+            if isinstance(payload.get("suggestion"), dict)
+            else {}
+        )
+        return _apply_create_project_from_evidence(sug)
+    if action == "suggest_duplicates":
+        st.info(ui.get("ee_duplicates_hint", "Duplicate scan is not yet wired."))
+        return False
+    if action == "merge_or_deprecate":
+        return _apply_deprecate(eid, str(payload.get("replaced_by") or ""))
+    return False
+
+
+def _evidence_editor_labels() -> dict[str, str]:
+    """Pass-through i18n labels the React component reads by key."""
+    keys = [
+        k
+        for k in ui.keys()
+        if k.startswith("ee_")
+        or k.startswith("field_")
+        or k.startswith("origin_")
+        or k.startswith("section_")
+    ]
+    return {k: ui[k] for k in keys}
+
+
+def _render_evidence_editor(review: dict) -> None:
+    """Render the unified React editor; persist events; rerun on save."""
+    payload = build_evidence_editor_payload(selected)
+    preview = st.session_state.get(f"evidence_editor_reformat_{selected}")
+    if preview:
+        payload["reformat_preview"] = preview
+    event = st_evidence_editor(
+        payload=payload,
+        labels=_evidence_editor_labels(),
+        settings={
+            "lang": llm_client.ui_language(),
+            "target_language": llm_client.reply_language(),
+        },
+        key=f"evidence_editor_{selected}",
+    )
+    if _handle_evidence_event(event):
+        st.rerun()
+
+
 review_payload = build_evidence_review(selected)
 summary = review_payload.get("summary") or {}
 
@@ -2666,16 +3075,24 @@ _NAV_SECTIONS = [
     ("refs", ui["tab_refs"], _render_refs),
     ("risks", ui["tab_risks"], _render_risks),
 ]
+# When the built React editor bundle is present, surface it as the default
+# section. The Python tabs remain as a full fallback (and for power workflows).
+if evidence_editor_component_available():
+    _NAV_SECTIONS = [
+        ("editor", ui.get("tab_editor", "Editor"), _render_evidence_editor),
+        *_NAV_SECTIONS,
+    ]
+_default_section = _NAV_SECTIONS[0][0]
 _nav_labels = {key: label for key, label, _ in _NAV_SECTIONS}
 _active_section = st.segmented_control(
     ui.get("nav_section_label", "Workspace"),
     options=[key for key, _, _ in _NAV_SECTIONS],
     format_func=lambda key: _nav_labels.get(key, key),
-    default="queue",
+    default=_default_section,
     key=f"evidence_review_active_section_{selected}",
     label_visibility="collapsed",
 )
-_active_section = _active_section or "queue"
+_active_section = _active_section or _default_section
 for _section_key, _section_label, _section_render in _NAV_SECTIONS:
     if _section_key == _active_section:
         _section_render(review_payload)

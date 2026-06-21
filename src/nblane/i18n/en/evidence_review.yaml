@@ -279,3 +279,83 @@ risk_line: '{label} is {status}; highest {highest}, expected {required}+.'
 merge_preview_title: Preview delta
 merge_preview_pool: Merged evidence-pool preview
 merge_preview_tree: Merged skill-tree preview
+
+# --- Evidence v2 React editor (Phase 8) ---
+tab_editor: Editor
+# field labels
+field_origin: Origin
+field_origin_ref: Origin ref
+field_origin_detail: Origin detail
+field_original_content: Original content
+field_formatted_content: Formatted content
+field_language: Language
+field_original_language: Original language
+field_original_content_hash: Content hash
+field_title: Title
+field_summary: Summary
+field_url: URL
+field_date: Date
+field_type: Type
+field_strength: Strength
+field_confidence: Confidence
+field_review_status: Review status
+field_public_readiness: Public readiness
+field_source_excerpt: Source excerpt
+# sections
+section_basics: Basics
+section_links: Links
+section_ai: AI / tools
+# origin labels
+origin_kanban_task: Kanban task
+origin_resume_parse: Resume parse
+origin_output: Output
+origin_manual_daily: Manual daily
+origin_paper: Paper
+origin_research_source: Research source
+# actions
+ee_add_evidence: Add evidence
+ee_save: Save
+ee_deprecate: Deprecate
+ee_deprecate_confirm: Deprecate this evidence?
+ee_link_project: Internal project
+ee_run_migration: Run migration
+ee_refresh_crystallized_tasks: Refresh crystallized
+ee_migration_preview: Migration preview
+ee_ai_reformat: AI reformat
+ee_ai_reformat_confirm: Confirm reformat
+ee_create_project_from_evidence: Create project from evidence
+ee_create_from_output: Create from output
+ee_duplicate_candidates: Find duplicates
+ee_backfill_project: Backfill project refs
+ee_cancel: Cancel
+ee_search: Search title / summary…
+ee_select_hint: Select an evidence row to edit.
+ee_empty: No evidence matches.
+ee_no_outputs: No outputs available.
+ee_unsaved: unsaved changes
+# filters
+ee_filter_origin: origin
+ee_filter_type: type
+ee_filter_review_status: status
+ee_filter_has_project: has project
+ee_filter_needs_migration: needs migration
+ee_filter_language: language
+# warnings
+ee_project_provenance_reminder: Resume/manual evidence should link an internal project or be left explicitly unassigned.
+ee_original_content_missing: No original content preserved.
+ee_formatted_content_missing: No formatted content yet.
+ee_privacy_original_content_warning: Public-ready row keeps original content — check for private info before publishing.
+ee_public_project_distinction: 'Public usage (read-only):'
+ee_saving: Saving…
+# status messages
+ee_saved: Saved.
+ee_added: Evidence added.
+ee_deprecated: Evidence deprecated.
+ee_migration_done: Migration applied ({n} rows).
+ee_migration_none: Nothing to migrate.
+ee_crystallized_done: Refreshed {n} from crystallized tasks.
+ee_crystallized_none: No crystallized tasks to refresh.
+ee_output_created: Evidence created from output.
+ee_output_missing: Output not found.
+ee_reformat_failed: AI reformat failed.
+ee_duplicates_hint: Duplicate scan is not yet wired.

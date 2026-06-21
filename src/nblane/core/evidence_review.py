@@ -16,9 +16,12 @@ from nblane.core.experience import load_experience_book
 from nblane.core.kanban_archive import find_kanban_tasks_by_ref, kanban_ref_id
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
+    EVIDENCE_LANGUAGES,
+    EVIDENCE_ORIGINS,
     EVIDENCE_PUBLIC_READINESS,
     EVIDENCE_REVIEW_STATUSES,
     EVIDENCE_STRENGTHS,
+    EVIDENCE_TYPES,
 )
 from nblane.core.project_board import load_project_board
 from nblane.core.research_sources import load_research_sources
@@ -680,6 +683,17 @@ def _evidence_row_payload(
         "project_refs": _clean_string_list(row.get("project_refs")),
         "experience_refs": _clean_string_list(row.get("experience_refs")),
         "kanban_refs": _clean_string_list(row.get("kanban_refs")),
+        "source_excerpt": str(row.get("source_excerpt", "") or ""),
+        "origin": str(row.get("origin", "") or ""),
+        "origin_ref": str(row.get("origin_ref", "") or ""),
+        "origin_detail": str(row.get("origin_detail", "") or ""),
+        "original_content": str(row.get("original_content", "") or ""),
+        "formatted_content": str(row.get("formatted_content", "") or ""),
+        "language": str(row.get("language", "") or ""),
+        "original_language": str(row.get("original_language", "") or ""),
+        "original_content_hash": str(
+            row.get("original_content_hash", "") or ""
+        ),
         "deprecated": bool(row.get("deprecated", False)),
         "replaced_by": str(row.get("replaced_by", "") or ""),
         "skill_refs": [item["id"] for item in used_by],
@@ -754,4 +768,198 @@ def build_evidence_review(profile: str | Path) -> dict[str, object]:
         "claim_rows": claims_with_refresh_status(profile),
         "legacy_claim_rows": legacy_claims(profile),
         "claim_usage": claim_usage,
+    }
+
+
+# --- Evidence v2 React editor payload ---------------------------------------
+
+
+def _public_project_options(profile: str | Path) -> list[dict[str, str]]:
+    """Read-only options from public projects.yaml (NOT project_refs targets).
+
+    These are surfaced as "public usage" only; the React editor must never
+    write a public project id into project_refs (those are internal-only).
+    """
+    pdir = profile if isinstance(profile, Path) else io_facade.profile_dir(profile)
+    raw = _read_profile_yaml(pdir / "projects.yaml")
+    projects = raw.get("projects") or []
+    options: list[dict[str, str]] = []
+    for proj in projects:
+        if not isinstance(proj, dict):
+            continue
+        pid = str(proj.get("id", "") or "").strip()
+        if not pid:
+            continue
+        options.append(
+            {
+                "id": pid,
+                "label": str(proj.get("title", "") or pid),
+                "evidence_refs": [
+                    str(r).strip()
+                    for r in (proj.get("evidence_refs") or [])
+                    if str(r).strip()
+                ],
+            }
+        )
+    return options
+
+
+def _read_profile_yaml(path: Path) -> dict:
+    """Load a profile-scoped YAML mapping; tolerate a missing file."""
+    from nblane.core.yaml_io import _load_yaml_dict
+
+    if not path.exists():
+        return {}
+    return _load_yaml_dict(path) or {}
+
+
+def _output_options(profile: str | Path) -> list[dict[str, str]]:
+    """Output rows that could become evidence (create_from_output picker)."""
+    pdir = profile if isinstance(profile, Path) else io_facade.profile_dir(profile)
+    raw = _read_profile_yaml(pdir / "outputs.yaml")
+    outputs = raw.get("outputs") or []
+    options: list[dict[str, str]] = []
+    for out in outputs:
+        if not isinstance(out, dict):
+            continue
+        oid = str(out.get("id", "") or "").strip()
+        if not oid:
+            continue
+        options.append(
+            {
+                "id": oid,
+                "label": str(out.get("title", "") or oid),
+                "target": str(out.get("target", "") or out.get("type", "")),
+                "status": str(out.get("status", "") or ""),
+            }
+        )
+    return options
+
+
+def _editor_row_derived(
+    row: dict[str, Any],
+    *,
+    project_label_by_id: dict[str, str],
+) -> dict[str, Any]:
+    """UI-derived flags for one row in the React editor list."""
+    origin = str(row.get("origin", "") or "")
+    project_refs = [
+        str(r).strip() for r in (row.get("project_refs") or []) if str(r).strip()
+    ]
+    has_original = bool(str(row.get("original_content", "") or "").strip())
+    # A row needs migration when it lacks any v2 provenance signal.
+    needs_migration = not origin or not has_original
+    source_label = str(row.get("origin_detail", "") or "") or origin
+    return {
+        "has_project": bool(project_refs),
+        "has_original_content": has_original,
+        "needs_migration": needs_migration,
+        "source_label": source_label,
+        "project_labels": [
+            project_label_by_id.get(pid, pid) for pid in project_refs
+        ],
+    }
+
+
+def _enum_options(values: tuple[str, ...]) -> list[dict[str, str]]:
+    return [{"id": v, "label": v} for v in values]
+
+
+def evidence_editor_migration_summary(
+    profile: str | Path,
+    *,
+    rows: list[dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Counts driving the editor toolbar (migration / missing raw / orphans)."""
+    if rows is None:
+        rows = _pool_entries(profile)
+    needs_migration = 0
+    missing_raw = 0
+    resume_manual_unassigned = 0
+    for row in rows:
+        if row.get("deprecated"):
+            continue
+        origin = str(row.get("origin", "") or "")
+        has_raw = bool(str(row.get("original_content", "") or "").strip())
+        if not origin or not has_raw:
+            needs_migration += 1
+        if not has_raw:
+            missing_raw += 1
+        project_refs = [
+            r for r in (row.get("project_refs") or []) if str(r).strip()
+        ]
+        if origin in ("resume_parse", "manual_daily") and not project_refs:
+            resume_manual_unassigned += 1
+    # Crystallized tasks without evidence + output candidates.
+    try:
+        from nblane.core.evidence_migrate import refresh_from_crystallized_tasks
+
+        crystallized = refresh_from_crystallized_tasks(profile, entries=rows)
+        crystallized_new = sum(
+            1 for p in crystallized["proposals"] if p["kind"] == "new"
+        )
+    except Exception:
+        crystallized_new = 0
+    output_candidates = len(_output_options(profile))
+    return {
+        "needs_migration": needs_migration,
+        "missing_raw": missing_raw,
+        "resume_manual_unassigned": resume_manual_unassigned,
+        "crystallized_without_evidence": crystallized_new,
+        "output_candidates": output_candidates,
+    }
+
+
+def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
+    """Full payload for the unified React evidence editor component.
+
+    Extends build_evidence_review() with editor-only data: public project
+    options (read-only), project suggestions, output options, enum option
+    lists, migration summary, and per-row UI-derived flags.
+    """
+    from nblane.core.evidence_migrate import suggest_projects_from_evidence
+
+    review = build_evidence_review(profile)
+    all_rows = list(review.get("all_evidence_rows") or [])
+    active_rows = list(review.get("evidence_rows") or [])
+
+    project_options = list(review.get("project_options") or [])
+    project_label_by_id = {
+        str(o.get("id")): str(o.get("label") or o.get("id"))
+        for o in project_options
+    }
+
+    # Annotate each active row with derived UI flags.
+    enriched_rows: list[dict[str, Any]] = []
+    for row in active_rows:
+        derived = _editor_row_derived(
+            row, project_label_by_id=project_label_by_id
+        )
+        enriched_rows.append({**row, **derived})
+
+    suggestions = suggest_projects_from_evidence(active_rows)
+
+    return {
+        "profile": _profile_name(profile),
+        "evidence_rows": enriched_rows,
+        "all_evidence_rows": all_rows,
+        "project_options": project_options,
+        "public_project_options": _public_project_options(profile),
+        "experience_options": review.get("experience_options") or [],
+        "source_options": review.get("source_options") or [],
+        "skill_options": review.get("skill_options") or [],
+        "output_options": _output_options(profile),
+        "project_ref_candidates": review.get("project_ref_candidates") or [],
+        "project_suggestions": suggestions,
+        "migration_summary": evidence_editor_migration_summary(
+            profile, rows=_pool_entries(profile)
+        ),
+        "origin_options": _enum_options(EVIDENCE_ORIGINS),
+        "type_options": _enum_options(tuple(sorted(EVIDENCE_TYPES))),
+        "language_options": _enum_options(EVIDENCE_LANGUAGES),
+        "review_status_options": _enum_options(EVIDENCE_REVIEW_STATUSES),
+        "strength_options": _enum_options(EVIDENCE_STRENGTHS),
+        "confidence_options": _enum_options(EVIDENCE_CONFIDENCES),
+        "public_readiness_options": _enum_options(EVIDENCE_PUBLIC_READINESS),
+        "summary": review.get("summary") or {},
     }

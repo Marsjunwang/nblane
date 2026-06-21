@@ -13,6 +13,7 @@ from nblane.core.claims import claims_with_refresh_status
 from nblane.core.evidence_review import (
     EVIDENCE_REVIEW_PAGE,
     build_evidence_review,
+    evidence_editor_migration_summary,
     evidence_status_risks,
 )
 from nblane.core.goals import (
@@ -441,6 +442,7 @@ def dashboard_pending_evidence_summary(profile: ProfileRef) -> dict:
     """Return lightweight evidence items that need review or linking."""
     review = build_evidence_review(profile)
     summary = review.get("summary") or {}
+    v2 = _v2_evidence_metrics(profile, review.get("evidence_rows") or [])
     return {
         "total_entries": int(summary.get("total_entries", 0) or 0),
         "evidence_rows": list(review.get("evidence_rows") or []),
@@ -456,6 +458,63 @@ def dashboard_pending_evidence_summary(profile: ProfileRef) -> dict:
         "done_uncrystallized": list(
             review.get("done_uncrystallized") or []
         )[:5],
+        **v2,
+    }
+
+
+def _v2_evidence_metrics(profile: ProfileRef, rows: list) -> dict:
+    """v2 provenance / full-content health metrics for the dashboard.
+
+    These are warnings (not blockers): they surface evidence that migrated
+    incompletely or that needs a project source, so the Home dashboard can
+    deep-link the reviewer to the right Evidence Review filter.
+    """
+    missing_original = 0
+    missing_formatted = 0
+    missing_origin = 0
+    resume_unassigned = 0
+    manual_unassigned = 0
+    public_with_private_origin = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        origin = str(row.get("origin", "") or "")
+        has_raw = bool(str(row.get("original_content", "") or "").strip())
+        has_fmt = bool(str(row.get("formatted_content", "") or "").strip())
+        project_refs = [
+            r for r in (row.get("project_refs") or []) if str(r).strip()
+        ]
+        readiness = str(row.get("public_readiness", "") or "")
+        if not has_raw:
+            missing_original += 1
+        if not has_fmt:
+            missing_formatted += 1
+        if not origin:
+            missing_origin += 1
+        if origin == "resume_parse" and not project_refs:
+            resume_unassigned += 1
+        if origin == "manual_daily" and not project_refs:
+            manual_unassigned += 1
+        if readiness in ("public_ready", "published") and origin in (
+            "resume_parse",
+            "manual_daily",
+        ):
+            public_with_private_origin += 1
+    extra = evidence_editor_migration_summary(profile, rows=rows)
+    return {
+        "missing_original_content_count": missing_original,
+        "missing_formatted_content_count": missing_formatted,
+        "missing_origin_count": missing_origin,
+        "resume_unassigned_project_count": resume_unassigned,
+        "manual_daily_unassigned_project_count": manual_unassigned,
+        "public_ready_with_private_origin_count": public_with_private_origin,
+        "needs_migration_count": int(extra.get("needs_migration", 0) or 0),
+        "crystallized_tasks_without_evidence_count": int(
+            extra.get("crystallized_without_evidence", 0) or 0
+        ),
+        "output_candidates_without_evidence_count": int(
+            extra.get("output_candidates", 0) or 0
+        ),
     }
 
 

@@ -167,6 +167,59 @@ def _evidence_issues(profile_path, tree_raw: dict | None) -> list[HealthIssue]:
                 ),
             )
         )
+    issues.extend(_evidence_v2_issues(profile_path))
+    return issues
+
+
+def _evidence_v2_issues(profile_path) -> list[HealthIssue]:
+    """v2 provenance warnings (never fatal): missing raw content / unassigned.
+
+    Aggregated counts keep the health report readable rather than emitting one
+    issue per row.
+    """
+    raw = load_evidence_pool_raw(profile_path) or {}
+    rows = [
+        r
+        for r in (raw.get("evidence_entries") or [])
+        if isinstance(r, dict) and not r.get("deprecated")
+    ]
+    if not rows:
+        return []
+    missing_raw = 0
+    unassigned = 0
+    for row in rows:
+        origin = str(row.get("origin", "") or "")
+        if not str(row.get("original_content", "") or "").strip():
+            missing_raw += 1
+        project_refs = [
+            p for p in (row.get("project_refs") or []) if str(p).strip()
+        ]
+        if origin in ("resume_parse", "manual_daily") and not project_refs:
+            unassigned += 1
+    issues: list[HealthIssue] = []
+    if missing_raw:
+        issues.append(
+            _issue(
+                "warning",
+                "evidence",
+                "Evidence missing preserved original content",
+                f"{missing_raw} evidence row(s) have no original_content.",
+                "Run migration in Evidence Review to backfill source content.",
+            )
+        )
+    if unassigned:
+        issues.append(
+            _issue(
+                "warning",
+                "evidence",
+                "Resume/manual evidence without a project",
+                f"{unassigned} resume/manual evidence row(s) have no project.",
+                (
+                    "Link an internal project (or create one from the "
+                    "evidence) in Evidence Review."
+                ),
+            )
+        )
     return issues
 
 

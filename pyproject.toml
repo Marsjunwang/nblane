@@ -68,6 +68,10 @@ include = ["nblane*", "schemas*"]
     "frontend/static/index.html",
     "frontend/static/assets/*",
 ]
+"nblane.evidence_editor_component" = [
+    "frontend/static/index.html",
+    "frontend/static/assets/*",
+]
 "nblane.web_reader_api" = [
     "templates/*.html",
     "static/assets/*",

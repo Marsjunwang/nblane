@@ -279,3 +279,83 @@ risk_line: '{label} 为 {status}；最高 {highest}，期望 {required}+。'
 merge_preview_title: 变更预览
 merge_preview_pool: 合并后的 evidence-pool 预览
 merge_preview_tree: 合并后的 skill-tree 预览
+
+# --- 证据 v2 React 编辑器（阶段 8）---
+tab_editor: 编辑器
+# 字段标签
+field_origin: 来源
+field_origin_ref: 主来源引用
+field_origin_detail: 来源说明
+field_original_content: 原始内容
+field_formatted_content: 规范正文
+field_language: 语言
+field_original_language: 原文语言
+field_original_content_hash: 内容哈希
+field_title: 标题
+field_summary: 摘要
+field_url: 链接
+field_date: 日期
+field_type: 类型
+field_strength: 强度
+field_confidence: 置信度
+field_review_status: 审阅状态
+field_public_readiness: 公开就绪度
+field_source_excerpt: 原文摘录
+# 分区
+section_basics: 基础
+section_links: 关联
+section_ai: AI / 工具
+# 来源标签
+origin_kanban_task: 看板任务
+origin_resume_parse: 简历解析
+origin_output: 输出作品
+origin_manual_daily: 手动日常
+origin_paper: 论文
+origin_research_source: 研究来源
+# 动作
+ee_add_evidence: 新增证据
+ee_save: 保存
+ee_deprecate: 弃用
+ee_deprecate_confirm: 确认弃用这条证据？
+ee_link_project: 内部项目
+ee_run_migration: 运行迁移
+ee_refresh_crystallized_tasks: 从已沉淀任务刷新
+ee_migration_preview: 迁移预览
+ee_ai_reformat: AI 重新格式化
+ee_ai_reformat_confirm: 确认格式化
+ee_create_project_from_evidence: 由证据创建项目
+ee_create_from_output: 从输出创建
+ee_duplicate_candidates: 查找重复
+ee_backfill_project: 回填项目引用
+ee_cancel: 取消
+ee_search: 搜索标题 / 摘要…
+ee_select_hint: 选择一条证据进行编辑。
+ee_empty: 没有匹配的证据。
+ee_no_outputs: 暂无可用输出。
+ee_unsaved: 未保存的修改
+# 过滤
+ee_filter_origin: 来源
+ee_filter_type: 类型
+ee_filter_review_status: 状态
+ee_filter_has_project: 已关联项目
+ee_filter_needs_migration: 待迁移
+ee_filter_language: 语言
+# 提醒
+ee_project_provenance_reminder: 简历/手动证据应关联内部项目，或显式标记为未关联。
+ee_original_content_missing: 未保留原始内容。
+ee_formatted_content_missing: 尚无规范正文。
+ee_privacy_original_content_warning: 公开就绪的条目仍保留原始内容，发布前请检查是否含隐私信息。
+ee_public_project_distinction: 公开使用（只读）：
+ee_saving: 保存中…
+# 状态消息
+ee_saved: 已保存。
+ee_added: 已新增证据。
+ee_deprecated: 已弃用证据。
+ee_migration_done: 已应用迁移（{n} 条）。
+ee_migration_none: 没有需要迁移的内容。
+ee_crystallized_done: 已从已沉淀任务刷新 {n} 条。
+ee_crystallized_none: 没有可刷新的已沉淀任务。
+ee_output_created: 已从输出创建证据。
+ee_output_missing: 未找到该输出。
+ee_reformat_failed: AI 重新格式化失败。
+ee_duplicates_hint: 重复检测尚未接入。

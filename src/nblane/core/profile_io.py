@@ -10,7 +10,11 @@ import yaml
 
 from nblane.core import git_backup
 from nblane.core.file_write import atomic_write_text
-from nblane.core.models import EvidencePool, SkillTree
+from nblane.core.models import (
+    EVIDENCE_POOL_SCHEMA_VERSION,
+    EvidencePool,
+    SkillTree,
+)
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict, _load_yaml_file
 
@@ -164,6 +168,10 @@ def save_evidence_pool(name: str, data: dict) -> None:
     """Write evidence-pool.yaml with today's date updated."""
     data = dict(data)
     data["updated"] = date.today().isoformat()
+    # Stamp v2 schema version on every write so refresh/compat checks have a
+    # signal. Only upgrades the marker; never downgrades a newer pool.
+    if not str(data.get("schema_version") or "").strip():
+        data["schema_version"] = EVIDENCE_POOL_SCHEMA_VERSION
     path = profile_dir(name) / EVIDENCE_POOL_FILENAME
     header = (
         f"# Evidence pool for {name}\n"

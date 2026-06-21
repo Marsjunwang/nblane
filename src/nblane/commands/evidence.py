@@ -10,7 +10,7 @@ from nblane.core.evidence_pool_id import (
     fingerprint_match_id,
     new_evidence_id,
 )
-from nblane.core.models import EVIDENCE_TYPES
+from nblane.core.models import EVIDENCE_ORIGINS, EVIDENCE_TYPES
 
 
 def cmd_evidence_add(
@@ -72,6 +72,15 @@ def cmd_evidence_pool_add(
     pa.add_argument("--date", default="")
     pa.add_argument("--url", default="")
     pa.add_argument("--summary", default="")
+    pa.add_argument("--origin", default="", choices=("", *EVIDENCE_ORIGINS))
+    pa.add_argument("--origin-ref", dest="origin_ref", default="")
+    pa.add_argument("--origin-detail", dest="origin_detail", default="")
+    pa.add_argument(
+        "--original-content", dest="original_content", default=""
+    )
+    pa.add_argument(
+        "--formatted-content", dest="formatted_content", default=""
+    )
     opts = pa.parse_args(argv)
 
     title = opts.title.strip()
@@ -131,6 +140,16 @@ def cmd_evidence_pool_add(
         row["url"] = opts.url.strip()
     if opts.summary.strip():
         row["summary"] = opts.summary.strip()
+    if opts.origin.strip():
+        row["origin"] = opts.origin.strip()
+    if opts.origin_ref.strip():
+        row["origin_ref"] = opts.origin_ref.strip()
+    if opts.origin_detail.strip():
+        row["origin_detail"] = opts.origin_detail.strip()
+    if opts.original_content.strip():
+        row["original_content"] = opts.original_content.strip()
+    if opts.formatted_content.strip():
+        row["formatted_content"] = opts.formatted_content.strip()
 
     plain_entries.append(row)
     raw["profile"] = name

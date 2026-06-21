@@ -85,8 +85,9 @@ def _system_prompt_resume_zh() -> str:
         "evidence_entries 每项字段：\n"
         "- id：推荐稳定短 id（如 ev_vla、ev_1），与下文 evidence_refs 字符串完全一致。\n"
         "- type：project | paper | course | practice（有论文或正式发表时务必用 paper）。\n"
-        "- title、date、url、summary：summary 写清可核验要点，便于判断 solid。\n\n"
-        "node_updates 每项：id（仅允许列表中的节点）、evidence_refs、"
+        "- title、date、url、summary：summary 写清可核验要点，便于判断 solid。\n"
+        + _evidence_provenance_resume_zh()
+        + "node_updates 每项：id（仅允许列表中的节点）、evidence_refs、"
         "可选 evidence、note、status。\n"
         "evidence_refs：引用本 JSON 里 evidence_entries 的 id；"
         "或用 first_1、ev_2 表示 evidence_entries 第 1、2 条（从 1 起）。\n\n"
@@ -108,14 +109,54 @@ def _system_prompt_resume_en() -> str:
         "- type: project | paper | course | practice (use paper when "
         "the resume describes a real publication).\n"
         "- title, date, url, summary: put verifiable details in summary "
-        "to support solid vs learning.\n\n"
-        "node_updates: id (allowed nodes only), evidence_refs, optional "
+        "to support solid vs learning.\n"
+        + _evidence_provenance_resume_en()
+        + "node_updates: id (allowed nodes only), evidence_refs, optional "
         "evidence, note, status.\n"
         "evidence_refs: same ids as evidence_entries, or first_1 / ev_2 "
         "meaning row index in evidence_entries (1-based).\n\n"
         + _status_rubric_en()
         + "\nUse empty arrays if mapping is unreliable."
     )
+
+
+def _evidence_provenance_resume_zh() -> str:
+    """v2 provenance fields each resume evidence row must carry."""
+    return (
+        "- origin：固定为 \"resume_parse\"。\n"
+        "- origin_ref：\"resume\"，或更精确的 resume:<区块/hash/block-id>。\n"
+        "- origin_detail：简历区块名（如 GAC / CloudMile / Publications）。\n"
+        "- source_excerpt：简历原文中证明该条的一两句照抄。\n"
+        "- original_content：对应简历**原始片段（span）**原样保留，"
+        "**不要**只存模型摘要。\n"
+        "- formatted_content：结构化、可读的 Markdown 正文。\n"
+        "- language：规范化字段语言，按回复语言填 \"en\"/\"zh\"。\n"
+        "- original_language：original_content 的实际语言。\n"
+        "- project_refs：若能确定对应已有 Project Board 项目则给出；"
+        "不确定就留空（后续由项目建议处理）。\n\n"
+    )
+
+
+def _evidence_provenance_resume_en() -> str:
+    """v2 provenance fields each resume evidence row must carry."""
+    return (
+        "- origin: always \"resume_parse\".\n"
+        "- origin_ref: \"resume\", or a more precise resume:<block/hash/id>.\n"
+        "- origin_detail: the resume section name (e.g. GAC / CloudMile / "
+        "Publications).\n"
+        "- source_excerpt: a literal sentence or two from the resume "
+        "grounding the row.\n"
+        "- original_content: keep the **original resume span** verbatim; "
+        "do NOT store only the model summary.\n"
+        "- formatted_content: a structured, readable Markdown body.\n"
+        "- language: language of the normalized fields; set \"en\"/\"zh\" to "
+        "match the reply language.\n"
+        "- original_language: the actual language of original_content.\n"
+        "- project_refs: provide it only when an existing Project Board "
+        "project clearly matches; otherwise leave empty (a separate project "
+        "suggestion step handles it).\n\n"
+    )
+
 
 
 def _kanban_evidence_contract_zh() -> str:
@@ -212,6 +253,50 @@ def _evidence_grading_en() -> str:
     )
 
 
+def _evidence_provenance_kanban_zh() -> str:
+    """v2 provenance fields the kanban distillation must emit per row."""
+    return (
+        "### v2 出处字段（看板蒸馏每条 evidence_entries 必填）\n\n"
+        "- origin：固定为 \"kanban_task\"。\n"
+        "- origin_ref：对应 Done 任务的 id（如 task 的 id 字段）。\n"
+        "- origin_detail：Done 任务标题 + 完成日期，便于人审时识别来源。\n"
+        "- kanban_refs：[\"kanban:<task id>\"]，至少含主任务。\n"
+        "- project_refs：仅当任务带 project_id 时填 [<project_id>]，否则省略。\n"
+        "- original_content：把**完整任务原文**（title/context/why/outcome/notes/"
+        "subtasks/dates/project_id）原样保留，**不要压成摘要**。\n"
+        "- formatted_content：结构化、可读的 Markdown 正文（标题/要点/指标/出处），"
+        "可读但**不替代** original_content。\n"
+        "- language：规范化字段（title/summary/formatted_content）的语言，"
+        "按系统回复语言填 \"en\" 或 \"zh\"。\n"
+        "- original_language：original_content 的实际语言（en/zh/mixed）。\n\n"
+    )
+
+
+def _evidence_provenance_kanban_en() -> str:
+    """v2 provenance fields the kanban distillation must emit per row."""
+    return (
+        "### v2 provenance fields (required on every kanban evidence row)\n\n"
+        "- origin: always \"kanban_task\".\n"
+        "- origin_ref: the source Done task id.\n"
+        "- origin_detail: Done task title + completed date (for human review).\n"
+        "- kanban_refs: [\"kanban:<task id>\"], at least the primary task.\n"
+        "- project_refs: [<project_id>] only when the task has a project_id; "
+        "otherwise omit.\n"
+        "- original_content: keep the **full task text** verbatim "
+        "(title/context/why/outcome/notes/subtasks/dates/project_id). "
+        "Do NOT compress it into a summary.\n"
+        "- formatted_content: a structured, readable Markdown body "
+        "(heading/points/metrics/source). Readable, but it does NOT replace "
+        "original_content.\n"
+        "- language: language of the normalized fields "
+        "(title/summary/formatted_content); set \"en\" or \"zh\" to match the "
+        "reply language.\n"
+        "- original_language: the actual language of original_content "
+        "(en/zh/mixed).\n\n"
+    )
+
+
+
 def _status_rubric_kanban_zh() -> str:
     """Stricter solid rules for kanban (resume keeps shared rubric)."""
     return (
@@ -261,6 +346,7 @@ def _system_prompt_kanban_zh() -> str:
         "字段名必须写作 id，禁止写 node_id、skill_id 或 node）、"
         "evidence_refs、status、rationale。\n\n"
         + _evidence_grading_zh()
+        + _evidence_provenance_kanban_zh()
         + "### 出处（必填）\n\n"
         "- evidence_entries 每项必须含 **source_excerpt**：从对应 Done 任务原文"
         "（title/context/outcome/notes/subtask）中**照抄或极短摘录**一两句，"
@@ -287,6 +373,7 @@ def _system_prompt_kanban_en() -> str:
         "the field name must be exactly id, not node_id, skill_id, or node), "
         "evidence_refs, status, rationale.\n\n"
         + _evidence_grading_en()
+        + _evidence_provenance_kanban_en()
         + "### Provenance (required)\n\n"
         "- Each evidence_entries item MUST include **source_excerpt**: "
         "a short literal quote from the Done task (title/context/outcome/"
@@ -376,6 +463,8 @@ def _format_done_tasks(tasks: list[KanbanTask]) -> str:
     lines: list[str] = []
     for t in tasks:
         lines.append(f"- title: {t.title}")
+        if t.id.strip():
+            lines.append(f"  id: {t.id.strip()}")
         if t.done:
             lines.append("  done: true")
         if t.context.strip():
@@ -390,6 +479,14 @@ def _format_done_tasks(tasks: list[KanbanTask]) -> str:
             lines.append(f"  started_on: {t.started_on}")
         if t.completed_on:
             lines.append(f"  completed_on: {t.completed_on}")
+        if t.project_id.strip():
+            lines.append(f"  project_id: {t.project_id.strip()}")
+        if t.milestone_id.strip():
+            lines.append(f"  milestone_id: {t.milestone_id.strip()}")
+        if t.tags.strip():
+            lines.append(f"  tags: {t.tags.strip()}")
+        if getattr(t, "crystallized", False):
+            lines.append("  crystallized: true")
         for st in t.subtasks:
             mark = "x" if st.done else " "
             lines.append(f"  subtask [{mark}] {st.title}")
@@ -586,3 +683,102 @@ def _use_codex_backend(value: object) -> bool:
     """Return True when kanban ingest should use local read-only Codex."""
 
     return str(value or "").strip().casefold() == "codex"
+
+
+# --- Evidence v2: AI reformat (target-language normalization) ---------------
+
+_REFORMAT_KEYS = ("title", "summary", "formatted_content")
+
+
+def _reformat_system_prompt(target_lang: str) -> str:
+    """System prompt for reformatting one evidence row to *target_lang*."""
+    if target_lang == "zh":
+        return (
+            "你是一个履历证据规范化助手。给定一条证据的原始内容"
+            "(original_content) 与现有字段，请把它整理成规范、可读的中文。\n"
+            "严格要求：\n"
+            "1. 只输出 JSON：{\"title\":..., \"summary\":..., "
+            "\"formatted_content\":...}。\n"
+            "2. title 为简短标题；summary 为 1-3 句摘要；formatted_content 为"
+            "完整、结构化的 Markdown 正文，可读且包含原始事实。\n"
+            "3. 事实只能来自 original_content / 现有字段，不要编造数字或成果。\n"
+            "4. 绝对不要改写或返回 original_content 本身。\n"
+            "5. 全部用中文输出。"
+        )
+    return (
+        "You normalize a single resume/evidence row. Given its raw "
+        "original_content and current fields, produce clean, readable English.\n"
+        "Strict rules:\n"
+        '1. Output JSON only: {"title":..., "summary":..., '
+        '"formatted_content":...}.\n'
+        "2. title is a short heading; summary is 1-3 sentences; "
+        "formatted_content is a complete, structured Markdown body that is "
+        "readable and preserves the original facts.\n"
+        "3. Facts must come only from original_content / current fields. Do "
+        "not invent metrics or outcomes.\n"
+        "4. Never rewrite or return original_content itself.\n"
+        "5. Write everything in English."
+    )
+
+
+def _reformat_user_message(row: dict) -> str:
+    def _g(key: str) -> str:
+        return str(row.get(key, "") or "").strip()
+
+    return (
+        "Current fields:\n"
+        f"- id: {_g('id')}\n"
+        f"- type: {_g('type')}\n"
+        f"- origin: {_g('origin')}\n"
+        f"- title: {_g('title')}\n"
+        f"- summary: {_g('summary')}\n\n"
+        "original_content (source of truth, do not rewrite):\n"
+        "<<<\n"
+        f"{_g('original_content')}\n"
+        ">>>\n\n"
+        "Return the JSON object now."
+    )
+
+
+def reformat_evidence(
+    profile: str,
+    row: dict,
+    *,
+    target_lang: str | None = None,
+) -> tuple[dict | None, str | None]:
+    """Propose normalized title/summary/formatted_content in *target_lang*.
+
+    Returns ``(proposed_row, error)``. The proposal only carries the
+    reformatted fields plus ``language``; it never touches original_content,
+    origin, refs, or status. Does not save — the caller confirms.
+    """
+    target_lang = (target_lang or llm_client.reply_language() or "en").strip()
+    target_lang = "zh" if target_lang == "zh" else "en"
+
+    if not str(row.get("original_content", "") or "").strip() and not str(
+        row.get("summary", "") or ""
+    ).strip():
+        return None, "no original_content to reformat"
+    if not llm_client.is_configured():
+        return None, "LLM not configured"
+
+    system = _reformat_system_prompt(target_lang)
+    user = _reformat_user_message(row)
+    reply = llm_client.chat(system, user, temperature=0.2)
+    if reply.startswith("LLM error:") or reply.startswith(
+        "AI features not configured"
+    ):
+        return None, reply
+    data = extract_json_object(reply)
+    if data is None:
+        return None, "Could not parse reformat JSON from LLM."
+
+    proposed: dict = {}
+    for key in _REFORMAT_KEYS:
+        val = str(data.get(key, "") or "").strip()
+        if val:
+            proposed[key] = val
+    if not proposed:
+        return None, "reformat produced no usable fields"
+    proposed["language"] = target_lang
+    return proposed, None

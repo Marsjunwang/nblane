@@ -8,6 +8,8 @@ import re
 from nblane.core.ingest_models import IngestPatch
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
+    EVIDENCE_LANGUAGES,
+    EVIDENCE_ORIGINS,
     EVIDENCE_PUBLIC_READINESS,
     EVIDENCE_REVIEW_STATUSES,
     EVIDENCE_STRENGTHS,
@@ -195,6 +197,26 @@ def _normalize_evidence_row(row: dict) -> dict | None:
     source_excerpt = row.get("source_excerpt")
     if source_excerpt is not None and str(source_excerpt).strip():
         out["source_excerpt"] = str(source_excerpt).strip()
+    # v2 provenance: enum-gated origin / language fields.
+    origin = str(row.get("origin", "") or "").strip()
+    if origin in EVIDENCE_ORIGINS:
+        out["origin"] = origin
+    language = str(row.get("language", "") or "").strip()
+    if language in EVIDENCE_LANGUAGES:
+        out["language"] = language
+    original_language = str(row.get("original_language", "") or "").strip()
+    if original_language in EVIDENCE_LANGUAGES:
+        out["original_language"] = original_language
+    # v2 free-text: .strip() trims only the outer whitespace of the whole
+    # string, leaving internal newlines intact.
+    for key in ("origin_ref", "origin_detail", "original_content_hash"):
+        val = row.get(key)
+        if val is not None and str(val).strip():
+            out[key] = str(val).strip()
+    for key in ("original_content", "formatted_content"):
+        val = row.get(key)
+        if val is not None and str(val).strip():
+            out[key] = str(val).strip()
     strength = str(row.get("strength", "") or "").strip()
     if strength in EVIDENCE_STRENGTHS:
         out["strength"] = strength
@@ -234,6 +256,15 @@ def _normalize_evidence_row(row: dict) -> dict | None:
         ]
         if refs:
             out["kanban_refs"] = refs
+    experience_refs = row.get("experience_refs")
+    if isinstance(experience_refs, list):
+        refs = [
+            str(item).strip()
+            for item in experience_refs
+            if str(item).strip()
+        ]
+        if refs:
+            out["experience_refs"] = refs
     if row.get("deprecated") is True:
         out["deprecated"] = True
     rb = str(row.get("replaced_by", "") or "").strip()

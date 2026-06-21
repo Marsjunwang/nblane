@@ -571,6 +571,7 @@ def _sync_new_case_and_refresh(
     visibility: str,
     summary: str,
     goal_refs: list[str],
+    evidence_refs: list[str] | None = None,
 ):
     latest_board = load_project_board(selected)
     try:
@@ -583,6 +584,7 @@ def _sync_new_case_and_refresh(
             visibility=visibility,
             summary=summary,
             goal_refs=goal_refs,
+            evidence_refs=evidence_refs or None,
         )
     except ValueError as exc:
         st.error(str(exc))
@@ -773,21 +775,58 @@ def _summary_metrics(board: ProjectBoard) -> None:
 
 
 def _render_create_project(board: ProjectBoard) -> None:
-    with st.expander(ui["create_project"], expanded=not board.project_cases):
+    # Prefill from an Evidence Review "create project from evidence" suggestion.
+    prefill = st.session_state.get("project_board_create_prefill") or {}
+    prefill_evidence = list(prefill.get("evidence_ids") or [])
+    with st.expander(
+        ui["create_project"], expanded=bool(prefill) or not board.project_cases
+    ):
+        if prefill:
+            st.info(
+                ui.get(
+                    "create_from_evidence_hint",
+                    "Prefilled from {n} evidence row(s). Confirm to create and link.",
+                ).format(n=len(prefill_evidence))
+            )
         with st.form(_state_key("create_project")):
-            title = st.text_input(ui["field_title"])
-            case_id = st.text_input(ui["field_id"], help=ui["id_help"])
+            title = st.text_input(
+                ui["field_title"], value=str(prefill.get("title", "") or "")
+            )
+            case_id = st.text_input(
+                ui["field_id"],
+                value=str(prefill.get("id", "") or ""),
+                help=ui["id_help"],
+            )
             c1, c2, c3 = st.columns(3)
             with c1:
                 status = st.selectbox(ui["field_status"], PROJECT_STATUSES)
             with c2:
-                kind = st.selectbox(ui["field_kind"], PROJECT_KINDS)
+                _kind_default = str(prefill.get("kind", "") or "")
+                kind = st.selectbox(
+                    ui["field_kind"],
+                    PROJECT_KINDS,
+                    index=(
+                        PROJECT_KINDS.index(_kind_default)
+                        if _kind_default in PROJECT_KINDS
+                        else 0
+                    ),
+                )
             with c3:
+                _vis_default = str(prefill.get("visibility", "") or "")
                 visibility = st.selectbox(
                     ui["field_visibility"],
                     PROJECT_VISIBILITIES,
+                    index=(
+                        PROJECT_VISIBILITIES.index(_vis_default)
+                        if _vis_default in PROJECT_VISIBILITIES
+                        else 0
+                    ),
                 )
-            summary = st.text_area(ui["field_summary"], height=80)
+            summary = st.text_area(
+                ui["field_summary"],
+                height=80,
+                value=str(prefill.get("summary", "") or ""),
+            )
             goals = _multiselect_refs(
                 ui["field_goal_refs"],
                 [],
@@ -809,9 +848,12 @@ def _render_create_project(board: ProjectBoard) -> None:
             visibility=visibility,
             summary=summary,
             goal_refs=goals,
+            evidence_refs=prefill_evidence,
         )
         if case is None:
             return
+        # One-shot prefill: clear so a normal create next time starts blank.
+        st.session_state.pop("project_board_create_prefill", None)
         st.session_state[_state_key("selected_project_active")] = case.id
         st.rerun()
 

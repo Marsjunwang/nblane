@@ -16,6 +16,21 @@ EVIDENCE_PUBLIC_READINESS = (
     "public_ready",
     "published",
 )
+# v2 provenance: where an evidence row came from (distinct from `type`,
+# which is the proof category). See evidence architecture v2 plan.
+EVIDENCE_ORIGINS = (
+    "kanban_task",
+    "resume_parse",
+    "output",
+    "manual_daily",
+    "paper",
+    "research_source",
+)
+# Language of the normalized fields (title/summary/formatted_content) and,
+# separately, the detected language of original_content.
+EVIDENCE_LANGUAGES = ("en", "zh", "mixed", "unknown")
+# Pool schema version. v2 introduces provenance + full-content fields.
+EVIDENCE_POOL_SCHEMA_VERSION = "2.0"
 CLAIM_TYPES = (
     "achievement",
     "skill",
@@ -85,6 +100,15 @@ class EvidenceRecord:
     experience_refs: list[str] = field(default_factory=list)
     kanban_refs: list[str] = field(default_factory=list)
     source_excerpt: str = ""
+    # v2 provenance + full-content fields.
+    origin: str = ""
+    origin_ref: str = ""
+    origin_detail: str = ""
+    original_content: str = ""
+    formatted_content: str = ""
+    language: str = ""
+    original_language: str = ""
+    original_content_hash: str = ""
     deprecated: bool = False
     replaced_by: str = ""
 
@@ -143,6 +167,14 @@ class EvidenceRecord:
             if isinstance(d.get("kanban_refs"), list)
             else [],
             source_excerpt=str(d.get("source_excerpt", "") or ""),
+            origin=str(d.get("origin", "") or ""),
+            origin_ref=str(d.get("origin_ref", "") or ""),
+            origin_detail=str(d.get("origin_detail", "") or ""),
+            original_content=str(d.get("original_content", "") or ""),
+            formatted_content=str(d.get("formatted_content", "") or ""),
+            language=str(d.get("language", "") or ""),
+            original_language=str(d.get("original_language", "") or ""),
+            original_content_hash=str(d.get("original_content_hash", "") or ""),
             deprecated=bool(d.get("deprecated", False)),
             replaced_by=str(d.get("replaced_by", "") or ""),
         )
@@ -178,6 +210,22 @@ class EvidenceRecord:
             out["kanban_refs"] = list(self.kanban_refs)
         if self.source_excerpt:
             out["source_excerpt"] = self.source_excerpt
+        if self.origin:
+            out["origin"] = self.origin
+        if self.origin_ref:
+            out["origin_ref"] = self.origin_ref
+        if self.origin_detail:
+            out["origin_detail"] = self.origin_detail
+        if self.original_content:
+            out["original_content"] = self.original_content
+        if self.formatted_content:
+            out["formatted_content"] = self.formatted_content
+        if self.language:
+            out["language"] = self.language
+        if self.original_language:
+            out["original_language"] = self.original_language
+        if self.original_content_hash:
+            out["original_content_hash"] = self.original_content_hash
         if self.deprecated:
             out["deprecated"] = True
         if self.replaced_by:
@@ -191,6 +239,7 @@ class EvidencePool:
 
     profile: str = ""
     updated: str = ""
+    schema_version: str = ""
     evidence_entries: list[EvidenceRecord] = field(default_factory=list)
     claims: list[dict] = field(default_factory=list)
 
@@ -206,6 +255,7 @@ class EvidencePool:
         return cls(
             profile=str(d.get("profile", "") or ""),
             updated=str(d.get("updated", "") or ""),
+            schema_version=str(d.get("schema_version", "") or ""),
             evidence_entries=entries,
             claims=[
                 dict(item)
@@ -223,6 +273,8 @@ class EvidencePool:
                 e.to_dict() for e in self.evidence_entries
             ],
         }
+        if self.schema_version:
+            out["schema_version"] = self.schema_version
         if self.claims:
             out["claims"] = [dict(item) for item in self.claims]
         return out
