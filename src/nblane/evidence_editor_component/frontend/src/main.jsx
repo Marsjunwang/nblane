@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import "./style.css";
 import { filterRows, rowWarnings } from "./filters.js";
-import { originColor, cleanText, asArray, label } from "./schema.js";
+import { originColor, cleanText, asArray, label, renderMarkdown } from "./schema.js";
 import {
   saveEvidenceEvent,
   addEvidenceEvent,
@@ -114,11 +114,17 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
   const [draft, setDraft] = useState(() => ({ ...row }));
   const [dirty, setDirty] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  // Default to a rendered preview when formatted_content has text, edit mode
+  // when it is empty (so adding content is one click away).
+  const [fmtPreview, setFmtPreview] = useState(
+    () => !!cleanText(row.formatted_content)
+  );
 
   useEffect(() => {
     setDraft({ ...row });
     setDirty(false);
     setShowRaw(false);
+    setFmtPreview(!!cleanText(row.formatted_content));
   }, [row.id]);
 
   const set = (key, value) => {
@@ -243,11 +249,42 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
       </Section>
 
       <Section title={label(labels, "field_formatted_content", "Formatted content")}>
-        <textarea
-          className="ee-ta ee-mono"
-          value={cleanText(draft.formatted_content)}
-          onChange={(e) => set("formatted_content", e.target.value)}
-        />
+        <div className="ee-fmt-toolbar">
+          <button
+            type="button"
+            className={`ee-toggle${fmtPreview ? " ee-toggle-on" : ""}`}
+            onClick={() => setFmtPreview(true)}
+          >
+            {label(labels, "ee_preview", "Preview")}
+          </button>
+          <button
+            type="button"
+            className={`ee-toggle${!fmtPreview ? " ee-toggle-on" : ""}`}
+            onClick={() => setFmtPreview(false)}
+          >
+            {label(labels, "ee_edit", "Edit")}
+          </button>
+        </div>
+        {fmtPreview ? (
+          cleanText(draft.formatted_content) ? (
+            <div
+              className="ee-md"
+              dangerouslySetInnerHTML={{
+                __html: renderMarkdown(draft.formatted_content),
+              }}
+            />
+          ) : (
+            <div className="ee-muted">
+              {label(labels, "ee_formatted_content_missing", "No formatted content yet.")}
+            </div>
+          )
+        ) : (
+          <textarea
+            className="ee-ta ee-ta-wrap"
+            value={cleanText(draft.formatted_content)}
+            onChange={(e) => set("formatted_content", e.target.value)}
+          />
+        )}
       </Section>
 
       <Section title={label(labels, "field_original_content", "Original content")}>
@@ -453,6 +490,7 @@ function App() {
   const emit = (event) => setComponentValue(event);
 
   const labels = payload.labels || {};
+  const settings = payload.settings || {};
   const rows = useMemo(() => asArray(payload.evidence_rows), [payload]);
   const summary = payload.migration_summary || {};
   const suggestions = asArray(payload.project_suggestions);
@@ -463,6 +501,18 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showOutputs, setShowOutputs] = useState(false);
+
+  // After a fragment rerun re-mounts the iframe, restore the row the user was
+  // acting on (Python echoes it via settings.last_selected_id) so the detail
+  // pane does not collapse and the page does not feel like it "jumped".
+  const lastSelectedId = cleanText(settings.last_selected_id);
+  useEffect(() => {
+    if (selectedId) return;
+    if (!lastSelectedId) return;
+    if (rows.some((r) => r.id === lastSelectedId)) {
+      setSelectedId(lastSelectedId);
+    }
+  }, [lastSelectedId, rows, selectedId]);
 
   const rootRef = useRef(null);
   useEffect(() => {

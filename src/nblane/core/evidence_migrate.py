@@ -389,16 +389,35 @@ def refresh_from_crystallized_tasks(
         raw = load_evidence_pool_raw(profile)
         entries = list((raw or {}).get("evidence_entries") or [])
 
-    # Index existing evidence by referenced kanban task id.
+    # Index existing evidence by referenced kanban task id, using several
+    # signals so a row that came from a task is repaired in place rather than
+    # duplicated: (1) kanban_refs, (2) origin_ref == kanban:<id>, and as a
+    # last resort (3) origin==kanban_task with a matching normalized title.
     refs_by_task: dict[str, str] = {}
+    title_by_task: dict[str, str] = {}  # normalized title -> evidence id
+
+    def _norm_title(text: str) -> str:
+        return " ".join(_clean(text).lower().split())
+
     for row in entries:
         if not isinstance(row, dict):
             continue
         eid = _clean(row.get("id"))
+        if not eid:
+            continue
         for ref in row.get("kanban_refs") or []:
             rid = kanban_ref_id(_clean(ref))
             if rid:
                 refs_by_task.setdefault(rid, eid)
+        # origin_ref like "kanban:<task_id>" (rows with no kanban_refs).
+        origin_ref_id = kanban_ref_id(_clean(row.get("origin_ref")))
+        if origin_ref_id:
+            refs_by_task.setdefault(origin_ref_id, eid)
+        # Title fallback only for kanban-origin rows.
+        if _clean(row.get("origin")) == "kanban_task":
+            nt = _norm_title(row.get("title"))
+            if nt:
+                title_by_task.setdefault(nt, eid)
 
     try:
         tasks = _all_lookup_tasks(profile)
@@ -417,7 +436,12 @@ def refresh_from_crystallized_tasks(
         seen_task_ids.add(tid)
         original = render_kanban_task_source(task)
         project_id = _clean(getattr(task, "project_id", ""))
+        # Resolve to an existing row by ref first, then title.
         existing_eid = refs_by_task.get(tid)
+        if not existing_eid:
+            existing_eid = title_by_task.get(
+                _norm_title(getattr(task, "title", ""))
+            )
         proposals.append(
             {
                 "kind": "update" if existing_eid else "new",

@@ -359,3 +359,5 @@ ee_output_created: Evidence created from output.
 ee_output_missing: Output not found.
 ee_reformat_failed: AI reformat failed.
 ee_duplicates_hint: Duplicate scan is not yet wired.
+ee_preview: Preview
+ee_edit: Edit

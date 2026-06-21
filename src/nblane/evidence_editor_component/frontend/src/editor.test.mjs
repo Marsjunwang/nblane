@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { filterRows, matchesFilters, matchesSearch, rowWarnings } from "./filters.js";
+import { renderMarkdown, escapeHtml } from "./schema.js";
 import {
   saveEvidenceEvent,
   addEvidenceEvent,
@@ -127,4 +128,32 @@ test("makeEvent generates unique ids", () => {
   const a = makeEvent("x");
   const b = makeEvent("x");
   assert.notEqual(a.event_id, b.event_id);
+});
+
+test("renderMarkdown: headings, bold, lists, code", () => {
+  const md = "# Title\n\nSome **bold** and `code`.\n\n- one\n- two\n\n1. first\n2. second";
+  const html = renderMarkdown(md);
+  assert.ok(html.includes("<h1>Title</h1>"));
+  assert.ok(html.includes("<strong>bold</strong>"));
+  assert.ok(html.includes("<code>code</code>"));
+  assert.ok(html.includes("<ul>"));
+  assert.ok(html.includes("<li>one</li>"));
+  assert.ok(html.includes("<ol>"));
+  assert.ok(html.includes("<li>first</li>"));
+});
+
+test("renderMarkdown: empty -> empty string", () => {
+  assert.equal(renderMarkdown(""), "");
+  assert.equal(renderMarkdown("   "), "");
+  assert.equal(renderMarkdown(null), "");
+});
+
+test("renderMarkdown: escapes HTML (no injection)", () => {
+  const html = renderMarkdown("<script>alert(1)</script>");
+  assert.ok(!html.includes("<script>"));
+  assert.ok(html.includes("&lt;script&gt;"));
+});
+
+test("escapeHtml basics", () => {
+  assert.equal(escapeHtml('a & b < c > "d"'), "a &amp; b &lt; c &gt; &quot;d&quot;");
 });

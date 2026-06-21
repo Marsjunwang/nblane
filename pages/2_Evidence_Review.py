@@ -2962,6 +2962,11 @@ def _handle_evidence_event(event: dict | None) -> bool:
     fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
     eid = str(payload.get("id") or "")
 
+    # Remember the row the user was acting on so the detail pane stays open on
+    # the same evidence after the fragment reruns (avoids losing context).
+    if eid:
+        st.session_state[f"evidence_editor_last_id_{selected}"] = eid
+
     if action == "save_evidence":
         return _apply_save_evidence(eid, fields)
     if action == "add_evidence":
@@ -3010,8 +3015,14 @@ def _evidence_editor_labels() -> dict[str, str]:
     return {k: ui[k] for k in keys}
 
 
+@st.fragment
 def _render_evidence_editor(review: dict) -> None:
-    """Render the unified React editor; persist events; rerun on save."""
+    """Render the unified React editor; persist events; rerun in-fragment.
+
+    Wrapped in a fragment so an editor event reruns only this region — the page
+    no longer scrolls to the top and the segmented-control section is kept (same
+    pattern as the Project Board component).
+    """
     payload = build_evidence_editor_payload(selected)
     preview = st.session_state.get(f"evidence_editor_reformat_{selected}")
     if preview:
@@ -3022,11 +3033,16 @@ def _render_evidence_editor(review: dict) -> None:
         settings={
             "lang": llm_client.ui_language(),
             "target_language": llm_client.reply_language(),
+            # Echo the last-touched row so the React side reselects it after a
+            # rerun re-mounts the iframe.
+            "last_selected_id": st.session_state.get(
+                f"evidence_editor_last_id_{selected}", ""
+            ),
         },
         key=f"evidence_editor_{selected}",
     )
     if _handle_evidence_event(event):
-        st.rerun()
+        st.rerun(scope="fragment")
 
 
 review_payload = build_evidence_review(selected)

@@ -359,3 +359,5 @@ ee_output_created: 已从输出创建证据。
 ee_output_missing: 未找到该输出。
 ee_reformat_failed: AI 重新格式化失败。
 ee_duplicates_hint: 重复检测尚未接入。
+ee_preview: 预览
+ee_edit: 编辑

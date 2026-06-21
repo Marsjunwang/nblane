@@ -130,6 +130,27 @@ button { cursor: pointer; }
 .ee-ta-sm { min-height: 52px; }
 .ee-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 90px; white-space: pre; }
 .ee-ta-ro { background: var(--soft); color: var(--ink); }
+/* formatted_content editor wraps (proportional font) — it is human prose, not
+   verbatim source like original_content. */
+.ee-ta-wrap { min-height: 120px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+
+/* formatted_content preview/edit toggle */
+.ee-fmt-toolbar { display: flex; gap: 4px; margin-bottom: 4px; }
+.ee-toggle { border: 1px solid var(--line); background: var(--paper); color: var(--muted); border-radius: 6px; padding: 2px 10px; font-size: 12px; }
+.ee-toggle-on { border-color: var(--accent-strong); background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+
+/* rendered markdown preview of formatted_content */
+.ee-md { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--soft); line-height: 1.55; overflow-wrap: anywhere; }
+.ee-md h1, .ee-md h2, .ee-md h3, .ee-md h4, .ee-md h5, .ee-md h6 { margin: 8px 0 4px; line-height: 1.25; }
+.ee-md h1 { font-size: 17px; }
+.ee-md h2 { font-size: 15px; }
+.ee-md h3 { font-size: 14px; }
+.ee-md h4, .ee-md h5, .ee-md h6 { font-size: 13px; }
+.ee-md p { margin: 4px 0; }
+.ee-md ul, .ee-md ol { margin: 4px 0; padding-left: 20px; }
+.ee-md li { margin: 2px 0; }
+.ee-md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12px; }
+.ee-md strong { font-weight: 700; }
 
 .ee-chips-label { color: var(--muted); font-size: 12px; }
 .ee-chips { display: flex; gap: 5px; flex-wrap: wrap; }

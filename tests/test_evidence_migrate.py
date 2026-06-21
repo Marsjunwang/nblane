@@ -254,6 +254,72 @@ class TestRefreshCrystallized(unittest.TestCase):
                 paths_mod.PROFILES_DIR = orig
                 profile_io.PROFILES_DIR = orig
 
+    def _match_case(self, existing_rows: list[dict]) -> dict:
+        """Run refresh against a profile with one crystallized task taskA."""
+        from nblane.core import io as io_mod
+        from nblane.core import paths as paths_mod
+        from nblane.core import profile_io
+
+        tmp = tempfile.TemporaryDirectory()
+        tmp_path = Path(tmp.name)
+        origs = {m: m.PROFILES_DIR for m in (paths_mod, profile_io, io_mod)}
+        for m in origs:
+            m.PROFILES_DIR = tmp_path
+        try:
+            pdir = tmp_path / "dev"
+            pdir.mkdir(parents=True)
+            self._write_kanban(pdir)
+            return refresh_from_crystallized_tasks("dev", entries=existing_rows)
+        finally:
+            for m, v in origs.items():
+                m.PROFILES_DIR = v
+            tmp.cleanup()
+
+    def test_match_by_origin_ref_no_kanban_refs(self) -> None:
+        # The reported case: row from a crystallized task with only origin_ref
+        # set (no kanban_refs) must be updated, not duplicated.
+        existing = [
+            {
+                "id": "ev_y",
+                "type": "practice",
+                "title": "Anything",
+                "origin": "kanban_task",
+                "origin_ref": "kanban:taskA",
+            }
+        ]
+        result = self._match_case(existing)
+        self.assertEqual(len(result["proposals"]), 1)
+        self.assertEqual(result["proposals"][0]["kind"], "update")
+        self.assertEqual(result["proposals"][0]["evidence_id"], "ev_y")
+
+    def test_match_by_title_when_no_refs(self) -> None:
+        # Last-resort: kanban-origin row with matching title, no refs at all.
+        existing = [
+            {
+                "id": "ev_z",
+                "type": "practice",
+                "title": "  Tuned   Latency ",  # normalized match
+                "origin": "kanban_task",
+            }
+        ]
+        result = self._match_case(existing)
+        self.assertEqual(len(result["proposals"]), 1)
+        self.assertEqual(result["proposals"][0]["kind"], "update")
+        self.assertEqual(result["proposals"][0]["evidence_id"], "ev_z")
+
+    def test_no_title_match_for_non_kanban_origin(self) -> None:
+        # A same-title row that is NOT kanban-origin must not absorb the task.
+        existing = [
+            {
+                "id": "ev_other",
+                "type": "practice",
+                "title": "Tuned latency",
+                "origin": "resume_parse",
+            }
+        ]
+        result = self._match_case(existing)
+        self.assertEqual(result["proposals"][0]["kind"], "new")
+
 
 if __name__ == "__main__":
     unittest.main()

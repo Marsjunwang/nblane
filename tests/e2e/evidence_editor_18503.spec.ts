@@ -135,3 +135,47 @@ test("run migration backfills v2 provenance and persists", async ({ page }, test
   // (Asserted on disk by the companion shell check; here we just confirm no crash.)
   expect(body.byteLength).toBeGreaterThan(20_000);
 });
+
+test("detail pane stays open on the same row after an action (no page jump)", async ({ page }, testInfo) => {
+  let response;
+  try {
+    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+  } catch {
+    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+  }
+  if (!response || response.status() >= 400) {
+    test.skip(true, "Evidence Review page unavailable on 18503.");
+  }
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  await ensureDevProfile(page);
+
+  const frame = await findEditorFrame(page);
+  expect(frame, "evidence editor iframe should be present").not.toBeNull();
+
+  // Open the first row and capture its id from the detail header.
+  await frame.locator(".ee-li").first().click();
+  await expect(frame.locator(".ee-detail")).toBeVisible({ timeout: 8_000 });
+  const metaBefore = await frame.locator(".ee-meta").innerText();
+  const idMatch = metaBefore.match(/id:\s*([^\s·]+)/);
+  expect(idMatch, "detail meta should show the row id").not.toBeNull();
+  const rowId = idMatch[1];
+
+  // Click "Run migration" (an action that triggers a Python rerun).
+  await frame.getByRole("button", { name: /运行迁移|Run migration/ }).click();
+  await page.waitForTimeout(4000);
+
+  // After the fragment rerun, the editor frame re-mounts; re-find it and assert
+  // the detail pane is still open on the SAME row (Fix 3: selection preserved).
+  const frame2 = await findEditorFrame(page);
+  expect(frame2, "editor iframe should re-mount").not.toBeNull();
+  await expect(frame2.locator(".ee-detail")).toBeVisible({ timeout: 10_000 });
+  const metaAfter = await frame2.locator(".ee-meta").innerText();
+  expect(metaAfter).toContain(rowId);
+
+  const body = await page.screenshot({ fullPage: true });
+  await testInfo.attach("selection-preserved", { body, contentType: "image/png" });
+});
