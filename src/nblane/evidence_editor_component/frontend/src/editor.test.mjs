@@ -157,3 +157,22 @@ test("renderMarkdown: escapes HTML (no injection)", () => {
 test("escapeHtml basics", () => {
   assert.equal(escapeHtml('a & b < c > "d"'), "a &amp; b &lt; c &gt; &quot;d&quot;");
 });
+
+test("dedup event factories", async () => {
+  const ev = await import("./events.js");
+  const sug = ev.suggestDuplicatesEvent("ev1", true);
+  assert.equal(sug.action, "suggest_duplicates");
+  assert.equal(sug.payload.id, "ev1");
+  assert.equal(sug.payload.ai, true);
+
+  const merge = ev.mergeOrDeprecateEvent("keep1", "other1", ["summary"]);
+  assert.equal(merge.action, "merge_or_deprecate");
+  assert.equal(merge.payload.keep, "keep1");
+  assert.equal(merge.payload.other, "other1");
+  assert.deepEqual(merge.payload.merge_fields, ["summary"]);
+
+  const dismiss = ev.dismissDuplicateEvent("a", "b");
+  assert.equal(dismiss.action, "dismiss_duplicate");
+  assert.equal(dismiss.payload.id, "a");
+  assert.equal(dismiss.payload.other, "b");
+});

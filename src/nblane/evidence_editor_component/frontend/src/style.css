@@ -180,3 +180,20 @@ button { cursor: pointer; }
   .ee-detail-wrap { flex: 1 1 auto; }
   .ee-list-scroll { max-height: 320px; }
 }
+
+/* duplicate review panel */
+.ee-dup-panel { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px; background: var(--warn-soft); display: flex; flex-direction: column; gap: 8px; }
+.ee-dup-pair { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ee-dup-reason { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.ee-dup-score { font-weight: 800; color: var(--accent-strong); }
+.ee-dup-cards { display: flex; gap: 8px; flex-wrap: wrap; }
+.ee-dup-card { flex: 1 1 240px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.ee-dup-keep { border-color: var(--ok); background: #f3faf6; }
+.ee-dup-card-head { display: flex; align-items: center; gap: 6px; }
+.ee-dup-keep-tag { font-size: 11px; font-weight: 700; color: var(--ok); border: 1px solid var(--ok); border-radius: 999px; padding: 0 6px; }
+.ee-dup-title { font-weight: 600; margin-top: 3px; }
+.ee-dup-prov { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.ee-dup-merge { font-size: 12px; }
+.ee-dup-merge summary { cursor: pointer; color: var(--accent); }
+.ee-dup-fields { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.ee-dup-actions { display: flex; gap: 8px; align-items: center; }

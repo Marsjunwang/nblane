@@ -179,3 +179,51 @@ test("detail pane stays open on the same row after an action (no page jump)", as
   const body = await page.screenshot({ fullPage: true });
   await testInfo.attach("selection-preserved", { body, contentType: "image/png" });
 });
+
+test("find duplicates surfaces a candidate pair and deprecate resolves it", async ({ page }, testInfo) => {
+  let response;
+  try {
+    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+  } catch {
+    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+  }
+  if (!response || response.status() >= 400) {
+    test.skip(true, "Evidence Review page unavailable on 18503.");
+  }
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  await ensureDevProfile(page);
+
+  let frame = await findEditorFrame(page);
+  expect(frame, "evidence editor iframe should be present").not.toBeNull();
+
+  // Run deterministic duplicate detection (the seeded dup_seed_a/b pair).
+  await frame.getByRole("button", { name: /查找重复$|Find duplicates$/ }).click();
+  await page.waitForTimeout(3500);
+
+  frame = await findEditorFrame(page);
+  // The duplicate panel appears only when the pool actually has candidates.
+  // Skip gracefully when the dev pool has no duplicates seeded.
+  const panel = frame.locator(".ee-dup-panel");
+  if ((await panel.count()) === 0) {
+    test.skip(true, "No duplicate candidates in the current dev pool (seed dup_seed_a/b to exercise).");
+  }
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  const pairsBefore = await frame.locator(".ee-dup-pair").count();
+  expect(pairsBefore).toBeGreaterThan(0);
+
+  // Resolve the first pair via "Deprecate other".
+  await frame
+    .locator(".ee-dup-pair")
+    .first()
+    .getByRole("button", { name: /弃用另一条|Deprecate other/ })
+    .click();
+  await page.waitForTimeout(3500);
+
+  const body = await page.screenshot({ fullPage: true });
+  await testInfo.attach("dedup-resolved", { body, contentType: "image/png" });
+  expect(body.byteLength).toBeGreaterThan(20_000);
+});

@@ -361,3 +361,13 @@ ee_reformat_failed: AI 重新格式化失败。
 ee_duplicates_hint: 重复检测尚未接入。
 ee_preview: 预览
 ee_edit: 编辑
+ee_find_duplicates: 查找重复
+ee_find_duplicates_ai: 查找重复（AI）
+ee_dup_keep: 保留
+ee_dup_merge_fields: 合并字段到保留项（可选）
+ee_dup_merge_deprecate: 合并 → 弃用另一条
+ee_dup_deprecate_other: 弃用另一条
+ee_dup_not_duplicate: 不是重复
+ee_dup_ai_running: 正在扫描重复…
+ee_dup_none: 未发现疑似重复。
+ee_dup_resolved: 已处理重复（保留 {k}）。

@@ -361,3 +361,13 @@ ee_reformat_failed: AI reformat failed.
 ee_duplicates_hint: Duplicate scan is not yet wired.
 ee_preview: Preview
 ee_edit: Edit
+ee_find_duplicates: Find duplicates
+ee_find_duplicates_ai: Find duplicates (AI)
+ee_dup_keep: keep
+ee_dup_merge_fields: Merge fields into kept (optional)
+ee_dup_merge_deprecate: Merge → deprecate other
+ee_dup_deprecate_other: Deprecate other
+ee_dup_not_duplicate: Not a duplicate
+ee_dup_ai_running: Scanning for duplicates…
+ee_dup_none: No duplicate candidates found.
+ee_dup_resolved: Resolved duplicate (kept {k}).

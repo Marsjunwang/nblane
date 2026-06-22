@@ -80,6 +80,11 @@ from nblane.core.evidence_migrate import (
     refresh_from_crystallized_tasks,
 )
 from nblane.core.evidence_from_output import evidence_row_from_output
+from nblane.core.evidence_dedup import (
+    apply_merge_or_deprecate,
+    find_duplicate_candidates,
+    suggest_duplicates_ai,
+)
 from nblane.evidence_editor_component import (
     evidence_editor_component_available,
     st_evidence_editor,
@@ -2951,6 +2956,92 @@ def _apply_create_project_from_evidence(suggestion: dict) -> bool:
     return False
 
 
+def _dupes_state_key() -> str:
+    return f"evidence_editor_dupes_{selected}"
+
+
+def _dismissed_state_key() -> str:
+    return f"evidence_editor_dupes_dismissed_{selected}"
+
+
+def _apply_suggest_duplicates(focus_id: str, use_ai: bool) -> bool:
+    """Detect duplicate candidates and stash them for the next render.
+
+    Deterministic always; AI clustering only when use_ai (explicit, slow).
+    Never writes. Returns True so the fragment reruns and surfaces the panel.
+    """
+    entries = _pool_entries()
+    focus = focus_id or None
+    candidates = find_duplicate_candidates(entries, focus_id=focus)
+    if use_ai:
+        with st.spinner(ui.get("ee_dup_ai_running", "Scanning for duplicates…")):
+            ai_pairs, err = suggest_duplicates_ai(entries)
+        if err:
+            st.warning(err)
+        else:
+            # Merge AI pairs in, de-duping by unordered id pair.
+            seen = {tuple(sorted((c["a"], c["b"]))) for c in candidates}
+            for p in ai_pairs:
+                key = tuple(sorted((p["a"], p["b"])))
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(p)
+    # Drop pairs the user dismissed this session.
+    dismissed = st.session_state.get(_dismissed_state_key()) or set()
+    candidates = [
+        c
+        for c in candidates
+        if tuple(sorted((c["a"], c["b"]))) not in dismissed
+    ]
+    st.session_state[_dupes_state_key()] = candidates
+    if not candidates:
+        st.info(ui.get("ee_dup_none", "No duplicate candidates found."))
+    return True
+
+
+def _apply_dismiss_duplicate(a: str, b: str) -> None:
+    if not a or not b:
+        return
+    key = tuple(sorted((a, b)))
+    dismissed = set(st.session_state.get(_dismissed_state_key()) or set())
+    dismissed.add(key)
+    st.session_state[_dismissed_state_key()] = dismissed
+    # Also drop it from the live candidate list.
+    cands = st.session_state.get(_dupes_state_key()) or []
+    st.session_state[_dupes_state_key()] = [
+        c for c in cands if tuple(sorted((c["a"], c["b"]))) != key
+    ]
+
+
+def _apply_merge_or_deprecate_event(
+    keep_id: str, other_id: str, merge_fields: object
+) -> bool:
+    if not keep_id or not other_id:
+        return False
+    fields = [str(f) for f in merge_fields] if isinstance(merge_fields, list) else None
+    entries = _pool_entries()
+    new_entries, changed = apply_merge_or_deprecate(
+        entries, keep_id=keep_id, other_id=other_id, merge_fields=fields
+    )
+    if not changed:
+        st.info(ui.get("pool_no_changes", "No changes."))
+        return False
+    new_entries = [_compact_row(r) for r in new_entries]
+    # Drop the resolved pair from the candidate list.
+    key = tuple(sorted((keep_id, other_id)))
+    cands = st.session_state.get(_dupes_state_key()) or []
+    st.session_state[_dupes_state_key()] = [
+        c for c in cands if tuple(sorted((c["a"], c["b"]))) != key
+    ]
+    _save_pool(
+        new_entries,
+        ui.get("ee_dup_resolved", "Resolved duplicate (kept {k}).").format(
+            k=keep_id
+        ),
+    )
+    return True
+
+
 def _handle_evidence_event(event: dict | None) -> bool:
     """Apply one event from the React evidence editor. Returns True if saved."""
     if not isinstance(event, dict):
@@ -2995,10 +3086,18 @@ def _handle_evidence_event(event: dict | None) -> bool:
         )
         return _apply_create_project_from_evidence(sug)
     if action == "suggest_duplicates":
-        st.info(ui.get("ee_duplicates_hint", "Duplicate scan is not yet wired."))
-        return False
+        return _apply_suggest_duplicates(
+            eid, bool(payload.get("ai"))
+        )
+    if action == "dismiss_duplicate":
+        _apply_dismiss_duplicate(eid, str(payload.get("other") or ""))
+        return True
     if action == "merge_or_deprecate":
-        return _apply_deprecate(eid, str(payload.get("replaced_by") or ""))
+        return _apply_merge_or_deprecate_event(
+            str(payload.get("keep") or payload.get("id") or ""),
+            str(payload.get("other") or payload.get("replaced_by") or ""),
+            payload.get("merge_fields"),
+        )
     return False
 
 
@@ -3027,6 +3126,10 @@ def _render_evidence_editor(review: dict) -> None:
     preview = st.session_state.get(f"evidence_editor_reformat_{selected}")
     if preview:
         payload["reformat_preview"] = preview
+    # Surface duplicate candidates from the last "Find duplicates" action.
+    dupes = st.session_state.get(_dupes_state_key())
+    if dupes is not None:
+        payload["duplicate_candidates"] = dupes
     event = st_evidence_editor(
         payload=payload,
         labels=_evidence_editor_labels(),

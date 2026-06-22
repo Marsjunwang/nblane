@@ -17,6 +17,8 @@ import {
   confirmAiReformatEvent,
   createFromOutputEvent,
   suggestDuplicatesEvent,
+  mergeOrDeprecateEvent,
+  dismissDuplicateEvent,
 } from "./events.js";
 
 const READY = "streamlit:componentReady";
@@ -480,6 +482,117 @@ function AddForm({ payload, labels, emit, onClose }) {
   );
 }
 
+/* ---- duplicate review panel (suggest-and-confirm) ---- */
+const MERGE_FIELD_OPTS = [
+  "summary",
+  "formatted_content",
+  "original_content",
+  "url",
+  "date",
+  "project_refs",
+  "source_refs",
+  "kanban_refs",
+];
+
+function DuplicatePair({ cand, rowsById, labels, emit }) {
+  const a = rowsById[cand.a] || { id: cand.a };
+  const b = rowsById[cand.b] || { id: cand.b };
+  const [keep, setKeep] = useState(cand.recommend_keep || cand.a);
+  const [mergeFields, setMergeFields] = useState([]);
+  const other = keep === a.id ? b : a;
+  const keptRow = keep === a.id ? a : b;
+
+  const toggleField = (f) =>
+    setMergeFields((prev) =>
+      prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]
+    );
+
+  const Row = ({ row, isKeep }) => (
+    <div className={`ee-dup-card${isKeep ? " ee-dup-keep" : ""}`}>
+      <div className="ee-dup-card-head">
+        <input
+          type="radio"
+          checked={keep === row.id}
+          onChange={() => setKeep(row.id)}
+        />
+        <span className="ee-li-id">{row.id}</span>
+        <Badge text={cleanText(row.origin) || "—"} color={originColor(row.origin)} />
+        {isKeep && <span className="ee-dup-keep-tag">{label(labels, "ee_dup_keep", "keep")}</span>}
+      </div>
+      <div className="ee-dup-title">{cleanText(row.title) || row.id}</div>
+      <div className="ee-dup-prov">
+        {row.has_original_content ? "✓ raw" : "⚠ no raw"} ·{" "}
+        {cleanText(row.review_status) || "—"}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="ee-dup-pair">
+      <div className="ee-dup-reason">
+        <span className="ee-dup-score">{Math.round((cand.score || 0) * 100)}%</span>
+        {cleanText(cand.reason)}
+      </div>
+      <div className="ee-dup-cards">
+        <Row row={a} isKeep={keep === a.id} />
+        <Row row={b} isKeep={keep === b.id} />
+      </div>
+      <details className="ee-dup-merge">
+        <summary>{label(labels, "ee_dup_merge_fields", "Merge fields into kept (optional)")}</summary>
+        <div className="ee-dup-fields">
+          {MERGE_FIELD_OPTS.map((f) => (
+            <label key={f} className="ee-check">
+              <input
+                type="checkbox"
+                checked={mergeFields.includes(f)}
+                onChange={() => toggleField(f)}
+              />
+              {label(labels, `field_${f}`, f)}
+            </label>
+          ))}
+        </div>
+      </details>
+      <div className="ee-dup-actions">
+        <button
+          type="button"
+          className="ee-btn-primary"
+          onClick={() => emit(mergeOrDeprecateEvent(keep, other.id, mergeFields.length ? mergeFields : null))}
+        >
+          {mergeFields.length
+            ? label(labels, "ee_dup_merge_deprecate", "Merge → deprecate other")
+            : label(labels, "ee_dup_deprecate_other", "Deprecate other")}
+        </button>
+        <button
+          type="button"
+          className="ee-btn-sm"
+          onClick={() => emit(dismissDuplicateEvent(a.id, b.id))}
+        >
+          {label(labels, "ee_dup_not_duplicate", "Not a duplicate")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DuplicatePanel({ candidates, rowsById, labels, emit }) {
+  return (
+    <div className="ee-dup-panel">
+      <div className="ee-section-h">
+        {label(labels, "ee_duplicate_candidates", "Duplicate candidates")} ({candidates.length})
+      </div>
+      {candidates.map((c) => (
+        <DuplicatePair
+          key={`${c.a}|${c.b}`}
+          cand={c}
+          rowsById={rowsById}
+          labels={labels}
+          emit={emit}
+        />
+      ))}
+    </div>
+  );
+}
+
 /* ---- main app ---- */
 function App() {
   const [args, setArgs] = useState({ payload: {} });
@@ -530,6 +643,12 @@ function App() {
   const toggleFilter = (k) => setFilters((f) => ({ ...f, [k]: !f[k] }));
 
   const reformatPreview = payload.reformat_preview || null;
+  const duplicateCandidates = asArray(payload.duplicate_candidates);
+  const rowsById = useMemo(() => {
+    const m = {};
+    for (const r of rows) m[r.id] = r;
+    return m;
+  }, [rows]);
 
   return (
     <div className="ee-root" ref={rootRef}>
@@ -547,6 +666,12 @@ function App() {
           </button>
           <button type="button" className="ee-btn" onClick={() => setShowOutputs((s) => !s)}>
             {label(labels, "ee_create_from_output", "Create from output")}
+          </button>
+          <button type="button" className="ee-btn" onClick={() => emit(suggestDuplicatesEvent("", false))}>
+            {label(labels, "ee_find_duplicates", "Find duplicates")}
+          </button>
+          <button type="button" className="ee-btn" onClick={() => emit(suggestDuplicatesEvent("", true))}>
+            {label(labels, "ee_find_duplicates_ai", "Find duplicates (AI)")}
           </button>
           {visible.some((r) => r.needs_migration) && (
             <button
@@ -600,6 +725,15 @@ function App() {
             </button>
           ))}
         </div>
+      )}
+
+      {duplicateCandidates.length > 0 && (
+        <DuplicatePanel
+          candidates={duplicateCandidates}
+          rowsById={rowsById}
+          labels={labels}
+          emit={emit}
+        />
       )}
 
       <div className="ee-body">

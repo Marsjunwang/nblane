@@ -42,11 +42,13 @@ export const createFromOutputEvent = (outputId) =>
   makeEvent("create_from_output", { output_id: outputId });
 
 // Duplicates.
-export const suggestDuplicatesEvent = (id) =>
-  makeEvent("suggest_duplicates", { id });
-export const mergeOrDeprecateEvent = (id, replacedBy, mergeFields = null) =>
+export const suggestDuplicatesEvent = (id, ai = false) =>
+  makeEvent("suggest_duplicates", { id: id || "", ai: !!ai });
+export const mergeOrDeprecateEvent = (keep, other, mergeFields = null) =>
   makeEvent("merge_or_deprecate", {
-    id,
-    replaced_by: replacedBy,
+    keep,
+    other,
     merge_fields: mergeFields,
   });
+export const dismissDuplicateEvent = (a, b) =>
+  makeEvent("dismiss_duplicate", { id: a, other: b });
