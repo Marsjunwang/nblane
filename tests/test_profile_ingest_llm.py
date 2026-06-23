@@ -25,6 +25,13 @@ class TestKanbanPromptGrading(unittest.TestCase):
             # inside the parser's whitelist.
             self.assertIn("high_trust", prompt)
 
+    def test_prompt_forbids_kanban_ids_in_evidence_refs(self) -> None:
+        """Kanban task ids must be steered to kanban_refs, not evidence_refs."""
+        for prompt in (_system_prompt_kanban_zh(), _system_prompt_kanban_en()):
+            self.assertIn("kb_", prompt)
+            self.assertIn("kanban:", prompt)
+            self.assertIn("kanban_refs", prompt)
+
 
 class TestProfileIngestLlm(unittest.TestCase):
     """Kanban Done ingest can swap AI backends."""

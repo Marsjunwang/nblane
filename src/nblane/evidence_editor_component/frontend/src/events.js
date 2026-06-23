@@ -25,11 +25,34 @@ export const backfillProjectRefsEvent = (ids) =>
 export const createProjectFromEvidenceEvent = (suggestion) =>
   makeEvent("create_project_from_evidence", { suggestion });
 
+// Skill linking (skill tree nodes; no LLM, add/remove reconcile).
+export const linkSkillsEvent = (id, skillIds) =>
+  makeEvent("link_skills", { id, skill_ids: skillIds });
+
 // Migration / refresh.
 export const applyMigrationEvent = (ids) =>
   makeEvent("apply_migration", { ids });
 export const refreshCrystallizedEvent = (taskIds) =>
   makeEvent("refresh_from_crystallized_tasks", { task_ids: taskIds });
+
+// Done tasks -> evidence (deterministic, incl. non-crystallized; no LLM).
+export const doneTasksToEvidenceEvent = (taskIds, markCrystallized = false) =>
+  makeEvent("done_tasks_to_evidence", {
+    task_ids: taskIds,
+    mark_crystallized: !!markCrystallized,
+  });
+
+// Bulk apply across many selected rows (one save). Either set a whitelisted
+// pool field ({field, value}) or run a named action ({action, ...payload}).
+export const bulkApplyEvent = (ids, opts = {}) =>
+  makeEvent("bulk_apply", {
+    ids,
+    field: opts.field || "",
+    value: opts.value || "",
+    bulk_action: opts.action || "",
+    project_refs: opts.projectRefs || undefined,
+    skill_ids: opts.skillIds || undefined,
+  });
 
 // AI reformat (suggest-and-confirm).
 export const requestAiReformatEvent = (id) =>

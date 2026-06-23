@@ -320,6 +320,53 @@ class TestRefreshCrystallized(unittest.TestCase):
         result = self._match_case(existing)
         self.assertEqual(result["proposals"][0]["kind"], "new")
 
+    def _run_mixed(self, **kwargs) -> dict:
+        """Run refresh against a Done section with one crystallized + one plain."""
+        from nblane.core import io as io_mod
+        from nblane.core import paths as paths_mod
+        from nblane.core import profile_io
+        from nblane.core.kanban_io import render_kanban
+
+        tmp = tempfile.TemporaryDirectory()
+        tmp_path = Path(tmp.name)
+        origs = {m: m.PROFILES_DIR for m in (paths_mod, profile_io, io_mod)}
+        for m in origs:
+            m.PROFILES_DIR = tmp_path
+        try:
+            pdir = tmp_path / "dev"
+            pdir.mkdir(parents=True)
+            tasks = [
+                KanbanTask(title="Crystallized one", id="taskA", done=True,
+                           crystallized=True),
+                KanbanTask(title="Plain done", id="taskB", done=True,
+                           crystallized=False),
+            ]
+            (pdir / "kanban.md").write_text(
+                render_kanban("dev", {"Done": tasks}), encoding="utf-8"
+            )
+            return refresh_from_crystallized_tasks("dev", entries=[], **kwargs)
+        finally:
+            for m, v in origs.items():
+                m.PROFILES_DIR = v
+            tmp.cleanup()
+
+    def test_default_excludes_uncrystallized(self) -> None:
+        # Default: only the crystallized task is proposed.
+        result = self._run_mixed()
+        ids = {p["task_id"] for p in result["proposals"]}
+        self.assertEqual(ids, {"taskA"})
+
+    def test_include_uncrystallized_adds_plain_done(self) -> None:
+        result = self._run_mixed(include_uncrystallized=True)
+        ids = {p["task_id"] for p in result["proposals"]}
+        self.assertEqual(ids, {"taskA", "taskB"})
+
+    def test_task_ids_restricts_regardless_of_crystallized(self) -> None:
+        # An explicit non-crystallized id is honored even without the flag.
+        result = self._run_mixed(task_ids=["taskB"])
+        ids = {p["task_id"] for p in result["proposals"]}
+        self.assertEqual(ids, {"taskB"})
+
 
 if __name__ == "__main__":
     unittest.main()

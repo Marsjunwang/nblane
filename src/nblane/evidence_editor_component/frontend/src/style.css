@@ -197,3 +197,24 @@ button { cursor: pointer; }
 .ee-dup-merge summary { cursor: pointer; color: var(--accent); }
 .ee-dup-fields { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .ee-dup-actions { display: flex; gap: 8px; align-items: center; }
+
+/* batch select + bulk action bar */
+.ee-li-row { display: flex; align-items: flex-start; gap: 6px; }
+.ee-li-row .ee-li { flex: 1 1 auto; min-width: 0; }
+.ee-li-row-batch .ee-li-check { margin-top: 8px; flex: 0 0 auto; }
+.ee-selectall { padding: 2px 2px 4px; }
+.ee-btn-on { border-color: var(--accent-strong); background: var(--accent-soft); color: var(--accent-strong); }
+.ee-bulkbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border: 1px solid var(--accent-strong); border-radius: 10px;
+  background: var(--accent-soft); padding: 6px 10px; margin-bottom: 4px;
+}
+.ee-bulkbar-count { font-weight: 700; color: var(--accent-strong); font-size: 12px; }
+.ee-bulkbar select { font-size: 12px; }
+.ee-bulkbar-sep { flex: 1 1 auto; }
+
+/* Done tasks -> evidence picker */
+.ee-done-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.ee-done-row { padding: 3px 2px; }
+.ee-done-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ee-badge-muted { color: var(--muted); border-color: var(--line); }

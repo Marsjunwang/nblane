@@ -62,6 +62,10 @@ from nblane.project_timeline_component import (
     project_timeline_component_available,
     st_project_timeline,
 )
+from nblane.evidence_editor_host import (
+    EvidenceEditorHost,
+    evidence_editor_host_available,
+)
 from nblane.core.kanban_archive import _archive_tasks
 from nblane.web_auth import require_login
 from nblane.web_cache import clear_web_cache, load_evidence_pool_raw, load_research_sources
@@ -1900,6 +1904,26 @@ def _render_project_detail(board: ProjectBoard, case) -> None:
         _milestones_tasks_fragment(case.id)
 
 
+# A module-level host so its session-state lives across reruns; the
+# project_board prefix keeps its keys from colliding with Evidence Review.
+_evidence_pool_host = EvidenceEditorHost(selected, key_prefix="project_board")
+
+
+@st.fragment
+def _render_evidence_pool_section() -> None:
+    """Embed the shared evidence editor on the Project Board homepage.
+
+    Fragment-scoped so an evidence event reruns only this region, leaving the
+    timeline and summary metrics untouched. No-op when the React bundle is
+    absent (the dedicated Evidence Review page remains the fallback).
+    """
+    if not evidence_editor_host_available():
+        return
+    with st.expander(ui.get("evidence_pool_section", "Evidence pool"), expanded=False):
+        st.caption(ui.get("evidence_pool_section_hint", ""))
+        _evidence_pool_host.render()
+
+
 def main() -> None:
     board = load_project_board(selected)
     head_l, head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")
@@ -1917,6 +1941,12 @@ def main() -> None:
     _summary_metrics(board)
     st.divider()
     _render_create_project(board)
+
+    # Evidence pool, embedded via the shared host. Placed before the timeline
+    # early-return so it stays reachable in the normal (component) path and even
+    # when there are no project cases yet — distilling Done work into evidence is
+    # often the first step before a project case exists.
+    _render_evidence_pool_section()
 
     if not board.project_cases:
         st.info(ui["empty_board"])

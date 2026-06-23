@@ -11,6 +11,11 @@ from nblane.core.kanban_io import (
     KANBAN_SOMEDAY,
 )
 from nblane.core.models import KanbanTask
+from nblane.core.project_board import (
+    load_project_board,
+    milestone_label_map,
+    project_label_map,
+)
 from nblane.web_i18n import kanban_section_label
 
 from ._edit_mode import _render_new_task_form, render_edit_card
@@ -36,6 +41,7 @@ def _render_task_cards(
     doing_focus_two_col: bool = False,
     max_cards: int | None = None,
     prefer_tail: bool = False,
+    label_maps: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Render all task cards for one section."""
     tasks = sections.get(section, [])
@@ -71,6 +77,7 @@ def _render_task_cards(
                 auto_dates,
                 ui,
                 to_delete,
+                label_maps=label_maps,
             )
         with c_right:
             _render_task_index_batch(
@@ -82,6 +89,7 @@ def _render_task_cards(
                 auto_dates,
                 ui,
                 to_delete,
+                label_maps=label_maps,
             )
     else:
         _render_task_index_batch(
@@ -93,6 +101,7 @@ def _render_task_cards(
             auto_dates,
             ui,
             to_delete,
+            label_maps=label_maps,
         )
 
     for jdx in reversed(to_delete):
@@ -115,6 +124,7 @@ def _render_task_index_batch(
     auto_dates: bool,
     ui: dict[str, str],
     to_delete: list[int],
+    label_maps: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Render cards for global indices *indices* within *tasks*."""
     first_idx = indices[0] if indices else None
@@ -137,6 +147,7 @@ def _render_task_index_batch(
                     ui,
                     to_delete,
                     show_section_hint=show_read_subtask_hint,
+                    label_maps=label_maps,
                 )
                 continue
 
@@ -160,6 +171,7 @@ def _render_section_column(
     ui: dict[str, str],
     *,
     wrap_done_in_expander: bool,
+    label_maps: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """One board column: header, optional Done wrapper, new task, cards."""
     tasks = sections.get(section, [])
@@ -179,6 +191,7 @@ def _render_section_column(
                 ui,
                 max_cards=_DONE_RENDER_LIMIT,
                 prefer_tail=True,
+                label_maps=label_maps,
             )
             _render_new_task_form(
                 section, sections, profile, auto_dates, ui,
@@ -197,6 +210,7 @@ def _render_section_column(
             else None
         ),
         prefer_tail=True,
+        label_maps=label_maps,
     )
     _render_new_task_form(section, sections, profile, auto_dates, ui)
 
@@ -209,6 +223,14 @@ def render_kanban_board(
     focus_mode: bool,
 ) -> None:
     """Render the full board (weighted columns or focus layout)."""
+    try:
+        board = load_project_board(profile)
+        label_maps: dict[str, dict[str, str]] = {
+            "project": project_label_map(board),
+            "milestone": milestone_label_map(board),
+        }
+    except Exception:
+        label_maps = {"project": {}, "milestone": {}}
     if focus_mode:
         doing_sec = KANBAN_DOING
         main_col, side_col = st.columns([3, 1])
@@ -221,6 +243,7 @@ def render_kanban_board(
                 auto_dates,
                 ui,
                 doing_focus_two_col=True,
+                label_maps=label_maps,
             )
             _render_new_task_form(
                 doing_sec, sections, profile, auto_dates, ui,
@@ -241,6 +264,7 @@ def render_kanban_board(
                     auto_dates,
                     ui,
                     wrap_done_in_expander=False,
+                    label_maps=label_maps,
                 )
             with td:
                 _render_section_column(
@@ -250,6 +274,7 @@ def render_kanban_board(
                     auto_dates,
                     ui,
                     wrap_done_in_expander=False,
+                    label_maps=label_maps,
                 )
             with ts:
                 _render_section_column(
@@ -259,6 +284,7 @@ def render_kanban_board(
                     auto_dates,
                     ui,
                     wrap_done_in_expander=False,
+                    label_maps=label_maps,
                 )
         return
 
@@ -272,4 +298,5 @@ def render_kanban_board(
                 auto_dates,
                 ui,
                 wrap_done_in_expander=(section == KANBAN_DONE),
+                label_maps=label_maps,
             )

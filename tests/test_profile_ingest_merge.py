@@ -217,7 +217,38 @@ class TestMergeIngestPatch(unittest.TestCase):
             msg=m.warnings,
         )
 
-    def test_node_id_alias_updates_tree(self) -> None:
+    def test_kanban_task_id_ref_gets_actionable_diagnostic(self) -> None:
+        """A kb_*/kanban:<id> ref in node_updates is dropped with guidance."""
+        pool = {"profile": "t", "evidence_entries": []}
+        tree = {
+            "profile": "t",
+            "schema": "robotics-engineer",
+            "updated": "2026-01-01",
+            "nodes": [{"id": "ros2_basics", "status": "locked"}],
+        }
+        patch = {
+            "evidence_entries": [
+                {"type": "project", "title": "Bringup demo", "date": "2026-03"}
+            ],
+            "node_updates": [
+                {
+                    "id": "ros2_basics",
+                    "evidence_refs": ["kb_done_ship", "kanban:done_demo", "first_1"],
+                }
+            ],
+        }
+        m = merge_ingest_patch("t", pool, tree, patch)
+        self.assertTrue(m.ok)
+        assert m.merged_tree is not None
+        # The valid placeholder still resolves; the Kanban ids are dropped.
+        nodes = m.merged_tree.get("nodes") or []
+        n0 = next(x for x in nodes if x.get("id") == "ros2_basics")
+        refs = n0.get("evidence_refs") or []
+        self.assertNotIn("kb_done_ship", refs)
+        self.assertNotIn("kanban:done_demo", refs)
+        kb_warnings = [w for w in m.warnings if "Kanban task id" in w]
+        self.assertEqual(len(kb_warnings), 2, msg=m.warnings)
+        self.assertTrue(all("kanban_refs" in w for w in kb_warnings))
         """LLM node_id aliases are merged instead of skipped."""
         pool = {
             "profile": "t",

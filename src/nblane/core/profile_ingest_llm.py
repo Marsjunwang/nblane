@@ -184,6 +184,10 @@ def _kanban_evidence_contract_zh() -> str:
         "（2）**或** user 消息里 Current evidence pool 已列出的**已有 id**"
         "（勿在 evidence_entries 里重复写该行）。\n"
         "禁止引用既不在池中、也不在本 JSON evidence_entries 中的 id。\n"
+        "- **严禁**把看板任务 id（形如 kb_… ）或 kanban:<任务 id> 写进 "
+        "node_updates 的 evidence_refs：它们只是证据来源（provenance），"
+        "应放在对应 evidence_entries 行的 kanban_refs 里；"
+        "node_updates 的 evidence_refs 只接受证据 id / 新行 id / first_1 / ev_2。\n"
         "- 多选「已完成」：若任务均可映射到已有池条目，"
         "evidence_entries 可为空，仅在 node_updates 挂引用。\n"
     )
@@ -208,6 +212,11 @@ def _kanban_evidence_contract_en() -> str:
         "- Row order is 1,2,3…; evidence_refs use ids from this array or "
         "first_1 / ev_2. You may also reference **existing pool ids** in "
         "node_updates without re-listing the row (see above).\n"
+        "- **Never** put a Kanban task id (shaped like kb_…) or a "
+        "kanban:<task id> ref in node_updates evidence_refs: those are "
+        "evidence provenance and belong in an evidence_entries row's "
+        "kanban_refs. node_updates evidence_refs accept only pool evidence "
+        "ids, new evidence row ids, or first_1 / ev_2 placeholders.\n"
         "- Multiple Done tasks: if all map to existing pool rows, "
         "evidence_entries can be empty.\n"
     )

@@ -59,6 +59,7 @@ metric_unlinked: Unlinked evidence
 metric_needs_review: Needs review
 metric_status_risk: Status evidence risk
 tab_queue: Done Queue / Housekeeping
+tab_housekeeping: Done Housekeeping
 tab_claims: Claim Studio
 tab_pool: Evidence Pool
 tab_links: Skill Links
@@ -318,6 +319,8 @@ ee_save: Save
 ee_deprecate: Deprecate
 ee_deprecate_confirm: Deprecate this evidence?
 ee_link_project: Internal project
+ee_link_skill: Skills
+ee_skill_linked: Updated skill links.
 ee_run_migration: Run migration
 ee_refresh_crystallized_tasks: Refresh crystallized
 ee_migration_preview: Migration preview
@@ -371,3 +374,21 @@ ee_dup_not_duplicate: Not a duplicate
 ee_dup_ai_running: Scanning for duplicates…
 ee_dup_none: No duplicate candidates found.
 ee_dup_resolved: Resolved duplicate (kept {k}).
+# done tasks -> evidence (deterministic, no LLM)
+ee_done_tasks_title: Done tasks → evidence
+ee_done_tasks_hint: Create v2 evidence rows from Done tasks (no AI). Already-ingested tasks are marked.
+ee_done_tasks_create: Create evidence
+ee_done_tasks_none: No Done tasks to ingest.
+ee_done_tasks_done: Created/updated {n} from Done tasks.
+ee_done_has_evidence: has evidence
+ee_done_mark_crystallized: Mark selected tasks crystallized after save
+# batch select + bulk actions
+ee_batch_mode: Batch select
+ee_bulk_selected: selected
+ee_bulk_select_visible: Select all visible
+ee_bulk_apply: Apply to selected
+ee_bulk_deprecate: Deprecate
+ee_bulk_deprecate_confirm: Deprecate selected rows?
+ee_bulk_clear: Clear
+ee_bulk_done: Updated {n} rows.
+ee_bulk_none: No rows selected.

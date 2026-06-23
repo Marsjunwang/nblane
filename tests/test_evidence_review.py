@@ -17,6 +17,7 @@ from nblane.core.evidence_review import (
     evidence_project_ref_candidates,
     evidence_usage_index,
     link_skill_to_evidence_nodes,
+    set_evidence_skill_refs,
     skill_evidence_summaries,
 )
 
@@ -96,6 +97,36 @@ class TestPoolEditHelpers(unittest.TestCase):
         link_skill_to_evidence_nodes(nodes, "nav2", ["e1", "e2", "e2"])
         self.assertEqual(nodes[0]["evidence_refs"], ["e1", "e2"])
         self.assertEqual(nodes[0]["status"], "solid")  # untouched
+
+    def test_set_evidence_skill_refs_adds_and_removes(self) -> None:
+        nodes = [
+            {"id": "ros2_basics", "status": "solid", "evidence_refs": ["e1"]},
+            {"id": "nav2", "status": "learning", "evidence_refs": ["e1", "e9"]},
+        ]
+        # e1 should now belong to ros2_basics + a brand-new node, not nav2.
+        set_evidence_skill_refs(nodes, "e1", ["ros2_basics", "perception"])
+        by_id = {n["id"]: n for n in nodes}
+        self.assertIn("e1", by_id["ros2_basics"]["evidence_refs"])
+        self.assertNotIn("e1", by_id["nav2"]["evidence_refs"])
+        # nav2's other ref survives.
+        self.assertEqual(by_id["nav2"]["evidence_refs"], ["e9"])
+        # New selected node is created as learning.
+        self.assertEqual(by_id["perception"]["status"], "learning")
+        self.assertEqual(by_id["perception"]["evidence_refs"], ["e1"])
+        # Existing node status untouched.
+        self.assertEqual(by_id["ros2_basics"]["status"], "solid")
+
+    def test_set_evidence_skill_refs_drops_empty_evidence_refs(self) -> None:
+        nodes = [{"id": "nav2", "status": "solid", "evidence_refs": ["e1"]}]
+        # Unlinking the only ref should remove the key entirely.
+        set_evidence_skill_refs(nodes, "e1", [])
+        self.assertNotIn("evidence_refs", nodes[0])
+        self.assertEqual(nodes[0]["status"], "solid")
+
+    def test_set_evidence_skill_refs_dedupes(self) -> None:
+        nodes = [{"id": "nav2", "status": "solid", "evidence_refs": ["e1", "e1"]}]
+        set_evidence_skill_refs(nodes, "e2", ["nav2"])
+        self.assertEqual(nodes[0]["evidence_refs"], ["e1", "e2"])
 
 
 class TestEvidenceReview(unittest.TestCase):

@@ -374,12 +374,24 @@ def refresh_from_crystallized_tasks(
     profile: str | Path,
     *,
     entries: list[dict] | None = None,
+    task_ids: list[str] | None = None,
+    include_uncrystallized: bool = False,
 ) -> dict[str, Any]:
-    """Find crystallized kanban tasks and propose new/updated evidence.
+    """Find Done kanban tasks and propose new/updated evidence.
 
     Returns {proposals, warnings}. Does not save; the UI confirms each.
     A proposal is ``kind="update"`` when an evidence row already references the
     task (via kanban_refs), else ``kind="new"``.
+
+    By default only ``crystallized`` tasks are considered (the "Refresh
+    crystallized" toolbar action). The deterministic "Done tasks -> evidence"
+    action widens this:
+
+    - ``task_ids`` — restrict to these explicit ids regardless of crystallized
+      state (a Done-task picker selection).
+    - ``include_uncrystallized`` — when no ``task_ids`` are given, also include
+      non-crystallized tasks that live in the Done section (``task.done``), so
+      Done work that was never crystallized can still become evidence.
     """
     from nblane.core.kanban_archive import _all_lookup_tasks, kanban_ref
 
@@ -427,10 +439,25 @@ def refresh_from_crystallized_tasks(
     proposals: list[dict] = []
     warnings: list[str] = []
     seen_task_ids: set[str] = set()
+    wanted_ids = {str(t).strip() for t in (task_ids or []) if str(t).strip()}
     for task in tasks:
-        if not getattr(task, "crystallized", False):
-            continue
         tid = _clean(getattr(task, "id", ""))
+        # Selection rules, in order:
+        #  1. explicit task_ids: take exactly those, any crystallized state;
+        #  2. include_uncrystallized: any Done-section task (task.done) or
+        #     crystallized task;
+        #  3. default: crystallized only.
+        if wanted_ids:
+            if not tid or tid not in wanted_ids:
+                continue
+        elif include_uncrystallized:
+            if not (
+                getattr(task, "crystallized", False)
+                or getattr(task, "done", False)
+            ):
+                continue
+        elif not getattr(task, "crystallized", False):
+            continue
         if not tid or tid in seen_task_ids:
             continue
         seen_task_ids.add(tid)

@@ -68,7 +68,11 @@ from nblane.kanban_ui._helpers import (
     _clear_kanban_dirty,
     _kanban_is_dirty,
 )
-from nblane.core.project_board import load_project_board
+from nblane.core.project_board import (
+    load_project_board,
+    milestone_label_map,
+    project_label_map,
+)
 from nblane.core.project_board_sync import (
     sync_project_board_from_kanban,
 )
@@ -792,6 +796,20 @@ def _project_options_payload(profile: str) -> list[dict]:
             }
         )
     return options
+
+
+def _project_label_maps_payload(profile: str) -> dict[str, dict[str, str]]:
+    """Return id -> title maps for read-mode project/milestone provenance.
+
+    Unlike ``_project_options_payload`` (edit choices, active/paused only),
+    these cover every case/milestone so archived or stale refs on a task can
+    still render a readable label in read mode.
+    """
+    board = load_project_board(profile)
+    return {
+        "project": project_label_map(board),
+        "milestone": milestone_label_map(board),
+    }
 
 
 def _board_labels(ui: dict[str, str]) -> dict[str, str]:
@@ -2362,6 +2380,7 @@ board_event = st_kanban_board(
         "focus_mode": focus_mode,
         "lang": llm_client.ui_language(),
         "project_options": _project_options_payload(selected),
+        "project_label_maps": _project_label_maps_payload(selected),
         "subtask_granularity": _kanban_subtask_granularity(selected),
         "subtask_style_hint": _kanban_subtask_style_hint(selected),
     },

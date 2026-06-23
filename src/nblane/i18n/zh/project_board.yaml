@@ -92,6 +92,8 @@ metric_unassigned_tasks: 未归属任务
 metric_unassigned_evidence: 未归属证据
 metric_current_goal_projects: 当前目标项目
 unassigned_evidence_hint: '{count} 条已审阅证据尚未关联任何项目。'
+evidence_pool_section: 证据池
+evidence_pool_section_hint: 无需离开项目板即可审阅、关联、弃用和批量编辑证据。
 status_active: 进行中
 status_paused: 暂停
 status_completed: 已完成

@@ -33,6 +33,7 @@ def _render_compact_body(
     task: KanbanTask,
     section: str,
     ui: dict[str, str],
+    label_maps: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Dense read-only body (no title; no subtasks — those use widgets)."""
     esc = html.escape
@@ -40,6 +41,27 @@ def _render_compact_body(
         "line-height:1.28;font-size:0.92rem;margin:0;padding:0.02em 0;"
     )
     chunks: list[str] = [f"<div style=\"{wrap}\">"]
+
+    _maps = label_maps or {}
+    project_id = (task.project_id or "").strip()
+    if project_id:
+        proj_map = _maps.get("project") or {}
+        mile_map = _maps.get("milestone") or {}
+        bits = [
+            f"{esc(ui.get('kb_project', 'Project'))}: "
+            f"{esc(proj_map.get(project_id, project_id))}"
+        ]
+        milestone_id = (task.milestone_id or "").strip()
+        if milestone_id:
+            bits.append(
+                f"{esc(ui.get('kb_milestone', 'Milestone'))}: "
+                f"{esc(mile_map.get(milestone_id, milestone_id))}"
+            )
+        chunks.append(
+            "<p style=\"margin:0.05em 0;opacity:0.7;font-size:0.82rem\">"
+            + " · ".join(bits)
+            + "</p>"
+        )
 
     if section == KANBAN_DOING:
         if task.context.strip():
@@ -395,6 +417,7 @@ def render_read_card(
     to_delete: list[int],
     *,
     show_section_hint: bool,
+    label_maps: dict[str, dict[str, str]] | None = None,
 ) -> KanbanTask:
     """Render a task card in compact read mode."""
     ek = _task_editing_key(profile, section, idx)
@@ -424,7 +447,7 @@ def render_read_card(
                 ui,
                 to_delete,
             )
-    _render_compact_body(task, section, ui)
+    _render_compact_body(task, section, ui, label_maps)
     _render_kanban_link_preview(ui, section, task)
     if task.crystallized:
         st.caption(ui["crystallized"])

@@ -124,10 +124,48 @@ test("event factory shape", () => {
   assert.equal(cp.payload.suggestion.suggested_id, "project:gac");
 });
 
+test("linkSkillsEvent shape", async () => {
+  const ev = await import("./events.js");
+  const link = ev.linkSkillsEvent("ev1", ["ros2_basics", "nav2"]);
+  assert.equal(link.action, "link_skills");
+  assert.equal(link.payload.id, "ev1");
+  assert.deepEqual(link.payload.skill_ids, ["ros2_basics", "nav2"]);
+  assert.ok(link.event_id);
+});
+
 test("makeEvent generates unique ids", () => {
   const a = makeEvent("x");
   const b = makeEvent("x");
   assert.notEqual(a.event_id, b.event_id);
+});
+
+test("doneTasksToEvidenceEvent shape", async () => {
+  const ev = await import("./events.js");
+  const e = ev.doneTasksToEvidenceEvent(["kb_1", "kb_2"], true);
+  assert.equal(e.action, "done_tasks_to_evidence");
+  assert.deepEqual(e.payload.task_ids, ["kb_1", "kb_2"]);
+  assert.equal(e.payload.mark_crystallized, true);
+  // Default mark_crystallized is false.
+  assert.equal(ev.doneTasksToEvidenceEvent(["kb_1"]).payload.mark_crystallized, false);
+});
+
+test("bulkApplyEvent: field/value shape", async () => {
+  const ev = await import("./events.js");
+  const e = ev.bulkApplyEvent(["ev1", "ev2"], { field: "review_status", value: "reviewed" });
+  assert.equal(e.action, "bulk_apply");
+  assert.deepEqual(e.payload.ids, ["ev1", "ev2"]);
+  assert.equal(e.payload.field, "review_status");
+  assert.equal(e.payload.value, "reviewed");
+  assert.equal(e.payload.bulk_action, "");
+});
+
+test("bulkApplyEvent: named action shape", async () => {
+  const ev = await import("./events.js");
+  const e = ev.bulkApplyEvent(["ev1"], { action: "deprecate" });
+  assert.equal(e.payload.bulk_action, "deprecate");
+  const link = ev.bulkApplyEvent(["ev1"], { action: "link_skills", skillIds: ["nav2"] });
+  assert.equal(link.payload.bulk_action, "link_skills");
+  assert.deepEqual(link.payload.skill_ids, ["nav2"]);
 });
 
 test("renderMarkdown: headings, bold, lists, code", () => {

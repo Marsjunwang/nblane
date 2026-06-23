@@ -227,3 +227,62 @@ test("find duplicates surfaces a candidate pair and deprecate resolves it", asyn
   await testInfo.attach("dedup-resolved", { body, contentType: "image/png" });
   expect(body.byteLength).toBeGreaterThan(20_000);
 });
+
+async function openEditor(page) {
+  let response;
+  try {
+    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+  } catch {
+    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+  }
+  if (!response || response.status() >= 400) {
+    test.skip(true, "Evidence Review page unavailable on 18503.");
+  }
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  await ensureDevProfile(page);
+  const frame = await findEditorFrame(page);
+  expect(frame, "evidence editor iframe should be present").not.toBeNull();
+  return frame;
+}
+
+test("batch select reveals checkboxes and a bulk action bar", async ({ page }, testInfo) => {
+  let frame = await openEditor(page);
+
+  // Toggle batch mode.
+  await frame.getByRole("button", { name: /批量选择|Batch select/ }).click();
+  await page.waitForTimeout(800);
+
+  // The bulk action bar appears and per-row checkboxes are shown.
+  await expect(frame.locator(".ee-bulkbar")).toBeVisible({ timeout: 8_000 });
+  await expect(frame.locator(".ee-li-check").first()).toBeVisible({ timeout: 8_000 });
+
+  // Select all visible, then confirm the count reflects >=1 selected.
+  await frame.locator(".ee-selectall input[type=checkbox]").click();
+  await page.waitForTimeout(500);
+  await expect(frame.locator(".ee-bulkbar-count")).toContainText(/\d/);
+
+  const body = await page.screenshot({ fullPage: true });
+  await testInfo.attach("batch-select", { body, contentType: "image/png" });
+});
+
+test("Done tasks -> evidence picker opens and lists Done tasks", async ({ page }, testInfo) => {
+  const frame = await openEditor(page);
+
+  // Open the Done-tasks picker modal.
+  await frame.getByRole("button", { name: /Done 任务 → 证据|Done tasks → evidence/ }).click();
+  await page.waitForTimeout(800);
+
+  // The modal renders with its create action (disabled until a task is picked).
+  await expect(frame.locator(".ee-modal")).toBeVisible({ timeout: 8_000 });
+  await expect(
+    frame.getByRole("button", { name: /生成证据|Create evidence/ })
+  ).toBeVisible({ timeout: 8_000 });
+
+  const body = await page.screenshot({ fullPage: true });
+  await testInfo.attach("done-tasks-picker", { body, contentType: "image/png" });
+});
+

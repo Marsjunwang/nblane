@@ -404,6 +404,13 @@
     }
     .kb-chip.warn { border-color: #ead5ab; background: #fff7e8; color: var(--warn); }
     .kb-chip.action { cursor: pointer; }
+    .kb-chip-muted {
+      border-color: #d6dcda;
+      background: #f1f4f3;
+      color: #4a5a55;
+      font-weight: 650;
+    }
+    .kb-read-provenance { display: flex; flex-wrap: wrap; gap: 6px; }
     .kb-alignment { display: grid; gap: 8px; padding: 9px; border: 1px solid #d8d0e8; border-radius: 8px; background: #f6f3fb; }
     .kb-alignment-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; }
     .kb-alignment-row input[type="radio"],
@@ -675,6 +682,25 @@
 	      const project = projectOptions().find((item) => item.id === projectId);
 	      return project ? project.milestones : [];
 	    }
+	    function projectLabelMaps() {
+	      const maps = asObj(settings().project_label_maps);
+	      return {
+	        project: asObj(maps.project),
+	        milestone: asObj(maps.milestone),
+	      };
+	    }
+	    function projectLabelFor(projectId) {
+	      const id = text(projectId).trim();
+	      if (!id) return "";
+	      const map = projectLabelMaps().project;
+	      return text(map[id] || id);
+	    }
+	    function milestoneLabelFor(milestoneId) {
+	      const id = text(milestoneId).trim();
+	      if (!id) return "";
+	      const map = projectLabelMaps().milestone;
+	      return text(map[id] || id);
+	    }
 	    function selectOptionsHtml(options, selected, emptyLabel) {
 	      const known = options.some((item) => item.id === selected);
 	      const extra = selected && !known ? [{ id: selected, label: selected }] : [];
@@ -933,6 +959,20 @@
       const clean = text(value).trim();
       if (!clean) return "";
       return `<div class="kb-read-line"><strong>${esc(label(key))}</strong> ${esc(clean)}</div>`;
+    }
+    function projectProvenanceHtml(task) {
+      const projectId = text(task.project_id).trim();
+      if (!projectId) return "";
+      const parts = [
+        `<span class="kb-chip kb-chip-muted">${esc(label("project", "Project"))}: ${esc(projectLabelFor(projectId))}</span>`,
+      ];
+      const milestoneId = text(task.milestone_id).trim();
+      if (milestoneId) {
+        parts.push(
+          `<span class="kb-chip kb-chip-muted">${esc(label("milestone", "Milestone"))}: ${esc(milestoneLabelFor(milestoneId))}</span>`
+        );
+      }
+      return `<div class="kb-read-provenance">${parts.join("")}</div>`;
     }
     function readFieldsHtml(task) {
       const add = (rows, key, value) => {
@@ -1316,6 +1356,7 @@
           ${cardHeaderHtml(task, editing)}
           ${compactTag ? focusTagBodyHtml(task, meta) : `
             ${readFieldsHtml(task)}
+            ${projectProvenanceHtml(task)}
             ${compactSubtasksHtml(task, task.subtasks.length)}
             <span class="kb-card-meta">${meta.join("")}</span>
             ${quickActionsHtml(task)}

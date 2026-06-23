@@ -317,6 +317,29 @@ def load_project_board_raw(name_or_dir: str | Path) -> dict | None:
     return _load_yaml_dict(_profile_file_path(name_or_dir))
 
 
+def project_label_map(board: ProjectBoard) -> dict[str, str]:
+    """Return project case id -> title for all cases (display use).
+
+    Includes every case (not only active/paused) so that archived or stale
+    references can still degrade gracefully to a readable label.
+    """
+    out: dict[str, str] = {}
+    for case in board.project_cases:
+        if case.id:
+            out[case.id] = case.title or case.id
+    return out
+
+
+def milestone_label_map(board: ProjectBoard) -> dict[str, str]:
+    """Return milestone id -> title across all cases (display use)."""
+    out: dict[str, str] = {}
+    for case in board.project_cases:
+        for milestone in case.milestones:
+            if milestone.id:
+                out[milestone.id] = milestone.title or milestone.id
+    return out
+
+
 def add_project_case(
     board: ProjectBoard,
     title: str,

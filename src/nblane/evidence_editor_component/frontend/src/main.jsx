@@ -11,8 +11,11 @@ import {
   linkProjectEvent,
   backfillProjectRefsEvent,
   createProjectFromEvidenceEvent,
+  linkSkillsEvent,
   applyMigrationEvent,
   refreshCrystallizedEvent,
+  doneTasksToEvidenceEvent,
+  bulkApplyEvent,
   requestAiReformatEvent,
   confirmAiReformatEvent,
   createFromOutputEvent,
@@ -73,28 +76,39 @@ function Counter({ icon, n, text, active, onClick }) {
 }
 
 /* ---- list item ---- */
-function ListItem({ row, selected, labels, onClick }) {
+function ListItem({ row, selected, labels, onClick, batch, checked, onCheck }) {
   const origin = cleanText(row.origin) || "—";
   const warns = rowWarnings(row);
   return (
-    <button
-      type="button"
-      className={`ee-li${selected ? " ee-li-sel" : ""}`}
-      onClick={onClick}
-    >
-      <div className="ee-li-top">
-        <span className="ee-li-id">{cleanText(row.id)}</span>
-        <Badge text={origin} color={originColor(row.origin)} />
-        {row.has_project ? (
-          <span className="ee-dot ee-dot-ok" title="has project">●</span>
-        ) : (
-          <span className="ee-dot ee-dot-warn" title="no project">○</span>
-        )}
-        {row.needs_migration && <span className="ee-flag" title="needs migration">◐</span>}
-        {!row.has_original_content && <span className="ee-flag ee-flag-warn" title="missing raw">⚠</span>}
-      </div>
-      <div className="ee-li-title">{cleanText(row.title) || cleanText(row.id)}</div>
-    </button>
+    <div className={`ee-li-row${batch ? " ee-li-row-batch" : ""}`}>
+      {batch && (
+        <input
+          type="checkbox"
+          className="ee-li-check"
+          checked={!!checked}
+          onChange={(e) => onCheck(row.id, e.target.checked)}
+          aria-label={cleanText(row.id)}
+        />
+      )}
+      <button
+        type="button"
+        className={`ee-li${selected ? " ee-li-sel" : ""}`}
+        onClick={onClick}
+      >
+        <div className="ee-li-top">
+          <span className="ee-li-id">{cleanText(row.id)}</span>
+          <Badge text={origin} color={originColor(row.origin)} />
+          {row.has_project ? (
+            <span className="ee-dot ee-dot-ok" title="has project">●</span>
+          ) : (
+            <span className="ee-dot ee-dot-warn" title="no project">○</span>
+          )}
+          {row.needs_migration && <span className="ee-flag" title="needs migration">◐</span>}
+          {!row.has_original_content && <span className="ee-flag ee-flag-warn" title="missing raw">⚠</span>}
+        </div>
+        <div className="ee-li-title">{cleanText(row.title) || cleanText(row.id)}</div>
+      </button>
+    </div>
   );
 }
 
@@ -136,6 +150,7 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
 
   const projectOptions = asArray(payload.project_options);
   const publicProjects = asArray(payload.public_project_options);
+  const skillOptions = asArray(payload.skill_options);
   const warns = rowWarnings(draft);
 
   const projectRefs = asArray(draft.project_refs);
@@ -145,6 +160,22 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
       ? projectRefs.filter((p) => p !== pid)
       : [...projectRefs, pid];
     set("project_refs", next);
+  };
+
+  // Skill refs live on skill-tree nodes, not on the evidence row, so they are
+  // saved immediately on toggle (no LLM). Track locally for optimistic UI
+  // because the payload only refreshes on the next Streamlit rerun.
+  const [skillRefs, setSkillRefs] = useState(() => asArray(row.skill_refs));
+  useEffect(() => {
+    setSkillRefs(asArray(row.skill_refs));
+  }, [row.id]);
+  const toggleSkill = (sid) => {
+    const has = skillRefs.includes(sid);
+    const next = has
+      ? skillRefs.filter((s) => s !== sid)
+      : [...skillRefs, sid];
+    setSkillRefs(next);
+    emit(linkSkillsEvent(row.id, next));
   };
 
   const save = () => {
@@ -327,6 +358,23 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
             );
           })}
           {projectOptions.length === 0 && <span className="ee-muted">—</span>}
+        </div>
+        <div className="ee-chips-label">{label(labels, "ee_link_skill", "Skills")}</div>
+        <div className="ee-chips">
+          {skillOptions.map((opt) => {
+            const on = skillRefs.includes(opt.id);
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                className={`ee-chip${on ? " ee-chip-on" : ""}`}
+                onClick={() => toggleSkill(opt.id)}
+              >
+                {cleanText(opt.label) || opt.id}
+              </button>
+            );
+          })}
+          {skillOptions.length === 0 && <span className="ee-muted">—</span>}
         </div>
         {publicProjects.length > 0 && (
           <div className="ee-public-usage">
@@ -593,6 +641,126 @@ function DuplicatePanel({ candidates, rowsById, labels, emit }) {
   );
 }
 
+/* ---- bulk action bar (batch mode) ---- */
+function BulkActionBar({ ids, payload, labels, emit, onClear }) {
+  const [field, setField] = useState("review_status");
+  const [value, setValue] = useState("");
+  const BULK_FIELDS = [
+    ["review_status", "review_status_options"],
+    ["public_readiness", "public_readiness_options"],
+    ["strength", "strength_options"],
+    ["confidence", "confidence_options"],
+  ];
+  const optKey = (BULK_FIELDS.find(([f]) => f === field) || [])[1];
+  return (
+    <div className="ee-bulkbar">
+      <span className="ee-bulkbar-count">
+        {ids.length} {label(labels, "ee_bulk_selected", "selected")}
+      </span>
+      <select value={field} onChange={(e) => { setField(e.target.value); setValue(""); }}>
+        {BULK_FIELDS.map(([f]) => (
+          <option key={f} value={f}>{label(labels, `field_${f}`, f)}</option>
+        ))}
+      </select>
+      <select value={value} onChange={(e) => setValue(e.target.value)}>
+        <option value="" />
+        {optionList(payload, optKey).map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="ee-btn-sm ee-btn-primary"
+        disabled={!value || ids.length === 0}
+        onClick={() => emit(bulkApplyEvent(ids, { field, value }))}
+      >
+        {label(labels, "ee_bulk_apply", "Apply to selected")}
+      </button>
+      <span className="ee-bulkbar-sep" />
+      <button
+        type="button"
+        className="ee-btn-sm ee-btn-danger"
+        disabled={ids.length === 0}
+        onClick={() => {
+          if (window.confirm(label(labels, "ee_bulk_deprecate_confirm", "Deprecate selected rows?"))) {
+            emit(bulkApplyEvent(ids, { action: "deprecate" }));
+          }
+        }}
+      >
+        {label(labels, "ee_bulk_deprecate", "Deprecate")}
+      </button>
+      <button type="button" className="ee-btn-sm" onClick={onClear}>
+        {label(labels, "ee_bulk_clear", "Clear")}
+      </button>
+    </div>
+  );
+}
+
+/* ---- Done tasks -> evidence picker (deterministic, no LLM) ---- */
+function DoneTasksPicker({ tasks, labels, emit, onClose }) {
+  const [picked, setPicked] = useState(() => new Set());
+  const [mark, setMark] = useState(true);
+  const toggle = (id) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  return (
+    <div className="ee-modal">
+      <div className="ee-modal-box">
+        <div className="ee-section-h">
+          {label(labels, "ee_done_tasks_title", "Done tasks → evidence")}
+        </div>
+        <div className="ee-muted">
+          {label(labels, "ee_done_tasks_hint", "Create v2 evidence rows from Done tasks (no AI). Already-ingested tasks are marked.")}
+        </div>
+        <div className="ee-done-list">
+          {tasks.length === 0 && (
+            <span className="ee-muted">{label(labels, "ee_done_tasks_none", "No Done tasks.")}</span>
+          )}
+          {tasks.map((t) => (
+            <label key={t.id} className="ee-check ee-done-row">
+              <input
+                type="checkbox"
+                checked={picked.has(t.id)}
+                onChange={() => toggle(t.id)}
+              />
+              <span className="ee-done-title">{cleanText(t.title) || t.id}</span>
+              {t.crystallized && <span className="ee-flag" title="crystallized">◆</span>}
+              {t.has_evidence && (
+                <span className="ee-badge ee-badge-muted">
+                  {label(labels, "ee_done_has_evidence", "has evidence")}
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
+        <label className="ee-check">
+          <input type="checkbox" checked={mark} onChange={() => setMark((m) => !m)} />
+          {label(labels, "ee_done_mark_crystallized", "Mark selected tasks crystallized after save")}
+        </label>
+        <div className="ee-detail-actions">
+          <button
+            type="button"
+            className="ee-btn-primary"
+            disabled={picked.size === 0}
+            onClick={() => {
+              emit(doneTasksToEvidenceEvent(Array.from(picked), mark));
+              onClose();
+            }}
+          >
+            {label(labels, "ee_done_tasks_create", "Create evidence")} ({picked.size})
+          </button>
+          <button type="button" className="ee-btn-sm" onClick={onClose}>
+            {label(labels, "ee_cancel", "Cancel")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---- main app ---- */
 function App() {
   const [args, setArgs] = useState({ payload: {} });
@@ -614,6 +782,11 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showOutputs, setShowOutputs] = useState(false);
+  const [showDoneTasks, setShowDoneTasks] = useState(false);
+  // Batch mode: a Set of selected row ids + a toggle to reveal checkboxes.
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchIds, setBatchIds] = useState(() => new Set());
+  const doneTasks = asArray(payload.done_task_options);
 
   // After a fragment rerun re-mounts the iframe, restore the row the user was
   // acting on (Python echoes it via settings.last_selected_id) so the detail
@@ -642,6 +815,35 @@ function App() {
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
   const toggleFilter = (k) => setFilters((f) => ({ ...f, [k]: !f[k] }));
 
+  // Batch selection helpers. Selection is keyed by id so it survives reorder.
+  const visibleIds = useMemo(() => visible.map((r) => r.id), [visible]);
+  const selectedBatchIds = useMemo(
+    () => visibleIds.filter((id) => batchIds.has(id)),
+    [visibleIds, batchIds]
+  );
+  const allVisibleSelected =
+    visibleIds.length > 0 && selectedBatchIds.length === visibleIds.length;
+  const checkRow = (id, on) =>
+    setBatchIds((prev) => {
+      const next = new Set(prev);
+      on ? next.add(id) : next.delete(id);
+      return next;
+    });
+  const toggleSelectAllVisible = () =>
+    setBatchIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  const clearBatch = () => {
+    setBatchIds(new Set());
+    setBatchMode(false);
+  };
+
   const reformatPreview = payload.reformat_preview || null;
   const duplicateCandidates = asArray(payload.duplicate_candidates);
   const rowsById = useMemo(() => {
@@ -664,6 +866,9 @@ function App() {
           <button type="button" className="ee-btn" onClick={() => emit(refreshCrystallizedEvent(null))}>
             {label(labels, "ee_refresh_crystallized_tasks", "Refresh crystallized")}
           </button>
+          <button type="button" className="ee-btn" onClick={() => setShowDoneTasks(true)}>
+            {label(labels, "ee_done_tasks_title", "Done tasks → evidence")}
+          </button>
           <button type="button" className="ee-btn" onClick={() => setShowOutputs((s) => !s)}>
             {label(labels, "ee_create_from_output", "Create from output")}
           </button>
@@ -672,6 +877,13 @@ function App() {
           </button>
           <button type="button" className="ee-btn" onClick={() => emit(suggestDuplicatesEvent("", true))}>
             {label(labels, "ee_find_duplicates_ai", "Find duplicates (AI)")}
+          </button>
+          <button
+            type="button"
+            className={`ee-btn${batchMode ? " ee-btn-on" : ""}`}
+            onClick={() => { setBatchMode((b) => !b); if (batchMode) setBatchIds(new Set()); }}
+          >
+            {label(labels, "ee_batch_mode", "Batch select")}
           </button>
           {visible.some((r) => r.needs_migration) && (
             <button
@@ -727,6 +939,16 @@ function App() {
         </div>
       )}
 
+      {batchMode && (
+        <BulkActionBar
+          ids={selectedBatchIds}
+          payload={payload}
+          labels={labels}
+          emit={emit}
+          onClear={clearBatch}
+        />
+      )}
+
       {duplicateCandidates.length > 0 && (
         <DuplicatePanel
           candidates={duplicateCandidates}
@@ -759,6 +981,16 @@ function App() {
               {label(labels, "ee_filter_needs_migration", "needs migration")}
             </label>
           </div>
+          {batchMode && visible.length > 0 && (
+            <label className="ee-check ee-selectall">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAllVisible}
+              />
+              {label(labels, "ee_bulk_select_visible", "Select all visible")} ({visible.length})
+            </label>
+          )}
           <div className="ee-list-scroll">
             {visible.length === 0 && <div className="ee-empty">{label(labels, "ee_empty", "No evidence matches.")}</div>}
             {visible.map((row) => (
@@ -768,6 +1000,9 @@ function App() {
                 labels={labels}
                 selected={row.id === selectedId}
                 onClick={() => setSelectedId(row.id)}
+                batch={batchMode}
+                checked={batchIds.has(row.id)}
+                onCheck={checkRow}
               />
             ))}
           </div>
@@ -784,6 +1019,14 @@ function App() {
       </div>
 
       {showAdd && <AddForm payload={payload} labels={labels} emit={emit} onClose={() => setShowAdd(false)} />}
+      {showDoneTasks && (
+        <DoneTasksPicker
+          tasks={doneTasks}
+          labels={labels}
+          emit={emit}
+          onClose={() => setShowDoneTasks(false)}
+        />
+      )}
     </div>
   );
 }

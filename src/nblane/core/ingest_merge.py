@@ -187,6 +187,14 @@ def merge_ingest_patch(
                     )
                     if mapped is not None and mapped in pool_ids:
                         resolved = mapped
+                    elif key.startswith("kb_") or key.startswith("kanban:"):
+                        warnings.append(
+                            f"{nid}: dropped evidence_refs id {key!r} "
+                            f"(looks like a Kanban task id; create/link an "
+                            f"evidence row via kanban_refs, then use the "
+                            f"evidence id in node_updates.evidence_refs)"
+                        )
+                        continue
                     else:
                         warnings.append(
                             f"{nid}: dropped evidence_refs id "

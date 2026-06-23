@@ -18,6 +18,8 @@ from nblane.core.project_board import (
     archive_project_case,
     load_project_board,
     load_project_board_raw,
+    milestone_label_map,
+    project_label_map,
     save_project_board,
     update_project_case,
 )
@@ -27,6 +29,55 @@ class _FakeDate:
     @staticmethod
     def today() -> date:
         return date(2026, 5, 13)
+
+
+class TestProjectLabelMaps(unittest.TestCase):
+    """Pure id -> title maps used for read-mode provenance display."""
+
+    def _board(self) -> ProjectBoard:
+        return ProjectBoard(
+            profile="alice",
+            project_cases=[
+                ProjectCase(
+                    id="proj_a",
+                    title="Project A",
+                    status="active",
+                    milestones=[
+                        ProjectMilestone(id="m1", title="Milestone 1"),
+                        ProjectMilestone(id="m2", title="Milestone 2"),
+                    ],
+                ),
+                ProjectCase(
+                    id="proj_b",
+                    title="Project B",
+                    status="archived",
+                ),
+                ProjectCase(id="", title="No id"),
+            ],
+        )
+
+    def test_project_label_map_includes_all_cases(self) -> None:
+        labels = project_label_map(self._board())
+        # Archived cases are included so stale refs still degrade gracefully.
+        self.assertEqual(labels, {"proj_a": "Project A", "proj_b": "Project B"})
+
+    def test_milestone_label_map_spans_cases(self) -> None:
+        labels = milestone_label_map(self._board())
+        self.assertEqual(labels, {"m1": "Milestone 1", "m2": "Milestone 2"})
+
+    def test_label_maps_fall_back_to_id_when_title_blank(self) -> None:
+        board = ProjectBoard(
+            profile="alice",
+            project_cases=[
+                ProjectCase(
+                    id="proj_x",
+                    title="",
+                    milestones=[ProjectMilestone(id="mx", title="")],
+                ),
+            ],
+        )
+        self.assertEqual(project_label_map(board), {"proj_x": "proj_x"})
+        self.assertEqual(milestone_label_map(board), {"mx": "mx"})
 
 
 class TestProjectBoard(unittest.TestCase):

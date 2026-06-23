@@ -92,6 +92,8 @@ metric_unassigned_tasks: Unassigned tasks
 metric_unassigned_evidence: Unassigned evidence
 metric_current_goal_projects: Current-goal projects
 unassigned_evidence_hint: '{count} reviewed evidence row(s) are not linked to any project.'
+evidence_pool_section: Evidence pool
+evidence_pool_section_hint: Review, link, deprecate, and batch-edit evidence without leaving the Project Board.
 status_active: Active
 status_paused: Paused
 status_completed: Completed

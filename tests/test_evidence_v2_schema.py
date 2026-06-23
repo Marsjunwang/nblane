@@ -13,18 +13,12 @@ from pathlib import Path
 
 from nblane.core.evidence_review import _evidence_row_payload
 from nblane.core.ingest_parse import _normalize_evidence_row
+from nblane.evidence_editor_host import compact_evidence_row
 from nblane.core.models import (
     EVIDENCE_POOL_SCHEMA_VERSION,
     EvidencePool,
     EvidenceRecord,
 )
-
-
-_PAGE_SOURCE = (
-    Path(__file__).resolve().parents[1]
-    / "pages"
-    / "2_Evidence_Review.py"
-).read_text(encoding="utf-8")
 
 
 V2_ROW = {
@@ -128,13 +122,26 @@ class TestNormalizeEvidenceRowV2(unittest.TestCase):
 
 
 class TestCompactRowV2(unittest.TestCase):
-    """_compact_row lives in a Streamlit page (cannot import bare); assert the
-    v2 field whitelist is wired in via source inspection. Behavioral coverage
-    of the same compaction rules is exercised by the normalizer tests above,
-    which share the strip-and-omit contract.
+    """compact_evidence_row (shared host helper) preserves v2 provenance fields
+    and drops empty ones. Now importable, so assert behavior directly instead of
+    scraping the page source.
     """
 
-    def test_compact_row_lists_v2_fields(self) -> None:
+    def test_compact_row_keeps_v2_fields_when_present(self) -> None:
+        row = {
+            "id": "e1",
+            "type": "project",
+            "title": "T",
+            "origin": "resume_parse",
+            "origin_ref": "resume",
+            "origin_detail": "section 2",
+            "language": "en",
+            "original_language": "zh",
+            "original_content_hash": "sha256:abc",
+            "original_content": "原文",
+            "formatted_content": "# Body",
+        }
+        out = compact_evidence_row(row)
         for field_name in (
             "origin",
             "origin_ref",
@@ -145,11 +152,17 @@ class TestCompactRowV2(unittest.TestCase):
             "original_content",
             "formatted_content",
         ):
-            self.assertIn(
-                f'"{field_name}"',
-                _PAGE_SOURCE,
-                f"_compact_row whitelist missing {field_name}",
+            self.assertEqual(
+                out.get(field_name),
+                row[field_name],
+                f"compact_evidence_row dropped {field_name}",
             )
+
+    def test_compact_row_omits_blank_v2_fields(self) -> None:
+        out = compact_evidence_row(
+            {"id": "e1", "type": "project", "title": "T", "origin": "  "}
+        )
+        self.assertNotIn("origin", out)
 
 
 class TestEvidenceRowPayloadV2(unittest.TestCase):

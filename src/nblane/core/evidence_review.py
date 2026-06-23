@@ -251,6 +251,66 @@ def link_skill_to_evidence_nodes(
     return nodes
 
 
+def set_evidence_skill_refs(
+    nodes: list[dict[str, Any]],
+    evidence_id: str,
+    skill_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Reconcile one evidence id across skill nodes (chip-save semantics).
+
+    Unlike :func:`link_skill_to_evidence_nodes` (append-only), this adds the
+    evidence id to every node in *skill_ids* and removes it from every other
+    node, matching a toggleable chip UI. Selected nodes that don't exist yet
+    are created with status ``learning``. De-dupes refs and drops an empty
+    ``evidence_refs`` key. Pure: mutates/returns the given node list, no IO.
+    """
+    eid = str(evidence_id or "").strip()
+    if not eid:
+        return nodes
+    selected = {
+        str(s).strip() for s in skill_ids if str(s).strip()
+    }
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        if isinstance(node, dict):
+            nid = str(node.get("id", "") or "").strip()
+            if nid:
+                by_id[nid] = node
+
+    # Remove from / keep on existing nodes.
+    for nid, node in by_id.items():
+        refs = [
+            str(ref).strip()
+            for ref in (node.get("evidence_refs") or [])
+            if str(ref).strip()
+        ]
+        has = eid in refs
+        want = nid in selected
+        if want and not has:
+            refs.append(eid)
+        elif not want and has:
+            refs = [r for r in refs if r != eid]
+        # De-dupe while preserving order.
+        refs = list(dict.fromkeys(refs))
+        if refs:
+            node["evidence_refs"] = refs
+        else:
+            node.pop("evidence_refs", None)
+
+    # Create selected nodes that don't exist yet.
+    for nid in selected:
+        if nid not in by_id:
+            nodes.append(
+                {
+                    "id": nid,
+                    "status": "learning",
+                    "evidence_refs": [eid],
+                }
+            )
+    return nodes
+
+
 def _pool_entries(profile: str | Path) -> list[dict[str, Any]]:
     raw = io_facade.load_evidence_pool_raw(profile) or {}
     entries = raw.get("evidence_entries") or []
@@ -910,6 +970,48 @@ def evidence_editor_migration_summary(
     }
 
 
+def _done_task_options(profile: str | Path) -> list[dict[str, object]]:
+    """Done-section kanban tasks for the editor's Done -> evidence picker.
+
+    Includes crystallized *and* non-crystallized Done tasks. Each entry carries
+    ``has_evidence`` (an evidence row already references the task) so the React
+    picker can show, but not hide, already-ingested tasks.
+    """
+    from nblane.core.evidence_migrate import refresh_from_crystallized_tasks
+
+    sections = io_facade.parse_kanban(profile)
+    done_tasks = sections.get(KANBAN_DONE) or []
+    # Reuse the deterministic proposal indexer to know which Done tasks already
+    # resolve to an existing evidence row (kind == "update").
+    try:
+        result = refresh_from_crystallized_tasks(
+            profile, entries=_pool_entries(profile), include_uncrystallized=True
+        )
+        evidence_task_ids = {
+            str(p.get("task_id") or "")
+            for p in (result.get("proposals") or [])
+            if p.get("kind") == "update"
+        }
+    except Exception:
+        evidence_task_ids = set()
+    out: list[dict[str, object]] = []
+    for task in done_tasks:
+        tid = str(getattr(task, "id", "") or "").strip()
+        if not tid:
+            continue
+        out.append(
+            {
+                "id": tid,
+                "title": str(getattr(task, "title", "") or "") or tid,
+                "crystallized": bool(getattr(task, "crystallized", False)),
+                "has_evidence": tid in evidence_task_ids,
+                "completed_on": str(getattr(task, "completed_on", "") or ""),
+                "project_id": str(getattr(task, "project_id", "") or ""),
+            }
+        )
+    return out
+
+
 def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
     """Full payload for the unified React evidence editor component.
 
@@ -949,6 +1051,7 @@ def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
         "source_options": review.get("source_options") or [],
         "skill_options": review.get("skill_options") or [],
         "output_options": _output_options(profile),
+        "done_task_options": _done_task_options(profile),
         "project_ref_candidates": review.get("project_ref_candidates") or [],
         "project_suggestions": suggestions,
         "migration_summary": evidence_editor_migration_summary(

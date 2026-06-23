@@ -59,6 +59,7 @@ metric_unlinked: 未挂技能
 metric_needs_review: 待审阅
 metric_status_risk: 状态证据风险
 tab_queue: 已完成队列 / 整理
+tab_housekeeping: 已完成整理
 tab_claims: 断言工作台
 tab_pool: 证据池
 tab_links: 技能关联
@@ -318,6 +319,8 @@ ee_save: 保存
 ee_deprecate: 弃用
 ee_deprecate_confirm: 确认弃用这条证据？
 ee_link_project: 内部项目
+ee_link_skill: 技能
+ee_skill_linked: 已更新技能关联。
 ee_run_migration: 运行迁移
 ee_refresh_crystallized_tasks: 从已沉淀任务刷新
 ee_migration_preview: 迁移预览
@@ -371,3 +374,21 @@ ee_dup_not_duplicate: 不是重复
 ee_dup_ai_running: 正在扫描重复…
 ee_dup_none: 未发现疑似重复。
 ee_dup_resolved: 已处理重复（保留 {k}）。
+# Done 任务 -> 证据（确定式，无 LLM）
+ee_done_tasks_title: Done 任务 → 证据
+ee_done_tasks_hint: 从 Done 任务确定式生成 v2 证据行（不调用 AI）。已入库的任务会被标记。
+ee_done_tasks_create: 生成证据
+ee_done_tasks_none: 没有可入库的 Done 任务。
+ee_done_tasks_done: 已从 Done 任务生成/更新 {n} 行。
+ee_done_has_evidence: 已有证据
+ee_done_mark_crystallized: 保存后将所选任务标记为已固化
+# 批量选择与批量操作
+ee_batch_mode: 批量选择
+ee_bulk_selected: 已选
+ee_bulk_select_visible: 全选当前
+ee_bulk_apply: 应用到所选
+ee_bulk_deprecate: 弃用
+ee_bulk_deprecate_confirm: 弃用所选证据行？
+ee_bulk_clear: 清除
+ee_bulk_done: 已更新 {n} 行。
+ee_bulk_none: 未选择任何行。
