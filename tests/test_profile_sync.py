@@ -90,6 +90,41 @@ class TestProfileSync(unittest.TestCase):
             final_text = skill_md.read_text(encoding="utf-8")
             self.assertIn(manual_line, final_text)
 
+    def test_sync_allows_backslashes_in_generated_blocks(self) -> None:
+        """Generated text is literal replacement text, not a regex template."""
+        from nblane.core.sync import write_generated_blocks
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_dir = self._make_profile_copy(Path(tmp))
+            (profile_dir / "kanban.md").write_text(
+                """# test-user · Kanban
+
+## Doing
+
+- [ ] Tune \\policy controller
+
+## Queue
+
+- (empty)
+
+## Done
+
+- (empty)
+
+## Someday / Maybe
+
+- (empty)
+""",
+                encoding="utf-8",
+            )
+
+            write_generated_blocks(profile_dir)
+
+            final_text = (profile_dir / "SKILL.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Tune \\policy controller", final_text)
+
     def test_current_focus_uses_structured_top_level_kanban(self) -> None:
         """Current Focus uses parsed Doing/Queue tasks and blocked_by only."""
         from nblane.core.sync import _render_focus_from_kanban

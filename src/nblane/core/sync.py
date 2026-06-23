@@ -72,7 +72,7 @@ def _replace_block_body(
             f"block '{block_name}'."
         )
     replacement = f"{begin}\n{body.strip()}\n{end}"
-    return pattern.sub(replacement, content, count=1)
+    return pattern.sub(lambda _match: replacement, content, count=1)
 
 
 def _render_skill_tree_block(profile_dir: Path) -> str:
