@@ -25,10 +25,47 @@ _TARGET_TO_TYPE = {
 # Preserve a compact slice of the output body so original_content stays useful
 # without copying an entire long-form post into the pool.
 _BODY_PREVIEW_CHARS = 100
+_BLOG_BODY_PREVIEW_CHARS = 2000
 
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
+
+
+def evidence_source_key(row: dict) -> tuple[str, str] | None:
+    """Return the canonical ``(origin, origin_ref)`` key for a row.
+
+    Empty legacy rows do not have a canonical source key yet and return None.
+    New flows should always set both fields before saving.
+    """
+    origin = _clean(row.get("origin"))
+    origin_ref = _clean(row.get("origin_ref"))
+    if not origin or not origin_ref:
+        return None
+    return origin, origin_ref
+
+
+def active_source_index(entries: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    """Map canonical source key -> active evidence rows."""
+    out: dict[tuple[str, str], list[dict]] = {}
+    for row in entries:
+        if not isinstance(row, dict) or bool(row.get("deprecated", False)):
+            continue
+        key = evidence_source_key(row)
+        if key is None:
+            continue
+        out.setdefault(key, []).append(row)
+    return out
+
+
+def find_active_by_source(
+    entries: list[dict],
+    origin: str,
+    origin_ref: str,
+) -> dict | None:
+    """Return the active evidence row for one canonical source, if unique."""
+    rows = active_source_index(entries).get((_clean(origin), _clean(origin_ref))) or []
+    return rows[0] if len(rows) == 1 else None
 
 
 def _output_original_content(output: dict) -> str:
@@ -127,10 +164,103 @@ def evidence_row_from_output(
         row["formatted_content"] = summary
     if project_refs:
         row["project_refs"] = project_refs
-    date = _clean(output.get("year")) or _clean(output.get("created_at"))
+    date = (
+        _clean(output.get("date"))
+        or _clean(output.get("created_at"))
+        or _clean(output.get("year"))
+    )
     if date:
         row["date"] = date
     url = _clean(output.get("url"))
     if url:
         row["url"] = url
+    return row
+
+
+def _blog_original_content(post: Any) -> str:
+    """Compose a compact source snapshot for a public blog post."""
+    lines: list[str] = []
+    for label, value in (
+        ("Blog route", getattr(post, "route", "")),
+        ("Title", getattr(post, "title", "")),
+        ("Status", getattr(post, "status", "")),
+        ("Date", getattr(post, "date", "")),
+        ("Path", getattr(post, "path", "")),
+    ):
+        val = _clean(value)
+        if val:
+            lines.append(f"{label}: {val}")
+    summary = _clean(getattr(post, "summary", ""))
+    if summary:
+        lines.append("")
+        lines.append(f"Summary: {summary}")
+    body = _clean(getattr(post, "body", ""))
+    if body:
+        preview = body[:_BLOG_BODY_PREVIEW_CHARS]
+        suffix = "..." if len(body) > _BLOG_BODY_PREVIEW_CHARS else ""
+        lines.append("")
+        lines.append("Body preview:")
+        lines.append(f"{preview}{suffix}")
+    return "\n".join(lines).strip()
+
+
+def evidence_row_from_blog_post(
+    post: Any,
+    *,
+    project_refs: list[str],
+    profile: str | Path = "",
+    existing_ids: set[str] | None = None,
+    target_lang: str | None = None,
+) -> dict:
+    """Build a v2 evidence row from one public blog post.
+
+    The canonical source is the public document itself:
+    ``origin=output`` and ``origin_ref=blog:<route>``.
+    """
+    existing_ids = set(existing_ids or set())
+    target_lang = (target_lang or llm_client.reply_language() or "en").strip()
+    target_lang = "zh" if target_lang == "zh" else "en"
+
+    route = _clean(getattr(post, "route", "")) or _clean(getattr(post, "slug", "blog"))
+    slug = route.replace("/", "_") or "blog"
+    base_id = f"blog_{slug}"
+    eid = base_id
+    suffix = 2
+    while eid in existing_ids:
+        eid = f"{base_id}_{suffix}"
+        suffix += 1
+
+    original_content = _blog_original_content(post)
+    title = _clean(getattr(post, "title", "")) or route
+    summary = _clean(getattr(post, "summary", ""))
+    status = _clean(getattr(post, "status", ""))
+    path = _clean(getattr(post, "path", ""))
+    date = _clean(getattr(post, "date", ""))
+    row: dict = {
+        "id": eid,
+        "type": "practice",
+        "title": title,
+        "origin": "output",
+        "origin_ref": f"blog:{route}",
+        "origin_detail": "Blog: " + " · ".join(
+            bit for bit in (status, path) if bit
+        )
+        if status or path
+        else "Blog",
+        "original_content": original_content,
+        "original_content_hash": content_hash(original_content),
+        "original_language": detect_language(original_content),
+        "language": target_lang,
+        "review_status": "needs_review",
+        "public_readiness": "private",
+        "project_refs": [_clean(r) for r in project_refs if _clean(r)],
+    }
+    if summary:
+        row["summary"] = summary
+        row["formatted_content"] = summary
+    if date:
+        row["date"] = date
+    url_path = _clean(getattr(post, "url_path", ""))
+    if url_path:
+        row["url"] = "/" + url_path.lstrip("/")
     return row

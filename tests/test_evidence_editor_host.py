@@ -49,11 +49,12 @@ class TestEvidenceEditorHost(unittest.TestCase):
         from nblane.core import io as io_mod
         from nblane.core import paths as paths_mod
         from nblane.core import profile_io
+        from nblane.core import project_board
 
         self._tmp = tempfile.TemporaryDirectory()
         tmp_path = Path(self._tmp.name)
         self._origs = {
-            m: m.PROFILES_DIR for m in (paths_mod, profile_io, io_mod)
+            m: m.PROFILES_DIR for m in (paths_mod, profile_io, io_mod, project_board)
         }
         for m in self._origs:
             m.PROFILES_DIR = tmp_path
@@ -64,7 +65,17 @@ class TestEvidenceEditorHost(unittest.TestCase):
             {
                 "profile": "dev",
                 "evidence_entries": [
-                    {"id": "e1", "type": "practice", "title": "First"},
+                    {
+                        "id": "e1",
+                        "type": "practice",
+                        "title": "First",
+                        "date": "2026-01-02",
+                        "origin": "manual_daily",
+                        "origin_ref": "manual:e1",
+                        "original_content": "raw",
+                        "formatted_content": "formatted",
+                        "project_refs": ["project:demo"],
+                    },
                 ],
             },
         )
@@ -77,6 +88,19 @@ class TestEvidenceEditorHost(unittest.TestCase):
                 "nodes": [
                     {"id": "ros2_basics", "status": "solid", "evidence_refs": []},
                     {"id": "nav2", "status": "learning", "evidence_refs": ["e1"]},
+                ],
+            },
+        )
+        _write_yaml(
+            self.pdir / "project-board.yaml",
+            {
+                "profile": "dev",
+                "project_cases": [
+                    {
+                        "id": "project:demo",
+                        "title": "Demo Project",
+                        "goal_refs": ["goal:demo"],
+                    }
                 ],
             },
         )
@@ -155,7 +179,16 @@ class TestEvidenceEditorHost(unittest.TestCase):
             {
                 "action": "add_evidence",
                 "event_id": "ev-2",
-                "payload": {"fields": {"title": "Brand new", "type": "project"}},
+                "payload": {
+                    "fields": {
+                        "title": "Brand new",
+                        "type": "project",
+                        "date": "2026-01-03",
+                        "original_content": "manual raw",
+                        "formatted_content": "manual formatted",
+                        "project_refs": ["project:demo"],
+                    }
+                },
             }
         )
         self.assertTrue(ok)
@@ -337,6 +370,8 @@ class TestEvidenceEditorHost(unittest.TestCase):
             "## Done\n\n"
             "- [x] Shipped detector\n"
             "  - id: kb_det\n"
+            "  - completed_on: 2026-02-01\n"
+            "  - project_id: project:demo\n"
             "  - outcome: faster pipeline\n",
             encoding="utf-8",
         )
@@ -357,11 +392,156 @@ class TestEvidenceEditorHost(unittest.TestCase):
         ]
         self.assertEqual(len(match), 1)
         self.assertEqual(match[0].get("origin"), "kanban_task")
+        self.assertEqual(match[0].get("date"), "2026-02-01")
+        self.assertTrue(match[0].get("formatted_content"))
         # The task is now crystallized in kanban.md.
         self.assertIn(
             "crystallized: true",
             (self.pdir / "kanban.md").read_text(encoding="utf-8"),
         )
+
+    def test_prepare_done_ai_preview_blocks_missing_completed_on(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] Missing date\n"
+            "  - id: kb_missing_date\n"
+            "  - project_id: project:demo\n",
+            encoding="utf-8",
+        )
+        with patch("nblane.evidence_editor_host.ingest_kanban_done_json") as ai:
+            ok = self.host.handle_event(
+                {
+                    "action": "prepare_done_task_evidence",
+                    "event_id": "done-ai-block-1",
+                    "payload": {"task_ids": ["kb_missing_date"]},
+                }
+            )
+        self.assertTrue(ok)
+        ai.assert_not_called()
+        preview = self.fake_st.session_state[self.host._done_preview_state_key()]
+        self.assertFalse(preview["can_accept"])
+        self.assertIn("completed_on", preview["task_blockers"][0]["blockers"][0])
+
+    def test_prepare_and_apply_done_ai_preview_writes_evidence_and_skills(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] AI detector\n"
+            "  - id: kb_ai\n"
+            "  - completed_on: 2026-02-02\n"
+            "  - project_id: project:demo\n"
+            "  - outcome: detector improved\n",
+            encoding="utf-8",
+        )
+        ai_patch = {
+            "evidence_entries": [
+                {
+                    "id": "ai_ev",
+                    "title": "AI normalized detector",
+                    "summary": "Detector work was completed.",
+                    "formatted_content": "## Detector\n\nCompleted detector work.",
+                    "strength": "medium",
+                    "confidence": "high",
+                    # Host must overwrite identity fields from the task.
+                    "date": "1900-01-01",
+                    "origin": "manual_daily",
+                    "origin_ref": "wrong",
+                    "project_refs": ["project:wrong"],
+                    "original_content": "wrong raw",
+                    "kanban_refs": ["kanban:kb_ai"],
+                }
+            ],
+            "node_updates": [
+                {
+                    "id": "ros2_basics",
+                    "evidence_refs": ["ai_ev"],
+                    "status": "learning",
+                }
+            ],
+        }
+        with patch(
+            "nblane.evidence_editor_host.ingest_kanban_done_json",
+            return_value=(ai_patch, None),
+        ), patch(
+            "nblane.evidence_editor_host.kanban_ai_backend",
+            return_value="llm",
+        ), patch(
+            "nblane.evidence_editor_host.current_goal_agent_context",
+            return_value="",
+        ):
+            ok = self.host.handle_event(
+                {
+                    "action": "prepare_done_task_evidence",
+                    "event_id": "done-ai-1",
+                    "payload": {"task_ids": ["kb_ai"]},
+                }
+            )
+        self.assertTrue(ok)
+        preview = self.fake_st.session_state[self.host._done_preview_state_key()]
+        self.assertTrue(preview["can_accept"])
+        row = preview["rows"][0]["row"]
+        self.assertEqual(row["date"], "2026-02-02")
+        self.assertEqual(row["origin"], "kanban_task")
+        self.assertEqual(row["origin_ref"], "kanban:kb_ai")
+        self.assertEqual(row["project_refs"], ["project:demo"])
+        self.assertIn("AI detector", row["original_content"])
+
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-ai-apply-1",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": True,
+                },
+            }
+        )
+        self.assertTrue(ok)
+        rows = self._pool()
+        match = [r for r in rows if r.get("origin_ref") == "kanban:kb_ai"]
+        self.assertEqual(len(match), 1)
+        self.assertEqual(match[0]["title"], "AI normalized detector")
+        self.assertEqual(match[0]["strength"], "medium")
+        by_id = {n["id"]: n for n in self._tree_nodes()}
+        self.assertIn(match[0]["id"], by_id["ros2_basics"].get("evidence_refs") or [])
+
+    def test_done_ai_duplicate_rows_block_accept(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] Duplicate AI rows\n"
+            "  - id: kb_dup\n"
+            "  - completed_on: 2026-02-03\n"
+            "  - project_id: project:demo\n",
+            encoding="utf-8",
+        )
+        row = {
+            "title": "Duplicate",
+            "summary": "summary",
+            "formatted_content": "formatted",
+            "strength": "medium",
+            "confidence": "high",
+            "kanban_refs": ["kanban:kb_dup"],
+        }
+        with patch(
+            "nblane.evidence_editor_host.ingest_kanban_done_json",
+            return_value=({"evidence_entries": [row, dict(row)], "node_updates": []}, None),
+        ), patch(
+            "nblane.evidence_editor_host.kanban_ai_backend",
+            return_value="llm",
+        ), patch(
+            "nblane.evidence_editor_host.current_goal_agent_context",
+            return_value="",
+        ):
+            ok = self.host.handle_event(
+                {
+                    "action": "prepare_done_task_evidence",
+                    "event_id": "done-ai-dup-1",
+                    "payload": {"task_ids": ["kb_dup"]},
+                }
+            )
+        self.assertTrue(ok)
+        preview = self.fake_st.session_state[self.host._done_preview_state_key()]
+        self.assertFalse(preview["can_accept"])
+        self.assertIn("multiple", preview["blocking_errors"][0])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ keys Evidence Review used before extraction, so its behavior is unchanged.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import streamlit as st
 
 from nblane.core import llm as llm_client
@@ -20,10 +22,18 @@ from nblane.core.evidence_dedup import (
     find_duplicate_candidates,
     suggest_duplicates_ai,
 )
-from nblane.core.evidence_from_output import evidence_row_from_output
+from nblane.core.evidence_from_output import (
+    active_source_index,
+    evidence_row_from_blog_post,
+    evidence_row_from_output,
+    evidence_source_key,
+)
 from nblane.core.evidence_migrate import (
+    content_hash,
+    detect_language,
     migrate_evidence_pool,
     refresh_from_crystallized_tasks,
+    render_kanban_task_source,
 )
 from nblane.core.evidence_pool_id import new_evidence_id
 from nblane.core.evidence_review import (
@@ -31,16 +41,30 @@ from nblane.core.evidence_review import (
     build_evidence_editor_payload,
     build_evidence_review,
     bulk_set_pool_field,
+    done_task_evidence_blockers,
+    internal_project_goal_index,
     set_evidence_skill_refs,
+    validate_internal_project_refs,
 )
 from nblane.core.evidence_migrate import backfill_row
+from nblane.core.ingest_parse import (
+    _llm_status_effective,
+    _ordinal_placeholder_to_id,
+    _status_rank,
+    parse_ingest_patch,
+)
 from nblane.core.io import (
     EVIDENCE_POOL_FILENAME,
     profile_dir,
+    load_schema_raw,
     save_evidence_pool,
     save_skill_tree,
+    schema_node_index,
 )
+from nblane.core.kanban_archive import kanban_ref, kanban_ref_id
+from nblane.core.models import EVIDENCE_CONFIDENCES, EVIDENCE_STRENGTHS
 from nblane.core.profile_ingest_llm import reformat_evidence
+from nblane.core.profile_ingest_llm import ingest_kanban_done_json
 from nblane.core.sync import write_generated_blocks
 from nblane.evidence_editor_component import (
     evidence_editor_component_available,
@@ -54,6 +78,8 @@ from nblane.web_cache import (
 from nblane.web_i18n import evidence_review_ui
 from nblane.web_shared import (
     assert_files_current,
+    current_goal_agent_context,
+    kanban_ai_backend,
     refresh_file_snapshots,
     stash_git_backup_results,
 )
@@ -172,6 +198,12 @@ class EvidenceEditorHost:
     def _dismissed_state_key(self) -> str:
         return self._k("dupes_dismissed")
 
+    def _done_preview_state_key(self) -> str:
+        return self._k("done_preview")
+
+    def _bulk_reformat_state_key(self) -> str:
+        return self._k("bulk_reformat")
+
     def _event_seen(self, event_id: str) -> bool:
         """Dedup component events by id (frontend resends last value on rerun)."""
         if not event_id:
@@ -193,6 +225,9 @@ class EvidenceEditorHost:
             for item in (raw.get("evidence_entries") or [])
             if isinstance(item, dict)
         ]
+
+    def _active_source_index(self, entries: list[dict] | None = None) -> dict:
+        return active_source_index(entries if entries is not None else self._pool_entries())
 
     def _save_pool(self, entries: list[dict], message: str) -> None:
         """Persist evidence-pool.yaml and refresh generated context blocks."""
@@ -219,6 +254,557 @@ class EvidenceEditorHost:
         clear_web_cache()
         st.success(message)
 
+    def _save_pool_and_tree(
+        self,
+        entries: list[dict],
+        tree: dict | None,
+        message: str,
+    ) -> None:
+        """Persist evidence-pool.yaml and, when changed, skill-tree.yaml."""
+        paths = [self.pool_path, self.skill_path]
+        if tree is not None:
+            paths.insert(1, self.tree_path)
+        assert_files_current(paths)
+        pool_raw = load_evidence_pool_raw(self.profile) or {}
+        pool_raw["profile"] = self.profile
+        pool_raw["evidence_entries"] = entries
+        save_evidence_pool(self.profile, pool_raw)
+        if tree is not None:
+            save_skill_tree(self.profile, tree)
+        if self.skill_path.exists():
+            write_generated_blocks(self.pdir)
+        refresh_file_snapshots(paths)
+        stash_git_backup_results()
+        clear_web_cache()
+        st.success(message)
+
+    # -- Done task AI preview / accept --------------------------------
+    def _lookup_tasks_by_id(self) -> dict[str, object]:
+        """Return live+archived kanban tasks keyed by stable task id."""
+        from nblane.core.kanban_archive import _all_lookup_tasks
+
+        out: dict[str, object] = {}
+        for task in _all_lookup_tasks(self.profile):
+            tid = str(getattr(task, "id", "") or "").strip()
+            if tid and tid not in out:
+                out[tid] = task
+        return out
+
+    def _candidate_task_id(
+        self,
+        row: dict,
+        selected_task_ids: set[str],
+    ) -> str:
+        """Infer which selected task an AI evidence candidate describes."""
+        for ref in row.get("kanban_refs") or []:
+            rid = kanban_ref_id(str(ref or ""))
+            if rid in selected_task_ids:
+                return rid
+        origin_ref = str(row.get("origin_ref", "") or "").strip()
+        rid = kanban_ref_id(origin_ref)
+        if rid in selected_task_ids:
+            return rid
+        if origin_ref in selected_task_ids:
+            return origin_ref
+        # For a single-task preview, tolerate a model that omitted provenance;
+        # host still overwrites canonical identity from the real task.
+        if len(selected_task_ids) == 1:
+            return next(iter(selected_task_ids))
+        return ""
+
+    def _normalize_done_ai_row(
+        self,
+        *,
+        ai_row: dict,
+        task: object,
+        ordinal: int,
+        existing_id: str = "",
+    ) -> dict:
+        """Host-normalize one AI Done evidence candidate."""
+        task_id = str(getattr(task, "id", "") or "").strip()
+        project_id = str(getattr(task, "project_id", "") or "").strip()
+        original = render_kanban_task_source(task)
+        strength = str(ai_row.get("strength", "") or "").strip()
+        confidence = str(ai_row.get("confidence", "") or "").strip()
+        title = str(ai_row.get("title", "") or "").strip()
+        summary = str(ai_row.get("summary", "") or "").strip()
+        formatted = str(ai_row.get("formatted_content", "") or "").strip()
+        blockers: list[str] = []
+        if not title:
+            blockers.append("AI did not return title.")
+        if not summary:
+            blockers.append("AI did not return summary.")
+        if not formatted:
+            blockers.append("AI did not return formatted_content.")
+        if strength not in EVIDENCE_STRENGTHS:
+            blockers.append("AI did not return a valid strength.")
+        if confidence not in EVIDENCE_CONFIDENCES:
+            blockers.append("AI did not return a valid confidence.")
+        row = {
+            "type": str(ai_row.get("type", "") or "practice"),
+            "title": title,
+            "summary": summary,
+            "formatted_content": formatted,
+            "source_excerpt": str(ai_row.get("source_excerpt", "") or "").strip(),
+            "date": str(getattr(task, "completed_on", "") or "").strip(),
+            "origin": "kanban_task",
+            "origin_ref": kanban_ref(task_id),
+            "origin_detail": f"Done task {task_id}",
+            "kanban_refs": [kanban_ref(task_id)],
+            "project_refs": [project_id] if project_id else [],
+            "original_content": original,
+            "original_content_hash": content_hash(original),
+            "original_language": detect_language(original),
+            "language": llm_client.reply_language(),
+            "strength": strength,
+            "confidence": confidence,
+            "review_status": "needs_review",
+            "public_readiness": "private",
+        }
+        url = str(ai_row.get("url", "") or "").strip()
+        if url:
+            row["url"] = url
+        return {
+            "task_id": task_id,
+            "task_title": str(getattr(task, "title", "") or ""),
+            "ordinal": ordinal,
+            "ai_id": str(ai_row.get("id", "") or "").strip(),
+            "existing_id": existing_id,
+            "row": row,
+            "valid": not blockers,
+            "blockers": blockers,
+            "source_key": ["kanban_task", kanban_ref(task_id)],
+        }
+
+    def _done_preview_payload(
+        self,
+        *,
+        selected_ids: list[str],
+        rows: list[dict] | None = None,
+        task_blockers: list[dict] | None = None,
+        node_updates: list[dict] | None = None,
+        warnings: list[str] | None = None,
+        ai_error: str = "",
+        blocking_errors: list[str] | None = None,
+    ) -> dict:
+        rows = list(rows or [])
+        task_blockers = list(task_blockers or [])
+        blocking_errors = list(blocking_errors or [])
+        valid_count = sum(1 for row in rows if row.get("valid"))
+        invalid_ai_count = sum(1 for row in rows if not row.get("valid"))
+        return {
+            "preview_id": uuid4().hex,
+            "selected_task_ids": selected_ids,
+            "rows": rows,
+            "task_blockers": task_blockers,
+            "node_updates": list(node_updates or []),
+            "warnings": list(warnings or []),
+            "ai_error": ai_error,
+            "blocking_errors": blocking_errors,
+            "valid_count": valid_count,
+            "invalid_count": invalid_ai_count + len(task_blockers),
+            "can_accept": bool(valid_count)
+            and not ai_error
+            and not blocking_errors
+            and invalid_ai_count == 0,
+        }
+
+    def _prepare_done_task_evidence(self, task_ids: list | None) -> bool:
+        """Run strict Done-task validation, then AI preview. Does not write."""
+        ids = [str(t).strip() for t in (task_ids or []) if str(t).strip()]
+        if not ids:
+            st.info(self.ui.get("ee_done_tasks_none", "No Done tasks selected."))
+            return False
+        project_index = internal_project_goal_index(self.profile)
+        tasks_by_id = self._lookup_tasks_by_id()
+        entries = self._pool_entries()
+        source_index = active_source_index(entries)
+        valid_tasks: list[object] = []
+        task_blockers: list[dict] = []
+        seen: set[str] = set()
+        for task_id in ids:
+            if task_id in seen:
+                continue
+            seen.add(task_id)
+            task = tasks_by_id.get(task_id)
+            if task is None:
+                task_blockers.append(
+                    {
+                        "task_id": task_id,
+                        "title": task_id,
+                        "blockers": [
+                            "Task cannot be resolved from kanban.md or kanban-archive.md."
+                        ],
+                    }
+                )
+                continue
+            blockers = done_task_evidence_blockers(
+                task,
+                project_index,
+                resolvable=True,
+            )
+            source_rows = source_index.get(("kanban_task", kanban_ref(task_id))) or []
+            if len(source_rows) > 1:
+                blockers.append(
+                    f"Multiple active evidence rows already use source kanban:{task_id}."
+                )
+            if blockers:
+                task_blockers.append(
+                    {
+                        "task_id": task_id,
+                        "title": str(getattr(task, "title", "") or task_id),
+                        "blockers": blockers,
+                    }
+                )
+            else:
+                valid_tasks.append(task)
+        if not valid_tasks:
+            preview = self._done_preview_payload(
+                selected_ids=ids,
+                task_blockers=task_blockers,
+                blocking_errors=[
+                    "No selected Done tasks satisfy the evidence contract."
+                ],
+            )
+            st.session_state[self._done_preview_state_key()] = preview
+            st.warning("No selected Done tasks satisfy the evidence contract.")
+            return True
+
+        try:
+            backend = kanban_ai_backend(self.profile)
+        except Exception:
+            backend = "llm"
+        try:
+            goal_context = current_goal_agent_context(self.profile)
+        except Exception:
+            goal_context = ""
+        with st.spinner(
+            self.ui.get("ee_done_ai_preview_running", "Preparing AI preview...")
+        ):
+            patch, err = ingest_kanban_done_json(
+                self.profile,
+                valid_tasks,
+                goal_context=goal_context,
+                ai_backend=backend,
+            )
+        if err or patch is None:
+            msg = err or "AI preview failed."
+            preview = self._done_preview_payload(
+                selected_ids=ids,
+                task_blockers=task_blockers,
+                ai_error=msg,
+                blocking_errors=[msg],
+            )
+            st.session_state[self._done_preview_state_key()] = preview
+            st.error(msg)
+            return True
+
+        parsed = parse_ingest_patch(patch)
+        selected_task_ids = {
+            str(getattr(task, "id", "") or "").strip()
+            for task in valid_tasks
+        }
+        task_by_id = {
+            str(getattr(task, "id", "") or "").strip(): task
+            for task in valid_tasks
+        }
+        grouped: dict[str, list[tuple[int, dict]]] = {tid: [] for tid in selected_task_ids}
+        unmapped: list[dict] = []
+        for ordinal, raw in enumerate(parsed.evidence_entries, start=1):
+            tid = self._candidate_task_id(raw, selected_task_ids)
+            if tid:
+                grouped.setdefault(tid, []).append((ordinal, dict(raw)))
+            else:
+                unmapped.append(
+                    {
+                        "task_id": "",
+                        "task_title": "",
+                        "ordinal": ordinal,
+                        "ai_id": str(raw.get("id", "") or "").strip(),
+                        "row": dict(raw),
+                        "valid": False,
+                        "blockers": [
+                            "AI row cannot be mapped to one selected task."
+                        ],
+                    }
+                )
+        rows: list[dict] = []
+        blocking_errors: list[str] = []
+        for tid, candidates in grouped.items():
+            task = task_by_id[tid]
+            source_rows = source_index.get(("kanban_task", kanban_ref(tid))) or []
+            existing_id = (
+                str(source_rows[0].get("id", "") or "").strip()
+                if len(source_rows) == 1
+                else ""
+            )
+            if len(candidates) > 1:
+                blocking_errors.append(
+                    f"AI returned multiple evidence rows for task {tid}."
+                )
+                for ordinal, raw in candidates:
+                    item = self._normalize_done_ai_row(
+                        ai_row=raw,
+                        task=task,
+                        ordinal=ordinal,
+                        existing_id=existing_id,
+                    )
+                    item["valid"] = False
+                    item.setdefault("blockers", []).append(
+                        "AI returned multiple evidence rows for this task; retry AI."
+                    )
+                    rows.append(item)
+                continue
+            if not candidates:
+                blocking_errors.append(
+                    f"AI did not return evidence row for task {tid}."
+                )
+                rows.append(
+                    {
+                        "task_id": tid,
+                        "task_title": str(getattr(task, "title", "") or tid),
+                        "ordinal": 0,
+                        "ai_id": "",
+                        "existing_id": existing_id,
+                        "row": {
+                            "origin": "kanban_task",
+                            "origin_ref": kanban_ref(tid),
+                            "project_refs": [
+                                str(getattr(task, "project_id", "") or "").strip()
+                            ],
+                            "date": str(getattr(task, "completed_on", "") or ""),
+                        },
+                        "valid": False,
+                        "blockers": [
+                            "AI did not return evidence row for this task."
+                        ],
+                    }
+                )
+                continue
+            ordinal, raw = candidates[0]
+            rows.append(
+                self._normalize_done_ai_row(
+                    ai_row=raw,
+                    task=task,
+                    ordinal=ordinal,
+                    existing_id=existing_id,
+                )
+            )
+        rows.extend(unmapped)
+        preview = self._done_preview_payload(
+            selected_ids=ids,
+            rows=rows,
+            task_blockers=task_blockers,
+            node_updates=parsed.node_updates,
+            blocking_errors=blocking_errors,
+        )
+        st.session_state[self._done_preview_state_key()] = preview
+        if preview["can_accept"]:
+            st.success(
+                self.ui.get(
+                    "ee_done_ai_preview_ready", "AI preview is ready."
+                )
+            )
+        else:
+            st.warning(
+                self.ui.get(
+                    "ee_done_ai_preview_blocked",
+                    "AI preview needs attention before it can be accepted.",
+                )
+            )
+        return True
+
+    def _apply_node_updates_from_done_preview(
+        self,
+        *,
+        tree: dict,
+        node_updates: list[dict],
+        ref_map: dict[str, str],
+        final_ids: set[str],
+    ) -> tuple[dict, bool, list[str]]:
+        """Append AI-suggested skill refs after remapping preview refs."""
+        warnings: list[str] = []
+        schema_name = str(tree.get("schema", "") or "").strip()
+        allowed_node_ids: set[str] = set()
+        if schema_name:
+            schema_raw = load_schema_raw(schema_name)
+            if isinstance(schema_raw, dict):
+                allowed_node_ids = set(schema_node_index(schema_raw))
+        nodes = [
+            dict(node)
+            for node in (tree.get("nodes") or [])
+            if isinstance(node, dict)
+        ]
+        by_id: dict[str, int] = {}
+        for idx, node in enumerate(nodes):
+            nid = str(node.get("id", "") or "").strip()
+            if nid:
+                by_id[nid] = idx
+        changed = False
+        for update in node_updates:
+            if not isinstance(update, dict):
+                continue
+            nid = str(update.get("id", "") or "").strip()
+            if not nid:
+                warnings.append("Skipped node_update without id.")
+                continue
+            if allowed_node_ids and nid not in allowed_node_ids:
+                warnings.append(f"Skipped unknown node id: {nid}.")
+                continue
+            if nid not in by_id:
+                nodes.append({"id": nid, "status": "locked"})
+                by_id[nid] = len(nodes) - 1
+                changed = True
+            node = nodes[by_id[nid]]
+            cur_refs = [
+                str(ref).strip()
+                for ref in (node.get("evidence_refs") or [])
+                if str(ref).strip()
+            ]
+            seen = set(cur_refs)
+            raw_refs = update.get("evidence_refs") or []
+            if isinstance(raw_refs, list):
+                for raw_ref in raw_refs:
+                    key = str(raw_ref or "").strip()
+                    if not key:
+                        continue
+                    resolved = ref_map.get(key)
+                    if not resolved:
+                        ordinal = _ordinal_placeholder_to_id(key, ref_map)
+                        resolved = ordinal or ""
+                    if not resolved and key in final_ids:
+                        resolved = key
+                    if not resolved:
+                        warnings.append(
+                            f"{nid}: skipped unresolved evidence ref {key}."
+                        )
+                        continue
+                    if resolved not in seen:
+                        cur_refs.append(resolved)
+                        seen.add(resolved)
+                        changed = True
+            if cur_refs:
+                node["evidence_refs"] = cur_refs
+            status = _llm_status_effective(str(update.get("status", "") or ""))
+            if status is not None:
+                prev = str(node.get("status", "locked") or "locked")
+                if prev != "expert" and _status_rank(status) >= _status_rank(prev):
+                    if node.get("status") != status:
+                        node["status"] = status
+                        changed = True
+            nodes[by_id[nid]] = node
+        if changed:
+            tree["nodes"] = nodes
+        return tree, changed, warnings
+
+    def _apply_done_task_evidence(
+        self,
+        preview_id: str,
+        mark_crystallized: bool,
+    ) -> bool:
+        """Accept a strict AI Done preview and write evidence + skill links."""
+        preview = st.session_state.get(self._done_preview_state_key())
+        if not isinstance(preview, dict):
+            st.warning("No Done evidence preview is available.")
+            return False
+        if preview_id and preview.get("preview_id") != preview_id:
+            st.warning("Done evidence preview is stale; run AI preview again.")
+            return False
+        if not preview.get("can_accept"):
+            st.error("Done evidence preview has blockers; retry AI or fix tasks first.")
+            return False
+        valid_rows = [r for r in (preview.get("rows") or []) if r.get("valid")]
+        if not valid_rows:
+            st.warning("No valid Done evidence rows to accept.")
+            return False
+
+        entries = self._pool_entries()
+        by_id = pool_index_by_id(entries)
+        existing_ids = {
+            str(r.get("id", "") or "").strip()
+            for r in entries
+            if str(r.get("id", "") or "").strip()
+        }
+        ref_map: dict[str, str] = {}
+        final_ids: set[str] = set()
+        changed = 0
+        for item in valid_rows:
+            row = dict(item.get("row") or {})
+            key = evidence_source_key(row)
+            if key is None:
+                st.error("Accepted row is missing canonical source identity.")
+                return False
+            source_rows = active_source_index(entries).get(key) or []
+            if len(source_rows) > 1:
+                st.error(
+                    f"Multiple active evidence rows already use source {key[0]}:{key[1]}."
+                )
+                return False
+            if source_rows:
+                existing_id = str(source_rows[0].get("id", "") or "").strip()
+                idx = by_id.get(existing_id)
+                if idx is None:
+                    st.error(f"Existing evidence id {existing_id} is missing.")
+                    return False
+                merged = dict(entries[idx])
+                merged.update(row)
+                merged["id"] = existing_id
+                entries[idx] = compact_evidence_row(merged)
+                final_id = existing_id
+            else:
+                final_id = new_evidence_id(
+                    str(row.get("title", "") or "task"), existing_ids
+                )
+                existing_ids.add(final_id)
+                row["id"] = final_id
+                entries.append(compact_evidence_row(row))
+                by_id[final_id] = len(entries) - 1
+            changed += 1
+            final_ids.add(final_id)
+            ordinal = int(item.get("ordinal") or 0)
+            if ordinal > 0:
+                ref_map[ordinal] = final_id
+                ref_map[f"first_{ordinal}"] = final_id
+                ref_map[f"ev_{ordinal}"] = final_id
+            ai_id = str(item.get("ai_id", "") or "").strip()
+            if ai_id:
+                ref_map[ai_id] = final_id
+            ref_map[final_id] = final_id
+
+        tree = load_skill_tree_raw(self.profile)
+        tree_changed = False
+        warnings: list[str] = []
+        if isinstance(tree, dict):
+            tree, tree_changed, warnings = self._apply_node_updates_from_done_preview(
+                tree=tree,
+                node_updates=[
+                    dict(u)
+                    for u in (preview.get("node_updates") or [])
+                    if isinstance(u, dict)
+                ],
+                ref_map=ref_map,
+                final_ids=final_ids,
+            )
+        elif preview.get("node_updates"):
+            warnings.append("skill-tree.yaml not found; skipped skill links.")
+            tree = None
+
+        self._save_pool_and_tree(
+            [compact_evidence_row(r) for r in entries],
+            tree if tree_changed else None,
+            self.ui.get("ee_done_tasks_done", "Created/updated {n} from Done tasks.").format(
+                n=changed
+            ),
+        )
+        if mark_crystallized:
+            self._mark_tasks_crystallized(
+                [str(item.get("task_id", "") or "") for item in valid_rows]
+            )
+        for warning in warnings:
+            st.warning(warning)
+        st.session_state.pop(self._done_preview_state_key(), None)
+        return True
+
     # -- handlers ------------------------------------------------------
     def _apply_save_evidence(self, eid: str, fields: dict) -> bool:
         entries = self._pool_entries()
@@ -237,6 +823,22 @@ class EvidenceEditorHost:
                 ]
             else:
                 row[key] = str(fields.get(key, "") or "")
+        project_validation = validate_internal_project_refs(
+            row.get("project_refs"),
+            internal_project_goal_index(self.profile),
+        )
+        blockers: list[str] = []
+        if not str(row.get("date", "") or "").strip():
+            blockers.append("Evidence requires a date.")
+        if not str(row.get("original_content", "") or "").strip():
+            blockers.append("Evidence requires original_content.")
+        if not str(row.get("formatted_content", "") or "").strip():
+            blockers.append("Evidence requires formatted_content.")
+        blockers.extend(project_validation["blockers"])
+        if blockers:
+            for blocker in blockers:
+                st.error(blocker)
+            return False
         entries[by_id[eid]] = compact_evidence_row(row)
         self._save_pool(entries, self.ui.get("ee_saved", "Saved."))
         return True
@@ -251,14 +853,41 @@ class EvidenceEditorHost:
         title = str(fields.get("title", "") or "").strip()
         if not title:
             return False
+        refs = [
+            str(r).strip()
+            for r in (fields.get("project_refs") or [])
+            if str(r).strip()
+        ]
+        project_validation = validate_internal_project_refs(
+            refs,
+            internal_project_goal_index(self.profile),
+        )
+        blockers: list[str] = []
+        if not str(fields.get("date", "") or "").strip():
+            blockers.append("Evidence requires a date.")
+        if not str(fields.get("original_content", "") or "").strip():
+            blockers.append("Evidence requires original_content.")
+        if not str(fields.get("formatted_content", "") or "").strip():
+            blockers.append("Evidence requires formatted_content.")
+        blockers.extend(project_validation["blockers"])
+        if blockers:
+            for blocker in blockers:
+                st.error(blocker)
+            return False
         new_id = new_evidence_id(title, existing)
+        origin = str(fields.get("origin", "") or "manual_daily")
+        origin_ref = str(fields.get("origin_ref", "") or "").strip()
+        if not origin_ref:
+            origin_ref = f"manual:{new_id}" if origin == "manual_daily" else f"{origin}:{new_id}"
         row = {
             "id": new_id,
             "type": str(fields.get("type", "") or "practice"),
             "title": title,
-            "origin": str(fields.get("origin", "") or "manual_daily"),
+            "origin": origin,
+            "origin_ref": origin_ref,
             "review_status": "needs_review",
             "public_readiness": str(fields.get("public_readiness", "") or "private"),
+            "project_refs": refs,
         }
         for key in (
             "summary",
@@ -270,13 +899,6 @@ class EvidenceEditorHost:
             val = str(fields.get(key, "") or "").strip()
             if val:
                 row[key] = val
-        refs = [
-            str(r).strip()
-            for r in (fields.get("project_refs") or [])
-            if str(r).strip()
-        ]
-        if refs:
-            row["project_refs"] = refs
         # Backfill v2 derived fields (language / hash) deterministically.
         row, _, _ = backfill_row(
             row, profile=self.profile, target_lang=llm_client.reply_language()
@@ -388,6 +1010,23 @@ class EvidenceEditorHost:
         if not proposals:
             st.info(self.ui.get("ee_done_tasks_none", "No Done tasks to ingest."))
             return False
+        project_index = internal_project_goal_index(self.profile)
+        tasks_by_id = self._lookup_tasks_by_id()
+        blockers: list[str] = []
+        for prop in proposals:
+            task_id = str(prop.get("task_id", "") or "").strip()
+            task = tasks_by_id.get(task_id)
+            if task is None:
+                blockers.append(
+                    f"{task_id}: Task cannot be resolved from kanban.md or kanban-archive.md."
+                )
+                continue
+            for blocker in done_task_evidence_blockers(task, project_index):
+                blockers.append(f"{task_id}: {blocker}")
+        if blockers:
+            for blocker in blockers:
+                st.error(blocker)
+            return False
         saved = self._apply_task_proposals(
             entries,
             proposals,
@@ -396,6 +1035,21 @@ class EvidenceEditorHost:
         if saved and mark_crystallized:
             self._mark_tasks_crystallized([p.get("task_id") for p in proposals])
         return saved
+
+    def _fallback_formatted_content(self, prop: dict) -> str:
+        lines: list[str] = []
+        title = str(prop.get("title", "") or "").strip()
+        if title:
+            lines.append(f"# {title}")
+        completed = str(prop.get("completed_on", "") or "").strip()
+        if completed:
+            lines.append(f"Completed: {completed}")
+        original = str(prop.get("original_content", "") or "").strip()
+        if original:
+            lines.append("")
+            lines.append("Preserved task source:")
+            lines.append(original)
+        return "\n".join(lines).strip()
 
     def _mark_tasks_crystallized(self, task_ids: list) -> None:
         """Set ``crystallized`` on the given Done tasks (best effort)."""
@@ -444,11 +1098,20 @@ class EvidenceEditorHost:
                     "original_content",
                     "original_content_hash",
                     "original_language",
+                    "date",
+                    "formatted_content",
                 ):
-                    if not str(row.get(key, "") or "").strip() and prop.get(key):
-                        row[key] = prop[key]
+                    value = prop.get(key)
+                    if key == "date":
+                        value = prop.get("completed_on")
+                    elif key == "formatted_content":
+                        value = self._fallback_formatted_content(prop)
+                    if not str(row.get(key, "") or "").strip() and value:
+                        row[key] = value
                 if not row.get("kanban_refs"):
                     row["kanban_refs"] = prop.get("kanban_refs") or []
+                if not row.get("project_refs") and prop.get("project_refs"):
+                    row["project_refs"] = prop.get("project_refs") or []
                 entries[by_id[prop["evidence_id"]]] = compact_evidence_row(row)
                 changed += 1
             elif prop["kind"] == "new":
@@ -464,6 +1127,8 @@ class EvidenceEditorHost:
                     "original_content": prop.get("original_content", ""),
                     "original_content_hash": prop.get("original_content_hash", ""),
                     "original_language": prop.get("original_language", ""),
+                    "date": prop.get("completed_on", ""),
+                    "formatted_content": self._fallback_formatted_content(prop),
                     "language": llm_client.reply_language(),
                     "review_status": "needs_review",
                     "public_readiness": "private",
@@ -475,37 +1140,139 @@ class EvidenceEditorHost:
         self._save_pool(entries, done_message.format(n=changed))
         return True
 
-    def _apply_create_from_output(self, output_id: str) -> bool:
-        import yaml as _yaml
+    def _apply_create_from_output(
+        self,
+        output_id: str,
+        source_kind: str = "output",
+        project_refs: list | None = None,
+    ) -> bool:
+        from nblane.core import public_site
 
+        source_kind = str(source_kind or "output").strip() or "output"
         entries = self._pool_entries()
         existing = {
             str(r.get("id", "") or "").strip()
             for r in entries
             if str(r.get("id", "") or "").strip()
         }
-        out_path = self.pdir / "outputs.yaml"
+        chosen_project_refs = [
+            str(r).strip() for r in (project_refs or []) if str(r).strip()
+        ]
         output = None
-        if out_path.exists():
-            data = _yaml.safe_load(out_path.read_text(encoding="utf-8")) or {}
-            for o in data.get("outputs") or []:
-                if isinstance(o, dict) and str(o.get("id", "")) == output_id:
-                    output = o
+        row = None
+        origin_ref = ""
+        if source_kind == "blog":
+            for post in public_site.load_blog_posts(
+                self.profile,
+                include_drafts=True,
+                include_archived=False,
+            ):
+                if str(getattr(post, "route", "") or "") == output_id:
+                    output = post
                     break
-        if output is None:
+            if output is None:
+                st.warning(self.ui.get("ee_output_missing", "Output not found."))
+                return False
+            if not chosen_project_refs:
+                chosen_project_refs = self._infer_projects_from_related_evidence(
+                    getattr(output, "meta", {}).get("related_evidence")
+                    if isinstance(getattr(output, "meta", {}), dict)
+                    else []
+                )
+            row = evidence_row_from_blog_post(
+                output,
+                profile=self.profile,
+                project_refs=chosen_project_refs,
+                existing_ids=existing,
+                target_lang=llm_client.reply_language(),
+            )
+            origin_ref = f"blog:{output_id}"
+        else:
+            for out in public_site.load_outputs(self.profile):
+                if isinstance(out, dict) and str(out.get("id", "")) == output_id:
+                    output = out
+                    break
+            if output is None:
+                st.warning(self.ui.get("ee_output_missing", "Output not found."))
+                return False
+            if not chosen_project_refs:
+                chosen_project_refs = [
+                    str(r).strip()
+                    for r in (output.get("project_refs") or [])
+                    if str(r).strip()
+                ]
+            if not chosen_project_refs:
+                chosen_project_refs = self._infer_projects_from_related_evidence(
+                    output.get("related_evidence")
+                )
+            output = dict(output)
+            output["project_refs"] = chosen_project_refs
+            row = evidence_row_from_output(
+                output,
+                profile=self.profile,
+                existing_ids=existing,
+                target_lang=llm_client.reply_language(),
+            )
+            origin_ref = f"output:{output_id}"
+        if row is None:
             st.warning(self.ui.get("ee_output_missing", "Output not found."))
             return False
-        row = evidence_row_from_output(
-            output,
-            profile=self.profile,
-            existing_ids=existing,
-            target_lang=llm_client.reply_language(),
+
+        project_validation = validate_internal_project_refs(
+            row.get("project_refs"),
+            internal_project_goal_index(self.profile),
         )
-        entries.append(compact_evidence_row(row))
+        blockers: list[str] = []
+        if not str(row.get("date", "") or "").strip():
+            blockers.append("Output source has no date; evidence requires a date.")
+        if not str(row.get("original_content", "") or "").strip():
+            blockers.append("Output source has no original_content.")
+        if not str(row.get("formatted_content", "") or "").strip():
+            blockers.append("Output source has no formatted_content.")
+        blockers.extend(project_validation["blockers"])
+        if blockers:
+            for blocker in blockers:
+                st.error(blocker)
+            return False
+        source_rows = active_source_index(entries).get(("output", origin_ref)) or []
+        if len(source_rows) > 1:
+            st.error(
+                f"Multiple active evidence rows already use source output:{origin_ref}."
+            )
+            return False
+        if source_rows:
+            eid = str(source_rows[0].get("id", "") or "").strip()
+            idx = pool_index_by_id(entries).get(eid)
+            if idx is None:
+                return False
+            merged = dict(entries[idx])
+            merged.update(row)
+            merged["id"] = eid
+            entries[idx] = compact_evidence_row(merged)
+        else:
+            entries.append(compact_evidence_row(row))
         self._save_pool(
             entries, self.ui.get("ee_output_created", "Evidence created from output.")
         )
         return True
+
+    def _infer_projects_from_related_evidence(self, evidence_ids: object) -> list[str]:
+        pool_by_id = {
+            str(row.get("id", "") or "").strip(): row
+            for row in self._pool_entries()
+            if str(row.get("id", "") or "").strip()
+        }
+        out: list[str] = []
+        raw_ids = evidence_ids if isinstance(evidence_ids, list) else []
+        for eid in raw_ids:
+            row = pool_by_id.get(str(eid).strip())
+            if not row:
+                continue
+            for ref in row.get("project_refs") or []:
+                clean = str(ref).strip()
+                if clean and clean not in out:
+                    out.append(clean)
+        return out
 
     def _apply_backfill_project_refs(self, ids: list | None) -> bool:
         review = build_evidence_review(self.profile)
@@ -549,6 +1316,96 @@ class EvidenceEditorHost:
         ok = self._apply_save_evidence(eid, fields)
         st.session_state.pop(self._k("reformat"), None)
         return ok
+
+    def _apply_bulk_request_ai_reformat(self, ids: list) -> bool:
+        target = [str(i).strip() for i in (ids or []) if str(i).strip()]
+        if not target:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+        rows = {
+            str(row.get("id", "") or "").strip(): row
+            for row in self._pool_entries()
+            if str(row.get("id", "") or "").strip()
+        }
+        items: list[dict] = []
+        with st.spinner(
+            self.ui.get("ee_bulk_reformat_running", "Preparing AI reformat preview...")
+        ):
+            for eid in target:
+                row = rows.get(eid)
+                if row is None:
+                    items.append({"id": eid, "error": "Evidence row not found."})
+                    continue
+                proposal, err = reformat_evidence(
+                    self.profile,
+                    row,
+                    target_lang=llm_client.reply_language(),
+                )
+                if err or not proposal:
+                    items.append({"id": eid, "title": row.get("title", ""), "error": err or "Reformat failed."})
+                    continue
+                fields = {
+                    key: str(proposal.get(key, "") or "")
+                    for key in ("title", "summary", "formatted_content")
+                    if str(proposal.get(key, "") or "").strip()
+                }
+                fields["language"] = llm_client.reply_language()
+                items.append(
+                    {
+                        "id": eid,
+                        "title": str(row.get("title", "") or eid),
+                        "fields": fields,
+                    }
+                )
+        preview = {
+            "preview_id": uuid4().hex,
+            "items": items,
+            "valid_count": sum(1 for item in items if item.get("fields")),
+        }
+        st.session_state[self._bulk_reformat_state_key()] = preview
+        if preview["valid_count"]:
+            st.success(
+                self.ui.get("ee_bulk_reformat_ready", "Bulk reformat preview is ready.")
+            )
+        else:
+            st.warning(self.ui.get("ee_reformat_failed", "Reformat failed."))
+        return True
+
+    def _apply_bulk_confirm_ai_reformat(self, preview_id: str) -> bool:
+        preview = st.session_state.get(self._bulk_reformat_state_key())
+        if not isinstance(preview, dict):
+            st.warning("No bulk reformat preview is available.")
+            return False
+        if preview_id and preview.get("preview_id") != preview_id:
+            st.warning("Bulk reformat preview is stale; run it again.")
+            return False
+        entries = self._pool_entries()
+        by_id = pool_index_by_id(entries)
+        changed = 0
+        for item in preview.get("items") or []:
+            if not isinstance(item, dict) or not item.get("fields"):
+                continue
+            eid = str(item.get("id", "") or "").strip()
+            idx = by_id.get(eid)
+            if idx is None:
+                continue
+            row = dict(entries[idx])
+            fields = item.get("fields") if isinstance(item.get("fields"), dict) else {}
+            for key in ("title", "summary", "formatted_content", "language"):
+                value = str(fields.get(key, "") or "").strip()
+                if value:
+                    row[key] = value
+            entries[idx] = compact_evidence_row(row)
+            changed += 1
+        if not changed:
+            st.info(self.ui.get("pool_no_changes", "No changes."))
+            return False
+        self._save_pool(
+            entries,
+            self.ui.get("ee_bulk_done", "Updated {n} rows.").format(n=changed),
+        )
+        st.session_state.pop(self._bulk_reformat_state_key(), None)
+        return True
 
     def _apply_suggest_skills(self, eid: str) -> bool:
         """LLM skill recall for one row: route its text to candidate nodes.
@@ -826,6 +1683,13 @@ class EvidenceEditorHost:
             return self._apply_migration(payload.get("ids"))
         if action == "refresh_from_crystallized_tasks":
             return self._apply_refresh_crystallized(payload.get("task_ids"))
+        if action == "prepare_done_task_evidence":
+            return self._prepare_done_task_evidence(payload.get("task_ids"))
+        if action == "apply_done_task_evidence":
+            return self._apply_done_task_evidence(
+                str(payload.get("preview_id") or ""),
+                bool(payload.get("mark_crystallized")),
+            )
         if action == "done_tasks_to_evidence":
             return self._apply_done_tasks_to_evidence(
                 payload.get("task_ids"),
@@ -843,8 +1707,18 @@ class EvidenceEditorHost:
             return self._apply_request_ai_reformat(eid)
         if action == "confirm_ai_reformat":
             return self._apply_confirm_ai_reformat(eid, fields)
+        if action == "bulk_request_ai_reformat":
+            return self._apply_bulk_request_ai_reformat(payload.get("ids") or [])
+        if action == "bulk_confirm_ai_reformat":
+            return self._apply_bulk_confirm_ai_reformat(
+                str(payload.get("preview_id") or "")
+            )
         if action == "create_from_output":
-            return self._apply_create_from_output(str(payload.get("output_id") or ""))
+            return self._apply_create_from_output(
+                str(payload.get("output_id") or ""),
+                str(payload.get("source_kind") or "output"),
+                payload.get("project_refs") or None,
+            )
         if action == "create_project_from_evidence":
             sug = (
                 payload.get("suggestion")
@@ -890,6 +1764,12 @@ class EvidenceEditorHost:
         dupes = st.session_state.get(self._dupes_state_key())
         if dupes is not None:
             payload["duplicate_candidates"] = dupes
+        done_preview = st.session_state.get(self._done_preview_state_key())
+        if done_preview:
+            payload["done_preview"] = done_preview
+        bulk_reformat = st.session_state.get(self._bulk_reformat_state_key())
+        if bulk_reformat:
+            payload["bulk_reformat_preview"] = bulk_reformat
         event = st_evidence_editor(
             payload=payload,
             labels=self.labels(),

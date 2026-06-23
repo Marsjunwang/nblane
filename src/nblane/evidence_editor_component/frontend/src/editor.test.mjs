@@ -86,7 +86,10 @@ test("filterRows combines search + filters", () => {
 });
 
 test("rowWarnings: resume orphan + missing raw + privacy", () => {
-  assert.deepEqual(rowWarnings(ROWS[0]), ["ee_project_provenance_reminder"]);
+  assert.deepEqual(rowWarnings(ROWS[0]), [
+    "ee_project_provenance_reminder",
+    "ee_missing_date",
+  ]);
   const w3 = rowWarnings(ROWS[2]);
   assert.ok(w3.includes("ee_original_content_missing"));
   // ev3 has public_ready readiness but no raw -> privacy warning not added
@@ -149,6 +152,13 @@ test("makeEvent generates unique ids", () => {
 
 test("doneTasksToEvidenceEvent shape", async () => {
   const ev = await import("./events.js");
+  const preview = ev.prepareDoneTaskEvidenceEvent(["kb_1"]);
+  assert.equal(preview.action, "prepare_done_task_evidence");
+  assert.deepEqual(preview.payload.task_ids, ["kb_1"]);
+  const accept = ev.applyDoneTaskEvidenceEvent("p1", true);
+  assert.equal(accept.action, "apply_done_task_evidence");
+  assert.equal(accept.payload.preview_id, "p1");
+  assert.equal(accept.payload.mark_crystallized, true);
   const e = ev.doneTasksToEvidenceEvent(["kb_1", "kb_2"], true);
   assert.equal(e.action, "done_tasks_to_evidence");
   assert.deepEqual(e.payload.task_ids, ["kb_1", "kb_2"]);
@@ -174,6 +184,12 @@ test("bulkApplyEvent: named action shape", async () => {
   const link = ev.bulkApplyEvent(["ev1"], { action: "link_skills", skillIds: ["nav2"] });
   assert.equal(link.payload.bulk_action, "link_skills");
   assert.deepEqual(link.payload.skill_ids, ["nav2"]);
+  const fmt = ev.bulkRequestAiReformatEvent(["ev1", "ev2"]);
+  assert.equal(fmt.action, "bulk_request_ai_reformat");
+  assert.deepEqual(fmt.payload.ids, ["ev1", "ev2"]);
+  const confirm = ev.bulkConfirmAiReformatEvent("r1");
+  assert.equal(confirm.action, "bulk_confirm_ai_reformat");
+  assert.equal(confirm.payload.preview_id, "r1");
 });
 
 test("renderMarkdown: headings, bold, lists, code", () => {

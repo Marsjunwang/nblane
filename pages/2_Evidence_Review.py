@@ -543,6 +543,23 @@ def _done_housekeeping_label(task: object, index: int) -> str:
     return f"{index + 1}. {title} [{status}]{suffix}"
 
 
+def _active_evidence_task_ids() -> set[str]:
+    """Task ids referenced by active evidence provenance."""
+    out: set[str] = set()
+    for row in _pool_entries():
+        if bool(row.get("deprecated", False)):
+            continue
+        if str(row.get("origin", "") or "").strip() == "kanban_task":
+            rid = kanban_ref_id(str(row.get("origin_ref", "") or ""))
+            if rid:
+                out.add(rid)
+        for ref in row.get("kanban_refs") or []:
+            rid = kanban_ref_id(str(ref or ""))
+            if rid:
+                out.add(rid)
+    return out
+
+
 def _render_done_housekeeping(sections: dict[str, list]) -> None:
     """Archive or delete Done tasks from the Evidence Review workbench."""
     st.subheader(ui["done_housekeeping_title"])
@@ -625,6 +642,21 @@ def _render_done_housekeeping(sections: dict[str, list]) -> None:
         st.rerun()
 
     if delete_clicked:
+        protected_task_ids = _active_evidence_task_ids()
+        blocked = [
+            str(getattr(done_tasks[index], "id", "") or "").strip()
+            for index in picked
+            if str(getattr(done_tasks[index], "id", "") or "").strip()
+            in protected_task_ids
+        ]
+        if blocked:
+            st.error(
+                ui.get(
+                    "done_housekeeping_delete_blocked_evidence",
+                    "Delete blocked: active evidence references task(s): {ids}. Archive instead.",
+                ).format(ids=", ".join(blocked))
+            )
+            return
         assert_files_current([_kanban_path, _project_path])
         updated = {
             section: list(tasks)
@@ -2674,14 +2706,15 @@ with head_goal:
         ):
             _render_evidence_ai_config_panel()
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric(
-    ui["metric_done_uncrystallized"],
-    summary.get("done_uncrystallized_count", 0),
-)
-m2.metric(ui["metric_unlinked"], summary.get("unlinked_count", 0))
-m3.metric(ui["metric_needs_review"], summary.get("needs_review_count", 0))
-m4.metric(ui["metric_status_risk"], summary.get("status_risk_count", 0))
+if not evidence_editor_component_available():
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(
+        ui["metric_done_uncrystallized"],
+        summary.get("done_uncrystallized_count", 0),
+    )
+    m2.metric(ui["metric_unlinked"], summary.get("unlinked_count", 0))
+    m3.metric(ui["metric_needs_review"], summary.get("needs_review_count", 0))
+    m4.metric(ui["metric_status_risk"], summary.get("status_risk_count", 0))
 
 # A session-state-backed segmented control replaces st.tabs here: st.tabs is
 # client-only and resets to the first tab on every st.rerun() (which the pool's
@@ -2705,7 +2738,7 @@ if evidence_editor_component_available():
         ("editor", ui.get("tab_editor", "Editor"), _render_evidence_editor),
         ("housekeeping", ui.get("tab_housekeeping", "Done Housekeeping"),
          _render_done_housekeeping_only),
-        *[s for s in _NAV_SECTIONS if s[0] != "queue"],
+        *[s for s in _NAV_SECTIONS if s[0] not in ("queue", "refs")],
     ]
 _default_section = _NAV_SECTIONS[0][0]
 _nav_labels = {key: label for key, label, _ in _NAV_SECTIONS}

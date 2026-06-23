@@ -24,6 +24,13 @@ export function matchesFilters(row, filters = {}) {
   }
   if (filters.hasProject && !row.has_project) return false;
   if (filters.needsMigration && !row.needs_migration) return false;
+  if (filters.missingRaw && row.has_original_content) return false;
+  if (filters.missingDate && !row.missing_date) return false;
+  if (filters.missingProject && row.has_project) return false;
+  if (filters.projectWithoutGoal && row.project_resolution_status !== "project_without_goal") return false;
+  if (filters.missingFormatted && !row.missing_formatted_content) return false;
+  if (filters.sourceConflict && !row.source_conflict) return false;
+  if (filters.danglingTaskSource && !row.dangling_task_source) return false;
   return true;
 }
 
@@ -47,6 +54,21 @@ export function rowWarnings(row) {
   }
   if (!hasRaw) {
     out.push("ee_original_content_missing");
+  }
+  if (!row.has_date) {
+    out.push("ee_missing_date");
+  }
+  if (row.missing_formatted_content) {
+    out.push("ee_missing_formatted_content");
+  }
+  if (row.project_resolution_status === "project_without_goal") {
+    out.push("ee_project_without_goal");
+  }
+  if (row.source_conflict) {
+    out.push("ee_source_conflict");
+  }
+  if (row.dangling_task_source) {
+    out.push("ee_dangling_task_source");
   }
   if (readiness && readiness !== "private" && hasRaw) {
     out.push("ee_privacy_original_content_warning");

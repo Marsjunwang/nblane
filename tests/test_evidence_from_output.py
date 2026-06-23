@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
-from nblane.core.evidence_from_output import evidence_row_from_output
+from nblane.core.evidence_from_output import (
+    evidence_row_from_blog_post,
+    evidence_row_from_output,
+)
 
 
 SAMPLE_OUTPUT = {
@@ -59,6 +63,29 @@ class TestEvidenceFromOutput(unittest.TestCase):
         self.assertEqual(row["title"], "x")
         self.assertEqual(row["type"], "practice")
         self.assertNotIn("project_refs", row)
+
+    def test_blog_post_source_identity(self) -> None:
+        post = SimpleNamespace(
+            route="notes/launch",
+            slug="notes/launch",
+            title="Launch note",
+            summary="Published launch note.",
+            status="published",
+            date="2026-05-01",
+            path="blog/notes/launch.md",
+            body="Full body",
+            url_path="blog/notes/launch/",
+        )
+        row = evidence_row_from_blog_post(
+            post,
+            project_refs=["project:nblane"],
+            target_lang="en",
+        )
+        self.assertEqual(row["origin"], "output")
+        self.assertEqual(row["origin_ref"], "blog:notes/launch")
+        self.assertEqual(row["date"], "2026-05-01")
+        self.assertEqual(row["project_refs"], ["project:nblane"])
+        self.assertIn("Body preview:", row["original_content"])
 
 
 if __name__ == "__main__":

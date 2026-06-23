@@ -74,7 +74,7 @@ class TestInferOrigin(unittest.TestCase):
             {"id": "ev_ap_boost", "type": "project", "title": "GAC work"}
         )
         self.assertEqual(origin, "resume_parse")
-        self.assertEqual(ref, "resume")
+        self.assertEqual(ref, "resume:ev_ap_boost")
 
     def test_manual_when_has_project_only(self) -> None:
         origin, _, _ = infer_origin(

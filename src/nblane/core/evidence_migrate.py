@@ -118,7 +118,8 @@ def infer_origin(
         )
 
     if _is_paper_like(row):
-        return ("paper", _clean(row.get("url")), "Paper / publication (inferred)")
+        ref = _clean(row.get("url")) or (f"paper:{eid}" if eid else "")
+        return ("paper", ref, "Paper / publication (inferred)")
 
     project_refs = [
         _clean(r) for r in (row.get("project_refs") or []) if _clean(r)
@@ -126,11 +127,15 @@ def infer_origin(
     if eid in resume_ids or (not kanban_refs and not project_refs):
         return (
             "resume_parse",
-            "resume",
+            f"resume:{eid}" if eid else "resume",
             "Resume parse (inferred; no original span retained)",
         )
 
-    return ("manual_daily", "", "Manual daily entry (inferred)")
+    return (
+        "manual_daily",
+        f"manual:{eid}" if eid else "",
+        "Manual daily entry (inferred)",
+    )
 
 
 def render_kanban_task_source(task: Any) -> str:
@@ -613,4 +618,3 @@ def _suggested_title(key: str, titles: list[str]) -> str:
     """A readable project title from the group key / member titles."""
     acronym = key.upper() if key.isalpha() and len(key) <= 5 else key.title()
     return f"{acronym} Project"
-

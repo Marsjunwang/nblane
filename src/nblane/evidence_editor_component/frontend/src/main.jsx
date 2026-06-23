@@ -15,10 +15,14 @@ import {
   suggestSkillsEvent,
   applyMigrationEvent,
   refreshCrystallizedEvent,
+  prepareDoneTaskEvidenceEvent,
+  applyDoneTaskEvidenceEvent,
   doneTasksToEvidenceEvent,
   bulkApplyEvent,
   requestAiReformatEvent,
   confirmAiReformatEvent,
+  bulkRequestAiReformatEvent,
+  bulkConfirmAiReformatEvent,
   createFromOutputEvent,
   suggestDuplicatesEvent,
   mergeOrDeprecateEvent,
@@ -106,6 +110,10 @@ function ListItem({ row, selected, labels, onClick, batch, checked, onCheck }) {
           )}
           {row.needs_migration && <span className="ee-flag" title="needs migration">◐</span>}
           {!row.has_original_content && <span className="ee-flag ee-flag-warn" title="missing raw">⚠</span>}
+          {row.missing_date && <span className="ee-flag ee-flag-warn" title="missing date">D</span>}
+          {row.missing_formatted_content && <span className="ee-flag ee-flag-warn" title="missing formatted content">F</span>}
+          {row.source_conflict && <span className="ee-flag ee-flag-warn" title="source conflict">S</span>}
+          {row.dangling_task_source && <span className="ee-flag ee-flag-danger" title="dangling task source">!</span>}
         </div>
         <div className="ee-li-title">{cleanText(row.title) || cleanText(row.id)}</div>
       </button>
@@ -157,9 +165,7 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
   const projectRefs = asArray(draft.project_refs);
   const toggleProject = (pid) => {
     const has = projectRefs.includes(pid);
-    const next = has
-      ? projectRefs.filter((p) => p !== pid)
-      : [...projectRefs, pid];
+    const next = has ? [] : [pid];
     set("project_refs", next);
   };
 
@@ -246,6 +252,7 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
         <div className="ee-detail-badges">
           <Badge text={cleanText(draft.origin) || "—"} color={originColor(draft.origin)} />
           <Badge text={draft.has_project ? "project" : "no project"} />
+          {draft.project_resolution_status === "project_without_goal" && <Badge text="project no goal" />}
           <Badge text={cleanText(draft.review_status) || "—"} />
           {!draft.has_original_content && <Badge text="no raw" />}
         </div>
@@ -385,10 +392,12 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
               <button
                 key={opt.id}
                 type="button"
-                className={`ee-chip${on ? " ee-chip-on" : ""}`}
+                className={`ee-chip${on ? " ee-chip-on" : ""}${opt.has_goal === false ? " ee-chip-warn" : ""}`}
                 onClick={() => toggleProject(opt.id)}
+                title={opt.has_goal === false ? "Project has no goal_refs" : ""}
               >
                 {cleanText(opt.label) || opt.id}
+                {opt.has_goal === false ? " · no goal" : ""}
               </button>
             );
           })}
@@ -571,10 +580,19 @@ function AddForm({ payload, labels, emit, onClose }) {
     date: "",
     summary: "",
     original_content: "",
+    formatted_content: "",
     origin_detail: "",
     public_readiness: "private",
+    project_refs: [],
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const projectOptions = asArray(payload.project_options);
+  const ready =
+    f.title.trim() &&
+    f.date.trim() &&
+    f.original_content.trim() &&
+    f.formatted_content.trim() &&
+    asArray(f.project_refs).length === 1;
   return (
     <div className="ee-modal">
       <div className="ee-modal-box">
@@ -592,19 +610,41 @@ function AddForm({ payload, labels, emit, onClose }) {
           <input value={f.title} onChange={(e) => set("title", e.target.value)} />
         </label>
         <label className="ee-field ee-field-wide">
+          <span>{label(labels, "field_date", "date")}</span>
+          <input value={f.date} onChange={(e) => set("date", e.target.value)} />
+        </label>
+        <label className="ee-field ee-field-wide">
           <span>{label(labels, "field_summary", "summary")}</span>
           <textarea className="ee-ta ee-ta-sm" value={f.summary} onChange={(e) => set("summary", e.target.value)} />
+        </label>
+        <label className="ee-field ee-field-wide">
+          <span>{label(labels, "field_formatted_content", "formatted_content")}</span>
+          <textarea className="ee-ta ee-ta-sm" value={f.formatted_content} onChange={(e) => set("formatted_content", e.target.value)} />
         </label>
         <label className="ee-field ee-field-wide">
           <span>{label(labels, "field_original_content", "original_content")}</span>
           <textarea className="ee-ta ee-mono" value={f.original_content} onChange={(e) => set("original_content", e.target.value)} />
         </label>
-        <div className="ee-muted">{label(labels, "ee_project_provenance_reminder", "Link or confirm a project source.")}</div>
+        <div className="ee-chips-label">{label(labels, "ee_link_project", "Internal project")}</div>
+        <div className="ee-chips">
+          {projectOptions.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`ee-chip${asArray(f.project_refs).includes(opt.id) ? " ee-chip-on" : ""}${opt.has_goal === false ? " ee-chip-warn" : ""}`}
+              onClick={() => set("project_refs", asArray(f.project_refs).includes(opt.id) ? [] : [opt.id])}
+              title={opt.has_goal === false ? "Project has no goal_refs" : ""}
+            >
+              {cleanText(opt.label) || opt.id}
+              {opt.has_goal === false ? " · no goal" : ""}
+            </button>
+          ))}
+        </div>
         <div className="ee-detail-actions">
           <button
             type="button"
             className="ee-btn-primary"
-            disabled={!f.title.trim()}
+            disabled={!ready}
             onClick={() => {
               emit(addEvidenceEvent(f));
               onClose();
@@ -732,6 +772,40 @@ function DuplicatePanel({ candidates, rowsById, labels, emit }) {
   );
 }
 
+function BulkReformatPreview({ preview, labels, emit }) {
+  if (!preview) return null;
+  const items = asArray(preview.items);
+  return (
+    <div className="ee-reformat ee-bulk-reformat-preview">
+      <div className="ee-section-h">
+        {label(labels, "ee_bulk_reformat", "AI reformat selected")} ({preview.valid_count || 0})
+      </div>
+      <div className="ee-done-preview-list">
+        {items.map((item) => (
+          <div key={item.id} className={`ee-preview-row${item.error ? " ee-preview-invalid" : ""}`}>
+            <div className="ee-preview-title">{item.id} · {cleanText(item.title)}</div>
+            {item.error ? (
+              <div className="ee-preview-blockers">{item.error}</div>
+            ) : (
+              <div className="ee-preview-summary">
+                {Object.keys(item.fields || {}).join(", ")}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="ee-btn-primary"
+        disabled={!preview.valid_count}
+        onClick={() => emit(bulkConfirmAiReformatEvent(preview.preview_id))}
+      >
+        {label(labels, "ee_ai_reformat_confirm", "Confirm reformat")}
+      </button>
+    </div>
+  );
+}
+
 /* ---- bulk action bar (batch mode) ---- */
 function BulkActionBar({ ids, payload, labels, emit, onClear }) {
   const [field, setField] = useState("review_status");
@@ -770,6 +844,14 @@ function BulkActionBar({ ids, payload, labels, emit, onClear }) {
       <span className="ee-bulkbar-sep" />
       <button
         type="button"
+        className="ee-btn-sm"
+        disabled={ids.length === 0}
+        onClick={() => emit(bulkRequestAiReformatEvent(ids))}
+      >
+        {label(labels, "ee_bulk_reformat", "AI reformat selected")}
+      </button>
+      <button
+        type="button"
         className="ee-btn-sm ee-btn-danger"
         disabled={ids.length === 0}
         onClick={() => {
@@ -787,9 +869,11 @@ function BulkActionBar({ ids, payload, labels, emit, onClear }) {
   );
 }
 
-/* ---- Done tasks -> evidence picker (deterministic, no LLM) ---- */
+/* ---- Done tasks -> evidence picker (AI preview by default) ---- */
 function DoneTasksPicker({ tasks, labels, emit, onClose }) {
-  const [picked, setPicked] = useState(() => new Set());
+  const [picked, setPicked] = useState(
+    () => new Set(tasks.filter((t) => t.recommended).map((t) => t.id))
+  );
   const [mark, setMark] = useState(true);
   const toggle = (id) =>
     setPicked((prev) => {
@@ -804,20 +888,31 @@ function DoneTasksPicker({ tasks, labels, emit, onClose }) {
           {label(labels, "ee_done_tasks_title", "Done tasks → evidence")}
         </div>
         <div className="ee-muted">
-          {label(labels, "ee_done_tasks_hint", "Create v2 evidence rows from Done tasks (no AI). Already-ingested tasks are marked.")}
+          {label(labels, "ee_done_tasks_hint", "AI previews Done evidence first. Blocked tasks need date, project, and project goal before evidence can be created.")}
         </div>
         <div className="ee-done-list">
           {tasks.length === 0 && (
             <span className="ee-muted">{label(labels, "ee_done_tasks_none", "No Done tasks.")}</span>
           )}
           {tasks.map((t) => (
-            <label key={t.id} className="ee-check ee-done-row">
+            <label key={t.id} className={`ee-check ee-done-row${t.blocked ? " ee-done-blocked" : ""}`}>
               <input
                 type="checkbox"
                 checked={picked.has(t.id)}
+                disabled={!!t.blocked}
                 onChange={() => toggle(t.id)}
               />
-              <span className="ee-done-title">{cleanText(t.title) || t.id}</span>
+              <span className="ee-done-main">
+                <span className="ee-done-title">{cleanText(t.title) || t.id}</span>
+                <span className="ee-done-meta">
+                  {cleanText(t.completed_on) || "no date"} · {cleanText(t.project_id) || "no project"}
+                </span>
+                {asArray(t.blockers).length > 0 && (
+                  <span className="ee-done-blockers">
+                    {asArray(t.blockers).join(" ")}
+                  </span>
+                )}
+              </span>
               {t.crystallized && <span className="ee-flag" title="crystallized">◆</span>}
               {t.has_evidence && (
                 <span className="ee-badge ee-badge-muted">
@@ -837,17 +932,181 @@ function DoneTasksPicker({ tasks, labels, emit, onClose }) {
             className="ee-btn-primary"
             disabled={picked.size === 0}
             onClick={() => {
-              emit(doneTasksToEvidenceEvent(Array.from(picked), mark));
+              emit(prepareDoneTaskEvidenceEvent(Array.from(picked)));
               onClose();
             }}
           >
-            {label(labels, "ee_done_tasks_create", "Create evidence")} ({picked.size})
+            {label(labels, "ee_done_ai_preview", "AI preview")} ({picked.size})
+          </button>
+          <button
+            type="button"
+            className="ee-btn-sm"
+            disabled={picked.size === 0}
+            onClick={() => {
+              if (window.confirm(label(labels, "ee_done_fallback_confirm", "Use deterministic fallback without AI grading?"))) {
+                emit(doneTasksToEvidenceEvent(Array.from(picked), mark));
+                onClose();
+              }
+            }}
+          >
+            {label(labels, "ee_done_fallback", "Fallback")}
           </button>
           <button type="button" className="ee-btn-sm" onClick={onClose}>
             {label(labels, "ee_cancel", "Cancel")}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DonePreviewPanel({ preview, labels, emit }) {
+  const [mark, setMark] = useState(true);
+  if (!preview) return null;
+  const rows = asArray(preview.rows);
+  const blockers = asArray(preview.task_blockers);
+  const blockingErrors = asArray(preview.blocking_errors);
+  return (
+    <div className={`ee-done-preview${preview.can_accept ? "" : " ee-done-preview-blocked"}`}>
+      <div className="ee-section-h">
+        {label(labels, "ee_done_ai_preview", "Done AI preview")}
+      </div>
+      {preview.ai_error && <div className="ee-warn-line">{preview.ai_error}</div>}
+      {blockingErrors.map((err) => (
+        <div key={err} className="ee-warn-line">{err}</div>
+      ))}
+      {blockers.length > 0 && (
+        <div className="ee-done-preview-list">
+          {blockers.map((item) => (
+            <div key={item.task_id} className="ee-preview-row ee-preview-invalid">
+              <div className="ee-preview-title">{cleanText(item.title) || item.task_id}</div>
+              <div className="ee-preview-blockers">{asArray(item.blockers).join(" ")}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div className="ee-done-preview-list">
+          {rows.map((item, idx) => {
+            const row = item.row || {};
+            return (
+              <div key={`${item.task_id}-${idx}`} className={`ee-preview-row${item.valid ? "" : " ee-preview-invalid"}`}>
+                <div className="ee-preview-title">
+                  {item.valid ? "✓" : "!"} {cleanText(row.title) || cleanText(item.task_title) || item.task_id}
+                </div>
+                <div className="ee-preview-meta">
+                  {cleanText(row.date) || "no date"} · {asArray(row.project_refs).join(", ") || "no project"} · {cleanText(row.strength) || "no strength"} / {cleanText(row.confidence) || "no confidence"}
+                </div>
+                {cleanText(row.summary) && <div className="ee-preview-summary">{cleanText(row.summary)}</div>}
+                {asArray(item.blockers).length > 0 && (
+                  <div className="ee-preview-blockers">{asArray(item.blockers).join(" ")}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="ee-preview-meta">
+        {preview.valid_count || 0} valid · {preview.invalid_count || 0} invalid · {asArray(preview.node_updates).length} skill link suggestions
+      </div>
+      <label className="ee-check">
+        <input type="checkbox" checked={mark} onChange={() => setMark((m) => !m)} />
+        {label(labels, "ee_done_mark_crystallized", "Mark accepted tasks crystallized after save")}
+      </label>
+      <div className="ee-row-btns">
+        <button
+          type="button"
+          className="ee-btn-primary"
+          disabled={!preview.can_accept}
+          onClick={() => emit(applyDoneTaskEvidenceEvent(preview.preview_id, mark))}
+        >
+          {label(labels, "ee_done_accept_valid", "Accept all valid recommendations")}
+        </button>
+        <button
+          type="button"
+          className="ee-btn-sm"
+          onClick={() => emit(prepareDoneTaskEvidenceEvent(asArray(preview.selected_task_ids)))}
+        >
+          {label(labels, "ee_retry_ai", "Retry AI")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OutputCreateStrip({ outputs, projectOptions, labels, emit, onClose }) {
+  const [projectByKey, setProjectByKey] = useState({});
+  const validProjects = asArray(projectOptions).filter((p) => p.has_goal !== false);
+  const projectLabel = (pid) => {
+    const found = asArray(projectOptions).find((p) => p.id === pid);
+    return found ? cleanText(found.label) || pid : pid;
+  };
+  return (
+    <div className="ee-output-strip">
+      {outputs.length === 0 && <span className="ee-muted">{label(labels, "ee_no_outputs", "No outputs")}</span>}
+      {outputs.map((o) => {
+        const key = `${o.source_kind || "output"}:${o.id}`;
+        const blockers = asArray(o.blockers);
+        const dateBlocked = blockers.some((b) => String(b).toLowerCase().includes("date"));
+        const inferredProjectRefs = asArray(o.project_refs);
+        const inferredOk = !!o.project_resolution_ok && inferredProjectRefs.length === 1;
+        const selectedProject = projectByKey[key] || "";
+        const finalProjectRefs = inferredOk ? inferredProjectRefs : selectedProject ? [selectedProject] : [];
+        const canCreate = !dateBlocked && finalProjectRefs.length === 1;
+        const shownBlockers = dateBlocked
+          ? blockers
+          : blockers.filter((b) => !String(b).toLowerCase().includes("project"));
+        return (
+          <div key={key} className={`ee-output-row${canCreate ? "" : " ee-output-row-blocked"}`}>
+            <div className="ee-output-main">
+              <div className="ee-output-title">
+                {cleanText(o.label)}
+                {o.already_has_evidence && (
+                  <span className="ee-badge ee-badge-muted">
+                    {label(labels, "ee_done_has_evidence", "has evidence")}
+                  </span>
+                )}
+              </div>
+              <div className="ee-output-meta">
+                {cleanText(o.source_kind) || "output"} · {cleanText(o.status) || "—"} · {cleanText(o.date) || "no date"}
+                {inferredOk ? ` · ${projectLabel(inferredProjectRefs[0])}` : ""}
+              </div>
+              {!inferredOk && !dateBlocked && (
+                <label className="ee-field ee-output-project">
+                  <span>{label(labels, "ee_link_project", "Internal project")}</span>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) =>
+                      setProjectByKey((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                  >
+                    <option value="" />
+                    {validProjects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {cleanText(p.label) || p.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {shownBlockers.length > 0 && (
+                <div className="ee-preview-blockers">{shownBlockers.join(" ")}</div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="ee-btn-sm ee-btn-primary"
+              disabled={!canCreate}
+              onClick={() => {
+                emit(createFromOutputEvent(o.id, o.source_kind || "output", finalProjectRefs));
+                onClose();
+              }}
+            >
+              {label(labels, "ee_create_from_output", "Create from output")}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -936,6 +1195,8 @@ function App() {
   };
 
   const reformatPreview = payload.reformat_preview || null;
+  const bulkReformatPreview = payload.bulk_reformat_preview || null;
+  const donePreview = payload.done_preview || null;
   const duplicateCandidates = asArray(payload.duplicate_candidates);
   const rowsById = useMemo(() => {
     const m = {};
@@ -976,6 +1237,14 @@ function App() {
           >
             {label(labels, "ee_batch_mode", "Batch select")}
           </button>
+          <button
+            type="button"
+            className="ee-btn"
+            disabled={!visible.some((r) => r.missing_formatted_content)}
+            onClick={() => emit(bulkRequestAiReformatEvent(visible.filter((r) => r.missing_formatted_content).map((r) => r.id)))}
+          >
+            {label(labels, "ee_bulk_reformat_missing", "AI reformat missing formatted")}
+          </button>
           {visible.some((r) => r.needs_migration) && (
             <button
               type="button"
@@ -988,8 +1257,13 @@ function App() {
         </div>
         <div className="ee-counters">
           <Counter icon="◐" n={summary.needs_migration || 0} text={label(labels, "ee_filter_needs_migration", "Needs migration")} active={!!filters.needsMigration} onClick={() => toggleFilter("needsMigration")} />
-          <Counter icon="⚠" n={summary.missing_raw || 0} text={label(labels, "ee_original_content_missing", "Missing raw")} />
-          <Counter icon="⚑" n={summary.resume_manual_unassigned || 0} text={label(labels, "ee_project_provenance_reminder", "Unassigned project")} />
+          <Counter icon="⚠" n={summary.missing_raw || 0} text={label(labels, "ee_original_content_missing", "Missing raw")} active={!!filters.missingRaw} onClick={() => toggleFilter("missingRaw")} />
+          <Counter icon="D" n={summary.missing_date || 0} text={label(labels, "ee_missing_date", "Missing date")} active={!!filters.missingDate} onClick={() => toggleFilter("missingDate")} />
+          <Counter icon="P" n={summary.missing_project || 0} text={label(labels, "ee_missing_project", "Missing project")} active={!!filters.missingProject} onClick={() => toggleFilter("missingProject")} />
+          <Counter icon="G" n={summary.project_without_goal || 0} text={label(labels, "ee_project_without_goal", "Project without goal")} active={!!filters.projectWithoutGoal} onClick={() => toggleFilter("projectWithoutGoal")} />
+          <Counter icon="F" n={summary.missing_formatted_content || 0} text={label(labels, "ee_missing_formatted_content", "Missing formatted")} active={!!filters.missingFormatted} onClick={() => toggleFilter("missingFormatted")} />
+          <Counter icon="S" n={summary.source_conflict || 0} text={label(labels, "ee_source_conflict", "Source conflict")} active={!!filters.sourceConflict} onClick={() => toggleFilter("sourceConflict")} />
+          <Counter icon="!" n={summary.dangling_task_source || 0} text={label(labels, "ee_dangling_task_source", "Dangling task source")} active={!!filters.danglingTaskSource} onClick={() => toggleFilter("danglingTaskSource")} />
           <Counter icon="⬚" n={summary.crystallized_without_evidence || 0} text={label(labels, "ee_refresh_crystallized_tasks", "Crystallized w/o evidence")} />
           <Counter icon="◇" n={summary.output_candidates || 0} text={label(labels, "ee_create_from_output", "Output candidates")} />
         </div>
@@ -1012,33 +1286,16 @@ function App() {
       )}
 
       {showOutputs && (
-        <div className="ee-output-strip">
-          {outputs.length === 0 && <span className="ee-muted">{label(labels, "ee_no_outputs", "No outputs")}</span>}
-          {outputs.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              className="ee-chip"
-              onClick={() => {
-                emit(createFromOutputEvent(o.id));
-                setShowOutputs(false);
-              }}
-            >
-              {cleanText(o.label)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {batchMode && (
-        <BulkActionBar
-          ids={selectedBatchIds}
-          payload={payload}
+        <OutputCreateStrip
+          outputs={outputs}
+          projectOptions={asArray(payload.project_options)}
           labels={labels}
           emit={emit}
-          onClear={clearBatch}
+          onClose={() => setShowOutputs(false)}
         />
       )}
+
+      <DonePreviewPanel preview={donePreview} labels={labels} emit={emit} />
 
       {duplicateCandidates.length > 0 && (
         <DuplicatePanel
@@ -1071,6 +1328,14 @@ function App() {
               <input type="checkbox" checked={!!filters.needsMigration} onChange={() => toggleFilter("needsMigration")} />
               {label(labels, "ee_filter_needs_migration", "needs migration")}
             </label>
+            <label className="ee-check">
+              <input type="checkbox" checked={!!filters.missingFormatted} onChange={() => toggleFilter("missingFormatted")} />
+              {label(labels, "ee_missing_formatted_content", "missing formatted")}
+            </label>
+            <label className="ee-check">
+              <input type="checkbox" checked={!!filters.danglingTaskSource} onChange={() => toggleFilter("danglingTaskSource")} />
+              {label(labels, "ee_dangling_task_source", "dangling task")}
+            </label>
           </div>
           {batchMode && visible.length > 0 && (
             <label className="ee-check ee-selectall">
@@ -1101,7 +1366,22 @@ function App() {
 
         {/* detail */}
         <div className="ee-detail-wrap">
-          {selected ? (
+          {batchMode ? (
+            <div className="ee-detail ee-batch-detail">
+              <BulkActionBar
+                ids={selectedBatchIds}
+                payload={payload}
+                labels={labels}
+                emit={emit}
+                onClear={clearBatch}
+              />
+              <BulkReformatPreview
+                preview={bulkReformatPreview}
+                labels={labels}
+                emit={emit}
+              />
+            </div>
+          ) : selected ? (
             <DetailPane row={selected} payload={payload} labels={labels} emit={emit} reformatPreview={reformatPreview} />
           ) : (
             <div className="ee-empty ee-empty-detail">{label(labels, "ee_select_hint", "Select an evidence row to edit.")}</div>

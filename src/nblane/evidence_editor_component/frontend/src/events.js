@@ -41,6 +41,13 @@ export const refreshCrystallizedEvent = (taskIds) =>
   makeEvent("refresh_from_crystallized_tasks", { task_ids: taskIds });
 
 // Done tasks -> evidence (deterministic, incl. non-crystallized; no LLM).
+export const prepareDoneTaskEvidenceEvent = (taskIds) =>
+  makeEvent("prepare_done_task_evidence", { task_ids: taskIds });
+export const applyDoneTaskEvidenceEvent = (previewId, markCrystallized = true) =>
+  makeEvent("apply_done_task_evidence", {
+    preview_id: previewId,
+    mark_crystallized: !!markCrystallized,
+  });
 export const doneTasksToEvidenceEvent = (taskIds, markCrystallized = false) =>
   makeEvent("done_tasks_to_evidence", {
     task_ids: taskIds,
@@ -64,10 +71,18 @@ export const requestAiReformatEvent = (id) =>
   makeEvent("request_ai_reformat", { id });
 export const confirmAiReformatEvent = (id, fields) =>
   makeEvent("confirm_ai_reformat", { id, fields });
+export const bulkRequestAiReformatEvent = (ids) =>
+  makeEvent("bulk_request_ai_reformat", { ids });
+export const bulkConfirmAiReformatEvent = (previewId) =>
+  makeEvent("bulk_confirm_ai_reformat", { preview_id: previewId });
 
 // Output -> evidence.
-export const createFromOutputEvent = (outputId) =>
-  makeEvent("create_from_output", { output_id: outputId });
+export const createFromOutputEvent = (outputId, sourceKind = "output", projectRefs = []) =>
+  makeEvent("create_from_output", {
+    output_id: outputId,
+    source_kind: sourceKind,
+    project_refs: projectRefs,
+  });
 
 // Duplicates.
 export const suggestDuplicatesEvent = (id, ai = false) =>

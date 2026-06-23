@@ -13,7 +13,12 @@ from nblane.core.claims import (
 from nblane.core import io as io_facade
 from nblane.core.io import KANBAN_DONE, STATUSES, schema_node_index
 from nblane.core.experience import load_experience_book
-from nblane.core.kanban_archive import find_kanban_tasks_by_ref, kanban_ref_id
+from nblane.core.kanban_archive import (
+    find_kanban_tasks_by_ref,
+    kanban_ref,
+    kanban_ref_id,
+)
+from nblane.core.evidence_from_output import active_source_index, evidence_source_key
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
     EVIDENCE_LANGUAGES,
@@ -326,18 +331,116 @@ def _pool_by_id(profile: str | Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _project_options(profile: str | Path) -> list[dict[str, str]]:
-    """Return project case options for evidence refs."""
+def internal_project_goal_index(profile: str | Path) -> dict[str, dict[str, Any]]:
+    """Return internal Project Board projects keyed by id.
+
+    ``project_refs`` on evidence rows point here, not to public projects.yaml.
+    The ``has_goal`` bit is intentionally part of the index because new
+    evidence must be traceable project -> goal.
+    """
     board = load_project_board(profile)
-    options: list[dict[str, str]] = []
+    out: dict[str, dict[str, Any]] = {}
     for case in board.project_cases:
-        if not case.id:
+        pid = str(getattr(case, "id", "") or "").strip()
+        if not pid:
             continue
+        goal_refs = _clean_string_list(getattr(case, "goal_refs", []))
+        out[pid] = {
+            "id": pid,
+            "label": str(getattr(case, "title", "") or pid),
+            "status": str(getattr(case, "status", "") or ""),
+            "goal_refs": goal_refs,
+            "has_goal": bool(goal_refs),
+        }
+    return out
+
+
+def validate_internal_project_refs(
+    project_refs: object,
+    project_index: dict[str, dict[str, Any]],
+    *,
+    require_exactly_one: bool = True,
+) -> dict[str, Any]:
+    """Validate evidence ownership against internal Project Board projects."""
+    refs = _clean_string_list(project_refs)
+    blockers: list[str] = []
+    status = "valid"
+    if require_exactly_one and len(refs) != 1:
+        status = "missing_project" if not refs else "multiple_projects"
+        blockers.append(
+            "Evidence requires exactly one internal project."
+            if refs
+            else "Evidence requires an internal project."
+        )
+        return {"ok": False, "status": status, "refs": refs, "blockers": blockers}
+    if not refs:
+        return {"ok": True, "status": "not_required", "refs": refs, "blockers": []}
+    unknown = [ref for ref in refs if ref not in project_index]
+    if unknown:
+        status = "unknown_project"
+        blockers.extend(
+            f"Project {ref} does not exist in project-board.yaml."
+            for ref in unknown
+        )
+    no_goal = [
+        ref
+        for ref in refs
+        if ref in project_index and not project_index[ref].get("has_goal")
+    ]
+    if no_goal:
+        status = "project_without_goal"
+        blockers.extend(
+            f"Project {ref} has no goal_refs; link project to a goal first."
+            for ref in no_goal
+        )
+    return {
+        "ok": not blockers,
+        "status": status,
+        "refs": refs,
+        "blockers": blockers,
+    }
+
+
+def done_task_evidence_blockers(
+    task: Any,
+    project_index: dict[str, dict[str, Any]],
+    *,
+    resolvable: bool = True,
+) -> list[str]:
+    """Return exact blockers for Done-task -> evidence generation."""
+    blockers: list[str] = []
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if not task_id:
+        blockers.append("Task has no stable id; evidence requires a source id.")
+    if not str(getattr(task, "completed_on", "") or "").strip():
+        blockers.append("Task has no completed_on; evidence requires a date.")
+    project_id = str(getattr(task, "project_id", "") or "").strip()
+    if not project_id:
+        blockers.append("Task has no project_id; link it to a project first.")
+    elif project_id not in project_index:
+        blockers.append(
+            f"Project {project_id} does not exist in project-board.yaml."
+        )
+    elif not project_index[project_id].get("has_goal"):
+        blockers.append(
+            f"Project {project_id} has no goal_refs; link project to a goal first."
+        )
+    if not resolvable:
+        blockers.append("Task cannot be resolved from kanban.md or kanban-archive.md.")
+    return blockers
+
+
+def _project_options(profile: str | Path) -> list[dict[str, object]]:
+    """Return project case options for evidence refs."""
+    options: list[dict[str, object]] = []
+    for case in internal_project_goal_index(profile).values():
         options.append(
             {
-                "id": case.id,
-                "label": case.title or case.id,
-                "status": case.status,
+                "id": case["id"],
+                "label": case["label"],
+                "status": case["status"],
+                "goal_refs": list(case["goal_refs"]),
+                "has_goal": bool(case["has_goal"]),
             }
         )
     return options
@@ -950,33 +1053,167 @@ def _read_profile_yaml(path: Path) -> dict:
     return _load_yaml_dict(path) or {}
 
 
-def _output_options(profile: str | Path) -> list[dict[str, str]]:
-    """Output rows that could become evidence (create_from_output picker)."""
+def _output_options(profile: str | Path) -> list[dict[str, object]]:
+    """Output/blog rows that could become evidence (create_from_output picker)."""
+    from nblane.core import public_site
+
+    project_index = internal_project_goal_index(profile)
+    pool = _pool_entries(profile)
+    pool_by_id = {
+        str(row.get("id", "") or "").strip(): row
+        for row in pool
+        if str(row.get("id", "") or "").strip()
+    }
+    source_index = active_source_index(pool)
+
+    def _date_from_output(out: dict[str, Any]) -> str:
+        for key in ("date", "created_at", "year"):
+            val = str(out.get(key, "") or "").strip()
+            if val:
+                return val
+        return ""
+
+    def _project_refs_from_related(raw_refs: object) -> list[str]:
+        refs: list[str] = []
+        for eid in _clean_string_list(raw_refs):
+            row = pool_by_id.get(eid)
+            if not row:
+                continue
+            for pref in _clean_string_list(row.get("project_refs")):
+                if pref not in refs:
+                    refs.append(pref)
+        return refs
+
+    def _resolution(project_refs: object) -> dict[str, Any]:
+        return validate_internal_project_refs(project_refs, project_index)
+
     pdir = profile if isinstance(profile, Path) else io_facade.profile_dir(profile)
-    raw = _read_profile_yaml(pdir / "outputs.yaml")
-    outputs = raw.get("outputs") or []
-    options: list[dict[str, str]] = []
-    for out in outputs:
+    if isinstance(profile, Path):
+        output_rows = [
+            out
+            for out in (_read_profile_yaml(pdir / "outputs.yaml").get("outputs") or [])
+            if isinstance(out, dict)
+        ]
+        blog_posts = []
+        blog_dir = pdir / "blog"
+        if blog_dir.exists():
+            for path in sorted(blog_dir.rglob("*.md")):
+                try:
+                    post = public_site.parse_blog_post(path)
+                except Exception:
+                    continue
+                if str(getattr(post, "status", "") or "draft") != "archived":
+                    blog_posts.append(post)
+    else:
+        try:
+            output_rows = public_site.load_outputs(_profile_name(profile))
+        except FileNotFoundError:
+            output_rows = []
+        try:
+            blog_posts = public_site.load_blog_posts(
+                _profile_name(profile),
+                include_drafts=True,
+                include_archived=False,
+            )
+        except FileNotFoundError:
+            blog_posts = []
+
+    options: list[dict[str, object]] = []
+    for out in output_rows:
         if not isinstance(out, dict):
             continue
         oid = str(out.get("id", "") or "").strip()
         if not oid:
             continue
+        refs = _clean_string_list(out.get("project_refs"))
+        if not refs:
+            refs = _project_refs_from_related(out.get("related_evidence"))
+        res = _resolution(refs)
+        date = _date_from_output(out)
+        origin_ref = f"output:{oid}"
         options.append(
             {
                 "id": oid,
+                "source_kind": "output",
                 "label": str(out.get("title", "") or oid),
                 "target": str(out.get("target", "") or out.get("type", "")),
                 "status": str(out.get("status", "") or ""),
+                "date": date,
+                "already_has_evidence": ("output", origin_ref) in source_index,
+                "project_refs": res["refs"],
+                "project_resolution_status": res["status"],
+                "project_resolution_ok": bool(res["ok"]),
+                "blockers": [
+                    *([] if date else ["Output has no date; evidence requires a date."]),
+                    *list(res["blockers"]),
+                ],
+            }
+        )
+    for post in blog_posts:
+        route = str(getattr(post, "route", "") or "").strip()
+        if not route:
+            continue
+        meta = getattr(post, "meta", {})
+        refs = _project_refs_from_related(
+            meta.get("related_evidence") if isinstance(meta, dict) else []
+        )
+        res = _resolution(refs)
+        date = str(getattr(post, "date", "") or "").strip()
+        origin_ref = f"blog:{route}"
+        options.append(
+            {
+                "id": route,
+                "source_kind": "blog",
+                "label": str(getattr(post, "title", "") or route),
+                "target": "blog",
+                "status": str(getattr(post, "status", "") or ""),
+                "date": date,
+                "already_has_evidence": ("output", origin_ref) in source_index,
+                "project_refs": res["refs"],
+                "project_resolution_status": res["status"],
+                "project_resolution_ok": bool(res["ok"]),
+                "blockers": [
+                    *([] if date else ["Blog post has no date; evidence requires a date."]),
+                    *list(res["blockers"]),
+                ],
             }
         )
     return options
+
+
+def _task_source_refs(row: dict[str, Any]) -> list[str]:
+    """Canonical and legacy kanban refs for a kanban-origin evidence row."""
+    refs: list[str] = []
+    origin = str(row.get("origin", "") or "").strip()
+    origin_ref = str(row.get("origin_ref", "") or "").strip()
+    if origin == "kanban_task" and origin_ref:
+        if kanban_ref_id(origin_ref):
+            refs.append(origin_ref)
+        else:
+            refs.append(kanban_ref(origin_ref))
+    for ref in _clean_string_list(row.get("kanban_refs")):
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _is_dangling_task_source(profile: str | Path, row: dict[str, Any]) -> bool:
+    refs = _task_source_refs(row)
+    if not refs:
+        return False
+    try:
+        return not bool(find_kanban_tasks_by_ref(profile, refs))
+    except Exception:
+        return True
 
 
 def _editor_row_derived(
     row: dict[str, Any],
     *,
     project_label_by_id: dict[str, str],
+    project_index: dict[str, dict[str, Any]],
+    source_counts: dict[tuple[str, str], int],
+    profile: str | Path,
 ) -> dict[str, Any]:
     """UI-derived flags for one row in the React editor list."""
     origin = str(row.get("origin", "") or "")
@@ -984,13 +1221,28 @@ def _editor_row_derived(
         str(r).strip() for r in (row.get("project_refs") or []) if str(r).strip()
     ]
     has_original = bool(str(row.get("original_content", "") or "").strip())
+    has_date = bool(str(row.get("date", "") or "").strip())
+    has_formatted = bool(str(row.get("formatted_content", "") or "").strip())
+    project_validation = validate_internal_project_refs(project_refs, project_index)
+    source_key = evidence_source_key(row)
+    source_conflict = bool(source_key and source_counts.get(source_key, 0) > 1)
+    dangling_task_source = _is_dangling_task_source(profile, row)
     # A row needs migration when it lacks any v2 provenance signal.
     needs_migration = not origin or not has_original
     source_label = str(row.get("origin_detail", "") or "") or origin
     return {
         "has_project": bool(project_refs),
+        "has_valid_project": bool(project_validation["ok"]),
+        "project_resolution_status": project_validation["status"],
+        "project_blockers": list(project_validation["blockers"]),
+        "has_date": has_date,
+        "missing_date": not has_date,
+        "has_formatted_content": has_formatted,
+        "missing_formatted_content": not has_formatted,
         "has_original_content": has_original,
         "needs_migration": needs_migration,
+        "source_conflict": source_conflict,
+        "dangling_task_source": dangling_task_source,
         "source_label": source_label,
         "project_labels": [
             project_label_by_id.get(pid, pid) for pid in project_refs
@@ -1013,6 +1265,19 @@ def evidence_editor_migration_summary(
     needs_migration = 0
     missing_raw = 0
     resume_manual_unassigned = 0
+    missing_date = 0
+    missing_project = 0
+    project_without_goal = 0
+    missing_formatted_content = 0
+    dangling_task_source = 0
+    source_conflict_rows = 0
+    project_index = internal_project_goal_index(profile)
+    source_counts: dict[tuple[str, str], int] = {}
+    for source_rows in active_source_index(rows).values():
+        for row in source_rows:
+            key = evidence_source_key(row)
+            if key is not None:
+                source_counts[key] = len(source_rows)
     for row in rows:
         if row.get("deprecated"):
             continue
@@ -1025,8 +1290,26 @@ def evidence_editor_migration_summary(
         project_refs = [
             r for r in (row.get("project_refs") or []) if str(r).strip()
         ]
+        if not str(row.get("date", "") or "").strip():
+            missing_date += 1
+        if not str(row.get("formatted_content", "") or "").strip():
+            missing_formatted_content += 1
+        project_validation = validate_internal_project_refs(
+            project_refs, project_index
+        )
+        if project_validation["status"] == "missing_project":
+            missing_project += 1
+        elif project_validation["status"] == "project_without_goal":
+            project_without_goal += 1
+        elif project_validation["status"] in ("unknown_project", "multiple_projects"):
+            missing_project += 1
         if origin in ("resume_parse", "manual_daily") and not project_refs:
             resume_manual_unassigned += 1
+        source_key = evidence_source_key(row)
+        if source_key is not None and source_counts.get(source_key, 0) > 1:
+            source_conflict_rows += 1
+        if _is_dangling_task_source(profile, row):
+            dangling_task_source += 1
     # Crystallized tasks without evidence + output candidates.
     try:
         from nblane.core.evidence_migrate import refresh_from_crystallized_tasks
@@ -1042,6 +1325,12 @@ def evidence_editor_migration_summary(
         "needs_migration": needs_migration,
         "missing_raw": missing_raw,
         "resume_manual_unassigned": resume_manual_unassigned,
+        "missing_date": missing_date,
+        "missing_project": missing_project,
+        "project_without_goal": project_without_goal,
+        "missing_formatted_content": missing_formatted_content,
+        "source_conflict": source_conflict_rows,
+        "dangling_task_source": dangling_task_source,
         "crystallized_without_evidence": crystallized_new,
         "output_candidates": output_candidates,
     }
@@ -1058,6 +1347,8 @@ def _done_task_options(profile: str | Path) -> list[dict[str, object]]:
 
     sections = io_facade.parse_kanban(profile)
     done_tasks = sections.get(KANBAN_DONE) or []
+    project_index = internal_project_goal_index(profile)
+    source_index = active_source_index(_pool_entries(profile))
     # Reuse the deterministic proposal indexer to know which Done tasks already
     # resolve to an existing evidence row (kind == "update").
     try:
@@ -1072,18 +1363,45 @@ def _done_task_options(profile: str | Path) -> list[dict[str, object]]:
     except Exception:
         evidence_task_ids = set()
     out: list[dict[str, object]] = []
-    for task in done_tasks:
+    for index, task in enumerate(done_tasks):
         tid = str(getattr(task, "id", "") or "").strip()
         if not tid:
+            out.append(
+                {
+                    "id": f"__missing_id_{index}",
+                    "title": str(getattr(task, "title", "") or "") or "(untitled)",
+                    "crystallized": bool(getattr(task, "crystallized", False)),
+                    "has_evidence": False,
+                    "completed_on": str(getattr(task, "completed_on", "") or ""),
+                    "project_id": str(getattr(task, "project_id", "") or ""),
+                    "blockers": done_task_evidence_blockers(
+                        task,
+                        project_index,
+                        resolvable=False,
+                    ),
+                    "blocked": True,
+                    "recommended": False,
+                }
+            )
             continue
+        source_has_evidence = ("kanban_task", kanban_ref(tid)) in source_index
+        blockers = done_task_evidence_blockers(
+            task,
+            project_index,
+            resolvable=True,
+        )
+        has_evidence = tid in evidence_task_ids or source_has_evidence
         out.append(
             {
                 "id": tid,
                 "title": str(getattr(task, "title", "") or "") or tid,
                 "crystallized": bool(getattr(task, "crystallized", False)),
-                "has_evidence": tid in evidence_task_ids,
+                "has_evidence": has_evidence,
                 "completed_on": str(getattr(task, "completed_on", "") or ""),
                 "project_id": str(getattr(task, "project_id", "") or ""),
+                "blockers": blockers,
+                "blocked": bool(blockers),
+                "recommended": not blockers and not has_evidence,
             }
         )
     return out
@@ -1107,13 +1425,21 @@ def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
         str(o.get("id")): str(o.get("label") or o.get("id"))
         for o in project_options
     }
+    project_index = internal_project_goal_index(profile)
+    source_counts: dict[tuple[str, str], int] = {}
+    for key, source_rows in active_source_index(_pool_entries(profile)).items():
+        source_counts[key] = len(source_rows)
 
     # Annotate each active row with derived UI flags.
     enriched_rows: list[dict[str, Any]] = []
     skill_suggestions = evidence_skill_suggestions(profile, rows=active_rows)
     for row in active_rows:
         derived = _editor_row_derived(
-            row, project_label_by_id=project_label_by_id
+            row,
+            project_label_by_id=project_label_by_id,
+            project_index=project_index,
+            source_counts=source_counts,
+            profile=profile,
         )
         derived["skill_suggestions"] = skill_suggestions.get(
             str(row.get("id", "") or ""), []
