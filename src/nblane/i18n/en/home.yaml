@@ -253,7 +253,7 @@ dashboard_explore_lane_skill_gap: Skill / Gap
 dashboard_explore_lane_output_feedback: Output / Feedback
 dashboard_attention_title: Attention
 dashboard_workbench_title: Workbench
-dashboard_workbench_caption: Today's signals, capture inbox, and quick actions.
+dashboard_workbench_caption: Today's signals, skill progress, and health.
 dashboard_canvas_setup_title: The canvas is still in setup
 dashboard_canvas_setup_hint: Add North Star and a current goal first, then capture sources to replace the skeleton.
 dashboard_canvas_missing_north_star: North Star missing

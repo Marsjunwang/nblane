@@ -22,7 +22,6 @@ import {
 } from "./payload.js";
 import {
   archiveGoalEvent,
-  captureInboxSubmitEvent,
   confirmGoalSkillLinksEvent,
   createGoalSubmitEvent,
   editGoalSubmitEvent,
@@ -351,11 +350,6 @@ function translatedNodeType(ui, type) {
   return label(ui, `dashboard_node_${clean}`, clean.replace(/_/g, " "));
 }
 
-function statusLabel(ui, status) {
-  const clean = cleanText(status);
-  return label(ui, `dashboard_skill_status_${clean}`, label(ui, `status_${clean}`, clean));
-}
-
 function nodeColor(node) {
   if (node.placeholder || node.implemented === false) {
     return "#a6b2ad";
@@ -389,22 +383,6 @@ function graphLayers(payload) {
   }
   payload.graph.nodes.forEach((node) => add(node.layer));
   return out;
-}
-
-function captureDraftFromFormData(formData) {
-  const tags = cleanText(formData.get("tags"))
-    .split(/[,\n]/)
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-  return {
-    title: cleanText(formData.get("title")),
-    type: cleanText(formData.get("type"), "note"),
-    source: cleanText(formData.get("source")),
-    source_url: cleanText(formData.get("source_url")),
-    raw_text: cleanText(formData.get("raw_text")),
-    goal_id: cleanText(formData.get("goal_id")),
-    tags,
-  };
 }
 
 function goalIdFromNode(node) {
@@ -2567,7 +2545,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
 
   if (!readOnly && goalEditor?.mode === "create") {
     return (
-      <aside className="hd-inspector">
+      <aside className="hd-inspector" data-section="goal-editor">
         <header><span className="hd-eyebrow">{label(ui, "dashboard_add_active_goal", "Add Active Goal")}</span><h3>{label(ui, "goal_create_title", "Create goal")}</h3></header>
         <GoalForm key="create-goal" payload={payload} goal={{ editor: emptyGoalEditor() }} mode="create" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
       </aside>
@@ -2578,7 +2556,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
   const selectedGoal = goalById(payload, selectedGoalId);
   if (!readOnly && goalEditor?.mode === "edit" && selectedGoal) {
     return (
-      <aside className="hd-inspector">
+      <aside className="hd-inspector" data-section="goal-editor">
         <header><span className="hd-eyebrow">{label(ui, "dashboard_goal_edit_inline", "Edit goal")}</span><h3>{goalDisplay(selectedGoal, ui).title}</h3></header>
         <GoalForm key={`edit-goal:${selectedGoal.id}`} payload={payload} goal={selectedGoal} mode="edit" onCancel={() => setGoalEditor(null)} onEmit={onEmit} />
       </aside>
@@ -2657,80 +2635,6 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
   );
 }
 
-function HomeCaptureForm({ payload, onEmit, className = "" }) {
-  const ui = payload.ui;
-  const currentGoalId = primaryGoalId(payload);
-  const sourceActive = Number(payload.sources.active_total || 0);
-  const formClassName = ["hd-capture-form", className].filter(Boolean).join(" ");
-  const [justSaved, setJustSaved] = useState(false);
-
-  function submit(event) {
-    event.preventDefault();
-    const draft = captureDraftFromFormData(new FormData(event.currentTarget));
-    if (!draft.title) {
-      return;
-    }
-    onEmit(captureInboxSubmitEvent(draft));
-    event.currentTarget.reset();
-    setJustSaved(true);
-  }
-
-  return (
-    <form className={formClassName} onSubmit={submit}>
-      <header>
-        <span className="hd-eyebrow">{label(ui, "dashboard_today_capture_sources", "Capture / Sources")}</span>
-        <strong>{label(ui, "dashboard_capture_title", "Capture source")}</strong>
-        <p className="hd-capture-caption">
-          {sourceActive > 0
-            ? `${sourceActive} ${label(ui, "dashboard_source_inbox_title", "Source inbox")}`
-            : label(ui, "dashboard_source_to_evidence_hint", "Captured sources stay in inbox until reviewed into evidence candidates.")}
-        </p>
-      </header>
-      <input type="hidden" name="goal_id" value={currentGoalId} />
-      <div className="hd-capture-compact">
-        <label>
-          {label(ui, "goal_field_title", "Title")}
-          <input name="title" required placeholder={label(ui, "dashboard_capture_title_placeholder", "What did you notice?")} />
-        </label>
-        <label>
-          {label(ui, "dashboard_capture_type", "Type")}
-          <select name="type" defaultValue="note">
-            <option value="note">{label(ui, "dashboard_capture_type_note", "Note")}</option>
-            <option value="link">{label(ui, "dashboard_capture_type_link", "Link")}</option>
-            <option value="resource">{label(ui, "dashboard_capture_type_resource", "Resource")}</option>
-            <option value="idea">{label(ui, "dashboard_capture_type_idea", "Idea")}</option>
-          </select>
-        </label>
-        <button className="hd-primary" type="submit" data-action="capture-source">{label(ui, "dashboard_capture_submit", "Capture")}</button>
-      </div>
-
-      {justSaved ? (
-        <p className="hd-capture-saved" role="status">{label(ui, "dashboard_capture_saved_hint", "Captured. Organizing into inbox…")}</p>
-      ) : null}
-
-      <details className="hd-capture-more">
-        <summary>{label(ui, "dashboard_capture_more_fields", "More fields")}</summary>
-        <label>
-          {label(ui, "dashboard_capture_source", "Source URL or origin")}
-          <input name="source" />
-        </label>
-        <label>
-          {label(ui, "dashboard_capture_source", "Source URL or origin")}
-          <input name="source_url" type="url" />
-        </label>
-        <label>
-          {label(ui, "dashboard_capture_raw_text", "Note")}
-          <textarea name="raw_text" rows="4" />
-        </label>
-        <label>
-          {label(ui, "dashboard_capture_tags", "Tags")}
-          <input name="tags" placeholder="project/nblane, flow/learning" />
-        </label>
-      </details>
-    </form>
-  );
-}
-
 function SkillProgressCard({ payload, onEmit, className = "" }) {
   const ui = payload.ui;
   const counts = payload.charts.skills.counts || {};
@@ -2801,16 +2705,6 @@ function SkillProgressCard({ payload, onEmit, className = "" }) {
             <strong>{lit}/{total}</strong>
             <span>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</span>
           </div>
-        </div>
-
-        <div className="hd-skill-legend">
-          {SKILL_STATUS_META.map((item) => (
-            <div key={item.key} className="hd-skill-legend-item">
-              <span className="hd-skill-legend-dot" style={{ background: item.color }} />
-              <span>{statusLabel(ui, item.key)}</span>
-              <strong>{Number(counts[item.key]) || 0}</strong>
-            </div>
-          ))}
         </div>
       </div>
     </article>
@@ -2887,7 +2781,6 @@ function ActionQueue({ payload, onEmit, className = "" }) {
 function Workbench({ payload, onEmit, readOnly = false, showActionQueue = true }) {
   const ui = payload.ui;
   const metrics = dashboardMetrics(payload);
-  const quickLinks = asArray(payload.quickLinks);
   const urgentHealth = metrics.healthAlerts > 0;
   const layoutClassName = showActionQueue ? "hd-workbench-layout" : "hd-workbench-layout no-queue";
 
@@ -2901,29 +2794,11 @@ function Workbench({ payload, onEmit, readOnly = false, showActionQueue = true }
       </header>
 
       <div className={layoutClassName}>
-        {!readOnly ? <HomeCaptureForm payload={payload} onEmit={onEmit} className="hd-workbench-capture" /> : null}
-
         {showActionQueue ? <ActionQueue payload={payload} onEmit={onEmit} className="hd-workbench-queue" /> : null}
 
         <SkillProgressCard payload={payload} onEmit={onEmit} className="hd-workbench-skill" />
 
         <HealthSummaryPanel payload={payload} className={`hd-workbench-health ${urgentHealth ? "urgent" : "secondary"}`} />
-
-        <section className="hd-side-panel hd-workbench-quick">
-          <details className="hd-quick-details">
-            <summary className="hd-quick-summary">
-              <strong>{label(ui, "dashboard_quick_title", "Quick entries")}</strong>
-              <span>{quickLinks.length}</span>
-            </summary>
-            <div className="hd-quick-grid">
-              {quickLinks.map((link) => (
-                <button key={link.path} className="hd-ghost" type="button" data-action="navigate" data-target={link.path} onClick={() => onEmit(navigationEvent(link.path))}>
-                  {cleanText(link.label, link.id)}
-                </button>
-              ))}
-            </div>
-          </details>
-        </section>
       </div>
     </section>
   );
@@ -2938,6 +2813,25 @@ function Dashboard({ args }) {
   const canvasEmbed = useMemo(() => (!args.standalone ? dashboardCanvasEmbed(payload) : null), [args.standalone, payload]);
   const readOnlyCanvas = Boolean(args.standalone);
   const useDailyGraphHero = !args.standalone && !args.embed;
+
+  useLayoutEffect(() => {
+    window.setTimeout(() => setFrameHeight(), 0);
+    if (!goalEditor?.mode || readOnlyCanvas) {
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const editor = document.querySelector('[data-section="goal-editor"]');
+      if (!editor) {
+        return;
+      }
+      editor.scrollIntoView({ block: "start", behavior: "smooth" });
+      const titleInput = editor.querySelector('input[name="title"]');
+      if (titleInput instanceof HTMLElement) {
+        titleInput.focus({ preventScroll: true });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [goalEditor?.mode, goalEditor?.goalId, readOnlyCanvas]);
 
   useEffect(() => {
     const availableIds = new Set(payload.graph.nodes.map((node) => node.id));

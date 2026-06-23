@@ -253,7 +253,7 @@ dashboard_explore_lane_skill_gap: 能力 / 缺口
 dashboard_explore_lane_output_feedback: 输出 / 反馈
 dashboard_attention_title: 关注信号
 dashboard_workbench_title: 今日工作台
-dashboard_workbench_caption: 集中查看今天的信号、捕捉入口和快捷操作。
+dashboard_workbench_caption: 集中查看今天的信号、技能进度与健康度。
 dashboard_canvas_setup_title: 当前画布仍处于搭建阶段
 dashboard_canvas_setup_hint: 先补长期方向和当前目标，再逐步用真实来源与证据替换骨架。
 dashboard_canvas_missing_north_star: 缺少长期方向
