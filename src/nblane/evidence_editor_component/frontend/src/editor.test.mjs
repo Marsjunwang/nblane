@@ -192,6 +192,34 @@ test("bulkApplyEvent: named action shape", async () => {
   assert.equal(confirm.payload.preview_id, "r1");
 });
 
+test("output candidate event factories shape", async () => {
+  const ev = await import("./events.js");
+  const single = ev.createFromOutputEvent("out1", "output", ["project:x"]);
+  assert.equal(single.action, "create_from_output");
+  assert.equal(single.payload.output_id, "out1");
+  assert.deepEqual(single.payload.project_refs, ["project:x"]);
+
+  const items = [
+    { output_id: "out1", source_kind: "output", project_refs: ["project:x"] },
+    { output_id: "route-1", source_kind: "blog", project_refs: ["project:y"] },
+  ];
+  const bulk = ev.bulkCreateFromOutputEvent(items);
+  assert.equal(bulk.action, "bulk_create_from_output");
+  assert.deepEqual(bulk.payload.items, items);
+
+  const ignore = ev.ignoreOutputCandidatesEvent(
+    [{ output_id: "out1", source_kind: "output" }],
+    "not_evidence"
+  );
+  assert.equal(ignore.action, "ignore_output_candidates");
+  assert.equal(ignore.payload.reason, "not_evidence");
+  assert.deepEqual(ignore.payload.items, [{ output_id: "out1", source_kind: "output" }]);
+
+  const restore = ev.restoreOutputCandidatesEvent([{ output_id: "route-1", source_kind: "blog" }]);
+  assert.equal(restore.action, "restore_output_candidates");
+  assert.deepEqual(restore.payload.items, [{ output_id: "route-1", source_kind: "blog" }]);
+});
+
 test("renderMarkdown: headings, bold, lists, code", () => {
   const md = "# Title\n\nSome **bold** and `code`.\n\n- one\n- two\n\n1. first\n2. second";
   const html = renderMarkdown(md);

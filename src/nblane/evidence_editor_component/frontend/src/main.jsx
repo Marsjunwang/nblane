@@ -23,7 +23,9 @@ import {
   confirmAiReformatEvent,
   bulkRequestAiReformatEvent,
   bulkConfirmAiReformatEvent,
-  createFromOutputEvent,
+  bulkCreateFromOutputEvent,
+  ignoreOutputCandidatesEvent,
+  restoreOutputCandidatesEvent,
   suggestDuplicatesEvent,
   mergeOrDeprecateEvent,
   dismissDuplicateEvent,
@@ -1034,30 +1036,157 @@ function DonePreviewPanel({ preview, labels, emit }) {
   );
 }
 
-function OutputCreateStrip({ outputs, projectOptions, labels, emit, onClose }) {
+function outputKey(o) {
+  return cleanText(o.source_key) || `${cleanText(o.source_kind) || "output"}:${cleanText(o.id)}`;
+}
+
+function outputEventItem(o, projectRefs = []) {
+  return {
+    output_id: cleanText(o.id),
+    source_kind: cleanText(o.source_kind) || "output",
+    project_refs: projectRefs,
+  };
+}
+
+function formatCountLabel(text, count) {
+  return cleanText(text).replace("{n}", String(count));
+}
+
+function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose }) {
+  const options = asArray(projectOptions);
+  const validProjectIds = useMemo(
+    () => new Set(options.filter((p) => p.has_goal !== false).map((p) => p.id)),
+    [options]
+  );
   const [projectByKey, setProjectByKey] = useState({});
-  const validProjects = asArray(projectOptions).filter((p) => p.has_goal !== false);
+  const [selectedKeys, setSelectedKeys] = useState(() => new Set());
+  const [showBlocked, setShowBlocked] = useState(false);
+  const [showIgnored, setShowIgnored] = useState(false);
+  const [showExisting, setShowExisting] = useState(false);
+
+  useEffect(() => {
+    const nextProjects = {};
+    const nextSelected = new Set();
+    asArray(outputs).forEach((o) => {
+      const key = outputKey(o);
+      const refs = asArray(o.project_refs);
+      const inferred = refs.length === 1 ? cleanText(refs[0]) : "";
+      if (inferred) nextProjects[key] = inferred;
+      if (o.source_ready && inferred && validProjectIds.has(inferred)) {
+        nextSelected.add(key);
+      }
+    });
+    setProjectByKey(nextProjects);
+    setSelectedKeys(nextSelected);
+  }, [outputs, validProjectIds]);
+
   const projectLabel = (pid) => {
-    const found = asArray(projectOptions).find((p) => p.id === pid);
+    const found = options.find((p) => p.id === pid);
     return found ? cleanText(found.label) || pid : pid;
   };
+
+  const selectedProject = (o) => {
+    const key = outputKey(o);
+    if (Object.prototype.hasOwnProperty.call(projectByKey, key)) {
+      return cleanText(projectByKey[key]);
+    }
+    const refs = asArray(o.project_refs);
+    return refs.length === 1 ? cleanText(refs[0]) : "";
+  };
+
+  const canCreateRow = (o) => {
+    const pid = selectedProject(o);
+    return !!o.source_ready && !!pid && validProjectIds.has(pid);
+  };
+
+  const setRowProject = (o, value) => {
+    const key = outputKey(o);
+    const pid = cleanText(value);
+    setProjectByKey((prev) => ({ ...prev, [key]: pid }));
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (o.source_ready && pid && validProjectIds.has(pid)) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const toggleRow = (o, checked) => {
+    const key = outputKey(o);
+    if (!canCreateRow(o)) return;
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      checked ? next.add(key) : next.delete(key);
+      return next;
+    });
+  };
+
+  const visibleOutputs = asArray(outputs).filter((o) => {
+    if (o.ignored) return showIgnored;
+    if (o.already_has_evidence) return showExisting;
+    if (!o.source_ready) return showBlocked;
+    return true;
+  });
+
+  const selectedItems = asArray(outputs)
+    .filter((o) => selectedKeys.has(outputKey(o)) && canCreateRow(o))
+    .map((o) => outputEventItem(o, [selectedProject(o)]));
+  const selectedCount = selectedItems.length;
+  const createText = formatCountLabel(
+    label(labels, "ee_output_bulk_create", "Create selected evidence ({n})"),
+    selectedCount
+  );
+  const createSelected = () => {
+    if (!selectedItems.length) return;
+    emit(bulkCreateFromOutputEvent(selectedItems));
+    onClose();
+  };
+
+  const actionItem = (o) => [outputEventItem(o, [])];
+
   return (
     <div className="ee-output-strip">
-      {outputs.length === 0 && <span className="ee-muted">{label(labels, "ee_no_outputs", "No outputs")}</span>}
-      {outputs.map((o) => {
-        const key = `${o.source_kind || "output"}:${o.id}`;
+      <div className="ee-output-panel-head">
+        <div className="ee-output-toggles">
+          <label className="ee-check">
+            <input type="checkbox" checked={showBlocked} onChange={() => setShowBlocked((v) => !v)} />
+            {label(labels, "ee_output_show_blocked", "Show draft/blocked")}
+          </label>
+          <label className="ee-check">
+            <input type="checkbox" checked={showIgnored} onChange={() => setShowIgnored((v) => !v)} />
+            {label(labels, "ee_output_show_ignored", "Show skipped")}
+          </label>
+          <label className="ee-check">
+            <input type="checkbox" checked={showExisting} onChange={() => setShowExisting((v) => !v)} />
+            {label(labels, "ee_output_show_existing", "Show existing evidence")}
+          </label>
+        </div>
+        <button
+          type="button"
+          className="ee-btn-primary"
+          disabled={!selectedCount}
+          onClick={createSelected}
+        >
+          {createText}
+        </button>
+      </div>
+      {visibleOutputs.length === 0 && <span className="ee-muted">{label(labels, "ee_no_outputs", "No outputs")}</span>}
+      {visibleOutputs.map((o) => {
+        const key = outputKey(o);
         const blockers = asArray(o.blockers);
-        const dateBlocked = blockers.some((b) => String(b).toLowerCase().includes("date"));
-        const inferredProjectRefs = asArray(o.project_refs);
-        const inferredOk = !!o.project_resolution_ok && inferredProjectRefs.length === 1;
-        const selectedProject = projectByKey[key] || "";
-        const finalProjectRefs = inferredOk ? inferredProjectRefs : selectedProject ? [selectedProject] : [];
-        const canCreate = !dateBlocked && finalProjectRefs.length === 1;
-        const shownBlockers = dateBlocked
-          ? blockers
-          : blockers.filter((b) => !String(b).toLowerCase().includes("project"));
+        const pid = selectedProject(o);
+        const canCreate = canCreateRow(o);
+        const checked = selectedKeys.has(key) && canCreate;
         return (
           <div key={key} className={`ee-output-row${canCreate ? "" : " ee-output-row-blocked"}`}>
+            <input
+              type="checkbox"
+              className="ee-output-check"
+              checked={checked}
+              disabled={!canCreate}
+              onChange={(e) => toggleRow(o, e.target.checked)}
+              aria-label={cleanText(o.label) || cleanText(o.id)}
+            />
             <div className="ee-output-main">
               <div className="ee-output-title">
                 {cleanText(o.label)}
@@ -1066,47 +1195,62 @@ function OutputCreateStrip({ outputs, projectOptions, labels, emit, onClose }) {
                     {label(labels, "ee_done_has_evidence", "has evidence")}
                   </span>
                 )}
+                {o.ignored && (
+                  <span className="ee-badge ee-badge-muted">
+                    {label(labels, "ee_output_ignored_badge", "skipped")}
+                  </span>
+                )}
               </div>
               <div className="ee-output-meta">
                 {cleanText(o.source_kind) || "output"} · {cleanText(o.status) || "—"} · {cleanText(o.date) || "no date"}
-                {inferredOk ? ` · ${projectLabel(inferredProjectRefs[0])}` : ""}
+                {pid ? ` · ${projectLabel(pid)}` : ""}
               </div>
-              {!inferredOk && !dateBlocked && (
-                <label className="ee-field ee-output-project">
-                  <span>{label(labels, "ee_link_project", "Internal project")}</span>
-                  <select
-                    value={selectedProject}
-                    onChange={(e) =>
-                      setProjectByKey((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                  >
-                    <option value="" />
-                    {validProjects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {cleanText(p.label) || p.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {shownBlockers.length > 0 && (
-                <div className="ee-preview-blockers">{shownBlockers.join(" ")}</div>
+              <label className="ee-field ee-output-project">
+                <span>{label(labels, "ee_link_project", "Internal project")}</span>
+                <select value={pid} onChange={(e) => setRowProject(o, e.target.value)}>
+                  <option value="" />
+                  {options.map((p) => (
+                    <option key={p.id} value={p.id} disabled={p.has_goal === false}>
+                      {cleanText(p.label) || p.id}
+                      {p.has_goal === false ? " · no goal" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {blockers.length > 0 && (
+                <div className="ee-preview-blockers">{blockers.join(" ")}</div>
               )}
             </div>
-            <button
-              type="button"
-              className="ee-btn-sm ee-btn-primary"
-              disabled={!canCreate}
-              onClick={() => {
-                emit(createFromOutputEvent(o.id, o.source_kind || "output", finalProjectRefs));
-                onClose();
-              }}
-            >
-              {label(labels, "ee_create_from_output", "Create from output")}
-            </button>
+            {o.ignored ? (
+              <button
+                type="button"
+                className="ee-btn-sm"
+                onClick={() => emit(restoreOutputCandidatesEvent(actionItem(o)))}
+              >
+                {label(labels, "ee_output_restore", "Restore")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ee-btn-sm"
+                onClick={() => emit(ignoreOutputCandidatesEvent(actionItem(o), "not_evidence"))}
+              >
+                {label(labels, "ee_output_ignore", "Skip")}
+              </button>
+            )}
           </div>
         );
       })}
+      <div className="ee-output-panel-foot">
+        <button
+          type="button"
+          className="ee-btn-primary"
+          disabled={!selectedCount}
+          onClick={createSelected}
+        >
+          {createText}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1221,14 +1365,6 @@ function App() {
           <button type="button" className="ee-btn" onClick={() => setShowDoneTasks(true)}>
             {label(labels, "ee_done_tasks_title", "Done tasks → evidence")}
           </button>
-          <button
-            type="button"
-            className={`ee-btn${showOutputs ? " ee-btn-on" : ""}`}
-            onClick={() => setShowOutputs((s) => !s)}
-            title={label(labels, "ee_create_from_output", "Create from output")}
-          >
-            {label(labels, "ee_create_from_output", "Create from output")} ({summary.output_candidates || 0})
-          </button>
           <button type="button" className="ee-btn" onClick={() => emit(suggestDuplicatesEvent("", false))}>
             {label(labels, "ee_find_duplicates", "Find duplicates")}
           </button>
@@ -1273,7 +1409,7 @@ function App() {
           <Counter
             icon="◇"
             n={summary.output_candidates || 0}
-            text={label(labels, "ee_create_from_output", "Output candidates")}
+            text={label(labels, "ee_output_ready_candidates", "Evidence-ready outputs")}
             active={showOutputs}
             onClick={() => setShowOutputs((s) => !s)}
           />
@@ -1297,7 +1433,7 @@ function App() {
       )}
 
       {showOutputs && (
-        <OutputCreateStrip
+        <OutputEvidencePanel
           outputs={outputs}
           projectOptions={asArray(payload.project_options)}
           labels={labels}

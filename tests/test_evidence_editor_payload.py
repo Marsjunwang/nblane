@@ -31,6 +31,7 @@ class TestEditorPayload(unittest.TestCase):
         from nblane.core import io as io_mod
         from nblane.core import paths as paths_mod
         from nblane.core import profile_io
+        from nblane.core import project_board
         from nblane.core.evidence_review import build_evidence_editor_payload
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -39,6 +40,7 @@ class TestEditorPayload(unittest.TestCase):
                 paths_mod: paths_mod.PROFILES_DIR,
                 profile_io: profile_io.PROFILES_DIR,
                 io_mod: io_mod.PROFILES_DIR,
+                project_board: project_board.PROFILES_DIR,
             }
             for mod in origs:
                 mod.PROFILES_DIR = tmp_path
@@ -113,6 +115,148 @@ class TestEditorPayload(unittest.TestCase):
         # No original_content -> missing_raw and needs_migration.
         self.assertGreaterEqual(ms["missing_raw"], 1)
         self.assertGreaterEqual(ms["resume_manual_unassigned"], 1)
+
+    def test_output_options_mark_source_ready_and_count_only_ready(self) -> None:
+        from nblane.core import io as io_mod
+        from nblane.core import paths as paths_mod
+        from nblane.core import profile_io
+        from nblane.core import project_board
+        from nblane.core.evidence_review import build_evidence_editor_payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            origs = {
+                paths_mod: paths_mod.PROFILES_DIR,
+                profile_io: profile_io.PROFILES_DIR,
+                io_mod: io_mod.PROFILES_DIR,
+                project_board: project_board.PROFILES_DIR,
+            }
+            for mod in origs:
+                mod.PROFILES_DIR = tmp_path
+            try:
+                _make_profile(
+                    tmp_path,
+                    "dev",
+                    [
+                        {
+                            "id": "ev_existing",
+                            "type": "practice",
+                            "title": "Existing output evidence",
+                            "origin": "output",
+                            "origin_ref": "output:already",
+                            "original_content": "raw",
+                            "formatted_content": "formatted",
+                            "date": "2026-02-01",
+                            "project_refs": ["project:demo"],
+                        }
+                    ],
+                )
+                pdir = tmp_path / "dev"
+                (pdir / "project-board.yaml").write_text(
+                    yaml.safe_dump(
+                        {
+                            "profile": "dev",
+                            "project_cases": [
+                                {
+                                    "id": "project:demo",
+                                    "title": "Demo",
+                                    "goal_refs": ["goal:demo"],
+                                }
+                            ],
+                        },
+                        allow_unicode=True,
+                    ),
+                    encoding="utf-8",
+                )
+                (pdir / "outputs.yaml").write_text(
+                    yaml.safe_dump(
+                        {
+                            "outputs": [
+                                {
+                                    "id": "ready_project",
+                                    "title": "Ready with project",
+                                    "status": "published",
+                                    "date": "2026-02-01",
+                                    "summary": "Ready summary.",
+                                    "project_refs": ["project:demo"],
+                                },
+                                {
+                                    "id": "ready_needs_project",
+                                    "title": "Ready needs project",
+                                    "status": "published",
+                                    "date": "2026-02-02",
+                                    "summary": "Ready summary.",
+                                },
+                                {
+                                    "id": "draft",
+                                    "title": "Draft",
+                                    "status": "draft",
+                                    "date": "2026-02-03",
+                                    "summary": "Draft summary.",
+                                },
+                                {
+                                    "id": "missing_summary",
+                                    "title": "Missing summary",
+                                    "status": "published",
+                                    "date": "2026-02-04",
+                                },
+                                {
+                                    "id": "already",
+                                    "title": "Already has evidence",
+                                    "status": "published",
+                                    "date": "2026-02-05",
+                                    "summary": "Already summary.",
+                                    "project_refs": ["project:demo"],
+                                },
+                                {
+                                    "id": "ignored",
+                                    "title": "Ignored",
+                                    "status": "published",
+                                    "date": "2026-02-06",
+                                    "summary": "Ignored summary.",
+                                    "project_refs": ["project:demo"],
+                                },
+                            ]
+                        },
+                        allow_unicode=True,
+                    ),
+                    encoding="utf-8",
+                )
+                (pdir / "web-preferences.yaml").write_text(
+                    yaml.safe_dump(
+                        {
+                            "evidence_review": {
+                                "ignored_output_candidates": [
+                                    {
+                                        "source_key": "output:ignored",
+                                        "source_kind": "output",
+                                        "output_id": "ignored",
+                                        "reason": "not_evidence",
+                                    }
+                                ]
+                            }
+                        },
+                        allow_unicode=True,
+                    ),
+                    encoding="utf-8",
+                )
+                payload = build_evidence_editor_payload("dev")
+            finally:
+                for mod, val in origs.items():
+                    mod.PROFILES_DIR = val
+
+        options = {item["id"]: item for item in payload["output_options"]}
+        self.assertEqual(payload["migration_summary"]["output_candidates"], 2)
+        self.assertTrue(options["ready_project"]["source_ready"])
+        self.assertFalse(options["ready_project"]["requires_project_selection"])
+        self.assertTrue(options["ready_needs_project"]["source_ready"])
+        self.assertTrue(options["ready_needs_project"]["requires_project_selection"])
+        self.assertFalse(options["draft"]["source_ready"])
+        self.assertFalse(options["missing_summary"]["source_ready"])
+        self.assertTrue(options["already"]["already_has_evidence"])
+        self.assertFalse(options["already"]["source_ready"])
+        self.assertTrue(options["ignored"]["ignored"])
+        self.assertFalse(options["ignored"]["source_ready"])
 
     def test_done_task_options_lists_done_incl_uncrystallized(self) -> None:
         from nblane.core import io as io_mod

@@ -71,16 +71,24 @@ button { cursor: pointer; }
   display: flex; flex-direction: column; gap: 6px; padding: 6px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--soft);
 }
+.ee-output-panel-head,
+.ee-output-panel-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap; padding: 2px;
+}
+.ee-output-toggles { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .ee-output-row {
   display: flex; align-items: center; gap: 10px; justify-content: space-between;
   border: 1px solid var(--line); border-radius: 8px; background: var(--paper);
   padding: 7px 8px;
 }
 .ee-output-row-blocked { border-color: #d8a53a; background: #fffaf0; }
+.ee-output-check { flex: 0 0 auto; }
 .ee-output-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
 .ee-output-title { display: flex; align-items: center; gap: 6px; font-weight: 700; overflow-wrap: anywhere; }
 .ee-output-meta { color: var(--muted); font-size: 11px; }
 .ee-output-project { max-width: 320px; }
+.ee-output-project select { min-width: 220px; }
 
 /* body: list + detail */
 .ee-body { display: flex; gap: 10px; align-items: stretch; }

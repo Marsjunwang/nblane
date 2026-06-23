@@ -18,7 +18,12 @@ from nblane.core.kanban_archive import (
     kanban_ref,
     kanban_ref_id,
 )
-from nblane.core.evidence_from_output import active_source_index, evidence_source_key
+from nblane.core.evidence_from_output import (
+    active_source_index,
+    evidence_row_from_blog_post,
+    evidence_row_from_output,
+    evidence_source_key,
+)
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
     EVIDENCE_LANGUAGES,
@@ -30,6 +35,7 @@ from nblane.core.models import (
 )
 from nblane.core.project_board import load_project_board
 from nblane.core.research_sources import load_research_sources
+from nblane.core.web_preferences import load_web_preferences
 
 EVIDENCE_REVIEW_PAGE = "pages/2_Evidence_Review.py"
 UNRATED_STRENGTH = "unrated"
@@ -1065,6 +1071,17 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         if str(row.get("id", "") or "").strip()
     }
     source_index = active_source_index(pool)
+    prefs = load_web_preferences(profile)
+    evidence_prefs = (
+        prefs.get("evidence_review")
+        if isinstance(prefs.get("evidence_review"), dict)
+        else {}
+    )
+    ignored_keys = {
+        str(item.get("source_key", "") or "").strip()
+        for item in (evidence_prefs.get("ignored_output_candidates") or [])
+        if isinstance(item, dict) and str(item.get("source_key", "") or "").strip()
+    }
 
     def _date_from_output(out: dict[str, Any]) -> str:
         for key in ("date", "created_at", "year"):
@@ -1087,6 +1104,57 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
     def _resolution(project_refs: object) -> dict[str, Any]:
         return validate_internal_project_refs(project_refs, project_index)
 
+    def _status_blocker(label: str, status: str) -> list[str]:
+        if status == "published":
+            return []
+        shown = status or "draft"
+        return [f"{label} status is {shown}; publish it before creating evidence."]
+
+    def _source_ready_row(
+        *,
+        source_key: str,
+        label: str,
+        status: str,
+        date: str,
+        already_has_evidence: bool,
+        ignored: bool,
+        has_original_content: bool,
+        has_formatted_content: bool,
+        project_resolution: dict[str, Any],
+    ) -> dict[str, Any]:
+        status = str(status or "").strip()
+        blockers: list[str] = []
+        if ignored:
+            blockers.append(f"{label} was skipped in Evidence Review.")
+        if already_has_evidence:
+            blockers.append(f"{label} already has evidence.")
+        blockers.extend(_status_blocker(label, status))
+        if not date:
+            blockers.append(f"{label} has no date; evidence requires a date.")
+        if not has_original_content:
+            blockers.append(f"{label} has no original_content.")
+        if not has_formatted_content:
+            blockers.append(f"{label} has no formatted_content.")
+        source_ready = (
+            not ignored
+            and not already_has_evidence
+            and status == "published"
+            and bool(date)
+            and has_original_content
+            and has_formatted_content
+        )
+        selection_blockers = list(project_resolution["blockers"])
+        return {
+            "source_key": source_key,
+            "ignored": ignored,
+            "source_ready": source_ready,
+            "requires_project_selection": bool(
+                source_ready and not project_resolution["ok"]
+            ),
+            "selection_blockers": selection_blockers,
+            "blockers": [*blockers, *selection_blockers],
+        }
+
     pdir = profile if isinstance(profile, Path) else io_facade.profile_dir(profile)
     if isinstance(profile, Path):
         output_rows = [
@@ -1102,8 +1170,7 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
                     post = public_site.parse_blog_post(path)
                 except Exception:
                     continue
-                if str(getattr(post, "status", "") or "draft") != "archived":
-                    blog_posts.append(post)
+                blog_posts.append(post)
     else:
         try:
             output_rows = public_site.load_outputs(_profile_name(profile))
@@ -1113,7 +1180,7 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
             blog_posts = public_site.load_blog_posts(
                 _profile_name(profile),
                 include_drafts=True,
-                include_archived=False,
+                include_archived=True,
             )
         except FileNotFoundError:
             blog_posts = []
@@ -1130,23 +1197,42 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
             refs = _project_refs_from_related(out.get("related_evidence"))
         res = _resolution(refs)
         date = _date_from_output(out)
-        origin_ref = f"output:{oid}"
+        source_key = f"output:{oid}"
+        already_has_evidence = ("output", source_key) in source_index
+        row_probe = evidence_row_from_output(
+            {**out, "project_refs": res["refs"]},
+            profile=profile,
+            existing_ids=set(),
+            target_lang="en",
+        )
+        readiness = _source_ready_row(
+            source_key=source_key,
+            label="Output",
+            status=str(out.get("status", "") or ""),
+            date=date,
+            already_has_evidence=already_has_evidence,
+            ignored=source_key in ignored_keys,
+            has_original_content=bool(
+                str(row_probe.get("original_content", "") or "").strip()
+            ),
+            has_formatted_content=bool(
+                str(row_probe.get("formatted_content", "") or "").strip()
+            ),
+            project_resolution=res,
+        )
         options.append(
             {
                 "id": oid,
                 "source_kind": "output",
+                **readiness,
                 "label": str(out.get("title", "") or oid),
                 "target": str(out.get("target", "") or out.get("type", "")),
                 "status": str(out.get("status", "") or ""),
                 "date": date,
-                "already_has_evidence": ("output", origin_ref) in source_index,
+                "already_has_evidence": already_has_evidence,
                 "project_refs": res["refs"],
                 "project_resolution_status": res["status"],
                 "project_resolution_ok": bool(res["ok"]),
-                "blockers": [
-                    *([] if date else ["Output has no date; evidence requires a date."]),
-                    *list(res["blockers"]),
-                ],
             }
         )
     for post in blog_posts:
@@ -1159,23 +1245,43 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         )
         res = _resolution(refs)
         date = str(getattr(post, "date", "") or "").strip()
-        origin_ref = f"blog:{route}"
+        source_key = f"blog:{route}"
+        already_has_evidence = ("output", source_key) in source_index
+        row_probe = evidence_row_from_blog_post(
+            post,
+            profile=profile,
+            project_refs=res["refs"],
+            existing_ids=set(),
+            target_lang="en",
+        )
+        readiness = _source_ready_row(
+            source_key=source_key,
+            label="Blog post",
+            status=str(getattr(post, "status", "") or ""),
+            date=date,
+            already_has_evidence=already_has_evidence,
+            ignored=source_key in ignored_keys,
+            has_original_content=bool(
+                str(row_probe.get("original_content", "") or "").strip()
+            ),
+            has_formatted_content=bool(
+                str(row_probe.get("formatted_content", "") or "").strip()
+            ),
+            project_resolution=res,
+        )
         options.append(
             {
                 "id": route,
                 "source_kind": "blog",
+                **readiness,
                 "label": str(getattr(post, "title", "") or route),
                 "target": "blog",
                 "status": str(getattr(post, "status", "") or ""),
                 "date": date,
-                "already_has_evidence": ("output", origin_ref) in source_index,
+                "already_has_evidence": already_has_evidence,
                 "project_refs": res["refs"],
                 "project_resolution_status": res["status"],
                 "project_resolution_ok": bool(res["ok"]),
-                "blockers": [
-                    *([] if date else ["Blog post has no date; evidence requires a date."]),
-                    *list(res["blockers"]),
-                ],
             }
         )
     return options
@@ -1320,7 +1426,9 @@ def evidence_editor_migration_summary(
         )
     except Exception:
         crystallized_new = 0
-    output_candidates = len(_output_options(profile))
+    output_candidates = sum(
+        1 for item in _output_options(profile) if bool(item.get("source_ready"))
+    )
     return {
         "needs_migration": needs_migration,
         "missing_raw": missing_raw,

@@ -334,6 +334,14 @@ ee_ai_reformat: AI 重新格式化
 ee_ai_reformat_confirm: 确认格式化
 ee_create_project_from_evidence: 由证据创建项目
 ee_create_from_output: 从输出创建
+ee_output_ready_candidates: 可成为 evidence 的输出
+ee_output_bulk_create: 创建选中的 evidence（{n}）
+ee_output_show_blocked: 显示 draft/blocked
+ee_output_show_ignored: 显示已跳过
+ee_output_show_existing: 显示已有 evidence
+ee_output_ignore: 跳过
+ee_output_restore: 恢复
+ee_output_ignored_badge: 已跳过
 ee_duplicate_candidates: 查找重复
 ee_backfill_project: 回填项目引用
 ee_cancel: 取消
@@ -365,6 +373,9 @@ ee_migration_none: 没有需要迁移的内容。
 ee_crystallized_done: 已从已沉淀任务刷新 {n} 条。
 ee_crystallized_none: 没有可刷新的已沉淀任务。
 ee_output_created: 已从输出创建证据。
+ee_output_bulk_created: 已从输出创建/更新 {n} 条证据。
+ee_output_ignored: 已跳过 {n} 个输出候选。
+ee_output_restored: 已恢复 {n} 个输出候选。
 ee_output_missing: 未找到该输出。
 ee_reformat_failed: AI 重新格式化失败。
 ee_duplicates_hint: 重复检测尚未接入。

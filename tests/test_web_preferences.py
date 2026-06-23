@@ -188,6 +188,49 @@ class TestWebPreferences(unittest.TestCase):
         self.assertNotIn("config_toml", dumped)
         self.assertNotIn("auth_json", dumped)
 
+    def test_evidence_review_ignored_output_candidates_are_whitelisted(self) -> None:
+        """Evidence Review skip state survives normalization without secrets."""
+
+        normalized = normalize_web_preferences(
+            {
+                "evidence_review": {
+                    "ignored_output_candidates": [
+                        {
+                            "source_key": "blog:2026-04-29-tttt",
+                            "source_kind": "blog",
+                            "output_id": "2026-04-29-tttt",
+                            "reason": "not_evidence",
+                            "ignored_at": "2026-06-23T00:00:00+00:00",
+                            "api_key": "sk-nope",
+                        },
+                        {
+                            "source_kind": "output",
+                            "output_id": "route-or-id",
+                            "token": "tok-nope",
+                        },
+                        {
+                            "source_kind": "output",
+                            "output_id": "route-or-id",
+                            "reason": "duplicate should be dropped",
+                        },
+                        {"source_kind": "bad", "output_id": "x"},
+                    ]
+                }
+            },
+            profile="alice",
+        )
+
+        ignored = normalized["evidence_review"]["ignored_output_candidates"]
+        self.assertEqual(
+            [item["source_key"] for item in ignored],
+            ["blog:2026-04-29-tttt", "output:route-or-id"],
+        )
+        self.assertEqual(ignored[1]["reason"], "not_evidence")
+        dumped = str(normalized)
+        self.assertNotIn("sk-nope", dumped)
+        self.assertNotIn("tok-nope", dumped)
+        self.assertNotIn("api_key", dumped)
+
     def test_profile_name_is_owned_by_target_profile(self) -> None:
         """A patch cannot rewrite the owning profile name."""
 

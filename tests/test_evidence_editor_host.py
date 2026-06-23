@@ -17,6 +17,7 @@ from nblane.evidence_editor_host import (
     EvidenceEditorHost,
     compact_evidence_row,
     pool_index_by_id,
+    save_evidence_pool,
 )
 
 
@@ -135,6 +136,10 @@ class TestEvidenceEditorHost(unittest.TestCase):
                 "nblane.evidence_editor_host.clear_web_cache",
                 lambda: None,
             ),
+            patch(
+                "nblane.core.web_preferences.git_backup.record_change",
+                lambda paths, action="": None,
+            ),
         ]
         for p in self._patches:
             p.start()
@@ -160,6 +165,15 @@ class TestEvidenceEditorHost(unittest.TestCase):
             (self.pdir / "skill-tree.yaml").read_text(encoding="utf-8")
         )
         return raw.get("nodes") or []
+
+    def _write_outputs(self, outputs: list[dict]) -> None:
+        _write_yaml(self.pdir / "outputs.yaml", {"outputs": outputs})
+
+    def _web_preferences(self) -> dict:
+        path = self.pdir / "web-preferences.yaml"
+        if not path.exists():
+            return {}
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
     def test_save_evidence_writes_pool(self) -> None:
         ok = self.host.handle_event(
@@ -363,6 +377,218 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertFalse(ok)
         row = next(r for r in self._pool() if r["id"] == "e1")
         self.assertNotIn("review_status", row)
+
+    def test_bulk_create_from_output_creates_two_rows_with_one_save(self) -> None:
+        self._write_outputs(
+            [
+                {
+                    "id": "out_a",
+                    "title": "Output A",
+                    "status": "published",
+                    "date": "2026-03-01",
+                    "summary": "Output A summary.",
+                    "project_refs": ["project:demo"],
+                },
+                {
+                    "id": "out_b",
+                    "title": "Output B",
+                    "status": "published",
+                    "date": "2026-03-02",
+                    "summary": "Output B summary.",
+                    "project_refs": ["project:demo"],
+                },
+            ]
+        )
+        real_save = save_evidence_pool
+        with patch(
+            "nblane.evidence_editor_host.save_evidence_pool",
+            wraps=real_save,
+        ) as save_mock:
+            ok = self.host.handle_event(
+                {
+                    "action": "bulk_create_from_output",
+                    "event_id": "out-bulk-1",
+                    "payload": {
+                        "items": [
+                            {"output_id": "out_a", "source_kind": "output"},
+                            {"output_id": "out_b", "source_kind": "output"},
+                        ]
+                    },
+                }
+            )
+
+        self.assertTrue(ok)
+        save_mock.assert_called_once()
+        by_ref = {r.get("origin_ref"): r for r in self._pool()}
+        self.assertEqual(by_ref["output:out_a"]["title"], "Output A")
+        self.assertEqual(by_ref["output:out_b"]["title"], "Output B")
+
+    def test_bulk_create_from_output_uses_payload_project_refs(self) -> None:
+        self._write_outputs(
+            [
+                {
+                    "id": "needs_project",
+                    "title": "Needs project",
+                    "status": "published",
+                    "date": "2026-03-03",
+                    "summary": "Needs project summary.",
+                }
+            ]
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "bulk_create_from_output",
+                "event_id": "out-bulk-2",
+                "payload": {
+                    "items": [
+                        {
+                            "output_id": "needs_project",
+                            "source_kind": "output",
+                            "project_refs": ["project:demo"],
+                        }
+                    ]
+                },
+            }
+        )
+
+        self.assertTrue(ok)
+        row = next(r for r in self._pool() if r.get("origin_ref") == "output:needs_project")
+        self.assertEqual(row["project_refs"], ["project:demo"])
+
+    def test_bulk_create_from_output_updates_existing_source(self) -> None:
+        rows = self._pool()
+        rows.append(
+            {
+                "id": "existing_output",
+                "type": "practice",
+                "title": "Old title",
+                "origin": "output",
+                "origin_ref": "output:update_me",
+                "original_content": "old raw",
+                "formatted_content": "old formatted",
+                "date": "2026-03-01",
+                "project_refs": ["project:demo"],
+            }
+        )
+        _write_yaml(
+            self.pdir / "evidence-pool.yaml",
+            {"profile": "dev", "evidence_entries": rows},
+        )
+        self._write_outputs(
+            [
+                {
+                    "id": "update_me",
+                    "title": "New title",
+                    "status": "published",
+                    "date": "2026-03-04",
+                    "summary": "New summary.",
+                    "project_refs": ["project:demo"],
+                }
+            ]
+        )
+
+        ok = self.host.handle_event(
+            {
+                "action": "bulk_create_from_output",
+                "event_id": "out-bulk-3",
+                "payload": {
+                    "items": [{"output_id": "update_me", "source_kind": "output"}]
+                },
+            }
+        )
+
+        self.assertTrue(ok)
+        matches = [r for r in self._pool() if r.get("origin_ref") == "output:update_me"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["id"], "existing_output")
+        self.assertEqual(matches[0]["title"], "New title")
+
+    def test_bulk_create_from_output_blocks_entire_batch_when_one_invalid(self) -> None:
+        before = self._pool()
+        self._write_outputs(
+            [
+                {
+                    "id": "good",
+                    "title": "Good",
+                    "status": "published",
+                    "date": "2026-03-05",
+                    "summary": "Good summary.",
+                    "project_refs": ["project:demo"],
+                },
+                {
+                    "id": "draft",
+                    "title": "Draft",
+                    "status": "draft",
+                    "date": "2026-03-06",
+                    "summary": "Draft summary.",
+                    "project_refs": ["project:demo"],
+                },
+            ]
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "bulk_create_from_output",
+                "event_id": "out-bulk-4",
+                "payload": {
+                    "items": [
+                        {"output_id": "good", "source_kind": "output"},
+                        {"output_id": "draft", "source_kind": "output"},
+                    ]
+                },
+            }
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(self._pool(), before)
+        self.fake_st.error.assert_called()
+
+    def test_ignore_and_restore_output_candidates_only_touch_preferences(self) -> None:
+        self._write_outputs(
+            [
+                {
+                    "id": "skip_me",
+                    "title": "Skip me",
+                    "status": "published",
+                    "date": "2026-03-07",
+                    "summary": "Skip summary.",
+                    "project_refs": ["project:demo"],
+                }
+            ]
+        )
+        original_outputs = (self.pdir / "outputs.yaml").read_text(encoding="utf-8")
+
+        ok = self.host.handle_event(
+            {
+                "action": "ignore_output_candidates",
+                "event_id": "ignore-1",
+                "payload": {
+                    "items": [{"output_id": "skip_me", "source_kind": "output"}],
+                    "reason": "not_evidence",
+                },
+            }
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(
+            (self.pdir / "outputs.yaml").read_text(encoding="utf-8"),
+            original_outputs,
+        )
+        ignored = self._web_preferences()["evidence_review"]["ignored_output_candidates"]
+        self.assertEqual(ignored[0]["source_key"], "output:skip_me")
+
+        ok = self.host.handle_event(
+            {
+                "action": "restore_output_candidates",
+                "event_id": "restore-1",
+                "payload": {
+                    "items": [{"output_id": "skip_me", "source_kind": "output"}]
+                },
+            }
+        )
+
+        self.assertTrue(ok)
+        ignored = self._web_preferences()["evidence_review"]["ignored_output_candidates"]
+        self.assertEqual(ignored, [])
 
     def test_done_tasks_to_evidence_includes_uncrystallized(self) -> None:
         # A Done task that was never crystallized should still produce evidence.

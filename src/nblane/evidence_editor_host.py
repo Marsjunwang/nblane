@@ -12,6 +12,7 @@ keys Evidence Review used before extraction, so its behavior is unchanged.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import streamlit as st
@@ -66,6 +67,7 @@ from nblane.core.models import EVIDENCE_CONFIDENCES, EVIDENCE_STRENGTHS
 from nblane.core.profile_ingest_llm import reformat_evidence
 from nblane.core.profile_ingest_llm import ingest_kanban_done_json
 from nblane.core.sync import write_generated_blocks
+from nblane.core.web_preferences import load_web_preferences, update_web_preferences
 from nblane.evidence_editor_component import (
     evidence_editor_component_available,
     st_evidence_editor,
@@ -1146,120 +1148,54 @@ class EvidenceEditorHost:
         source_kind: str = "output",
         project_refs: list | None = None,
     ) -> bool:
+        return self._apply_bulk_create_from_output(
+            [
+                {
+                    "output_id": output_id,
+                    "source_kind": source_kind,
+                    "project_refs": project_refs or [],
+                }
+            ],
+            success_message=self.ui.get(
+                "ee_output_created", "Evidence created from output."
+            ),
+        )
+
+    def _output_source_maps(self) -> tuple[dict[str, dict], dict[str, object]]:
         from nblane.core import public_site
 
-        source_kind = str(source_kind or "output").strip() or "output"
-        entries = self._pool_entries()
-        existing = {
-            str(r.get("id", "") or "").strip()
-            for r in entries
-            if str(r.get("id", "") or "").strip()
-        }
-        chosen_project_refs = [
-            str(r).strip() for r in (project_refs or []) if str(r).strip()
-        ]
-        output = None
-        row = None
-        origin_ref = ""
-        if source_kind == "blog":
-            for post in public_site.load_blog_posts(
+        try:
+            output_rows = public_site.load_outputs(self.profile)
+        except FileNotFoundError:
+            output_rows = []
+        try:
+            blog_posts = public_site.load_blog_posts(
                 self.profile,
                 include_drafts=True,
-                include_archived=False,
-            ):
-                if str(getattr(post, "route", "") or "") == output_id:
-                    output = post
-                    break
-            if output is None:
-                st.warning(self.ui.get("ee_output_missing", "Output not found."))
-                return False
-            if not chosen_project_refs:
-                chosen_project_refs = self._infer_projects_from_related_evidence(
-                    getattr(output, "meta", {}).get("related_evidence")
-                    if isinstance(getattr(output, "meta", {}), dict)
-                    else []
-                )
-            row = evidence_row_from_blog_post(
-                output,
-                profile=self.profile,
-                project_refs=chosen_project_refs,
-                existing_ids=existing,
-                target_lang=llm_client.reply_language(),
+                include_archived=True,
             )
-            origin_ref = f"blog:{output_id}"
-        else:
-            for out in public_site.load_outputs(self.profile):
-                if isinstance(out, dict) and str(out.get("id", "")) == output_id:
-                    output = out
-                    break
-            if output is None:
-                st.warning(self.ui.get("ee_output_missing", "Output not found."))
-                return False
-            if not chosen_project_refs:
-                chosen_project_refs = [
-                    str(r).strip()
-                    for r in (output.get("project_refs") or [])
-                    if str(r).strip()
-                ]
-            if not chosen_project_refs:
-                chosen_project_refs = self._infer_projects_from_related_evidence(
-                    output.get("related_evidence")
-                )
-            output = dict(output)
-            output["project_refs"] = chosen_project_refs
-            row = evidence_row_from_output(
-                output,
-                profile=self.profile,
-                existing_ids=existing,
-                target_lang=llm_client.reply_language(),
-            )
-            origin_ref = f"output:{output_id}"
-        if row is None:
-            st.warning(self.ui.get("ee_output_missing", "Output not found."))
-            return False
+        except FileNotFoundError:
+            blog_posts = []
+        outputs = {
+            str(out.get("id", "") or "").strip(): out
+            for out in output_rows
+            if isinstance(out, dict) and str(out.get("id", "") or "").strip()
+        }
+        blogs = {
+            str(getattr(post, "route", "") or "").strip(): post
+            for post in blog_posts
+            if str(getattr(post, "route", "") or "").strip()
+        }
+        return outputs, blogs
 
-        project_validation = validate_internal_project_refs(
-            row.get("project_refs"),
-            internal_project_goal_index(self.profile),
-        )
-        blockers: list[str] = []
-        if not str(row.get("date", "") or "").strip():
-            blockers.append("Output source has no date; evidence requires a date.")
-        if not str(row.get("original_content", "") or "").strip():
-            blockers.append("Output source has no original_content.")
-        if not str(row.get("formatted_content", "") or "").strip():
-            blockers.append("Output source has no formatted_content.")
-        blockers.extend(project_validation["blockers"])
-        if blockers:
-            for blocker in blockers:
-                st.error(blocker)
-            return False
-        source_rows = active_source_index(entries).get(("output", origin_ref)) or []
-        if len(source_rows) > 1:
-            st.error(
-                f"Multiple active evidence rows already use source output:{origin_ref}."
-            )
-            return False
-        if source_rows:
-            eid = str(source_rows[0].get("id", "") or "").strip()
-            idx = pool_index_by_id(entries).get(eid)
-            if idx is None:
-                return False
-            merged = dict(entries[idx])
-            merged.update(row)
-            merged["id"] = eid
-            entries[idx] = compact_evidence_row(merged)
-        else:
-            entries.append(compact_evidence_row(row))
-        self._save_pool(
-            entries, self.ui.get("ee_output_created", "Evidence created from output.")
-        )
-        return True
-
-    def _infer_projects_from_related_evidence(self, evidence_ids: object) -> list[str]:
+    def _infer_projects_from_related_evidence_in_entries(
+        self,
+        entries: list[dict],
+        evidence_ids: object,
+    ) -> list[str]:
         pool_by_id = {
             str(row.get("id", "") or "").strip(): row
-            for row in self._pool_entries()
+            for row in entries
             if str(row.get("id", "") or "").strip()
         }
         out: list[str] = []
@@ -1273,6 +1209,330 @@ class EvidenceEditorHost:
                 if clean and clean not in out:
                     out.append(clean)
         return out
+
+    def _output_evidence_proposal(
+        self,
+        item: dict,
+        *,
+        entries: list[dict],
+        existing_ids: set[str],
+        outputs_by_id: dict[str, dict],
+        blogs_by_route: dict[str, object],
+    ) -> dict:
+        source_kind = str(item.get("source_kind") or "output").strip() or "output"
+        source_kind = "blog" if source_kind == "blog" else "output"
+        output_id = str(item.get("output_id") or item.get("id") or "").strip()
+        source_key = f"{source_kind}:{output_id}" if output_id else ""
+        chosen_project_refs = [
+            str(r).strip()
+            for r in (item.get("project_refs") or [])
+            if str(r).strip()
+        ]
+        if not output_id:
+            return {
+                "source_kind": source_kind,
+                "output_id": output_id,
+                "source_key": source_key,
+                "row": None,
+                "blockers": ["Output source has no id."],
+            }
+
+        row = None
+        status = ""
+        if source_kind == "blog":
+            post = blogs_by_route.get(output_id)
+            if post is None:
+                return {
+                    "source_kind": source_kind,
+                    "output_id": output_id,
+                    "source_key": source_key,
+                    "row": None,
+                    "blockers": [self.ui.get("ee_output_missing", "Output not found.")],
+                }
+            status = str(getattr(post, "status", "") or "").strip()
+            if not chosen_project_refs:
+                meta = getattr(post, "meta", {})
+                chosen_project_refs = self._infer_projects_from_related_evidence_in_entries(
+                    entries,
+                    meta.get("related_evidence") if isinstance(meta, dict) else [],
+                )
+            row = evidence_row_from_blog_post(
+                post,
+                profile=self.profile,
+                project_refs=chosen_project_refs,
+                existing_ids=existing_ids,
+                target_lang=llm_client.reply_language(),
+            )
+        else:
+            output = outputs_by_id.get(output_id)
+            if output is None:
+                return {
+                    "source_kind": source_kind,
+                    "output_id": output_id,
+                    "source_key": source_key,
+                    "row": None,
+                    "blockers": [self.ui.get("ee_output_missing", "Output not found.")],
+                }
+            status = str(output.get("status", "") or "").strip()
+            if not chosen_project_refs:
+                chosen_project_refs = [
+                    str(r).strip()
+                    for r in (output.get("project_refs") or [])
+                    if str(r).strip()
+                ]
+            if not chosen_project_refs:
+                chosen_project_refs = self._infer_projects_from_related_evidence_in_entries(
+                    entries,
+                    output.get("related_evidence"),
+                )
+            normalized_output = dict(output)
+            normalized_output["project_refs"] = chosen_project_refs
+            row = evidence_row_from_output(
+                normalized_output,
+                profile=self.profile,
+                existing_ids=existing_ids,
+                target_lang=llm_client.reply_language(),
+            )
+
+        project_validation = validate_internal_project_refs(
+            row.get("project_refs") if row else [],
+            internal_project_goal_index(self.profile),
+        )
+        blockers: list[str] = []
+        if status != "published":
+            blockers.append(
+                f"Output source status is {status or 'draft'}; publish it before creating evidence."
+            )
+        if not str(row.get("date", "") or "").strip():
+            blockers.append("Output source has no date; evidence requires a date.")
+        if not str(row.get("original_content", "") or "").strip():
+            blockers.append("Output source has no original_content.")
+        if not str(row.get("formatted_content", "") or "").strip():
+            blockers.append("Output source has no formatted_content.")
+        blockers.extend(project_validation["blockers"])
+        return {
+            "source_kind": source_kind,
+            "output_id": output_id,
+            "source_key": source_key,
+            "row": row,
+            "blockers": blockers,
+        }
+
+    def _apply_bulk_create_from_output(
+        self,
+        items: list | None,
+        *,
+        success_message: str | None = None,
+    ) -> bool:
+        raw_items = items if isinstance(items, list) else []
+        clean_items = [item for item in raw_items if isinstance(item, dict)]
+        if not clean_items:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+
+        entries = self._pool_entries()
+        existing_ids = {
+            str(r.get("id", "") or "").strip()
+            for r in entries
+            if str(r.get("id", "") or "").strip()
+        }
+        source_index = active_source_index(entries)
+        outputs_by_id, blogs_by_route = self._output_source_maps()
+        proposals: list[dict] = []
+        selected_keys: set[str] = set()
+        duplicate_keys: set[str] = set()
+        for item in clean_items:
+            proposal = self._output_evidence_proposal(
+                item,
+                entries=entries,
+                existing_ids=existing_ids,
+                outputs_by_id=outputs_by_id,
+                blogs_by_route=blogs_by_route,
+            )
+            source_key = str(proposal.get("source_key") or "").strip()
+            if source_key:
+                if source_key in selected_keys:
+                    duplicate_keys.add(source_key)
+                selected_keys.add(source_key)
+            proposals.append(proposal)
+            source_rows = source_index.get(("output", source_key)) or []
+            if len(source_rows) == 0 and isinstance(proposal.get("row"), dict):
+                rid = str(proposal["row"].get("id", "") or "").strip()
+                if rid:
+                    existing_ids.add(rid)
+
+        all_blockers: list[str] = []
+        for proposal in proposals:
+            label = str(proposal.get("source_key") or proposal.get("output_id") or "")
+            for blocker in proposal.get("blockers") or []:
+                all_blockers.append(f"{label}: {blocker}" if label else str(blocker))
+            source_key = str(proposal.get("source_key") or "").strip()
+            if source_key in duplicate_keys:
+                all_blockers.append(f"{source_key}: selected more than once.")
+            source_rows = source_index.get(("output", source_key)) or []
+            if len(source_rows) > 1:
+                all_blockers.append(
+                    f"{source_key}: multiple active evidence rows already use this source."
+                )
+        if all_blockers:
+            for blocker in all_blockers:
+                st.error(blocker)
+            return False
+
+        by_id = pool_index_by_id(entries)
+        changed = 0
+        for proposal in proposals:
+            row = proposal.get("row")
+            source_key = str(proposal.get("source_key") or "").strip()
+            if not isinstance(row, dict) or not source_key:
+                continue
+            source_rows = source_index.get(("output", source_key)) or []
+            if source_rows:
+                # Multiple active rows were blocked above; a single row updates in place.
+                eid = str(source_rows[0].get("id", "") or "").strip()
+                idx = by_id.get(eid)
+                if idx is None:
+                    st.error(f"{source_key}: existing evidence row is missing.")
+                    return False
+                merged = dict(entries[idx])
+                merged.update(row)
+                merged["id"] = eid
+                entries[idx] = compact_evidence_row(merged)
+            else:
+                entries.append(compact_evidence_row(row))
+                rid = str(row.get("id", "") or "").strip()
+                if rid:
+                    by_id[rid] = len(entries) - 1
+            changed += 1
+        self._save_pool(
+            entries,
+            success_message
+            or self.ui.get(
+                "ee_output_bulk_created",
+                "Created/updated {n} evidence row(s) from outputs.",
+            ).format(n=changed),
+        )
+        return True
+
+    def _infer_projects_from_related_evidence(self, evidence_ids: object) -> list[str]:
+        return self._infer_projects_from_related_evidence_in_entries(
+            self._pool_entries(),
+            evidence_ids,
+        )
+
+    def _clean_output_candidate_items(self, items: object) -> list[dict[str, str]]:
+        raw_items = items if isinstance(items, list) else []
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            source_kind = str(item.get("source_kind") or "output").strip()
+            source_kind = "blog" if source_kind == "blog" else "output"
+            output_id = str(item.get("output_id") or item.get("id") or "").strip()
+            if not output_id:
+                continue
+            source_key = f"{source_kind}:{output_id}"
+            if source_key in seen:
+                continue
+            seen.add(source_key)
+            out.append(
+                {
+                    "source_key": source_key,
+                    "source_kind": source_kind,
+                    "output_id": output_id,
+                }
+            )
+        return out
+
+    def _apply_ignore_output_candidates(
+        self,
+        items: object,
+        reason: str = "not_evidence",
+    ) -> bool:
+        clean_items = self._clean_output_candidate_items(items)
+        if not clean_items:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+        prefs = load_web_preferences(self.profile)
+        evidence_review = (
+            prefs.get("evidence_review")
+            if isinstance(prefs.get("evidence_review"), dict)
+            else {}
+        )
+        existing = [
+            dict(item)
+            for item in (evidence_review.get("ignored_output_candidates") or [])
+            if isinstance(item, dict)
+        ]
+        by_key = {
+            str(item.get("source_key") or "").strip(): item
+            for item in existing
+            if str(item.get("source_key") or "").strip()
+        }
+        ignored_at = datetime.now(timezone.utc).isoformat()
+        clean_reason = str(reason or "not_evidence").strip() or "not_evidence"
+        for item in clean_items:
+            by_key[item["source_key"]] = {
+                **item,
+                "reason": clean_reason,
+                "ignored_at": ignored_at,
+            }
+        changed = update_web_preferences(
+            self.profile,
+            {
+                "evidence_review": {
+                    "ignored_output_candidates": list(by_key.values()),
+                }
+            },
+        )
+        clear_web_cache()
+        if changed:
+            st.success(
+                self.ui.get(
+                    "ee_output_ignored", "Skipped {n} output candidate(s)."
+                ).format(n=len(clean_items))
+            )
+        else:
+            st.info(self.ui.get("pool_no_changes", "No changes"))
+        return True
+
+    def _apply_restore_output_candidates(self, items: object) -> bool:
+        clean_items = self._clean_output_candidate_items(items)
+        if not clean_items:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+        restore_keys = {item["source_key"] for item in clean_items}
+        prefs = load_web_preferences(self.profile)
+        evidence_review = (
+            prefs.get("evidence_review")
+            if isinstance(prefs.get("evidence_review"), dict)
+            else {}
+        )
+        existing = [
+            dict(item)
+            for item in (evidence_review.get("ignored_output_candidates") or [])
+            if isinstance(item, dict)
+        ]
+        kept = [
+            item
+            for item in existing
+            if str(item.get("source_key") or "").strip() not in restore_keys
+        ]
+        changed = update_web_preferences(
+            self.profile,
+            {"evidence_review": {"ignored_output_candidates": kept}},
+        )
+        clear_web_cache()
+        if changed:
+            st.success(
+                self.ui.get(
+                    "ee_output_restored", "Restored {n} output candidate(s)."
+                ).format(n=len(clean_items))
+            )
+        else:
+            st.info(self.ui.get("pool_no_changes", "No changes"))
+        return True
 
     def _apply_backfill_project_refs(self, ids: list | None) -> bool:
         review = build_evidence_review(self.profile)
@@ -1719,6 +1979,15 @@ class EvidenceEditorHost:
                 str(payload.get("source_kind") or "output"),
                 payload.get("project_refs") or None,
             )
+        if action == "bulk_create_from_output":
+            return self._apply_bulk_create_from_output(payload.get("items") or [])
+        if action == "ignore_output_candidates":
+            return self._apply_ignore_output_candidates(
+                payload.get("items") or [],
+                str(payload.get("reason") or "not_evidence"),
+            )
+        if action == "restore_output_candidates":
+            return self._apply_restore_output_candidates(payload.get("items") or [])
         if action == "create_project_from_evidence":
             sug = (
                 payload.get("suggestion")

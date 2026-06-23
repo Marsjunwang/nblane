@@ -334,6 +334,14 @@ ee_ai_reformat: AI reformat
 ee_ai_reformat_confirm: Confirm reformat
 ee_create_project_from_evidence: Create project from evidence
 ee_create_from_output: Create from output
+ee_output_ready_candidates: Evidence-ready outputs
+ee_output_bulk_create: Create selected evidence ({n})
+ee_output_show_blocked: Show draft/blocked
+ee_output_show_ignored: Show skipped
+ee_output_show_existing: Show existing evidence
+ee_output_ignore: Skip
+ee_output_restore: Restore
+ee_output_ignored_badge: skipped
 ee_duplicate_candidates: Find duplicates
 ee_backfill_project: Backfill project refs
 ee_cancel: Cancel
@@ -365,6 +373,9 @@ ee_migration_none: Nothing to migrate.
 ee_crystallized_done: Refreshed {n} from crystallized tasks.
 ee_crystallized_none: No crystallized tasks to refresh.
 ee_output_created: Evidence created from output.
+ee_output_bulk_created: Created/updated {n} evidence row(s) from outputs.
+ee_output_ignored: Skipped {n} output candidate(s).
+ee_output_restored: Restored {n} output candidate(s).
 ee_output_missing: Output not found.
 ee_reformat_failed: AI reformat failed.
 ee_duplicates_hint: Duplicate scan is not yet wired.

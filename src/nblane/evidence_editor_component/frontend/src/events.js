@@ -83,6 +83,15 @@ export const createFromOutputEvent = (outputId, sourceKind = "output", projectRe
     source_kind: sourceKind,
     project_refs: projectRefs,
   });
+export const bulkCreateFromOutputEvent = (items) =>
+  makeEvent("bulk_create_from_output", { items: Array.isArray(items) ? items : [] });
+export const ignoreOutputCandidatesEvent = (items, reason = "not_evidence") =>
+  makeEvent("ignore_output_candidates", {
+    items: Array.isArray(items) ? items : [],
+    reason,
+  });
+export const restoreOutputCandidatesEvent = (items) =>
+  makeEvent("restore_output_candidates", { items: Array.isArray(items) ? items : [] });
 
 // Duplicates.
 export const suggestDuplicatesEvent = (id, ai = false) =>

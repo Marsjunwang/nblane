@@ -113,6 +113,11 @@ def normalize_web_preferences(
     paper = ai.get("paper") if isinstance(ai.get("paper"), dict) else {}
     actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
     kanban = source.get("kanban") if isinstance(source.get("kanban"), dict) else {}
+    evidence_review = (
+        source.get("evidence_review")
+        if isinstance(source.get("evidence_review"), dict)
+        else {}
+    )
     project_board = (
         source.get("project_board")
         if isinstance(source.get("project_board"), dict)
@@ -156,6 +161,11 @@ def normalize_web_preferences(
             "subtask_style_hint": _clean_text(kanban.get("subtask_style_hint")),
             "focus_mode": _clean_bool(kanban.get("focus_mode"), default=False),
             "auto_dates": _clean_bool(kanban.get("auto_dates"), default=True),
+        },
+        "evidence_review": {
+            "ignored_output_candidates": _normalize_ignored_output_candidates(
+                evidence_review.get("ignored_output_candidates")
+            ),
         },
         "project_board": {
             "timeline_range": {
@@ -323,6 +333,48 @@ def _iso_date(value: object) -> str:
     """Keep only well-formed ISO date strings (YYYY-MM-DD); else empty."""
     clean = _clean_text(value)
     return clean if _ISO_DATE_RE.match(clean) else ""
+
+
+def _normalize_ignored_output_candidates(raw: object) -> list[dict[str, str]]:
+    """Return safe Evidence Review output-candidate skip records."""
+
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        source_kind = _clean_text(item.get("source_kind")).lower()
+        output_id = _clean_text(item.get("output_id"))
+        source_key = _clean_text(item.get("source_key"))
+        if source_kind not in {"blog", "output"}:
+            if source_key.startswith("blog:"):
+                source_kind = "blog"
+            elif source_key.startswith("output:"):
+                source_kind = "output"
+        if source_kind not in {"blog", "output"}:
+            continue
+        if not output_id and ":" in source_key:
+            output_id = source_key.split(":", 1)[1].strip()
+        if not output_id:
+            continue
+        source_key = f"{source_kind}:{output_id}"
+        if source_key in seen:
+            continue
+        seen.add(source_key)
+        reason = _clean_text(item.get("reason")) or "not_evidence"
+        entry = {
+            "source_key": source_key,
+            "source_kind": source_kind,
+            "output_id": output_id,
+            "reason": reason,
+        }
+        ignored_at = _clean_text(item.get("ignored_at"))
+        if ignored_at:
+            entry["ignored_at"] = ignored_at
+        out.append(entry)
+    return out
 
 
 __all__ = [
