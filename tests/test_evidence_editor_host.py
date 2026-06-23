@@ -238,6 +238,75 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertEqual(by_id["perception"]["status"], "learning")
         self.assertIn("e1", by_id["perception"]["evidence_refs"])
 
+    def test_link_skill_appends_evidence_to_one_node(self) -> None:
+        # Skill-centric: attach e1 to ros2_basics WITHOUT removing it from nav2
+        # (append semantics, unlike the reconcile of link_skills).
+        ok = self.host.handle_event(
+            {
+                "action": "link_skill",
+                "event_id": "ev-ls1",
+                "payload": {"skill_id": "ros2_basics", "evidence_ids": ["e1"]},
+            }
+        )
+        self.assertTrue(ok)
+        by_id = {n["id"]: n for n in self._tree_nodes()}
+        self.assertIn("e1", by_id["ros2_basics"].get("evidence_refs") or [])
+        # nav2 still keeps e1 (append, not reconcile).
+        self.assertIn("e1", by_id["nav2"].get("evidence_refs") or [])
+
+    def test_link_skill_creates_missing_node_as_learning(self) -> None:
+        ok = self.host.handle_event(
+            {
+                "action": "link_skill",
+                "event_id": "ev-ls2",
+                "payload": {"skill_id": "slam", "evidence_ids": ["e1"]},
+            }
+        )
+        self.assertTrue(ok)
+        by_id = {n["id"]: n for n in self._tree_nodes()}
+        self.assertIn("slam", by_id)
+        self.assertEqual(by_id["slam"]["status"], "learning")
+        self.assertEqual(by_id["slam"]["evidence_refs"], ["e1"])
+
+    def test_link_skill_noop_without_skill_or_evidence(self) -> None:
+        self.assertFalse(
+            self.host.handle_event(
+                {
+                    "action": "link_skill",
+                    "event_id": "ev-ls3",
+                    "payload": {"skill_id": "", "evidence_ids": ["e1"]},
+                }
+            )
+        )
+        self.assertFalse(
+            self.host.handle_event(
+                {
+                    "action": "link_skill",
+                    "event_id": "ev-ls4",
+                    "payload": {"skill_id": "ros2_basics", "evidence_ids": []},
+                }
+            )
+        )
+
+    def test_save_evidence_writes_experience_and_source_refs(self) -> None:
+        ok = self.host.handle_event(
+            {
+                "action": "save_evidence",
+                "event_id": "ev-refs",
+                "payload": {
+                    "id": "e1",
+                    "fields": {
+                        "experience_refs": ["exp:acme", " "],
+                        "source_refs": ["src:paper1"],
+                    },
+                },
+            }
+        )
+        self.assertTrue(ok)
+        row = next(r for r in self._pool() if r["id"] == "e1")
+        self.assertEqual(row.get("experience_refs"), ["exp:acme"])
+        self.assertEqual(row.get("source_refs"), ["src:paper1"])
+
     def test_event_dedup_by_id(self) -> None:
         ev = {
             "action": "save_evidence",
@@ -768,6 +837,93 @@ class TestEvidenceEditorHost(unittest.TestCase):
         preview = self.fake_st.session_state[self.host._done_preview_state_key()]
         self.assertFalse(preview["can_accept"])
         self.assertIn("multiple", preview["blocking_errors"][0])
+
+    def test_archive_done_tasks_by_id_removes_from_kanban(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] Keep me\n"
+            "  - id: kb_keep\n"
+            "  - completed_on: 2026-02-01\n"
+            "- [x] Archive me\n"
+            "  - id: kb_arch\n"
+            "  - completed_on: 2026-02-02\n",
+            encoding="utf-8",
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "archive_done_tasks",
+                "event_id": "arch-1",
+                "payload": {"task_ids": ["kb_arch"]},
+            }
+        )
+        self.assertTrue(ok)
+        kanban = (self.pdir / "kanban.md").read_text(encoding="utf-8")
+        self.assertNotIn("kb_arch", kanban)
+        self.assertIn("kb_keep", kanban)
+        archive = (self.pdir / "kanban-archive.md").read_text(encoding="utf-8")
+        self.assertIn("kb_arch", archive)
+
+    def test_delete_done_task_blocked_when_cited_by_active_evidence(self) -> None:
+        # e1 already cites kb_cited via kanban_refs -> deletion must be blocked.
+        entries = self._pool()
+        entries[0]["origin"] = "kanban_task"
+        entries[0]["origin_ref"] = "kanban:kb_cited"
+        entries[0]["kanban_refs"] = ["kanban:kb_cited"]
+        save_evidence_pool(
+            "dev", {"profile": "dev", "evidence_entries": entries}
+        )
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] Cited task\n"
+            "  - id: kb_cited\n"
+            "  - completed_on: 2026-02-01\n",
+            encoding="utf-8",
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "delete_done_tasks",
+                "event_id": "del-blocked",
+                "payload": {"task_ids": ["kb_cited"]},
+            }
+        )
+        self.assertFalse(ok)
+        # Task remains in kanban.md.
+        self.assertIn(
+            "kb_cited", (self.pdir / "kanban.md").read_text(encoding="utf-8")
+        )
+
+    def test_delete_done_task_succeeds_when_not_cited(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] Orphan task\n"
+            "  - id: kb_orphan\n"
+            "  - completed_on: 2026-02-01\n",
+            encoding="utf-8",
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "delete_done_tasks",
+                "event_id": "del-ok",
+                "payload": {"task_ids": ["kb_orphan"]},
+            }
+        )
+        self.assertTrue(ok)
+        self.assertNotIn(
+            "kb_orphan", (self.pdir / "kanban.md").read_text(encoding="utf-8")
+        )
+
+    def test_done_housekeeping_missing_task_id_errors(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n- [x] Only task\n  - id: kb_only\n", encoding="utf-8"
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "archive_done_tasks",
+                "event_id": "arch-missing",
+                "payload": {"task_ids": ["kb_ghost"]},
+            }
+        )
+        self.assertFalse(ok)
 
 
 if __name__ == "__main__":

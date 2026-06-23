@@ -12,12 +12,15 @@ import {
   backfillProjectRefsEvent,
   createProjectFromEvidenceEvent,
   linkSkillsEvent,
+  linkSkillEvent,
   suggestSkillsEvent,
   applyMigrationEvent,
   refreshCrystallizedEvent,
   prepareDoneTaskEvidenceEvent,
   applyDoneTaskEvidenceEvent,
   doneTasksToEvidenceEvent,
+  archiveDoneTasksEvent,
+  deleteDoneTasksEvent,
   bulkApplyEvent,
   requestAiReformatEvent,
   confirmAiReformatEvent,
@@ -162,6 +165,8 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
   const projectOptions = asArray(payload.project_options);
   const publicProjects = asArray(payload.public_project_options);
   const skillOptions = asArray(payload.skill_options);
+  const experienceOptions = asArray(payload.experience_options);
+  const sourceOptions = asArray(payload.source_options);
   const warns = rowWarnings(draft);
 
   const projectRefs = asArray(draft.project_refs);
@@ -169,6 +174,16 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
     const has = projectRefs.includes(pid);
     const next = has ? [] : [pid];
     set("project_refs", next);
+  };
+
+  // experience_refs / source_refs are plain multi-select ref lists on the row,
+  // saved with the rest of the draft on Save (unlike skill refs which live on
+  // the tree and save on toggle).
+  const experienceRefs = asArray(draft.experience_refs);
+  const sourceRefs = asArray(draft.source_refs);
+  const toggleRefIn = (field, current, id) => {
+    const has = current.includes(id);
+    set(field, has ? current.filter((x) => x !== id) : [...current, id]);
   };
 
   // Skill refs live on skill-tree nodes, not on the evidence row, so they are
@@ -240,6 +255,8 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
       "origin_ref",
       "origin_detail",
       "project_refs",
+      "experience_refs",
+      "source_refs",
     ].forEach((k) => {
       fields[k] = draft[k] ?? (Array.isArray(row[k]) ? [] : "");
     });
@@ -405,6 +422,46 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
           })}
           {projectOptions.length === 0 && <span className="ee-muted">—</span>}
         </div>
+        {experienceOptions.length > 0 && (
+          <>
+            <div className="ee-chips-label">{label(labels, "ee_link_experience", "Experience")}</div>
+            <div className="ee-chips">
+              {experienceOptions.map((opt) => {
+                const on = experienceRefs.includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`ee-chip${on ? " ee-chip-on" : ""}`}
+                    onClick={() => toggleRefIn("experience_refs", experienceRefs, opt.id)}
+                  >
+                    {cleanText(opt.label) || opt.id}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+        {sourceOptions.length > 0 && (
+          <>
+            <div className="ee-chips-label">{label(labels, "ee_link_source", "Sources")}</div>
+            <div className="ee-chips">
+              {sourceOptions.map((opt) => {
+                const on = sourceRefs.includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`ee-chip${on ? " ee-chip-on" : ""}`}
+                    onClick={() => toggleRefIn("source_refs", sourceRefs, opt.id)}
+                  >
+                    {cleanText(opt.label) || opt.id}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
         <div className="ee-chips-label">
           {label(labels, "ee_link_skill", "Skills")}
           <button
@@ -509,13 +566,11 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
         {reformatPreview && reformatPreview.id === row.id && (
           <div className="ee-reformat">
             <div className="ee-reformat-head">{label(labels, "ee_ai_reformat", "AI reformat")} →</div>
-            {asArray(payload.__reformat_fields).length === 0 && (
-              <ReformatPreview
-                preview={reformatPreview}
-                labels={labels}
-                onConfirm={(fields) => emit(confirmAiReformatEvent(row.id, fields))}
-              />
-            )}
+            <ReformatPreview
+              preview={reformatPreview}
+              labels={labels}
+              onConfirm={(fields) => emit(confirmAiReformatEvent(row.id, fields))}
+            />
           </div>
         )}
       </Section>
@@ -809,7 +864,7 @@ function BulkReformatPreview({ preview, labels, emit }) {
 }
 
 /* ---- bulk action bar (batch mode) ---- */
-function BulkActionBar({ ids, payload, labels, emit, onClear }) {
+function BulkActionBar({ ids, visibleIds, payload, labels, emit, onClear }) {
   const [field, setField] = useState("review_status");
   const [value, setValue] = useState("");
   const BULK_FIELDS = [
@@ -819,6 +874,7 @@ function BulkActionBar({ ids, payload, labels, emit, onClear }) {
     ["confidence", "confidence_options"],
   ];
   const optKey = (BULK_FIELDS.find(([f]) => f === field) || [])[1];
+  const allFiltered = asArray(visibleIds);
   return (
     <div className="ee-bulkbar">
       <span className="ee-bulkbar-count">
@@ -842,6 +898,18 @@ function BulkActionBar({ ids, payload, labels, emit, onClear }) {
         onClick={() => emit(bulkApplyEvent(ids, { field, value }))}
       >
         {label(labels, "ee_bulk_apply", "Apply to selected")}
+      </button>
+      <button
+        type="button"
+        className="ee-btn-sm"
+        disabled={!value || allFiltered.length === 0}
+        onClick={() => emit(bulkApplyEvent(allFiltered, { field, value }))}
+        title={label(labels, "ee_bulk_all_hint", "")}
+      >
+        {formatCountLabel(
+          label(labels, "ee_bulk_apply_all", "Apply to ALL filtered ({n})"),
+          allFiltered.length
+        )}
       </button>
       <span className="ee-bulkbar-sep" />
       <button
@@ -901,7 +969,6 @@ function DoneTasksPicker({ tasks, labels, emit, onClose }) {
               <input
                 type="checkbox"
                 checked={picked.has(t.id)}
-                disabled={!!t.blocked}
                 onChange={() => toggle(t.id)}
               />
               <span className="ee-done-main">
@@ -956,6 +1023,40 @@ function DoneTasksPicker({ tasks, labels, emit, onClose }) {
           <button type="button" className="ee-btn-sm" onClick={onClose}>
             {label(labels, "ee_cancel", "Cancel")}
           </button>
+        </div>
+        <div className="ee-done-housekeeping">
+          <div className="ee-section-h">
+            {label(labels, "ee_done_housekeeping_title", "Housekeeping (archive / delete)")}
+          </div>
+          <div className="ee-muted">
+            {label(labels, "ee_done_housekeeping_hint", "These act on the kanban board, not evidence. Deleting a task cited by active evidence is blocked — archive it instead.")}
+          </div>
+          <div className="ee-row-btns">
+            <button
+              type="button"
+              className="ee-btn-sm"
+              disabled={picked.size === 0}
+              onClick={() => {
+                emit(archiveDoneTasksEvent(Array.from(picked)));
+                onClose();
+              }}
+            >
+              {label(labels, "ee_done_archive_selected", "Archive selected")} ({picked.size})
+            </button>
+            <button
+              type="button"
+              className="ee-btn-sm ee-btn-danger"
+              disabled={picked.size === 0}
+              onClick={() => {
+                if (window.confirm(label(labels, "ee_done_delete_confirm", "Delete selected Done tasks? Tasks cited by active evidence are blocked."))) {
+                  emit(deleteDoneTasksEvent(Array.from(picked)));
+                  onClose();
+                }
+              }}
+            >
+              {label(labels, "ee_done_delete_selected", "Delete selected")} ({picked.size})
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1255,6 +1356,112 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
   );
 }
 
+/* ---- skill-gap panel (skill-centric: attach evidence to under-supported skills) ---- */
+function gapSortKey(s) {
+  // risk_level first, then most-evidence first (mirrors Python _gap_sort).
+  return [s.risk_level ? 0 : 1, -(Number(s.evidence_count) || 0)];
+}
+
+function SkillGapPanel({ summaries, rows, labels, emit, onClose }) {
+  const ordered = useMemo(() => {
+    const list = asArray(summaries).slice();
+    list.sort((a, b) => {
+      const ka = gapSortKey(a);
+      const kb = gapSortKey(b);
+      return ka[0] - kb[0] || ka[1] - kb[1];
+    });
+    return list;
+  }, [summaries]);
+  const risky = useMemo(() => ordered.filter((s) => s.risk_level), [ordered]);
+  const [skillId, setSkillId] = useState(() => (ordered[0] ? ordered[0].id : ""));
+  const [picked, setPicked] = useState(() => new Set());
+  useEffect(() => {
+    setPicked(new Set());
+  }, [skillId]);
+
+  const chosen = ordered.find((s) => s.id === skillId) || null;
+  const already = new Set(asArray(chosen && chosen.active_evidence_refs));
+  const candidates = asArray(rows).filter((r) => !already.has(r.id));
+
+  const toggle = (id) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const skillOptLabel = (s) =>
+    `${s.risk_level ? "⚠ " : ""}${cleanText(s.label) || s.id} · ${cleanText(s.status)} · ${Number(s.evidence_count) || 0}`;
+
+  return (
+    <div className="ee-output-strip ee-skill-gap-panel">
+      <div className="ee-output-panel-head">
+        <div className="ee-section-h">
+          {label(labels, "ee_skill_gap_title", "Skill gaps")}
+          {risky.length > 0 ? ` (${risky.length} ⚠)` : ""}
+        </div>
+        <button type="button" className="ee-btn-sm" onClick={onClose}>
+          {label(labels, "ee_cancel", "Cancel")}
+        </button>
+      </div>
+      {ordered.length === 0 ? (
+        <div className="ee-muted">{label(labels, "ee_skill_gap_none", "No skill gaps.")}</div>
+      ) : (
+        <>
+          <div className="ee-muted">{label(labels, "ee_skill_gap_hint", "Pick a skill, then attach evidence.")}</div>
+          <label className="ee-field ee-field-wide">
+            <span>{label(labels, "ee_skill_gap_pick", "Pick a skill")}</span>
+            <select value={skillId} onChange={(e) => setSkillId(e.target.value)}>
+              {ordered.map((s) => (
+                <option key={s.id} value={s.id}>{skillOptLabel(s)}</option>
+              ))}
+            </select>
+          </label>
+          {chosen && chosen.risk_reason && (
+            <div className="ee-warn-line">⚠ {cleanText(chosen.risk_reason)}</div>
+          )}
+          {already.size > 0 && (
+            <div className="ee-muted">
+              {formatCountLabel(label(labels, "ee_skill_gap_current", "Already linked: {n}"), already.size)}
+            </div>
+          )}
+          <div className="ee-skill-gap-list">
+            {candidates.map((r) => (
+              <label key={r.id} className="ee-check ee-done-row">
+                <input
+                  type="checkbox"
+                  checked={picked.has(r.id)}
+                  onChange={() => toggle(r.id)}
+                />
+                <span className="ee-done-main">
+                  <span className="ee-done-title">{cleanText(r.title) || r.id}</span>
+                  <span className="ee-done-meta">
+                    {cleanText(r.id)} · {cleanText(r.strength) || "no strength"} · {cleanText(r.review_status) || "—"}
+                  </span>
+                </span>
+              </label>
+            ))}
+            {candidates.length === 0 && <span className="ee-muted">—</span>}
+          </div>
+          <div className="ee-detail-actions">
+            <button
+              type="button"
+              className="ee-btn-primary"
+              disabled={!skillId || picked.size === 0}
+              onClick={() => {
+                emit(linkSkillEvent(skillId, Array.from(picked)));
+                setPicked(new Set());
+              }}
+            >
+              {label(labels, "ee_skill_gap_attach", "Attach to skill")} ({picked.size})
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ---- main app ---- */
 function App() {
   const [args, setArgs] = useState({ payload: {} });
@@ -1277,10 +1484,16 @@ function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [showOutputs, setShowOutputs] = useState(false);
   const [showDoneTasks, setShowDoneTasks] = useState(false);
+  const [showSkillGaps, setShowSkillGaps] = useState(false);
   // Batch mode: a Set of selected row ids + a toggle to reveal checkboxes.
   const [batchMode, setBatchMode] = useState(false);
   const [batchIds, setBatchIds] = useState(() => new Set());
   const doneTasks = asArray(payload.done_task_options);
+  const skillSummaries = asArray(payload.skill_summaries);
+  const skillGapCount = useMemo(
+    () => skillSummaries.filter((s) => s.risk_level).length,
+    [skillSummaries]
+  );
 
   // After a fragment rerun re-mounts the iframe, restore the row the user was
   // acting on (Python echoes it via settings.last_selected_id) so the detail
@@ -1365,6 +1578,14 @@ function App() {
           <button type="button" className="ee-btn" onClick={() => setShowDoneTasks(true)}>
             {label(labels, "ee_done_tasks_title", "Done tasks → evidence")}
           </button>
+          <button
+            type="button"
+            className={`ee-btn${showSkillGaps ? " ee-btn-on" : ""}`}
+            onClick={() => setShowSkillGaps((s) => !s)}
+          >
+            {label(labels, "ee_skill_gap_title", "Skill gaps")}
+            {skillGapCount > 0 ? ` (${skillGapCount} ⚠)` : ""}
+          </button>
           <button type="button" className="ee-btn" onClick={() => emit(suggestDuplicatesEvent("", false))}>
             {label(labels, "ee_find_duplicates", "Find duplicates")}
           </button>
@@ -1439,6 +1660,16 @@ function App() {
           labels={labels}
           emit={emit}
           onClose={() => setShowOutputs(false)}
+        />
+      )}
+
+      {showSkillGaps && (
+        <SkillGapPanel
+          summaries={skillSummaries}
+          rows={rows}
+          labels={labels}
+          emit={emit}
+          onClose={() => setShowSkillGaps(false)}
         />
       )}
 
@@ -1517,6 +1748,7 @@ function App() {
             <div className="ee-detail ee-batch-detail">
               <BulkActionBar
                 ids={selectedBatchIds}
+                visibleIds={visibleIds}
                 payload={payload}
                 labels={labels}
                 emit={emit}

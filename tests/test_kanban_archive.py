@@ -44,6 +44,7 @@ class TestKanbanRefHelpers(unittest.TestCase):
     def test_ref_roundtrip(self) -> None:
         self.assertEqual(kanban_ref("kb_1"), "kanban:kb_1")
         self.assertEqual(kanban_ref_id("kanban:kb_1"), "kb_1")
+        self.assertEqual(kanban_ref_id("kb_1"), "kb_1")
         self.assertEqual(kanban_ref_id("project:x"), "")
 
     def test_refs_for_tasks_skips_idless_and_dedups(self) -> None:
@@ -83,7 +84,7 @@ class TestKanbanRefHelpers(unittest.TestCase):
                 "nblane.core.kanban_archive.parse_kanban", lambda _n: {}
             ):
                 found = find_kanban_tasks_by_ref(
-                    "p", ["kanban:kb_pi05", "kanban:nope"]
+                    "p", ["kb_pi05", "kanban:nope"]
                 )
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].title, "Reproduce PI0.5 on Piper")

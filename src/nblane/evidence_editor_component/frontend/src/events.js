@@ -29,6 +29,11 @@ export const createProjectFromEvidenceEvent = (suggestion) =>
 export const linkSkillsEvent = (id, skillIds) =>
   makeEvent("link_skills", { id, skill_ids: skillIds });
 
+// Skill-centric linking: attach several evidence rows to ONE skill node
+// (append-only, no LLM). Used by the skill-gap panel.
+export const linkSkillEvent = (skillId, evidenceIds) =>
+  makeEvent("link_skill", { skill_id: skillId, evidence_ids: evidenceIds });
+
 // Optional LLM skill recall: ask the router for extra candidate skills for one
 // row. Rule suggestions ship in the payload already; this augments them.
 export const suggestSkillsEvent = (id) =>
@@ -54,6 +59,13 @@ export const doneTasksToEvidenceEvent = (taskIds, markCrystallized = false) =>
     mark_crystallized: !!markCrystallized,
   });
 
+// Done housekeeping: archive/delete Done kanban tasks by stable id (NOT index).
+// These mutate kanban.md, not the evidence pool; they live in the Done picker.
+export const archiveDoneTasksEvent = (taskIds) =>
+  makeEvent("archive_done_tasks", { task_ids: Array.isArray(taskIds) ? taskIds : [] });
+export const deleteDoneTasksEvent = (taskIds) =>
+  makeEvent("delete_done_tasks", { task_ids: Array.isArray(taskIds) ? taskIds : [] });
+
 // Bulk apply across many selected rows (one save). Either set a whitelisted
 // pool field ({field, value}) or run a named action ({action, ...payload}).
 export const bulkApplyEvent = (ids, opts = {}) =>
@@ -77,12 +89,6 @@ export const bulkConfirmAiReformatEvent = (previewId) =>
   makeEvent("bulk_confirm_ai_reformat", { preview_id: previewId });
 
 // Output -> evidence.
-export const createFromOutputEvent = (outputId, sourceKind = "output", projectRefs = []) =>
-  makeEvent("create_from_output", {
-    output_id: outputId,
-    source_kind: sourceKind,
-    project_refs: projectRefs,
-  });
 export const bulkCreateFromOutputEvent = (items) =>
   makeEvent("bulk_create_from_output", { items: Array.isArray(items) ? items : [] });
 export const ignoreOutputCandidatesEvent = (items, reason = "not_evidence") =>

@@ -142,7 +142,7 @@ Output 是表达和投影
 以下区块供 Dashboard、Schema、8502 Canvas 和测试读取。人类说明仍以本文正文为准；修改图谱元素时应同步更新该区块。
 
 ```yaml growth_graph_contract
-schema_version: "1.0"
+schema_version: "1.1"
 layers:
   - id: direction
     label: Direction
@@ -177,81 +177,125 @@ layers:
   - id: governance
     label: Governance
     label_zh: 治理
+roles:
+  - id: trunk
+    label: Trunk
+    label_zh: 主干
+  - id: direction
+    label: Direction
+    label_zh: 方向
+  - id: branch
+    label: Branch
+    label_zh: 分支
+  - id: leaf
+    label: Leaf
+    label_zh: 叶
+  - id: fruit
+    label: Fruit
+    label_zh: 果
+  - id: star
+    label: Star
+    label_zh: 星辰
+  - id: constellation
+    label: Constellation
+    label_zh: 星座
+  - id: sand
+    label: Sand
+    label_zh: 沙子
 node_types:
   - id: north_star
     layer: direction
+    role: trunk
     label: North Star
     label_zh: 长期方向
   - id: goal
     layer: objective
+    role: direction
     label: Goal
     label_zh: 阶段目标
   - id: project_case
     layer: work_context
+    role: branch
     label: Project Case
     label_zh: 项目案例
   - id: task
     layer: activity
+    role: leaf
     label: Task
     label_zh: 任务
   - id: daily_work
     layer: activity
+    role: sand
     label: Daily Work
     label_zh: 日常工作
   - id: research
     layer: activity
+    role: sand
     label: Research
     label_zh: 研究
   - id: agent_run
     layer: activity
+    role: ""
     label: Agent Run
     label_zh: Agent 运行
   - id: source
     layer: source
+    role: sand
     label: Source
     label_zh: 来源
   - id: evidence_candidate
     layer: evidence
+    role: fruit
     label: Evidence Candidate
     label_zh: 证据候选
   - id: atomic_evidence
     layer: evidence
+    role: fruit
     label: Atomic Evidence
     label_zh: 原子证据
   - id: composite_evidence
     layer: evidence
+    role: fruit
     label: Composite Evidence
     label_zh: 组合证据
   - id: claim
     layer: claim
+    role: constellation
     label: Claim
     label_zh: 断言
   - id: skill
     layer: capability
+    role: star
     label: Skill
     label_zh: 技能
   - id: gap
     layer: capability
+    role: ""
     label: Gap
     label_zh: 缺口
   - id: next_action
     layer: capability
+    role: ""
     label: Next Action
     label_zh: 下一步行动
   - id: output
     layer: output
+    role: leaf
     label: Output
     label_zh: 输出
   - id: feedback
     layer: feedback
+    role: ""
     label: Feedback
     label_zh: 反馈
   - id: capacity
     layer: governance
+    role: ""
     label: North Star Capacity
     label_zh: 方向容量
   - id: health
     layer: governance
+    role: ""
     label: Health
     label_zh: 健康
 edge_types:

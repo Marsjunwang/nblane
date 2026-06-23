@@ -27,7 +27,7 @@ def _make_profile(tmp: Path, name: str, pool_rows: list[dict]) -> None:
 
 
 class TestEditorPayload(unittest.TestCase):
-    def _run(self, pool_rows: list[dict]):
+    def _run(self, pool_rows: list[dict], project_board_data: dict | None = None):
         from nblane.core import io as io_mod
         from nblane.core import paths as paths_mod
         from nblane.core import profile_io
@@ -46,6 +46,11 @@ class TestEditorPayload(unittest.TestCase):
                 mod.PROFILES_DIR = tmp_path
             try:
                 _make_profile(tmp_path, "dev", pool_rows)
+                if project_board_data is not None:
+                    (tmp_path / "dev" / "project-board.yaml").write_text(
+                        yaml.safe_dump(project_board_data, allow_unicode=True),
+                        encoding="utf-8",
+                    )
                 return build_evidence_editor_payload("dev")
             finally:
                 for mod, val in origs.items():
@@ -73,6 +78,8 @@ class TestEditorPayload(unittest.TestCase):
             "origin_options",
             "type_options",
             "language_options",
+            "skill_summaries",
+            "skill_options",
         ):
             self.assertIn(key, payload)
 
@@ -115,6 +122,49 @@ class TestEditorPayload(unittest.TestCase):
         # No original_content -> missing_raw and needs_migration.
         self.assertGreaterEqual(ms["missing_raw"], 1)
         self.assertGreaterEqual(ms["resume_manual_unassigned"], 1)
+
+    def test_resume_rows_allow_optional_project_and_shared_resume_source(self) -> None:
+        payload = self._run(
+            [
+                {
+                    "id": "ev_ap_boost",
+                    "type": "project",
+                    "title": "Far-range Monocular Detection Optimization",
+                    "origin": "resume_parse",
+                    "origin_ref": "resume",
+                    "original_content": "Improved AP by 15.",
+                    "project_refs": ["project:gac"],
+                },
+                {
+                    "id": "ev_training_speedup",
+                    "type": "project",
+                    "title": "End-to-End Model Training Acceleration",
+                    "origin": "resume_parse",
+                    "origin_ref": "resume",
+                    "original_content": "Improved training throughput.",
+                },
+            ],
+            {
+                "profile": "dev",
+                "project_cases": [
+                    {
+                        "id": "project:gac",
+                        "title": "GAC",
+                    }
+                ],
+            },
+        )
+        by_id = {r["id"]: r for r in payload["evidence_rows"]}
+        self.assertEqual(by_id["ev_ap_boost"]["project_resolution_status"], "valid")
+        self.assertFalse(by_id["ev_ap_boost"]["source_conflict"])
+        self.assertEqual(
+            by_id["ev_training_speedup"]["project_resolution_status"],
+            "not_required",
+        )
+        self.assertFalse(by_id["ev_training_speedup"]["source_conflict"])
+        self.assertEqual(payload["migration_summary"]["project_without_goal"], 0)
+        self.assertEqual(payload["migration_summary"]["missing_project"], 0)
+        self.assertEqual(payload["migration_summary"]["source_conflict"], 0)
 
     def test_output_options_mark_source_ready_and_count_only_ready(self) -> None:
         from nblane.core import io as io_mod

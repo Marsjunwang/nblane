@@ -56,6 +56,8 @@ _STATUS_STRENGTH_REQUIREMENTS = {
     "solid": "medium",
     "expert": "strong",
 }
+_PROJECT_OPTIONAL_ORIGINS = frozenset({"resume_parse"})
+_SOURCE_CONFLICT_OPTIONAL_ORIGINS = frozenset({"resume_parse"})
 
 
 def _profile_name(profile: str | Path) -> str:
@@ -366,6 +368,7 @@ def validate_internal_project_refs(
     project_index: dict[str, dict[str, Any]],
     *,
     require_exactly_one: bool = True,
+    require_goal: bool = True,
 ) -> dict[str, Any]:
     """Validate evidence ownership against internal Project Board projects."""
     refs = _clean_string_list(project_refs)
@@ -393,7 +396,7 @@ def validate_internal_project_refs(
         for ref in refs
         if ref in project_index and not project_index[ref].get("has_goal")
     ]
-    if no_goal:
+    if require_goal and no_goal:
         status = "project_without_goal"
         blockers.extend(
             f"Project {ref} has no goal_refs; link project to a goal first."
@@ -405,6 +408,42 @@ def validate_internal_project_refs(
         "refs": refs,
         "blockers": blockers,
     }
+
+
+def _editor_project_validation(
+    row: dict[str, Any],
+    project_index: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate project refs using editor-specific origin rules."""
+    origin = str(row.get("origin", "") or "").strip()
+    optional_project = origin in _PROJECT_OPTIONAL_ORIGINS
+    return validate_internal_project_refs(
+        row.get("project_refs"),
+        project_index,
+        require_exactly_one=not optional_project,
+        require_goal=not optional_project,
+    )
+
+
+def _editor_source_conflict_key(row: dict[str, Any]) -> tuple[str, str] | None:
+    """Return source key for editor conflict checks."""
+    origin = str(row.get("origin", "") or "").strip()
+    if origin in _SOURCE_CONFLICT_OPTIONAL_ORIGINS:
+        return None
+    return evidence_source_key(row)
+
+
+def _editor_source_conflict_counts(
+    rows: list[dict[str, Any]],
+) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    for row in rows:
+        if not isinstance(row, dict) or row.get("deprecated"):
+            continue
+        key = _editor_source_conflict_key(row)
+        if key is not None:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def done_task_evidence_blockers(
@@ -1303,14 +1342,45 @@ def _task_source_refs(row: dict[str, Any]) -> list[str]:
     return refs
 
 
-def _is_dangling_task_source(profile: str | Path, row: dict[str, Any]) -> bool:
+def _is_dangling_task_source(
+    profile: str | Path,
+    row: dict[str, Any],
+    *,
+    tasks_by_id: dict[str, Any] | None = None,
+) -> bool:
     refs = _task_source_refs(row)
     if not refs:
         return False
+    if tasks_by_id is not None:
+        # Resolve against a pre-built id map (avoids re-parsing kanban per row).
+        for ref in refs:
+            rid = kanban_ref_id(ref)
+            if rid and rid in tasks_by_id:
+                return False
+        return True
     try:
         return not bool(find_kanban_tasks_by_ref(profile, refs))
     except Exception:
         return True
+
+
+def _editor_tasks_by_id(profile: str | Path) -> dict[str, Any]:
+    """Map task id -> KanbanTask across live + archived kanban (parsed once).
+
+    Threaded into per-row derivations so the editor payload parses kanban a
+    single time instead of once per evidence row.
+    """
+    from nblane.core.kanban_archive import _all_lookup_tasks
+
+    out: dict[str, Any] = {}
+    try:
+        for task in _all_lookup_tasks(profile):
+            tid = str(getattr(task, "id", "") or "").strip()
+            if tid and tid not in out:
+                out[tid] = task
+    except Exception:  # pragma: no cover - defensive
+        return {}
+    return out
 
 
 def _editor_row_derived(
@@ -1320,6 +1390,7 @@ def _editor_row_derived(
     project_index: dict[str, dict[str, Any]],
     source_counts: dict[tuple[str, str], int],
     profile: str | Path,
+    tasks_by_id: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """UI-derived flags for one row in the React editor list."""
     origin = str(row.get("origin", "") or "")
@@ -1329,10 +1400,12 @@ def _editor_row_derived(
     has_original = bool(str(row.get("original_content", "") or "").strip())
     has_date = bool(str(row.get("date", "") or "").strip())
     has_formatted = bool(str(row.get("formatted_content", "") or "").strip())
-    project_validation = validate_internal_project_refs(project_refs, project_index)
-    source_key = evidence_source_key(row)
+    project_validation = _editor_project_validation(row, project_index)
+    source_key = _editor_source_conflict_key(row)
     source_conflict = bool(source_key and source_counts.get(source_key, 0) > 1)
-    dangling_task_source = _is_dangling_task_source(profile, row)
+    dangling_task_source = _is_dangling_task_source(
+        profile, row, tasks_by_id=tasks_by_id
+    )
     # A row needs migration when it lacks any v2 provenance signal.
     needs_migration = not origin or not has_original
     source_label = str(row.get("origin_detail", "") or "") or origin
@@ -1364,10 +1437,13 @@ def evidence_editor_migration_summary(
     profile: str | Path,
     *,
     rows: list[dict[str, Any]] | None = None,
+    tasks_by_id: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     """Counts driving the editor toolbar (migration / missing raw / orphans)."""
     if rows is None:
         rows = _pool_entries(profile)
+    if tasks_by_id is None:
+        tasks_by_id = _editor_tasks_by_id(profile)
     needs_migration = 0
     missing_raw = 0
     resume_manual_unassigned = 0
@@ -1378,12 +1454,7 @@ def evidence_editor_migration_summary(
     dangling_task_source = 0
     source_conflict_rows = 0
     project_index = internal_project_goal_index(profile)
-    source_counts: dict[tuple[str, str], int] = {}
-    for source_rows in active_source_index(rows).values():
-        for row in source_rows:
-            key = evidence_source_key(row)
-            if key is not None:
-                source_counts[key] = len(source_rows)
+    source_counts = _editor_source_conflict_counts(rows)
     for row in rows:
         if row.get("deprecated"):
             continue
@@ -1400,9 +1471,7 @@ def evidence_editor_migration_summary(
             missing_date += 1
         if not str(row.get("formatted_content", "") or "").strip():
             missing_formatted_content += 1
-        project_validation = validate_internal_project_refs(
-            project_refs, project_index
-        )
+        project_validation = _editor_project_validation(row, project_index)
         if project_validation["status"] == "missing_project":
             missing_project += 1
         elif project_validation["status"] == "project_without_goal":
@@ -1411,10 +1480,10 @@ def evidence_editor_migration_summary(
             missing_project += 1
         if origin in ("resume_parse", "manual_daily") and not project_refs:
             resume_manual_unassigned += 1
-        source_key = evidence_source_key(row)
+        source_key = _editor_source_conflict_key(row)
         if source_key is not None and source_counts.get(source_key, 0) > 1:
             source_conflict_rows += 1
-        if _is_dangling_task_source(profile, row):
+        if _is_dangling_task_source(profile, row, tasks_by_id=tasks_by_id):
             dangling_task_source += 1
     # Crystallized tasks without evidence + output candidates.
     try:
@@ -1534,9 +1603,11 @@ def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
         for o in project_options
     }
     project_index = internal_project_goal_index(profile)
-    source_counts: dict[tuple[str, str], int] = {}
-    for key, source_rows in active_source_index(_pool_entries(profile)).items():
-        source_counts[key] = len(source_rows)
+    source_counts = _editor_source_conflict_counts(_pool_entries(profile))
+    # Parse live + archived kanban a single time; thread the id map into every
+    # per-row dangling-source check and the migration summary (was O(rows)
+    # re-parses of kanban.md + kanban-archive.md).
+    tasks_by_id = _editor_tasks_by_id(profile)
 
     # Annotate each active row with derived UI flags.
     enriched_rows: list[dict[str, Any]] = []
@@ -1548,6 +1619,7 @@ def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
             project_index=project_index,
             source_counts=source_counts,
             profile=profile,
+            tasks_by_id=tasks_by_id,
         )
         derived["skill_suggestions"] = skill_suggestions.get(
             str(row.get("id", "") or ""), []
@@ -1565,12 +1637,13 @@ def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
         "experience_options": review.get("experience_options") or [],
         "source_options": review.get("source_options") or [],
         "skill_options": review.get("skill_options") or [],
+        "skill_summaries": review.get("skill_summaries") or [],
         "output_options": _output_options(profile),
         "done_task_options": _done_task_options(profile),
         "project_ref_candidates": review.get("project_ref_candidates") or [],
         "project_suggestions": suggestions,
         "migration_summary": evidence_editor_migration_summary(
-            profile, rows=_pool_entries(profile)
+            profile, rows=_pool_entries(profile), tasks_by_id=tasks_by_id
         ),
         "origin_options": _enum_options(EVIDENCE_ORIGINS),
         "type_options": _enum_options(tuple(sorted(EVIDENCE_TYPES))),

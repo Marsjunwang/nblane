@@ -8,6 +8,12 @@ export function matchesSearch(row, query) {
   return hay.includes(q);
 }
 
+const MISSING_PROJECT_STATUSES = new Set([
+  "missing_project",
+  "unknown_project",
+  "multiple_projects",
+]);
+
 // filters: {origin, type, review_status, language, hasProject, needsMigration}
 // Empty/falsey filter fields mean "any".
 export function matchesFilters(row, filters = {}) {
@@ -26,7 +32,12 @@ export function matchesFilters(row, filters = {}) {
   if (filters.needsMigration && !row.needs_migration) return false;
   if (filters.missingRaw && row.has_original_content) return false;
   if (filters.missingDate && !row.missing_date) return false;
-  if (filters.missingProject && row.has_project) return false;
+  if (
+    filters.missingProject &&
+    !MISSING_PROJECT_STATUSES.has(row.project_resolution_status || "")
+  ) {
+    return false;
+  }
   if (filters.projectWithoutGoal && row.project_resolution_status !== "project_without_goal") return false;
   if (filters.missingFormatted && !row.missing_formatted_content) return false;
   if (filters.sourceConflict && !row.source_conflict) return false;
@@ -49,7 +60,11 @@ export function rowWarnings(row) {
   const hasProject = !!row.has_project;
   const hasRaw = !!row.has_original_content;
   const readiness = row.public_readiness || "";
-  if ((origin === "resume_parse" || origin === "manual_daily") && !hasProject) {
+  if (
+    (origin === "resume_parse" || origin === "manual_daily") &&
+    !hasProject &&
+    row.project_resolution_status === "missing_project"
+  ) {
     out.push("ee_project_provenance_reminder");
   }
   if (!hasRaw) {

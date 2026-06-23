@@ -320,6 +320,8 @@ ee_deprecate: Deprecate
 ee_deprecate_confirm: Deprecate this evidence?
 ee_link_project: Internal project
 ee_link_skill: Skills
+ee_link_experience: Experience
+ee_link_source: Sources
 ee_skill_linked: Updated skill links.
 ee_skill_suggested: Suggested
 ee_skill_show_all: All skills
@@ -327,6 +329,13 @@ ee_skill_suggest_llm: AI suggest
 ee_skill_suggest_llm_hint: Ask AI for more skill suggestions
 ee_skill_suggest_running: Asking AI for skill suggestions…
 ee_skill_suggest_empty: No text to match against skills.
+ee_skill_gap_title: Skill gaps
+ee_skill_gap_hint: Skills claiming a status above their evidence. Pick one, then attach evidence.
+ee_skill_gap_pick: Pick a skill
+ee_skill_gap_evidence_pick: Evidence to attach
+ee_skill_gap_attach: Attach to skill
+ee_skill_gap_none: No skill gaps — every skill's evidence supports its status.
+ee_skill_gap_current: 'Already linked: {n}'
 ee_run_migration: Run migration
 ee_refresh_crystallized_tasks: Refresh crystallized
 ee_migration_preview: Migration preview
@@ -358,7 +367,7 @@ ee_filter_has_project: has project
 ee_filter_needs_migration: needs migration
 ee_filter_language: language
 # warnings
-ee_project_provenance_reminder: Resume/manual evidence should link an internal project or be left explicitly unassigned.
+ee_project_provenance_reminder: Manual evidence should link an internal project or be left explicitly unassigned.
 ee_original_content_missing: No original content preserved.
 ee_formatted_content_missing: No formatted content yet.
 ee_privacy_original_content_warning: Public-ready row keeps original content — check for private info before publishing.
@@ -399,11 +408,19 @@ ee_done_tasks_none: No Done tasks to ingest.
 ee_done_tasks_done: Created/updated {n} from Done tasks.
 ee_done_has_evidence: has evidence
 ee_done_mark_crystallized: Mark selected tasks crystallized after save
+ee_done_housekeeping_title: Housekeeping (archive / delete)
+ee_done_housekeeping_hint: These act on the kanban board, not evidence. Deleting a task cited by active evidence is blocked — archive it instead.
+ee_done_archive_selected: Archive selected
+ee_done_delete_selected: Delete selected
+ee_done_delete_confirm: Delete selected Done tasks? Tasks cited by active evidence are blocked.
+ee_done_housekeeping_missing: 'Task(s) not in Done: {ids}.'
 # batch select + bulk actions
 ee_batch_mode: Batch select
 ee_bulk_selected: selected
 ee_bulk_select_visible: Select all visible
 ee_bulk_apply: Apply to selected
+ee_bulk_apply_all: Apply to ALL filtered ({n})
+ee_bulk_all_hint: Applies the field/value to every row matching the current search and filters — across all pages, ignoring the checkboxes.
 ee_bulk_deprecate: Deprecate
 ee_bulk_deprecate_confirm: Deprecate selected rows?
 ee_bulk_clear: Clear

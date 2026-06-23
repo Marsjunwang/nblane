@@ -35,6 +35,32 @@ const GRAPH_TYPE_LAYER = {
   health: "governance",
 };
 
+// Visual role (star-tree prototype) fallback when the backend omits `role`.
+// Single source of truth is growth_graph_contract.py; this mirror keeps the
+// frontend resilient against older payloads. The 6 out-of-tree types map to "".
+export const ROLE_FOR_TYPE = {
+  north_star: "trunk",
+  goal: "direction",
+  project_case: "branch",
+  task: "leaf",
+  output: "leaf",
+  daily_work: "sand",
+  research: "sand",
+  source: "sand",
+  evidence: "fruit",
+  evidence_candidate: "fruit",
+  atomic_evidence: "fruit",
+  composite_evidence: "fruit",
+  claim: "constellation",
+  skill: "star",
+  agent_run: "",
+  gap: "",
+  next_action: "",
+  feedback: "",
+  capacity: "",
+  health: "",
+};
+
 export function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -158,6 +184,7 @@ export function normalizeGraphNode(node) {
     id: cleanText(source.id),
     type,
     layer: cleanText(source.layer, GRAPH_TYPE_LAYER[type] || "activity"),
+    role: cleanText(source.role) || ROLE_FOR_TYPE[type] || "",
     label: cleanText(source.label),
     metric: cleanText(source.metric),
     status: cleanText(source.status),

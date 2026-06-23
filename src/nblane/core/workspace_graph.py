@@ -8,6 +8,7 @@ from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
 from nblane.core.growth_graph_contract import (
     growth_graph_edge_types,
     growth_graph_layers,
+    growth_graph_node_type_roles,
     growth_graph_node_types,
     growth_graph_payload as growth_graph_contract_payload,
 )
@@ -16,6 +17,7 @@ from nblane.core.goals import Goal, GoalSkillLink, goal_for_ui
 WORKSPACE_GRAPH_LAYERS: tuple[str, ...] = growth_graph_layers()
 WORKSPACE_GRAPH_NODE_TYPES: tuple[str, ...] = growth_graph_node_types()
 WORKSPACE_GRAPH_EDGE_TYPES: tuple[str, ...] = growth_graph_edge_types()
+_NODE_TYPE_ROLES: dict[str, str] = growth_graph_node_type_roles()
 
 
 def workspace_graph_layers() -> tuple[str, ...]:
@@ -31,6 +33,16 @@ def workspace_graph_node_types() -> tuple[str, ...]:
 def workspace_graph_edge_types() -> tuple[str, ...]:
     """Return supported workspace graph edge types."""
     return growth_graph_edge_types()
+
+
+def workspace_graph_node_type_roles() -> dict[str, str]:
+    """Return node type -> visual role mapping (star-tree prototypes)."""
+    return growth_graph_node_type_roles()
+
+
+def _role_for_type(node_type: str) -> str:
+    """Return the contract visual role for a node type ("" when out of tree)."""
+    return _NODE_TYPE_ROLES.get(str(node_type or ""), "")
 
 
 def _ui_text(ui: dict[str, str] | None, key: str, fallback: str = "") -> str:
@@ -56,6 +68,7 @@ def _node(
     is_primary: bool = False,
     summary: str = "",
     description: str = "",
+    role: str = "",
     primary_action: dict[str, object] | None = None,
     secondary_actions: list[dict[str, object]] | None = None,
     **extra: object,
@@ -64,6 +77,7 @@ def _node(
         "id": id,
         "type": type,
         "layer": layer,
+        "role": role or _role_for_type(type),
         "label": label,
         "metric": metric,
         "status": status,
@@ -1275,6 +1289,7 @@ def workspace_graph_payload(
 __all__ = [
     "workspace_graph_edge_types",
     "workspace_graph_layers",
+    "workspace_graph_node_type_roles",
     "workspace_graph_node_types",
     "workspace_graph_payload",
 ]

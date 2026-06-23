@@ -729,18 +729,6 @@ def _link_skill_to_evidence(skill_id: str, evidence_ids: list[str]) -> None:
     _save_tree(tree, ui["link_done"])
 
 
-def _render_done_housekeeping_only(review: dict) -> None:
-    """Housekeeping-only section for the React-editor path.
-
-    The legacy ``queue`` tab bundled LLM Done->evidence ingest *and* archive/
-    delete housekeeping. When the React editor is the default, Done->evidence
-    moves there (deterministic, no LLM), so this section keeps only the
-    archive/delete controls reachable.
-    """
-    sections = parse_kanban(selected)
-    _render_done_housekeeping(sections)
-
-
 def _render_done_ingest(review: dict) -> None:
     st.subheader(ui["done_queue_title"])
     sections = parse_kanban(selected)
@@ -2729,16 +2717,14 @@ _NAV_SECTIONS = [
     ("risks", ui["tab_risks"], _render_risks),
 ]
 # When the built React editor bundle is present, surface it as the default
-# section and retire the legacy LLM Done-queue tab: Done->evidence now happens
-# in the editor (deterministic, no LLM). Archive/delete housekeeping stays
-# reachable via a slim housekeeping-only section. The other Python tabs remain
-# as a full fallback (and for power workflows).
+# section and retire the legacy LLM Done-queue, pool, links, and housekeeping
+# tabs: Done->evidence, the evidence pool (list/detail/batch), skill links, and
+# Done archive/delete all now live inside the editor. The other Python tabs
+# remain as a full fallback for when the component bundle is unavailable.
 if evidence_editor_component_available():
     _NAV_SECTIONS = [
         ("editor", ui.get("tab_editor", "Editor"), _render_evidence_editor),
-        ("housekeeping", ui.get("tab_housekeeping", "Done Housekeeping"),
-         _render_done_housekeeping_only),
-        *[s for s in _NAV_SECTIONS if s[0] not in ("queue", "refs")],
+        *[s for s in _NAV_SECTIONS if s[0] in ("claims", "risks")],
     ]
 _default_section = _NAV_SECTIONS[0][0]
 _nav_labels = {key: label for key, label, _ in _NAV_SECTIONS}

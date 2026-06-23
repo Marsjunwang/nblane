@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from nblane.core.home_dashboard import dashboard_payload
+from nblane.core.growth_graph_contract import growth_graph_node_type_roles, growth_graph_roles
 from nblane.core.workspace_graph import (
     workspace_graph_layers,
     workspace_graph_node_types,
@@ -53,6 +54,23 @@ def test_workspace_graph_empty_profile_returns_full_layer_skeleton() -> None:
         assert node["type"] in workspace_graph_node_types()
         assert "implemented" in node
         assert "placeholder" in node
+
+    # Every node carries a visual role consistent with the contract type->role
+    # map; roles are one of the 8 star-tree prototypes or "" (out of tree).
+    valid_roles = set(growth_graph_roles()) | {""}
+    type_roles = growth_graph_node_type_roles()
+    for node in nodes.values():
+        assert node["role"] in valid_roles
+        assert node["role"] == type_roles.get(node["type"], "")
+    assert nodes["north_star"]["role"] == "trunk"
+    assert nodes["goal:missing"]["role"] == "direction"
+    assert nodes["project_case:planned"]["role"] == "branch"
+    assert nodes["source:inbox"]["role"] == "sand"
+    assert nodes["atomic_evidence:pool"]["role"] == "fruit"
+    assert nodes["claim:planned"]["role"] == "constellation"
+    assert nodes["skill:lit"]["role"] == "star"
+    assert nodes["output"]["role"] == "leaf"
+    assert nodes["health"]["role"] == ""
 
 
 def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> None:

@@ -320,6 +320,8 @@ ee_deprecate: 弃用
 ee_deprecate_confirm: 确认弃用这条证据？
 ee_link_project: 内部项目
 ee_link_skill: 技能
+ee_link_experience: 经历
+ee_link_source: 来源
 ee_skill_linked: 已更新技能关联。
 ee_skill_suggested: 建议
 ee_skill_show_all: 全部技能
@@ -327,6 +329,13 @@ ee_skill_suggest_llm: AI 建议
 ee_skill_suggest_llm_hint: 让 AI 补充更多技能建议
 ee_skill_suggest_running: 正在用 AI 生成技能建议…
 ee_skill_suggest_empty: 没有可用于匹配技能的文本。
+ee_skill_gap_title: 技能缺口
+ee_skill_gap_hint: 这些技能声称的状态高于其证据支撑。选一个技能，然后挂上证据。
+ee_skill_gap_pick: 选择技能
+ee_skill_gap_evidence_pick: 要关联的证据
+ee_skill_gap_attach: 关联到技能
+ee_skill_gap_none: 没有技能缺口——每个技能的证据都支撑其状态。
+ee_skill_gap_current: '已关联：{n}'
 ee_run_migration: 运行迁移
 ee_refresh_crystallized_tasks: 从已沉淀任务刷新
 ee_migration_preview: 迁移预览
@@ -358,7 +367,7 @@ ee_filter_has_project: 已关联项目
 ee_filter_needs_migration: 待迁移
 ee_filter_language: 语言
 # 提醒
-ee_project_provenance_reminder: 简历/手动证据应关联内部项目，或显式标记为未关联。
+ee_project_provenance_reminder: 手动证据应关联内部项目，或显式标记为未关联。
 ee_original_content_missing: 未保留原始内容。
 ee_formatted_content_missing: 尚无规范正文。
 ee_privacy_original_content_warning: 公开就绪的条目仍保留原始内容，发布前请检查是否含隐私信息。
@@ -399,11 +408,19 @@ ee_done_tasks_none: 没有可入库的 Done 任务。
 ee_done_tasks_done: 已从 Done 任务生成/更新 {n} 行。
 ee_done_has_evidence: 已有证据
 ee_done_mark_crystallized: 保存后将所选任务标记为已固化
+ee_done_housekeeping_title: 清场（归档 / 删除）
+ee_done_housekeeping_hint: 这些操作作用于看板而非证据。被活跃证据引用的任务不允许删除——请改为归档。
+ee_done_archive_selected: 归档所选
+ee_done_delete_selected: 删除所选
+ee_done_delete_confirm: 删除所选 Done 任务？被活跃证据引用的任务会被拦截。
+ee_done_housekeeping_missing: '任务不在 Done 列：{ids}。'
 # 批量选择与批量操作
 ee_batch_mode: 批量选择
 ee_bulk_selected: 已选
 ee_bulk_select_visible: 全选当前
 ee_bulk_apply: 应用到所选
+ee_bulk_apply_all: 应用到全部筛选结果（{n}）
+ee_bulk_all_hint: 对当前搜索与筛选命中的所有行套用字段/值——跨所有分页，忽略勾选框。
 ee_bulk_deprecate: 弃用
 ee_bulk_deprecate_confirm: 弃用所选证据行？
 ee_bulk_clear: 清除

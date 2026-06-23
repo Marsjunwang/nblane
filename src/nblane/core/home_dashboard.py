@@ -410,16 +410,21 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
         )
 
     targets, target_hits = _target_skill_hits(profile, tree_raw, index)
+    # Emit the full schema node set so the Growth Graph can render every skill
+    # (the "star" layer is the whole 82-node domain, not just tracked nodes).
+    # Untracked nodes default to "locked" — the dimmest status.
+    tree_status_by_id = {
+        str(node.get("id")): str(node.get("status", "locked") or "locked")
+        for node in _as_list(tree_raw.get("nodes"))
+        if isinstance(node, dict) and node.get("id")
+    }
     items: list[dict[str, str]] = []
-    for node in _as_list(tree_raw.get("nodes")):
-        if not isinstance(node, dict) or not node.get("id"):
-            continue
-        node_id = str(node.get("id") or "")
+    for node_id in index:
         items.append(
             {
                 "id": node_id,
                 "label": _node_label(index, node_id),
-                "status": str(node.get("status", "locked") or "locked"),
+                "status": tree_status_by_id.get(node_id, "locked"),
                 "category": str((index.get(node_id) or {}).get("category") or ""),
             }
         )

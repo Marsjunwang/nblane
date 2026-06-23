@@ -82,6 +82,7 @@ test("normalizes chart totals and quick links", () => {
           id: "goal:g1",
           type: "goal",
           layer: "objective",
+          role: "direction",
           label: "Demo",
           metric: "Primary",
           record_id: "g1",
@@ -151,10 +152,13 @@ test("normalizes chart totals and quick links", () => {
   assert.equal(payload.graph.nodes[0].isPrimary, true);
   assert.equal(payload.graph.nodes[0].summary, "Goal summary");
   assert.equal(payload.graph.nodes[0].primaryAction.event.action, "navigate");
+  assert.equal(payload.graph.nodes[0].role, "direction");
   assert.equal(payload.graph.nodes[1].layer, "capability");
   assert.equal(payload.graph.nodes[1].implemented, true);
+  assert.equal(payload.graph.nodes[1].role, "star");
   assert.equal(payload.graph.nodes[2].placeholder, true);
   assert.equal(payload.graph.nodes[2].implemented, false);
+  assert.equal(payload.graph.nodes[2].role, "sand");
   assert.deepEqual(payload.graph.layers, ["direction", "objective", "capability", "source"]);
   assert.equal(payload.graph.edges[1].from, "skill:ros2_basics");
   assert.equal(payload.graph.edges[1].suggested, true);

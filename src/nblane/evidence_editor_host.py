@@ -44,6 +44,7 @@ from nblane.core.evidence_review import (
     bulk_set_pool_field,
     done_task_evidence_blockers,
     internal_project_goal_index,
+    link_skill_to_evidence_nodes,
     set_evidence_skill_refs,
     validate_internal_project_refs,
 )
@@ -104,6 +105,13 @@ EDITOR_SAVE_FIELDS = (
     "origin_ref",
     "origin_detail",
     "project_refs",
+    "experience_refs",
+    "source_refs",
+)
+
+# Editor-writable fields that hold a list of refs (cleaned per item).
+EDITOR_SAVE_LIST_FIELDS = frozenset(
+    {"project_refs", "experience_refs", "source_refs"}
 )
 
 
@@ -405,10 +413,13 @@ class EvidenceEditorHost:
             "blocking_errors": blocking_errors,
             "valid_count": valid_count,
             "invalid_count": invalid_ai_count + len(task_blockers),
+            # Accept as long as at least one valid row exists: a poorly-graded
+            # row no longer blocks the good ones (apply writes only valid rows).
+            # ai_error / blocking_errors still gate, since those signal AI
+            # confusion (e.g. multiple rows for one task) that warrants a retry.
             "can_accept": bool(valid_count)
             and not ai_error
-            and not blocking_errors
-            and invalid_ai_count == 0,
+            and not blocking_errors,
         }
 
     def _prepare_done_task_evidence(self, task_ids: list | None) -> bool:
@@ -817,7 +828,7 @@ class EvidenceEditorHost:
         for key in EDITOR_SAVE_FIELDS:
             if key not in fields:
                 continue
-            if key == "project_refs":
+            if key in EDITOR_SAVE_LIST_FIELDS:
                 row[key] = [
                     str(r).strip()
                     for r in (fields.get(key) or [])
@@ -940,6 +951,34 @@ class EvidenceEditorHost:
         ]
         cleaned = [str(s).strip() for s in (skill_ids or []) if str(s).strip()]
         tree["nodes"] = set_evidence_skill_refs(nodes, eid, cleaned)
+        self._save_tree(
+            tree, self.ui.get("ee_skill_linked", self.ui.get("link_done", "Linked."))
+        )
+        return True
+
+    def _apply_link_skill(self, skill_id: str, evidence_ids: list) -> bool:
+        """Attach several evidence rows to ONE skill node (append-only, no LLM).
+
+        Skill-centric counterpart of :meth:`_apply_link_skills`: used by the
+        skill-gap panel to bulk-attach evidence to a skill whose claimed status
+        outruns its evidence. Reuses the pure ``link_skill_to_evidence_nodes``
+        (append + de-dupe + create missing node as ``learning``).
+        """
+        skill = str(skill_id or "").strip()
+        refs = [str(e).strip() for e in (evidence_ids or []) if str(e).strip()]
+        if not skill or not refs:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+        tree = load_skill_tree_raw(self.profile)
+        if not isinstance(tree, dict):
+            st.error("skill-tree.yaml not found.")
+            return False
+        nodes = [
+            dict(node)
+            for node in (tree.get("nodes") or [])
+            if isinstance(node, dict)
+        ]
+        tree["nodes"] = link_skill_to_evidence_nodes(nodes, skill, refs)
         self._save_tree(
             tree, self.ui.get("ee_skill_linked", self.ui.get("link_done", "Linked."))
         )
@@ -1080,6 +1119,145 @@ class EvidenceEditorHost:
         stash_git_backup_results()
         clear_web_cache()
 
+    def _active_evidence_task_ids(self) -> set[str]:
+        """Task ids referenced by active (non-deprecated) evidence provenance.
+
+        Used to protect Done tasks from deletion when evidence still cites them
+        (archive instead). Mirrors the page-level guard, moved into the host.
+        """
+        out: set[str] = set()
+        for row in self._pool_entries():
+            if bool(row.get("deprecated", False)):
+                continue
+            if str(row.get("origin", "") or "").strip() == "kanban_task":
+                rid = kanban_ref_id(str(row.get("origin_ref", "") or ""))
+                if rid:
+                    out.add(rid)
+            for ref in row.get("kanban_refs") or []:
+                rid = kanban_ref_id(str(ref or ""))
+                if rid:
+                    out.add(rid)
+        return out
+
+    def _done_indexes_for_task_ids(
+        self, task_ids: list
+    ) -> tuple[dict, list[int], list[str]]:
+        """Resolve task ids to Done-section indexes.
+
+        Returns (sections, indexes, missing_ids). ``sections`` is the parsed
+        kanban so callers can save it without re-parsing.
+        """
+        from nblane.core.io import KANBAN_DONE, parse_kanban
+
+        wanted = [str(t).strip() for t in (task_ids or []) if str(t).strip()]
+        sections = parse_kanban(self.profile)
+        done_tasks = list(sections.get(KANBAN_DONE) or [])
+        index_by_id: dict[str, int] = {}
+        for index, task in enumerate(done_tasks):
+            tid = str(getattr(task, "id", "") or "").strip()
+            if tid and tid not in index_by_id:
+                index_by_id[tid] = index
+        indexes: list[int] = []
+        missing: list[str] = []
+        for tid in wanted:
+            if tid in index_by_id:
+                indexes.append(index_by_id[tid])
+            else:
+                missing.append(tid)
+        return sections, sorted(set(indexes)), missing
+
+    def _sync_board(self, sections: dict) -> None:
+        """Best-effort project-board sync after a kanban mutation."""
+        from nblane.core.project_board_sync import sync_project_board_from_kanban
+
+        try:
+            sync_project_board_from_kanban(self.profile, sections)
+        except Exception:  # pragma: no cover - sync is best effort
+            pass
+
+    def _apply_archive_done_tasks(self, task_ids: list) -> bool:
+        """Archive selected Done tasks into kanban-archive.md (mutates kanban)."""
+        from nblane.core.io import archive_kanban_done_tasks
+
+        sections, indexes, missing = self._done_indexes_for_task_ids(task_ids)
+        if missing:
+            st.error(
+                self.ui.get(
+                    "ee_done_housekeeping_missing",
+                    "Task(s) not in Done: {ids}.",
+                ).format(ids=", ".join(missing))
+            )
+            return False
+        if not indexes:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+        archive_path = self.pdir / "kanban-archive.md"
+        kanban_path = self.pdir / "kanban.md"
+        project_path = self.pdir / "project-board.yaml"
+        assert_files_current([archive_path, kanban_path, project_path])
+        updated = archive_kanban_done_tasks(self.profile, sections, indexes)
+        self._sync_board(updated)
+        refresh_file_snapshots([archive_path, kanban_path, project_path])
+        stash_git_backup_results()
+        clear_web_cache()
+        st.success(
+            self.ui.get(
+                "done_housekeeping_archived", "Archived {n} task(s)."
+            ).format(n=len(indexes))
+        )
+        return True
+
+    def _apply_delete_done_tasks(self, task_ids: list) -> bool:
+        """Delete selected Done tasks, blocking any cited by active evidence."""
+        from nblane.core.io import KANBAN_DONE, save_kanban
+
+        sections, indexes, missing = self._done_indexes_for_task_ids(task_ids)
+        if missing:
+            st.error(
+                self.ui.get(
+                    "ee_done_housekeeping_missing",
+                    "Task(s) not in Done: {ids}.",
+                ).format(ids=", ".join(missing))
+            )
+            return False
+        if not indexes:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+        done_tasks = list(sections.get(KANBAN_DONE) or [])
+        protected = self._active_evidence_task_ids()
+        blocked = [
+            str(getattr(done_tasks[i], "id", "") or "").strip()
+            for i in indexes
+            if str(getattr(done_tasks[i], "id", "") or "").strip() in protected
+        ]
+        if blocked:
+            st.error(
+                self.ui.get(
+                    "done_housekeeping_delete_blocked_evidence",
+                    "Delete blocked: active evidence references task(s): {ids}. Archive instead.",
+                ).format(ids=", ".join(blocked))
+            )
+            return False
+        kanban_path = self.pdir / "kanban.md"
+        project_path = self.pdir / "project-board.yaml"
+        assert_files_current([kanban_path, project_path])
+        updated = {section: list(tasks) for section, tasks in sections.items()}
+        remaining = list(done_tasks)
+        for i in sorted(indexes, reverse=True):
+            remaining.pop(i)
+        updated[KANBAN_DONE] = remaining
+        save_kanban(self.profile, updated)
+        self._sync_board(updated)
+        refresh_file_snapshots([kanban_path, project_path])
+        stash_git_backup_results()
+        clear_web_cache()
+        st.success(
+            self.ui.get(
+                "done_housekeeping_deleted", "Deleted {n} task(s)."
+            ).format(n=len(indexes))
+        )
+        return True
+
     def _apply_task_proposals(
         self, entries: list[dict], proposals: list[dict], done_message: str
     ) -> bool:
@@ -1141,25 +1319,6 @@ class EvidenceEditorHost:
                 changed += 1
         self._save_pool(entries, done_message.format(n=changed))
         return True
-
-    def _apply_create_from_output(
-        self,
-        output_id: str,
-        source_kind: str = "output",
-        project_refs: list | None = None,
-    ) -> bool:
-        return self._apply_bulk_create_from_output(
-            [
-                {
-                    "output_id": output_id,
-                    "source_kind": source_kind,
-                    "project_refs": project_refs or [],
-                }
-            ],
-            success_message=self.ui.get(
-                "ee_output_created", "Evidence created from output."
-            ),
-        )
 
     def _output_source_maps(self) -> tuple[dict[str, dict], dict[str, object]]:
         from nblane.core import public_site
@@ -1935,6 +2094,11 @@ class EvidenceEditorHost:
             return self._apply_link_project(eid, payload.get("project_refs") or [])
         if action == "link_skills":
             return self._apply_link_skills(eid, payload.get("skill_ids") or [])
+        if action == "link_skill":
+            return self._apply_link_skill(
+                str(payload.get("skill_id") or ""),
+                payload.get("evidence_ids") or [],
+            )
         if action == "suggest_skills":
             return self._apply_suggest_skills(eid)
         if action == "backfill_project_refs":
@@ -1955,6 +2119,10 @@ class EvidenceEditorHost:
                 payload.get("task_ids"),
                 bool(payload.get("mark_crystallized")),
             )
+        if action == "archive_done_tasks":
+            return self._apply_archive_done_tasks(payload.get("task_ids") or [])
+        if action == "delete_done_tasks":
+            return self._apply_delete_done_tasks(payload.get("task_ids") or [])
         if action == "bulk_apply":
             return self._apply_bulk(
                 payload.get("ids") or [],
@@ -1972,12 +2140,6 @@ class EvidenceEditorHost:
         if action == "bulk_confirm_ai_reformat":
             return self._apply_bulk_confirm_ai_reformat(
                 str(payload.get("preview_id") or "")
-            )
-        if action == "create_from_output":
-            return self._apply_create_from_output(
-                str(payload.get("output_id") or ""),
-                str(payload.get("source_kind") or "output"),
-                payload.get("project_refs") or None,
             )
         if action == "bulk_create_from_output":
             return self._apply_bulk_create_from_output(payload.get("items") or [])

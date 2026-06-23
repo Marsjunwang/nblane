@@ -21,6 +21,7 @@ const ROWS = [
     review_status: "reviewed",
     language: "en",
     has_project: false,
+    project_resolution_status: "not_required",
     has_original_content: true,
     needs_migration: false,
     public_readiness: "private",
@@ -34,6 +35,7 @@ const ROWS = [
     review_status: "needs_review",
     language: "en",
     has_project: true,
+    project_resolution_status: "valid",
     has_original_content: true,
     needs_migration: false,
     public_readiness: "private",
@@ -47,6 +49,7 @@ const ROWS = [
     review_status: "",
     language: "",
     has_project: false,
+    project_resolution_status: "missing_project",
     has_original_content: false,
     needs_migration: true,
     public_readiness: "public_ready",
@@ -78,6 +81,18 @@ test("matchesFilters: hasProject and needsMigration toggles", () => {
   assert.equal(matchesFilters(ROWS[0], { needsMigration: true }), false);
 });
 
+test("matchesFilters: missingProject follows backend status", () => {
+  assert.equal(matchesFilters(ROWS[0], { missingProject: true }), false);
+  assert.equal(matchesFilters(ROWS[2], { missingProject: true }), true);
+  assert.equal(
+    matchesFilters(
+      { ...ROWS[1], project_resolution_status: "unknown_project" },
+      { missingProject: true },
+    ),
+    true,
+  );
+});
+
 test("filterRows combines search + filters", () => {
   const out = filterRows(ROWS, "", { origin: "resume_parse" });
   assert.deepEqual(out.map((r) => r.id), ["ev1"]);
@@ -85,11 +100,8 @@ test("filterRows combines search + filters", () => {
   assert.deepEqual(out2.map((r) => r.id), ["ev3"]);
 });
 
-test("rowWarnings: resume orphan + missing raw + privacy", () => {
-  assert.deepEqual(rowWarnings(ROWS[0]), [
-    "ee_project_provenance_reminder",
-    "ee_missing_date",
-  ]);
+test("rowWarnings: optional resume project + missing raw + privacy", () => {
+  assert.deepEqual(rowWarnings(ROWS[0]), ["ee_missing_date"]);
   const w3 = rowWarnings(ROWS[2]);
   assert.ok(w3.includes("ee_original_content_missing"));
   // ev3 has public_ready readiness but no raw -> privacy warning not added
@@ -144,6 +156,27 @@ test("suggestSkillsEvent shape", async () => {
   assert.ok(e.event_id);
 });
 
+test("linkSkillEvent shape (skill-centric, append)", async () => {
+  const ev = await import("./events.js");
+  const e = ev.linkSkillEvent("ros2_basics", ["ev1", "ev2"]);
+  assert.equal(e.action, "link_skill");
+  assert.equal(e.payload.skill_id, "ros2_basics");
+  assert.deepEqual(e.payload.evidence_ids, ["ev1", "ev2"]);
+  assert.ok(e.event_id);
+});
+
+test("archive/delete done task event shapes", async () => {
+  const ev = await import("./events.js");
+  const a = ev.archiveDoneTasksEvent(["kb_1", "kb_2"]);
+  assert.equal(a.action, "archive_done_tasks");
+  assert.deepEqual(a.payload.task_ids, ["kb_1", "kb_2"]);
+  const d = ev.deleteDoneTasksEvent(["kb_3"]);
+  assert.equal(d.action, "delete_done_tasks");
+  assert.deepEqual(d.payload.task_ids, ["kb_3"]);
+  // Non-array coerces to [].
+  assert.deepEqual(ev.archiveDoneTasksEvent(null).payload.task_ids, []);
+});
+
 test("makeEvent generates unique ids", () => {
   const a = makeEvent("x");
   const b = makeEvent("x");
@@ -194,11 +227,6 @@ test("bulkApplyEvent: named action shape", async () => {
 
 test("output candidate event factories shape", async () => {
   const ev = await import("./events.js");
-  const single = ev.createFromOutputEvent("out1", "output", ["project:x"]);
-  assert.equal(single.action, "create_from_output");
-  assert.equal(single.payload.output_id, "out1");
-  assert.deepEqual(single.payload.project_refs, ["project:x"]);
-
   const items = [
     { output_id: "out1", source_kind: "output", project_refs: ["project:x"] },
     { output_id: "route-1", source_kind: "blog", project_refs: ["project:y"] },

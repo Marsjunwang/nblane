@@ -36,10 +36,12 @@ def kanban_ref(task_id: str) -> str:
 
 
 def kanban_ref_id(ref: str) -> str:
-    """Return the bare task id from a ``kanban:<id>`` ref (or "" if not one)."""
+    """Return the bare task id from a canonical or legacy kanban ref."""
     text = str(ref or "").strip()
     if text.startswith(KANBAN_REF_PREFIX):
         return text[len(KANBAN_REF_PREFIX):].strip()
+    if text and ":" not in text and not re.search(r"\s", text):
+        return text
     return ""
 
 

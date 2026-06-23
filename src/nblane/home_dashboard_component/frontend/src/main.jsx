@@ -11,10 +11,12 @@ import {
 import "@xyflow/react/dist/style.css";
 import ForceGraph3D from "react-force-graph-3d";
 import * as THREE from "three";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 import "./style.css";
 import {
   asArray,
+  asObject,
   cleanText,
   goalDisplay,
   goalDraftFromFormData,
@@ -95,6 +97,46 @@ const EDGE_WIDTHS = {
 };
 
 const GRAPH_3D_MIN_HEIGHT = 520;
+
+// ── Star-tree (role-based) visual model ──────────────────────────────────────
+// Block B replaces the flat force-directed 3D graph with a deterministic
+// "star tree": roles map to visual prototypes pinned at fixed coordinates, and
+// "Live" comes from a breathing animation loop rather than force drift.
+const TREE_ROLES = new Set([
+  "trunk",
+  "direction",
+  "branch",
+  "leaf",
+  "fruit",
+  "star",
+  "constellation",
+]);
+const SAND_ROLE = "sand";
+
+const ROLE_COLORS = {
+  trunk: "#7d5fd0",
+  direction: "#21685b",
+  branch: "#7d8a91",
+  leaf: "#3f9e63",
+  fruit: "#c2683a",
+  star: "#bcd4ff",
+  constellation: "#e8d27a",
+  sand: "#c4b186",
+};
+
+// Star brightness by skill status — the dome dims for locked, blazes for expert.
+const STAR_STATUS_EMISSIVE = {
+  locked: 0.05,
+  learning: 0.18,
+  solid: 0.4,
+  expert: 0.7,
+};
+
+// Tree skeleton dimensions (world units, y is up).
+const TREE_HEIGHT = 92;
+const STAR_DOME_CENTER_Y = TREE_HEIGHT + 8;
+const STAR_DOME_RADIUS = 96;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 const FALLBACK_LAYERS = [
   "direction",
@@ -470,11 +512,11 @@ function preferredNode(payload) {
   const realNodes = payload.graph.nodes.filter(isConcreteNode);
   return (
     realNodes.find((node) =>
-      (node.type === "goal" && goalIds.has(node.recordId)) ||
+      (node.role === "direction" && goalIds.has(node.recordId)) ||
       Boolean(node.ownerPath) ||
-      node.type === "skill" ||
-      node.type === "task" ||
-      node.type === "north_star"
+      node.role === "star" ||
+      (node.role === "leaf" && node.type === "task") ||
+      node.role === "trunk"
     ) ||
     realNodes[0] ||
     null
@@ -1339,23 +1381,220 @@ function relationColor(relation) {
   return EDGE_COLORS[cleanText(relation)] || EDGE_COLORS.link;
 }
 
-function graph3DSeedPosition(payload, node, index) {
-  const layers = graphLayers(payload);
-  const layerIndex = Math.max(0, layers.indexOf(node.layer));
-  const layerCount = Math.max(1, layers.length);
-  const angle = (layerIndex / layerCount) * Math.PI * 2;
-  const ring = 72 + (layerIndex % 4) * 18;
-  const typeOffset = cleanText(node.type).split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const local = ((index % 11) - 5) * 5.2;
-  return {
-    x: Math.cos(angle) * ring + local,
-    y: Math.sin(angle) * ring + ((index % 5) - 2) * 8,
-    z: (layerIndex - layerCount / 2) * 18 + ((typeOffset % 9) - 4) * 6,
+// Stable hash → [0,1). Keeps the star tree deterministic across refreshes
+// (no Math.random), so the silhouette stays put while it breathes.
+function hashUnit(text) {
+  const str = cleanText(text);
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+// Resolve the parent of a node along a set of preferred relations. Edges point
+// parent → child, so we look for an incoming edge whose source is allowed.
+function parentByRelation(node, edgesByTarget, allowed, nodesById) {
+  const incoming = edgesByTarget.get(node.id) || [];
+  for (const relation of allowed) {
+    const match = incoming.find((edge) => (edge.relation || edge.type) === relation && nodesById.has(edge.from));
+    if (match) {
+      return nodesById.get(match.from);
+    }
+  }
+  // Fall back to any structural incoming edge from a placed node.
+  const any = incoming.find((edge) => nodesById.has(edge.from));
+  return any ? nodesById.get(any.from) : null;
+}
+
+// Deterministic star-tree skeleton. Returns id -> {x, y, z} for every tree,
+// star and constellation node. Sand nodes are excluded (rendered as a particle
+// field). Coordinates are pinned onto node.fx/fy/fz by the caller so the
+// force engine never drifts them.
+function growthTreeLayout(payload, nodes) {
+  const positions = new Map();
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edges = asArray(payload.graph.edges).filter(
+    (edge) => nodesById.has(edge.from) && nodesById.has(edge.to),
+  );
+  const edgesByTarget = new Map();
+  edges.forEach((edge) => {
+    if (!edgesByTarget.has(edge.to)) {
+      edgesByTarget.set(edge.to, []);
+    }
+    edgesByTarget.get(edge.to).push(edge);
+  });
+
+  const byRole = (role) => nodes.filter((node) => node.role === role);
+
+  // 1. Trunk — vertical spine at the origin.
+  const trunks = byRole("trunk");
+  trunks.forEach((node) => {
+    positions.set(node.id, { x: 0, y: TREE_HEIGHT, z: 0 });
+  });
+  const trunkAnchor = () => ({ x: 0, y: TREE_HEIGHT * 0.62, z: 0 });
+
+  // 2. Direction (goals) — fan out around the upper trunk, angled up-and-out.
+  const directions = byRole("direction");
+  const dirCount = Math.max(1, directions.length);
+  const directionPos = new Map();
+  directions.forEach((node, index) => {
+    const theta = (index / dirCount) * Math.PI * 2 + 0.4;
+    const r = 42;
+    const pos = {
+      x: Math.cos(theta) * r,
+      y: TREE_HEIGHT * 0.6 + (index % 3) * 9,
+      z: Math.sin(theta) * r,
+    };
+    positions.set(node.id, pos);
+    directionPos.set(node.id, { pos, theta });
+  });
+
+  const fallbackDirection = () => {
+    const first = directions[0];
+    return first ? directionPos.get(first.id) : { pos: trunkAnchor(), theta: 0.4 };
   };
+
+  // 3. Branch (projects) — second-order spread off their owning goal.
+  const branches = byRole("branch");
+  const branchPos = new Map();
+  branches.forEach((node, index) => {
+    const parent = parentByRelation(node, edgesByTarget, ["contains", "alignment"], nodesById);
+    const base = (parent && directionPos.get(parent.id)) || fallbackDirection();
+    const spread = hashUnit(node.id) * Math.PI * 2;
+    const theta = base.theta + (hashUnit(`${node.id}:t`) - 0.5) * 1.1;
+    const r = 26 + hashUnit(`${node.id}:r`) * 10;
+    const pos = {
+      x: base.pos.x + Math.cos(theta) * r,
+      y: base.pos.y + 8 + (hashUnit(`${node.id}:y`) - 0.5) * 8,
+      z: base.pos.z + Math.sin(theta) * r,
+    };
+    positions.set(node.id, pos);
+    branchPos.set(node.id, { pos, theta, spread });
+  });
+
+  // 4. Leaf (tasks/outputs) — scatter at the branch tips, lifted slightly.
+  const leaves = byRole("leaf");
+  const leafPos = new Map();
+  leaves.forEach((node) => {
+    const parent = parentByRelation(
+      node,
+      edgesByTarget,
+      ["contains", "produces", "drives", "supports"],
+      nodesById,
+    );
+    const parentPos =
+      (parent && (branchPos.get(parent.id)?.pos || directionPos.get(parent.id)?.pos || positions.get(parent.id))) ||
+      null;
+    const anchor = parentPos || fallbackDirection().pos;
+    const theta = hashUnit(`${node.id}:lt`) * Math.PI * 2;
+    const r = 12 + hashUnit(`${node.id}:lr`) * 10;
+    const pos = {
+      x: anchor.x + Math.cos(theta) * r,
+      y: anchor.y + 10 + hashUnit(`${node.id}:ly`) * 8,
+      z: anchor.z + Math.sin(theta) * r,
+    };
+    positions.set(node.id, pos);
+    leafPos.set(node.id, { pos });
+  });
+
+  // 5. Fruit (evidence) — hang below the leaf that generated them.
+  const fruits = byRole("fruit");
+  fruits.forEach((node) => {
+    const parent = parentByRelation(
+      node,
+      edgesByTarget,
+      ["generated_by", "produces", "contains", "supports", "review", "derives"],
+      nodesById,
+    );
+    const base =
+      (parent && (leafPos.get(parent.id)?.pos || positions.get(parent.id))) || null;
+    const anchor = base || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
+    const theta = hashUnit(`${node.id}:ft`) * Math.PI * 2;
+    const r = 6 + hashUnit(`${node.id}:fr`) * 8;
+    positions.set(node.id, {
+      x: anchor.x + Math.cos(theta) * r,
+      y: anchor.y - 8 - hashUnit(`${node.id}:fy`) * 8,
+      z: anchor.z + Math.sin(theta) * r,
+    });
+  });
+
+  // 6. Star (skills) — a glowing dome above the canopy. Sectorized by category
+  // then distributed with a fibonacci-style spiral for an even sky.
+  const stars = byRole("star");
+  const categories = [...new Set(stars.map((node) => cleanText(node.metric) || "general"))];
+  const categoryIndex = new Map(categories.map((cat, idx) => [cat, idx]));
+  const catCount = Math.max(1, categories.length);
+  const starTotal = Math.max(1, stars.length);
+  stars.forEach((node, index) => {
+    const cat = cleanText(node.metric) || "general";
+    const sector = (categoryIndex.get(cat) || 0) / catCount;
+    // Map index onto a hemisphere; bias phi toward the top so it reads as a dome.
+    const t = (index + 0.5) / starTotal;
+    const phi = Math.acos(1 - t * 0.92); // 0 (top) .. ~0.9π/2
+    const theta = sector * Math.PI * 2 + index * GOLDEN_ANGLE;
+    const r = STAR_DOME_RADIUS * (0.82 + hashUnit(`${node.id}:sr`) * 0.18);
+    positions.set(node.id, {
+      x: Math.sin(phi) * Math.cos(theta) * r,
+      y: STAR_DOME_CENTER_Y + Math.cos(phi) * r * 0.5,
+      z: Math.sin(phi) * Math.sin(theta) * r,
+    });
+  });
+
+  // 7. Constellation (claims) — float above the centroid of their sources.
+  const constellations = byRole("constellation");
+  constellations.forEach((node) => {
+    const incoming = (edgesByTarget.get(node.id) || []).filter((edge) =>
+      ["supports", "derives"].includes(edge.relation || edge.type),
+    );
+    const anchors = incoming
+      .map((edge) => positions.get(edge.from))
+      .filter(Boolean);
+    let centroid;
+    if (anchors.length) {
+      centroid = anchors.reduce(
+        (acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y, z: acc.z + p.z }),
+        { x: 0, y: 0, z: 0 },
+      );
+      centroid = {
+        x: centroid.x / anchors.length,
+        y: centroid.y / anchors.length,
+        z: centroid.z / anchors.length,
+      };
+    } else {
+      const theta = hashUnit(`${node.id}:ct`) * Math.PI * 2;
+      centroid = { x: Math.cos(theta) * 40, y: TREE_HEIGHT * 0.8, z: Math.sin(theta) * 40 };
+    }
+    positions.set(node.id, {
+      x: centroid.x,
+      y: centroid.y + 18 + hashUnit(`${node.id}:cy`) * 8,
+      z: centroid.z,
+    });
+  });
+
+  // Any tree-role node still unplaced (missing edges) gets pinned to the trunk
+  // at a stable height so nothing snaps to the origin.
+  nodes.forEach((node) => {
+    if (positions.has(node.id) || node.role === SAND_ROLE || !TREE_ROLES.has(node.role)) {
+      return;
+    }
+    positions.set(node.id, {
+      x: (hashUnit(`${node.id}:ux`) - 0.5) * 20,
+      y: TREE_HEIGHT * (0.3 + hashUnit(`${node.id}:uy`) * 0.4),
+      z: (hashUnit(`${node.id}:uz`) - 0.5) * 20,
+    });
+  });
+
+  return positions;
 }
 
 function graph3DData(payload, nodes) {
-  const visibleIds = new Set(nodes.map((node) => node.id));
+  // Sand nodes (sources / daily work / research) leave the force graph and are
+  // rendered as a particle field; keep only tree/star/constellation nodes here.
+  const treeNodes = nodes.filter((node) => node.role !== SAND_ROLE);
+  const visibleIds = new Set(treeNodes.map((node) => node.id));
+  const positions = growthTreeLayout(payload, treeNodes);
   const links = payload.graph.edges
     .filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
     .map((edge, index) => ({
@@ -1373,17 +1612,27 @@ function graph3DData(payload, nodes) {
     degree.set(link.target, (degree.get(link.target) || 0) + 1);
   });
   return {
-    nodes: nodes.map((node, index) => {
-      const seed = graph3DSeedPosition(payload, node, index);
+    nodes: treeNodes.map((node) => {
+      const pos = positions.get(node.id) || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
       const nodeDegree = degree.get(node.id) || 0;
+      const isStar = node.role === "star";
       return {
         ...node,
-        ...seed,
-        group: node.layer,
-        color: nodeColor(node),
+        x: pos.x,
+        y: pos.y,
+        z: pos.z,
+        // Pin coordinates so the force engine never drifts the skeleton.
+        fx: pos.x,
+        fy: pos.y,
+        fz: pos.z,
+        group: node.role || node.layer,
+        color: starTreeColor(node),
+        starEmissive: isStar
+          ? STAR_STATUS_EMISSIVE[cleanText(node.status)] ?? STAR_STATUS_EMISSIVE.locked
+          : 0,
         val: Math.max(
-          4,
-          5 + Math.min(10, nodeDegree) + (node.isPrimary ? 4 : 0) + (node.placeholder ? -1 : 0),
+          3,
+          (isStar ? 3 : 5) + Math.min(9, nodeDegree) + (node.isPrimary ? 4 : 0) + (node.placeholder ? -1 : 0),
         ),
         degree: nodeDegree,
       };
@@ -1391,6 +1640,15 @@ function graph3DData(payload, nodes) {
     links,
   };
 }
+
+// Color for a star-tree node: stars tint by brightness, others by role.
+function starTreeColor(node) {
+  if (node.placeholder || node.implemented === false) {
+    return "#a6b2ad";
+  }
+  return ROLE_COLORS[node.role] || NODE_COLORS[node.type] || "#68716f";
+}
+
 
 function graph3DSelectedLink(link, selectedNodeId) {
   const source = linkEndpointId(link.source);
@@ -1427,12 +1685,14 @@ function createLabelSprite(text, color, selected) {
   ctx.font = `800 ${fontSize}px Inter, system-ui, sans-serif`;
   ctx.textBaseline = "middle";
   drawRoundedRect(ctx, 0, 0, canvas.width, canvas.height, selected ? 24 : 20);
-  ctx.fillStyle = selected ? "rgba(255, 255, 255, .96)" : "rgba(255, 255, 255, .82)";
+  // Dark translucent pill + light text so labels stay below the bloom
+  // threshold on the night sky (white fills would blow out into glare).
+  ctx.fillStyle = selected ? "rgba(15, 22, 40, .92)" : "rgba(12, 17, 32, .74)";
   ctx.fill();
-  ctx.strokeStyle = selected ? color : "rgba(96, 113, 107, .32)";
+  ctx.strokeStyle = selected ? color : "rgba(150, 170, 210, .42)";
   ctx.lineWidth = selected ? 5 : 3;
   ctx.stroke();
-  ctx.fillStyle = selected ? "#17211e" : "#24302c";
+  ctx.fillStyle = selected ? "#eaf1ff" : "#cdd8ee";
   ctx.fillText(labelText, paddingX, canvas.height / 2);
   const texture = new THREE.CanvasTexture(canvas);
   if ("colorSpace" in texture && THREE.SRGBColorSpace) {
@@ -1454,11 +1714,37 @@ function createLabelSprite(text, color, selected) {
 
 function nodeThreeObject(node, selectedNodeId) {
   const selected = selectedNodeId === node.id;
-  const color = node.color || nodeColor(node);
+  const color = node.color || starTreeColor(node);
   const group = new THREE.Group();
+
+  // Stars: small, bright spheres whose emissive tracks skill status. No label
+  // (82 of them) unless selected — the dome reads as a sky, not a tag cloud.
+  if (node.role === "star") {
+    const baseEmissive = Number.isFinite(node.starEmissive) ? node.starEmissive : STAR_STATUS_EMISSIVE.locked;
+    const radius = Math.max(1.6, 1.8 + baseEmissive * 3.4) * (selected ? 1.8 : 1);
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: selected ? Math.max(0.85, baseEmissive + 0.4) : baseEmissive,
+      metalness: 0.0,
+      roughness: 0.5,
+      transparent: true,
+      opacity: 0.55 + baseEmissive * 0.6,
+    });
+    const star = new THREE.Mesh(new THREE.SphereGeometry(radius, 14, 12), material);
+    star.userData.baseEmissive = baseEmissive;
+    star.userData.role = "star";
+    group.add(star);
+    if (selected) {
+      group.add(createLabelSprite(node.label || node.id, "#bcd4ff", true));
+    }
+    group.userData.starMesh = star;
+    return group;
+  }
+
   const radius = Math.min(
-    selected ? 12.5 : 9.4,
-    Math.max(4.2, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 2.32 : 1.88)),
+    selected ? 8.5 : 6.2,
+    Math.max(3.2, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 1.7 : 1.32)),
   );
   const geometry = node.placeholder || node.implemented === false
     ? new THREE.OctahedronGeometry(radius, 1)
@@ -1466,11 +1752,13 @@ function nodeThreeObject(node, selectedNodeId) {
   const material = new THREE.MeshStandardMaterial({
     color,
     emissive: color,
-    emissiveIntensity: selected ? 0.28 : 0.08,
-    metalness: 0.16,
-    roughness: 0.42,
+    // Keep tree nodes below the bloom threshold so they read as distinct
+    // colored beads against the night sky rather than a glare.
+    emissiveIntensity: selected ? 0.34 : 0.14,
+    metalness: 0.12,
+    roughness: 0.62,
     transparent: true,
-    opacity: node.placeholder || node.implemented === false ? 0.56 : 0.95,
+    opacity: node.placeholder || node.implemented === false ? 0.5 : 0.92,
   });
   group.add(new THREE.Mesh(geometry, material));
   if (selected) {
@@ -1505,7 +1793,10 @@ function connectedGraphNode(node) {
 }
 
 function fitGraphCamera(graph, duration = 700) {
-  graph?.zoomToFit?.(duration, 34, connectedGraphNode);
+  // Include every node in the bounds: the star dome's 82 skills are mostly
+  // edge-less, but the deterministic layout keeps them on-screen, so the fit
+  // must frame the whole tree + sky, not just connected nodes.
+  graph?.zoomToFit?.(duration, 28);
 }
 
 function graph3DLinkWidth(link, selectedNodeId) {
@@ -1542,12 +1833,90 @@ function Graph3DLegend({ payload, graphData }) {
   );
 }
 
+// Build the sand particle field (sources / daily work / research). Sand nodes
+// are clustered by theme (tags → goal_refs → kind) and rendered as one
+// THREE.Points cloud — atmosphere, not clickable nodes. Returns {points,
+// clusters} where clusters carry the member items for hover aggregation.
+function buildSandField(payload, sandNodes) {
+  if (!sandNodes.length) {
+    return null;
+  }
+  const themeOf = (node) => {
+    const meta = asObject(node.meta);
+    const tag = asArray(meta.tags).map((t) => cleanText(t)).find(Boolean);
+    if (tag) return `tag:${tag}`;
+    const goalRef = asArray(meta.goal_refs).map((g) => cleanText(g)).find(Boolean);
+    if (goalRef) return `goal:${goalRef}`;
+    const kind = cleanText(node.metric) || cleanText(node.type) || "sand";
+    return `kind:${kind}`;
+  };
+  const clustersByKey = new Map();
+  sandNodes.forEach((node) => {
+    const key = themeOf(node);
+    if (!clustersByKey.has(key)) {
+      clustersByKey.set(key, { key, label: key.split(":").slice(1).join(":") || key, nodes: [] });
+    }
+    clustersByKey.get(key).nodes.push(node);
+  });
+  const clusters = [...clustersByKey.values()];
+  const clusterCount = Math.max(1, clusters.length);
+
+  const positions = [];
+  const colors = [];
+  const basePositions = [];
+  const color = new THREE.Color();
+  clusters.forEach((cluster, ci) => {
+    const angle = (ci / clusterCount) * Math.PI * 2 + 0.7;
+    const ringR = 30 + (ci % 3) * 16;
+    const center = {
+      x: Math.cos(angle) * ringR,
+      y: 26 + hashUnit(`${cluster.key}:cy`) * 8,
+      z: Math.sin(angle) * ringR,
+    };
+    cluster.center = center;
+    color.set(SAND_PALETTE[ci % SAND_PALETTE.length]);
+    cluster.nodes.forEach((node) => {
+      // Gaussian-ish scatter around the cluster center — a thin ground haze.
+      const dx = (hashUnit(`${node.id}:sx`) + hashUnit(`${node.id}:sx2`) - 1) * 18;
+      const dy = (hashUnit(`${node.id}:sy`) + hashUnit(`${node.id}:sy2`) - 1) * 5;
+      const dz = (hashUnit(`${node.id}:sz`) + hashUnit(`${node.id}:sz2`) - 1) * 18;
+      const px = center.x + dx;
+      const py = center.y + dy;
+      const pz = center.z + dz;
+      positions.push(px, py, pz);
+      basePositions.push(px, py, pz);
+      colors.push(color.r, color.g, color.b);
+    });
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
+    size: 3.4,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.userData.basePositions = Float32Array.from(basePositions);
+  points.userData.isSandField = true;
+  return { points, clusters };
+}
+
+const SAND_PALETTE = ["#c4b186", "#a8b48f", "#bfa27a", "#9fb0a6", "#c9b27c", "#b0a394"];
+
 function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessage = "", minHeight = GRAPH_3D_MIN_HEIGHT, compact = false }) {
   const ui = payload.ui;
   const graphRef = useRef(null);
   const wrapRef = useRef(null);
+  const sceneObjsRef = useRef({ points: null, clusters: [], bloom: null, raf: 0 });
   const [size, setSize] = useState({ width: 900, height: minHeight });
+  const [sandHover, setSandHover] = useState(null);
   const graphData = useMemo(() => graph3DData(payload, nodes), [payload, nodes]);
+  const sandNodes = useMemo(() => nodes.filter((node) => node.role === SAND_ROLE), [nodes]);
 
   useLayoutEffect(() => {
     const element = wrapRef.current;
@@ -1611,19 +1980,110 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph) {
-      return;
+      return undefined;
     }
+    // Skeleton is pinned via fx/fy/fz, so neutralize the force engine — the
+    // "Live" feel comes from the breathing rAF loop below, not force drift.
     const charge = graph.d3Force?.("charge");
-    const link = graph.d3Force?.("link");
     if (charge?.strength) {
-      charge.strength(-88);
+      charge.strength(0);
     }
-    if (link?.distance) {
-      link.distance((edge) => (edge.relation === "contains" ? 46 : edge.relation === "watches" ? 82 : 62));
+
+    const scene = graph.scene?.();
+    const store = sceneObjsRef.current;
+
+    // 1. Bloom — make bright stars glow, leave the dim (locked) ones matte.
+    let bloom = null;
+    try {
+      const composer = graph.postProcessingComposer?.();
+      if (composer && !store.bloom) {
+        bloom = new UnrealBloomPass(
+          new THREE.Vector2(size.width || 900, size.height || minHeight),
+          0.62, // strength — subtle halo, not a floodlight
+          0.55, // radius
+          0.62, // threshold — only genuinely bright stars bloom
+        );
+        composer.addPass(bloom);
+        store.bloom = bloom;
+      }
+    } catch (err) {
+      // Bloom is a progressive enhancement; ignore if composer isn't ready.
     }
-    window.setTimeout(() => fitGraphCamera(graph, 700), 220);
-    window.setTimeout(() => fitGraphCamera(graph, 500), 900);
-  }, [graphData]);
+
+    // 2. Sand particle field.
+    if (scene) {
+      if (store.points) {
+        scene.remove(store.points);
+        store.points.geometry?.dispose?.();
+        store.points.material?.dispose?.();
+        store.points = null;
+        store.clusters = [];
+      }
+      const sand = buildSandField(payload, sandNodes);
+      if (sand) {
+        scene.add(sand.points);
+        store.points = sand.points;
+        store.clusters = sand.clusters;
+      }
+    }
+
+    window.setTimeout(() => fitGraphCamera(graph, 700), 240);
+    window.setTimeout(() => fitGraphCamera(graph, 500), 920);
+
+    // 3. Breathing animation loop — single rAF, updates only materials and the
+    // sand position attribute (no geometry rebuilds).
+    let frame = 0;
+    const animate = () => {
+      frame += 1;
+      const t = frame / 60;
+      // Stars: gentle per-star emissive flicker, phase offset by index.
+      scene?.traverse?.((obj) => {
+        if (obj.userData?.role === "star") {
+          const base = obj.userData.baseEmissive || 0;
+          const phase = (obj.id % 17) * 0.37;
+          obj.material.emissiveIntensity = Math.max(0, base + Math.sin(t * 1.6 + phase) * base * 0.35);
+        }
+      });
+      // Sand: slow drift around the base positions.
+      if (store.points) {
+        const attr = store.points.geometry.getAttribute("position");
+        const base = store.points.userData.basePositions;
+        if (attr && base) {
+          for (let i = 0; i < attr.count; i += 1) {
+            const o = i * 3;
+            attr.array[o] = base[o] + Math.sin(t * 0.4 + i * 0.5) * 1.2;
+            attr.array[o + 1] = base[o + 1] + Math.sin(t * 0.32 + i * 0.7) * 0.8;
+            attr.array[o + 2] = base[o + 2] + Math.cos(t * 0.36 + i * 0.6) * 1.2;
+          }
+          attr.needsUpdate = true;
+        }
+      }
+      store.raf = window.requestAnimationFrame(animate);
+    };
+    store.raf = window.requestAnimationFrame(animate);
+
+    return () => {
+      window.cancelAnimationFrame(store.raf);
+      store.raf = 0;
+      if (scene && store.points) {
+        scene.remove(store.points);
+        store.points.geometry?.dispose?.();
+        store.points.material?.dispose?.();
+        store.points = null;
+        store.clusters = [];
+      }
+      if (store.bloom) {
+        try {
+          const composer = graph.postProcessingComposer?.();
+          composer?.removePass?.(store.bloom);
+        } catch (err) {
+          // composer already gone
+        }
+        store.bloom.dispose?.();
+        store.bloom = null;
+      }
+    };
+  }, [graphData, sandNodes, payload, size.width, size.height, minHeight]);
 
   useEffect(() => {
     const target = graphData.nodes.find((node) => node.id === selectedNodeId);
@@ -1637,6 +2097,76 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
       }, 80);
     }
   }, [graphData, selectedNodeId]);
+
+  // Hover aggregation over the sand field — raycast pointer against the
+  // particle cloud and, on a hit, surface the nearest cluster's items.
+  useEffect(() => {
+    const element = wrapRef.current;
+    const graph = graphRef.current;
+    if (!element || !graph) {
+      return undefined;
+    }
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Points = { threshold: 9 };
+    const pointer = new THREE.Vector2();
+    let scheduled = false;
+    const onMove = (event) => {
+      if (scheduled) {
+        return;
+      }
+      scheduled = true;
+      window.requestAnimationFrame(() => {
+        scheduled = false;
+        const store = sceneObjsRef.current;
+        const camera = graph.camera?.();
+        if (!store.points || !camera) {
+          if (sandHover) setSandHover(null);
+          return;
+        }
+        const rect = element.getBoundingClientRect();
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObject(store.points, false);
+        if (!hits.length) {
+          if (sandHover) setSandHover(null);
+          return;
+        }
+        // Find the cluster whose center is nearest the hit point.
+        const point = hits[0].point;
+        let best = null;
+        let bestDist = Infinity;
+        store.clusters.forEach((cluster) => {
+          const c = cluster.center;
+          const d = (c.x - point.x) ** 2 + (c.y - point.y) ** 2 + (c.z - point.z) ** 2;
+          if (d < bestDist) {
+            bestDist = d;
+            best = cluster;
+          }
+        });
+        if (best) {
+          setSandHover({
+            label: best.label,
+            count: best.nodes.length,
+            items: best.nodes.slice(0, 8).map((node) => ({
+              id: node.id,
+              title: node.label || node.id,
+              kind: cleanText(node.metric) || cleanText(node.type),
+            })),
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          });
+        }
+      });
+    };
+    const onLeave = () => setSandHover(null);
+    element.addEventListener("pointermove", onMove);
+    element.addEventListener("pointerleave", onLeave);
+    return () => {
+      element.removeEventListener("pointermove", onMove);
+      element.removeEventListener("pointerleave", onLeave);
+    };
+  }, [graphData, sandNodes, sandHover]);
 
   if (!graphData.nodes.length) {
     return (
@@ -1654,11 +2184,11 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
           width={size.width}
           height={size.height}
           graphData={graphData}
-          backgroundColor="#f8fbfa"
+          backgroundColor="#070b18"
           nodeId="id"
           nodeVal="val"
           nodeLabel={(node) => `${node.label || node.id}\n${layerLabel(ui, node.layer)} · ${translatedNodeType(ui, node.type)}`}
-          nodeColor={(node) => node.color || nodeColor(node)}
+          nodeColor={(node) => node.color || starTreeColor(node)}
           nodeThreeObject={(node) => nodeThreeObject(node, selectedNodeId)}
           nodeThreeObjectExtend={false}
           nodeOpacity={0.92}
@@ -1666,23 +2196,22 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
           linkLabel={(link) => cleanText(link.relation, link.type).replace(/_/g, " ")}
           linkColor={(link) => relationColor(link.relation || link.type)}
           linkWidth={(link) => graph3DLinkWidth(link, selectedNodeId)}
-          linkOpacity={0.28}
+          linkOpacity={0.34}
           linkCurvature={(link) => (link.relation === "watches" ? 0.2 : link.relation === "feedback" ? 0.16 : 0.04)}
           linkDirectionalArrowLength={(link) => (link.placeholder ? 0 : 2.6)}
           linkDirectionalArrowColor={(link) => relationColor(link.relation || link.type)}
           linkDirectionalArrowRelPos={0.74}
-          linkDirectionalParticles={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 2 : ["drives", "supports", "produces", "source_to_candidate"].includes(link.relation) ? 1 : 0)}
+          linkDirectionalParticles={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 2 : link.relation === "supports" ? 1 : 0)}
           linkDirectionalParticleSpeed={0.005}
           linkDirectionalParticleWidth={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 1.85 : 0.95)}
           linkDirectionalParticleColor={(link) => relationColor(link.relation || link.type)}
           showNavInfo={false}
           controlType="orbit"
           rendererConfig={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
-          enableNodeDrag
-          cooldownTicks={100}
-          warmupTicks={24}
-          d3VelocityDecay={0.33}
-          onEngineStop={() => fitGraphCamera(graphRef.current, 450)}
+          enableNodeDrag={false}
+          cooldownTicks={0}
+          warmupTicks={0}
+          d3VelocityDecay={0.9}
           onNodeClick={(node) => {
             onSelectNode(node.id);
             focusGraphCamera(graphRef.current, node);
@@ -1690,6 +2219,22 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
           onBackgroundClick={() => fitGraphCamera(graphRef.current)}
         />
       </div>
+      {sandHover ? (
+        <div
+          className="hd-sand-tooltip"
+          style={{ left: `${sandHover.x + 14}px`, top: `${sandHover.y + 14}px` }}
+        >
+          <strong>{sandHover.label} · {sandHover.count}</strong>
+          <ul>
+            {sandHover.items.map((item) => (
+              <li key={item.id}>
+                <span>{item.title}</span>
+                {item.kind ? <em>{item.kind}</em> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="hd-graph3d-toolbar">
         <button type="button" data-action="graph-fit" onClick={() => fitGraphCamera(graphRef.current)}>
           {label(ui, "dashboard_graph_fit", "Fit")}
@@ -1976,24 +2521,20 @@ function CanvasSummaryPanel({ payload, embed }) {
   );
 }
 
-function primaryDailyAction(payload) {
-  const items = actionQueueItems(payload);
-  return (
-    items.find((item) => item.tone === "warning" && Number(item.count) > 0) ||
-    items.find((item) => Number(item.count) > 0) ||
-    items[0] ||
-    null
-  );
-}
-
 function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }) {
   const ui = payload.ui;
   const [showEmbed, setShowEmbed] = useState(false);
-  const actions = actionQueueItems(payload);
-  const primaryAction = primaryDailyAction(payload);
+  const itemsById = useMemo(() => {
+    const map = new Map();
+    actionQueueItems(payload).forEach((item) => map.set(item.id, item));
+    return map;
+  }, [payload]);
+  const evidenceItem = itemsById.get("evidence");
+  const signalTiles = ["output", "focus", "gap"]
+    .map((id) => itemsById.get(id))
+    .filter(Boolean);
   const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
   const selectedNode = nodesById.get(selectedNodeId) || preferredNode(payload);
-  const focusNodes = payload.graph.focusPath.map((id) => nodesById.get(id)).filter(Boolean);
   const heroNodes = useMemo(() => {
     const scoped = graphExploreNodes(payload, new Set(), selectedNodeId, "context");
     const selected = nodesById.get(selectedNodeId);
@@ -2030,27 +2571,30 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
       </div>
 
       <aside className="hd-graph-hero-panel">
-        {primaryAction ? (
-          <button
-            className={`hd-hero-primary-action ${primaryAction.tone || ""}`}
-            type="button"
-            data-action="navigate"
-            data-dashboard-action={`hero:${primaryAction.id}`}
-            data-target={primaryAction.path}
-            onClick={() => onEmit(navigationEvent(primaryAction.path))}
-          >
-            <span>{label(ui, "dashboard_hero_start_here", "Start here")}</span>
-            <strong>{primaryAction.title}</strong>
-            <small>{primaryAction.why || primaryAction.detail}</small>
-            <em>{primaryAction.count}</em>
-          </button>
-        ) : null}
+        <div className="hd-hero-top">
+          <SkillProgressCard payload={payload} onEmit={onEmit} className="hd-hero-skill" />
+          {evidenceItem ? (
+            <button
+              className={`hd-hero-evidence ${evidenceItem.tone || ""}`}
+              type="button"
+              data-action="navigate"
+              data-dashboard-action={`hero:${evidenceItem.id}`}
+              data-target={evidenceItem.path}
+              onClick={() => onEmit(navigationEvent(evidenceItem.path))}
+            >
+              <span>{evidenceItem.eyebrow}</span>
+              <strong>{evidenceItem.title}</strong>
+              <small>{evidenceItem.detail}</small>
+              <em>{evidenceItem.count}</em>
+            </button>
+          ) : null}
+        </div>
 
         <div className="hd-hero-signal-grid" aria-label={label(ui, "dashboard_today_focus_title", "Today focus")}>
-          {actions.map((item) => (
+          {signalTiles.map((item) => (
             <button
               key={item.id}
-              className={`hd-hero-signal ${item.id === primaryAction?.id ? "active" : ""} ${item.tone || ""}`}
+              className={`hd-hero-signal ${item.tone || ""}`}
               type="button"
               data-action="navigate"
               data-dashboard-action={`hero-signal:${item.id}`}
@@ -2063,22 +2607,7 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
           ))}
         </div>
 
-        <div className="hd-hero-node-card">
-          <span className="hd-eyebrow">{label(ui, "dashboard_graph_selected_node", "Selected node")}</span>
-          <strong>{selectedNode?.label || label(ui, "dashboard_explore_nodes", "Graph nodes")}</strong>
-          <p>{selectedNode?.summary || selectedNode?.metric || selectedNode?.status || label(ui, "dashboard_graph_3d_hint", "Click nodes to inspect the graph.")}</p>
-          {embed?.standaloneUrl && selectedNode?.id ? (
-            <a href={dashboardNodeUrl(embed.standaloneUrl, selectedNode.id)} target="_blank" rel="noreferrer" data-action="open-8502-node" data-node-id={selectedNode.id}>
-              {label(ui, "dashboard_graph_open_selected", "Open selected in 8502")}
-            </a>
-          ) : null}
-        </div>
-
-        <div className="hd-hero-stats">
-          <span><strong>{focusNodes.length}</strong>{label(ui, "dashboard_view_focus_path", "Focus Path")}</span>
-          <span><strong>{asArray(payload.graph.attention.nodes).length}</strong>{label(ui, "dashboard_attention_title", "Attention")}</span>
-          <span><strong>{payload.graph.nodes.length}</strong>{label(ui, "dashboard_explore_nodes", "Graph nodes")}</span>
-        </div>
+        <HealthSummaryPanel payload={payload} className="hd-hero-health" />
       </aside>
 
       {embed?.url ? (
@@ -2567,7 +3096,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
     return <EmptyInspector payload={payload} onEmit={onEmit} onCreateGoal={() => setGoalEditor({ mode: "create" })} readOnly={readOnly} />;
   }
 
-  if (selectedNode.type === "goal" && selectedGoal) {
+  if (selectedNode.role === "direction" && selectedGoal) {
     const display = goalDisplay(selectedGoal, ui);
     return (
       <aside className="hd-inspector">
@@ -2628,7 +3157,7 @@ function InspectorPanel({ payload, selectedNodeId, goalEditor, setGoalEditor, on
           ) : null}
         </div>
       ) : null}
-      {selectedNode.type === "skill" && selectedNode.implemented !== false ? (
+      {selectedNode.role === "star" && selectedNode.implemented !== false ? (
         <button className="hd-ghost full" type="button" data-action="navigate" data-target="pages/2_Gap_Analysis.py" onClick={() => onEmit(navigationEvent("pages/2_Gap_Analysis.py"))}>{label(ui, "quick_gap", "Gap Analysis")}</button>
       ) : null}
     </aside>
@@ -2884,7 +3413,7 @@ function Dashboard({ args }) {
   }
 
   function selectGoal(goalId) {
-    const node = payload.graph.nodes.find((item) => item.type === "goal" && item.recordId === goalId);
+    const node = payload.graph.nodes.find((item) => item.role === "direction" && item.recordId === goalId);
     if (node) {
       setSelectedNodeId(node.id);
     }
@@ -2901,7 +3430,7 @@ function Dashboard({ args }) {
   };
 
   const selectedGoalId = useMemo(() => {
-    const node = payload.graph.nodes.find((item) => item.id === selectedNodeId && item.type === "goal");
+    const node = payload.graph.nodes.find((item) => item.id === selectedNodeId && item.role === "direction");
     return node ? node.recordId : "";
   }, [payload, selectedNodeId]);
 
@@ -3025,7 +3554,7 @@ function Dashboard({ args }) {
       {inlineGoalEditor}
 
       {canvasSurface}
-      <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} showActionQueue={!useDailyGraphHero} />
+      {useDailyGraphHero ? null : <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} showActionQueue={!useDailyGraphHero} />}
         </>
       )}
     </main>

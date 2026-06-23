@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -547,13 +548,56 @@ def refresh_from_crystallized_tasks(
 
     # Index existing evidence by referenced kanban task id, using several
     # signals so a row that came from a task is repaired in place rather than
-    # duplicated: (1) kanban_refs, (2) origin_ref == kanban:<id>, and as a
-    # last resort (3) origin==kanban_task with a matching normalized title.
+    # duplicated: (1) kanban_refs, (2) origin_ref == kanban:<id>, (3)
+    # origin==kanban_task with a matching normalized title, and finally (4)
+    # high-confidence title match for legacy rows with no provenance at all.
     refs_by_task: dict[str, str] = {}
     title_by_task: dict[str, str] = {}  # normalized title -> evidence id
+    legacy_title_rows: list[tuple[str, str]] = []
 
     def _norm_title(text: str) -> str:
         return " ".join(_clean(text).lower().split())
+
+    def _compact_title(text: str) -> str:
+        compact = re.sub(r"[\W_]+", "", _clean(text).casefold())
+        return compact.replace("的", "")
+
+    def _legacy_title_matchable(row: dict) -> bool:
+        if any(
+            _clean(row.get(key))
+            for key in ("origin", "origin_ref", "original_content", "url")
+        ):
+            return False
+        for key in ("kanban_refs", "source_refs", "experience_refs"):
+            if [_clean(r) for r in (row.get(key) or []) if _clean(r)]:
+                return False
+        return True
+
+    def _title_score(a: str, b: str) -> float:
+        if not a or not b or min(len(a), len(b)) < 6:
+            return 0.0
+        if a == b:
+            return 1.0
+        ratio = SequenceMatcher(None, a, b).ratio()
+        if a in b or b in a:
+            coverage = min(len(a), len(b)) / max(len(a), len(b))
+            if coverage >= 0.5:
+                ratio = max(ratio, 0.9)
+        return ratio
+
+    def _legacy_title_match(task_title: str) -> str:
+        compact = _compact_title(task_title)
+        matches = sorted(
+            (
+                (_title_score(row_title, compact), eid)
+                for row_title, eid in legacy_title_rows
+            ),
+            reverse=True,
+        )
+        matches = [(score, eid) for score, eid in matches if score >= 0.86]
+        if len(matches) != 1:
+            return ""
+        return matches[0][1]
 
     for row in entries:
         if not isinstance(row, dict):
@@ -574,6 +618,10 @@ def refresh_from_crystallized_tasks(
             nt = _norm_title(row.get("title"))
             if nt:
                 title_by_task.setdefault(nt, eid)
+        elif _legacy_title_matchable(row):
+            compact_title = _compact_title(row.get("title"))
+            if compact_title:
+                legacy_title_rows.append((compact_title, eid))
 
     try:
         tasks = _all_lookup_tasks(profile)
@@ -613,6 +661,8 @@ def refresh_from_crystallized_tasks(
             existing_eid = title_by_task.get(
                 _norm_title(getattr(task, "title", ""))
             )
+        if not existing_eid:
+            existing_eid = _legacy_title_match(getattr(task, "title", ""))
         proposals.append(
             {
                 "kind": "update" if existing_eid else "new",

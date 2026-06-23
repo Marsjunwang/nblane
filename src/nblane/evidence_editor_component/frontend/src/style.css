@@ -247,6 +247,8 @@ button { cursor: pointer; }
 
 /* Done tasks -> evidence picker */
 .ee-done-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.ee-skill-gap-list { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.ee-done-housekeeping { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .ee-done-row { padding: 5px 4px; align-items: flex-start; border-bottom: 1px solid var(--line); }
 .ee-done-blocked { color: var(--warn); background: var(--warn-soft); border-radius: 8px; border-bottom: 0; }
 .ee-done-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }

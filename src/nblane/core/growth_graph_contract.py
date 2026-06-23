@@ -11,7 +11,7 @@ import yaml
 
 from nblane.core.paths import REPO_ROOT
 
-CONTRACT_SCHEMA_VERSION = "1.0"
+CONTRACT_SCHEMA_VERSION = "1.1"
 GROWTH_GRAPH_DOC = REPO_ROOT / "docs" / "zh" / "product" / "growth-graph.md"
 
 _CONTRACT_BLOCK_RE = re.compile(
@@ -34,26 +34,36 @@ _DEFAULT_CONTRACT: dict[str, Any] = {
         {"id": "feedback", "label": "Feedback", "label_zh": "反馈"},
         {"id": "governance", "label": "Governance", "label_zh": "治理"},
     ],
+    "roles": [
+        {"id": "trunk", "label": "Trunk", "label_zh": "主干"},
+        {"id": "direction", "label": "Direction", "label_zh": "方向"},
+        {"id": "branch", "label": "Branch", "label_zh": "分支"},
+        {"id": "leaf", "label": "Leaf", "label_zh": "叶"},
+        {"id": "fruit", "label": "Fruit", "label_zh": "果"},
+        {"id": "star", "label": "Star", "label_zh": "星辰"},
+        {"id": "constellation", "label": "Constellation", "label_zh": "星座"},
+        {"id": "sand", "label": "Sand", "label_zh": "沙子"},
+    ],
     "node_types": [
-        {"id": "north_star", "layer": "direction", "label": "North Star", "label_zh": "长期方向"},
-        {"id": "goal", "layer": "objective", "label": "Goal", "label_zh": "阶段目标"},
-        {"id": "project_case", "layer": "work_context", "label": "Project Case", "label_zh": "项目案例"},
-        {"id": "task", "layer": "activity", "label": "Task", "label_zh": "任务"},
-        {"id": "daily_work", "layer": "activity", "label": "Daily Work", "label_zh": "日常工作"},
-        {"id": "research", "layer": "activity", "label": "Research", "label_zh": "研究"},
-        {"id": "agent_run", "layer": "activity", "label": "Agent Run", "label_zh": "Agent 运行"},
-        {"id": "source", "layer": "source", "label": "Source", "label_zh": "来源"},
-        {"id": "evidence_candidate", "layer": "evidence", "label": "Evidence Candidate", "label_zh": "证据候选"},
-        {"id": "atomic_evidence", "layer": "evidence", "label": "Atomic Evidence", "label_zh": "原子证据"},
-        {"id": "composite_evidence", "layer": "evidence", "label": "Composite Evidence", "label_zh": "组合证据"},
-        {"id": "claim", "layer": "claim", "label": "Claim", "label_zh": "断言"},
-        {"id": "skill", "layer": "capability", "label": "Skill", "label_zh": "技能"},
-        {"id": "gap", "layer": "capability", "label": "Gap", "label_zh": "缺口"},
-        {"id": "next_action", "layer": "capability", "label": "Next Action", "label_zh": "下一步行动"},
-        {"id": "output", "layer": "output", "label": "Output", "label_zh": "输出"},
-        {"id": "feedback", "layer": "feedback", "label": "Feedback", "label_zh": "反馈"},
-        {"id": "capacity", "layer": "governance", "label": "North Star Capacity", "label_zh": "方向容量"},
-        {"id": "health", "layer": "governance", "label": "Health", "label_zh": "健康"},
+        {"id": "north_star", "layer": "direction", "role": "trunk", "label": "North Star", "label_zh": "长期方向"},
+        {"id": "goal", "layer": "objective", "role": "direction", "label": "Goal", "label_zh": "阶段目标"},
+        {"id": "project_case", "layer": "work_context", "role": "branch", "label": "Project Case", "label_zh": "项目案例"},
+        {"id": "task", "layer": "activity", "role": "leaf", "label": "Task", "label_zh": "任务"},
+        {"id": "daily_work", "layer": "activity", "role": "sand", "label": "Daily Work", "label_zh": "日常工作"},
+        {"id": "research", "layer": "activity", "role": "sand", "label": "Research", "label_zh": "研究"},
+        {"id": "agent_run", "layer": "activity", "role": "", "label": "Agent Run", "label_zh": "Agent 运行"},
+        {"id": "source", "layer": "source", "role": "sand", "label": "Source", "label_zh": "来源"},
+        {"id": "evidence_candidate", "layer": "evidence", "role": "fruit", "label": "Evidence Candidate", "label_zh": "证据候选"},
+        {"id": "atomic_evidence", "layer": "evidence", "role": "fruit", "label": "Atomic Evidence", "label_zh": "原子证据"},
+        {"id": "composite_evidence", "layer": "evidence", "role": "fruit", "label": "Composite Evidence", "label_zh": "组合证据"},
+        {"id": "claim", "layer": "claim", "role": "constellation", "label": "Claim", "label_zh": "断言"},
+        {"id": "skill", "layer": "capability", "role": "star", "label": "Skill", "label_zh": "技能"},
+        {"id": "gap", "layer": "capability", "role": "", "label": "Gap", "label_zh": "缺口"},
+        {"id": "next_action", "layer": "capability", "role": "", "label": "Next Action", "label_zh": "下一步行动"},
+        {"id": "output", "layer": "output", "role": "leaf", "label": "Output", "label_zh": "输出"},
+        {"id": "feedback", "layer": "feedback", "role": "", "label": "Feedback", "label_zh": "反馈"},
+        {"id": "capacity", "layer": "governance", "role": "", "label": "North Star Capacity", "label_zh": "方向容量"},
+        {"id": "health", "layer": "governance", "role": "", "label": "Health", "label_zh": "健康"},
     ],
     "edge_types": [
         {"id": "alignment", "label": "Alignment", "label_zh": "对齐"},
@@ -75,7 +85,12 @@ def _clean_text(value: object) -> str:
     return str(value or "").strip()
 
 
-def _clean_rows(raw: object, *, require_layer: bool = False) -> list[dict[str, str]]:
+def _clean_rows(
+    raw: object,
+    *,
+    require_layer: bool = False,
+    require_role: bool = False,
+) -> list[dict[str, str]]:
     rows = raw if isinstance(raw, list) else []
     out: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -92,6 +107,8 @@ def _clean_rows(raw: object, *, require_layer: bool = False) -> list[dict[str, s
         }
         if require_layer:
             row["layer"] = _clean_text(item.get("layer"))
+        if require_role:
+            row["role"] = _clean_text(item.get("role"))
         out.append(row)
         seen.add(row_id)
     return out
@@ -105,10 +122,18 @@ def _normalize_contract(raw: dict[str, Any] | None) -> dict[str, Any]:
         contract["layers"] = layers
     layer_ids = {row["id"] for row in contract["layers"]}
 
+    roles = _clean_rows(source.get("roles"))
+    if roles:
+        contract["roles"] = roles
+    role_ids = {row["id"] for row in contract["roles"]}
+
     node_types = [
         row
-        for row in _clean_rows(source.get("node_types"), require_layer=True)
+        for row in _clean_rows(
+            source.get("node_types"), require_layer=True, require_role=True
+        )
         if row.get("layer") in layer_ids
+        and (not row.get("role") or row["role"] in role_ids)
     ]
     if node_types:
         contract["node_types"] = node_types
@@ -176,6 +201,26 @@ def growth_graph_node_type_layers(path: Path = GROWTH_GRAPH_DOC) -> dict[str, st
     }
 
 
+def growth_graph_roles(path: Path = GROWTH_GRAPH_DOC) -> tuple[str, ...]:
+    """Return stable Growth Graph visual role ids (star-tree prototypes)."""
+
+    return tuple(row["id"] for row in growth_graph_contract(path).get("roles", []))
+
+
+def growth_graph_node_type_roles(path: Path = GROWTH_GRAPH_DOC) -> dict[str, str]:
+    """Return node type -> visual role mapping.
+
+    Roles are the 8 star-tree visual prototypes (trunk/direction/branch/leaf/
+    fruit/star/constellation/sand). Node types that stay out of the tree map to
+    an empty role.
+    """
+
+    return {
+        row["id"]: row.get("role", "")
+        for row in growth_graph_contract(path)["node_types"]
+    }
+
+
 def growth_graph_payload(path: Path = GROWTH_GRAPH_DOC) -> dict[str, Any]:
     """Return a JSON-safe contract payload for clients."""
 
@@ -189,6 +234,8 @@ __all__ = [
     "growth_graph_edge_types",
     "growth_graph_layers",
     "growth_graph_node_type_layers",
+    "growth_graph_node_type_roles",
     "growth_graph_node_types",
     "growth_graph_payload",
+    "growth_graph_roles",
 ]

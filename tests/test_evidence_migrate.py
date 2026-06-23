@@ -367,6 +367,52 @@ class TestRefreshCrystallized(unittest.TestCase):
         self.assertEqual(result["proposals"][0]["kind"], "update")
         self.assertEqual(result["proposals"][0]["evidence_id"], "ev_z")
 
+    def test_match_legacy_unprovenanced_row_by_high_confidence_title(self) -> None:
+        # Legacy rows with no provenance/raw source can be repaired in place
+        # when the task title is an unambiguous high-confidence match.
+        from nblane.core import io as io_mod
+        from nblane.core import paths as paths_mod
+        from nblane.core import profile_io
+        from nblane.core.kanban_io import render_kanban
+
+        tmp = tempfile.TemporaryDirectory()
+        tmp_path = Path(tmp.name)
+        origs = {m: m.PROFILES_DIR for m in (paths_mod, profile_io, io_mod)}
+        for m in origs:
+            m.PROFILES_DIR = tmp_path
+        try:
+            pdir = tmp_path / "dev"
+            pdir.mkdir(parents=True)
+            task = KanbanTask(
+                title="梳理家庭鞋子抓取摆放的benchmark",
+                id="taskShoe",
+                done=True,
+                completed_on="2026-03-31",
+                crystallized=True,
+            )
+            (pdir / "kanban.md").write_text(
+                render_kanban("dev", {"Done": [task]}),
+                encoding="utf-8",
+            )
+            result = refresh_from_crystallized_tasks(
+                "dev",
+                entries=[
+                    {
+                        "id": "ev_shoe",
+                        "type": "practice",
+                        "title": "家庭鞋子抓取摆放 benchmark 梳理",
+                    }
+                ],
+            )
+        finally:
+            for m, v in origs.items():
+                m.PROFILES_DIR = v
+            tmp.cleanup()
+
+        self.assertEqual(len(result["proposals"]), 1)
+        self.assertEqual(result["proposals"][0]["kind"], "update")
+        self.assertEqual(result["proposals"][0]["evidence_id"], "ev_shoe")
+
     def test_no_title_match_for_non_kanban_origin(self) -> None:
         # A same-title row that is NOT kanban-origin must not absorb the task.
         existing = [
