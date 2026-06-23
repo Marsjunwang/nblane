@@ -5,14 +5,15 @@ page_help_short: 使用说明
 page_help_body: |-
   ### 项目看板使用流程
 
-  1. 为需要跨目标、看板任务、证据、研究资料、里程碑和输出追踪的工作创建内部项目案例。
+  1. 在顶部工具栏点击「新建项目」创建内部项目案例，用来连接目标、看板任务、证据、研究资料、里程碑和输出。
   2. 内部项目默认服务于个人工作流；公开项目页仍由公开输出层管理。
-  3. 关联任务和证据后，首页与证据审阅才能识别项目归属缺口。
+  3. 关联任务和证据后，首页与证据审阅才能识别项目归属缺口；概览数字已折叠进图例那一行。
   4. 项目有阶段节点时添加里程碑；里程碑可以承接看板任务，不必改写任务正文。
-  5. 只有准备进入执行流的事项才用「新建看板任务」。
+  5. 在项目行尾用「+任务」加看板任务，可顺带勾选若干子任务；只为准备进入执行流的事项建任务。
 
-  本页会写入 project-board.yaml，并可能把任务归属同步回 kanban.md。
+  本页会写入 project-board.yaml，并可能把任务归属同步回 kanban.md。证据审阅在专门的「证据审阅」页进行。
 create_project: 新建项目
+create_from_evidence_hint: 已根据 {n} 条证据预填，确认后创建并关联。
 create_task: 新建看板任务
 project_tasks: 项目任务
 project_tasks_empty: 这个项目还没有任务，用上方表单创建第一个。
@@ -92,8 +93,8 @@ metric_unassigned_tasks: 未归属任务
 metric_unassigned_evidence: 未归属证据
 metric_current_goal_projects: 当前目标项目
 unassigned_evidence_hint: '{count} 条已审阅证据尚未关联任何项目。'
-evidence_pool_section: 证据池
-evidence_pool_section_hint: 无需离开项目板即可审阅、关联、弃用和批量编辑证据。
+tl_subtask_add: 添加子任务
+tl_subtask_placeholder: 子任务…
 status_active: 进行中
 status_paused: 暂停
 status_completed: 已完成
@@ -116,7 +117,7 @@ tl_to_evidence: 沉淀为证据
 tl_started: 开始
 tl_completed: 完成
 task_field_outcome: 成果
-task_subtasks: 子任务数
+task_subtasks: 子任务
 tl_review_mode: 评审模式
 tl_review_pick: 选择项目：
 tl_review_window: 窗口
@@ -143,6 +144,7 @@ visibility_private: 私有
 visibility_public: 公开
 cancel: 取消
 save: 保存
+delete_task: 删除
 section_Queue: 待办
 section_Doing: 进行中
 section_Done: 已完成

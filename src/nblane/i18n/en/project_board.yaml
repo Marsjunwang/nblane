@@ -5,14 +5,15 @@ page_help_short: Guide
 page_help_body: |-
   ### Project Board workflow
 
-  1. Create internal project cases for work that connects goals, Kanban tasks, evidence, research sources, milestones, and outputs.
+  1. Click "Create project" in the top toolbar to add an internal project case that connects goals, Kanban tasks, evidence, research sources, milestones, and outputs.
   2. Keep project status private by default; public project pages still come from the public output layer.
-  3. Link tasks and evidence so Dashboard and Evidence Review can show ownership gaps.
+  3. Link tasks and evidence so Dashboard and Evidence Review can show ownership gaps; the overview counts are folded into the legend row.
   4. Add milestones when a project has visible checkpoints. Milestones can own Kanban tasks without changing the task text.
-  5. Use the create-task action only for execution work you intend to track on Kanban.
+  5. Use "+ Task" at the end of a project row for execution work, optionally checking off a few subtasks. Only create tasks you intend to track on Kanban.
 
-  This page writes project-board.yaml and may sync task ownership back to kanban.md.
+  This page writes project-board.yaml and may sync task ownership back to kanban.md. Evidence review lives on the dedicated Evidence Review page.
 create_project: Create project
+create_from_evidence_hint: Prefilled from {n} evidence row(s). Confirm to create and link.
 create_task: Create Kanban task
 project_tasks: Project tasks
 project_tasks_empty: No tasks yet for this project — create the first one with the form above.
@@ -92,8 +93,8 @@ metric_unassigned_tasks: Unassigned tasks
 metric_unassigned_evidence: Unassigned evidence
 metric_current_goal_projects: Current-goal projects
 unassigned_evidence_hint: '{count} reviewed evidence row(s) are not linked to any project.'
-evidence_pool_section: Evidence pool
-evidence_pool_section_hint: Review, link, deprecate, and batch-edit evidence without leaving the Project Board.
+tl_subtask_add: Add subtask
+tl_subtask_placeholder: Subtask…
 status_active: Active
 status_paused: Paused
 status_completed: Completed
@@ -143,6 +144,7 @@ visibility_private: Private
 visibility_public: Public
 cancel: Cancel
 save: Save
+delete_task: Delete
 section_Queue: Queue
 section_Doing: Doing
 section_Done: Done

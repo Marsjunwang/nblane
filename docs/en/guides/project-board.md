@@ -11,21 +11,21 @@ Project Board is the internal project case page. It connects goals, Kanban tasks
 
 ## Reading The First Screen
 
-The compact summary bar combines project status counts and ownership gaps:
+The timeline is the whole page. The top toolbar holds Create project, Review mode, and the date-range filter; the legend row beneath it folds the overview counts in on the right so you see more project content at once:
 
 - Active / Paused / Completed / Archived: project counts from `project-board.yaml`.
 - Unassigned tasks: Kanban tasks without a project owner.
 - Unassigned evidence: reviewed evidence rows without a project owner.
 - Current-goal projects: projects linked to the current goal.
 
-If unassigned tasks or evidence are non-zero, handle those gaps first. Dashboard, Evidence Review, and project reviews become more useful when ownership links are complete.
+If unassigned tasks or evidence are non-zero, handle those gaps first. Dashboard, Evidence Review, and project reviews become more useful when ownership links are complete. Evidence itself is reviewed on the dedicated Evidence Review page — Project Board only links to it.
 
 ## Recommended Workflow
 
-1. Create a project case with status, kind, visibility, and summary.
-2. Link the current goal, Kanban tasks, evidence, research sources, and outputs.
+1. Click "Create project" in the toolbar and fill in title, status, kind, visibility, and summary. The form opens inline above the timeline; on an empty board it is your first step.
+2. Link the current goal, Kanban tasks, evidence, research sources, and outputs from the project's info panel.
 3. Add milestones when the project has visible checkpoints, then attach the relevant tasks to those milestones.
-4. Use the create-task action for execution work that should live on Kanban.
+4. Use "+ Task" at the end of a project row for execution work that should live on Kanban, optionally adding a few subtasks.
 5. Check the timeline to see whether the project, tasks, and milestones sit in the right time window.
 6. Return to Dashboard or Evidence Review to check for remaining ownership gaps.
 
@@ -73,6 +73,7 @@ Milestones are visible checkpoints, such as "source review complete," "first dem
 - Milestones can own tasks, evidence, research sources, and outputs.
 - A Kanban task can belong to a project and optionally to a specific milestone.
 - Creating a task writes to `kanban.md` and syncs project ownership back into Project Board.
+- A task can carry subtasks: add or check them off in the task form when you create or edit it. They render as a checklist in the task detail.
 - Moving a task to Doing records a start date; moving it to Done records a completion date.
 
 ## Write Boundaries

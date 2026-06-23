@@ -10,6 +10,7 @@ export function makeEvent(action, payload = {}) {
 
 export const saveBasicsEvent = (id, fields) => makeEvent("save_basics", { id, fields });
 export const archiveProjectEvent = (id) => makeEvent("archive_project", { id });
+export const createProjectEvent = (fields) => makeEvent("create_project", { fields });
 
 export const addTaskEvent = (id, fields) => makeEvent("add_task", { id, fields });
 export const saveTaskEvent = (id, taskId, fields) =>

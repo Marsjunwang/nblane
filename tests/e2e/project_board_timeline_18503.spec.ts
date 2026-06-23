@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-// Closed-loop check that the Project Board homepage embeds the shared evidence
-// editor host (Problem 2.3). The section must be reachable even on the normal
-// timeline-component path, so this drives the live 18503 UI, expands the
-// "Evidence pool" section, and asserts the React editor iframe renders.
+// Closed-loop check for the reworked Project Board homepage:
+//  - the evidence pool editor is REMOVED (it lives on Evidence Review now);
+//  - the timeline React component renders;
+//  - "Create project" is folded into the component toolbar (not a Streamlit
+//    expander), and the overview counts sit on the legend row.
+// Drives the live 18503 UI on the `dev` profile.
 
 const baseUrl =
   process.env.NBLANE_STREAMLIT_BASE_URL || "http://127.0.0.1:18503";
@@ -27,13 +29,13 @@ async function ensureDevProfile(page) {
   await page.waitForTimeout(2500);
 }
 
-async function findEditorFrame(page) {
+async function findTimelineFrame(page) {
   const deadline = Date.now() + 25_000;
   let frame = null;
   while (Date.now() < deadline && !frame) {
     for (const f of page.frames()) {
       const hit = await f
-        .locator(".ee-toolbar, .ee-root")
+        .locator(".tl-root, .tl-toolbar")
         .count()
         .catch(() => 0);
       if (hit > 0) {
@@ -46,7 +48,7 @@ async function findEditorFrame(page) {
   return frame;
 }
 
-test("Project Board homepage embeds the evidence editor host", async ({ page }, testInfo) => {
+test("Project Board homepage shows the timeline with in-component create", async ({ page }, testInfo) => {
   let response;
   try {
     response = await page.goto(`${baseUrl}/Project_Board`, {
@@ -63,21 +65,28 @@ test("Project Board homepage embeds the evidence editor host", async ({ page }, 
   await page.waitForTimeout(3000);
   await ensureDevProfile(page);
 
-  // The "Evidence pool" expander should be present (zh: 证据池).
-  const expander = page.getByText(/Evidence pool|证据池/).first();
-  await expect(expander).toBeVisible({ timeout: 15_000 });
-  await expander.click();
-  await page.waitForTimeout(2000);
+  // The embedded evidence pool expander must be GONE from this page.
+  await expect(page.getByText(/Evidence pool|证据池/)).toHaveCount(0);
 
-  // The shared editor renders inside a Streamlit component iframe.
-  const frame = await findEditorFrame(page);
+  // The timeline React component iframe should render.
+  const frame = await findTimelineFrame(page);
   if (!frame) {
     const body = await page.screenshot({ fullPage: true });
-    await testInfo.attach("no-editor-frame", { body, contentType: "image/png" });
+    await testInfo.attach("no-timeline-frame", { body, contentType: "image/png" });
   }
-  expect(frame, "embedded evidence editor iframe should be present").not.toBeNull();
-  await expect(frame.locator(".ee-toolbar")).toBeVisible({ timeout: 10_000 });
+  expect(frame, "timeline component iframe should be present").not.toBeNull();
+  await expect(frame.locator(".tl-toolbar")).toBeVisible({ timeout: 10_000 });
+
+  // Create project is a toolbar button inside the component.
+  const createBtn = frame
+    .locator("button", { hasText: /Create project|新建项目/ })
+    .first();
+  await expect(createBtn).toBeVisible({ timeout: 10_000 });
+
+  // Clicking it opens the inline create form (title field shows up).
+  await createBtn.click();
+  await expect(frame.locator(".tl-create-form")).toBeVisible({ timeout: 8_000 });
 
   const body = await page.screenshot({ fullPage: true });
-  await testInfo.attach("project-board-evidence", { body, contentType: "image/png" });
+  await testInfo.attach("project-board-timeline", { body, contentType: "image/png" });
 });

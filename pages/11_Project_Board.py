@@ -21,6 +21,7 @@ from nblane.core.io import (
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SECTIONS,
+    KanbanSubtask,
     KanbanTask,
     parse_kanban,
     profile_dir,
@@ -61,10 +62,6 @@ from nblane.project_board_component import (
 from nblane.project_timeline_component import (
     project_timeline_component_available,
     st_project_timeline,
-)
-from nblane.evidence_editor_host import (
-    EvidenceEditorHost,
-    evidence_editor_host_available,
 )
 from nblane.core.kanban_archive import _archive_tasks
 from nblane.web_auth import require_login
@@ -644,7 +641,8 @@ def _summary_chip(label: str, value: int, *, tone: str = "default") -> str:
     )
 
 
-def _summary_metrics(board: ProjectBoard) -> None:
+def _summary_counts(board: ProjectBoard) -> dict[str, int]:
+    """Compute the project-board overview counts (status + ownership gaps)."""
     counts = {status: 0 for status in PROJECT_STATUSES}
     for case in board.project_cases:
         counts[case.status] = counts.get(case.status, 0) + 1
@@ -666,6 +664,19 @@ def _summary_metrics(board: ProjectBoard) -> None:
             "project_refs"
         ):
             unassigned_evidence += 1
+    return {
+        **{status: counts.get(status, 0) for status in PROJECT_STATUSES},
+        "unassigned_tasks": unassigned_tasks,
+        "unassigned_evidence": unassigned_evidence,
+        "current_goal_projects": goal_count,
+    }
+
+
+def _summary_metrics(board: ProjectBoard) -> None:
+    counts = _summary_counts(board)
+    unassigned_tasks = counts["unassigned_tasks"]
+    unassigned_evidence = counts["unassigned_evidence"]
+    goal_count = counts["current_goal_projects"]
 
     status_html = "".join(
         _summary_chip(ui[f"status_{status}"], counts.get(status, 0))
@@ -1042,6 +1053,28 @@ def _apply_milestone_delete_event(case, milestone_id: str) -> None:
     _sync_latest_and_refresh(latest_board, latest_case.id)
 
 
+def _subtasks_from_fields(fields: dict) -> list[KanbanSubtask]:
+    """Build KanbanSubtask list from a task event's `subtasks` payload.
+
+    Accepts either a list of {title, done} dicts or plain title strings; blanks
+    are dropped so an empty trailing input row never persists.
+    """
+    raw = fields.get("subtasks") if isinstance(fields, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[KanbanSubtask] = []
+    for item in raw:
+        if isinstance(item, dict):
+            title = str(item.get("title", "") or "").strip()
+            done = bool(item.get("done"))
+        else:
+            title = str(item or "").strip()
+            done = False
+        if title:
+            out.append(KanbanSubtask(title=title, done=done))
+    return out
+
+
 def _apply_task_add_event(case, fields: dict) -> None:
     title = str(fields.get("title", "") or "").strip()
     if not title:
@@ -1061,6 +1094,7 @@ def _apply_task_add_event(case, fields: dict) -> None:
         project_id=case.id,
         milestone_id=str(fields.get("milestone_id", "") or ""),
         context=str(fields.get("context", "") or "").strip(),
+        subtasks=_subtasks_from_fields(fields),
     )
     if section == KANBAN_DONE:
         task = replace(task, started_on=anchor, completed_on=anchor, done=True)
@@ -1089,6 +1123,7 @@ def _apply_task_save_event(case, task_id: str, fields: dict) -> None:
                     milestone_id=str(
                         fields.get("milestone_id", task.milestone_id) or ""
                     ),
+                    subtasks=_subtasks_from_fields(fields),
                 )
                 _save_kanban_and_refresh(sections, ui["task_row_saved"])
                 return
@@ -1141,6 +1176,36 @@ def _timeline_range_pref() -> dict[str, str]:
         "start": str(rng.get("start", "") or ""),
         "end": str(rng.get("end", "") or ""),
     }
+
+
+def _apply_create_project_event(fields: dict) -> None:
+    """Create a new project case from a component create_project event.
+
+    Mirrors the old Streamlit create form: title required, status/kind/
+    visibility fall back to defaults, optional goal refs and evidence prefill.
+    Clears any one-shot create-from-evidence prefill and selects the new case.
+    """
+    fields = fields if isinstance(fields, dict) else {}
+    title = str(fields.get("title", "") or "").strip()
+    if not title:
+        st.error(ui["title_required"])
+        return
+    prefill = st.session_state.get("project_board_create_prefill") or {}
+    prefill_evidence = list(prefill.get("evidence_ids") or [])
+    case = _sync_new_case_and_refresh(
+        title=title,
+        case_id=str(fields.get("id", "") or "").strip(),
+        status=str(fields.get("status") or PROJECT_STATUSES[0]),
+        kind=str(fields.get("kind") or PROJECT_KINDS[0]),
+        visibility=str(fields.get("visibility") or PROJECT_VISIBILITIES[0]),
+        summary=str(fields.get("summary", "") or "").strip(),
+        goal_refs=_clean_list(fields.get("goal_refs")),
+        evidence_refs=prefill_evidence,
+    )
+    if case is None:
+        return
+    st.session_state.pop("project_board_create_prefill", None)
+    st.session_state[_state_key("selected_project_active")] = case.id
 
 
 def _apply_set_range_event(payload: dict) -> None:
@@ -1197,6 +1262,11 @@ def _handle_project_event(event: dict | None, case=None) -> bool:
     # set_range carries no project id -- persist the timeline range preference.
     if action == "set_range":
         _apply_set_range_event(payload)
+        return True
+
+    # create_project carries no existing project id -- create a new case.
+    if action == "create_project":
+        _apply_create_project_event(fields)
         return True
 
     # Resolve the target case from the payload when not passed in explicitly.
@@ -1289,6 +1359,11 @@ def _timeline_labels() -> dict[str, str]:
         "tl_legend_title", "tl_legend_doing", "tl_legend_done",
         "tl_legend_archived", "tl_legend_milestone", "tl_legend_today",
         "section_Queue", "section_Doing", "section_Done", "section_Someday / Maybe",
+        "create_project", "field_goal_refs_help", "id_help",
+        "create_from_evidence_hint", "empty_board",
+        "task_subtasks", "tl_subtask_add", "tl_subtask_placeholder",
+        "metric_unassigned_tasks", "metric_unassigned_evidence",
+        "metric_current_goal_projects",
     )
     return {key: ui[key] for key in keys if key in ui}
 
@@ -1312,6 +1387,25 @@ def _project_timeline_entry(case, live, archived, task_index) -> dict:
     }
 
 
+def _create_form_payload(board: ProjectBoard) -> dict:
+    """Options + one-shot prefill for the component's inline create-project form."""
+    prefill = st.session_state.get("project_board_create_prefill") or {}
+    return {
+        "statuses": list(PROJECT_STATUSES),
+        "kinds": list(PROJECT_KINDS),
+        "visibilities": list(PROJECT_VISIBILITIES),
+        "goal_options": _candidate_rows(_goal_options()),
+        "prefill": {
+            "title": str(prefill.get("title", "") or ""),
+            "id": str(prefill.get("id", "") or ""),
+            "kind": str(prefill.get("kind", "") or ""),
+            "visibility": str(prefill.get("visibility", "") or ""),
+            "summary": str(prefill.get("summary", "") or ""),
+            "evidence_count": len(list(prefill.get("evidence_ids") or [])),
+        },
+    }
+
+
 def _multi_timeline_payload(board: ProjectBoard, *, show_archived: bool) -> dict:
     """Payload for the multi-project timeline: one entry per (filtered) project."""
     live = _live_section_tasks()
@@ -1326,6 +1420,8 @@ def _multi_timeline_payload(board: ProjectBoard, *, show_archived: bool) -> dict
         "projects": projects,
         "range": _timeline_range_pref(),
         "labels": _timeline_labels(),
+        "summary": _summary_counts(board),
+        "create_form": _create_form_payload(board),
         "settings": {
             "lang": llm_client.ui_language(),
             "today": date.today().isoformat(),
@@ -1904,26 +2000,6 @@ def _render_project_detail(board: ProjectBoard, case) -> None:
         _milestones_tasks_fragment(case.id)
 
 
-# A module-level host so its session-state lives across reruns; the
-# project_board prefix keeps its keys from colliding with Evidence Review.
-_evidence_pool_host = EvidenceEditorHost(selected, key_prefix="project_board")
-
-
-@st.fragment
-def _render_evidence_pool_section() -> None:
-    """Embed the shared evidence editor on the Project Board homepage.
-
-    Fragment-scoped so an evidence event reruns only this region, leaving the
-    timeline and summary metrics untouched. No-op when the React bundle is
-    absent (the dedicated Evidence Review page remains the fallback).
-    """
-    if not evidence_editor_host_available():
-        return
-    with st.expander(ui.get("evidence_pool_section", "Evidence pool"), expanded=False):
-        st.caption(ui.get("evidence_pool_section_hint", ""))
-        _evidence_pool_host.render()
-
-
 def main() -> None:
     board = load_project_board(selected)
     head_l, head_goal = st.columns([5, 2], gap="medium", vertical_alignment="top")
@@ -1938,25 +2014,23 @@ def main() -> None:
         docs_path=f"docs/{llm_client.ui_language()}/guides/project-board.md",
     )
 
+    # Component path: the React timeline owns the overview chips, the inline
+    # create-project form, and the per-project rows in one compact surface, so
+    # it renders even with no cases yet (the create form is the first step).
+    if project_timeline_component_available():
+        _render_multi_timeline(board)
+        return
+
+    # Fallback: legacy summary strip + create form + list/detail layout when the
+    # component bundle is absent.
     _summary_metrics(board)
     st.divider()
     _render_create_project(board)
-
-    # Evidence pool, embedded via the shared host. Placed before the timeline
-    # early-return so it stays reachable in the normal (component) path and even
-    # when there are no project cases yet — distilling Done work into evidence is
-    # often the first step before a project case exists.
-    _render_evidence_pool_section()
 
     if not board.project_cases:
         st.info(ui["empty_board"])
         return
 
-    if project_timeline_component_available():
-        _render_multi_timeline(board)
-        return
-
-    # Fallback: legacy list + detail layout when the component bundle is absent.
     left, right = st.columns([2, 3], gap="large")
     with left:
         _render_project_board(board)

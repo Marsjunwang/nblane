@@ -23,6 +23,7 @@ import {
   openEvidenceForTaskEvent,
   saveBasicsEvent,
   archiveProjectEvent,
+  createProjectEvent,
   suggestRefsEvent,
   setRangeEvent,
 } from "./events.js";
@@ -367,6 +368,45 @@ function BasicsForm({ project, labels, emit, onClose }) {
   );
 }
 
+/* ---- subtask checklist editor (task add/edit) ---- */
+function SubtaskEditor({ labels, value, onChange }) {
+  const items = asArray(value);
+  const update = (i, patch) =>
+    onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
+  const add = () => onChange([...items, { title: "", done: false }]);
+  return (
+    <div className="tl-field">
+      <label>{label(labels, "task_subtasks", "Subtasks")}</label>
+      <div className="tl-subtask-edit">
+        {items.map((it, i) => (
+          <div className="tl-subtask-edit-row" key={i}>
+            <button
+              type="button"
+              className={`tl-subtask-check${it.done ? " is-done" : ""}`}
+              onClick={() => update(i, { done: !it.done })}
+              title={it.done ? "✓" : "○"}
+            >
+              {it.done ? "☑" : "☐"}
+            </button>
+            <input
+              value={it.title || ""}
+              placeholder={label(labels, "tl_subtask_placeholder", "Subtask…")}
+              onChange={(e) => update(i, { title: e.target.value })}
+            />
+            <button type="button" className="tl-subtask-del" onClick={() => remove(i)}>
+              ✕
+            </button>
+          </div>
+        ))}
+        <button type="button" className="tl-btn tl-btn-sm tl-subtask-add" onClick={add}>
+          + {label(labels, "tl_subtask_add", "Add subtask")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---- inline add/edit form (task / milestone) ---- */
 function EditForm({ kind, initial, labels, settings, onSubmit, onCancel, onDelete }) {
   const today = cleanText(settings.today);
@@ -376,6 +416,7 @@ function EditForm({ kind, initial, labels, settings, onSubmit, onCancel, onDelet
   const [form, setForm] = useState(() => {
     const f = { ...initial };
     if (kind === "task" && !cleanText(f.date)) f.date = today;
+    if (kind === "task") f.subtasks = asArray(f.subtasks).map((s) => ({ ...s }));
     return f;
   });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -426,10 +467,17 @@ function EditForm({ kind, initial, labels, settings, onSubmit, onCancel, onDelet
         </div>
       )}
       {isTask ? (
-        <div className="tl-field">
-          <label>{label(labels, "task_field_context", "Context")}</label>
-          <textarea value={form.context || ""} onChange={(e) => set("context", e.target.value)} />
-        </div>
+        <>
+          <div className="tl-field">
+            <label>{label(labels, "task_field_context", "Context")}</label>
+            <textarea value={form.context || ""} onChange={(e) => set("context", e.target.value)} />
+          </div>
+          <SubtaskEditor
+            labels={labels}
+            value={form.subtasks}
+            onChange={(next) => set("subtasks", next)}
+          />
+        </>
       ) : (
         <>
           <div className="tl-field">
@@ -830,6 +878,146 @@ function ReviewList({ tasks, cursor, windowSize, labels, projects, onPick }) {
   );
 }
 
+/* ---- compact summary chips folded into the legend row ---- */
+function SummaryChips({ summary, labels }) {
+  if (!summary || typeof summary !== "object") return null;
+  const statusItems = STATUS_OPTS.map((s) => ({
+    key: s,
+    text: label(labels, `status_${s}`, s),
+    value: Number(summary[s] || 0),
+    tone: "",
+  }));
+  const gapItems = [
+    {
+      key: "unassigned_tasks",
+      text: label(labels, "metric_unassigned_tasks", "Unassigned tasks"),
+      value: Number(summary.unassigned_tasks || 0),
+      tone: summary.unassigned_tasks ? "risk" : "quiet",
+    },
+    {
+      key: "unassigned_evidence",
+      text: label(labels, "metric_unassigned_evidence", "Unassigned evidence"),
+      value: Number(summary.unassigned_evidence || 0),
+      tone: summary.unassigned_evidence ? "risk" : "quiet",
+    },
+    {
+      key: "current_goal_projects",
+      text: label(labels, "metric_current_goal_projects", "Current-goal projects"),
+      value: Number(summary.current_goal_projects || 0),
+      tone: "goal",
+    },
+  ];
+  const chip = (item) => (
+    <span className={`tl-sum-chip${item.tone ? ` tl-sum-chip-${item.tone}` : ""}`} key={item.key}>
+      <span className="tl-sum-label">{item.text}</span>
+      <strong>{item.value}</strong>
+    </span>
+  );
+  return (
+    <span className="tl-sum">
+      <span className="tl-sum-group">{statusItems.map(chip)}</span>
+      <span className="tl-sum-group">{gapItems.map(chip)}</span>
+    </span>
+  );
+}
+
+/* ---- inline create-project form (opened from the toolbar) ---- */
+function CreateProjectForm({ createForm, labels, emit, onClose }) {
+  const opts = createForm || {};
+  const prefill = opts.prefill || {};
+  const statuses = asArray(opts.statuses).length ? asArray(opts.statuses) : STATUS_OPTS;
+  const kinds = asArray(opts.kinds).length ? asArray(opts.kinds) : KIND_OPTS;
+  const visibilities = asArray(opts.visibilities).length ? asArray(opts.visibilities) : VIS_OPTS;
+  const [form, setForm] = useState(() => ({
+    title: cleanText(prefill.title),
+    id: cleanText(prefill.id),
+    status: statuses[0],
+    kind: kinds.includes(prefill.kind) ? prefill.kind : kinds[0],
+    visibility: visibilities.includes(prefill.visibility) ? prefill.visibility : visibilities[0],
+    summary: cleanText(prefill.summary),
+    goal_refs: [],
+  }));
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const evidenceCount = Number(prefill.evidence_count || 0);
+  return (
+    <div className="tl-detail tl-create-form">
+      <div className="tl-detail-head">
+        <span className="tl-detail-title">{label(labels, "create_project", "Create project")}</span>
+        <button className="tl-btn tl-btn-ghost" onClick={onClose}>✕</button>
+      </div>
+      {evidenceCount > 0 && (
+        <div className="tl-create-hint">
+          {label(
+            labels,
+            "create_from_evidence_hint",
+            "Prefilled from {n} evidence row(s). Confirm to create and link."
+          ).replace("{n}", evidenceCount)}
+        </div>
+      )}
+      <div className="tl-row2">
+        <div className="tl-field">
+          <label>{label(labels, "field_title", "Title")}</label>
+          <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus />
+        </div>
+        <div className="tl-field">
+          <label>{label(labels, "field_id", "ID")}</label>
+          <input
+            value={form.id}
+            placeholder={label(labels, "id_help", "")}
+            onChange={(e) => set("id", e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="tl-row3">
+        <div className="tl-field">
+          <label>{label(labels, "field_status", "Status")}</label>
+          <select value={form.status} onChange={(e) => set("status", e.target.value)}>
+            {statuses.map((s) => (
+              <option key={s} value={s}>{label(labels, `status_${s}`, s)}</option>
+            ))}
+          </select>
+        </div>
+        <div className="tl-field">
+          <label>{label(labels, "field_kind", "Kind")}</label>
+          <select value={form.kind} onChange={(e) => set("kind", e.target.value)}>
+            {kinds.map((s) => (
+              <option key={s} value={s}>{label(labels, `kind_${s}`, s)}</option>
+            ))}
+          </select>
+        </div>
+        <div className="tl-field">
+          <label>{label(labels, "field_visibility", "Visibility")}</label>
+          <select value={form.visibility} onChange={(e) => set("visibility", e.target.value)}>
+            {visibilities.map((s) => (
+              <option key={s} value={s}>{label(labels, `visibility_${s}`, s)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="tl-field">
+        <label>{label(labels, "field_summary", "Summary")}</label>
+        <textarea value={form.summary} onChange={(e) => set("summary", e.target.value)} />
+      </div>
+      <ChipSelect
+        labelText={label(labels, "field_goal_refs", "Goals")}
+        options={opts.goal_options}
+        selected={form.goal_refs}
+        onChange={(next) => set("goal_refs", next)}
+      />
+      <div className="tl-detail-actions">
+        <button className="tl-btn" onClick={onClose}>{label(labels, "cancel", "Cancel")}</button>
+        <button
+          className="tl-btn tl-btn-primary"
+          onClick={() => {
+            if (!cleanText(form.title).trim()) return;
+            emit(createProjectEvent(form));
+          }}
+        >{label(labels, "create_project", "Create project")}</button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [args, setArgs] = useState({ payload: {} });
   useEffect(() => {
@@ -858,6 +1046,8 @@ function App() {
   const lang = cleanText(settings.lang, "en");
   const todayMs = parseISO(settings.today) ?? Date.now();
   const range = payload.range || {};
+  const summary = payload.summary || null;
+  const createForm = payload.create_form || null;
 
   const wrapRef = useRef(null);
   const mainRef = useRef(null); // timeline area; native wheel listener attaches here
@@ -868,6 +1058,14 @@ function App() {
   const [panel, setPanel] = useState(null); // {projectId, mode, kind?, initial?, top}
   const [menu, setMenu] = useState(null); // {x,y,projectId,kind,id}
   const [tip, setTip] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  // Auto-open the create form when Python prefilled it (create-from-evidence
+  // flow) or when there are no projects yet -- creating one is the first step.
+  const createEvidenceCount = Number(createForm?.prefill?.evidence_count || 0);
+  useEffect(() => {
+    if (createEvidenceCount > 0) setShowCreate(true);
+  }, [createEvidenceCount]);
 
   // Review mode: interleave selected projects' tasks in time order, color by
   // project, step with up/down, page with left/right over an N-task window.
@@ -1037,16 +1235,18 @@ function App() {
 
   const projectById = (id) => projects.find((p) => p.case?.id === id);
 
-  if (!projects.length) {
-    return <div className="tl-root"><div className="tl-hint" style={{ padding: 12 }}>{label(labels, "tl_select_hint", "…")}</div></div>;
-  }
-
   return (
     <div className="tl-root" ref={wrapRef} onClick={() => setMenu(null)}>
       {/* range toolbar */}
       <div className="tl-toolbar">
         <span className="tl-hint">{label(labels, "tl_zoom_hint", "Scroll to zoom · double-click to reset")}</span>
         <div className="tl-range">
+          <button
+            className={`tl-btn tl-btn-sm tl-btn-primary${showCreate ? " is-open" : ""}`}
+            onClick={() => setShowCreate((s) => !s)}
+          >
+            + {label(labels, "create_project", "Create project")}
+          </button>
           <button
             className={`tl-btn tl-btn-sm${reviewMode ? " tl-btn-primary" : ""}`}
             onClick={() => { setReviewMode((m) => !m); setReviewCursor(0); }}
@@ -1073,7 +1273,24 @@ function App() {
         </div>
       </div>
 
-      <TimelineLegend labels={labels} />
+      {/* legend + folded summary chips share one compact row */}
+      <div className="tl-legend-row">
+        <TimelineLegend labels={labels} />
+        <SummaryChips summary={summary} labels={labels} />
+      </div>
+
+      {showCreate && (
+        <CreateProjectForm
+          createForm={createForm}
+          labels={labels}
+          emit={emit}
+          onClose={() => setShowCreate(false)}
+        />
+      )}
+
+      {!projects.length && (
+        <div className="tl-empty-hint">{label(labels, "empty_board", "No internal projects yet.")}</div>
+      )}
 
       {reviewMode && (
         <div className="tl-review-bar">
@@ -1103,6 +1320,7 @@ function App() {
         </div>
       )}
 
+      {projects.length > 0 && (
       <div className={`tl-layout${reviewMode ? " is-review" : ""}`}>
         <div className="tl-main" ref={mainRef} onDoubleClick={onDoubleClick}>
           {!reviewMode && (
@@ -1182,6 +1400,7 @@ function App() {
           </aside>
         )}
       </div>
+      )}
 
       {tip && <div className="tl-tooltip" style={{ left: tip.x, top: tip.y }}>{tip.text}</div>}
 

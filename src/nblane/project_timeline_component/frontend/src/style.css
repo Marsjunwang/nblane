@@ -336,6 +336,60 @@ svg.tl-svg { display: block; width: 100%; height: auto; touch-action: none; }
   font-size: 11px; max-width: 240px; box-shadow: var(--shadow);
 }
 
+/* legend + folded summary chips on one compact row */
+.tl-legend-row {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 6px 14px; padding: 2px 4px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--soft);
+}
+.tl-legend-row .tl-legend { padding: 2px 0; }
+.tl-sum {
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px;
+  margin-left: auto;
+}
+.tl-sum-group { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.tl-sum-group + .tl-sum-group { border-left: 1px solid var(--line); padding-left: 6px; }
+.tl-sum-chip {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 999px;
+  padding: 1px 8px; color: var(--ink);
+}
+.tl-sum-chip-quiet { background: var(--paper); }
+.tl-sum-chip-risk { background: #fff7ed; border-color: #fed7aa; }
+.tl-sum-chip-goal { background: var(--accent-soft); border-color: #bfd0fb; }
+.tl-sum-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.tl-sum-chip strong { font-size: 12px; line-height: 1; }
+
+/* inline create-project form */
+.tl-create-form { max-width: 720px; }
+.tl-create-hint {
+  font-size: 12px; color: var(--accent-strong);
+  background: var(--accent-soft); border-radius: 7px; padding: 5px 8px;
+}
+
+/* empty board hint */
+.tl-empty-hint { color: var(--muted); font-size: 13px; padding: 14px 6px; }
+
+/* subtask checklist editor */
+.tl-subtask-edit { display: grid; gap: 4px; }
+.tl-subtask-edit-row { display: flex; align-items: center; gap: 6px; }
+.tl-subtask-check {
+  flex: 0 0 auto; border: 0; background: transparent; color: var(--accent);
+  font-size: 14px; line-height: 1; padding: 2px;
+}
+.tl-subtask-check.is-done { color: var(--ok); }
+.tl-subtask-edit-row input {
+  flex: 1 1 auto; min-width: 0; padding: 4px 7px;
+  border: 1px solid var(--line); border-radius: 6px; outline: 0;
+  background: var(--paper); color: var(--ink); font-size: 12px;
+}
+.tl-subtask-del {
+  flex: 0 0 auto; border: 0; background: transparent; color: var(--muted);
+  font-size: 11px; padding: 2px 4px;
+}
+.tl-subtask-del:hover { color: var(--danger); }
+.tl-subtask-add { justify-self: start; margin-top: 2px; }
+
 @media (max-width: 920px) {
   .tl-layout,
   .tl-layout.is-review {
