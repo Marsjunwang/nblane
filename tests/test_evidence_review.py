@@ -305,6 +305,30 @@ class TestEvidenceReview(unittest.TestCase):
             any(row["id"] == "ev_old" for row in review["evidence_rows"])
         )
 
+    def test_evidence_skill_suggestions_rank_and_exclude_linked(self) -> None:
+        """Rule recall suggests skills by text overlap, excluding linked ones."""
+        from nblane.core.evidence_review import (
+            build_evidence_editor_payload,
+            evidence_skill_suggestions,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_s:
+            profile = self._profile(Path(tmp_s))
+            sugg = evidence_skill_suggestions(profile)
+            payload = build_evidence_editor_payload(profile)
+
+        # ev_medium is linked to experiment_design -> excluded from its own list.
+        med = sugg.get("ev_medium") or []
+        self.assertNotIn("experiment_design", [s["id"] for s in med])
+        # Suggestions are ranked by score descending and tagged rule source.
+        for items in sugg.values():
+            scores = [s["score"] for s in items]
+            self.assertEqual(scores, sorted(scores, reverse=True))
+            self.assertTrue(all(s["source"] == "rule" for s in items))
+        # The editor payload threads per-row suggestions onto each row.
+        rows = {r["id"]: r for r in payload["evidence_rows"]}
+        self.assertIn("skill_suggestions", rows["ev_medium"])
+
     def test_project_ref_candidates_infer_from_kanban_tasks(self) -> None:
         """Reviewed evidence can inherit project refs from live/archive tasks."""
         with tempfile.TemporaryDirectory() as tmp_s:

@@ -201,6 +201,42 @@ class TestEvidenceEditorHost(unittest.TestCase):
         # Same event id again -> treated as a resend, ignored.
         self.assertFalse(self.host.handle_event(ev))
 
+    def test_suggest_skills_stashes_llm_without_writing(self) -> None:
+        # The LLM-suggest action must stash candidates for the next render and
+        # never mutate skill-tree links (human still confirms via chips).
+        from nblane.core.models import GapResult
+
+        fake = GapResult(
+            top_matches=[
+                {"id": "nav2", "label": "Nav2", "score": 7, "source": "rule+llm"},
+                {"id": "perception", "label": "Perception", "score": 3, "source": "llm"},
+            ]
+        )
+        before = self._tree_nodes()
+        with patch(
+            "nblane.core.gap.analyze", return_value=fake
+        ) as analyze_mock:
+            ok = self.host.handle_event(
+                {
+                    "action": "suggest_skills",
+                    "event_id": "sk-1",
+                    "payload": {"id": "e1"},
+                }
+            )
+        self.assertTrue(ok)
+        analyze_mock.assert_called_once()
+        # use_llm_router must be on for this explicit, slow path.
+        self.assertTrue(analyze_mock.call_args.kwargs.get("use_llm_router"))
+        stash = self.fake_st.session_state.get(
+            self.host._k("skill_suggest")
+        )
+        self.assertEqual(stash["id"], "e1")
+        self.assertEqual(
+            [s["id"] for s in stash["suggestions"]], ["nav2", "perception"]
+        )
+        # Skill-tree nodes are unchanged (no write happened).
+        self.assertEqual(self._tree_nodes(), before)
+
     def test_unknown_action_returns_false(self) -> None:
         self.assertFalse(
             self.host.handle_event(

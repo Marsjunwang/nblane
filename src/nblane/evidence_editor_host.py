@@ -550,6 +550,55 @@ class EvidenceEditorHost:
         st.session_state.pop(self._k("reformat"), None)
         return ok
 
+    def _apply_suggest_skills(self, eid: str) -> bool:
+        """LLM skill recall for one row: route its text to candidate nodes.
+
+        Rule suggestions already ship in the payload; this augments them with
+        the LLM router (slow, explicit). Stashes results for the next render;
+        never writes skill links (the human still confirms via chips).
+        """
+        from nblane.core import gap as gap_mod
+        from nblane.core.evidence_review import _row_match_text
+
+        row = next((r for r in self._pool_entries() if str(r.get("id")) == eid), None)
+        if row is None:
+            return False
+        text = _row_match_text(row)
+        if not text.strip():
+            st.info(self.ui.get("ee_skill_suggest_empty", "No text to match."))
+            return False
+        with st.spinner(self.ui.get("ee_skill_suggest_running", "Asking AI…")):
+            try:
+                result = gap_mod.analyze(
+                    self.profile,
+                    text,
+                    use_rule_match=True,
+                    use_llm_router=True,
+                    source_kind="evidence",
+                    source_id=eid,
+                )
+            except Exception as exc:  # noqa: BLE001 - surface, never crash editor
+                st.warning(str(exc))
+                return False
+        if getattr(result, "error", ""):
+            st.warning(result.error)
+            return False
+        suggestions = [
+            {
+                "id": str(m.get("id", "")),
+                "label": str(m.get("label", "") or m.get("id", "")),
+                "score": int(m.get("score", 0) or 0),
+                "source": str(m.get("source", "") or "rule"),
+            }
+            for m in (result.top_matches or [])
+            if str(m.get("id", "")).strip()
+        ]
+        st.session_state[self._k("skill_suggest")] = {
+            "id": eid,
+            "suggestions": suggestions,
+        }
+        return True
+
     def _apply_create_project_from_evidence(self, suggestion: dict) -> bool:
         """Stash the suggestion for Project Board create-form prefill, then jump."""
         st.session_state["project_board_create_prefill"] = {
@@ -769,6 +818,8 @@ class EvidenceEditorHost:
             return self._apply_link_project(eid, payload.get("project_refs") or [])
         if action == "link_skills":
             return self._apply_link_skills(eid, payload.get("skill_ids") or [])
+        if action == "suggest_skills":
+            return self._apply_suggest_skills(eid)
         if action == "backfill_project_refs":
             return self._apply_backfill_project_refs(payload.get("ids"))
         if action == "apply_migration":
@@ -833,6 +884,9 @@ class EvidenceEditorHost:
         preview = st.session_state.get(self._k("reformat"))
         if preview:
             payload["reformat_preview"] = preview
+        skill_suggest = st.session_state.get(self._k("skill_suggest"))
+        if skill_suggest:
+            payload["skill_suggestion_llm"] = skill_suggest
         dupes = st.session_state.get(self._dupes_state_key())
         if dupes is not None:
             payload["duplicate_candidates"] = dupes

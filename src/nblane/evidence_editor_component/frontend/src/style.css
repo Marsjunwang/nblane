@@ -158,6 +158,16 @@ button { cursor: pointer; }
 .ee-chip-on { border-color: var(--accent-strong); background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
 .ee-public-usage { color: var(--muted); font-size: 11px; }
 
+/* skill recall: suggested chips on top, full list collapsed */
+.ee-chips-label { display: flex; align-items: center; gap: 8px; }
+.ee-btn-link { border: 0; background: none; color: var(--accent-strong); font-size: 11px; cursor: pointer; padding: 0; text-decoration: underline; }
+.ee-skill-suggest { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 5px 7px; border: 1px dashed var(--accent); border-radius: 8px; background: var(--accent-soft); margin: 3px 0; }
+.ee-skill-suggest-tag { font-size: 11px; font-weight: 700; color: var(--accent-strong); }
+.ee-chip-suggest { border-style: dashed; border-color: var(--accent-strong); color: var(--accent-strong); cursor: pointer; }
+.ee-chip-llm { border-style: solid; background: #eef6ff; }
+.ee-skill-all { margin-top: 3px; }
+.ee-chips-all { margin-top: 4px; max-height: 168px; overflow-y: auto; }
+
 .ee-row-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .ee-reformat { border: 1px dashed var(--accent); border-radius: 8px; padding: 6px; background: var(--accent-soft); }
 .ee-reformat-head { font-weight: 700; font-size: 12px; margin-bottom: 4px; }

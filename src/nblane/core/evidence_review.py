@@ -679,6 +679,83 @@ def skill_evidence_summaries(profile: str | Path) -> list[dict[str, object]]:
     return summaries
 
 
+def _row_match_text(row: dict[str, Any]) -> str:
+    """Concatenate the text fields worth matching a row against skills.
+
+    Title + summary + original/formatted content + source excerpt give the
+    rule matcher enough signal without pulling in ids or metadata noise.
+    """
+    parts = [
+        str(row.get("title", "") or ""),
+        str(row.get("summary", "") or ""),
+        str(row.get("original_content", "") or ""),
+        str(row.get("formatted_content", "") or ""),
+        str(row.get("source_excerpt", "") or ""),
+    ]
+    return "\n".join(p for p in parts if p.strip())
+
+
+def evidence_skill_suggestions(
+    profile: str | Path,
+    rows: list[dict[str, Any]] | None = None,
+    *,
+    top_n: int = 6,
+) -> dict[str, list[dict[str, object]]]:
+    """Map evidence id -> ranked rule-based skill suggestions.
+
+    Deterministic keyword/synonym overlap (no LLM): reuses ``gap.score_nodes``
+    against the active schema so the editor can surface "evidence probably
+    belongs to these skills" without the human scanning the full node list.
+    Already-linked skills are excluded so suggestions only add signal.
+    """
+    from nblane.core import gap as gap_mod
+    from nblane.core import learned_keywords as lk_store
+
+    tree = _tree_raw(profile)
+    schema_name = str(tree.get("schema", "") or "")
+    if not schema_name:
+        return {}
+    schema_raw = io_facade.load_schema_raw(schema_name)
+    if not isinstance(schema_raw, dict):
+        return {}
+    index = schema_node_index(schema_raw)
+    learned = lk_store.load(schema_name)
+
+    if rows is None:
+        rows = _pool_entries(profile)
+    usage = evidence_usage_index(profile)
+
+    out: dict[str, list[dict[str, object]]] = {}
+    for row in rows:
+        eid = str(row.get("id", "") or "").strip()
+        if not eid or row.get("deprecated"):
+            continue
+        text = _row_match_text(row)
+        if not text.strip():
+            continue
+        ranked = gap_mod.score_nodes(text, schema_raw, learned=learned)
+        if not ranked:
+            continue
+        linked = {item["id"] for item in usage.get(eid, [])}
+        suggestions: list[dict[str, object]] = []
+        for nid, score in ranked:
+            if nid in linked or nid not in index:
+                continue
+            suggestions.append(
+                {
+                    "id": nid,
+                    "label": _node_label(index, nid),
+                    "score": int(score),
+                    "source": "rule",
+                }
+            )
+            if len(suggestions) >= top_n:
+                break
+        if suggestions:
+            out[eid] = suggestions
+    return out
+
+
 def evidence_status_risks(profile: str | Path) -> list[dict[str, object]]:
     """Return solid/expert skill rows whose evidence is missing or too weak."""
     risks: list[dict[str, object]] = []
@@ -1033,9 +1110,13 @@ def build_evidence_editor_payload(profile: str | Path) -> dict[str, object]:
 
     # Annotate each active row with derived UI flags.
     enriched_rows: list[dict[str, Any]] = []
+    skill_suggestions = evidence_skill_suggestions(profile, rows=active_rows)
     for row in active_rows:
         derived = _editor_row_derived(
             row, project_label_by_id=project_label_by_id
+        )
+        derived["skill_suggestions"] = skill_suggestions.get(
+            str(row.get("id", "") or ""), []
         )
         enriched_rows.append({**row, **derived})
 

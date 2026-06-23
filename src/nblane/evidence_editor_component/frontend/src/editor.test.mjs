@@ -133,6 +133,14 @@ test("linkSkillsEvent shape", async () => {
   assert.ok(link.event_id);
 });
 
+test("suggestSkillsEvent shape", async () => {
+  const ev = await import("./events.js");
+  const e = ev.suggestSkillsEvent("ev1");
+  assert.equal(e.action, "suggest_skills");
+  assert.equal(e.payload.id, "ev1");
+  assert.ok(e.event_id);
+});
+
 test("makeEvent generates unique ids", () => {
   const a = makeEvent("x");
   const b = makeEvent("x");

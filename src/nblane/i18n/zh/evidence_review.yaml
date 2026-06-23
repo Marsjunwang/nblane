@@ -321,6 +321,12 @@ ee_deprecate_confirm: 确认弃用这条证据？
 ee_link_project: 内部项目
 ee_link_skill: 技能
 ee_skill_linked: 已更新技能关联。
+ee_skill_suggested: 建议
+ee_skill_show_all: 全部技能
+ee_skill_suggest_llm: AI 建议
+ee_skill_suggest_llm_hint: 让 AI 补充更多技能建议
+ee_skill_suggest_running: 正在用 AI 生成技能建议…
+ee_skill_suggest_empty: 没有可用于匹配技能的文本。
 ee_run_migration: 运行迁移
 ee_refresh_crystallized_tasks: 从已沉淀任务刷新
 ee_migration_preview: 迁移预览

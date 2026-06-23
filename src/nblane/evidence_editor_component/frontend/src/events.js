@@ -29,6 +29,11 @@ export const createProjectFromEvidenceEvent = (suggestion) =>
 export const linkSkillsEvent = (id, skillIds) =>
   makeEvent("link_skills", { id, skill_ids: skillIds });
 
+// Optional LLM skill recall: ask the router for extra candidate skills for one
+// row. Rule suggestions ship in the payload already; this augments them.
+export const suggestSkillsEvent = (id) =>
+  makeEvent("suggest_skills", { id });
+
 // Migration / refresh.
 export const applyMigrationEvent = (ids) =>
   makeEvent("apply_migration", { ids });

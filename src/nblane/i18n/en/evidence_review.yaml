@@ -321,6 +321,12 @@ ee_deprecate_confirm: Deprecate this evidence?
 ee_link_project: Internal project
 ee_link_skill: Skills
 ee_skill_linked: Updated skill links.
+ee_skill_suggested: Suggested
+ee_skill_show_all: All skills
+ee_skill_suggest_llm: AI suggest
+ee_skill_suggest_llm_hint: Ask AI for more skill suggestions
+ee_skill_suggest_running: Asking AI for skill suggestions…
+ee_skill_suggest_empty: No text to match against skills.
 ee_run_migration: Run migration
 ee_refresh_crystallized_tasks: Refresh crystallized
 ee_migration_preview: Migration preview

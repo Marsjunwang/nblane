@@ -12,6 +12,7 @@ import {
   backfillProjectRefsEvent,
   createProjectFromEvidenceEvent,
   linkSkillsEvent,
+  suggestSkillsEvent,
   applyMigrationEvent,
   refreshCrystallizedEvent,
   doneTasksToEvidenceEvent,
@@ -177,6 +178,40 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
     setSkillRefs(next);
     emit(linkSkillsEvent(row.id, next));
   };
+
+  // Skill recall: rule suggestions ship on the row; an optional LLM pass can
+  // be stashed back into payload.skill_suggestion_llm for the active row.
+  const [showAllSkills, setShowAllSkills] = useState(false);
+  useEffect(() => {
+    setShowAllSkills(false);
+  }, [row.id]);
+  const skillLabelById = useMemo(() => {
+    const m = {};
+    skillOptions.forEach((o) => {
+      m[o.id] = cleanText(o.label) || o.id;
+    });
+    return m;
+  }, [skillOptions]);
+  const llmSuggest =
+    payload.skill_suggestion_llm && payload.skill_suggestion_llm.id === row.id
+      ? asArray(payload.skill_suggestion_llm.suggestions)
+      : [];
+  const skillSuggestions = useMemo(() => {
+    const merged = [];
+    const seen = new Set();
+    [...asArray(row.skill_suggestions), ...llmSuggest].forEach((s) => {
+      const id = s && s.id;
+      if (!id || seen.has(id) || skillRefs.includes(id)) return;
+      seen.add(id);
+      merged.push({
+        id,
+        label: skillLabelById[id] || cleanText(s.label) || id,
+        score: Number(s.score) || 0,
+        source: s.source || "rule",
+      });
+    });
+    return merged;
+  }, [row.id, row.skill_suggestions, llmSuggest, skillRefs, skillLabelById]);
 
   const save = () => {
     const fields = {};
@@ -359,23 +394,79 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
           })}
           {projectOptions.length === 0 && <span className="ee-muted">—</span>}
         </div>
-        <div className="ee-chips-label">{label(labels, "ee_link_skill", "Skills")}</div>
-        <div className="ee-chips">
-          {skillOptions.map((opt) => {
-            const on = skillRefs.includes(opt.id);
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                className={`ee-chip${on ? " ee-chip-on" : ""}`}
-                onClick={() => toggleSkill(opt.id)}
-              >
-                {cleanText(opt.label) || opt.id}
-              </button>
-            );
-          })}
-          {skillOptions.length === 0 && <span className="ee-muted">—</span>}
+        <div className="ee-chips-label">
+          {label(labels, "ee_link_skill", "Skills")}
+          <button
+            type="button"
+            className="ee-btn-link"
+            onClick={() => emit(suggestSkillsEvent(row.id))}
+            title={label(labels, "ee_skill_suggest_llm_hint", "Ask AI for more skill suggestions")}
+          >
+            {label(labels, "ee_skill_suggest_llm", "AI suggest")}
+          </button>
         </div>
+        {skillSuggestions.length > 0 && (
+          <div className="ee-skill-suggest">
+            <span className="ee-skill-suggest-tag">
+              {label(labels, "ee_skill_suggested", "Suggested")}
+            </span>
+            {skillSuggestions.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`ee-chip ee-chip-suggest${s.source === "llm" ? " ee-chip-llm" : ""}`}
+                onClick={() => toggleSkill(s.id)}
+                title={`${s.source} · ${s.score}`}
+              >
+                + {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="ee-chips">
+          {skillRefs.map((sid) => (
+            <button
+              key={sid}
+              type="button"
+              className="ee-chip ee-chip-on"
+              onClick={() => toggleSkill(sid)}
+            >
+              {skillLabelById[sid] || sid}
+            </button>
+          ))}
+          {skillRefs.length === 0 && skillSuggestions.length === 0 && (
+            <span className="ee-muted">—</span>
+          )}
+        </div>
+        {skillOptions.length > 0 && (
+          <div className="ee-skill-all">
+            <button
+              type="button"
+              className="ee-btn-link"
+              onClick={() => setShowAllSkills((s) => !s)}
+            >
+              {showAllSkills ? "▾" : "▸"}{" "}
+              {label(labels, "ee_skill_show_all", "All skills")} ({skillOptions.length})
+            </button>
+            {showAllSkills && (
+              <div className="ee-chips ee-chips-all">
+                {skillOptions.map((opt) => {
+                  const on = skillRefs.includes(opt.id);
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`ee-chip${on ? " ee-chip-on" : ""}`}
+                      onClick={() => toggleSkill(opt.id)}
+                    >
+                      {cleanText(opt.label) || opt.id}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {publicProjects.length > 0 && (
           <div className="ee-public-usage">
             {label(labels, "ee_public_project_distinction", "Public usage (read-only):")}{" "}

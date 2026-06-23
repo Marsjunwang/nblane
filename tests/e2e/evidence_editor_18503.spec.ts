@@ -286,3 +286,26 @@ test("Done tasks -> evidence picker opens and lists Done tasks", async ({ page }
   await testInfo.attach("done-tasks-picker", { body, contentType: "image/png" });
 });
 
+test("detail pane shows ranked skill suggestions + expandable full list", async ({ page }, testInfo) => {
+  const frame = await openEditor(page);
+
+  // Open the first row's detail pane.
+  await frame.locator(".ee-li").first().click();
+  await expect(frame.locator(".ee-detail")).toBeVisible({ timeout: 8_000 });
+
+  // The Skills "suggested" area is on top (rule recall ships in the payload).
+  // Dev pool rows have enough text to match >=1 schema node, so it renders.
+  await expect(frame.locator(".ee-skill-suggest")).toBeVisible({ timeout: 8_000 });
+  const suggestChips = frame.locator(".ee-chip-suggest");
+  expect(await suggestChips.count()).toBeGreaterThan(0);
+
+  // The full skill list is collapsed behind an "All skills" toggle.
+  const allToggle = frame.getByRole("button", { name: /全部技能|All skills/ });
+  await expect(allToggle).toBeVisible({ timeout: 8_000 });
+  await allToggle.click();
+  await expect(frame.locator(".ee-chips-all")).toBeVisible({ timeout: 5_000 });
+
+  const body = await page.screenshot({ fullPage: true });
+  await testInfo.attach("skill-suggestions", { body, contentType: "image/png" });
+});
+
