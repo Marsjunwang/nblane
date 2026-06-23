@@ -1221,8 +1221,13 @@ function App() {
           <button type="button" className="ee-btn" onClick={() => setShowDoneTasks(true)}>
             {label(labels, "ee_done_tasks_title", "Done tasks → evidence")}
           </button>
-          <button type="button" className="ee-btn" onClick={() => setShowOutputs((s) => !s)}>
-            {label(labels, "ee_create_from_output", "Create from output")}
+          <button
+            type="button"
+            className={`ee-btn${showOutputs ? " ee-btn-on" : ""}`}
+            onClick={() => setShowOutputs((s) => !s)}
+            title={label(labels, "ee_create_from_output", "Create from output")}
+          >
+            {label(labels, "ee_create_from_output", "Create from output")} ({summary.output_candidates || 0})
           </button>
           <button type="button" className="ee-btn" onClick={() => emit(suggestDuplicatesEvent("", false))}>
             {label(labels, "ee_find_duplicates", "Find duplicates")}
@@ -1265,7 +1270,13 @@ function App() {
           <Counter icon="S" n={summary.source_conflict || 0} text={label(labels, "ee_source_conflict", "Source conflict")} active={!!filters.sourceConflict} onClick={() => toggleFilter("sourceConflict")} />
           <Counter icon="!" n={summary.dangling_task_source || 0} text={label(labels, "ee_dangling_task_source", "Dangling task source")} active={!!filters.danglingTaskSource} onClick={() => toggleFilter("danglingTaskSource")} />
           <Counter icon="⬚" n={summary.crystallized_without_evidence || 0} text={label(labels, "ee_refresh_crystallized_tasks", "Crystallized w/o evidence")} />
-          <Counter icon="◇" n={summary.output_candidates || 0} text={label(labels, "ee_create_from_output", "Output candidates")} />
+          <Counter
+            icon="◇"
+            n={summary.output_candidates || 0}
+            text={label(labels, "ee_create_from_output", "Output candidates")}
+            active={showOutputs}
+            onClick={() => setShowOutputs((s) => !s)}
+          />
         </div>
       </div>
 
