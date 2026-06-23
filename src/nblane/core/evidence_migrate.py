@@ -213,9 +213,11 @@ def _draft_formatted_content(row: dict) -> str:
     if refs_bits:
         lines.append("")
         lines.extend(refs_bits)
-    if _clean(row.get("original_content")):
+    original = _clean(row.get("original_content"))
+    if original:
         lines.append("")
-        lines.append("See original_content for the full preserved source.")
+        lines.append("Original content:")
+        lines.append(original)
     return "\n".join(lines).strip()
 
 

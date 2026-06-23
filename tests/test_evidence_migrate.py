@@ -148,6 +148,25 @@ class TestBackfillRow(unittest.TestCase):
         self.assertEqual(out["original_content"], "原文")
         self.assertEqual(out["original_language"], "zh")
 
+    def test_formatted_preview_includes_full_original_content(self) -> None:
+        row = {
+            "id": "ev1",
+            "type": "project",
+            "title": "T",
+            "summary": "short summary",
+            "original_content": "line one\nline two with preserved detail",
+        }
+        out, _, _ = backfill_row(row, profile="dev", target_lang="en")
+        self.assertIn("Original content:", out["formatted_content"])
+        self.assertIn(
+            "line one\nline two with preserved detail",
+            out["formatted_content"],
+        )
+        self.assertNotIn(
+            "See original_content for the full preserved source.",
+            out["formatted_content"],
+        )
+
     def test_protected_summary_never_clobbered(self) -> None:
         row = {"id": "x", "type": "project", "title": "T", "summary": "S"}
         out, _, _ = backfill_row(row, profile="dev")
