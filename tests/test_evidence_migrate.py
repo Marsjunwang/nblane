@@ -167,6 +167,47 @@ class TestBackfillRow(unittest.TestCase):
             out["formatted_content"],
         )
 
+    def test_kanban_task_preview_uses_readable_sections(self) -> None:
+        row = {
+            "id": "ev1",
+            "type": "practice",
+            "title": "VLA模型语言引导能力恢复",
+            "origin": "kanban_task",
+            "origin_ref": "kanban:kb_aaeb7aaa6533",
+            "date": "2026-06-16",
+            "original_content": "\n".join(
+                [
+                    "# vla steering",
+                    "id: kb_aaeb7aaa6533",
+                    "context: 让vla恢复语言steering的能力",
+                    "started_on: 2026-06-01",
+                    "completed_on: 2026-06-16",
+                    "crystallized: true",
+                    "subtasks:",
+                    "- [x] 数据需求对齐，包含仿真和遥操作数据，数据量200要操作+800仿真",
+                    "- [x] 工作调研",
+                    "- [x] 基于自动标注的数据实现物体颜色steering的能力",
+                    "- [x] 提高物体抓取完停止的能力",
+                    "- [x] 制定结下来任务的milestone",
+                ]
+            ),
+        }
+        out, _, _ = backfill_row(row, profile="dev", target_lang="zh")
+        formatted = out["formatted_content"]
+        self.assertTrue(formatted.startswith("VLA模型语言引导能力恢复\n"))
+        self.assertIn("任务标识：kb_aaeb7aaa6533", formatted)
+        self.assertIn("目标：让vla恢复语言steering的能力", formatted)
+        self.assertIn("关键进展", formatted)
+        self.assertIn(
+            "✅ 数据需求对齐，包含仿真和遥操作数据，数据量200要操作+800仿真",
+            formatted,
+        )
+        self.assertIn("时间节点", formatted)
+        self.assertIn("启动时间：2026-06-01", formatted)
+        self.assertIn("完成时间：2026-06-16", formatted)
+        self.assertIn("状态：已结晶（crystallized: true）", formatted)
+        self.assertNotIn("Original content:", formatted)
+
     def test_protected_summary_never_clobbered(self) -> None:
         row = {"id": "x", "type": "project", "title": "T", "summary": "S"}
         out, _, _ = backfill_row(row, profile="dev")

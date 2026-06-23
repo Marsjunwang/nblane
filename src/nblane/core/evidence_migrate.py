@@ -184,8 +184,145 @@ def render_kanban_task_source(task: Any) -> str:
     return "\n".join(lines)
 
 
+def _kanban_id_from_row(row: dict) -> str:
+    origin_ref = _clean(row.get("origin_ref"))
+    if origin_ref.startswith("kanban:"):
+        return kanban_ref_id(origin_ref) or origin_ref.removeprefix("kanban:")
+    for ref in row.get("kanban_refs") or []:
+        clean_ref = _clean(ref)
+        if clean_ref.startswith("kanban:"):
+            return kanban_ref_id(clean_ref) or clean_ref.removeprefix(
+                "kanban:"
+            )
+    return ""
+
+
+def _is_kanban_task_row(row: dict) -> bool:
+    if _clean(row.get("origin")) == "kanban_task":
+        return True
+    if _clean(row.get("origin_ref")).startswith("kanban:"):
+        return True
+    return any(
+        _clean(ref).startswith("kanban:") for ref in row.get("kanban_refs") or []
+    )
+
+
+def _parse_kanban_task_source(source: str) -> dict:
+    fields: dict[str, str] = {}
+    subtasks: list[tuple[bool, str]] = []
+    notes: list[str] = []
+    title = ""
+    section = ""
+
+    for raw_line in str(source or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            title = line.removeprefix("# ").strip()
+            section = ""
+            continue
+        if line == "subtasks:":
+            section = "subtasks"
+            continue
+        if line == "notes:":
+            section = "notes"
+            continue
+        if section == "subtasks":
+            match = re.match(r"- \[([ xX])\]\s*(.+)", line)
+            if match:
+                subtasks.append((match.group(1).lower() == "x", match.group(2).strip()))
+                continue
+        if section == "notes" and line.startswith("- "):
+            notes.append(line.removeprefix("- ").strip())
+            continue
+        match = re.match(r"([A-Za-z_][A-Za-z0-9_]*):\s*(.*)", line)
+        if match:
+            fields[match.group(1)] = match.group(2).strip()
+            section = ""
+
+    return {
+        "title": title,
+        "fields": fields,
+        "subtasks": subtasks,
+        "notes": notes,
+    }
+
+
+def _draft_kanban_task_preview(row: dict) -> str:
+    """Render kanban-task evidence as a readable, sectioned preview."""
+    original = _clean(row.get("original_content"))
+    if not original or not _is_kanban_task_row(row):
+        return ""
+
+    parsed = _parse_kanban_task_source(original)
+    fields = parsed["fields"]
+    subtasks = parsed["subtasks"]
+    notes = parsed["notes"]
+    task_id = _clean(fields.get("id")) or _kanban_id_from_row(row)
+    if not (task_id or fields or subtasks or notes):
+        return ""
+
+    lines: list[str] = []
+    title = _clean(row.get("title")) or _clean(parsed.get("title"))
+    if title:
+        lines.append(title)
+    if task_id:
+        lines.extend(["", f"任务标识：{task_id}"])
+
+    for label, key in (
+        ("目标", "context"),
+        ("背景", "why"),
+        ("结果", "outcome"),
+        ("阻塞因素", "blocked_by"),
+    ):
+        value = _clean(fields.get(key))
+        if value:
+            lines.extend(["", f"{label}：{value}"])
+
+    if subtasks:
+        lines.extend(["", "关键进展"])
+        for done, text in subtasks:
+            prefix = "✅" if done else "☐"
+            lines.append(f"{prefix} {text}")
+
+    if notes:
+        lines.extend(["", "补充记录"])
+        lines.extend(f"- {note}" for note in notes)
+
+    timeline: list[str] = []
+    started = _clean(fields.get("started_on"))
+    completed = _clean(fields.get("completed_on")) or _clean(row.get("date"))
+    if started:
+        timeline.append(f"启动时间：{started}")
+    if completed:
+        timeline.append(f"完成时间：{completed}")
+    if _clean(fields.get("crystallized")).lower() == "true":
+        timeline.append("状态：已结晶（crystallized: true）")
+    if timeline:
+        lines.extend(["", "时间节点", *timeline])
+
+    refs: list[str] = []
+    for label, key in (
+        ("项目", "project_id"),
+        ("里程碑", "milestone_id"),
+        ("标签", "tags"),
+    ):
+        value = _clean(fields.get(key))
+        if value:
+            refs.append(f"{label}：{value}")
+    if refs:
+        lines.extend(["", "关联信息", *refs])
+
+    return "\n".join(lines).strip()
+
+
 def _draft_formatted_content(row: dict) -> str:
     """Deterministic (non-AI) formatted_content draft from existing fields."""
+    kanban_preview = _draft_kanban_task_preview(row)
+    if kanban_preview:
+        return kanban_preview
+
     lines: list[str] = []
     origin = _clean(row.get("origin"))
     if origin:
