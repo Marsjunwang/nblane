@@ -71,6 +71,23 @@ def test_workspace_graph_empty_profile_returns_full_layer_skeleton() -> None:
     assert nodes["skill:lit"]["role"] == "star"
     assert nodes["output"]["role"] == "leaf"
     assert nodes["health"]["role"] == ""
+    sand_placeholders = [
+        node
+        for node in nodes.values()
+        if node.get("item_kind") == "runtime_sand"
+    ]
+    assert len(sand_placeholders) >= 30
+    assert all(node["placeholder"] and node["suggested"] for node in sand_placeholders)
+    output_placeholders = [
+        node
+        for node in nodes.values()
+        if node.get("item_kind") == "runtime_output"
+    ]
+    assert len(output_placeholders) == 3
+    assert all(
+        node["placeholder"] and node["suggested"] and node.get("synthetic")
+        for node in output_placeholders
+    )
 
 
 def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> None:
@@ -198,6 +215,180 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
         for edge in dumped["edges"]
     }
     assert ("goal:g1", "project:secret", "contains") in edges
-    assert ("project:secret", "task:0", "contains") in edges
+    assert ("project:secret", "task:task_active", "contains") in edges
     assert ("project:secret", "atomic_evidence:pool", "supports") in edges
     assert ("project:secret", "source:inbox", "contains") in edges
+
+
+def test_workspace_graph_lifecycle_refs_and_runtime_placeholders() -> None:
+    """Graph renders all task states, archived goals, inferred edges, placeholders."""
+    with tempfile.TemporaryDirectory() as tmp_s:
+        profile = Path(tmp_s) / "alice"
+        profile.mkdir()
+        _write_yaml(
+            profile / "goals.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "current_goal_id": "g1",
+                "goals": [
+                    {"id": "g1", "title": "Ship demo", "status": "active"},
+                    {"id": "g_old", "title": "Old demo", "status": "archived"},
+                ],
+            },
+        )
+        (profile / "kanban.md").write_text(
+            "# alice · Kanban\n\n"
+            "## Doing\n\n"
+            "- [ ] Active 1\n"
+            "  - id: task_active_1\n"
+            "  - project_id: project:demo\n"
+            "- [ ] Active 2\n"
+            "  - id: task_active_2\n"
+            "- [ ] Active 3\n"
+            "  - id: task_active_3\n"
+            "- [ ] Active 4\n"
+            "  - id: task_active_4\n"
+            "## Queue\n\n"
+            "- [ ] Queued\n"
+            "  - id: task_queued\n"
+            "## Done\n\n"
+            "- [x] Done task\n"
+            "  - id: task_done\n"
+            "  - project_id: project:demo\n"
+            "## Someday / Maybe\n\n"
+            "- Someday task\n"
+            "  - id: task_someday\n",
+            encoding="utf-8",
+        )
+        (profile / "kanban-archive.md").write_text(
+            "# alice · Kanban archive\n\n"
+            "## Archived · 2026-05-01\n\n"
+            "- [x] Archived task\n"
+            "  - id: task_archived\n"
+            "  - project_id: project:demo\n",
+            encoding="utf-8",
+        )
+        _write_yaml(
+            profile / "project-board.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "project_cases": [
+                    {
+                        "id": "project:demo",
+                        "title": "Demo",
+                        "status": "active",
+                        "goal_refs": ["g1"],
+                        "task_refs": ["task_done"],
+                        "evidence_refs": ["ev_done"],
+                    }
+                ],
+            },
+        )
+        _write_yaml(
+            profile / "evidence-pool.yaml",
+            {
+                "profile": "alice",
+                "evidence_entries": [
+                    {
+                        "id": "ev_done",
+                        "title": "Done evidence",
+                        "review_status": "reviewed",
+                        "project_refs": ["project:demo"],
+                        "skill_refs": ["ros2_basics"],
+                        "kanban_refs": ["kanban:task_done"],
+                    },
+                    {
+                        "id": "ev_orphan",
+                        "title": "Orphan evidence",
+                        "review_status": "reviewed",
+                    },
+                ],
+            },
+        )
+        _write_yaml(
+            profile / "skill-tree.yaml",
+            {
+                "profile": "alice",
+                "schema": "robotics-engineer",
+                "nodes": [
+                    {
+                        "id": "ros2_basics",
+                        "status": "solid",
+                        "evidence_refs": ["ev_done"],
+                    }
+                ],
+            },
+        )
+        _write_yaml(
+            profile / "claims.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "claims": [
+                    {
+                        "id": "claim:done",
+                        "status": "accepted",
+                        "text": "Done evidence supports ROS 2 skill.",
+                        "evidence_refs": ["ev_done"],
+                        "skill_refs": ["ros2_basics"],
+                    }
+                ],
+            },
+        )
+
+        payload = dashboard_payload(profile)
+
+    graph = payload["graph"]
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    assert nodes["goal:g_old"]["status"] == "archived"
+    task_ids = {
+        node["id"]
+        for node in graph["nodes"]
+        if node["type"] == "task"
+    }
+    assert {
+        "task:task_active_1",
+        "task:task_active_2",
+        "task:task_active_3",
+        "task:task_active_4",
+        "task:task_queued",
+        "task:task_done",
+        "task:task_someday",
+        "task:task_archived",
+    }.issubset(task_ids)
+    assert nodes["task:task_done"]["status"] == "done"
+    assert nodes["task:task_archived"]["status"] == "archived"
+
+    edges = {
+        (edge["from"], edge["to"], edge["type"])
+        for edge in graph["edges"]
+    }
+    assert ("task:task_done", "atomic_evidence:ev_done", "generated_by") in edges
+    assert ("project:demo", "atomic_evidence:ev_done", "supports") in edges
+    assert ("atomic_evidence:ev_done", "claim:item:claim:done", "supports") in edges
+    assert ("claim:item:claim:done", "skill:ros2_basics", "supports") in edges
+    assert ("atomic_evidence:ev_done", "skill:ros2_basics", "supports") in edges
+    assert any(
+        edge["to"] == "atomic_evidence:ev_orphan"
+        and edge["relation"] == "layout_anchor"
+        and edge["suggested"]
+        for edge in graph["edges"]
+    )
+
+    node_ids = set(nodes)
+    for edge in graph["edges"]:
+        assert edge["from"] in node_ids
+        assert edge["to"] in node_ids
+
+    output_placeholders = [
+        node for node in graph["nodes"] if node.get("item_kind") == "runtime_output"
+    ]
+    assert len(output_placeholders) == 3
+    assert all(node["placeholder"] and node.get("synthetic") for node in output_placeholders)
+    sand_placeholders = [
+        node for node in graph["nodes"] if node.get("item_kind") == "runtime_sand"
+    ]
+    assert sand_placeholders
+    assert all(node["placeholder"] and node.get("synthetic") for node in sand_placeholders)

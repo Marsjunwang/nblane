@@ -121,15 +121,28 @@ const ROLE_COLORS = {
   fruit: "#c2683a",
   star: "#bcd4ff",
   constellation: "#e8d27a",
-  sand: "#c4b186",
+  sand: "#94c7d8",
 };
+
+const SKILL_CATEGORY_COLORS = [
+  "#8fb8ff",
+  "#76d0c0",
+  "#f0c86a",
+  "#e68ab3",
+  "#9bd97a",
+  "#c6a6ff",
+  "#72c3f4",
+  "#f09a72",
+  "#d0df78",
+  "#8ed6f1",
+];
 
 // Star brightness by skill status — the dome dims for locked, blazes for expert.
 const STAR_STATUS_EMISSIVE = {
-  locked: 0.05,
-  learning: 0.18,
-  solid: 0.4,
-  expert: 0.7,
+  locked: 0.12,
+  learning: 0.24,
+  solid: 0.46,
+  expert: 0.76,
 };
 
 // Tree skeleton dimensions (world units, y is up).
@@ -1187,7 +1200,7 @@ function CanvasSetupBanner({ payload, insight, hiddenLayers, onEmit, onCreateGoa
   );
 }
 
-function AttentionSummary({ payload, onSelectNode }) {
+function AttentionSummary({ payload, selectedNodeId = "", onSelectNode }) {
   const ui = payload.ui;
   const attention = payload.graph.attention;
   if (!attention.nodes.length) {
@@ -1200,7 +1213,11 @@ function AttentionSummary({ payload, onSelectNode }) {
         {attention.nodes.map((item) => (
           <button
             key={item.id}
-            className={`hd-attention-chip ${item.severity || ""}`}
+            className={[
+              "hd-attention-chip",
+              item.severity || "",
+              selectedNodeId === item.id ? "selected" : "",
+            ].filter(Boolean).join(" ")}
             type="button"
             data-action="select-node"
             data-source="attention-chip"
@@ -1393,6 +1410,34 @@ function hashUnit(text) {
   return ((h >>> 0) % 100000) / 100000;
 }
 
+function skillCategoryColor(node) {
+  const category = cleanText(node.metric || node.meta?.category || node.recordId || node.id, "general");
+  const index = Math.floor(hashUnit(category) * SKILL_CATEGORY_COLORS.length) % SKILL_CATEGORY_COLORS.length;
+  return SKILL_CATEGORY_COLORS[index] || ROLE_COLORS.star;
+}
+
+function nodeVisualWeight(node) {
+  const status = cleanText(node.status).toLowerCase();
+  const placeholder = Boolean(node.placeholder || node.implemented === false);
+  if (placeholder) {
+    return {
+      radius: 0.72,
+      opacity: node.role === "fruit" ? 0.38 : 0.48,
+      emissive: 0.55,
+    };
+  }
+  if (status === "archived") {
+    return { radius: 0.78, opacity: 0.48, emissive: 0.5 };
+  }
+  if (status === "done" || status === "completed") {
+    return { radius: 0.88, opacity: 0.66, emissive: 0.66 };
+  }
+  if (status === "draft" || status === "planned") {
+    return { radius: 0.82, opacity: 0.56, emissive: 0.58 };
+  }
+  return { radius: 1, opacity: 0.92, emissive: 1 };
+}
+
 // Resolve the parent of a node along a set of preferred relations. Edges point
 // parent → child, so we look for an incoming edge whose source is allowed.
 function parentByRelation(node, edgesByTarget, allowed, nodesById) {
@@ -1408,6 +1453,18 @@ function parentByRelation(node, edgesByTarget, allowed, nodesById) {
   return any ? nodesById.get(any.from) : null;
 }
 
+function outgoingAnchorPosition(node, edgesBySource, allowed, positions, nodesById) {
+  const outgoing = edgesBySource.get(node.id) || [];
+  for (const relation of allowed) {
+    const match = outgoing.find((edge) => (edge.relation || edge.type) === relation && nodesById.has(edge.to) && positions.has(edge.to));
+    if (match) {
+      return positions.get(match.to);
+    }
+  }
+  const any = outgoing.find((edge) => nodesById.has(edge.to) && positions.has(edge.to));
+  return any ? positions.get(any.to) : null;
+}
+
 // Deterministic star-tree skeleton. Returns id -> {x, y, z} for every tree,
 // star and constellation node. Sand nodes are excluded (rendered as a particle
 // field). Coordinates are pinned onto node.fx/fy/fz by the caller so the
@@ -1419,11 +1476,16 @@ function growthTreeLayout(payload, nodes) {
     (edge) => nodesById.has(edge.from) && nodesById.has(edge.to),
   );
   const edgesByTarget = new Map();
+  const edgesBySource = new Map();
   edges.forEach((edge) => {
     if (!edgesByTarget.has(edge.to)) {
       edgesByTarget.set(edge.to, []);
     }
     edgesByTarget.get(edge.to).push(edge);
+    if (!edgesBySource.has(edge.from)) {
+      edgesBySource.set(edge.from, []);
+    }
+    edgesBySource.get(edge.from).push(edge);
   });
 
   const byRole = (role) => nodes.filter((node) => node.role === role);
@@ -1499,28 +1561,7 @@ function growthTreeLayout(payload, nodes) {
     leafPos.set(node.id, { pos });
   });
 
-  // 5. Fruit (evidence) — hang below the leaf that generated them.
-  const fruits = byRole("fruit");
-  fruits.forEach((node) => {
-    const parent = parentByRelation(
-      node,
-      edgesByTarget,
-      ["generated_by", "produces", "contains", "supports", "review", "derives"],
-      nodesById,
-    );
-    const base =
-      (parent && (leafPos.get(parent.id)?.pos || positions.get(parent.id))) || null;
-    const anchor = base || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
-    const theta = hashUnit(`${node.id}:ft`) * Math.PI * 2;
-    const r = 6 + hashUnit(`${node.id}:fr`) * 8;
-    positions.set(node.id, {
-      x: anchor.x + Math.cos(theta) * r,
-      y: anchor.y - 8 - hashUnit(`${node.id}:fy`) * 8,
-      z: anchor.z + Math.sin(theta) * r,
-    });
-  });
-
-  // 6. Star (skills) — a glowing dome above the canopy. Sectorized by category
+  // 5. Star (skills) — a glowing dome above the canopy. Sectorized by category
   // then distributed with a fibonacci-style spiral for an even sky.
   const stars = byRole("star");
   const categories = [...new Set(stars.map((node) => cleanText(node.metric) || "general"))];
@@ -1532,13 +1573,44 @@ function growthTreeLayout(payload, nodes) {
     const sector = (categoryIndex.get(cat) || 0) / catCount;
     // Map index onto a hemisphere; bias phi toward the top so it reads as a dome.
     const t = (index + 0.5) / starTotal;
-    const phi = Math.acos(1 - t * 0.92); // 0 (top) .. ~0.9π/2
+    const phi = Math.acos(1 - t * 0.92); // 0 (top) .. ~0.9pi/2
     const theta = sector * Math.PI * 2 + index * GOLDEN_ANGLE;
     const r = STAR_DOME_RADIUS * (0.82 + hashUnit(`${node.id}:sr`) * 0.18);
     positions.set(node.id, {
       x: Math.sin(phi) * Math.cos(theta) * r,
       y: STAR_DOME_CENTER_Y + Math.cos(phi) * r * 0.5,
       z: Math.sin(phi) * Math.sin(theta) * r,
+    });
+  });
+
+  // 6. Fruit (evidence) — hang below a task/project/output anchor, or drift
+  // toward an outgoing skill/output support when no incoming parent exists.
+  const fruits = byRole("fruit");
+  fruits.forEach((node) => {
+    const parent = parentByRelation(
+      node,
+      edgesByTarget,
+      ["layout_anchor", "generated_by", "produces", "supports", "contains", "review", "derives"],
+      nodesById,
+    );
+    const outgoing = outgoingAnchorPosition(
+      node,
+      edgesBySource,
+      ["produces", "supports", "claim_evidence_skill"],
+      positions,
+      nodesById,
+    );
+    const base =
+      (parent && (leafPos.get(parent.id)?.pos || branchPos.get(parent.id)?.pos || positions.get(parent.id))) ||
+      outgoing ||
+      null;
+    const anchor = base || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
+    const theta = hashUnit(`${node.id}:ft`) * Math.PI * 2;
+    const r = 6 + hashUnit(`${node.id}:fr`) * 8;
+    positions.set(node.id, {
+      x: anchor.x + Math.cos(theta) * r,
+      y: anchor.y - 8 - hashUnit(`${node.id}:fy`) * 8,
+      z: anchor.z + Math.sin(theta) * r,
     });
   });
 
@@ -1616,6 +1688,7 @@ function graph3DData(payload, nodes) {
       const pos = positions.get(node.id) || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
       const nodeDegree = degree.get(node.id) || 0;
       const isStar = node.role === "star";
+      const weight = nodeVisualWeight(node);
       return {
         ...node,
         x: pos.x,
@@ -1628,13 +1701,14 @@ function graph3DData(payload, nodes) {
         group: node.role || node.layer,
         color: starTreeColor(node),
         starEmissive: isStar
-          ? STAR_STATUS_EMISSIVE[cleanText(node.status)] ?? STAR_STATUS_EMISSIVE.locked
+          ? (STAR_STATUS_EMISSIVE[cleanText(node.status)] ?? STAR_STATUS_EMISSIVE.locked) * weight.emissive
           : 0,
         val: Math.max(
           3,
-          (isStar ? 3 : 5) + Math.min(9, nodeDegree) + (node.isPrimary ? 4 : 0) + (node.placeholder ? -1 : 0),
+          ((isStar ? 3 : 5) + Math.min(9, nodeDegree) + (node.isPrimary ? 4 : 0) + (node.placeholder ? -1 : 0)) * weight.radius,
         ),
         degree: nodeDegree,
+        visualWeight: weight,
       };
     }),
     links,
@@ -1645,6 +1719,9 @@ function graph3DData(payload, nodes) {
 function starTreeColor(node) {
   if (node.placeholder || node.implemented === false) {
     return "#a6b2ad";
+  }
+  if (node.role === "star") {
+    return skillCategoryColor(node);
   }
   return ROLE_COLORS[node.role] || NODE_COLORS[node.type] || "#68716f";
 }
@@ -1715,13 +1792,15 @@ function createLabelSprite(text, color, selected) {
 function nodeThreeObject(node, selectedNodeId) {
   const selected = selectedNodeId === node.id;
   const color = node.color || starTreeColor(node);
+  const weight = node.visualWeight || nodeVisualWeight(node);
+  const opacity = selected ? Math.min(1, weight.opacity + 0.16) : weight.opacity;
   const group = new THREE.Group();
 
   // Stars: small, bright spheres whose emissive tracks skill status. No label
   // (82 of them) unless selected — the dome reads as a sky, not a tag cloud.
   if (node.role === "star") {
     const baseEmissive = Number.isFinite(node.starEmissive) ? node.starEmissive : STAR_STATUS_EMISSIVE.locked;
-    const radius = Math.max(1.6, 1.8 + baseEmissive * 3.4) * (selected ? 1.8 : 1);
+    const radius = Math.max(1.7, 1.9 + baseEmissive * 3.4) * (selected ? 1.8 : 1) * weight.radius;
     const material = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
@@ -1729,7 +1808,7 @@ function nodeThreeObject(node, selectedNodeId) {
       metalness: 0.0,
       roughness: 0.5,
       transparent: true,
-      opacity: 0.55 + baseEmissive * 0.6,
+      opacity: Math.min(1, (0.58 + baseEmissive * 0.62) * (selected ? 1 : weight.opacity)),
     });
     const star = new THREE.Mesh(new THREE.SphereGeometry(radius, 14, 12), material);
     star.userData.baseEmissive = baseEmissive;
@@ -1742,9 +1821,54 @@ function nodeThreeObject(node, selectedNodeId) {
     return group;
   }
 
+  if (node.role === "fruit") {
+    const baseRadius = Math.max(2.6, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 1.32 : 1.02)) * weight.radius;
+    const petalColor = new THREE.Color(color).lerp(new THREE.Color("#f7d7c8"), node.placeholder ? 0.46 : 0.22);
+    const petalMaterial = new THREE.MeshStandardMaterial({
+      color: petalColor,
+      emissive: petalColor,
+      emissiveIntensity: (selected ? 0.28 : 0.1) * weight.emissive,
+      roughness: 0.72,
+      metalness: 0.02,
+      transparent: true,
+      opacity: node.placeholder ? Math.min(opacity, 0.34) : opacity,
+      depthWrite: false,
+    });
+    const centerMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: (selected ? 0.32 : 0.13) * weight.emissive,
+      roughness: 0.55,
+      transparent: true,
+      opacity: node.placeholder ? Math.min(opacity + 0.08, 0.5) : Math.min(1, opacity + 0.04),
+    });
+    const petals = node.placeholder ? 5 : 6;
+    for (let i = 0; i < petals; i += 1) {
+      const angle = (i / petals) * Math.PI * 2;
+      const petal = new THREE.Mesh(new THREE.SphereGeometry(baseRadius * 0.72, 12, 10), petalMaterial);
+      petal.scale.set(1.35, 0.62, 0.32);
+      petal.position.set(Math.cos(angle) * baseRadius * 0.72, Math.sin(angle) * baseRadius * 0.72, 0);
+      petal.rotation.z = angle;
+      group.add(petal);
+    }
+    group.add(new THREE.Mesh(new THREE.SphereGeometry(baseRadius * 0.48, 14, 12), centerMaterial));
+    if (selected) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(baseRadius * 1.42, Math.max(0.18, baseRadius * 0.045), 10, 48),
+        new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.9 }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      group.add(ring);
+    }
+    if (selected || !node.placeholder) {
+      group.add(createLabelSprite(node.label || node.id, color, selected));
+    }
+    return group;
+  }
+
   const radius = Math.min(
     selected ? 8.5 : 6.2,
-    Math.max(3.2, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 1.7 : 1.32)),
+    Math.max(3.2, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 1.7 : 1.32) * weight.radius),
   );
   const geometry = node.placeholder || node.implemented === false
     ? new THREE.OctahedronGeometry(radius, 1)
@@ -1754,11 +1878,11 @@ function nodeThreeObject(node, selectedNodeId) {
     emissive: color,
     // Keep tree nodes below the bloom threshold so they read as distinct
     // colored beads against the night sky rather than a glare.
-    emissiveIntensity: selected ? 0.34 : 0.14,
+    emissiveIntensity: (selected ? 0.34 : 0.14) * weight.emissive,
     metalness: 0.12,
     roughness: 0.62,
     transparent: true,
-    opacity: node.placeholder || node.implemented === false ? 0.5 : 0.92,
+    opacity,
   });
   group.add(new THREE.Mesh(geometry, material));
   if (selected) {
@@ -1864,7 +1988,6 @@ function buildSandField(payload, sandNodes) {
   const positions = [];
   const colors = [];
   const basePositions = [];
-  const color = new THREE.Color();
   clusters.forEach((cluster, ci) => {
     const angle = (ci / clusterCount) * Math.PI * 2 + 0.7;
     const ringR = 30 + (ci % 3) * 16;
@@ -1874,7 +1997,7 @@ function buildSandField(payload, sandNodes) {
       z: Math.sin(angle) * ringR,
     };
     cluster.center = center;
-    color.set(SAND_PALETTE[ci % SAND_PALETTE.length]);
+    const baseColor = new THREE.Color(SAND_PALETTE[ci % SAND_PALETTE.length]);
     cluster.nodes.forEach((node) => {
       // Gaussian-ish scatter around the cluster center — a thin ground haze.
       const dx = (hashUnit(`${node.id}:sx`) + hashUnit(`${node.id}:sx2`) - 1) * 18;
@@ -1885,7 +2008,11 @@ function buildSandField(payload, sandNodes) {
       const pz = center.z + dz;
       positions.push(px, py, pz);
       basePositions.push(px, py, pz);
-      colors.push(color.r, color.g, color.b);
+      const nodeColor = baseColor.clone();
+      if (node.placeholder || node.implemented === false || node.meta?.synthetic) {
+        nodeColor.lerp(new THREE.Color("#4a5f72"), 0.42);
+      }
+      colors.push(nodeColor.r, nodeColor.g, nodeColor.b);
     });
   });
 
@@ -1897,7 +2024,7 @@ function buildSandField(payload, sandNodes) {
     sizeAttenuation: true,
     vertexColors: true,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.68,
     depthWrite: false,
   });
   const points = new THREE.Points(geometry, material);
@@ -1906,7 +2033,7 @@ function buildSandField(payload, sandNodes) {
   return { points, clusters };
 }
 
-const SAND_PALETTE = ["#c4b186", "#a8b48f", "#bfa27a", "#9fb0a6", "#c9b27c", "#b0a394"];
+const SAND_PALETTE = ["#9ed3e6", "#7fb8d6", "#b5d9e8", "#82c6c0", "#a7c7e8", "#87aeca"];
 
 function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessage = "", minHeight = GRAPH_3D_MIN_HEIGHT, compact = false }) {
   const ui = payload.ui;
@@ -2535,14 +2662,12 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
     .filter(Boolean);
   const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
   const selectedNode = nodesById.get(selectedNodeId) || preferredNode(payload);
-  const heroNodes = useMemo(() => {
-    const scoped = graphExploreNodes(payload, new Set(), selectedNodeId, "context");
-    const selected = nodesById.get(selectedNodeId);
-    const combined = selected && !scoped.some((node) => node.id === selected.id)
-      ? [selected, ...scoped]
-      : scoped;
-    return sortedExploreNodes(payload, combined, selectedNodeId).slice(0, 42);
-  }, [payload, nodesById, selectedNodeId]);
+  // Feed the full node set (matching the standalone 8502 ContextCanvas) so the
+  // hero shows the complete star tree, not a 42-node curated subset.
+  const heroNodes = useMemo(
+    () => graphExploreNodes(payload, new Set(), selectedNodeId, "all"),
+    [payload, selectedNodeId],
+  );
 
   return (
     <section className="hd-graph-hero" data-section="graph-hero">
@@ -2564,8 +2689,6 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
           nodes={heroNodes}
           selectedNodeId={selectedNode?.id || selectedNodeId}
           onSelectNode={onSelectNode}
-          minHeight={340}
-          compact
           emptyMessage={label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}
         />
       </div>
@@ -2716,7 +2839,7 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
         readOnly={readOnly}
       />
 
-      <AttentionSummary payload={payload} onSelectNode={onSelectNode} />
+      <AttentionSummary payload={payload} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
 
       {viewMode === "focus" ? (
         <FocusPathView payload={payload} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />

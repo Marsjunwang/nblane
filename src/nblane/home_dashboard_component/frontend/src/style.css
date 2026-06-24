@@ -777,8 +777,8 @@ button {
 
 .hd-graph-hero .hd-graph3d-stage {
   border-radius: 16px;
-  height: 360px;
-  min-height: 340px;
+  height: 520px;
+  min-height: 520px;
 }
 
 .hd-graph3d-stage.compact .hd-graph3d-toolbar {
@@ -1227,6 +1227,12 @@ button {
 
 .hd-attention-chip.error {
   border-color: rgba(159, 29, 29, .44);
+}
+
+.hd-attention-chip.selected {
+  background: rgba(47, 111, 237, .08);
+  border-color: rgba(47, 111, 237, .42);
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, .12);
 }
 
 .hd-flow-wrap,
@@ -3097,8 +3103,8 @@ button {
   }
 
   .hd-graph-hero .hd-graph3d-stage {
-    height: 380px;
-    min-height: 340px;
+    height: 460px;
+    min-height: 460px;
   }
 
   .hd-graph3d-legend {

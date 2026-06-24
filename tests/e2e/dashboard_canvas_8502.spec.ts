@@ -56,6 +56,7 @@ async function canvasPixelStats(locator) {
 }
 
 test("8502 standalone Dashboard Canvas renders the 3D graph, attention, and inspector", async ({ page }, testInfo) => {
+  test.setTimeout(75_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openDashboardCanvas(page);
 

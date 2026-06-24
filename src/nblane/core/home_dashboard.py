@@ -30,6 +30,7 @@ from nblane.core.io import (
     KANBAN_DONE,
     KANBAN_QUEUE,
     KANBAN_SECTIONS,
+    KANBAN_SOMEDAY,
     STATUSES,
     schema_node_index,
 )
@@ -121,6 +122,8 @@ def _as_list(raw: object) -> list:
 
 
 def _clean_string_list(raw: object) -> list[str]:
+    if isinstance(raw, str):
+        raw = [raw]
     if not isinstance(raw, list):
         return []
     out: list[str] = []
@@ -324,8 +327,43 @@ def _target_skill_hits(
     return targets, hits
 
 
+# Kanban section -> Growth Graph lifecycle. Lifecycle drives the leaf's
+# visual weight in the star tree: active leaves read full, finished/parked
+# leaves stay the same hue but dimmer, archived dimmer still (archived is not
+# unimportant — just resting).
+_KANBAN_LIFECYCLE = {
+    KANBAN_DOING: "active",
+    KANBAN_QUEUE: "queued",
+    KANBAN_DONE: "done",
+    KANBAN_SOMEDAY: "someday",
+}
+
+
+def _kanban_task_row(task: object, *, lifecycle: str, archived: bool = False) -> dict:
+    """Project one KanbanTask onto a privacy-safe graph row."""
+    return {
+        "title": getattr(task, "title", "") or "",
+        "id": getattr(task, "id", "") or "",
+        "blocked_by": getattr(task, "blocked_by", "") or "",
+        "tags": getattr(task, "tags", "") or "",
+        "started_on": getattr(task, "started_on", "") or "",
+        "completed_on": getattr(task, "completed_on", "") or "",
+        "project_id": getattr(task, "project_id", "") or "",
+        "milestone_id": getattr(task, "milestone_id", "") or "",
+        "crystallized": bool(getattr(task, "crystallized", False)),
+        "lifecycle": lifecycle,
+        "archived": archived,
+    }
+
+
 def dashboard_kanban_summary(profile: ProfileRef) -> dict:
-    """Return Doing and crystallization summary for ``kanban.md``."""
+    """Return Doing, crystallization, and full-lifecycle task summary.
+
+    The Growth Graph renders one leaf per task across every lifecycle state
+    (Doing / Queue / Done / Someday / archived), so this summary now emits a
+    flat ``tasks`` list in addition to the legacy Doing-only fields the rest of
+    the dashboard relies on.
+    """
     try:
         sections = io_facade.parse_kanban(profile)
         error = ""
@@ -352,6 +390,34 @@ def dashboard_kanban_summary(profile: ProfileRef) -> dict:
         }
         for task in doing
     ]
+
+    # Full task set across the live board, then archived tasks. Earlier task
+    # ids win on collision so a live task is never shadowed by a stale archive.
+    tasks: list[dict] = []
+    seen_ids: set[str] = set()
+    for section in KANBAN_SECTIONS:
+        lifecycle = _KANBAN_LIFECYCLE.get(section, "active")
+        for task in sections.get(section) or []:
+            row = _kanban_task_row(task, lifecycle=lifecycle)
+            if row["id"]:
+                if row["id"] in seen_ids:
+                    continue
+                seen_ids.add(row["id"])
+            tasks.append(row)
+    try:
+        from nblane.core.kanban_archive import _archive_tasks
+
+        for task in _archive_tasks(profile):
+            row = _kanban_task_row(task, lifecycle="archived", archived=True)
+            if row["id"]:
+                if row["id"] in seen_ids:
+                    continue
+                seen_ids.add(row["id"])
+            tasks.append(row)
+    except Exception:
+        # Archive is a best-effort enrichment; never let it break the board.
+        pass
+
     return {
         "error": error,
         "counts": {
@@ -361,6 +427,8 @@ def dashboard_kanban_summary(profile: ProfileRef) -> dict:
         "doing": doing_items[:5],
         "doing_items": doing_items,
         "doing_total": len(doing),
+        "tasks": tasks,
+        "tasks_total": len(tasks),
         "done_uncrystallized_count": len(pending_done),
         "done_uncrystallized": [
             {"title": task.title, "completed_on": task.completed_on or ""}
@@ -413,19 +481,25 @@ def dashboard_skill_summary(profile: ProfileRef) -> dict:
     # Emit the full schema node set so the Growth Graph can render every skill
     # (the "star" layer is the whole 82-node domain, not just tracked nodes).
     # Untracked nodes default to "locked" — the dimmest status.
-    tree_status_by_id = {
-        str(node.get("id")): str(node.get("status", "locked") or "locked")
+    tree_node_by_id = {
+        str(node.get("id")): node
         for node in _as_list(tree_raw.get("nodes"))
         if isinstance(node, dict) and node.get("id")
     }
-    items: list[dict[str, str]] = []
+    tree_status_by_id = {
+        node_id: str(node.get("status", "locked") or "locked")
+        for node_id, node in tree_node_by_id.items()
+    }
+    items: list[dict[str, object]] = []
     for node_id in index:
+        node = tree_node_by_id.get(node_id) or {}
         items.append(
             {
                 "id": node_id,
                 "label": _node_label(index, node_id),
                 "status": tree_status_by_id.get(node_id, "locked"),
                 "category": str((index.get(node_id) or {}).get("category") or ""),
+                "evidence_refs": _clean_string_list(node.get("evidence_refs")),
             }
         )
     return {
@@ -613,6 +687,13 @@ def dashboard_project_summary(profile: ProfileRef) -> dict:
             continue
         for ref in _clean_string_list(row.get("project_refs")):
             evidence_by_project.setdefault(ref, []).append(eid)
+    for case in board.project_cases:
+        if not case.id:
+            continue
+        for ref in _clean_string_list(case.evidence_refs):
+            evidence_by_project.setdefault(case.id, []).append(ref)
+    for project_id, refs in list(evidence_by_project.items()):
+        evidence_by_project[project_id] = _clean_string_list(refs)
 
     source_by_project: dict[str, list[str]] = {}
     for case in board.project_cases:
@@ -681,17 +762,45 @@ def _status_counts_from_items(items: list) -> dict[str, int]:
     return counts
 
 
-def _blog_post_status(path: Path) -> str:
+def _blog_post_meta(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
-        return "draft"
+        return {}
     end = text.find("\n---", 4)
     if end == -1:
-        return "draft"
+        return {}
     raw = yaml.safe_load(text[4:end]) or {}
     if not isinstance(raw, dict):
-        return "draft"
-    return str(raw.get("status", "draft") or "draft")
+        return {}
+    return raw
+
+
+def _blog_post_item(path: Path, blog_dir: Path) -> dict[str, object]:
+    """Return graph-safe metadata for one blog post."""
+    meta = _blog_post_meta(path)
+    route = path.relative_to(blog_dir).with_suffix("").as_posix()
+    title = str(meta.get("title") or route)
+    summary = str(meta.get("summary") or "")
+    status = str(meta.get("status", "draft") or "draft")
+    return {
+        "id": f"blog:{route}",
+        "route": route,
+        "title": title,
+        "status": status,
+        "summary": summary,
+        "kind": "blog",
+        "date": str(meta.get("date") or ""),
+        "evidence_refs": _clean_string_list(meta.get("related_evidence")),
+        "claim_refs": _clean_string_list(
+            [
+                *_clean_string_list(meta.get("related_claims")),
+                *_clean_string_list(meta.get("related_research_claims")),
+            ]
+        ),
+        "skill_refs": _clean_string_list(meta.get("skill_refs")),
+        "project_refs": _clean_string_list(meta.get("project_refs")),
+        "kanban_refs": _clean_string_list(meta.get("related_kanban")),
+    }
 
 
 def dashboard_public_summary(profile: ProfileRef) -> dict:
@@ -702,13 +811,13 @@ def dashboard_public_summary(profile: ProfileRef) -> dict:
     projects = _as_list(_read_yaml_mapping(pdir / "projects.yaml").get("projects"))
     outputs = _as_list(_read_yaml_mapping(pdir / "outputs.yaml").get("outputs"))
 
-    blog_items: list[dict[str, str]] = []
+    blog_items: list[dict[str, object]] = []
     blog_dir = pdir / "blog"
     if blog_dir.exists():
         for path in sorted(blog_dir.rglob("*.md")):
             if any(part.startswith(".") for part in path.relative_to(blog_dir).parts):
                 continue
-            blog_items.append({"status": _blog_post_status(path)})
+            blog_items.append(_blog_post_item(path, blog_dir))
 
     output_dir = REPO_ROOT / "dist" / "public" / name
     initialized = any(
@@ -755,10 +864,13 @@ def dashboard_public_summary(profile: ProfileRef) -> dict:
                 "evidence_refs": _clean_string_list(item.get("evidence_refs")),
                 "claim_refs": _clean_string_list(item.get("claim_refs")),
                 "skill_refs": _clean_string_list(item.get("skill_refs")),
+                "project_refs": _clean_string_list(item.get("project_refs")),
+                "kanban_refs": _clean_string_list(item.get("kanban_refs")),
             }
             for idx, item in enumerate(outputs)
             if isinstance(item, dict)
         ],
+        "blog_items": blog_items,
         "project_items": [
             {
                 "id": str(item.get("id") or item.get("slug") or item.get("title") or f"public_project:{idx}"),
@@ -769,6 +881,8 @@ def dashboard_public_summary(profile: ProfileRef) -> dict:
                 "evidence_refs": _clean_string_list(item.get("evidence_refs")),
                 "claim_refs": _clean_string_list(item.get("claim_refs")),
                 "skill_refs": _clean_string_list(item.get("skill_refs")),
+                "project_refs": _clean_string_list(item.get("project_refs")),
+                "kanban_refs": _clean_string_list(item.get("kanban_refs")),
             }
             for idx, item in enumerate(projects)
             if isinstance(item, dict)

@@ -43,14 +43,26 @@ class TestHomeDashboard(unittest.TestCase):
             "  - project_id: project:nblane\n"
             "- [ ] Write eval notes\n\n"
             "## Queue\n\n"
-            "- [ ] Read paper\n\n"
+            "- [ ] Read paper\n"
+            "  - id: task_read_paper\n\n"
             "## Done\n\n"
             "- [x] Finish benchmark\n"
+            "  - id: task_finish_benchmark\n"
             "  - outcome: done\n"
             "- [x] Archive old result\n"
+            "  - id: task_archive_old_result\n"
             "  - crystallized: true\n\n"
             "## Someday / Maybe\n\n"
-            "- Future idea\n",
+            "- Future idea\n"
+            "  - id: task_future_idea\n",
+            encoding="utf-8",
+        )
+        (profile / "kanban-archive.md").write_text(
+            "# alice · Kanban archive\n\n"
+            "## Archived · 2026-05-01\n\n"
+            "- [x] Archived prior demo\n"
+            "  - id: task_archived_prior_demo\n"
+            "  - project_id: project:nblane\n",
             encoding="utf-8",
         )
         _write_yaml(
@@ -81,12 +93,33 @@ class TestHomeDashboard(unittest.TestCase):
                         "strength": "medium",
                         "review_status": "reviewed",
                         "project_refs": ["project:nblane"],
+                        "skill_refs": ["ros2_basics"],
+                        "kanban_refs": ["kanban:task_ship_demo"],
                     },
                     {
                         "id": "ev_unused",
                         "type": "practice",
                         "title": "Needs linking",
                     },
+                ],
+            },
+        )
+        _write_yaml(
+            profile / "claims.yaml",
+            {
+                "schema_version": "1.0",
+                "profile": "alice",
+                "claims": [
+                    {
+                        "id": "claim:demo",
+                        "status": "accepted",
+                        "text": "Linked evidence supports the robotics demo.",
+                        "evidence_refs": ["ev_linked"],
+                        "skill_refs": ["ros2_basics"],
+                        "project_refs": ["project:nblane"],
+                        "source_refs": ["source:research:20260513-001"],
+                        "output_refs": ["blog:published"],
+                    }
                 ],
             },
         )
@@ -217,10 +250,28 @@ class TestHomeDashboard(unittest.TestCase):
             "---\ntitle: Draft\nstatus: draft\n---\n\nBody\n",
             encoding="utf-8",
         )
+        (blog_dir / "published.md").write_text(
+            "---\n"
+            "title: Published note\n"
+            "status: published\n"
+            "summary: A public note backed by reviewed evidence.\n"
+            "related_evidence:\n"
+            "  - ev_linked\n"
+            "related_research_claims:\n"
+            "  - claim:demo\n"
+            "skill_refs:\n"
+            "  - ros2_basics\n"
+            "project_refs:\n"
+            "  - project:nblane\n"
+            "related_kanban:\n"
+            "  - kanban:task_ship_demo\n"
+            "---\n\nBody\n",
+            encoding="utf-8",
+        )
         return profile
 
-    def test_kanban_summary_surfaces_doing_and_uncrystallized_done(self) -> None:
-        """Kanban summary reads Doing and Done crystallization state."""
+    def test_kanban_summary_surfaces_full_task_lifecycle(self) -> None:
+        """Kanban summary reads Doing, queued, done, someday, and archived."""
         with tempfile.TemporaryDirectory() as tmp_s:
             profile = self._profile(Path(tmp_s))
             summary = dashboard_kanban_summary(profile)
@@ -229,6 +280,14 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertEqual(summary["doing"][0]["title"], "Ship robot demo")
         self.assertEqual(summary["doing"][0]["blocked_by"], "calibration data")
         self.assertEqual(summary["done_uncrystallized_count"], 1)
+        self.assertEqual(summary["tasks_total"], 7)
+        lifecycles = {task["lifecycle"] for task in summary["tasks"]}
+        self.assertEqual(
+            lifecycles,
+            {"active", "queued", "done", "someday", "archived"},
+        )
+        archived = [task for task in summary["tasks"] if task["archived"]]
+        self.assertEqual(archived[0]["id"], "task_archived_prior_demo")
 
     def test_skill_summary_counts_risks_and_goal_targets(self) -> None:
         """Skill summary reads status, evidence risk, and current goal targets."""
@@ -245,6 +304,9 @@ class TestHomeDashboard(unittest.TestCase):
             summary["target_learning_locked"][0]["id"],
             "ros2_basics",
         )
+        self.assertEqual(len(summary["items"]), summary["total"])
+        items = {item["id"]: item for item in summary["items"]}
+        self.assertEqual(items["experiment_design"]["evidence_refs"], ["ev_linked"])
 
     def test_pending_evidence_summary_combines_done_and_unlinked_pool(self) -> None:
         """Evidence summary shows both Done review and unlinked pool rows."""
@@ -291,7 +353,13 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertTrue(summary["initialized"])
         self.assertEqual(summary["visibility"], "public")
         self.assertEqual(summary["draft_total"], 2)
+        self.assertEqual(summary["published_total"], 1)
         self.assertFalse(summary["build_exists"])
+        blog_items = {item["id"]: item for item in summary["blog_items"]}
+        self.assertEqual(blog_items["blog:published"]["title"], "Published note")
+        self.assertEqual(blog_items["blog:published"]["status"], "published")
+        self.assertEqual(blog_items["blog:published"]["evidence_refs"], ["ev_linked"])
+        self.assertEqual(blog_items["blog:published"]["claim_refs"], ["claim:demo"])
 
     def test_dashboard_payload_has_stable_chart_and_graph_shape(self) -> None:
         """Aggregate payload exposes stable JSON for the React component."""
@@ -397,13 +465,15 @@ class TestHomeDashboard(unittest.TestCase):
             "research:planned",
             "agent_run:planned",
             "composite_evidence:planned",
-            "claim:planned",
             "feedback:planned",
             "capacity:planned",
         ):
             self.assertTrue(nodes[node_id]["placeholder"])
             self.assertFalse(nodes[node_id]["implemented"])
             self.assertEqual(nodes[node_id]["status"], "planned")
+        self.assertIn("claim:accepted", nodes)
+        self.assertTrue(nodes["claim:accepted"]["implemented"])
+        self.assertEqual(nodes["claim:accepted"]["status"], "accepted")
         node_ids = set(nodes)
         for edge in payload["graph"]["edges"]:
             self.assertIn(edge["from"], node_ids)
@@ -413,9 +483,33 @@ class TestHomeDashboard(unittest.TestCase):
             for edge in payload["graph"]["edges"]
         }
         self.assertIn(("goal:g1", "project:nblane", "contains"), graph_edges)
-        self.assertIn(("project:nblane", "task:0", "contains"), graph_edges)
+        self.assertIn(("project:nblane", "task:task_ship_demo", "contains"), graph_edges)
+        self.assertIn(
+            ("task:task_ship_demo", "atomic_evidence:ev_linked", "generated_by"),
+            graph_edges,
+        )
         self.assertIn(
             ("project:nblane", "atomic_evidence:pool", "supports"),
+            graph_edges,
+        )
+        self.assertIn(
+            ("project:nblane", "atomic_evidence:ev_linked", "supports"),
+            graph_edges,
+        )
+        self.assertIn(
+            ("atomic_evidence:ev_linked", "skill:experiment_design", "supports"),
+            graph_edges,
+        )
+        self.assertIn(
+            ("atomic_evidence:ev_linked", "claim:item:claim:demo", "supports"),
+            graph_edges,
+        )
+        self.assertIn(
+            ("claim:item:claim:demo", "skill:ros2_basics", "supports"),
+            graph_edges,
+        )
+        self.assertIn(
+            ("atomic_evidence:ev_linked", "output:item:blog:published", "produces"),
             graph_edges,
         )
         self.assertIn(("project:nblane", "source:inbox", "contains"), graph_edges)

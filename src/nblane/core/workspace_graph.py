@@ -260,6 +260,63 @@ def _clean_string_list(value: object) -> list[str]:
     return out
 
 
+def _node_id_part(value: object, fallback: str = "item") -> str:
+    text = "_".join(str(value or "").strip().split())
+    if not text:
+        return fallback
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:._-")
+    cleaned = "".join(ch if ch in allowed else "_" for ch in text).strip("_")
+    return cleaned or fallback
+
+
+def _ref_node(mapping: dict[str, str], ref: object) -> str:
+    text = str(ref or "").strip()
+    if not text:
+        return ""
+    candidates = [text]
+    if text.startswith("kanban:"):
+        candidates.append(text.split(":", 1)[1])
+    else:
+        candidates.append(f"kanban:{text}")
+    for candidate in candidates:
+        found = mapping.get(candidate)
+        if found:
+            return found
+    return ""
+
+
+def _non_draft_status(value: object) -> bool:
+    status = str(value or "").strip().lower()
+    return bool(status and status != "draft")
+
+
+def _runtime_placeholder_needed(current: int, minimum: int) -> int:
+    return max(0, int(minimum) - max(0, int(current)))
+
+
+def _task_lifecycle_label(lifecycle: str, ui: dict[str, str] | None) -> str:
+    clean = str(lifecycle or "").strip().lower()
+    labels = {
+        "active": _ui_text(ui, "dashboard_metric_doing", "Doing"),
+        "queued": _ui_text(ui, "dashboard_metric_queue", "Queue"),
+        "done": _ui_text(ui, "dashboard_metric_done", "Done"),
+        "someday": _ui_text(ui, "dashboard_metric_someday", "Someday"),
+        "archived": _ui_text(ui, "dashboard_metric_archived", "archived"),
+    }
+    return labels.get(clean, clean or _ui_text(ui, "dashboard_metric_doing", "Doing"))
+
+
+def _task_status(item: dict[str, Any]) -> str:
+    if item.get("blocked_by"):
+        return "risk"
+    lifecycle = str(item.get("lifecycle") or "").strip().lower()
+    if lifecycle == "active":
+        return "active"
+    if lifecycle in {"queued", "done", "someday", "archived"}:
+        return lifecycle
+    return lifecycle or "active"
+
+
 def _clean_item_rows(value: object, *, limit: int = 120) -> list[dict[str, Any]]:
     rows = value if isinstance(value, list) else []
     out: list[dict[str, Any]] = []
@@ -458,7 +515,7 @@ def workspace_graph_payload(
         item
         for item in list(project_summary.get("cases") or [])
         if isinstance(item, dict) and str(item.get("id") or "").strip()
-    ][:3]
+    ][:40]
     project_node_ids: list[str] = []
     project_node_by_id: dict[str, str] = {}
     if project_cases:
@@ -574,10 +631,27 @@ def workspace_graph_payload(
             )
         )
 
-    for idx, item in enumerate((kanban.get("doing") or [])[:3]):
+    task_node_ids: list[str] = []
+    task_node_by_ref: dict[str, str] = {}
+    task_items = _clean_item_rows(kanban.get("tasks"), limit=260)
+    if not task_items:
+        task_items = _clean_item_rows(kanban.get("doing"), limit=40)
+        for item in task_items:
+            item.setdefault("lifecycle", "active")
+            item.setdefault("archived", False)
+    for idx, item in enumerate(task_items):
         if not isinstance(item, dict):
             continue
-        node_id = f"task:{idx}"
+        task_id = str(item.get("id") or "").strip()
+        node_id = f"task:{_node_id_part(task_id, str(idx))}"
+        if node_id in task_node_ids:
+            node_id = f"task:{_node_id_part(task_id, str(idx))}:{idx}"
+        lifecycle = str(item.get("lifecycle") or "active").strip().lower()
+        status = _task_status(item)
+        task_node_ids.append(node_id)
+        if task_id:
+            task_node_by_ref[task_id] = node_id
+            task_node_by_ref[f"kanban:{task_id}"] = node_id
         nodes.append(
             _node(
                 id=node_id,
@@ -587,10 +661,17 @@ def workspace_graph_payload(
                 metric=(
                     _ui_text(ui, "dashboard_graph_blocked", "blocked")
                     if item.get("blocked_by")
-                    else _ui_text(ui, "dashboard_metric_doing", "Doing")
+                    else _task_lifecycle_label(lifecycle, ui)
                 ),
-                status="risk" if item.get("blocked_by") else "active",
+                status=status,
+                record_id=task_id,
                 owner_path="pages/3_Kanban.py",
+                lifecycle=lifecycle,
+                archived=bool(item.get("archived")),
+                meta={
+                    "project_id": str(item.get("project_id") or "").strip(),
+                    "kanban_ref": f"kanban:{task_id}" if task_id else "",
+                },
             )
         )
         edges.append(_edge(primary_node_id, node_id, "drives"))
@@ -640,8 +721,8 @@ def workspace_graph_payload(
         )
     )
     edges.append(_edge(primary_node_id, "source:inbox", "contains"))
-    for idx in range(min(len(kanban.get("doing") or []), 3)):
-        edges.append(_edge(f"task:{idx}", "source:inbox", "generated_by"))
+    for node_id in task_node_ids[:8]:
+        edges.append(_edge(node_id, "source:inbox", "generated_by", suggested=True))
     for activity_id in ("daily_work:planned", "research:planned", "agent_run:planned"):
         edges.append(
             _edge(activity_id, "source:inbox", "generated_by", placeholder=True, suggested=True)
@@ -673,6 +754,12 @@ def workspace_graph_payload(
                 owner_path="pages/7_Research.py",
                 summary="" if private else _short_text(source.get("summary"), max_len=180),
                 item_kind="source",
+                meta={
+                    "tags": _clean_string_list(source.get("tags")),
+                    "goal_refs": _clean_string_list(source.get("goal_refs")),
+                    "project_refs": _clean_string_list(source.get("project_refs")),
+                    "evidence_refs": _clean_string_list(source.get("evidence_refs")),
+                },
             )
         )
         edges.append(_edge("source:inbox", node_id, "contains"))
@@ -684,6 +771,40 @@ def workspace_graph_payload(
             project_node_id = project_node_by_id.get(project_ref)
             if project_node_id:
                 edges.append(_edge(project_node_id, node_id, "contains"))
+
+    sand_count = sum(1 for node in nodes if str(node.get("role") or "") == "sand")
+    for idx in range(_runtime_placeholder_needed(sand_count, 36)):
+        placeholder_id = f"source:placeholder:{idx + 1}"
+        nodes.append(
+            _node(
+                id=placeholder_id,
+                type="source",
+                layer="source",
+                role="sand",
+                label=_ui_text(ui, "dashboard_source_ambient", "Ambient source"),
+                metric=_ui_text(ui, "dashboard_placeholder_metric", "planned"),
+                status="planned",
+                implemented=False,
+                placeholder=True,
+                suggested=True,
+                synthetic=True,
+                item_kind="runtime_sand",
+                meta={
+                    "tags": ["runtime-placeholder"],
+                    "synthetic": True,
+                    "source_counts_excluded": True,
+                },
+            )
+        )
+        edges.append(
+            _edge(
+                "source:inbox",
+                placeholder_id,
+                "contains",
+                placeholder=True,
+                suggested=True,
+            )
+        )
 
     candidate_count = int(pending.get("done_uncrystallized_count") or 0)
     unlinked_count = int(pending.get("unlinked_count") or 0)
@@ -795,6 +916,12 @@ def workspace_graph_payload(
                 owner_path=EVIDENCE_REVIEW_PAGE,
                 summary="" if private else _short_text(evidence.get("summary"), max_len=220),
                 item_kind="evidence",
+                meta={
+                    "source_refs": _clean_string_list(evidence.get("source_refs")),
+                    "project_refs": _clean_string_list(evidence.get("project_refs")),
+                    "skill_refs": _clean_string_list(evidence.get("skill_refs")),
+                    "kanban_refs": _clean_string_list(evidence.get("kanban_refs")),
+                },
             )
         )
         edges.append(_edge("atomic_evidence:pool", node_id, "contains"))
@@ -808,6 +935,10 @@ def workspace_graph_payload(
             project_node_id = project_node_by_id.get(project_ref)
             if project_node_id:
                 edges.append(_edge(project_node_id, node_id, "supports"))
+        for task_ref in _clean_string_list(evidence.get("kanban_refs")):
+            task_node_id = _ref_node(task_node_by_ref, task_ref)
+            if task_node_id:
+                edges.append(_edge(task_node_id, node_id, "generated_by"))
 
     for source in source_items:
         source_id = str(source.get("id") or "").strip()
@@ -818,6 +949,24 @@ def workspace_graph_payload(
             evidence_node_id = evidence_node_by_ref.get(evidence_ref)
             if evidence_node_id:
                 edges.append(_edge(source_node_id, evidence_node_id, "source_to_candidate"))
+
+    for case in project_cases:
+        project_ref = str(case.get("id") or "").strip()
+        project_node_id = project_node_by_id.get(project_ref)
+        if not project_node_id:
+            continue
+        for task_ref in _clean_string_list(case.get("task_refs")):
+            task_node_id = _ref_node(task_node_by_ref, task_ref)
+            if task_node_id:
+                edges.append(_edge(project_node_id, task_node_id, "contains"))
+        for source_ref in _clean_string_list(case.get("source_refs")):
+            source_node_id = source_node_by_ref.get(source_ref)
+            if source_node_id:
+                edges.append(_edge(project_node_id, source_node_id, "contains"))
+        for evidence_ref in _clean_string_list(case.get("evidence_refs")):
+            evidence_node_id = evidence_node_by_ref.get(evidence_ref)
+            if evidence_node_id:
+                edges.append(_edge(project_node_id, evidence_node_id, "supports"))
 
     claim_summary = claims or {}
     accepted_claims = int(claim_summary.get("accepted_count") or 0)
@@ -932,7 +1081,8 @@ def workspace_graph_payload(
             goal_node_id = goal_node_ids.get(goal_obj.id)
             if goal_node_id:
                 edges.append(_edge(goal_node_id, skill_node_id, "drives"))
-    for item in _clean_item_rows(skills.get("items"), limit=180):
+    skill_items = _clean_item_rows(skills.get("items"), limit=260)
+    for item in skill_items:
         skill_id = str(item.get("id") or "").strip()
         if not skill_id:
             continue
@@ -948,6 +1098,10 @@ def workspace_graph_payload(
                 record_id=skill_id,
                 status=str(item.get("status") or ""),
                 owner_path="pages/1_Skill_Tree.py",
+                meta={
+                    "category": str(item.get("category") or ""),
+                    "evidence_refs": _clean_string_list(item.get("evidence_refs")),
+                },
             ),
         )
     if not skill_nodes:
@@ -995,14 +1149,42 @@ def workspace_graph_payload(
             if skill_node_id in skill_nodes:
                 edges.append(_edge(evidence_node_id, skill_node_id, "supports"))
 
+    for item in skill_items:
+        skill_ref = str(item.get("id") or "").strip()
+        skill_node_id = skill_node_by_ref.get(skill_ref) or f"skill:{skill_ref}"
+        if skill_node_id not in skill_nodes:
+            continue
+        for evidence_ref in _clean_string_list(item.get("evidence_refs")):
+            evidence_node_id = evidence_node_by_ref.get(evidence_ref)
+            if evidence_node_id:
+                edges.append(_edge(evidence_node_id, skill_node_id, "supports"))
+
     for claim in claim_items:
         claim_node_id_for_item = claim_node_by_ref.get(str(claim.get("id") or "").strip())
         if not claim_node_id_for_item:
             continue
+        claim_evidence_node_ids = [
+            evidence_node_by_ref[ref]
+            for ref in _clean_string_list(claim.get("evidence_refs"))
+            if ref in evidence_node_by_ref
+        ]
+        claim_skill_node_ids: list[str] = []
         for skill_ref in _clean_string_list(claim.get("skill_refs")):
             skill_node_id = skill_node_by_ref.get(skill_ref) or f"skill:{skill_ref}"
             if skill_node_id in skill_nodes:
+                claim_skill_node_ids.append(skill_node_id)
                 edges.append(_edge(claim_node_id_for_item, skill_node_id, "supports"))
+        for evidence_node_id in claim_evidence_node_ids:
+            for skill_node_id in claim_skill_node_ids:
+                edges.append(
+                    _edge(
+                        evidence_node_id,
+                        skill_node_id,
+                        "supports",
+                        suggested=True,
+                        relation="claim_evidence_skill",
+                    )
+                )
 
     for node_id in list(skill_nodes)[:4]:
         edges.append(_edge(claim_node_id, node_id, "supports", placeholder=claim_node_id == "claim:planned", suggested=True))
@@ -1038,31 +1220,53 @@ def workspace_graph_payload(
     edges.append(_edge("gap:risk", "next_action:planned", "drives", suggested=True))
     edges.append(_edge("next_action:planned", primary_node_id, "drives", suggested=True))
 
+    raw_output_items = [
+        *(_clean_item_rows(public.get("items"), limit=100)),
+        *(_clean_item_rows(public.get("blog_items"), limit=100)),
+        *(_clean_item_rows(public.get("project_items"), limit=100)),
+    ]
+    output_items = [
+        item
+        for item in raw_output_items
+        if _non_draft_status(item.get("status"))
+    ]
+    real_output_count = len(output_items)
+    output_implemented = bool(real_output_count or public.get("initialized"))
     nodes.append(
         _node(
             id="output",
             type="output",
             layer="output",
             label=_ui_text(ui, "dashboard_output_title", "Output"),
-            metric=str(public.get("draft_total", 0)),
-            status="draft" if public.get("draft_total") else "clear",
+            metric=str(real_output_count or public.get("draft_total", 0)),
+            status=(
+                "published"
+                if real_output_count
+                else "draft"
+                if public.get("draft_total")
+                else "planned"
+            ),
             owner_path="pages/6_Output_Studio.py",
+            implemented=output_implemented,
+            placeholder=not output_implemented,
+            suggested=not bool(real_output_count),
         )
     )
     edges.append(_edge(claim_node_id, "output", "produces", placeholder=claim_node_id == "claim:planned", suggested=True))
-    edges.append(_edge("atomic_evidence:pool", "output", "produces"))
+    edges.append(_edge("atomic_evidence:pool", "output", "produces", suggested=not bool(real_output_count)))
 
     output_node_by_ref: dict[str, str] = {}
-    output_items = [
-        *(_clean_item_rows(public.get("items"), limit=80)),
-        *(_clean_item_rows(public.get("project_items"), limit=80)),
-    ]
-    for output_item in output_items:
+    output_refs_by_evidence: dict[str, list[str]] = {}
+    output_leaf_ids: list[str] = []
+    for idx, output_item in enumerate(output_items):
         output_id = str(output_item.get("id") or "").strip()
         if not output_id:
             continue
-        node_id = f"output:item:{output_id}"
+        node_id = f"output:item:{_node_id_part(output_id, str(idx))}"
+        if node_id in output_leaf_ids:
+            node_id = f"{node_id}:{idx}"
         output_node_by_ref[output_id] = node_id
+        output_leaf_ids.append(node_id)
         nodes.append(
             _node(
                 id=node_id,
@@ -1075,12 +1279,21 @@ def workspace_graph_payload(
                 owner_path="pages/6_Output_Studio.py",
                 summary=_short_text(output_item.get("summary"), max_len=220),
                 item_kind=str(output_item.get("kind") or "output"),
+                meta={
+                    "route": str(output_item.get("route") or ""),
+                    "evidence_refs": _clean_string_list(output_item.get("evidence_refs")),
+                    "claim_refs": _clean_string_list(output_item.get("claim_refs")),
+                    "skill_refs": _clean_string_list(output_item.get("skill_refs")),
+                    "project_refs": _clean_string_list(output_item.get("project_refs")),
+                    "kanban_refs": _clean_string_list(output_item.get("kanban_refs")),
+                },
             )
         )
         edges.append(_edge("output", node_id, "contains"))
         for evidence_ref in _clean_string_list(output_item.get("evidence_refs")):
             evidence_node_id = evidence_node_by_ref.get(evidence_ref)
             if evidence_node_id:
+                output_refs_by_evidence.setdefault(evidence_ref, []).append(node_id)
                 edges.append(_edge(evidence_node_id, node_id, "produces"))
         for claim_ref in _clean_string_list(output_item.get("claim_refs")):
             claim_item_node_id = claim_node_by_ref.get(claim_ref)
@@ -1090,6 +1303,45 @@ def workspace_graph_payload(
             skill_node_id = skill_node_by_ref.get(skill_ref) or f"skill:{skill_ref}"
             if skill_node_id in skill_nodes:
                 edges.append(_edge(skill_node_id, node_id, "supports"))
+        for project_ref in _clean_string_list(output_item.get("project_refs")):
+            project_node_id = project_node_by_id.get(project_ref)
+            if project_node_id:
+                edges.append(_edge(project_node_id, node_id, "produces"))
+        for task_ref in _clean_string_list(output_item.get("kanban_refs")):
+            task_node_id = _ref_node(task_node_by_ref, task_ref)
+            if task_node_id:
+                edges.append(_edge(task_node_id, node_id, "produces"))
+
+    if not output_leaf_ids:
+        for idx in range(3):
+            node_id = f"output:placeholder:{idx + 1}"
+            output_leaf_ids.append(node_id)
+            nodes.append(
+                _node(
+                    id=node_id,
+                    type="output",
+                    layer="output",
+                    label=f"{_ui_text(ui, 'dashboard_output_title', 'Output')} {idx + 1}",
+                    metric=_ui_text(ui, "dashboard_placeholder_metric", "planned"),
+                    status="planned",
+                    implemented=False,
+                    placeholder=True,
+                    suggested=True,
+                    synthetic=True,
+                    item_kind="runtime_output",
+                    meta={"synthetic": True, "runtime_placeholder": True},
+                )
+            )
+            edges.append(_edge("output", node_id, "contains", placeholder=True, suggested=True))
+            edges.append(
+                _edge(
+                    claim_node_id,
+                    node_id,
+                    "produces",
+                    placeholder=True,
+                    suggested=True,
+                )
+            )
 
     for claim in claim_items:
         claim_item_node_id = claim_node_by_ref.get(str(claim.get("id") or "").strip())
@@ -1099,6 +1351,50 @@ def workspace_graph_payload(
             output_item_node_id = output_node_by_ref.get(output_ref)
             if output_item_node_id:
                 edges.append(_edge(claim_item_node_id, output_item_node_id, "produces"))
+
+    layout_anchor_sources = (
+        set(project_node_by_id.values())
+        | set(task_node_by_ref.values())
+        | set(output_leaf_ids)
+        | {"output"}
+    )
+    for evidence in evidence_items:
+        evidence_id = str(evidence.get("id") or "").strip()
+        evidence_node_id = evidence_node_by_ref.get(evidence_id)
+        if not evidence_node_id:
+            continue
+        has_layout_parent = any(
+            str(edge.get("to") or "") == evidence_node_id
+            and str(edge.get("from") or "") in layout_anchor_sources
+            for edge in edges
+        )
+        if has_layout_parent:
+            continue
+        anchor_id = ""
+        for project_ref in _clean_string_list(evidence.get("project_refs")):
+            anchor_id = project_node_by_id.get(project_ref, "")
+            if anchor_id:
+                break
+        if not anchor_id:
+            for task_ref in _clean_string_list(evidence.get("kanban_refs")):
+                anchor_id = _ref_node(task_node_by_ref, task_ref)
+                if anchor_id:
+                    break
+        if not anchor_id:
+            anchor_id = next(iter(output_refs_by_evidence.get(evidence_id, [])), "")
+        if not anchor_id:
+            anchor_id = "atomic_evidence:pool"
+        edges.append(
+            _edge(
+                anchor_id,
+                evidence_node_id,
+                "supports",
+                suggested=True,
+                placeholder=anchor_id == "atomic_evidence:pool",
+                relation="layout_anchor",
+                layout_only=True,
+            )
+        )
 
     nodes.append(
         _node(
