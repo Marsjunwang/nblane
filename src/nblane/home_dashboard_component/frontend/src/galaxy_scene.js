@@ -379,15 +379,17 @@ export class GalaxyScene {
     // bright satellites — clearly subordinate to the task, yet sparkling.
     const moon = Boolean(node.moon);
     const baseR = moon
-      ? 2.2
+      ? 1.5
       : node.role === "direction" ? 5.4 : node.role === "branch" ? 4.4 : node.role === "constellation" ? 3.8 : 3.4;
-    const r = Math.max(moon ? 1.6 : 2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
+    const r = Math.max(moon ? 1.1 : 2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
 
     // Planet-like material: a touch of metalness + lower roughness give a soft
     // specular sheen so spheres read as lit bodies rather than flat discs, while
     // the emissive keeps them glowing against the deep space. Placeholders stay
-    // matte + dim.
-    const baseEmissive = placeholder ? 0.22 : moon ? 0.95 : 0.62;
+    // matte + dim. Moons (a task's generated-evidence satellite) are tiny but the
+    // brightest body on screen — a sparkling firefly whose mere presence signals
+    // "this task has already produced evidence".
+    const baseEmissive = placeholder ? 0.22 : moon ? 1.6 : 0.62;
     const baseOpacity = placeholder ? 0.5 : 0.96;
     const orb = new THREE.Mesh(
       new THREE.SphereGeometry(r, 32, 24),
@@ -406,11 +408,14 @@ export class GalaxyScene {
     orb.userData.baseEmissive = baseEmissive;
     orb.userData.baseOpacity = baseOpacity;
     this.nodeGroup.add(orb);
-    this.pickables.push(orb);
+    // Moons are ambient indicators, not navigation targets — leave them out of the
+    // pickables so a click falls through to the task/empty space behind them.
+    if (!moon) this.pickables.push(orb);
 
-    // Glow halo, dimmer for placeholders; moons keep a tight but vivid halo.
-    const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), moon ? 0.4 : 0.25);
-    const halo = this._addHalo(pos, haloColor.getHex(), r * (placeholder ? 2.4 : moon ? 3.0 : 3.4), placeholder ? 0.16 : moon ? 0.52 : 0.42);
+    // Glow halo, dimmer for placeholders; moons keep a tight but vivid halo so the
+    // little firefly twinkles brighter than its size suggests.
+    const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), moon ? 0.55 : 0.25);
+    const halo = this._addHalo(pos, haloColor.getHex(), r * (placeholder ? 2.4 : moon ? 4.2 : 3.4), placeholder ? 0.16 : moon ? 0.7 : 0.42);
     // Track for orbital animation: orb + halo move together each frame.
     this._orbMesh.set(node.id, orb);
     this._orbHalo.set(node.id, halo);
