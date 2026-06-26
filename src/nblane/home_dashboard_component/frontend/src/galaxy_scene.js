@@ -85,6 +85,7 @@ export class GalaxyScene {
     this.nodeGroup = new THREE.Group(); // pickable orb meshes
     this.haloGroup = new THREE.Group(); // additive glow sprites
     this.linkGroup = new THREE.Group(); // orbit rings
+    this.trailGroup = new THREE.Group(); // comet trails for evidence moons
     this.selEdgeGroup = new THREE.Group(); // relationship filaments for the selection
     this.fxGroup = new THREE.Group(); // skill halo points, dust, core glow
     this.labelGroup = new THREE.Group(); // hover / selected labels
@@ -94,6 +95,7 @@ export class GalaxyScene {
     this._posById = new Map();
     this._orbMesh = new Map(); // nodeId -> orb mesh
     this._orbHalo = new Map(); // nodeId -> halo sprite
+    this._comets = new Map(); // nodeId -> { line, positions:Float32Array, history:[Vector3] } for evidence moon trails
     this._orbGlow = new Map(); // nodeId -> glow entry (for focus dimming)
     this._nodeOrbits = {}; // nodeId -> { parentId, a, b, tilt, swivel, baseAngle, speed }
     this._orbitOrder = []; // node ids ordered parent-before-child for animation
@@ -157,7 +159,7 @@ export class GalaxyScene {
     const scene = new THREE.Scene();
     scene.background = makeSpaceGradient();
     scene.fog = new THREE.FogExp2(0x070a1c, 0.0007);
-    scene.add(this.linkGroup, this.selEdgeGroup, this.fxGroup, this.haloGroup, this.nodeGroup, this.labelGroup, this.focusLabelGroup);
+    scene.add(this.linkGroup, this.trailGroup, this.selEdgeGroup, this.fxGroup, this.haloGroup, this.nodeGroup, this.labelGroup, this.focusLabelGroup);
     this.scene = scene;
 
     const camera = new THREE.PerspectiveCamera(52, this.width / this.height, 1, 4000);
@@ -379,9 +381,9 @@ export class GalaxyScene {
     // bright satellites — clearly subordinate to the task, yet sparkling.
     const moon = Boolean(node.moon);
     const baseR = moon
-      ? 1.5
+      ? 1.1
       : node.role === "direction" ? 5.4 : node.role === "branch" ? 4.4 : node.role === "constellation" ? 3.8 : 3.4;
-    const r = Math.max(moon ? 1.1 : 2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
+    const r = Math.max(moon ? 0.8 : 2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
 
     // Planet-like material: a touch of metalness + lower roughness give a soft
     // specular sheen so spheres read as lit bodies rather than flat discs, while
@@ -419,6 +421,58 @@ export class GalaxyScene {
     // Track for orbital animation: orb + halo move together each frame.
     this._orbMesh.set(node.id, orb);
     this._orbHalo.set(node.id, halo);
+
+    // Evidence moons get a fading comet trail — a vertex-coloured line whose tail
+    // dims to nothing. The whipping comet (head + trail) is the sole cue that this
+    // task has produced evidence, so the tier-3 orbit ring is intentionally absent.
+    if (moon) this._addCometTrail(node.id, color);
+  }
+
+  _addCometTrail(id, color) {
+    const LEN = 26; // trail samples (head → tail)
+    const positions = new Float32Array(LEN * 3);
+    const colors = new Float32Array(LEN * 3);
+    const geom = new THREE.BufferGeometry();
+    for (let i = 0; i < LEN; i += 1) {
+      // Tail fades to black (additive blending → fades to invisible). The head end
+      // is pushed toward white so the leading point sparkles like a bright comet
+      // nucleus regardless of the evidence's own (purple) colour.
+      const f = 1 - i / (LEN - 1); // 1 at head → 0 at tail
+      const headGlow = Math.pow(f, 1.6); // concentrate brightness near the head
+      const white = 0.55 * Math.pow(f, 6); // only the very tip whitens
+      colors[i * 3] = Math.min(1, color.r * headGlow + white);
+      colors[i * 3 + 1] = Math.min(1, color.g * headGlow + white);
+      colors[i * 3 + 2] = Math.min(1, color.b * headGlow + white);
+    }
+    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const line = new THREE.Line(geom, mat);
+    line.frustumCulled = false;
+    this.trailGroup.add(line);
+    this._comets.set(id, { line, positions, history: [] });
+  }
+
+  _advanceComet(comet, head) {
+    const LEN = comet.positions.length / 3;
+    const hist = comet.history;
+    hist.unshift(head.clone()); // newest at index 0 (the head)
+    if (hist.length > LEN) hist.length = LEN;
+    for (let i = 0; i < LEN; i += 1) {
+      // Before the trail has filled, clamp to the oldest known sample so the tail
+      // collapses onto the head instead of sitting at the origin.
+      const s = hist[Math.min(i, hist.length - 1)] || head;
+      comet.positions[i * 3] = s.x;
+      comet.positions[i * 3 + 1] = s.y;
+      comet.positions[i * 3 + 2] = s.z;
+    }
+    comet.line.geometry.attributes.position.needsUpdate = true;
   }
 
   _addOrbitRing(orbit) {
@@ -788,6 +842,12 @@ export class GalaxyScene {
       this._setMeshLOD(mesh, level);
       const halo = this._orbHalo.get(id);
       if (halo && halo.userData.glow) halo.userData.glow.vis = level;
+      // Comet trail dims with its own node (the evidence moon).
+      const comet = this._comets.get(id);
+      if (comet) {
+        comet.line.visible = level > 0.02;
+        comet.line.material.opacity = 0.85 * level;
+      }
     });
 
     // North Star core: hidden while a goal subsystem is focused.
@@ -1043,6 +1103,10 @@ export class GalaxyScene {
       if (mesh) mesh.position.copy(p);
       const halo = this._orbHalo.get(id);
       if (halo) halo.position.copy(p);
+      // Comet trail: push the new head position, keep the last LEN samples, and
+      // write them tail→head into the line buffer so the trail streams behind.
+      const comet = this._comets.get(id);
+      if (comet) this._advanceComet(comet, p);
       // Keep selection lookups in sync with the moving node.
       const pb = this._posById.get(id);
       if (pb) pb.copy(p);
@@ -1128,6 +1192,7 @@ export class GalaxyScene {
     this._clearGroup(this.nodeGroup);
     this._clearGroup(this.haloGroup);
     this._clearGroup(this.linkGroup);
+    this._clearGroup(this.trailGroup);
     this._clearGroup(this.selEdgeGroup);
     this._clearGroup(this.labelGroup);
     this._clearGroup(this.focusLabelGroup);
@@ -1148,6 +1213,7 @@ export class GalaxyScene {
     this.glows = [];
     this._orbMesh = new Map();
     this._orbHalo = new Map();
+    this._comets = new Map();
     this._orbitOrder = [];
     this._childrenByParent = new Map();
     this._coreOrb = null;

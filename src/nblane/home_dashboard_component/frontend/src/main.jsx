@@ -1819,7 +1819,9 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
     });
     // Only record a ring when something actually orbits on it — an empty `children`
     // array (e.g. a focused goal with zero projects) must never paint a hollow ellipse.
-    if (children.length) {
+    // Tier 3 (evidence comets) draws no ring: the comet's own fading trail traces
+    // the orbit, so a static ellipse there would just be redundant clutter.
+    if (children.length && tier !== 3) {
       orbits.push({ center: { x: center.x, y: cy, z: center.z }, a, b, tilt, swivel, phase, parentId, tier });
     }
   };
@@ -1971,13 +1973,16 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
       });
       tier2.forEach((x) => visible.add(x));
 
-      // Tier 3 — task-generated evidence orbits its task as a tight, fast moon.
+      // Tier 3 — task-generated evidence orbits its task as a tiny, fast comet
+      // (small bright head + fading trail, drawn by the scene). The whipping comet
+      // *is* the cue, so no orbit ring is drawn for this tier. A task with a comet
+      // circling it has produced evidence; a bare task has not yet.
       evByTask.forEach((ids, tid) => {
         const tcenter = positions.get(tid) || center;
         ids.sort();
-        const Rm = 6 + Math.min(ids.length, 4) * 1.5; // tight moons around the task
+        const Rm = 5 + Math.min(ids.length, 4) * 1.2; // tight comet orbit around the task
         const tilt = 0.9 + hashUnit(`${tid}:em`) * 0.5;
-        placeOnOrbit(ids, tid, tcenter, Rm, tilt, `${tid}:em`, orbitSpeed(Rm) * 2.4, 0.3, 0, 3);
+        placeOnOrbit(ids, tid, tcenter, Rm, tilt, `${tid}:em`, orbitSpeed(Rm) * 4.2, 0.3, 0, 3);
         ids.forEach((x) => visible.add(x));
       });
     });
