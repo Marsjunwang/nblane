@@ -10,8 +10,10 @@ from nblane.core.profile_context import (
     extract_generated_blocks,
     north_star_context_from_identity,
     north_star_payload_from_identity,
+    parse_core_competencies,
     parse_identity_fields,
     section_body,
+    update_core_competencies,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -122,6 +124,119 @@ class TestProfileContextEditor(unittest.TestCase):
         )
         self.assertIn("Diffusion Policy", section_body(updated, "Research Fingerprint"))
         self.assertIn("Alice", section_body(updated, "Identity"))
+
+
+SAMPLE_WITH_COMPETENCIES = """# Sample Profile
+
+## Identity
+
+- **Name**: Sample
+- **North Star Visibility**: discreet
+
+---
+
+## Core Competencies
+<!-- Rate each: locked | learning | solid | expert -->
+<!-- This is what the agent uses to calibrate its assumptions about you -->
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Perception | solid | BEV, segmentation |
+| VLA models | learning | replicating PI0 |
+
+---
+
+## Research Fingerprint
+
+Some prose.
+
+---
+
+## Skill Tree
+
+<!-- BEGIN GENERATED:skill_tree -->
+- [x] Something (`x`)
+<!-- END GENERATED:skill_tree -->
+"""
+
+
+class TestCoreCompetencies(unittest.TestCase):
+    """Core Competencies table parses and round-trips losslessly."""
+
+    def test_parse_rows(self) -> None:
+        rows = parse_core_competencies(SAMPLE_WITH_COMPETENCIES)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], {
+            "area": "Perception",
+            "status": "solid",
+            "notes": "BEV, segmentation",
+        })
+        self.assertEqual(rows[1]["area"], "VLA models")
+        self.assertEqual(rows[1]["status"], "learning")
+
+    def test_round_trip_preserves_other_sections_and_comments(self) -> None:
+        rows = parse_core_competencies(SAMPLE_WITH_COMPETENCIES)
+        updated = update_core_competencies(SAMPLE_WITH_COMPETENCIES, rows)
+        # Other sections untouched.
+        self.assertEqual(
+            extract_generated_blocks(updated)["skill_tree"],
+            extract_generated_blocks(SAMPLE_WITH_COMPETENCIES)["skill_tree"],
+        )
+        self.assertIn("Some prose.", section_body(updated, "Research Fingerprint"))
+        # HTML comments above the table preserved.
+        body = section_body(updated, "Core Competencies")
+        self.assertIn("<!-- Rate each:", body)
+        # Re-parse is stable.
+        self.assertEqual(parse_core_competencies(updated), rows)
+
+    def test_add_and_remove_rows(self) -> None:
+        rows = parse_core_competencies(SAMPLE_WITH_COMPETENCIES)
+        rows.append({"area": "ROS2", "status": "learning", "notes": "nodes, topics"})
+        rows.pop(0)
+        updated = update_core_competencies(SAMPLE_WITH_COMPETENCIES, rows)
+        reparsed = parse_core_competencies(updated)
+        areas = [r["area"] for r in reparsed]
+        self.assertEqual(areas, ["VLA models", "ROS2"])
+
+    def test_empty_table_writes_header_only(self) -> None:
+        updated = update_core_competencies(SAMPLE_WITH_COMPETENCIES, [])
+        self.assertEqual(parse_core_competencies(updated), [])
+        # Section still exists with its header and comments.
+        body = section_body(updated, "Core Competencies")
+        self.assertIn("| Area | Status | Notes |", body)
+        self.assertIn("<!-- Rate each:", body)
+
+    def test_unknown_status_preserved_verbatim(self) -> None:
+        rows = [{"area": "X", "status": "WIZARD", "notes": ""}]
+        updated = update_core_competencies(SAMPLE_WITH_COMPETENCIES, rows)
+        reparsed = parse_core_competencies(updated)
+        self.assertEqual(reparsed[0]["status"], "WIZARD")
+
+    def test_pipe_in_notes_is_escaped(self) -> None:
+        rows = [{"area": "X", "status": "solid", "notes": "a | b | c"}]
+        updated = update_core_competencies(SAMPLE_WITH_COMPETENCIES, rows)
+        reparsed = parse_core_competencies(updated)
+        self.assertEqual(reparsed[0]["notes"], "a | b | c")
+
+    def test_apply_edits_with_competencies_and_identity(self) -> None:
+        rows = parse_core_competencies(SAMPLE_WITH_COMPETENCIES)
+        rows[0]["status"] = "expert"
+        updated = apply_profile_context_structured_edits(
+            SAMPLE_WITH_COMPETENCIES,
+            identity_fields={"Name": "Renamed"},
+            core_competencies=rows,
+        )
+        self.assertEqual(parse_identity_fields(updated)["Name"], "Renamed")
+        self.assertEqual(parse_core_competencies(updated)[0]["status"], "expert")
+        # Untouched when core_competencies is None.
+        untouched = apply_profile_context_structured_edits(
+            SAMPLE_WITH_COMPETENCIES,
+            identity_fields={"Name": "X"},
+        )
+        self.assertEqual(
+            parse_core_competencies(untouched),
+            parse_core_competencies(SAMPLE_WITH_COMPETENCIES),
+        )
 
 
 if __name__ == "__main__":

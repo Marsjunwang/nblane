@@ -34,6 +34,8 @@ dashboard_health_context_ready: Context ready
 dashboard_health_empty: Profile Health has no issues.
 dashboard_yes: 'Yes'
 dashboard_no: 'No'
+dashboard_research_papers: papers
+dashboard_research_kinds: themes
 dashboard_output_title: Output
 dashboard_output_empty: Public layer has no summary yet. Open Output Studio to initialize drafts.
 dashboard_public_drafts: Drafts
@@ -126,10 +128,7 @@ dashboard_ai_test_ok: Model test succeeded ({seconds}s).
 dashboard_open_8502_canvas: Open 8502 Canvas
 dashboard_canvas_sidecar_unavailable: 8502 Dashboard Canvas is not reachable at {base}; using the local Dashboard fallback.
 dashboard_canvas_sidecar_link_disabled_help: Start or forward the 8502 Dashboard Canvas sidecar to use this link.
-dashboard_embedded_canvas_title: Embedded canvas
-dashboard_canvas_summary_title: Canvas summary
-dashboard_canvas_summary_caption: The daily dashboard keeps the big canvas folded until you need deeper graph exploration.
-dashboard_canvas_load_embed: Load embedded canvas
+dashboard_research_title: Research
 dashboard_graph_hero_title: Live growth graph
 dashboard_graph_hero_caption: A compact 3D map of today's goals, sources, evidence, skills, and outputs.
 dashboard_hero_start_here: Start here
@@ -415,3 +414,44 @@ resume_applied: 'Applied: pool, skill-tree, and SKILL.md sync.'
 resume_err: 'Error: {msg}'
 resume_no_ai: AI not configured. Set LLM_API_KEY in .env.
 resume_warn: Warnings
+dashboard_open_resume_ingest: Import resume
+dashboard_open_profile_context: Edit Profile Context
+dashboard_drawer_close: Close
+dashboard_drawer_resume_ingest_title: Resume / long text (AI ingest)
+dashboard_drawer_profile_context_title: Profile Context / SKILL.md
+dashboard_drawer_resume_pending_caption: A draft is pending. Review and Apply, or Discard to drop it.
+dashboard_drawer_resume_discard: Discard draft
+dashboard_drawer_resume_no_ai: AI not configured. Set LLM_API_KEY in .env first.
+dashboard_drawer_resume_preview_delta_title: Merge preview
+dashboard_drawer_resume_preview_delta_new_evidence: New evidence
+dashboard_drawer_resume_preview_delta_tree: Skill-tree changes
+dashboard_drawer_resume_preview_delta_none: No diff against existing data.
+dashboard_drawer_profile_section_identity: Structured profile
+dashboard_drawer_profile_section_narrative: Long-term narrative sections
+dashboard_drawer_profile_section_competencies: Core competencies
+dashboard_drawer_profile_section_generated: Generated blocks (preview)
+dashboard_drawer_profile_section_raw: Raw Markdown
+dashboard_drawer_profile_save_raw: Save raw Markdown
+profile_context_competencies_title: Core competencies
+competencies_caption: Areas you can do, with a self-rated status. The agent uses these to calibrate its assumptions about you.
+competencies_empty: No competencies yet. Add a row to start.
+competency_col_area: Area
+competency_col_status: Status
+competency_col_notes: Notes
+competency_status_locked: Locked
+competency_status_learning: Learning
+competency_status_solid: Solid
+competency_status_expert: Expert
+competency_add_row: + Add row
+competency_remove_row: Remove
+competency_area_placeholder: e.g. End-to-end perception
+competency_notes_placeholder: What you've done here, scope, evidence
+competency_error_area: Area is required.
+competency_error_status: Unknown status value.
+profile_context_field_placeholder: ''
+identity_north_star_placeholder: One sentence. What does mastery look like for you in 5 years?
+narrative_placeholder: ''
+narrative_preview: Preview
+narrative_edit: Edit
+narrative_empty_preview: (empty)
+profile_context_unsaved_warning: You have unsaved changes. Discard them?

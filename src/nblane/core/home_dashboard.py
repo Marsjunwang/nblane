@@ -36,8 +36,16 @@ from nblane.core.io import (
 )
 from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_context import (
+    COMPETENCY_STATUSES,
+    GENERATED_BLOCKS,
+    IDENTITY_FIELDS,
+    LONG_NARRATIVE_SECTIONS,
+    NORTH_STAR_VISIBILITIES,
+    extract_generated_blocks,
     north_star_payload_from_identity,
+    parse_core_competencies,
     parse_identity_fields,
+    section_body,
 )
 from nblane.core.project_board import load_project_board
 from nblane.core.research_sources import load_research_sources
@@ -1357,6 +1365,35 @@ def _goal_skill_alignment_payload(
     }
 
 
+def profile_context_payload(profile: ProfileRef) -> dict:
+    """Return the SKILL.md profile-context shape consumed by the React drawer."""
+    skill_content = io_facade.load_skill_md(_profile_name(profile))
+    has_skill = bool(skill_content)
+    identity = parse_identity_fields(skill_content) if has_skill else {
+        field: "" for field in IDENTITY_FIELDS
+    }
+    narrative = {
+        title: section_body(skill_content, title) if has_skill else ""
+        for title in LONG_NARRATIVE_SECTIONS
+    }
+    blocks = extract_generated_blocks(skill_content) if has_skill else {}
+    return {
+        "has_skill_md": has_skill,
+        "identity": {field: identity.get(field, "") for field in IDENTITY_FIELDS},
+        "identity_fields": list(IDENTITY_FIELDS),
+        "narrative": {title: narrative.get(title, "") for title in LONG_NARRATIVE_SECTIONS},
+        "narrative_sections": list(LONG_NARRATIVE_SECTIONS),
+        "north_star_visibilities": list(NORTH_STAR_VISIBILITIES),
+        "core_competencies": parse_core_competencies(skill_content) if has_skill else [],
+        "competency_statuses": list(COMPETENCY_STATUSES),
+        "generated_blocks": list(GENERATED_BLOCKS),
+        "generated_block_text": {
+            block: blocks.get(block, "") for block in GENERATED_BLOCKS
+        },
+        "raw_markdown": skill_content,
+    }
+
+
 def dashboard_payload(
     profile: ProfileRef,
     *,
@@ -1452,6 +1489,7 @@ def dashboard_payload(
             all_goals=book.goals,
         ),
         "quick_links": _quick_links_payload(ui),
+        "profile_context": profile_context_payload(profile),
         "ai": dict(ai or {}),
         "ui": dict(ui or {}),
     }

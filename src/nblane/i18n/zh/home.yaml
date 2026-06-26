@@ -34,6 +34,8 @@ dashboard_health_context_ready: 上下文就绪
 dashboard_health_empty: Profile Health 未发现问题。
 dashboard_yes: 是
 dashboard_no: 否
+dashboard_research_papers: 篇论文
+dashboard_research_kinds: 个主题
 dashboard_output_title: 输出机会
 dashboard_output_empty: 公开层暂无摘要。进入输出工作台初始化草稿。
 dashboard_public_drafts: 草稿
@@ -126,10 +128,7 @@ dashboard_ai_test_ok: 模型测试成功（{seconds}s）。
 dashboard_open_8502_canvas: 打开 8502 画布
 dashboard_canvas_sidecar_unavailable: 8502 画布当前不可达：{base}；已使用本地首页回退视图。
 dashboard_canvas_sidecar_link_disabled_help: 请先启动或转发 8502 画布 sidecar，再使用这个入口。
-dashboard_embedded_canvas_title: 内嵌画布
-dashboard_canvas_summary_title: 画布摘要
-dashboard_canvas_summary_caption: 日常首页先折叠大画布；需要深入探索图谱时再展开或打开 8502 画布。
-dashboard_canvas_load_embed: 加载内嵌画布
+dashboard_research_title: 研究
 dashboard_graph_hero_title: 实时成长图谱
 dashboard_graph_hero_caption: 用一张紧凑 3D 图把今天的目标、来源、证据、技能和输出串起来。
 dashboard_hero_start_here: 从这里开始
@@ -415,3 +414,44 @@ resume_applied: 已写入：证据池、技能树，并已同步 SKILL.md。
 resume_err: 错误：{msg}
 resume_no_ai: 未配置 AI。请在 .env 中设置 LLM_API_KEY。
 resume_warn: 警告
+dashboard_open_resume_ingest: 导入简历
+dashboard_open_profile_context: 编辑档案上下文
+dashboard_drawer_close: 关闭
+dashboard_drawer_resume_ingest_title: 简历 / 长文本（AI 摄入）
+dashboard_drawer_profile_context_title: 档案上下文 / SKILL.md
+dashboard_drawer_resume_pending_caption: 当前已有未应用的草案。审阅后点击「写入 Profile」应用，或「丢弃草案」放弃。
+dashboard_drawer_resume_discard: 丢弃草案
+dashboard_drawer_resume_no_ai: 未配置 AI。请先在 .env 中设置 LLM_API_KEY。
+dashboard_drawer_resume_preview_delta_title: 合并预览
+dashboard_drawer_resume_preview_delta_new_evidence: 新增证据
+dashboard_drawer_resume_preview_delta_tree: 技能树变更
+dashboard_drawer_resume_preview_delta_none: 与现有数据无差异。
+dashboard_drawer_profile_section_identity: 结构化画像
+dashboard_drawer_profile_section_narrative: 长期叙事章节
+dashboard_drawer_profile_section_competencies: 核心能力
+dashboard_drawer_profile_section_generated: 生成块预览
+dashboard_drawer_profile_section_raw: 原始 Markdown
+dashboard_drawer_profile_save_raw: 保存原始 Markdown
+profile_context_competencies_title: 核心能力
+competencies_caption: 你能做的领域及自评状态。Agent 用它来校准对你的能力假设。
+competencies_empty: 还没有能力项，点下方添加一行开始填写。
+competency_col_area: 领域
+competency_col_status: 状态
+competency_col_notes: 备注
+competency_status_locked: 未解锁
+competency_status_learning: 学习中
+competency_status_solid: 扎实
+competency_status_expert: 精通
+competency_add_row: + 添加一行
+competency_remove_row: 删除
+competency_area_placeholder: 例如：端到端感知
+competency_notes_placeholder: 你在这块做过什么、范围、证据
+competency_error_area: 领域不能为空。
+competency_error_status: 未知的状态值。
+profile_context_field_placeholder: ''
+identity_north_star_placeholder: 一句话。5 年后你心中的"大佬"是什么样？
+narrative_placeholder: ''
+narrative_preview: 预览
+narrative_edit: 编辑
+narrative_empty_preview: （空）
+profile_context_unsaved_warning: 有未保存的修改，确定要放弃吗？

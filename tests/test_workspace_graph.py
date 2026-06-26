@@ -193,12 +193,17 @@ def test_workspace_graph_schema_validates_aliases_and_no_dangling_edges() -> Non
         assert edge["from"] in node_ids
         assert edge["to"] in node_ids
     text = yaml.dump(dumped, allow_unicode=True)
+    # Goal + North Star keep their deliberate visibility model (private → masked);
+    # skills stay masked too. Projects/sources are owner-facing on the dashboard
+    # graph and now show their real titles (privacy kept in the `locked` flag).
     assert "Private launch goal" not in text
     assert "Secret Skill" not in text
     assert "Sensitive north star" not in text
-    assert "Sensitive project title" not in text
-    assert "Sensitive source title" not in text
+    assert "Sensitive project title" in text
+    assert "Sensitive source title" in text
     nodes = {node["id"]: node for node in dumped["nodes"]}
+    # The real titles show, but the private flag is preserved for styling/badges.
+    assert nodes["project:secret"]["locked"] is True
     assert nodes["project:secret"]["layer"] == "work_context"
     assert nodes["project:secret"]["owner_path"] == "pages/11_Project_Board.py"
     assert nodes["source:inbox"]["owner_path"] == "pages/7_Research.py"

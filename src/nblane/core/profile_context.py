@@ -29,6 +29,15 @@ LONG_NARRATIVE_SECTIONS: tuple[str, ...] = (
     "Influence & Output",
 )
 
+CORE_COMPETENCIES_SECTION = "Core Competencies"
+COMPETENCY_STATUSES: tuple[str, ...] = (
+    "locked",
+    "learning",
+    "solid",
+    "expert",
+)
+_COMPETENCY_HEADER = ("Area", "Status", "Notes")
+
 GENERATED_BLOCKS: tuple[str, ...] = (
     "skill_tree",
     "current_focus",
@@ -271,16 +280,133 @@ def extract_generated_blocks(text: str) -> dict[str, str]:
     return blocks
 
 
+def _split_table_row(line: str) -> list[str]:
+    """Split a Markdown table row into trimmed, unescaped cells.
+
+    Splits only on unescaped ``|`` so that ``\\|`` inside a cell is preserved.
+    """
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith("\\|"):
+        stripped = stripped[:-1]
+    cells = re.split(r"(?<!\\)\|", stripped)
+    return [cell.replace("\\|", "|").strip() for cell in cells]
+
+
+def _is_table_divider(cells: list[str]) -> bool:
+    """True when every cell is a Markdown table divider like ``---`` / ``:--:``."""
+    return bool(cells) and all(
+        re.fullmatch(r":?-{1,}:?", cell or "") for cell in cells
+    )
+
+
+def _normalize_competency_status(value: object) -> str:
+    """Lowercase the status; keep unknown values verbatim for the UI to flag."""
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+    return lowered if lowered in COMPETENCY_STATUSES else raw
+
+
+def parse_core_competencies(text: str) -> list[dict[str, str]]:
+    """Parse the ``Core Competencies`` table into ``[{area,status,notes}]`` rows.
+
+    Skips HTML comments, blank lines, the header row and the ``|---|`` divider.
+    Only the first three columns are kept; extra columns are dropped. ``status``
+    is lowercased and left verbatim when it is not a known status so the editor
+    can flag it. Rows with no Area and no Notes are ignored.
+    """
+    body = section_body(text, CORE_COMPETENCIES_SECTION)
+    rows: list[dict[str, str]] = []
+    seen_header = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("<!--") or "|" not in stripped:
+            continue
+        cells = _split_table_row(line)
+        if _is_table_divider(cells):
+            continue
+        if not seen_header:
+            # The first table row is the header; remember it and skip.
+            seen_header = True
+            if [c.lower() for c in cells[:3]] == [
+                h.lower() for h in _COMPETENCY_HEADER
+            ]:
+                continue
+        area = cells[0] if len(cells) > 0 else ""
+        status = cells[1] if len(cells) > 1 else ""
+        notes = cells[2] if len(cells) > 2 else ""
+        if not area and not notes:
+            continue
+        rows.append(
+            {
+                "area": area,
+                "status": _normalize_competency_status(status),
+                "notes": notes,
+            }
+        )
+    return rows
+
+
+def _competency_comment_lines(body: str) -> list[str]:
+    """Return the HTML comment lines that precede the table, to preserve them."""
+    comments: list[str] = []
+    for line in body.splitlines():
+        if line.strip().startswith("<!--"):
+            comments.append(line.rstrip("\n"))
+    return comments
+
+
+def _render_competency_table(rows: list[dict[str, str]]) -> list[str]:
+    """Render rows as Markdown table lines (header + divider + body rows)."""
+    def cell(value: object) -> str:
+        return str(value or "").replace("|", "\\|").strip()
+
+    lines = [
+        "| " + " | ".join(_COMPETENCY_HEADER) + " |",
+        "|" + "|".join(["------"] * len(_COMPETENCY_HEADER)) + "|",
+    ]
+    for row in rows:
+        area = cell(row.get("area"))
+        status = _normalize_competency_status(row.get("status"))
+        notes = cell(row.get("notes"))
+        if not area and not notes and not status:
+            continue
+        lines.append(f"| {area} | {cell(status)} | {notes} |")
+    return lines
+
+
+def update_core_competencies(text: str, rows: list[dict[str, str]]) -> str:
+    """Rebuild the ``Core Competencies`` table from structured rows.
+
+    Preserves the HTML comment lines above the table and the section's spacing
+    conventions; only the table body is replaced. An empty ``rows`` writes a
+    header-only table rather than deleting the section.
+    """
+    body = section_body(text, CORE_COMPETENCIES_SECTION)
+    comments = _competency_comment_lines(body)
+    table = _render_competency_table(rows)
+    parts: list[str] = [""]
+    parts.extend(comments)
+    parts.append("")
+    parts.extend(table)
+    parts.append("")
+    new_body = "\n".join(parts) + "\n"
+    return replace_section_body(text, CORE_COMPETENCIES_SECTION, new_body)
+
+
 def apply_profile_context_structured_edits(
     text: str,
     *,
     identity_fields: dict[str, str] | None = None,
     narrative_sections: dict[str, str] | None = None,
+    core_competencies: list[dict[str, str]] | None = None,
 ) -> str:
     """Apply human-owned Profile Context edits to ``SKILL.md``.
 
     Generated blocks are not part of this write path. Narrative updates are
-    limited to the long-form sections owned by the human author.
+    limited to the long-form sections owned by the human author. ``core_competencies``
+    rewrites the Core Competencies table when provided.
     """
     next_text = text
     if identity_fields:
@@ -289,4 +415,6 @@ def apply_profile_context_structured_edits(
         if title not in LONG_NARRATIVE_SECTIONS:
             continue
         next_text = replace_section_body(next_text, title, body)
+    if core_competencies is not None:
+        next_text = update_core_competencies(next_text, core_competencies)
     return next_text

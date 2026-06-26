@@ -9,9 +9,9 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import ForceGraph3D from "react-force-graph-3d";
 import * as THREE from "three";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { GalaxyScene } from "./galaxy_scene.js";
 
 import "./style.css";
 import {
@@ -35,6 +35,8 @@ import {
   requestGoalSkillRuleMatchEvent,
   setPrimaryGoalEvent,
 } from "./events.js";
+import { ResumeIngestDrawer } from "./resume_ingest.jsx";
+import { ProfileContextDrawer } from "./profile_context.jsx";
 
 const READY = "streamlit:componentReady";
 const SET_VALUE = "streamlit:setComponentValue";
@@ -96,7 +98,7 @@ const EDGE_WIDTHS = {
   watches: 1.1,
 };
 
-const GRAPH_3D_MIN_HEIGHT = 520;
+const GRAPH_3D_MIN_HEIGHT = 560;
 
 // ── Star-tree (role-based) visual model ──────────────────────────────────────
 // Block B replaces the flat force-directed 3D graph with a deterministic
@@ -114,42 +116,58 @@ const TREE_ROLES = new Set([
 const SAND_ROLE = "sand";
 
 const ROLE_COLORS = {
-  trunk: "#7d5fd0",
-  direction: "#21685b",
-  branch: "#7d8a91",
-  leaf: "#3f9e63",
-  fruit: "#c2683a",
-  star: "#bcd4ff",
-  constellation: "#e8d27a",
-  sand: "#94c7d8",
+  trunk: "#a98b6b",
+  direction: "#3f8f7c",
+  branch: "#9b7e5e",
+  leaf: "#79b889",
+  fruit: "#e09a6e",
+  star: "#9bbf86",
+  constellation: "#d8b4d0",
+  sand: "#a9cdd8",
 };
 
 const SKILL_CATEGORY_COLORS = [
-  "#8fb8ff",
-  "#76d0c0",
-  "#f0c86a",
-  "#e68ab3",
-  "#9bd97a",
-  "#c6a6ff",
-  "#72c3f4",
-  "#f09a72",
-  "#d0df78",
-  "#8ed6f1",
+  "#7fa8e0",
+  "#6cc3b4",
+  "#e3bd6a",
+  "#dd8fb0",
+  "#92cf7e",
+  "#b59ae0",
+  "#73b8d8",
+  "#e09a78",
+  "#bcce72",
+  "#84cbd8",
 ];
 
 // Star brightness by skill status — the dome dims for locked, blazes for expert.
+// Locked sits at the visibility floor so the dome's shape always reads as faint
+// points, while solid/expert push past the bloom threshold and glow.
 const STAR_STATUS_EMISSIVE = {
-  locked: 0.12,
-  learning: 0.24,
-  solid: 0.46,
-  expert: 0.76,
+  locked: 0.2,
+  learning: 0.28,
+  solid: 0.48,
+  expert: 0.78,
 };
 
 // Tree skeleton dimensions (world units, y is up).
 const TREE_HEIGHT = 92;
-const STAR_DOME_CENTER_Y = TREE_HEIGHT + 8;
-const STAR_DOME_RADIUS = 96;
+const STAR_DOME_CENTER_Y = 96;
+const STAR_DOME_RADIUS = 58;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+// Vertical tiers — the metaphor stacks bottom-to-top so the silhouette reads as
+// a tree growing upward: ground haze (sand) → trunk (north_star) low → goals
+// branch up-and-out → projects fork higher → leaves at the crown → fruit hangs
+// below its leaf → star dome floats above the canopy.
+const GROUND_Y = 0; // sand sits on the ground plane
+const TRUNK_BASE_Y = 0; // trunk rises from the ground
+const TRUNK_TOP_Y = 52; // north_star crowns a tall, present trunk
+const DIRECTION_Y = 64; // goals branch up-and-out from the trunk top
+const BRANCH_RISE = 16; // projects lift above their goal
+const LEAF_RISE = 13; // tasks / outputs at the branch tips (crown)
+const FRUIT_DROP = 12; // evidence hangs below its leaf
+const DOME_BASE_Y = 128; // star dome floats clearly above the canopy
+const STAR_EMISSIVE_FLOOR = 0.2; // locked stars stay faintly visible (below bloom)
 
 const FALLBACK_LAYERS = [
   "direction",
@@ -358,15 +376,14 @@ function nodeActionBundle(payload, node, readOnly = false) {
 }
 
 function dashboardCanvasEmbed(payload) {
+  // The dashboard no longer embeds the 8502 canvas in an iframe; the only thing
+  // consumed here is the standalone URL behind the "Open 8502 Canvas" link.
   const embed = payload?.canvasEmbed || payload?.canvas_embed || {};
-  const url = cleanText(embed.url);
-  if (!url) {
+  const standaloneUrl = cleanText(embed.standaloneUrl || embed.standalone_url || embed.url);
+  if (!standaloneUrl) {
     return null;
   }
-  return {
-    url,
-    standaloneUrl: cleanText(embed.standaloneUrl || embed.standalone_url, url.replace(/([?&])embed=1(&?)/, "$1").replace(/[?&]$/, "")),
-  };
+  return { standaloneUrl };
 }
 
 function label(ui, key, fallback) {
@@ -714,7 +731,7 @@ function skillSegments(counts, total) {
   });
 }
 
-function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal, canEditGoals = true, canSelectGoals = true, showToday = true, selectedGoalId = "" }) {
+function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal, onOpenResumeIngest, onOpenProfileContext, canEditGoals = true, canSelectGoals = true, showToday = true, selectedGoalId = "" }) {
   const ui = payload.ui;
   const northStar = payload.northStar;
   const primary = goalDisplay(payload.primaryGoal, ui);
@@ -833,8 +850,24 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
             {label(ui, "dashboard_add_active_goal", "Add goal")}
           </button>
         ) : null}
-        <button className="hd-ghost full" type="button" data-action="open-profile-context" onClick={() => onEmit(openProfileContextEvent())}>
-          {label(ui, "north_star_edit_action", "Edit Profile Context")}
+        {onOpenResumeIngest ? (
+          <button className="hd-ghost full" type="button" data-action="open-resume-ingest" onClick={onOpenResumeIngest}>
+            {label(ui, "dashboard_open_resume_ingest", "Import resume")}
+          </button>
+        ) : null}
+        <button
+          className="hd-ghost full"
+          type="button"
+          data-action="open-profile-context"
+          onClick={() => {
+            if (onOpenProfileContext) {
+              onOpenProfileContext();
+              return;
+            }
+            onEmit(openProfileContextEvent());
+          }}
+        >
+          {label(ui, "dashboard_open_profile_context", label(ui, "north_star_edit_action", "Edit Profile Context"))}
         </button>
       </div>
     </section>
@@ -1490,53 +1523,81 @@ function growthTreeLayout(payload, nodes) {
 
   const byRole = (role) => nodes.filter((node) => node.role === role);
 
-  // 1. Trunk — vertical spine at the origin.
+  // 1. Trunk — vertical spine rising from the ground to the canopy.
   const trunks = byRole("trunk");
   trunks.forEach((node) => {
-    positions.set(node.id, { x: 0, y: TREE_HEIGHT, z: 0 });
+    positions.set(node.id, { x: 0, y: TRUNK_TOP_Y, z: 0 });
   });
-  const trunkAnchor = () => ({ x: 0, y: TREE_HEIGHT * 0.62, z: 0 });
+  const trunkAnchor = () => ({ x: 0, y: DIRECTION_Y, z: 0 });
 
-  // 2. Direction (goals) — fan out around the upper trunk, angled up-and-out.
+  // 2. Direction (goals) — fan out around the trunk with golden-angle spacing so
+  // even 1-3 goals separate visibly. Each goal carries an angular budget for its
+  // child branches to spread within.
   const directions = byRole("direction");
   const dirCount = Math.max(1, directions.length);
   const directionPos = new Map();
+  // Even angular spacing around the trunk keeps the canopy balanced (golden-angle
+  // bunches goals to one side for small counts). A half-step phase offset avoids a
+  // goal sitting dead-center-front.
+  const dirRadius = 34 + (dirCount <= 3 ? (4 - dirCount) * 4 : 0);
+  const angSpan = Math.min(1.0, ((Math.PI * 2) / dirCount) * 0.4 + 0.4);
   directions.forEach((node, index) => {
-    const theta = (index / dirCount) * Math.PI * 2 + 0.4;
-    const r = 42;
+    const theta = (index / dirCount) * Math.PI * 2 + Math.PI / dirCount;
     const pos = {
-      x: Math.cos(theta) * r,
-      y: TREE_HEIGHT * 0.6 + (index % 3) * 9,
-      z: Math.sin(theta) * r,
+      x: Math.cos(theta) * dirRadius,
+      y: DIRECTION_Y + (index % 2) * 6,
+      z: Math.sin(theta) * dirRadius,
     };
     positions.set(node.id, pos);
-    directionPos.set(node.id, { pos, theta });
+    directionPos.set(node.id, { pos, theta, angSpan });
   });
 
   const fallbackDirection = () => {
     const first = directions[0];
-    return first ? directionPos.get(first.id) : { pos: trunkAnchor(), theta: 0.4 };
+    return first
+      ? directionPos.get(first.id)
+      : { pos: trunkAnchor(), theta: 0.4, angSpan: Math.PI * 0.9 };
   };
 
-  // 3. Branch (projects) — second-order spread off their owning goal.
+  // 3. Branch (projects) — siblings of one goal fan evenly across its angular
+  // budget (ranked deterministically by id) instead of scattering randomly.
   const branches = byRole("branch");
   const branchPos = new Map();
-  branches.forEach((node, index) => {
+  // Group branches by their owning goal so we can fan siblings evenly.
+  const branchGoal = new Map();
+  const siblingsByGoal = new Map();
+  branches.forEach((node) => {
     const parent = parentByRelation(node, edgesByTarget, ["contains", "alignment"], nodesById);
-    const base = (parent && directionPos.get(parent.id)) || fallbackDirection();
-    const spread = hashUnit(node.id) * Math.PI * 2;
-    const theta = base.theta + (hashUnit(`${node.id}:t`) - 0.5) * 1.1;
-    const r = 26 + hashUnit(`${node.id}:r`) * 10;
+    const goalId = parent && directionPos.has(parent.id) ? parent.id : "__fallback__";
+    branchGoal.set(node.id, goalId);
+    if (!siblingsByGoal.has(goalId)) {
+      siblingsByGoal.set(goalId, []);
+    }
+    siblingsByGoal.get(goalId).push(node.id);
+  });
+  siblingsByGoal.forEach((ids) => ids.sort());
+  branches.forEach((node) => {
+    const goalId = branchGoal.get(node.id);
+    const base = (goalId !== "__fallback__" && directionPos.get(goalId)) || fallbackDirection();
+    const siblings = siblingsByGoal.get(goalId) || [node.id];
+    const n = siblings.length;
+    const rank = Math.max(0, siblings.indexOf(node.id));
+    const span = base.angSpan ?? angSpan;
+    // Even fan within ±span; single child sits on the goal's own bearing.
+    const frac = n > 1 ? rank / (n - 1) - 0.5 : 0;
+    const jitter = (hashUnit(`${node.id}:t`) - 0.5) * 0.18;
+    const theta = base.theta + frac * 2 * span + jitter;
+    const r = 22 + Math.min(n, 8) * 1.6 + hashUnit(`${node.id}:r`) * 8;
     const pos = {
       x: base.pos.x + Math.cos(theta) * r,
-      y: base.pos.y + 8 + (hashUnit(`${node.id}:y`) - 0.5) * 8,
+      y: base.pos.y + BRANCH_RISE + (hashUnit(`${node.id}:y`) - 0.5) * 6,
       z: base.pos.z + Math.sin(theta) * r,
     };
     positions.set(node.id, pos);
-    branchPos.set(node.id, { pos, theta, spread });
+    branchPos.set(node.id, { pos, theta, spread: theta });
   });
 
-  // 4. Leaf (tasks/outputs) — scatter at the branch tips, lifted slightly.
+  // 4. Leaf (tasks/outputs) — scatter at the branch tips, lifted to the crown.
   const leaves = byRole("leaf");
   const leafPos = new Map();
   leaves.forEach((node) => {
@@ -1551,34 +1612,51 @@ function growthTreeLayout(payload, nodes) {
       null;
     const anchor = parentPos || fallbackDirection().pos;
     const theta = hashUnit(`${node.id}:lt`) * Math.PI * 2;
-    const r = 12 + hashUnit(`${node.id}:lr`) * 10;
+    const r = 11 + hashUnit(`${node.id}:lr`) * 9;
     const pos = {
       x: anchor.x + Math.cos(theta) * r,
-      y: anchor.y + 10 + hashUnit(`${node.id}:ly`) * 8,
+      y: anchor.y + LEAF_RISE + hashUnit(`${node.id}:ly`) * 6,
       z: anchor.z + Math.sin(theta) * r,
     };
     positions.set(node.id, pos);
     leafPos.set(node.id, { pos });
   });
 
-  // 5. Star (skills) — a glowing dome above the canopy. Sectorized by category
-  // then distributed with a fibonacci-style spiral for an even sky.
+  // 5. Star (skills) — a glowing dome above the canopy. Each category claims a
+  // contiguous sky sector (a "constellation region"); within a sector skills
+  // spiral out by a fibonacci angle for an even, stable spread.
   const stars = byRole("star");
-  const categories = [...new Set(stars.map((node) => cleanText(node.metric) || "general"))];
+  // Stable category order so sectors don't reshuffle between renders.
+  const categories = [...new Set(stars.map((node) => cleanText(node.metric) || "general"))].sort();
   const categoryIndex = new Map(categories.map((cat, idx) => [cat, idx]));
   const catCount = Math.max(1, categories.length);
-  const starTotal = Math.max(1, stars.length);
-  stars.forEach((node, index) => {
+  // Rank each star within its own category for the intra-sector spiral.
+  const starsByCat = new Map();
+  stars.forEach((node) => {
     const cat = cleanText(node.metric) || "general";
-    const sector = (categoryIndex.get(cat) || 0) / catCount;
-    // Map index onto a hemisphere; bias phi toward the top so it reads as a dome.
-    const t = (index + 0.5) / starTotal;
-    const phi = Math.acos(1 - t * 0.92); // 0 (top) .. ~0.9pi/2
-    const theta = sector * Math.PI * 2 + index * GOLDEN_ANGLE;
-    const r = STAR_DOME_RADIUS * (0.82 + hashUnit(`${node.id}:sr`) * 0.18);
+    if (!starsByCat.has(cat)) {
+      starsByCat.set(cat, []);
+    }
+    starsByCat.get(cat).push(node.id);
+  });
+  starsByCat.forEach((ids) => ids.sort());
+  const sectorWidth = (Math.PI * 2) / catCount;
+  stars.forEach((node) => {
+    const cat = cleanText(node.metric) || "general";
+    const catIdx = categoryIndex.get(cat) || 0;
+    const peers = starsByCat.get(cat) || [node.id];
+    const localRank = Math.max(0, peers.indexOf(node.id));
+    const localCount = Math.max(1, peers.length);
+    // Latitude band: spread the category's skills from dome edge toward the top.
+    const t = (localRank + 0.5) / localCount;
+    const phi = Math.acos(1 - t * 0.92); // 0 (top) .. ~0.9*pi/2
+    // Longitude: sit inside this category's sector, fanned within it.
+    const within = localCount > 1 ? localRank / (localCount - 1) - 0.5 : 0;
+    const theta = catIdx * sectorWidth + sectorWidth * (0.5 + within * 0.7);
+    const r = STAR_DOME_RADIUS * (0.84 + hashUnit(`${node.id}:sr`) * 0.16);
     positions.set(node.id, {
       x: Math.sin(phi) * Math.cos(theta) * r,
-      y: STAR_DOME_CENTER_Y + Math.cos(phi) * r * 0.5,
+      y: STAR_DOME_CENTER_Y - 10 + Math.cos(phi) * r * 0.42,
       z: Math.sin(phi) * Math.sin(theta) * r,
     });
   });
@@ -1604,12 +1682,12 @@ function growthTreeLayout(payload, nodes) {
       (parent && (leafPos.get(parent.id)?.pos || branchPos.get(parent.id)?.pos || positions.get(parent.id))) ||
       outgoing ||
       null;
-    const anchor = base || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
+    const anchor = base || { x: 0, y: DIRECTION_Y + LEAF_RISE, z: 0 };
     const theta = hashUnit(`${node.id}:ft`) * Math.PI * 2;
     const r = 6 + hashUnit(`${node.id}:fr`) * 8;
     positions.set(node.id, {
       x: anchor.x + Math.cos(theta) * r,
-      y: anchor.y - 8 - hashUnit(`${node.id}:fy`) * 8,
+      y: anchor.y - FRUIT_DROP - hashUnit(`${node.id}:fy`) * 7,
       z: anchor.z + Math.sin(theta) * r,
     });
   });
@@ -1636,24 +1714,24 @@ function growthTreeLayout(payload, nodes) {
       };
     } else {
       const theta = hashUnit(`${node.id}:ct`) * Math.PI * 2;
-      centroid = { x: Math.cos(theta) * 40, y: TREE_HEIGHT * 0.8, z: Math.sin(theta) * 40 };
+      centroid = { x: Math.cos(theta) * 34, y: TRUNK_TOP_Y * 0.78, z: Math.sin(theta) * 34 };
     }
     positions.set(node.id, {
       x: centroid.x,
-      y: centroid.y + 18 + hashUnit(`${node.id}:cy`) * 8,
+      y: centroid.y + 14 + hashUnit(`${node.id}:cy`) * 8,
       z: centroid.z,
     });
   });
 
-  // Any tree-role node still unplaced (missing edges) gets pinned to the trunk
-  // at a stable height so nothing snaps to the origin.
+  // Any tree-role node still unplaced (missing edges) gets pinned near the trunk
+  // at a stable mid-height so nothing snaps to the origin.
   nodes.forEach((node) => {
     if (positions.has(node.id) || node.role === SAND_ROLE || !TREE_ROLES.has(node.role)) {
       return;
     }
     positions.set(node.id, {
       x: (hashUnit(`${node.id}:ux`) - 0.5) * 20,
-      y: TREE_HEIGHT * (0.3 + hashUnit(`${node.id}:uy`) * 0.4),
+      y: DIRECTION_Y + hashUnit(`${node.id}:uy`) * 30,
       z: (hashUnit(`${node.id}:uz`) - 0.5) * 20,
     });
   });
@@ -1661,12 +1739,443 @@ function growthTreeLayout(payload, nodes) {
   return positions;
 }
 
-function graph3DData(payload, nodes) {
-  // Sand nodes (sources / daily work / research) leave the force graph and are
-  // rendered as a particle field; keep only tree/star/constellation nodes here.
-  const treeNodes = nodes.filter((node) => node.role !== SAND_ROLE);
+// Deterministic "growth galaxy" layout. Returns id -> {x,y,z}. The North Star
+// is the bright core; goals/projects/tasks/outputs/evidence spiral outward on a
+// flattened galactic plane (parent angle inherited so containment reads as
+// clustering); skills form a surrounding spherical halo sectorized by category;
+// claims sit at the centroid of what they support; sand is excluded (ambient
+// dust). No Math.random — hashUnit keeps it refresh-stable.
+function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
+  const positions = new Map();
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edges = asArray(payload.graph.edges).filter(
+    (edge) => nodesById.has(edge.from) && nodesById.has(edge.to),
+  );
+  const edgesByTarget = new Map();
+  edges.forEach((edge) => {
+    if (!edgesByTarget.has(edge.to)) edgesByTarget.set(edge.to, []);
+    edgesByTarget.get(edge.to).push(edge);
+  });
+  const byRole = (role) => nodes.filter((node) => node.role === role);
+
+  // The galaxy has real 3D volume (a central bulge + arm waviness) so it never
+  // collapses to an edge-on sheet. Rings grow outward by metaphor depth.
+  // Nested orbital system (银河系/太阳系/地月系): the North Star is the center;
+  // goals orbit it on distinct inclined shells; projects orbit their goal; tasks
+  // /outputs/evidence orbit their project; orphans (no parent) share a common
+  // orbit. `orbits` records each ring (center + radius + tilt) so the scene can
+  // draw the "who circles whom" rings.
+  const orbits = [];
+  const childrenByParent = (relations) => {
+    const map = new Map();
+    edges.forEach((e) => {
+      if (!relations.includes(e.relation || e.type)) return;
+      if (!map.has(e.from)) map.set(e.from, []);
+      map.get(e.from).push(e.to);
+    });
+    return map;
+  };
+
+  // 0. Core.
+  const core = byRole("trunk")[0];
+  const corePos = { x: 0, y: 0, z: 0 };
+  if (core) positions.set(core.id, corePos);
+
+  // Per-node orbit params so the scene can animate true rotation around the
+  // (possibly moving) parent center: { parentId, a, b, tilt, swivel, baseAngle, speed }.
+  // Orbits are gently elliptical (a=semi-major, b=semi-minor) and each is swivelled
+  // in-plane so the rings don't all align — borrowing the layered, orderly beauty
+  // of NASA Eyes without chasing literal Keplerian accuracy.
+  const nodeOrbits = new Map();
+
+  // Place children evenly along an elliptical orbit around a parent. `tilt`
+  // inclines the orbital plane; `swivel` rotates the ellipse within that plane;
+  // `ecc` sets how oval it is. Deterministic (hashUnit, no random).
+  const placeOnOrbit = (children, parentId, center, radius, tilt, phaseSeed, speed, ecc = 0.18, centerOffsetY = 0, tier = null) => {
+    const n = Math.max(1, children.length);
+    const a = radius; // semi-major
+    const b = radius * (1 - ecc); // semi-minor
+    const cosT = Math.cos(tilt);
+    const sinT = Math.sin(tilt);
+    const swivel = hashUnit(`${phaseSeed}:sw`) * Math.PI * 2;
+    const cosS = Math.cos(swivel);
+    const sinS = Math.sin(swivel);
+    const phase = hashUnit(`${phaseSeed}:ph`) * Math.PI * 2;
+    // The orbital plane can be lifted/lowered off the parent's center so tiers
+    // sharing a parent (tasks above, evidence below) read as distinct shells.
+    const cy = center.y + centerOffsetY;
+    const at = (ang) => {
+      // Ellipse in local plane, swivelled, then inclined about the X axis.
+      const ex = Math.cos(ang) * a;
+      const ey = Math.sin(ang) * b;
+      const px = ex * cosS - ey * sinS;
+      const pz = ex * sinS + ey * cosS;
+      return { x: center.x + px, y: cy + pz * sinT, z: center.z + pz * cosT };
+    };
+    children.forEach((id, i) => {
+      const ang = phase + (i / n) * Math.PI * 2;
+      positions.set(id, at(ang));
+      nodeOrbits.set(id, { parentId, a, b, tilt, swivel, baseAngle: ang, speed, centerOffsetY });
+    });
+    orbits.push({ center: { x: center.x, y: cy, z: center.z }, a, b, tilt, swivel, phase, parentId, tier });
+  };
+  // Orbit angular speed: slower for bigger orbits (Keplerian feel), capped.
+  const orbitSpeed = (radius) => 0.12 * Math.sqrt(60 / Math.max(20, radius));
+
+  // Skills are grouped into per-category constellations: each category owns a
+  // small cluster placed around the galaxy (not one enveloping sphere), and the
+  // scene draws faint figure-lines between a cluster's stars. Deterministic
+  // (hashUnit, no Math.random). Returns [{cat, center, memberIds, color}] so the
+  // scene can draw lines + a category label without re-grouping. Shared by the
+  // overview and focused layouts (skills stay as the outer reference when zoomed).
+  const placeSkillConstellations = () => {
+    const stars = byRole("star");
+    if (!stars.length) return [];
+    const NON_CATEGORY = new Set(["manual", "rule", "ai", "rule+ai", ""]);
+    const catOf = (n) => {
+      const m = cleanText(n.metric);
+      return m && !NON_CATEGORY.has(m) ? m : `misc${Math.floor(hashUnit(`${n.id}:cat`) * 6)}`;
+    };
+    const categories = [...new Set(stars.map(catOf))].sort();
+    const catCount = Math.max(1, categories.length);
+    const starsByCat = new Map();
+    stars.forEach((n) => {
+      const c = catOf(n);
+      if (!starsByCat.has(c)) starsByCat.set(c, []);
+      starsByCat.get(c).push(n.id);
+    });
+    starsByCat.forEach((ids) => ids.sort());
+    const constellations = [];
+    categories.forEach((cat, ci) => {
+      // Cluster center: spread around a ring of longitudes, jittered in latitude
+      // + radius so the constellations don't sit on one perfect circle.
+      const ringAng = ((ci + 0.5) / catCount) * Math.PI * 2;
+      const lat = (hashUnit(`${cat}:lat`) - 0.5) * 0.9;
+      const CR = 230 + hashUnit(`${cat}:cr`) * 40;
+      const center = {
+        x: Math.cos(ringAng) * Math.cos(lat) * CR,
+        y: 40 + Math.sin(lat) * CR * 0.5,
+        z: Math.sin(ringAng) * Math.cos(lat) * CR,
+      };
+      const memberIds = starsByCat.get(cat) || [];
+      memberIds.forEach((id) => {
+        // Small blob around the cluster center, deterministic per skill id.
+        const rad = 14 + hashUnit(`${id}:cr`) * 18; // 14..32
+        const a = hashUnit(`${id}:ca`) * Math.PI * 2;
+        const b = Math.acos(1 - 2 * hashUnit(`${id}:cb`));
+        positions.set(id, {
+          x: center.x + Math.sin(b) * Math.cos(a) * rad,
+          y: center.y + Math.cos(b) * rad,
+          z: center.z + Math.sin(b) * Math.sin(a) * rad,
+        });
+      });
+      constellations.push({ cat, center, memberIds, color: skillCategoryColor({ metric: cat }) });
+    });
+    return constellations;
+  };
+
+  // ── Focused sub-galaxy ─────────────────────────────────────────────────────
+  // Clicking into a goal pins it at the center as a STATIC sun (no nodeOrbits
+  // entry → the animation loop never moves it) and shows only its three orbital
+  // tiers: projects circle the goal (Tier 1, near-circular reference plane),
+  // tasks circle each project on a high-inclination tight oval lifted above
+  // (Tier 2), evidence circles on a wide elongated belt dropped below (Tier 3).
+  // The North Star, sibling goals, orphans and claims are excluded so the goal
+  // reads as its own clean solar system. Returns focusVisibleIds so graph3DData
+  // can trim the rendered node set.
+  if (focusGoalId && nodesById.has(focusGoalId)) {
+    const goalPos = { x: 0, y: 0, z: 0 };
+    positions.set(focusGoalId, goalPos);
+    const branches = byRole("branch");
+    const leaves = byRole("leaf");
+    const fruits = byRole("fruit");
+    const hasFrom = (id, relations, from) =>
+      (edgesByTarget.get(id) || []).some(
+        (e) => relations.includes(e.relation || e.type) && e.from === from,
+      );
+
+    // Tier 1 — projects orbit the goal. Wider base + gap so the sub-galaxy reads
+    // roomy (the goal sits big at center; projects need clearance from it).
+    const projects = branches
+      .filter((b) => hasFrom(b.id, ["contains", "alignment"], focusGoalId))
+      .map((b) => b.id)
+      .sort();
+    const R1 = 58 + Math.min(projects.length, 8) * 7;
+    placeOnOrbit(projects, focusGoalId, goalPos, R1, 0.16, `${focusGoalId}:f1`, orbitSpeed(R1) * 1.0, 0.08, 0, 1);
+
+    const visible = new Set([focusGoalId, ...projects]);
+    const candFrom = (id) =>
+      (edgesByTarget.get(id) || [])
+        .filter((e) =>
+          ["generated_by", "produces", "supports", "contains", "review", "derives"].includes(e.relation || e.type),
+        )
+        .map((e) => e.from);
+    projects.forEach((pid) => {
+      const center = positions.get(pid) || goalPos;
+      // Tier 2 — tasks/outputs on a clean, near-circular ring lifted above the
+      // project (flatter + rounder than before so the "一圈 task" reads as a tidy
+      // halo rather than a steep oval).
+      const tasks = leaves
+        .filter((l) => hasFrom(l.id, ["contains", "produces", "drives", "supports"], pid))
+        .map((l) => l.id)
+        .sort();
+      const taskSet = new Set(tasks);
+      if (tasks.length) {
+        const R2 = 18 + Math.min(tasks.length, 6) * 2.6;
+        const tilt = 0.42 + hashUnit(`${pid}:lt`) * 0.22;
+        placeOnOrbit(tasks, pid, center, R2, tilt, `${pid}:f2`, orbitSpeed(R2) * 1.5, 0.16, 11, 2);
+        tasks.forEach((t) => visible.add(t));
+      }
+
+      // Tier 3 — evidence. Each piece prefers to orbit the TASK it was generated
+      // by (so it reads as a "moon" of that task — the task↔evidence link is the
+      // orbit itself); evidence tied only to the project falls to a belt below.
+      const evNodes = fruits.filter((f) => {
+        const cand = candFrom(f.id);
+        return cand.includes(pid) || cand.some((id) => taskSet.has(id));
+      });
+      const evByTask = new Map();
+      const evProjectOnly = [];
+      evNodes.forEach((f) => {
+        const cand = candFrom(f.id);
+        const ownerTask = cand.find((id) => taskSet.has(id));
+        if (ownerTask) {
+          if (!evByTask.has(ownerTask)) evByTask.set(ownerTask, []);
+          evByTask.get(ownerTask).push(f.id);
+        } else {
+          evProjectOnly.push(f.id);
+        }
+      });
+      evByTask.forEach((ids, tid) => {
+        const tcenter = positions.get(tid) || center;
+        ids.sort();
+        const Rm = 6 + Math.min(ids.length, 4) * 1.5; // tight moons around the task
+        const tilt = 0.9 + hashUnit(`${tid}:em`) * 0.5;
+        placeOnOrbit(ids, tid, tcenter, Rm, tilt, `${tid}:em`, orbitSpeed(Rm) * 2.4, 0.3, 0, 3);
+        ids.forEach((x) => visible.add(x));
+      });
+      if (evProjectOnly.length) {
+        evProjectOnly.sort();
+        const R3 = 24 + Math.min(evProjectOnly.length, 5) * 1.8;
+        const tilt = -0.7 + hashUnit(`${pid}:ft`) * 0.3;
+        placeOnOrbit(evProjectOnly, pid, center, R3, tilt, `${pid}:f3`, orbitSpeed(R3) * 1.9, 0.45, -11, 3);
+        evProjectOnly.forEach((x) => visible.add(x));
+      }
+    });
+
+    const constellations = placeSkillConstellations();
+    byRole("star").forEach((s) => visible.add(s.id));
+    return { positions, orbits, nodeOrbits, constellations, focusVisibleIds: visible };
+  }
+
+  // 1. Goals orbit the North Star, each on its own shell + inclination so the
+  // orbits nest like a solar system rather than lying flat.
+  const directions = byRole("direction");
+  const GOAL_BASE_R = 70;
+  const GOAL_RING_GAP = 26;
+  directions.forEach((node, i) => {
+    const radius = GOAL_BASE_R + i * GOAL_RING_GAP;
+    const tilt = 0.5 + (i - (directions.length - 1) / 2) * 0.34; // distinct inclinations
+    placeOnOrbit([node.id], core?.id || "__core__", corePos, radius, tilt, `goal${i}`, orbitSpeed(radius));
+  });
+
+  // 2. Projects orbit their owning goal; orphan projects share one outer orbit
+  // around the core (a "loose work" cluster).
+  const projContains = childrenByParent(["contains", "alignment"]);
+  const goalIds = new Set(directions.map((d) => d.id));
+  const branches = byRole("branch");
+  const projByGoal = new Map();
+  const orphanProjects = [];
+  branches.forEach((node) => {
+    const parents = (edgesByTarget.get(node.id) || [])
+      .filter((e) => ["contains", "alignment"].includes(e.relation || e.type))
+      .map((e) => e.from)
+      .filter((id) => goalIds.has(id));
+    if (parents.length) {
+      const g = parents[0];
+      if (!projByGoal.has(g)) projByGoal.set(g, []);
+      projByGoal.get(g).push(node.id);
+    } else {
+      orphanProjects.push(node.id);
+    }
+  });
+  projByGoal.forEach((ids, goalId) => {
+    const center = positions.get(goalId) || corePos;
+    ids.sort();
+    const radius = 26 + Math.min(ids.length, 6) * 2.5;
+    placeOnOrbit(ids, goalId, center, radius, 0.5 + hashUnit(`${goalId}:t`) * 0.6, goalId, orbitSpeed(radius) * 1.4);
+  });
+  if (orphanProjects.length) {
+    orphanProjects.sort();
+    const radius = GOAL_BASE_R + directions.length * GOAL_RING_GAP + 24;
+    placeOnOrbit(orphanProjects, core?.id || "__core__", corePos, radius, -0.5, "orphan", orbitSpeed(radius));
+  }
+
+  // 3. Tasks / outputs (leaves) orbit their project (or goal); orphans cluster.
+  const leaves = byRole("leaf");
+  const leavesByParent = new Map();
+  const orphanLeaves = [];
+  leaves.forEach((node) => {
+    const parents = (edgesByTarget.get(node.id) || [])
+      .filter((e) => ["contains", "produces", "drives", "supports"].includes(e.relation || e.type))
+      .map((e) => e.from)
+      .filter((id) => positions.has(id));
+    if (parents.length) {
+      const p = parents[0];
+      if (!leavesByParent.has(p)) leavesByParent.set(p, []);
+      leavesByParent.get(p).push(node.id);
+    } else {
+      orphanLeaves.push(node.id);
+    }
+  });
+  leavesByParent.forEach((ids, parentId) => {
+    const center = positions.get(parentId) || corePos;
+    ids.sort();
+    const radius = 13 + Math.min(ids.length, 6) * 1.6;
+    placeOnOrbit(ids, parentId, center, radius, 0.7 + hashUnit(`${parentId}:lt`) * 0.7, parentId, orbitSpeed(radius) * 1.8);
+  });
+  if (orphanLeaves.length) {
+    orphanLeaves.sort();
+    const radius = GOAL_BASE_R + directions.length * GOAL_RING_GAP + 48;
+    placeOnOrbit(orphanLeaves, core?.id || "__core__", corePos, radius, 0.3, "orphanleaf", orbitSpeed(radius));
+  }
+
+  // 4. Evidence (fruit) — the "twin" ring of its project: when evidence ties to a
+  // project (directly or via a task on that project), orbit the PROJECT on a
+  // higher, differently-tilted ring than the tasks, so a project shows task +
+  // evidence as two distinct orbital families ("双子"). Otherwise orbit its
+  // nearest placed anchor.
+  const branchIds = new Set(branches.map((b) => b.id));
+  const fruits = byRole("fruit");
+  const fruitByParent = new Map();
+  const fruitTwin = new Set(); // parents that are projects → use twin-ring tilt
+  const orphanFruit = [];
+  fruits.forEach((node) => {
+    const cand = (edgesByTarget.get(node.id) || [])
+      .filter((e) =>
+        ["generated_by", "produces", "supports", "contains", "review", "derives"].includes(e.relation || e.type),
+      )
+      .map((e) => e.from)
+      .filter((id) => positions.has(id));
+    // Prefer a project parent (direct, or the project that owns a linked task).
+    let parent = cand.find((id) => branchIds.has(id));
+    if (!parent) {
+      for (const id of cand) {
+        const po = nodeOrbits.get(id);
+        if (po && branchIds.has(po.parentId)) {
+          parent = po.parentId;
+          break;
+        }
+      }
+    }
+    if (!parent) parent = cand[0];
+    if (parent) {
+      if (branchIds.has(parent)) fruitTwin.add(parent);
+      if (!fruitByParent.has(parent)) fruitByParent.set(parent, []);
+      fruitByParent.get(parent).push(node.id);
+    } else {
+      orphanFruit.push(node.id);
+    }
+  });
+  fruitByParent.forEach((ids, parentId) => {
+    const center = positions.get(parentId) || corePos;
+    ids.sort();
+    const twin = fruitTwin.has(parentId);
+    // Evidence ring sits wider + tilted away from the task ring around a project.
+    const radius = (twin ? 20 : 9) + Math.min(ids.length, 5) * 1.5;
+    const tilt = (twin ? -0.8 : 0.9) + hashUnit(`${parentId}:ft`) * 0.5;
+    placeOnOrbit(ids, parentId, center, radius, tilt, `${parentId}:ev`, orbitSpeed(radius) * 2.0);
+  });
+  if (orphanFruit.length) {
+    orphanFruit.sort();
+    const radius = GOAL_BASE_R + directions.length * GOAL_RING_GAP + 66;
+    placeOnOrbit(orphanFruit, core?.id || "__core__", corePos, radius, -0.3, "orphanfruit", orbitSpeed(radius));
+  }
+
+  // 5. Skills — grouped into per-category constellations placed around the galaxy
+  // (see placeSkillConstellations). The scene draws figure-lines + a label per
+  // cluster; brightness still maps to mastery via starEmissive.
+  const constellations = placeSkillConstellations();
+
+  // 6. Claims — at the centroid of the evidence/skills they tie together, lifted
+  // above the plane so the "constellation" floats over its sources.
+  byRole("constellation").forEach((node) => {
+    const anchors = (edgesByTarget.get(node.id) || [])
+      .filter((e) => ["supports", "derives"].includes(e.relation || e.type))
+      .map((e) => positions.get(e.from))
+      .filter(Boolean);
+    let c;
+    if (anchors.length) {
+      c = anchors.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y, z: a.z + p.z }), { x: 0, y: 0, z: 0 });
+      c = { x: c.x / anchors.length, y: c.y / anchors.length, z: c.z / anchors.length };
+    } else {
+      const a = hashUnit(`${node.id}:ct`) * Math.PI * 2;
+      c = { x: Math.cos(a) * 120, y: 30, z: Math.sin(a) * 120 };
+    }
+    positions.set(node.id, { x: c.x, y: c.y + 26 + hashUnit(`${node.id}:cy`) * 10, z: c.z });
+  });
+
+  // Any remaining placeable node (missing edges) drifts on an outer ring so it
+  // never collapses to the core.
+  nodes.forEach((node) => {
+    if (positions.has(node.id) || node.role === SAND_ROLE || !TREE_ROLES.has(node.role)) return;
+    const a = hashUnit(`${node.id}:ux`) * Math.PI * 2;
+    const r = 100 + hashUnit(`${node.id}:ur`) * 60;
+    positions.set(node.id, { x: Math.cos(a) * r, y: (hashUnit(`${node.id}:uy`) - 0.5) * 20, z: Math.sin(a) * r });
+  });
+
+  return { positions, orbits, nodeOrbits, constellations, focusVisibleIds: null };
+}
+
+// Resolve which goal (role "direction") a selected node belongs to, by walking
+// the containment edges upward. A selected goal returns itself; a project/task
+// /evidence returns the goal it rolls up into; anything else (or no selection)
+// returns null → overview. Mirrors the scene's `_ancestorGoal` walk so React and
+// THREE agree on the focused subsystem.
+function ancestorGoalId(payload, nodes, selectedId) {
+  const sel = cleanText(selectedId);
+  if (!sel) return null;
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const selNode = nodesById.get(sel);
+  if (!selNode || !TREE_ROLES.has(selNode.role)) return null;
+  if (selNode.role === "direction") return sel;
+  const edgesByTarget = new Map();
+  asArray(payload.graph.edges).forEach((edge) => {
+    if (!edgesByTarget.has(edge.to)) edgesByTarget.set(edge.to, []);
+    edgesByTarget.get(edge.to).push(edge);
+  });
+  const allowed = ["contains", "alignment", "produces", "drives", "supports", "generated_by", "derives"];
+  let cur = sel;
+  const guard = new Set();
+  while (cur && !guard.has(cur)) {
+    guard.add(cur);
+    const node = nodesById.get(cur);
+    if (node && node.role === "direction") return cur;
+    const parent = (edgesByTarget.get(cur) || [])
+      .filter((e) => allowed.includes(e.relation || e.type))
+      .map((e) => e.from)
+      .find((id) => nodesById.has(id) && !guard.has(id));
+    cur = parent || null;
+  }
+  return null;
+}
+
+function graph3DData(payload, nodes, focusGoalId = null) {
+  // Keep only nodes that belong in the galaxy (the 7 tree-roles). Sand renders as
+  // the source spiral; empty-role types (health/gap/next_action/feedback/capacity
+  // /agent_run) have their own dashboard UI and must NOT appear as stray orbs.
+  const allTreeNodes = nodes.filter((node) => TREE_ROLES.has(node.role));
+  const { positions, orbits, nodeOrbits, constellations, focusVisibleIds } = growthGalaxyLayout(
+    payload,
+    allTreeNodes,
+    focusGoalId,
+  );
+  // In focused mode only the goal's own sub-galaxy (+ the skill constellations as
+  // the outer reference) is rendered; everything else is excluded.
+  const treeNodes = focusVisibleIds
+    ? allTreeNodes.filter((node) => focusVisibleIds.has(node.id))
+    : allTreeNodes;
   const visibleIds = new Set(treeNodes.map((node) => node.id));
-  const positions = growthTreeLayout(payload, treeNodes);
   const links = payload.graph.edges
     .filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
     .map((edge, index) => ({
@@ -1685,7 +2194,7 @@ function graph3DData(payload, nodes) {
   });
   return {
     nodes: treeNodes.map((node) => {
-      const pos = positions.get(node.id) || { x: 0, y: TREE_HEIGHT * 0.5, z: 0 };
+      const pos = positions.get(node.id) || { x: 0, y: DIRECTION_Y, z: 0 };
       const nodeDegree = degree.get(node.id) || 0;
       const isStar = node.role === "star";
       const weight = nodeVisualWeight(node);
@@ -1712,6 +2221,9 @@ function graph3DData(payload, nodes) {
       };
     }),
     links,
+    orbits,
+    nodeOrbits: Object.fromEntries(nodeOrbits),
+    constellations: constellations || [],
   };
 }
 
@@ -1799,8 +2311,11 @@ function nodeThreeObject(node, selectedNodeId) {
   // Stars: small, bright spheres whose emissive tracks skill status. No label
   // (82 of them) unless selected — the dome reads as a sky, not a tag cloud.
   if (node.role === "star") {
-    const baseEmissive = Number.isFinite(node.starEmissive) ? node.starEmissive : STAR_STATUS_EMISSIVE.locked;
-    const radius = Math.max(1.7, 1.9 + baseEmissive * 3.4) * (selected ? 1.8 : 1) * weight.radius;
+    const rawEmissive = Number.isFinite(node.starEmissive) ? node.starEmissive : STAR_STATUS_EMISSIVE.locked;
+    // Floor keeps locked stars visible as faint points so the dome's shape always
+    // reads; it stays below the bloom threshold so they don't glow.
+    const baseEmissive = Math.max(STAR_EMISSIVE_FLOOR, rawEmissive);
+    const radius = Math.max(2.2, 1.9 + baseEmissive * 3.4) * (selected ? 1.8 : 1) * weight.radius;
     const material = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
@@ -1808,7 +2323,7 @@ function nodeThreeObject(node, selectedNodeId) {
       metalness: 0.0,
       roughness: 0.5,
       transparent: true,
-      opacity: Math.min(1, (0.58 + baseEmissive * 0.62) * (selected ? 1 : weight.opacity)),
+      opacity: Math.min(1, (0.66 + baseEmissive * 0.55) * (selected ? 1 : weight.opacity)),
     });
     const star = new THREE.Mesh(new THREE.SphereGeometry(radius, 14, 12), material);
     star.userData.baseEmissive = baseEmissive;
@@ -1818,6 +2333,58 @@ function nodeThreeObject(node, selectedNodeId) {
       group.add(createLabelSprite(node.label || node.id, "#bcd4ff", true));
     }
     group.userData.starMesh = star;
+    return group;
+  }
+
+  // Claims read as a soft willow-catkin glow: a warm core ringed by low-opacity
+  // drifting puffs. Deliberately restrained — the core stays below the bloom
+  // threshold so it shimmers without stealing focus from the tree or stars.
+  if (node.role === "constellation") {
+    const warm = new THREE.Color(node.placeholder ? "#cdd6c9" : "#ecdca6");
+    const coreRadius = Math.max(2.2, Math.sqrt(Math.max(1, node.val || 5)) * (selected ? 1.4 : 1.05)) * weight.radius;
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: warm,
+      emissive: warm,
+      // Below bloom threshold (0.62) at rest; only a selected claim blooms.
+      emissiveIntensity: selected ? 0.85 : 0.46,
+      roughness: 0.5,
+      metalness: 0.0,
+      transparent: true,
+      opacity: node.placeholder ? Math.min(opacity, 0.5) : Math.min(1, opacity + 0.04),
+    });
+    group.add(new THREE.Mesh(new THREE.SphereGeometry(coreRadius * 0.5, 14, 12), coreMaterial));
+
+    // Catkin halo: a handful of faint puffs scattered deterministically around
+    // the core; the breathing loop drifts them for a floating-down feel.
+    const puffCount = node.placeholder ? 5 : 7;
+    const puffMaterial = new THREE.MeshStandardMaterial({
+      color: warm,
+      emissive: warm,
+      emissiveIntensity: 0.22,
+      roughness: 0.85,
+      transparent: true,
+      opacity: node.placeholder ? 0.18 : 0.3,
+      depthWrite: false,
+    });
+    for (let i = 0; i < puffCount; i += 1) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(coreRadius * 0.34, 8, 8), puffMaterial);
+      const u = hashUnit(`${node.id}:pf${i}`);
+      const v = hashUnit(`${node.id}:pg${i}`);
+      const ang = u * Math.PI * 2;
+      const rad = coreRadius * (0.9 + v * 1.3);
+      puff.position.set(
+        Math.cos(ang) * rad,
+        (hashUnit(`${node.id}:ph${i}`) - 0.5) * coreRadius * 1.6,
+        Math.sin(ang) * rad,
+      );
+      puff.userData.role = "constellation";
+      puff.userData.basePos = puff.position.clone();
+      puff.userData.phase = u * Math.PI * 2;
+      group.add(puff);
+    }
+    if (selected || !node.placeholder) {
+      group.add(createLabelSprite(node.label || node.id, "#ecdca6", selected));
+    }
     return group;
   }
 
@@ -1917,10 +2484,10 @@ function connectedGraphNode(node) {
 }
 
 function fitGraphCamera(graph, duration = 700) {
-  // Include every node in the bounds: the star dome's 82 skills are mostly
-  // edge-less, but the deterministic layout keeps them on-screen, so the fit
-  // must frame the whole tree + sky, not just connected nodes.
-  graph?.zoomToFit?.(duration, 28);
+  // Frame the tree body (trunk/goals/projects/leaves/fruit/claims) and let the
+  // 82-skill dome arc out past the top of the viewport, so the tree fills the
+  // frame instead of being shrunk by the wide star sphere.
+  graph?.zoomToFit?.(duration, 36, (n) => Boolean(n?.role) && n.role !== "star");
 }
 
 function graph3DLinkWidth(link, selectedNodeId) {
@@ -1931,28 +2498,59 @@ function graph3DLinkWidth(link, selectedNodeId) {
   return Math.max(0.45, base * 0.58);
 }
 
-function Graph3DLegend({ payload, graphData }) {
+// Legend keyed to the star-tree's eight visual roles (trunk/direction/branch/
+// leaf/fruit/star/constellation/sand) — the vocabulary the tree actually speaks,
+// not the legacy layer/relation taxonomy it replaced.
+function Graph3DLegend({ payload, graphData, selectedNodeId = "", onSelectNode }) {
   const ui = payload.ui;
-  const layers = graphLayers(payload).filter((layer) => graphData.nodes.some((node) => node.layer === layer));
-  const relations = [...new Set(graphData.links.map((link) => cleanText(link.relation, link.type)).filter(Boolean))].slice(0, 9);
+  // Replace the static role swatches with the real North Star + goals as
+  // clickable chips: clicking one selects + focuses that node in 3D (the scene
+  // then dives into the goal's subsystem). This makes the bottom-left corner an
+  // actual navigator instead of a colour key.
+  const nodes = graphData.nodes;
+  const northStar = nodes.find((node) => node.role === "trunk");
+  const goals = nodes
+    .filter((node) => node.role === "direction")
+    .sort((a, b) => cleanText(a.label || a.id).localeCompare(cleanText(b.label || b.id)));
+  if (!northStar && !goals.length) {
+    return null;
+  }
+  const Chip = ({ node, kind }) => {
+    const selected = node.id === selectedNodeId;
+    return (
+      <button
+        type="button"
+        className={`hd-graph3d-nav-chip ${kind}${selected ? " selected" : ""}`}
+        data-action="select-node"
+        data-source="graph-legend"
+        data-node-id={node.id}
+        aria-pressed={selected}
+        title={cleanText(node.label || node.id)}
+        onClick={() => onSelectNode?.(node.id)}
+      >
+        <i style={{ background: node.color || ROLE_COLORS[node.role] || "#9fb29c" }} />
+        <span>{cleanText(node.label || node.id)}</span>
+      </button>
+    );
+  };
   return (
-    <div className="hd-graph3d-legend" aria-hidden="true">
-      <div className="hd-graph3d-legend-group">
-        {layers.map((layer) => (
-          <span key={layer}>
-            <i style={{ background: NODE_COLORS[graphData.nodes.find((node) => node.layer === layer)?.type] || "#68716f" }} />
-            {layerLabel(ui, layer)}
-          </span>
-        ))}
-      </div>
-      <div className="hd-graph3d-legend-group relations">
-        {relations.map((relation) => (
-          <span key={relation}>
-            <i style={{ background: relationColor(relation) }} />
-            {relation.replace(/_/g, " ")}
-          </span>
-        ))}
-      </div>
+    <div className="hd-graph3d-legend hd-graph3d-nav">
+      {northStar ? (
+        <div className="hd-graph3d-nav-group">
+          <span className="hd-graph3d-nav-label">{label(ui, "dashboard_node_north_star", "North Star")}</span>
+          <Chip node={northStar} kind="trunk" />
+        </div>
+      ) : null}
+      {goals.length ? (
+        <div className="hd-graph3d-nav-group">
+          <span className="hd-graph3d-nav-label">{label(ui, "dashboard_active_goals_title", "Goals")}</span>
+          <div className="hd-graph3d-nav-chips">
+            {goals.map((node) => (
+              <Chip key={node.id} node={node} kind="direction" />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1961,6 +2559,144 @@ function Graph3DLegend({ payload, graphData }) {
 // are clustered by theme (tags → goal_refs → kind) and rendered as one
 // THREE.Points cloud — atmosphere, not clickable nodes. Returns {points,
 // clusters} where clusters carry the member items for hover aggregation.
+// The sources form their own spiral galaxy floating below the main growth
+// galaxy: each research theme (tag) is a spiral arm, lit sources burn bright,
+// placeholder/inbox ones are faint dust. Returns { points, clusters } where
+// clusters carry members + a center for hover aggregation.
+const SOURCE_GALAXY_Y = -175; // sits clearly below the main galaxy
+
+// Palette for research-source kinds (paper/course/blog/...). Deterministic by
+// kind so a kind always gets the same comet colour.
+const RESEARCH_KIND_COLORS = ["#8fb8ff", "#76d0c0", "#f0c86a", "#e68ab3", "#9bd97a", "#c6a6ff", "#f09a72", "#84cbd8"];
+
+// Build the research meteor-shower model from sand (source) nodes: count real
+// papers, group by kind, assign each a colour, and emit one comet per source.
+function researchShowerData(sandNodes) {
+  const sources = (sandNodes || []).filter(
+    (n) =>
+      cleanText(n.type) === "source" &&
+      !n.placeholder &&
+      n.implemented !== false &&
+      n.id !== "source:inbox" && // the inbox is an aggregate, not a paper
+      !cleanText(n.id).includes(":inbox"),
+  );
+  const kindOf = (n) => cleanText(n.metric) || cleanText(asObject(n.meta).kind) || "paper";
+  const tagOf = (n) => asArray(asObject(n.meta).tags).map((t) => cleanText(t)).find(Boolean) || "";
+  // Group by tag (research theme) when present, else by kind — that's the
+  // "种类" the user wants the shower bucketed by.
+  const bucketOf = (n) => tagOf(n) || kindOf(n);
+  const buckets = [...new Set(sources.map(bucketOf))].sort();
+  const colorOf = new Map(buckets.map((b, i) => [b, RESEARCH_KIND_COLORS[i % RESEARCH_KIND_COLORS.length]]));
+  // Title riding the comet: for a private source the real title is hidden
+  // ("私密来源 · id" placeholder) — show the research theme/kind instead so the
+  // label stays meaningful without leaking the private name.
+  const titleOf = (n) => {
+    if (n.locked) return tagOf(n) || kindOf(n);
+    const t = cleanText(n.label);
+    return t && !cleanText(n.id).includes(t) ? t.slice(0, 26) : tagOf(n) || kindOf(n);
+  };
+  const meteors = sources.map((n) => ({
+    id: n.id,
+    title: titleOf(n),
+    color: colorOf.get(bucketOf(n)),
+  }));
+  return {
+    count: sources.length,
+    kinds: buckets.map((b) => ({ key: b, color: colorOf.get(b), count: sources.filter((n) => bucketOf(n) === b).length })),
+    meteors,
+  };
+}
+
+// The comet field: papers streak across the stage one (or two) at a time on
+// randomized intervals — sparse, not a continuous rain. Each comet carries its
+// source's short title and crosses horizontally, alternating left↔right. A
+// setTimeout scheduler mounts one meteor per tick with a varying 4–16s gap, and
+// removes it after its flight so the DOM stays light. The paper/theme counts
+// live in the right data panel (ResearchStatsPanel), not here.
+function ResearchShower({ research }) {
+  const [active, setActive] = useState([]);
+
+  useEffect(() => {
+    if (!research || !research.meteors || !research.meteors.length) {
+      setActive([]);
+      return undefined;
+    }
+    const meteors = research.meteors;
+    let alive = true;
+    let idx = 0;
+    let timer = 0;
+    const removers = [];
+    const FLIGHT_MS = 2600;
+    const spawn = () => {
+      if (!alive) return;
+      const src = meteors[idx % meteors.length];
+      idx += 1;
+      const key = `${src.id}:${idx}`;
+      const top = 8 + hashUnit(`${src.id}:${idx}:t`) * 60; // 8..68% down the stage
+      const dir = idx % 2 ? "ltr" : "rtl";
+      // Cap at 2 concurrent comets so it stays sparse.
+      setActive((cur) => [...cur, { ...src, key, top, dir }].slice(-2));
+      const rm = window.setTimeout(() => {
+        if (alive) setActive((cur) => cur.filter((m) => m.key !== key));
+      }, FLIGHT_MS + 200);
+      removers.push(rm);
+      const gap = 4000 + hashUnit(`${src.id}:${idx}:g`) * 12000; // 4–16s, varying
+      timer = window.setTimeout(spawn, gap);
+    };
+    timer = window.setTimeout(spawn, 300); // first comet appears promptly
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+      removers.forEach((id) => window.clearTimeout(id));
+    };
+  }, [research]);
+
+  if (!research || !research.count) {
+    return null;
+  }
+  return (
+    <div className="hd-research-shower" aria-hidden="true">
+      {active.map((m) => (
+        <span
+          key={m.key}
+          className={`hd-meteor ${m.dir}`}
+          style={{ color: m.color, top: `${m.top}%` }}
+        >
+          <em className="hd-meteor-label">{m.title}</em>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Research counts moved out of the canvas overlay into the right data column
+// (below "Context ready"): N papers · M themes + a colour-coded theme legend.
+function ResearchStatsPanel({ research, ui, className = "" }) {
+  if (!research || !research.count) {
+    return null;
+  }
+  const panelClassName = ["hd-side-panel", "hd-research-panel", className].filter(Boolean).join(" ");
+  return (
+    <section className={panelClassName}>
+      <header>
+        <span className="hd-eyebrow">{label(ui, "dashboard_research_title", "Research")}</span>
+        <strong>
+          {research.count} {label(ui, "dashboard_research_papers", "papers")} ·{" "}
+          {research.kinds.length} {label(ui, "dashboard_research_kinds", "themes")}
+        </strong>
+      </header>
+      <div className="hd-research-panel-kinds">
+        {research.kinds.slice(0, 8).map((k) => (
+          <span key={k.key}>
+            <i style={{ background: k.color }} />
+            {k.key} <em>{k.count}</em>
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function buildSandField(payload, sandNodes) {
   if (!sandNodes.length) {
     return null;
@@ -1982,50 +2718,83 @@ function buildSandField(payload, sandNodes) {
     }
     clustersByKey.get(key).nodes.push(node);
   });
-  const clusters = [...clustersByKey.values()];
-  const clusterCount = Math.max(1, clusters.length);
+  // Stable arm order so the spiral doesn't reshuffle between renders.
+  const clusters = [...clustersByKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+  const armCount = Math.max(1, clusters.length);
 
   const positions = [];
   const colors = [];
+  const sizes = [];
   const basePositions = [];
+  const litColor = new THREE.Color("#b8e0ff");
+  const dimColor = new THREE.Color("#41597a");
   clusters.forEach((cluster, ci) => {
-    const angle = (ci / clusterCount) * Math.PI * 2 + 0.7;
-    const ringR = 30 + (ci % 3) * 16;
-    const center = {
-      x: Math.cos(angle) * ringR,
-      y: 26 + hashUnit(`${cluster.key}:cy`) * 8,
-      z: Math.sin(angle) * ringR,
+    // Each theme is a logarithmic spiral arm radiating from the source-galaxy
+    // center; members sorted so lit ones sit inner, placeholders trail outward.
+    const armBase = (ci / armCount) * Math.PI * 2;
+    const members = cluster.nodes.slice().sort((a, b) => {
+      const la = a.status === "reading" || a.status === "read" ? 0 : 1;
+      const lb = b.status === "reading" || b.status === "read" ? 0 : 1;
+      return la - lb || cleanText(a.id).localeCompare(cleanText(b.id));
+    });
+    const n = Math.max(1, members.length);
+    // Approximate arm center for hover (mid of the arm).
+    cluster.center = {
+      x: Math.cos(armBase + 0.6) * 46,
+      y: SOURCE_GALAXY_Y,
+      z: Math.sin(armBase + 0.6) * 46,
     };
-    cluster.center = center;
-    const baseColor = new THREE.Color(SAND_PALETTE[ci % SAND_PALETTE.length]);
-    cluster.nodes.forEach((node) => {
-      // Gaussian-ish scatter around the cluster center — a thin ground haze.
-      const dx = (hashUnit(`${node.id}:sx`) + hashUnit(`${node.id}:sx2`) - 1) * 18;
-      const dy = (hashUnit(`${node.id}:sy`) + hashUnit(`${node.id}:sy2`) - 1) * 5;
-      const dz = (hashUnit(`${node.id}:sz`) + hashUnit(`${node.id}:sz2`) - 1) * 18;
-      const px = center.x + dx;
-      const py = center.y + dy;
-      const pz = center.z + dz;
+    members.forEach((node, j) => {
+      const t = (j + 1) / n; // 0..1 outward along the arm
+      const r = 22 + t * 130;
+      const swirl = armBase + t * 3.0; // arm winds as it extends — a clear spiral
+      const jx = (hashUnit(`${node.id}:jx`) - 0.5) * 12;
+      const jz = (hashUnit(`${node.id}:jz`) - 0.5) * 12;
+      const jy = (hashUnit(`${node.id}:jy`) - 0.5) * 10;
+      const px = Math.cos(swirl) * r + jx;
+      const pz = Math.sin(swirl) * r + jz;
+      const py = SOURCE_GALAXY_Y + jy;
       positions.push(px, py, pz);
       basePositions.push(px, py, pz);
-      const nodeColor = baseColor.clone();
-      if (node.placeholder || node.implemented === false || node.meta?.synthetic) {
-        nodeColor.lerp(new THREE.Color("#4a5f72"), 0.42);
-      }
-      colors.push(nodeColor.r, nodeColor.g, nodeColor.b);
+      const lit = node.status === "reading" || node.status === "read";
+      const placeholder = node.placeholder || node.implemented === false || node.meta?.synthetic;
+      const c = (lit && !placeholder ? litColor : dimColor).clone();
+      // Tint slightly per-arm so themes are distinguishable.
+      c.offsetHSL((ci / armCount) * 0.5 - 0.1, 0, 0);
+      colors.push(c.r, c.g, c.b);
+      sizes.push(lit && !placeholder ? 30 : 13);
     });
   });
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  const material = new THREE.PointsMaterial({
-    size: 3.4,
-    sizeAttenuation: true,
-    vertexColors: true,
+  geometry.setAttribute("aSize", new THREE.Float32BufferAttribute(sizes, 1));
+  const material = new THREE.ShaderMaterial({
+    uniforms: { uTex: { value: makeSoftDot() }, uPulse: { value: 1.0 } },
+    vertexShader: `
+      attribute float aSize;
+      varying vec3 vColor;
+      uniform float uPulse;
+      void main() {
+        vColor = color;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = aSize * uPulse * (300.0 / -mv.z);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uTex;
+      varying vec3 vColor;
+      void main() {
+        vec4 t = texture2D(uTex, gl_PointCoord);
+        gl_FragColor = vec4(vColor, 1.0) * t;
+      }
+    `,
     transparent: true,
-    opacity: 0.68,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
   });
   const points = new THREE.Points(geometry, material);
   points.userData.basePositions = Float32Array.from(basePositions);
@@ -2033,18 +2802,140 @@ function buildSandField(payload, sandNodes) {
   return { points, clusters };
 }
 
+// Soft round dot texture for the source-galaxy points (mirrors the skill glow).
+let _softDot = null;
+function makeSoftDot() {
+  if (_softDot) return _softDot;
+  const s = 64;
+  const c = document.createElement("canvas");
+  c.width = s;
+  c.height = s;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.3, "rgba(255,255,255,0.85)");
+  g.addColorStop(0.7, "rgba(255,255,255,0.18)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  _softDot = new THREE.CanvasTexture(c);
+  _softDot.needsUpdate = true;
+  return _softDot;
+}
+
 const SAND_PALETTE = ["#9ed3e6", "#7fb8d6", "#b5d9e8", "#82c6c0", "#a7c7e8", "#87aeca"];
 
-function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessage = "", minHeight = GRAPH_3D_MIN_HEIGHT, compact = false }) {
+function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessage = "", minHeight = GRAPH_3D_MIN_HEIGHT, compact = false, research: researchProp = null }) {
   const ui = payload.ui;
-  const graphRef = useRef(null);
   const wrapRef = useRef(null);
-  const sceneObjsRef = useRef({ points: null, clusters: [], bloom: null, raf: 0 });
-  const [size, setSize] = useState({ width: 900, height: minHeight });
+  const canvasHostRef = useRef(null);
+  const sceneRef = useRef(null);
   const [sandHover, setSandHover] = useState(null);
-  const graphData = useMemo(() => graph3DData(payload, nodes), [payload, nodes]);
+  // The focused goal drives the sub-galaxy relayout: clicking any node resolves
+  // to its owning goal (a project/task/evidence dives into the goal it belongs
+  // to); clicking the North Star / Fit / empty space clears it back to overview.
+  const focusedGoalId = useMemo(
+    () => ancestorGoalId(payload, nodes, selectedNodeId),
+    [payload, nodes, selectedNodeId],
+  );
+  const graphData = useMemo(() => graph3DData(payload, nodes, focusedGoalId), [payload, nodes, focusedGoalId]);
+  // The legend stays an overview (North Star + every goal) even when focused, so
+  // its nav chips keep working as the way back out.
+  const legendData = useMemo(() => graph3DData(payload, nodes, null), [payload, nodes]);
   const sandNodes = useMemo(() => nodes.filter((node) => node.role === SAND_ROLE), [nodes]);
+  // Research sources become a full-stage comet shower (one comet per real paper,
+  // coloured by theme). The paper/theme counts render in the right data panel
+  // (ResearchStatsPanel), so prefer the parent-provided research object and only
+  // compute locally as a fallback.
+  const localResearch = useMemo(() => researchShowerData(sandNodes), [sandNodes]);
+  const research = researchProp || localResearch;
+  const hasNodes = graphData.nodes.length > 0;
 
+  // Latest callbacks/selection without forcing a scene rebuild.
+  const onSelectRef = useRef(onSelectNode);
+  onSelectRef.current = onSelectNode;
+
+  // Mount the native THREE scene once.
+  useEffect(() => {
+    const host = canvasHostRef.current;
+    if (!host || !hasNodes) {
+      return undefined;
+    }
+    const scene = new GalaxyScene();
+    const rect = host.getBoundingClientRect();
+    scene.mount(host, {
+      width: rect.width || 900,
+      height: rect.height || minHeight,
+      makeLabel: (node, selected) => createLabelSprite(node.label || node.id, node.color || starTreeColor(node), selected),
+      makeCatLabel: (text, color) => createLabelSprite(text, color, false),
+      onSelect: (id) => onSelectRef.current?.(id),
+      onHover: (hover) => {
+        if (!hover) {
+          setSandHover(null);
+          return;
+        }
+        const best = hover.cluster;
+        setSandHover({
+          label: best.label,
+          count: best.nodes.length,
+          items: best.nodes.slice(0, 8).map((node) => ({
+            id: node.id,
+            title: node.label || node.id,
+            kind: cleanText(node.metric) || cleanText(node.type),
+          })),
+          x: hover.x,
+          y: hover.y,
+        });
+      },
+    });
+    sceneRef.current = scene;
+    return () => {
+      scene.dispose();
+      sceneRef.current = null;
+    };
+    // Mount only once per stage lifetime; data flows in via the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasNodes, minHeight]);
+
+  // Feed data (rebuilds the tree geometry) whenever the graph changes.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !hasNodes) {
+      return;
+    }
+    // Sources are no longer a 3D spiral — they fly as the right-edge meteor
+    // shower (see ResearchShower). The galaxy stays focused on goals→evidence.
+    scene.setData(graphData, null);
+    scene.setSelected(selectedNodeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphData, sandNodes, payload]);
+
+  // Selection highlight + focus.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+    scene.setSelected(selectedNodeId);
+    const target = graphData.nodes.find((node) => node.id === selectedNodeId);
+    if (target) {
+      scene.focus(target);
+    }
+  }, [selectedNodeId, graphData]);
+
+  // Returning to the overview (focused goal cleared): the explicit Fit / empty
+  // click fires before the overview data rebuilds, so re-fit once the full galaxy
+  // is back in the scene. Runs after the setData effect (declared above).
+  const prevFocusRef = useRef(focusedGoalId);
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (scene && prevFocusRef.current && !focusedGoalId) {
+      scene.fit();
+    }
+    prevFocusRef.current = focusedGoalId;
+  }, [focusedGoalId]);
+
+  // Keep the renderer sized to the stage.
   useLayoutEffect(() => {
     const element = wrapRef.current;
     if (!element) {
@@ -2052,250 +2943,23 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
     }
     const update = () => {
       const rect = element.getBoundingClientRect();
-      const next = {
-        width: Math.max(320, Math.round(element.clientWidth || rect.width || 900)),
-        height: Math.max(minHeight, Math.round(element.clientHeight || rect.height || minHeight)),
-      };
-      graphRef.current?.width?.(next.width);
-      graphRef.current?.height?.(next.height);
-      element.querySelectorAll(".scene-container, .scene-container canvas").forEach((child) => {
-        child.style.setProperty("width", `${next.width}px`, "important");
-        child.style.setProperty("height", `${next.height}px`, "important");
-      });
-      setSize((current) => {
-        if (Math.abs(current.width - next.width) < 2 && Math.abs(current.height - next.height) < 2) {
-          return current;
-        }
-        return next;
-      });
+      const width = Math.max(320, Math.round(element.clientWidth || rect.width || 900));
+      const height = Math.max(minHeight, Math.round(element.clientHeight || rect.height || minHeight));
+      sceneRef.current?.resize(width, height);
     };
     update();
-    const rafs = [
-      window.requestAnimationFrame(update),
-      window.requestAnimationFrame(() => window.requestAnimationFrame(update)),
-    ];
-    const timers = [
-      window.setTimeout(update, 180),
-      window.setTimeout(update, 650),
-      window.setTimeout(update, 1400),
-    ];
-    const interval = window.setInterval(update, 250);
-    const stopInterval = window.setTimeout(() => window.clearInterval(interval), 2600);
+    const timers = [window.setTimeout(update, 180), window.setTimeout(update, 650)];
     const observer = new ResizeObserver(update);
     observer.observe(element);
     window.addEventListener("resize", update);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
-      rafs.forEach((id) => window.cancelAnimationFrame(id));
       timers.forEach((id) => window.clearTimeout(id));
-      window.clearInterval(interval);
-      window.clearTimeout(stopInterval);
     };
-  }, [minHeight]);
+  }, [minHeight, hasNodes]);
 
-  useEffect(() => {
-    const graph = graphRef.current;
-    if (!graph) {
-      return;
-    }
-    graph.width?.(size.width);
-    graph.height?.(size.height);
-    window.setTimeout(() => fitGraphCamera(graph, 350), 80);
-  }, [size.width, size.height]);
-
-  useEffect(() => {
-    const graph = graphRef.current;
-    if (!graph) {
-      return undefined;
-    }
-    // Skeleton is pinned via fx/fy/fz, so neutralize the force engine — the
-    // "Live" feel comes from the breathing rAF loop below, not force drift.
-    const charge = graph.d3Force?.("charge");
-    if (charge?.strength) {
-      charge.strength(0);
-    }
-
-    const scene = graph.scene?.();
-    const store = sceneObjsRef.current;
-
-    // 1. Bloom — make bright stars glow, leave the dim (locked) ones matte.
-    let bloom = null;
-    try {
-      const composer = graph.postProcessingComposer?.();
-      if (composer && !store.bloom) {
-        bloom = new UnrealBloomPass(
-          new THREE.Vector2(size.width || 900, size.height || minHeight),
-          0.62, // strength — subtle halo, not a floodlight
-          0.55, // radius
-          0.62, // threshold — only genuinely bright stars bloom
-        );
-        composer.addPass(bloom);
-        store.bloom = bloom;
-      }
-    } catch (err) {
-      // Bloom is a progressive enhancement; ignore if composer isn't ready.
-    }
-
-    // 2. Sand particle field.
-    if (scene) {
-      if (store.points) {
-        scene.remove(store.points);
-        store.points.geometry?.dispose?.();
-        store.points.material?.dispose?.();
-        store.points = null;
-        store.clusters = [];
-      }
-      const sand = buildSandField(payload, sandNodes);
-      if (sand) {
-        scene.add(sand.points);
-        store.points = sand.points;
-        store.clusters = sand.clusters;
-      }
-    }
-
-    window.setTimeout(() => fitGraphCamera(graph, 700), 240);
-    window.setTimeout(() => fitGraphCamera(graph, 500), 920);
-
-    // 3. Breathing animation loop — single rAF, updates only materials and the
-    // sand position attribute (no geometry rebuilds).
-    let frame = 0;
-    const animate = () => {
-      frame += 1;
-      const t = frame / 60;
-      // Stars: gentle per-star emissive flicker, phase offset by index.
-      scene?.traverse?.((obj) => {
-        if (obj.userData?.role === "star") {
-          const base = obj.userData.baseEmissive || 0;
-          const phase = (obj.id % 17) * 0.37;
-          obj.material.emissiveIntensity = Math.max(0, base + Math.sin(t * 1.6 + phase) * base * 0.35);
-        }
-      });
-      // Sand: slow drift around the base positions.
-      if (store.points) {
-        const attr = store.points.geometry.getAttribute("position");
-        const base = store.points.userData.basePositions;
-        if (attr && base) {
-          for (let i = 0; i < attr.count; i += 1) {
-            const o = i * 3;
-            attr.array[o] = base[o] + Math.sin(t * 0.4 + i * 0.5) * 1.2;
-            attr.array[o + 1] = base[o + 1] + Math.sin(t * 0.32 + i * 0.7) * 0.8;
-            attr.array[o + 2] = base[o + 2] + Math.cos(t * 0.36 + i * 0.6) * 1.2;
-          }
-          attr.needsUpdate = true;
-        }
-      }
-      store.raf = window.requestAnimationFrame(animate);
-    };
-    store.raf = window.requestAnimationFrame(animate);
-
-    return () => {
-      window.cancelAnimationFrame(store.raf);
-      store.raf = 0;
-      if (scene && store.points) {
-        scene.remove(store.points);
-        store.points.geometry?.dispose?.();
-        store.points.material?.dispose?.();
-        store.points = null;
-        store.clusters = [];
-      }
-      if (store.bloom) {
-        try {
-          const composer = graph.postProcessingComposer?.();
-          composer?.removePass?.(store.bloom);
-        } catch (err) {
-          // composer already gone
-        }
-        store.bloom.dispose?.();
-        store.bloom = null;
-      }
-    };
-  }, [graphData, sandNodes, payload, size.width, size.height, minHeight]);
-
-  useEffect(() => {
-    const target = graphData.nodes.find((node) => node.id === selectedNodeId);
-    if (target) {
-      window.setTimeout(() => {
-        if (connectedGraphNode(target)) {
-          focusGraphCamera(graphRef.current, target);
-        } else {
-          fitGraphCamera(graphRef.current);
-        }
-      }, 80);
-    }
-  }, [graphData, selectedNodeId]);
-
-  // Hover aggregation over the sand field — raycast pointer against the
-  // particle cloud and, on a hit, surface the nearest cluster's items.
-  useEffect(() => {
-    const element = wrapRef.current;
-    const graph = graphRef.current;
-    if (!element || !graph) {
-      return undefined;
-    }
-    const raycaster = new THREE.Raycaster();
-    raycaster.params.Points = { threshold: 9 };
-    const pointer = new THREE.Vector2();
-    let scheduled = false;
-    const onMove = (event) => {
-      if (scheduled) {
-        return;
-      }
-      scheduled = true;
-      window.requestAnimationFrame(() => {
-        scheduled = false;
-        const store = sceneObjsRef.current;
-        const camera = graph.camera?.();
-        if (!store.points || !camera) {
-          if (sandHover) setSandHover(null);
-          return;
-        }
-        const rect = element.getBoundingClientRect();
-        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera(pointer, camera);
-        const hits = raycaster.intersectObject(store.points, false);
-        if (!hits.length) {
-          if (sandHover) setSandHover(null);
-          return;
-        }
-        // Find the cluster whose center is nearest the hit point.
-        const point = hits[0].point;
-        let best = null;
-        let bestDist = Infinity;
-        store.clusters.forEach((cluster) => {
-          const c = cluster.center;
-          const d = (c.x - point.x) ** 2 + (c.y - point.y) ** 2 + (c.z - point.z) ** 2;
-          if (d < bestDist) {
-            bestDist = d;
-            best = cluster;
-          }
-        });
-        if (best) {
-          setSandHover({
-            label: best.label,
-            count: best.nodes.length,
-            items: best.nodes.slice(0, 8).map((node) => ({
-              id: node.id,
-              title: node.label || node.id,
-              kind: cleanText(node.metric) || cleanText(node.type),
-            })),
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top,
-          });
-        }
-      });
-    };
-    const onLeave = () => setSandHover(null);
-    element.addEventListener("pointermove", onMove);
-    element.addEventListener("pointerleave", onLeave);
-    return () => {
-      element.removeEventListener("pointermove", onMove);
-      element.removeEventListener("pointerleave", onLeave);
-    };
-  }, [graphData, sandNodes, sandHover]);
-
-  if (!graphData.nodes.length) {
+  if (!hasNodes) {
     return (
       <div className="hd-graph3d-stage hd-canvas-surface-empty">
         <p className="hd-empty">{emptyMessage || label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
@@ -2305,65 +2969,19 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
 
   return (
     <div className={compact ? "hd-graph3d-stage compact" : "hd-graph3d-stage"} ref={wrapRef} data-testid="dashboard-3d-graph">
-      <div className="hd-graph3d-force">
-        <ForceGraph3D
-          ref={graphRef}
-          width={size.width}
-          height={size.height}
-          graphData={graphData}
-          backgroundColor="#070b18"
-          nodeId="id"
-          nodeVal="val"
-          nodeLabel={(node) => `${node.label || node.id}\n${layerLabel(ui, node.layer)} · ${translatedNodeType(ui, node.type)}`}
-          nodeColor={(node) => node.color || starTreeColor(node)}
-          nodeThreeObject={(node) => nodeThreeObject(node, selectedNodeId)}
-          nodeThreeObjectExtend={false}
-          nodeOpacity={0.92}
-          nodeResolution={18}
-          linkLabel={(link) => cleanText(link.relation, link.type).replace(/_/g, " ")}
-          linkColor={(link) => relationColor(link.relation || link.type)}
-          linkWidth={(link) => graph3DLinkWidth(link, selectedNodeId)}
-          linkOpacity={0.34}
-          linkCurvature={(link) => (link.relation === "watches" ? 0.2 : link.relation === "feedback" ? 0.16 : 0.04)}
-          linkDirectionalArrowLength={(link) => (link.placeholder ? 0 : 2.6)}
-          linkDirectionalArrowColor={(link) => relationColor(link.relation || link.type)}
-          linkDirectionalArrowRelPos={0.74}
-          linkDirectionalParticles={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 2 : link.relation === "supports" ? 1 : 0)}
-          linkDirectionalParticleSpeed={0.005}
-          linkDirectionalParticleWidth={(link) => (graph3DSelectedLink(link, selectedNodeId) ? 1.85 : 0.95)}
-          linkDirectionalParticleColor={(link) => relationColor(link.relation || link.type)}
-          showNavInfo={false}
-          controlType="orbit"
-          rendererConfig={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
-          enableNodeDrag={false}
-          cooldownTicks={0}
-          warmupTicks={0}
-          d3VelocityDecay={0.9}
-          onNodeClick={(node) => {
-            onSelectNode(node.id);
-            focusGraphCamera(graphRef.current, node);
-          }}
-          onBackgroundClick={() => fitGraphCamera(graphRef.current)}
-        />
-      </div>
-      {sandHover ? (
-        <div
-          className="hd-sand-tooltip"
-          style={{ left: `${sandHover.x + 14}px`, top: `${sandHover.y + 14}px` }}
-        >
-          <strong>{sandHover.label} · {sandHover.count}</strong>
-          <ul>
-            {sandHover.items.map((item) => (
-              <li key={item.id}>
-                <span>{item.title}</span>
-                {item.kind ? <em>{item.kind}</em> : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <div className="hd-graph3d-force" ref={canvasHostRef} />
+      <ResearchShower research={research} />
       <div className="hd-graph3d-toolbar">
-        <button type="button" data-action="graph-fit" onClick={() => fitGraphCamera(graphRef.current)}>
+        <button
+          type="button"
+          data-action="graph-fit"
+          onClick={() => {
+            // Fit returns to the overview, so clear the selection too — otherwise
+            // focusedGoalId would re-derive the sub-galaxy on the next render.
+            onSelectNode?.("");
+            sceneRef.current?.fit();
+          }}
+        >
           {label(ui, "dashboard_graph_fit", "Fit")}
         </button>
         <button
@@ -2372,17 +2990,17 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
           disabled={!selectedNodeId}
           onClick={() => {
             const target = graphData.nodes.find((node) => node.id === selectedNodeId);
-            if (connectedGraphNode(target)) {
-              focusGraphCamera(graphRef.current, target);
+            if (target) {
+              sceneRef.current?.focus(target);
             } else {
-              fitGraphCamera(graphRef.current);
+              sceneRef.current?.fit();
             }
           }}
         >
           {label(ui, "dashboard_graph_focus_selected", "Focus")}
         </button>
       </div>
-      <Graph3DLegend payload={payload} graphData={graphData} />
+      <Graph3DLegend payload={payload} graphData={legendData} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
     </div>
   );
 }
@@ -2548,109 +3166,8 @@ function ExploreNodeList({
   );
 }
 
-function EmbeddedCanvasFrame({ payload, embed, showHeader = true }) {
-  const ui = payload.ui;
-  const [loaded, setLoaded] = useState(false);
-  return (
-    <section className={showHeader ? "hd-canvas-embed" : "hd-canvas-embed hd-canvas-embed-inline"} aria-label={label(ui, "dashboard_embedded_canvas_title", "Embedded canvas")}>
-      {showHeader ? (
-        <header>
-          <div>
-            <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
-            <h3>{label(ui, "dashboard_embedded_canvas_title", "Embedded canvas")}</h3>
-          </div>
-          {embed.standaloneUrl ? (
-            <a href={embed.standaloneUrl} target="_blank" rel="noreferrer" data-action="open-8502-canvas">
-              {label(ui, "dashboard_open_8502_canvas", "Open 8502 Canvas")}
-            </a>
-          ) : null}
-        </header>
-      ) : null}
-      <div className={loaded ? "hd-canvas-embed-frame loaded" : "hd-canvas-embed-frame"}>
-        {!loaded ? <span>{label(ui, "dashboard_graph_loading", "Loading graph...")}</span> : null}
-        <iframe
-          title={label(ui, "dashboard_embedded_canvas_title", "Embedded canvas")}
-          src={embed.url}
-          loading="eager"
-          onLoad={() => setLoaded(true)}
-        />
-      </div>
-    </section>
-  );
-}
-
-function CanvasSummaryPanel({ payload, embed }) {
-  const ui = payload.ui;
-  const [showEmbed, setShowEmbed] = useState(false);
-  const nodesById = useMemo(() => new Map(payload.graph.nodes.map((node) => [node.id, node])), [payload]);
-  const focusNodes = payload.graph.focusPath.map((id) => nodesById.get(id)).filter(Boolean);
-  const attentionCount = asArray(payload.graph.attention.nodes).length;
-  const graphNodeCount = asArray(payload.graph.nodes).length;
-  const previewNodes = focusNodes.slice(0, 8);
-  return (
-    <section className="hd-canvas-summary" data-section="canvas-summary">
-      <header>
-        <div>
-          <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
-          <h3>{label(ui, "dashboard_canvas_summary_title", "Canvas summary")}</h3>
-          <p>{label(ui, "dashboard_canvas_summary_caption", "The daily dashboard keeps the big canvas folded until you need deeper graph exploration.")}</p>
-        </div>
-        {embed.standaloneUrl ? (
-          <a href={embed.standaloneUrl} target="_blank" rel="noreferrer" data-action="open-8502-canvas">
-            {label(ui, "dashboard_open_8502_canvas", "Open 8502 Canvas")}
-          </a>
-        ) : null}
-      </header>
-
-      <div className="hd-canvas-summary-body">
-        <div className="hd-canvas-summary-path" aria-label={label(ui, "dashboard_view_focus_path", "Focus Path")}>
-          {previewNodes.length ? previewNodes.map((node, index) => (
-            embed.standaloneUrl ? (
-              <a
-                key={node.id}
-                className={`type-${node.type} ${node.placeholder ? "placeholder" : ""}`}
-                href={dashboardNodeUrl(embed.standaloneUrl, node.id)}
-                target="_blank"
-                rel="noreferrer"
-                data-action="open-8502-node"
-                data-node-id={node.id}
-              >
-                <small>{String(index + 1).padStart(2, "0")} · {translatedNodeType(ui, node.type)}</small>
-                <strong>{node.label}</strong>
-              </a>
-            ) : (
-              <span key={node.id} className={`type-${node.type} ${node.placeholder ? "placeholder" : ""}`}>
-              <small>{String(index + 1).padStart(2, "0")} · {translatedNodeType(ui, node.type)}</small>
-              <strong>{node.label}</strong>
-              </span>
-            )
-          )) : (
-            <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
-          )}
-        </div>
-        <div className="hd-canvas-summary-stats">
-          <span><strong>{focusNodes.length}</strong>{label(ui, "dashboard_view_focus_path", "Focus Path")}</span>
-          <span><strong>{attentionCount}</strong>{label(ui, "dashboard_attention_title", "Attention")}</span>
-          <span><strong>{graphNodeCount}</strong>{label(ui, "dashboard_explore_nodes", "Graph nodes")}</span>
-        </div>
-      </div>
-
-      <details
-        className="hd-canvas-embed-details"
-        onToggle={(event) => setShowEmbed(event.currentTarget.open)}
-      >
-        <summary data-action="load-embedded-canvas">
-          {label(ui, "dashboard_canvas_load_embed", "Load embedded canvas")}
-        </summary>
-        {showEmbed ? <EmbeddedCanvasFrame payload={payload} embed={embed} showHeader={false} /> : null}
-      </details>
-    </section>
-  );
-}
-
 function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }) {
   const ui = payload.ui;
-  const [showEmbed, setShowEmbed] = useState(false);
   const itemsById = useMemo(() => {
     const map = new Map();
     actionQueueItems(payload).forEach((item) => map.set(item.id, item));
@@ -2667,6 +3184,12 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
   const heroNodes = useMemo(
     () => graphExploreNodes(payload, new Set(), selectedNodeId, "all"),
     [payload, selectedNodeId],
+  );
+  // Research stats live in the right data panel (below Context ready), not as a
+  // canvas overlay. Compute here from the same sand nodes the comet shower uses.
+  const research = useMemo(
+    () => researchShowerData(heroNodes.filter((node) => node.role === SAND_ROLE)),
+    [heroNodes],
   );
 
   return (
@@ -2689,6 +3212,7 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
           nodes={heroNodes}
           selectedNodeId={selectedNode?.id || selectedNodeId}
           onSelectNode={onSelectNode}
+          research={research}
           emptyMessage={label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}
         />
       </div>
@@ -2731,19 +3255,8 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
         </div>
 
         <HealthSummaryPanel payload={payload} className="hd-hero-health" />
+        <ResearchStatsPanel research={research} ui={ui} className="hd-hero-research" />
       </aside>
-
-      {embed?.url ? (
-        <details
-          className="hd-graph-hero-embed"
-          onToggle={(event) => setShowEmbed(event.currentTarget.open)}
-        >
-          <summary data-action="load-embedded-canvas">
-            {label(ui, "dashboard_canvas_load_embed", "Load embedded canvas")}
-          </summary>
-          {showEmbed ? <EmbeddedCanvasFrame payload={payload} embed={embed} showHeader={false} /> : null}
-        </details>
-      ) : null}
     </section>
   );
 }
@@ -3462,6 +3975,8 @@ function Dashboard({ args }) {
   const [selectedNodeId, setSelectedNodeId] = useState(() => requestedNodeId);
   const [goalEditor, setGoalEditor] = useState(null);
   const [viewMode, setViewMode] = useState(() => initialDashboardViewMode(args));
+  const [resumeIngestOpen, setResumeIngestOpen] = useState(false);
+  const [profileContextOpen, setProfileContextOpen] = useState(false);
   const canvasEmbed = useMemo(() => (!args.standalone ? dashboardCanvasEmbed(payload) : null), [args.standalone, payload]);
   const readOnlyCanvas = Boolean(args.standalone);
   const useDailyGraphHero = !args.standalone && !args.embed;
@@ -3669,6 +4184,8 @@ function Dashboard({ args }) {
         onCreateGoal={() => setGoalEditor({ mode: "create" })}
         onSelectGoal={selectGoal}
         onEditGoal={(goalId) => setGoalEditor({ mode: "edit", goalId })}
+        onOpenResumeIngest={readOnlyCanvas ? null : () => setResumeIngestOpen(true)}
+        onOpenProfileContext={readOnlyCanvas ? null : () => setProfileContextOpen(true)}
         canEditGoals={!readOnlyCanvas}
         canSelectGoals={!readOnlyCanvas}
         showToday={!useDailyGraphHero}
@@ -3678,6 +4195,20 @@ function Dashboard({ args }) {
 
       {canvasSurface}
       {useDailyGraphHero ? null : <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} showActionQueue={!useDailyGraphHero} />}
+      <ResumeIngestDrawer
+        open={resumeIngestOpen}
+        onClose={() => setResumeIngestOpen(false)}
+        ui={payload.ui}
+        resume={payload.resumeIngest}
+        onEmit={emit}
+      />
+      <ProfileContextDrawer
+        open={profileContextOpen}
+        onClose={() => setProfileContextOpen(false)}
+        ui={payload.ui}
+        profileContext={payload.profileContext}
+        onEmit={emit}
+      />
         </>
       )}
     </main>

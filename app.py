@@ -65,6 +65,7 @@ from nblane.core.research_sources import (
     save_research_sources,
 )
 from nblane.core.profile_context import (
+    COMPETENCY_STATUSES,
     GENERATED_BLOCKS,
     IDENTITY_FIELDS,
     LONG_NARRATIVE_SECTIONS,
@@ -73,6 +74,7 @@ from nblane.core.profile_context import (
     extract_generated_blocks,
     normalize_north_star_visibility,
     north_star_context_from_identity,
+    parse_core_competencies,
     parse_identity_fields,
     parse_skill_md_sections,
     rejoin_sections,
@@ -396,12 +398,14 @@ def dashboard_payload(profile: str) -> dict:
         ai=ai_payload,
         skill_alignment_candidates=_goal_skill_candidates_for_home(profile),
     )
+    payload["resume_ingest"] = _resume_ingest_payload(profile)
     canvas_base = _dashboard_canvas_base()
     canvas_ok, _canvas_message = _dashboard_canvas_status(canvas_base, profile)
     if canvas_base and canvas_ok is not False:
         encoded_profile = quote(profile, safe="")
+        # Only the standalone deep link is used now (the "Open 8502 Canvas"
+        # button); the embedded-iframe canvas was removed from the dashboard.
         payload["canvas_embed"] = {
-            "url": f"{canvas_base}/dashboard?profile={encoded_profile}&embed=1&view=focus",
             "standalone_url": f"{canvas_base}/dashboard?profile={encoded_profile}",
         }
     return payload
@@ -1615,6 +1619,63 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> bool:
         st.session_state[f"_open_profile_context_{profile}"] = True
         st.rerun()
         return True
+    if action == "resume_ingest_generate":
+        text = str(payload.get("text") or "")
+        allow_status = _dashboard_goal_bool(payload, "allow_status_change", False)
+        _run_resume_generate(profile, text, allow_status)
+        return True
+    if action == "resume_ingest_apply":
+        allow_status = _dashboard_goal_bool(payload, "allow_status_change", False)
+        _apply_resume_ingest(profile, allow_status)
+        return True
+    if action == "resume_ingest_discard":
+        _discard_resume_ingest(profile)
+        return True
+    if action == "profile_context_save":
+        identity_raw = payload.get("identity_fields")
+        narrative_raw = payload.get("narrative_sections")
+        competencies_raw = payload.get("core_competencies")
+        identity_fields = (
+            {str(k): str(v) for k, v in identity_raw.items()}
+            if isinstance(identity_raw, dict)
+            else {}
+        )
+        narrative_sections = (
+            {str(k): str(v) for k, v in narrative_raw.items()}
+            if isinstance(narrative_raw, dict)
+            else {}
+        )
+        core_competencies = (
+            [
+                {
+                    "area": str(row.get("area", "")),
+                    "status": str(row.get("status", "")),
+                    "notes": str(row.get("notes", "")),
+                }
+                for row in competencies_raw
+                if isinstance(row, dict)
+            ]
+            if isinstance(competencies_raw, list)
+            else None
+        )
+        skill_path = profile_dir(profile) / "SKILL.md"
+        skill_content = load_skill_md(profile)
+        if not skill_content:
+            st.warning(ui["warning_no_skill_md"])
+            return True
+        updated = apply_profile_context_structured_edits(
+            skill_content,
+            identity_fields=identity_fields,
+            narrative_sections=narrative_sections,
+            core_competencies=core_competencies,
+        )
+        _save_skill_md(skill_path, updated, ui["home_saved"])
+        return True
+    if action == "profile_context_save_raw":
+        raw_markdown = str(payload.get("raw_markdown") or "")
+        skill_path = profile_dir(profile) / "SKILL.md"
+        _save_skill_md(skill_path, raw_markdown, ui["home_saved"])
+        return True
     if action == "navigate":
         path = str(payload.get("path") or "").strip()
         if path:
@@ -2084,6 +2145,137 @@ def _render_home_native_fallback(payload: dict) -> None:
     st.divider()
 
     _render_quick_entries()
+    st.divider()
+
+    _render_resume_ingest(selected)
+    st.divider()
+    _render_profile_context(selected)
+
+
+def _resume_ingest_payload(profile: str) -> dict:
+    """React-facing snapshot of the resume ingest state for the dashboard drawer."""
+    rkey = f"resume_ingest_patch_{profile}"
+    pending = st.session_state.get(rkey)
+    snapshot: dict[str, object] = {
+        "llm_configured": llm_client.is_configured(),
+        "has_pending_patch": pending is not None,
+        "merge": None,
+    }
+    if pending is None:
+        return snapshot
+    pool_r = load_evidence_pool_raw(profile)
+    tree_r = load_skill_tree_raw(profile)
+    rmerge = merge_ingest_patch(
+        profile,
+        pool_r,
+        tree_r,
+        pending,
+        allow_status_change=False,
+        bump_locked_with_evidence=True,
+    )
+    new_ev: list[str] = []
+    tree_delta: list[str] = []
+    if rmerge.ok and (
+        rmerge.merged_pool is not None or rmerge.merged_tree is not None
+    ):
+        lab = schema_node_labels(tree_r)
+        new_ev, tree_delta = ingest_preview_delta(
+            pool_r,
+            tree_r,
+            rmerge.merged_pool,
+            rmerge.merged_tree,
+            lab,
+        )
+    merged_pool_yaml = (
+        yaml.dump(
+            rmerge.merged_pool,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        if rmerge.ok and rmerge.merged_pool
+        else ""
+    )
+    merged_tree_yaml = (
+        yaml.dump(
+            rmerge.merged_tree,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        if rmerge.ok and rmerge.merged_tree
+        else ""
+    )
+    snapshot["merge"] = {
+        "ok": bool(rmerge.ok),
+        "warnings": list(rmerge.warnings),
+        "errors": list(rmerge.errors),
+        "new_evidence": list(new_ev),
+        "tree_delta": list(tree_delta),
+        "merged_pool_yaml": merged_pool_yaml,
+        "merged_tree_yaml": merged_tree_yaml,
+    }
+    return snapshot
+
+
+def _run_resume_generate(profile: str, text: str, _allow_status_change: bool) -> None:
+    """Generate an ingest patch from raw text and stash it for review."""
+    text = (text or "").strip()
+    if not text:
+        return
+    if not llm_client.is_configured():
+        render_llm_unavailable(ui)
+        return
+    with st.spinner(ui["resume_spinner"]):
+        patch, err = ingest_resume_json(profile, text)
+    if err is not None:
+        st.error(ui["resume_err"].format(msg=err))
+        return
+    if patch is None:
+        return
+    drop_streamlit_widget_keys(
+        [
+            f"rp_pool_{profile}",
+            f"rp_tree_{profile}",
+        ]
+    )
+    st.session_state[f"resume_ingest_patch_{profile}"] = patch
+    st.rerun()
+
+
+def _apply_resume_ingest(profile: str, allow_status_change: bool) -> None:
+    """Apply the pending ingest patch to disk and clear session state."""
+    rkey = f"resume_ingest_patch_{profile}"
+    patch = st.session_state.get(rkey)
+    if patch is None:
+        return
+    assert_files_current([_pool_path, _tree_path, _skill_md_path])
+    _, apply_r = run_ingest_patch(
+        profile,
+        patch,
+        allow_status_change=allow_status_change,
+        bump_locked_with_evidence=True,
+        dry_run=False,
+    )
+    if apply_r.ok:
+        clear_web_cache()
+        refresh_file_snapshots([_pool_path, _tree_path, _skill_md_path])
+        stash_git_backup_results()
+        st.session_state.pop(rkey, None)
+        st.success(ui["resume_applied"])
+        render_git_backup_notices()
+        st.rerun()
+    else:
+        for e in apply_r.errors:
+            st.error(e)
+        for w in apply_r.warnings:
+            st.warning(w)
+
+
+def _discard_resume_ingest(profile: str) -> None:
+    """Forget the pending ingest patch without writing anything."""
+    st.session_state.pop(f"resume_ingest_patch_{profile}", None)
+    st.rerun()
 
 
 def _render_resume_ingest(profile: str) -> None:
@@ -2321,16 +2513,50 @@ def _render_profile_context(profile: str) -> None:
                     key=f"profile_narrative_{profile}_{title}",
                 )
 
+            st.markdown(
+                f"**{ui.get('profile_context_competencies_title', 'Core competencies')}**"
+            )
+            st.caption(ui.get("competencies_caption", ""))
+            existing_rows = parse_core_competencies(skill_content)
+            competency_editor = st.data_editor(
+                existing_rows,
+                num_rows="dynamic",
+                use_container_width=True,
+                column_config={
+                    "area": st.column_config.TextColumn(
+                        ui.get("competency_col_area", "Area"),
+                    ),
+                    "status": st.column_config.SelectboxColumn(
+                        ui.get("competency_col_status", "Status"),
+                        options=list(COMPETENCY_STATUSES),
+                    ),
+                    "notes": st.column_config.TextColumn(
+                        ui.get("competency_col_notes", "Notes"),
+                    ),
+                },
+                key=f"profile_competencies_{profile}",
+            )
+
             submitted = st.form_submit_button(
                 ui["save_profile_context"],
                 type="primary",
             )
 
         if submitted:
+            competency_rows = [
+                {
+                    "area": str(row.get("area", "")),
+                    "status": str(row.get("status", "")),
+                    "notes": str(row.get("notes", "")),
+                }
+                for row in competency_editor
+                if isinstance(row, dict)
+            ]
             updated = apply_profile_context_structured_edits(
                 skill_content,
                 identity_fields=identity_updates,
                 narrative_sections=narrative_updates,
+                core_competencies=competency_rows,
             )
             _save_skill_md(skill_path, updated, ui["home_saved"])
 
@@ -2470,11 +2696,6 @@ def _render_home_page() -> None:
 
     _render_home_capture_hint()
 
-    profile_context_requested = _profile_context_open_requested(selected)
-    if profile_context_requested:
-        _render_profile_context(selected)
-        st.divider()
-
     home_dashboard_payload = dashboard_payload(selected)
     home_dashboard_event = st_home_dashboard(
         payload=home_dashboard_payload,
@@ -2486,12 +2707,6 @@ def _render_home_page() -> None:
     elif home_dashboard_event.get("action"):
         if _handle_home_dashboard_event(home_dashboard_event, selected):
             return
-
-    _render_resume_ingest(selected)
-
-    if not profile_context_requested:
-        st.divider()
-        _render_profile_context(selected)
 
 
 def _navigation_pages() -> dict[str, list[st.Page]]:

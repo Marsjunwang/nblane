@@ -225,13 +225,26 @@ if [[ "${LLM_REPLY_LANG:-}" == "en" || "${LLM_REPLY_LANG:-}" == "zh" ]]; then
   lang_env="${lang_env} LLM_REPLY_LANG=${LLM_REPLY_LANG}"
 fi
 
+# Forward LLM credentials into the tmux child processes. The script sources
+# the repo .env above (set -a), but --isolated runs point NBLANE_ROOT at
+# .dev-data, so llm.py's load_dotenv(REPO_ROOT/.env) misses the repo .env and
+# AI features report "not configured". Pass the already-exported vars through
+# explicitly, mirroring lang_env. Each is single-quoted to survive spaces.
+llm_env=""
+for var in LLM_API_KEY LLM_BASE_URL LLM_MODEL VISUAL_API_KEY DASHSCOPE_API_KEY; do
+  value="${!var:-}"
+  if [[ -n "$value" ]]; then
+    llm_env="${llm_env} ${var}='${value}'"
+  fi
+done
+
 stop_sessions
 
 tmux new-session -d -s "$reader_session" -c "$repo_root" \
   "NBLANE_ROOT='$dev_root' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
-   ${auth_env} ${grobid_env} ${lang_env} \
+   ${auth_env} ${grobid_env} ${lang_env} ${llm_env} \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
 
 tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
@@ -241,7 +254,7 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
    NBLANE_PAPER_LIBRARY_RUNTIME='$runtime' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
-   ${auth_env} ${grobid_env} ${lang_env} \
+   ${auth_env} ${grobid_env} ${lang_env} ${llm_env} \
    PYTHONPATH=src .venv/bin/streamlit run app.py \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
 

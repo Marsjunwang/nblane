@@ -66,3 +66,48 @@ export function setPrimaryGoalEvent(goalId) {
 export function openProfileContextEvent() {
   return makeEvent("set_north_star_display_open_profile_context", {});
 }
+
+export function resumeIngestGenerateEvent({ text = "", allowStatusChange = false } = {}) {
+  return makeEvent("resume_ingest_generate", {
+    text: String(text || ""),
+    allow_status_change: Boolean(allowStatusChange),
+  });
+}
+
+export function resumeIngestApplyEvent({ allowStatusChange = false } = {}) {
+  return makeEvent("resume_ingest_apply", {
+    allow_status_change: Boolean(allowStatusChange),
+  });
+}
+
+export function resumeIngestDiscardEvent() {
+  return makeEvent("resume_ingest_discard", {});
+}
+
+export function profileContextSaveEvent({
+  identityFields = {},
+  narrativeSections = {},
+  coreCompetencies = [],
+} = {}) {
+  return makeEvent("profile_context_save", {
+    identity_fields:
+      identityFields && typeof identityFields === "object" ? { ...identityFields } : {},
+    narrative_sections:
+      narrativeSections && typeof narrativeSections === "object"
+        ? { ...narrativeSections }
+        : {},
+    core_competencies: Array.isArray(coreCompetencies)
+      ? coreCompetencies.map((row) => ({
+          area: String((row && row.area) || ""),
+          status: String((row && row.status) || ""),
+          notes: String((row && row.notes) || ""),
+        }))
+      : [],
+  });
+}
+
+export function profileContextSaveRawEvent({ rawMarkdown = "" } = {}) {
+  return makeEvent("profile_context_save_raw", {
+    raw_markdown: String(rawMarkdown || ""),
+  });
+}

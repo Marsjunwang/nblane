@@ -516,7 +516,15 @@ class TestHomeDashboard(unittest.TestCase):
         graph_text = yaml.dump(payload["graph"], allow_unicode=True)
         self.assertIn("Reliable robot learning systems.", graph_text)
         self.assertIn("ROS 2 Basics", graph_text)
-        self.assertNotIn("Private Nblane Project", graph_text)
+        # Owner-facing dashboard graph: a private project now shows its real title
+        # (privacy is carried by the node's `locked` flag, not by masking the name).
+        self.assertIn("Private Nblane Project", graph_text)
+        project_nodes = {
+            node["id"]: node
+            for node in payload["graph"]["nodes"]
+            if node["id"] == "project:nblane"
+        }
+        self.assertTrue(project_nodes["project:nblane"]["locked"])
         self.assertTrue(
             any(link["path"] == "pages/3_Kanban.py" for link in payload["quick_links"])
         )

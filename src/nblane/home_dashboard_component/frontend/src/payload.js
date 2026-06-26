@@ -324,6 +324,109 @@ export function goalDisplay(goal, ui = {}) {
   };
 }
 
+export function normalizeProfileContext(source) {
+  const value = asObject(source);
+  const identityFields = asArray(value.identity_fields || value.identityFields)
+    .map((field) => cleanText(field))
+    .filter(Boolean);
+  const narrativeSections = asArray(
+    value.narrative_sections || value.narrativeSections,
+  )
+    .map((title) => cleanText(title))
+    .filter(Boolean);
+  const visibilities = asArray(
+    value.north_star_visibilities || value.northStarVisibilities,
+  )
+    .map((item) => cleanText(item))
+    .filter(Boolean);
+  const generatedBlocks = asArray(value.generated_blocks || value.generatedBlocks)
+    .map((item) => cleanText(item))
+    .filter(Boolean);
+  const competencyStatuses = asArray(
+    value.competency_statuses || value.competencyStatuses,
+  )
+    .map((item) => cleanText(item))
+    .filter(Boolean);
+  const coreCompetencies = asArray(
+    value.core_competencies || value.coreCompetencies,
+  )
+    .map((row) => {
+      const item = asObject(row);
+      return {
+        area: cleanText(item.area),
+        status: cleanText(item.status),
+        notes: cleanText(item.notes),
+      };
+    })
+    .filter((row) => row.area || row.notes);
+  const identityRaw = asObject(value.identity);
+  const identity = {};
+  identityFields.forEach((field) => {
+    identity[field] = cleanText(identityRaw[field]);
+  });
+  const narrativeRaw = asObject(value.narrative);
+  const narrative = {};
+  narrativeSections.forEach((title) => {
+    narrative[title] = typeof narrativeRaw[title] === "string" ? narrativeRaw[title] : "";
+  });
+  const generatedBlockRaw = asObject(
+    value.generated_block_text || value.generatedBlockText,
+  );
+  const generatedBlockText = {};
+  generatedBlocks.forEach((block) => {
+    generatedBlockText[block] =
+      typeof generatedBlockRaw[block] === "string" ? generatedBlockRaw[block] : "";
+  });
+  return {
+    hasSkillMd: Boolean(value.has_skill_md || value.hasSkillMd),
+    identityFields,
+    identity,
+    narrativeSections,
+    narrative,
+    northStarVisibilities: visibilities,
+    coreCompetencies,
+    competencyStatuses,
+    generatedBlocks,
+    generatedBlockText,
+    rawMarkdown: typeof value.raw_markdown === "string" ? value.raw_markdown : "",
+  };
+}
+
+export function normalizeResumeIngest(source) {
+  const value = asObject(source);
+  const mergeRaw = value.merge && typeof value.merge === "object" ? value.merge : null;
+  const merge = mergeRaw
+    ? {
+        ok: Boolean(mergeRaw.ok),
+        warnings: asArray(mergeRaw.warnings).map((item) => cleanText(item)).filter(Boolean),
+        errors: asArray(mergeRaw.errors).map((item) => cleanText(item)).filter(Boolean),
+        newEvidence: asArray(mergeRaw.new_evidence || mergeRaw.newEvidence)
+          .map((item) => cleanText(item))
+          .filter(Boolean),
+        treeDelta: asArray(mergeRaw.tree_delta || mergeRaw.treeDelta)
+          .map((item) => cleanText(item))
+          .filter(Boolean),
+        mergedPoolYaml:
+          typeof mergeRaw.merged_pool_yaml === "string"
+            ? mergeRaw.merged_pool_yaml
+            : typeof mergeRaw.mergedPoolYaml === "string"
+            ? mergeRaw.mergedPoolYaml
+            : "",
+        mergedTreeYaml:
+          typeof mergeRaw.merged_tree_yaml === "string"
+            ? mergeRaw.merged_tree_yaml
+            : typeof mergeRaw.mergedTreeYaml === "string"
+            ? mergeRaw.mergedTreeYaml
+            : "",
+      }
+    : null;
+  return {
+    llmConfigured: Boolean(value.llm_configured || value.llmConfigured),
+    hasPendingPatch: Boolean(value.has_pending_patch || value.hasPendingPatch),
+    merge,
+  };
+}
+
 export function normalizePayload(payload) {
   const source = asObject(payload);
   const charts = asObject(source.charts);
@@ -384,6 +487,8 @@ export function normalizePayload(payload) {
     })(),
     quickLinks: asArray(source.quick_links).map(asObject).filter((link) => cleanText(link.path)),
     canvasEmbed: asObject(source.canvas_embed || source.canvasEmbed),
+    profileContext: normalizeProfileContext(source.profile_context || source.profileContext),
+    resumeIngest: normalizeResumeIngest(source.resume_ingest || source.resumeIngest),
     ai: asObject(source.ai),
     ui: asObject(source.ui),
   };

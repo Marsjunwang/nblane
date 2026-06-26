@@ -719,11 +719,17 @@ button {
   border-radius: 22px;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(300px, 1fr) minmax(220px, clamp(240px, 25vw, 360px));
+  grid-template-columns: minmax(420px, 1.4fr) minmax(220px, clamp(240px, 22vw, 340px));
   margin: 0 14px 14px;
   min-width: 0;
   overflow: hidden;
   padding: 14px;
+}
+
+@media (max-width: 1100px) {
+  .hd-graph-hero {
+    grid-template-columns: 1fr;
+  }
 }
 
 .hd-graph-hero-visual {
@@ -777,8 +783,8 @@ button {
 
 .hd-graph-hero .hd-graph3d-stage {
   border-radius: 16px;
-  height: 520px;
-  min-height: 520px;
+  height: clamp(560px, 72vh, 820px);
+  min-height: 560px;
 }
 
 .hd-graph3d-stage.compact .hd-graph3d-toolbar {
@@ -1514,6 +1520,120 @@ button {
   opacity: .48;
 }
 
+/* Research comet shower — comets streaking across the WHOLE stage, one per
+   paper, coloured by theme. The paper/theme counts live in the right data panel
+   (.hd-research-panel), not as a canvas overlay. */
+.hd-research-shower {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.hd-meteor {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px 2px currentColor;
+  opacity: 0;
+  animation: hd-meteor-streak-ltr 2.6s linear forwards;
+}
+
+.hd-meteor.rtl {
+  animation-name: hd-meteor-streak-rtl;
+}
+
+/* Horizontal tail trailing BEHIND the head, along the direction of travel:
+   ltr moves right so the tail streaks left; rtl is mirrored. */
+.hd-meteor::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  width: 110px;
+  height: 1px;
+  transform-origin: right center;
+  background: linear-gradient(270deg, currentColor, transparent);
+  opacity: .65;
+}
+
+.hd-meteor.rtl::after {
+  right: auto;
+  left: 2px;
+  transform-origin: left center;
+  background: linear-gradient(90deg, currentColor, transparent);
+}
+
+/* Source title rides behind the head and ABOVE the tail line so the text and the
+   streak don't overlap — the comet reads as "•—— title" moving as one unit. */
+.hd-meteor-label {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
+  color: currentColor;
+  text-shadow: 0 0 6px currentColor, 0 1px 2px rgba(6, 10, 24, .9);
+  opacity: .9;
+}
+
+.hd-meteor.rtl .hd-meteor-label {
+  right: auto;
+  left: 6px;
+}
+
+/* Single-shot horizontal streaks: a comet enters one edge and exits the other,
+   then unmounts (no infinite loop) — the scheduler spaces them out. */
+@keyframes hd-meteor-streak-ltr {
+  0% { opacity: 0; transform: translateX(-12vw); }
+  8% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(112vw); }
+}
+
+@keyframes hd-meteor-streak-rtl {
+  0% { opacity: 0; transform: translateX(112vw); }
+  8% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-12vw); }
+}
+
+/* Research stats relocated into the right data panel (below "Context ready"). */
+.hd-research-panel-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin-top: 8px;
+}
+
+.hd-research-panel-kinds span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 720;
+  color: var(--hd-muted);
+}
+
+.hd-research-panel-kinds i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hd-research-panel-kinds em {
+  font-style: normal;
+  font-weight: 820;
+  color: var(--hd-ink);
+}
+
+
 .hd-sand-tooltip {
   background: rgba(11, 16, 30, .92);
   border: 1px solid rgba(196, 177, 134, .5);
@@ -1565,46 +1685,95 @@ button {
   font-size: 10px;
 }
 
+/* Bottom-left navigator: clickable North Star + goal chips that select + focus
+   the matching 3D node (replaces the old static role colour key). */
 .hd-graph3d-legend {
   bottom: 12px;
   display: grid;
-  gap: 7px;
+  gap: 8px;
   left: 12px;
-  max-width: min(620px, calc(100% - 24px));
-  max-height: 112px;
-  opacity: .82;
+  max-width: min(560px, calc(100% - 24px));
+  max-height: 188px;
   overflow: hidden;
-  pointer-events: none;
   position: absolute;
   z-index: 5;
 }
 
-.hd-graph3d-legend-group {
+.hd-graph3d-nav {
+  pointer-events: none;
+}
+
+.hd-graph3d-nav-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hd-graph3d-nav-label {
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: rgba(214, 225, 245, .82);
+  text-shadow: 0 1px 3px rgba(6, 10, 24, .8);
+  margin-right: 2px;
+}
+
+.hd-graph3d-nav-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.hd-graph3d-legend span {
+.hd-graph3d-nav-chip {
+  pointer-events: auto;
   align-items: center;
-  background: rgba(255, 255, 255, .86);
-  border: 1px solid rgba(216, 225, 220, .84);
+  background: rgba(12, 18, 36, .66);
+  border: 1px solid rgba(150, 178, 230, .34);
   border-radius: 999px;
-  color: var(--hd-muted);
+  color: #dbe6ff;
+  cursor: pointer;
   display: inline-flex;
-  font-size: 10px;
-  font-weight: 780;
-  gap: 5px;
-  min-height: 22px;
-  padding: 2px 7px;
-  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 760;
+  gap: 6px;
+  max-width: 220px;
+  min-height: 26px;
+  padding: 3px 11px 3px 8px;
+  backdrop-filter: blur(3px);
+  transition: border-color .15s, background .15s, transform .12s;
 }
 
-.hd-graph3d-legend i {
+.hd-graph3d-nav-chip:hover {
+  background: rgba(20, 30, 56, .82);
+  border-color: rgba(180, 205, 250, .6);
+  transform: translateY(-1px);
+}
+
+.hd-graph3d-nav-chip.selected {
+  background: rgba(40, 58, 104, .9);
+  border-color: #bcd4ff;
+  box-shadow: 0 0 0 1px rgba(188, 212, 255, .5), 0 6px 16px rgba(8, 14, 32, .5);
+}
+
+.hd-graph3d-nav-chip.trunk {
+  font-weight: 820;
+}
+
+.hd-graph3d-nav-chip i {
   border-radius: 999px;
   display: block;
-  height: 8px;
-  width: 8px;
+  height: 9px;
+  width: 9px;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px 1px currentColor;
+}
+
+.hd-graph3d-nav-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hd-explore-map-stage {
@@ -3137,5 +3306,183 @@ button {
 
   .hd-canvas-toolbar {
     display: grid;
+  }
+}
+
+.hd-drawer-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.hd-drawer-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(23, 33, 30, 0.32);
+  backdrop-filter: blur(2px);
+}
+
+.hd-drawer-panel {
+  position: relative;
+  width: min(640px, 100vw);
+  height: 100%;
+  background: var(--hd-paper);
+  box-shadow: var(--hd-shadow);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--hd-line);
+}
+
+.hd-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--hd-line);
+}
+
+.hd-drawer-head h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--hd-ink);
+}
+
+.hd-drawer-head .hd-ghost {
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 10px;
+}
+
+.hd-drawer-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 14px;
+}
+
+.hd-drawer-foot {
+  border-top: 1px solid var(--hd-line);
+  padding: 12px 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--hd-soft);
+}
+
+.hd-drawer-section {
+  display: grid;
+  gap: 8px;
+}
+
+.hd-drawer-section h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hd-muted);
+}
+
+.hd-drawer-row {
+  display: grid;
+  gap: 4px;
+}
+
+.hd-drawer-row label {
+  font-size: 12px;
+  color: var(--hd-muted);
+}
+
+.hd-drawer-row input[type="text"],
+.hd-drawer-row input[type="date"],
+.hd-drawer-row textarea,
+.hd-drawer-row select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  background: var(--hd-paper);
+  color: var(--hd-ink);
+  font-size: 13px;
+}
+
+.hd-drawer-row textarea {
+  min-height: 96px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.hd-drawer-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.hd-drawer-banner {
+  background: var(--hd-amber-soft);
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--hd-amber);
+}
+
+.hd-drawer-warning {
+  background: var(--hd-danger-soft);
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--hd-danger);
+}
+
+.hd-drawer-info {
+  background: var(--hd-soft);
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--hd-muted);
+}
+
+.hd-drawer-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.hd-drawer-list li {
+  font-size: 13px;
+  color: var(--hd-ink);
+}
+
+.hd-drawer-pre {
+  background: var(--hd-soft);
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+  color: var(--hd-ink);
+}
+
+.hd-context-actions .hd-ghost.full,
+.hd-context-actions .hd-primary.full {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .hd-drawer-panel {
+    width: 100vw;
+    border-left: 0;
+  }
+  .hd-drawer-grid-2 {
+    grid-template-columns: 1fr;
   }
 }

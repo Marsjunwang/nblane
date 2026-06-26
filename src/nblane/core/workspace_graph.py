@@ -530,11 +530,10 @@ def workspace_graph_payload(
                     id=node_id,
                     type="project_case",
                     layer="work_context",
-                    label=(
-                        _ui_text(ui, "dashboard_private_project_case", "Private project case")
-                        if is_private
-                        else str(case.get("title") or record_id)
-                    ),
+                    # Owner-facing graph: show the real title (the dashboard is the
+                    # user's own operating view). `locked` still carries privacy so
+                    # downstream styling/badges can mark it.
+                    label=str(case.get("title") or record_id),
                     metric=str(case.get("kind") or ""),
                     record_id=record_id,
                     status=str(case.get("status") or ""),
@@ -742,17 +741,14 @@ def workspace_graph_payload(
                 id=node_id,
                 type="source",
                 layer="source",
-                label=(
-                    _private_label(ui, "dashboard_private_source", "Private source", source_id)
-                    if private
-                    else _short_text(source.get("title"), source_id)
-                ),
+                # Owner-facing: show the real source title (privacy kept in `locked`).
+                label=_short_text(source.get("title"), source_id),
                 metric=str(source.get("kind") or source.get("origin") or ""),
                 record_id=source_id,
                 status=str(source.get("status") or ""),
                 locked=private,
                 owner_path="pages/7_Research.py",
-                summary="" if private else _short_text(source.get("summary"), max_len=180),
+                summary=_short_text(source.get("summary"), max_len=180),
                 item_kind="source",
                 meta={
                     "tags": _clean_string_list(source.get("tags")),
@@ -904,17 +900,14 @@ def workspace_graph_payload(
                 id=node_id,
                 type="atomic_evidence",
                 layer="evidence",
-                label=(
-                    _private_label(ui, "dashboard_private_evidence", "Private evidence", evidence_id)
-                    if private
-                    else _short_text(evidence.get("title"), evidence_id)
-                ),
+                # Owner-facing: real evidence title (privacy kept in `locked`).
+                label=_short_text(evidence.get("title"), evidence_id),
                 metric=str(evidence.get("strength") or evidence.get("type") or ""),
                 record_id=evidence_id,
                 status=review_status or str(evidence.get("confidence") or ""),
                 locked=private,
                 owner_path=EVIDENCE_REVIEW_PAGE,
-                summary="" if private else _short_text(evidence.get("summary"), max_len=220),
+                summary=_short_text(evidence.get("summary"), max_len=220),
                 item_kind="evidence",
                 meta={
                     "source_refs": _clean_string_list(evidence.get("source_refs")),
@@ -1028,17 +1021,14 @@ def workspace_graph_payload(
                 id=node_id,
                 type="claim",
                 layer="claim",
-                label=(
-                    _private_label(ui, "dashboard_private_claim", "Private claim", claim_id)
-                    if private
-                    else _short_text(claim.get("text"), claim_id, max_len=82)
-                ),
+                # Owner-facing: real claim text (privacy kept in `locked`).
+                label=_short_text(claim.get("text"), claim_id, max_len=82),
                 metric=str(claim.get("type") or ""),
                 record_id=claim_id,
                 status=str(claim.get("refresh_status") or claim.get("status") or ""),
                 locked=private,
                 owner_path=EVIDENCE_REVIEW_PAGE,
-                summary="" if private else _short_text(claim.get("text"), max_len=220),
+                summary=_short_text(claim.get("text"), max_len=220),
                 item_kind="claim",
             )
         )
