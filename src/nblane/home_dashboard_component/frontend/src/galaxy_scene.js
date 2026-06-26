@@ -430,6 +430,9 @@ export class GalaxyScene {
     const sinT = Math.sin(tilt || 0);
     const cosS = Math.cos(swivel || 0);
     const sinS = Math.sin(swivel || 0);
+    // Build the ring relative to its center and place it via line.position, so the
+    // animation loop can translate the whole ring by its (orbiting) parent's live
+    // displacement each frame — keeping the ellipse glued under its orbiting nodes.
     const pts = [];
     for (let i = 0; i <= SEG; i += 1) {
       const ang = (i / SEG) * Math.PI * 2;
@@ -437,7 +440,7 @@ export class GalaxyScene {
       const ey = Math.sin(ang) * semiMinor;
       const px = ex * cosS - ey * sinS;
       const pz = ex * sinS + ey * cosS;
-      pts.push(new THREE.Vector3(center.x + px, center.y + pz * sinT, center.z + pz * cosT));
+      pts.push(new THREE.Vector3(px, pz * sinT, pz * cosT));
     }
     const geom = new THREE.BufferGeometry().setFromPoints(pts);
     // Cool per-tier palette so projects / tasks / evidence rings read as distinct
@@ -454,8 +457,13 @@ export class GalaxyScene {
       depthWrite: false,
     });
     const line = new THREE.Line(geom, mat);
-    // Tag the ring with its owning parent so focus-mode can dim/hide it per tier.
+    line.position.set(center.x, center.y, center.z);
+    // Tag the ring with its owning parent so focus-mode can dim/hide it per tier,
+    // and so the animation loop can re-translate it as that parent orbits. The
+    // base center is the parent's *initial* position; each frame we shift the ring
+    // by the parent's live displacement from that base (see _updateOrbits).
     line.userData.parentId = orbit.parentId || null;
+    line.userData.baseCenter = new THREE.Vector3(center.x, center.y, center.z);
     line.userData.baseOpacity = ringOpacity;
     this.linkGroup.add(line);
   }
@@ -1034,6 +1042,22 @@ export class GalaxyScene {
       const pb = this._posById.get(id);
       if (pb) pb.copy(p);
     }
+    // Keep each orbit ring glued under its orbiting nodes: shift the ring by its
+    // parent's displacement from the parent's baked (initial) position. Rings whose
+    // parent is static (the focused goal, the North Star core) get a zero shift.
+    this.linkGroup.children.forEach((line) => {
+      const base = line.userData && line.userData.baseCenter;
+      const pid = line.userData && line.userData.parentId;
+      if (!base || !pid) return;
+      const live = this._livePos.get(pid);
+      const init = this.nodeById.get(pid);
+      if (!live || !init) return;
+      line.position.set(
+        base.x + (live.x - (init.x || 0)),
+        base.y + (live.y - (init.y || 0)),
+        base.z + (live.z - (init.z || 0)),
+      );
+    });
     // Keep the selected node's label + filaments glued to its moving position.
     if (this.selectedId) this._repositionSelection();
     // Keep the persistent focus labels glued to their orbiting projects.
