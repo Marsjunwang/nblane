@@ -375,15 +375,19 @@ export class GalaxyScene {
     const weight = node.visualWeight || { radius: 1, opacity: 0.9, emissive: 1 };
     const color = new THREE.Color(node.color || "#9fb29c");
     const placeholder = Boolean(node.placeholder || node.implemented === false);
-    const baseR =
-      node.role === "direction" ? 5.4 : node.role === "branch" ? 4.4 : node.role === "constellation" ? 3.8 : 3.4;
-    const r = Math.max(2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
+    // Evidence moons (task-generated evidence orbiting its task) read as small but
+    // bright satellites — clearly subordinate to the task, yet sparkling.
+    const moon = Boolean(node.moon);
+    const baseR = moon
+      ? 2.2
+      : node.role === "direction" ? 5.4 : node.role === "branch" ? 4.4 : node.role === "constellation" ? 3.8 : 3.4;
+    const r = Math.max(moon ? 1.6 : 2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
 
     // Planet-like material: a touch of metalness + lower roughness give a soft
     // specular sheen so spheres read as lit bodies rather than flat discs, while
     // the emissive keeps them glowing against the deep space. Placeholders stay
     // matte + dim.
-    const baseEmissive = placeholder ? 0.22 : 0.62;
+    const baseEmissive = placeholder ? 0.22 : moon ? 0.95 : 0.62;
     const baseOpacity = placeholder ? 0.5 : 0.96;
     const orb = new THREE.Mesh(
       new THREE.SphereGeometry(r, 32, 24),
@@ -404,9 +408,9 @@ export class GalaxyScene {
     this.nodeGroup.add(orb);
     this.pickables.push(orb);
 
-    // Glow halo, dimmer for placeholders.
-    const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), 0.25);
-    const halo = this._addHalo(pos, haloColor.getHex(), r * (placeholder ? 2.4 : 3.4), placeholder ? 0.16 : 0.42);
+    // Glow halo, dimmer for placeholders; moons keep a tight but vivid halo.
+    const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), moon ? 0.4 : 0.25);
+    const halo = this._addHalo(pos, haloColor.getHex(), r * (placeholder ? 2.4 : moon ? 3.0 : 3.4), placeholder ? 0.16 : moon ? 0.52 : 0.42);
     // Track for orbital animation: orb + halo move together each frame.
     this._orbMesh.set(node.id, orb);
     this._orbHalo.set(node.id, halo);
