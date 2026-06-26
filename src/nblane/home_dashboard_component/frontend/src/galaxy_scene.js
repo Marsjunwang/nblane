@@ -377,13 +377,17 @@ export class GalaxyScene {
     const weight = node.visualWeight || { radius: 1, opacity: 0.9, emissive: 1 };
     const color = new THREE.Color(node.color || "#9fb29c");
     const placeholder = Boolean(node.placeholder || node.implemented === false);
-    // Evidence moons (task-generated evidence orbiting its task) read as small but
-    // bright satellites — clearly subordinate to the task, yet sparkling.
+    // Evidence moons (task-generated evidence orbiting its task) read as a tiny
+    // bright point — a comet nucleus, clearly subordinate to the task. Its size is
+    // fixed (decoupled from the degree-based `val`) so it always stays a dot no
+    // matter how many edges the evidence has.
     const moon = Boolean(node.moon);
     const baseR = moon
-      ? 1.1
+      ? 0.55
       : node.role === "direction" ? 5.4 : node.role === "branch" ? 4.4 : node.role === "constellation" ? 3.8 : 3.4;
-    const r = Math.max(moon ? 0.8 : 2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
+    const r = moon
+      ? 0.55
+      : Math.max(2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
 
     // Planet-like material: a touch of metalness + lower roughness give a soft
     // specular sheen so spheres read as lit bodies rather than flat discs, while
@@ -414,10 +418,11 @@ export class GalaxyScene {
     // pickables so a click falls through to the task/empty space behind them.
     if (!moon) this.pickables.push(orb);
 
-    // Glow halo, dimmer for placeholders; moons keep a tight but vivid halo so the
-    // little firefly twinkles brighter than its size suggests.
-    const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), moon ? 0.55 : 0.25);
-    const halo = this._addHalo(pos, haloColor.getHex(), r * (placeholder ? 2.4 : moon ? 4.2 : 3.4), placeholder ? 0.16 : moon ? 0.7 : 0.42);
+    // Glow halo, dimmer for placeholders; the moon keeps a tight vivid halo a few
+    // times its (tiny) radius so the little comet nucleus twinkles bright without
+    // growing into a disc.
+    const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), moon ? 0.6 : 0.25);
+    const halo = this._addHalo(pos, haloColor.getHex(), moon ? 3.4 : r * (placeholder ? 2.4 : 3.4), placeholder ? 0.16 : moon ? 0.8 : 0.42);
     // Track for orbital animation: orb + halo move together each frame.
     this._orbMesh.set(node.id, orb);
     this._orbHalo.set(node.id, halo);

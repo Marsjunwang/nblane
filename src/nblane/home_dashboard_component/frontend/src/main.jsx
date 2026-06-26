@@ -1833,16 +1833,22 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   // than a single crammed circle. Each ring grows in radius and tilts/swivels a
   // touch (deterministic) so the shells nest like NASA-Eyes orbits. Bodies are
   // dealt round-robin (i % ringCount) so siblings of different kinds interleave.
-  const PER_RING = 6;
+  const PER_RING = 4;
   const placeConcentric = (ids, parentId, center, { baseR, gap, tilt, offsetY = 0, tier = 2, speedMul = 1.5, ecc = 0.16 }) => {
     if (!ids.length) return;
-    const ringCount = Math.min(3, Math.ceil(ids.length / PER_RING));
+    const ringCount = Math.min(5, Math.ceil(ids.length / PER_RING));
     for (let k = 0; k < ringCount; k += 1) {
       const chunk = ids.filter((_, i) => i % ringCount === k);
       if (!chunk.length) continue;
       const R = baseR + k * gap;
-      const t = tilt + k * 0.1 + hashUnit(`${parentId}:r${k}`) * 0.12;
-      placeOnOrbit(chunk, parentId, center, R, t, `${parentId}:ring${k}`, orbitSpeed(R) * speedMul, ecc, offsetY, tier);
+      // Each ring gets its OWN ecliptic inclination and ellipticity so the task
+      // orbits read as a layered planetary system (à la NASA Eyes) rather than a
+      // stack of coplanar hoops: the progressive `k` term fans the orbital planes
+      // apart, the hash term breaks any leftover symmetry, and the eccentricity
+      // grows ring-by-ring so outer orbits stretch into ovals. Deterministic.
+      const t = tilt + k * 0.3 + (hashUnit(`${parentId}:rt${k}`) - 0.5) * 0.55;
+      const e = Math.min(0.5, Math.max(0.05, ecc + k * 0.08 + (hashUnit(`${parentId}:re${k}`) - 0.5) * 0.14));
+      placeOnOrbit(chunk, parentId, center, R, t, `${parentId}:ring${k}`, orbitSpeed(R) * speedMul, e, offsetY, tier);
     }
   };
 
@@ -1965,11 +1971,12 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
       });
 
       // Tier 2 — tasks + project-only evidence share one concentric-ring system
-      // lifted above the project (2–3 nested rings so many tasks never cram onto a
-      // single circle). Colour separates them: task brown, evidence purple.
+      // lifted above the project. Up to 5 nested rings, each at its own ecliptic
+      // tilt + ellipticity (see placeConcentric), so many tasks read as a layered
+      // solar system. Colour separates them: task brown, evidence purple.
       const tier2 = [...tasks, ...evProjectOnly.sort()];
       placeConcentric(tier2, pid, center, {
-        baseR: 22, gap: 12, tilt: 0.42, offsetY: 11, tier: 2, speedMul: 1.5, ecc: 0.12,
+        baseR: 22, gap: 14, tilt: 0.36, offsetY: 11, tier: 2, speedMul: 1.5, ecc: 0.1,
       });
       tier2.forEach((x) => visible.add(x));
 
@@ -1982,7 +1989,10 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
         ids.sort();
         const Rm = 5 + Math.min(ids.length, 4) * 1.2; // tight comet orbit around the task
         const tilt = 0.9 + hashUnit(`${tid}:em`) * 0.5;
-        placeOnOrbit(ids, tid, tcenter, Rm, tilt, `${tid}:em`, orbitSpeed(Rm) * 4.2, 0.3, 0, 3);
+        // Whip the evidence comet around at "paper-meteor" pace — a full revolution
+        // in ~2s reads as a tiny streak flicking around its task, not a lazy moon.
+        // The high tilt keeps the loop near edge-on so it flashes across like a comet.
+        placeOnOrbit(ids, tid, tcenter, Rm, tilt, `${tid}:em`, orbitSpeed(Rm) * 14, 0.34, 0, 3);
         ids.forEach((x) => visible.add(x));
       });
     });
