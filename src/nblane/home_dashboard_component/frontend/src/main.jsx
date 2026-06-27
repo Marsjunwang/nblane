@@ -115,6 +115,11 @@ const TREE_ROLES = new Set([
 ]);
 const SAND_ROLE = "sand";
 
+// Synthetic catch-all goal: projects with no goal_refs are adopted into this
+// "Other" hub so they orbit a labelled sun like any real goal, instead of being
+// flung onto a huge near-empty ring around the North Star.
+const OTHER_GOAL_ID = "__other_goal__";
+
 const ROLE_COLORS = {
   trunk: "#a98b6b",
   direction: "#3f8f7c",
@@ -2201,19 +2206,129 @@ function ancestorGoalId(payload, nodes, selectedId) {
   return null;
 }
 
+// Aggregate hubs (the "Evidence candidates" pending pool + the atomic-evidence
+// catch-all pool) are inbox concepts with their own dashboard panels — like
+// source:inbox they don't belong in the galaxy, where they'd otherwise fall to
+// an orphan ring around the North Star.
+function isGalaxyAggregate(node) {
+  return node.type === "evidence_candidate" || node.id === "atomic_evidence:pool";
+}
+
+// The real (non-aggregate) tree-role nodes that make up the galaxy.
+function galaxyTreeNodes(nodes) {
+  return nodes.filter((node) => TREE_ROLES.has(node.role) && !isGalaxyAggregate(node));
+}
+
+// Adopt orphans under a synthetic "Other" goal. A project with no owning goal —
+// or a task/evidence with no placeable parent at all — used to be flung onto a
+// huge, near-empty ring around the North Star. Instead we mint one catch-all
+// "Other" goal (a real direction sun) and hang every orphan off it with a
+// `contains` edge, so loose work orbits a labelled hub exactly like a real goal's
+// work does. Returns the node list + payload the galaxy layout should actually
+// use (augmented when any orphan exists, the originals untouched otherwise).
+function buildGalaxyInputs(payload, treeNodes) {
+  const nodesById = new Map(treeNodes.map((n) => [n.id, n]));
+  const goalIds = new Set(treeNodes.filter((n) => n.role === "direction").map((n) => n.id));
+  const edgesByTarget = new Map();
+  asArray(payload.graph.edges).forEach((e) => {
+    if (!nodesById.has(e.to) || !nodesById.has(e.from)) return;
+    if (!edgesByTarget.has(e.to)) edgesByTarget.set(e.to, []);
+    edgesByTarget.get(e.to).push(e);
+  });
+  const parentsOf = (id, relations) =>
+    (edgesByTarget.get(id) || [])
+      .filter((e) => relations.includes(e.relation || e.type))
+      .map((e) => e.from);
+  const orphans = [];
+  treeNodes.forEach((node) => {
+    if (node.role === "branch") {
+      // A project with no owning goal among the real directions.
+      if (!parentsOf(node.id, ["contains", "alignment"]).some((id) => goalIds.has(id))) {
+        orphans.push(node.id);
+      }
+    } else if (node.role === "leaf" || node.role === "fruit") {
+      // A task/output/evidence with no placeable structural parent at all.
+      const rel = ["contains", "produces", "drives", "supports", "generated_by", "review", "derives"];
+      if (!parentsOf(node.id, rel).some((id) => nodesById.has(id))) {
+        orphans.push(node.id);
+      }
+    }
+  });
+  if (!orphans.length) {
+    return { nodes: treeNodes, payload, otherGoalId: null };
+  }
+  const otherGoal = {
+    id: OTHER_GOAL_ID,
+    role: "direction",
+    type: "goal",
+    layer: "objective",
+    label: label(payload.ui, "dashboard_other_goal", "其他"),
+    implemented: true,
+    synthetic: true,
+  };
+  const synthEdges = orphans.map((to) => ({
+    from: OTHER_GOAL_ID,
+    to,
+    relation: "contains",
+    type: "contains",
+    synthetic: true,
+  }));
+  return {
+    nodes: [...treeNodes, otherGoal],
+    payload: {
+      ...payload,
+      graph: { ...payload.graph, edges: [...asArray(payload.graph.edges), ...synthEdges] },
+    },
+    otherGoalId: OTHER_GOAL_ID,
+  };
+}
+
+// Count how many nodes sit beneath each node along structural (parent→child)
+// edges — a goal's "subtree mass". Goals are then sized by this so a direction
+// that spawned a big body of work reads as a dominant sun, never smaller than the
+// project swarm orbiting it.
+function subtreeMassByNode(links, nodes) {
+  const children = new Map();
+  const STRUCT = new Set(["contains", "alignment", "produces", "drives", "supports", "generated_by", "derives"]);
+  links.forEach((link) => {
+    const rel = cleanText(link.relation || link.type);
+    if (!STRUCT.has(rel)) return;
+    const from = linkEndpointId(link.source);
+    const to = linkEndpointId(link.target);
+    if (!from || !to) return;
+    if (!children.has(from)) children.set(from, []);
+    children.get(from).push(to);
+  });
+  const mass = new Map();
+  const countFrom = (rootId) => {
+    const seen = new Set([rootId]);
+    const stack = [rootId];
+    let n = 0;
+    while (stack.length) {
+      const id = stack.pop();
+      (children.get(id) || []).forEach((c) => {
+        if (seen.has(c)) return;
+        seen.add(c);
+        n += 1;
+        stack.push(c);
+      });
+    }
+    return n;
+  };
+  nodes.forEach((node) => mass.set(node.id, countFrom(node.id)));
+  return mass;
+}
+
 function graph3DData(payload, nodes, focusGoalId = null) {
   // Keep only nodes that belong in the galaxy (the 7 tree-roles). Sand renders as
   // the source spiral; empty-role types (health/gap/next_action/feedback/capacity
   // /agent_run) have their own dashboard UI and must NOT appear as stray orbs.
-  // Aggregate hubs (the "Evidence candidates" pending pool + the atomic-evidence
-  // catch-all pool) are inbox concepts with their own dashboard panels — like
-  // source:inbox they don't belong in the galaxy, where they'd otherwise fall to
-  // an orphan ring around the North Star.
-  const isGalaxyAggregate = (node) =>
-    node.type === "evidence_candidate" || node.id === "atomic_evidence:pool";
-  const allTreeNodes = nodes.filter((node) => TREE_ROLES.has(node.role) && !isGalaxyAggregate(node));
+  const realTreeNodes = galaxyTreeNodes(nodes);
+  // Adopt orphan projects/leaves/fruit under a synthetic "Other" goal so loose
+  // work orbits a labelled hub instead of a giant ring around the North Star.
+  const { nodes: allTreeNodes, payload: galaxyPayload } = buildGalaxyInputs(payload, realTreeNodes);
   const { positions, orbits, nodeOrbits, constellations, focusVisibleIds } = growthGalaxyLayout(
-    payload,
+    galaxyPayload,
     allTreeNodes,
     focusGoalId,
   );
@@ -2223,7 +2338,7 @@ function graph3DData(payload, nodes, focusGoalId = null) {
     ? allTreeNodes.filter((node) => focusVisibleIds.has(node.id))
     : allTreeNodes;
   const visibleIds = new Set(treeNodes.map((node) => node.id));
-  const links = payload.graph.edges
+  const links = asArray(galaxyPayload.graph.edges)
     .filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
     .map((edge, index) => ({
       id: `${edge.from}-${edge.to}-${edge.type}-${index}`,
@@ -2239,12 +2354,25 @@ function graph3DData(payload, nodes, focusGoalId = null) {
     degree.set(link.source, (degree.get(link.source) || 0) + 1);
     degree.set(link.target, (degree.get(link.target) || 0) + 1);
   });
+  // Subtree mass drives goal size so a direction sun always dominates its swarm.
+  const mass = subtreeMassByNode(links, treeNodes);
   return {
     nodes: treeNodes.map((node) => {
       const pos = positions.get(node.id) || { x: 0, y: DIRECTION_Y, z: 0 };
       const nodeDegree = degree.get(node.id) || 0;
       const isStar = node.role === "star";
+      const isGoal = node.role === "direction";
       const weight = nodeVisualWeight(node);
+      // Goals: size by how much work hangs under them (subtree mass), so the sun
+      // grows with its system and never shrinks below an orbiting project. Other
+      // roles keep the modest degree-based size, and are clamped well under the
+      // goal band so the hierarchy goal ≫ project > task reads at a glance.
+      const val = isGoal
+        ? Math.min(26, 11 + Math.sqrt(mass.get(node.id) || 0) * 3.4) * (weight.radius || 1)
+        : Math.min(
+            9,
+            (isStar ? 3 : 5) + Math.min(7, nodeDegree) + (node.isPrimary ? 3 : 0) + (node.placeholder ? -1 : 0),
+          ) * (weight.radius || 1);
       return {
         ...node,
         x: pos.x,
@@ -2259,10 +2387,7 @@ function graph3DData(payload, nodes, focusGoalId = null) {
         starEmissive: isStar
           ? (STAR_STATUS_EMISSIVE[cleanText(node.status)] ?? STAR_STATUS_EMISSIVE.locked) * weight.emissive
           : 0,
-        val: Math.max(
-          3,
-          ((isStar ? 3 : 5) + Math.min(9, nodeDegree) + (node.isPrimary ? 4 : 0) + (node.placeholder ? -1 : 0)) * weight.radius,
-        ),
+        val: Math.max(3, val),
         degree: nodeDegree,
         visualWeight: weight,
         // Tier-3 evidence orbits its task as a moon → rendered small + bright.
@@ -2636,13 +2761,16 @@ function researchShowerData(sandNodes) {
   const bucketOf = (n) => tagOf(n) || kindOf(n);
   const buckets = [...new Set(sources.map(bucketOf))].sort();
   const colorOf = new Map(buckets.map((b, i) => [b, RESEARCH_KIND_COLORS[i % RESEARCH_KIND_COLORS.length]]));
-  // Title riding the comet: for a private source the real title is hidden
-  // ("私密来源 · id" placeholder) — show the research theme/kind instead so the
-  // label stays meaningful without leaking the private name.
+  // Title riding the comet: per the owner-facing privacy policy the real source
+  // title now ships even when `locked` (it's the user's own workspace), so show
+  // the paper name directly. Fall back to the research theme/kind only when the
+  // payload genuinely carries no usable title (the label is just the id, or a
+  // "私密来源 · id" placeholder from an older payload).
   const titleOf = (n) => {
-    if (n.locked) return tagOf(n) || kindOf(n);
     const t = cleanText(n.label);
-    return t && !cleanText(n.id).includes(t) ? t.slice(0, 26) : tagOf(n) || kindOf(n);
+    const id = cleanText(n.id);
+    const isPlaceholder = !t || id.includes(t) || /^私密来源|·\s/.test(t);
+    return isPlaceholder ? tagOf(n) || kindOf(n) : t.slice(0, 40);
   };
   const meteors = sources.map((n) => ({
     id: n.id,
@@ -2656,49 +2784,107 @@ function researchShowerData(sandNodes) {
   };
 }
 
-// The comet field: papers streak across the stage one (or two) at a time on
-// randomized intervals — sparse, not a continuous rain. Each comet carries its
-// source's short title and crosses horizontally, alternating left↔right. A
-// setTimeout scheduler mounts one meteor per tick with a varying 4–16s gap, and
-// removes it after its flight so the DOM stays light. The paper/theme counts
-// live in the right data panel (ResearchStatsPanel), not here.
-function ResearchShower({ research }) {
-  const [active, setActive] = useState([]);
+// Build one comet instance with its own diagonal trajectory. Each meteor tilts by
+// a per-instance angle (`--ang`) so the streak + tail ride a varied diagonal, and
+// carries its own flight duration (speed) and tail length. Deterministic per
+// (source, tag) via hashUnit so a given comet always flies the same path.
+const METEOR_MAX_ACTIVE = 44; // bound concurrent DOM nodes (burst can be dense)
+function makeMeteor(src, tag, seq) {
+  const h = (k) => hashUnit(`${src.id}:${tag}:${k}`);
+  const dir = h("d") < 0.5 ? "ltr" : "rtl";
+  const top = 4 + h("t") * 72; // 4..76% down the stage
+  const ang = (h("a") - 0.5) * 54; // -27..27° diagonal tilt
+  const dur = 2.0 + h("v") * 1.8; // 2.0..3.8s flight (speed variety)
+  const tail = 78 + h("l") * 92; // 78..170px tail length
+  return {
+    ...src,
+    key: `${tag}:${seq}`,
+    dir,
+    flightMs: dur * 1000,
+    style: {
+      color: src.color,
+      top: `${top}%`,
+      "--ang": `${ang}deg`,
+      "--tail": `${tail}px`,
+      animationDuration: `${dur}s`,
+    },
+  };
+}
 
+// The comet field: papers streak across the stage on varied diagonal paths. A
+// calm ambient stream trickles a few at a time; the "流星雨" toolbar button fires
+// a dense burst (burstSignal bumps each click). Each comet carries its source's
+// title and self-removes after its flight so the DOM stays light. The paper/theme
+// counts live in the right data panel (ResearchStatsPanel), not here.
+function ResearchShower({ research, burstSignal = 0 }) {
+  const [active, setActive] = useState([]);
+  const timersRef = useRef(new Set());
+  const seqRef = useRef(0);
+
+  // Clear every pending timer on unmount (no setState after unmount).
+  useEffect(
+    () => () => {
+      timersRef.current.forEach((id) => window.clearTimeout(id));
+      timersRef.current.clear();
+    },
+    [],
+  );
+
+  const meteors = research && research.meteors ? research.meteors : [];
+
+  const launch = (m) => {
+    seqRef.current += 1;
+    setActive((cur) => [...cur, m].slice(-METEOR_MAX_ACTIVE));
+    const rm = window.setTimeout(() => {
+      setActive((cur) => cur.filter((x) => x.key !== m.key));
+      timersRef.current.delete(rm);
+    }, m.flightMs + 200);
+    timersRef.current.add(rm);
+  };
+
+  // Ambient sparse stream.
   useEffect(() => {
-    if (!research || !research.meteors || !research.meteors.length) {
+    if (!meteors.length) {
       setActive([]);
       return undefined;
     }
-    const meteors = research.meteors;
     let alive = true;
     let idx = 0;
     let timer = 0;
-    const removers = [];
-    const FLIGHT_MS = 2600;
     const spawn = () => {
       if (!alive) return;
       const src = meteors[idx % meteors.length];
       idx += 1;
-      const key = `${src.id}:${idx}`;
-      const top = 8 + hashUnit(`${src.id}:${idx}:t`) * 60; // 8..68% down the stage
-      const dir = idx % 2 ? "ltr" : "rtl";
-      // Cap at 2 concurrent comets so it stays sparse.
-      setActive((cur) => [...cur, { ...src, key, top, dir }].slice(-2));
-      const rm = window.setTimeout(() => {
-        if (alive) setActive((cur) => cur.filter((m) => m.key !== key));
-      }, FLIGHT_MS + 200);
-      removers.push(rm);
-      const gap = 4000 + hashUnit(`${src.id}:${idx}:g`) * 12000; // 4–16s, varying
+      launch(makeMeteor(src, `amb${idx}`, seqRef.current));
+      const gap = 3200 + hashUnit(`amb${idx}:g`) * 9000; // 3.2–12.2s, varying
       timer = window.setTimeout(spawn, gap);
+      timersRef.current.add(timer);
     };
     timer = window.setTimeout(spawn, 300); // first comet appears promptly
+    timersRef.current.add(timer);
     return () => {
       alive = false;
       window.clearTimeout(timer);
-      removers.forEach((id) => window.clearTimeout(id));
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [research]);
+
+  // Burst: a dense shower fired by the toolbar button (burstSignal increments).
+  useEffect(() => {
+    if (!burstSignal || !meteors.length) return undefined;
+    const n = Math.min(meteors.length, 18);
+    for (let i = 0; i < n; i += 1) {
+      const src = meteors[(i * 5 + burstSignal) % meteors.length];
+      const delay = hashUnit(`burst${burstSignal}:${i}:s`) * 1700; // staggered 0–1.7s
+      const t = window.setTimeout(() => {
+        launch(makeMeteor(src, `b${burstSignal}-${i}`, seqRef.current));
+        timersRef.current.delete(t);
+      }, delay);
+      timersRef.current.add(t);
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [burstSignal]);
 
   if (!research || !research.count) {
     return null;
@@ -2706,11 +2892,7 @@ function ResearchShower({ research }) {
   return (
     <div className="hd-research-shower" aria-hidden="true">
       {active.map((m) => (
-        <span
-          key={m.key}
-          className={`hd-meteor ${m.dir}`}
-          style={{ color: m.color, top: `${m.top}%` }}
-        >
+        <span key={m.key} className={`hd-meteor ${m.dir}`} style={m.style}>
           <em className="hd-meteor-label">{m.title}</em>
         </span>
       ))}
@@ -2880,13 +3062,17 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
   const canvasHostRef = useRef(null);
   const sceneRef = useRef(null);
   const [sandHover, setSandHover] = useState(null);
+  // Bumped each time the "流星雨" button is pressed → fires a dense burst shower.
+  const [burstSignal, setBurstSignal] = useState(0);
   // The focused goal drives the sub-galaxy relayout: clicking any node resolves
   // to its owning goal (a project/task/evidence dives into the goal it belongs
   // to); clicking the North Star / Fit / empty space clears it back to overview.
-  const focusedGoalId = useMemo(
-    () => ancestorGoalId(payload, nodes, selectedNodeId),
-    [payload, nodes, selectedNodeId],
-  );
+  // Resolve against the augmented inputs so an orphan adopted by the synthetic
+  // "Other" goal — and the Other goal itself — focus like any real goal.
+  const focusedGoalId = useMemo(() => {
+    const { nodes: galaxyNodes, payload: galaxyPayload } = buildGalaxyInputs(payload, galaxyTreeNodes(nodes));
+    return ancestorGoalId(galaxyPayload, galaxyNodes, selectedNodeId);
+  }, [payload, nodes, selectedNodeId]);
   const graphData = useMemo(() => graph3DData(payload, nodes, focusedGoalId), [payload, nodes, focusedGoalId]);
   // The legend stays an overview (North Star + every goal) even when focused, so
   // its nav chips keep working as the way back out.
@@ -3019,7 +3205,7 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
   return (
     <div className={compact ? "hd-graph3d-stage compact" : "hd-graph3d-stage"} ref={wrapRef} data-testid="dashboard-3d-graph">
       <div className="hd-graph3d-force" ref={canvasHostRef} />
-      <ResearchShower research={research} />
+      <ResearchShower research={research} burstSignal={burstSignal} />
       <div className="hd-graph3d-toolbar">
         <button
           type="button"
@@ -3048,6 +3234,16 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
         >
           {label(ui, "dashboard_graph_focus_selected", "Focus")}
         </button>
+        {research && research.count ? (
+          <button
+            type="button"
+            data-action="graph-meteor-shower"
+            title={label(ui, "dashboard_graph_meteor_shower_hint", "Fire a research meteor shower")}
+            onClick={() => setBurstSignal((s) => s + 1)}
+          >
+            {label(ui, "dashboard_graph_meteor_shower", "流星雨")}
+          </button>
+        ) : null}
       </div>
       <Graph3DLegend payload={payload} graphData={legendData} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
     </div>

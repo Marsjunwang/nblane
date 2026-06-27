@@ -1539,6 +1539,11 @@ button {
   background: currentColor;
   box-shadow: 0 0 8px 2px currentColor;
   opacity: 0;
+  /* Each comet rides its own diagonal: --ang tilts the whole streak (head, tail
+     and label rotate together), and animationDuration (set inline) varies speed.
+     The travel keyframes translate along X; the rotation bends that into a
+     diagonal so papers rain in from assorted directions. */
+  transform: rotate(var(--ang, 0deg));
   animation: hd-meteor-streak-ltr 2.6s linear forwards;
 }
 
@@ -1547,13 +1552,14 @@ button {
 }
 
 /* Horizontal tail trailing BEHIND the head, along the direction of travel:
-   ltr moves right so the tail streaks left; rtl is mirrored. */
+   ltr moves right so the tail streaks left; rtl is mirrored. Length is
+   per-comet (--tail). */
 .hd-meteor::after {
   content: "";
   position: absolute;
   top: 1px;
   right: 2px;
-  width: 110px;
+  width: var(--tail, 110px);
   height: 1px;
   transform-origin: right center;
   background: linear-gradient(270deg, currentColor, transparent);
@@ -1587,20 +1593,21 @@ button {
   left: 6px;
 }
 
-/* Single-shot horizontal streaks: a comet enters one edge and exits the other,
-   then unmounts (no infinite loop) — the scheduler spaces them out. */
+/* Single-shot diagonal streaks: a comet enters one edge and exits the other,
+   then unmounts (no infinite loop) — the scheduler spaces them out. The rotate()
+   carries the per-comet diagonal angle; translateX is the travel axis. */
 @keyframes hd-meteor-streak-ltr {
-  0% { opacity: 0; transform: translateX(-12vw); }
+  0% { opacity: 0; transform: rotate(var(--ang, 0deg)) translateX(-12vw); }
   8% { opacity: 1; }
   85% { opacity: 1; }
-  100% { opacity: 0; transform: translateX(112vw); }
+  100% { opacity: 0; transform: rotate(var(--ang, 0deg)) translateX(112vw); }
 }
 
 @keyframes hd-meteor-streak-rtl {
-  0% { opacity: 0; transform: translateX(112vw); }
+  0% { opacity: 0; transform: rotate(var(--ang, 0deg)) translateX(112vw); }
   8% { opacity: 1; }
   85% { opacity: 1; }
-  100% { opacity: 0; transform: translateX(-12vw); }
+  100% { opacity: 0; transform: rotate(var(--ang, 0deg)) translateX(-12vw); }
 }
 
 /* Research stats relocated into the right data panel (below "Context ready"). */

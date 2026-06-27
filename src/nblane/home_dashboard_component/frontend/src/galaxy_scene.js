@@ -382,12 +382,22 @@ export class GalaxyScene {
     // fixed (decoupled from the degree-based `val`) so it always stays a dot no
     // matter how many edges the evidence has.
     const moon = Boolean(node.moon);
-    const baseR = moon
-      ? 0.55
-      : node.role === "direction" ? 5.4 : node.role === "branch" ? 4.4 : node.role === "constellation" ? 3.8 : 3.4;
-    const r = moon
-      ? 0.55
-      : Math.max(2.4, baseR * (0.7 + Math.min(1.4, (node.val || 5) / 9)) * (weight.radius || 1));
+    const val = node.val || 5;
+    let r;
+    if (moon) {
+      r = 0.55;
+    } else if (node.role === "direction") {
+      // Goals are suns: `val` carries subtree mass (≈11..26), so let the radius
+      // ride that full range (≈8..17) instead of clamping it like a child orb.
+      // A goal must always out-size the projects orbiting it.
+      r = Math.max(8, Math.min(17, 4 + val * 0.52)) * (weight.radius || 1);
+    } else {
+      // Children stay in a modest band well under the goal sun: projects a touch
+      // bigger than tasks/evidence, all clamped so a busy project never rivals a
+      // goal. `val` here is the degree-based size (≈3..9).
+      const baseR = node.role === "branch" ? 3.6 : node.role === "constellation" ? 3.4 : 3.0;
+      r = Math.max(2.2, Math.min(6.4, baseR * (0.7 + Math.min(1.0, val / 9)) * (weight.radius || 1)));
+    }
 
     // Planet-like material: a touch of metalness + lower roughness give a soft
     // specular sheen so spheres read as lit bodies rather than flat discs, while

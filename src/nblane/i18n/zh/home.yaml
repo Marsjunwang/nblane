@@ -233,6 +233,9 @@ dashboard_view_attention: 关注
 dashboard_view_3d_graph: 3D 全局图
 dashboard_graph_fit: 适配视图
 dashboard_graph_focus_selected: 聚焦所选
+dashboard_graph_meteor_shower: 流星雨
+dashboard_graph_meteor_shower_hint: 来一场研究流星雨
+dashboard_other_goal: 其他
 dashboard_open_8503: 打开 8503
 dashboard_explore_title: 图谱
 dashboard_explore_nodes: 图谱节点

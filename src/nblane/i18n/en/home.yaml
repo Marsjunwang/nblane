@@ -233,6 +233,9 @@ dashboard_view_attention: Attention
 dashboard_view_3d_graph: 3D Graph
 dashboard_graph_fit: Fit
 dashboard_graph_focus_selected: Focus
+dashboard_graph_meteor_shower: Meteor shower
+dashboard_graph_meteor_shower_hint: Fire a research meteor shower
+dashboard_other_goal: Other
 dashboard_open_8503: Open 8503
 dashboard_explore_title: Graph
 dashboard_explore_nodes: Graph nodes
