@@ -20,6 +20,7 @@ import {
   cleanText,
   goalDisplay,
   goalDraftFromFormData,
+  hiddenArchivedSubtreeIds,
   normalizePayload,
 } from "./payload.js";
 import {
@@ -381,14 +382,13 @@ function nodeActionBundle(payload, node, readOnly = false) {
 }
 
 function dashboardCanvasEmbed(payload) {
-  // The dashboard no longer embeds the 8502 canvas in an iframe; the only thing
-  // consumed here is the standalone URL behind the "Open 8502 Canvas" link.
-  const embed = payload?.canvasEmbed || payload?.canvas_embed || {};
-  const standaloneUrl = cleanText(embed.standaloneUrl || embed.standalone_url || embed.url);
-  if (!standaloneUrl) {
-    return null;
-  }
-  return { standaloneUrl };
+  // The 8502 standalone canvas link has been retired — it duplicated the
+  // in-place 3D graph without adding value, and the entry point was confusing
+  // users. Returning null short-circuits every `embed?.standaloneUrl ?` guard
+  // so the link, the iframe hooks, and the related node-permalink logic all
+  // disappear from the rendered tree.
+  void payload;
+  return null;
 }
 
 function label(ui, key, fallback) {
@@ -469,6 +469,10 @@ function goalIdFromNode(node) {
 function goalById(payload, goalId) {
   if (!goalId) {
     return null;
+  }
+  const allGoal = asArray(payload.allGoals).find((goal) => goal.id === goalId);
+  if (allGoal) {
+    return allGoal;
   }
   const activeGoal = asArray(payload.activeGoals).find((goal) => goal.id === goalId);
   if (activeGoal) {
@@ -567,6 +571,103 @@ function quickLink(payload, id, fallbackPath, fallbackLabel) {
       label: fallbackLabel || id,
     }
   );
+}
+
+function DeltaChip({ value, kindLabel = "" }) {
+  if (!Number.isFinite(value) || value === 0) return null;
+  const sign = value > 0 ? "+" : "-";
+  const tone = value > 0 ? "up" : "down";
+  return (
+    <span
+      className={`hd-delta-chip ${tone}`}
+      aria-label={kindLabel ? `${kindLabel} ${sign}${Math.abs(value)}` : undefined}
+    >
+      {sign}{Math.abs(value)}
+    </span>
+  );
+}
+
+function Sparkline({ series = [], width = 60, height = 18, tone = "" }) {
+  const points = (series || []).filter((n) => Number.isFinite(n));
+  if (points.length < 2) return null;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = max - min || 1;
+  const step = width / (points.length - 1);
+  const coords = points
+    .map((value, idx) => {
+      const x = idx * step;
+      const y = height - ((value - min) / range) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const stroke =
+    tone === "down"
+      ? "rgba(255, 107, 107, .82)"
+      : tone === "up"
+        ? "rgba(94, 224, 160, .92)"
+        : "rgba(122, 162, 255, .85)";
+  return (
+    <svg
+      className="hd-sparkline"
+      viewBox={`0 0 ${width} ${height}`}
+      aria-hidden="true"
+    >
+      <polyline
+        points={coords}
+        fill="none"
+        stroke={stroke}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function sortGoalChips(goals) {
+  // Most-urgent first: overdue > due-soon > active-with-progress > stalled > rest.
+  const score = (g) => {
+    const days = Number.isFinite(g.daysToTarget) ? g.daysToTarget : null;
+    if (days !== null && days < 0) return -1000 + days; // overdue, most-negative first
+    if (days !== null && days <= 30) return -500 + days;
+    if (g.stalled) return 500;
+    if (Number.isFinite(g.progress) && g.progress !== null) return 100 - Math.round(g.progress * 100);
+    return 1000;
+  };
+  return [...goals].sort((a, b) => score(a) - score(b));
+}
+
+function goalDueLabel(goal, ui) {
+  const days = Number.isFinite(goal.daysToTarget) ? goal.daysToTarget : null;
+  if (days === null) return null;
+  if (days < 0) {
+    const abs = Math.abs(days);
+    return {
+      tone: "overdue",
+      short: `${abs}${label(ui, "dashboard_goal_overdue_short", "d overdue")}`,
+      full: `${label(ui, "dashboard_goal_overdue", "Overdue")} ${abs}${label(ui, "dashboard_goal_days", "d")}`,
+    };
+  }
+  if (days === 0) {
+    return {
+      tone: "due-soon",
+      short: label(ui, "dashboard_goal_due_today", "today"),
+      full: label(ui, "dashboard_goal_due_today", "Due today"),
+    };
+  }
+  if (days <= 30) {
+    return {
+      tone: "due-soon",
+      short: `${days}${label(ui, "dashboard_goal_days", "d")}`,
+      full: `${label(ui, "dashboard_goal_due_in", "Due in")} ${days}${label(ui, "dashboard_goal_days", "d")}`,
+    };
+  }
+  return {
+    tone: "far",
+    short: `${days}${label(ui, "dashboard_goal_days", "d")}`,
+    full: `${label(ui, "dashboard_goal_due_in", "Due in")} ${days}${label(ui, "dashboard_goal_days", "d")}`,
+  };
 }
 
 function dashboardMetrics(payload) {
@@ -742,7 +843,41 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
   const primary = goalDisplay(payload.primaryGoal, ui);
   const primaryId = primaryGoalId(payload);
   const activeGoals = asArray(payload.activeGoals);
-  const secondaryGoals = activeGoals.filter((goal) => !goal.isPrimary);
+  const allGoals = asArray(payload.allGoals);
+  const RAIL_ARCHIVED_KEY = "nblane.context.goalRail.showArchived";
+  const [showArchivedRail, setShowArchivedRail] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_ARCHIVED_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  });
+  const toggleArchivedRail = () => {
+    setShowArchivedRail((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(RAIL_ARCHIVED_KEY, next ? "1" : "0");
+      } catch (e) {
+        // ignore — privacy mode blocks storage
+      }
+      return next;
+    });
+  };
+  const isExtinguishedGoal = (goal) => {
+    const status = String(goal?.status || "").toLowerCase();
+    return status === "archived" || status === "paused" || status === "completed";
+  };
+  const railSource = allGoals.length ? allGoals : activeGoals;
+  const secondaryActive = railSource.filter(
+    (goal) => !goal.isPrimary && String(goal.status || "active").toLowerCase() === "active",
+  );
+  const secondaryExtinguished = railSource.filter(
+    (goal) => !goal.isPrimary && isExtinguishedGoal(goal),
+  );
+  const extinguishedCount = secondaryExtinguished.length;
+  const secondaryGoals = showArchivedRail
+    ? [...secondaryActive, ...secondaryExtinguished]
+    : secondaryActive;
   const northStarText =
     northStar.locked || northStar.visibility === "private"
       ? label(ui, "north_star_private_display", "Private North Star")
@@ -809,13 +944,46 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
           <div className="hd-context-goals-head">
             <span className="hd-eyebrow">{label(ui, "dashboard_active_goals_title", "Active goals")}</span>
             <span className="hd-context-count">{secondaryGoals.length}</span>
+            {extinguishedCount > 0 ? (
+              <button
+                type="button"
+                className={`hd-context-archived-toggle${showArchivedRail ? " on" : ""}`}
+                onClick={toggleArchivedRail}
+                aria-pressed={showArchivedRail}
+                title={label(ui, "dashboard_show_archived_goals", "Show archived / paused goals (extinguished stars)")}
+              >
+                {showArchivedRail ? "◐" : "◯"} {extinguishedCount}
+              </button>
+            ) : null}
           </div>
           <div className="hd-goal-rail">
-            {secondaryGoals.length ? secondaryGoals.map((goal) => {
+            {secondaryGoals.length ? sortGoalChips(secondaryGoals).map((goal) => {
               const display = goalDisplay(goal, ui);
               const isSelected = Boolean(goal.id) && goal.id === selectedGoalId;
-              const className = `hd-goal-pill${isSelected ? " selected" : ""}`;
-              const title = `${display.title} · ${label(ui, `goal_status_${display.status}`, display.status || "active")}`;
+              const extinguished = isExtinguishedGoal(goal);
+              const className = `hd-goal-pill${isSelected ? " selected" : ""}${goal.stalled ? " stalled" : ""}${extinguished ? " extinguished" : ""}`;
+              const progressPct = Number.isFinite(goal.progress) && goal.progress !== null
+                ? Math.round(Math.max(0, Math.min(1, goal.progress)) * 100)
+                : null;
+              const due = goalDueLabel(goal, ui);
+              const titleAttr = [
+                display.title,
+                label(ui, `goal_status_${display.status}`, display.status || "active"),
+                progressPct !== null ? `${progressPct}%` : null,
+                due ? due.full : null,
+              ].filter(Boolean).join(" · ");
+              const inner = (
+                <>
+                  <span className="hd-goal-pill-dot" />
+                  <strong>{display.title}</strong>
+                  {progressPct !== null ? (
+                    <span className="hd-goal-pill-progress" aria-label={`${progressPct}%`}>
+                      <i style={{ width: `${progressPct}%` }} />
+                    </span>
+                  ) : null}
+                  {due ? <span className={`hd-goal-pill-due ${due.tone}`}>{due.short}</span> : null}
+                </>
+              );
               return canSelectGoals ? (
                 <button
                   key={goal.id || display.title}
@@ -824,11 +992,10 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
                   data-action="select-goal"
                   data-goal-id={goal.id}
                   aria-pressed={isSelected}
-                  title={title}
+                  title={titleAttr}
                   onClick={() => onSelectGoal(goal.id)}
                 >
-                  <span className="hd-goal-pill-dot" />
-                  <strong>{display.title}</strong>
+                  {inner}
                 </button>
               ) : (
                 <span
@@ -836,10 +1003,9 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
                   className={`${className} static`}
                   data-action="goal-context"
                   data-goal-id={goal.id}
-                  title={title}
+                  title={titleAttr}
                 >
-                  <span className="hd-goal-pill-dot" />
-                  <strong>{display.title}</strong>
+                  {inner}
                 </span>
               );
             }) : <span className="hd-empty-inline">{label(ui, "dashboard_no_secondary_goals", "Only the primary goal is active.")}</span>}
@@ -934,8 +1100,15 @@ function canvasLayout(nodes, layers) {
   return positions;
 }
 
-function graphNodesForView(payload, hiddenLayers, viewMode) {
-  const baseNodes = payload.graph.nodes.filter((node) => !hiddenLayers.has(node.layer));
+// Ids to hide when the "show archived / paused goals" toggle is OFF: an
+// extinguished goal PLUS its whole subtree (see hiddenArchivedSubtreeIds in
+// payload.js — kept there so it is unit-testable without importing this entry).
+function graphNodesForView(payload, hiddenLayers, viewMode, options = {}) {
+  const { showArchived = false } = options;
+  const hidden = hiddenArchivedSubtreeIds(payload, showArchived);
+  const baseNodes = payload.graph.nodes
+    .filter((node) => !hiddenLayers.has(node.layer))
+    .filter((node) => !hidden.has(node.id));
   if (viewMode === "focus" && payload.graph.focusPath.length) {
     const focusIds = new Set(payload.graph.focusPath);
     return baseNodes.filter((node) => focusIds.has(node.id));
@@ -1129,8 +1302,8 @@ function graphExploreNodes(payload, hiddenLayers, selectedNodeId, scope) {
   return sortedExploreNodes(payload, scoped.length ? scoped : firstPass.length ? firstPass : baseNodes, selectedNodeId);
 }
 
-function flowData(payload, hiddenLayers, viewMode) {
-  const visibleNodes = graphNodesForView(payload, hiddenLayers, viewMode);
+function flowData(payload, hiddenLayers, viewMode, options = {}) {
+  const visibleNodes = graphNodesForView(payload, hiddenLayers, viewMode, options);
   const visibleLayers = graphLayers(payload).filter((layer) =>
     !hiddenLayers.has(layer) && visibleNodes.some((node) => node.layer === layer)
   );
@@ -1835,24 +2008,65 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
 
   // Spread a set of bodies across up to 3 nested concentric rings around a parent
   // so a project with many tasks reads as a multi-orbit planetary system rather
-  // than a single crammed circle. Each ring grows in radius and tilts/swivels a
-  // touch (deterministic) so the shells nest like NASA-Eyes orbits. Bodies are
-  // dealt round-robin (i % ringCount) so siblings of different kinds interleave.
-  const PER_RING = 4;
-  const placeConcentric = (ids, parentId, center, { baseR, gap, tilt, offsetY = 0, tier = 2, speedMul = 1.5, ecc = 0.16 }) => {
+  // than a single crammed circle. The rings stay NEAR-COPLANAR (small per-ring
+  // tilt step + small jitter) so a project's tasks read as a flat "disk" / Saturn
+  // ring, not a tangled ball of differently-angled hoops. Bodies are dealt
+  // round-robin (i % ringCount) so siblings of different kinds interleave.
+  // Geometric collision constants — keep in sync with galaxy_scene.js sphere
+  // size bands (r_p ≤ 9 for projects, r_t ≤ 4.5 for tasks). The constraint
+  // system below uses these directly so a child disk never welds onto the
+  // project body or laps an inner ring. Single source of truth.
+  const LAYOUT_R_PROJECT_MAX = 9;
+  const LAYOUT_R_TASK_MAX = 4.5;
+  const LAYOUT_SAFE_MARGIN = 2;
+  const placeConcentric = (ids, parentId, center, { baseR, gap, tilt, offsetY = 0, tier = 2, speedMul = 1.5, ecc = 0.16, parentRadius = LAYOUT_R_PROJECT_MAX, childRadius = LAYOUT_R_TASK_MAX } = {}) => {
     if (!ids.length) return;
-    const ringCount = Math.min(5, Math.ceil(ids.length / PER_RING));
-    for (let k = 0; k < ringCount; k += 1) {
-      const chunk = ids.filter((_, i) => i % ringCount === k);
+    // Constraint B: inner ring must clear the parent sphere.
+    const R0 = Math.max(baseR || 0, parentRadius + childRadius + LAYOUT_SAFE_MARGIN);
+    // Constraint C: adjacent rings must not collide.
+    const dR = Math.max(gap || 0, 2 * childRadius + LAYOUT_SAFE_MARGIN);
+    const f = Math.max(0.6, 1 - ecc); // eccentricity foreshortening
+    // Constraint A: same-ring spacing — max bodies a ring of radius R can hold.
+    const ringCapacity = (R) => {
+      const arg = (childRadius + LAYOUT_SAFE_MARGIN / 2) / (f * R);
+      if (arg >= 1) return 1;
+      return Math.max(1, Math.floor(Math.PI / Math.asin(arg)));
+    };
+    // Capacity-driven K: grow rings outward until we can hold every child.
+    const ringRadii = [];
+    const caps = [];
+    let assigned = 0;
+    let kIdx = 0;
+    while (assigned < ids.length && kIdx < 12) {
+      const R = R0 + kIdx * dR;
+      const cap = ringCapacity(R);
+      ringRadii.push(R);
+      caps.push(cap);
+      assigned += cap;
+      kIdx += 1;
+    }
+    const K = ringRadii.length;
+    // Distribute ids proportional to ring capacity (inner rings fill first to
+    // their cap; the outer ring absorbs the remainder so we never violate A).
+    const buckets = Array.from({ length: K }, () => []);
+    let cursor = 0;
+    for (let k = 0; k < K; k += 1) {
+      const take = k === K - 1 ? ids.length - cursor : Math.min(caps[k], ids.length - cursor);
+      for (let i = 0; i < take; i += 1) {
+        buckets[k].push(ids[cursor + i]);
+      }
+      cursor += take;
+      if (cursor >= ids.length) break;
+    }
+    for (let k = 0; k < K; k += 1) {
+      const chunk = buckets[k];
       if (!chunk.length) continue;
-      const R = baseR + k * gap;
-      // Each ring gets its OWN ecliptic inclination and ellipticity so the task
-      // orbits read as a layered planetary system (à la NASA Eyes) rather than a
-      // stack of coplanar hoops: the progressive `k` term fans the orbital planes
-      // apart, the hash term breaks any leftover symmetry, and the eccentricity
-      // grows ring-by-ring so outer orbits stretch into ovals. Deterministic.
-      const t = tilt + k * 0.3 + (hashUnit(`${parentId}:rt${k}`) - 0.5) * 0.55;
-      const e = Math.min(0.5, Math.max(0.05, ecc + k * 0.08 + (hashUnit(`${parentId}:re${k}`) - 0.5) * 0.14));
+      const R = ringRadii[k];
+      // Keep rings nearly coplanar: a small progressive k term gives just enough
+      // depth to tell nested rings apart, with a small hash jitter to break
+      // dead symmetry. Eccentricity grows gently outward.
+      const t = tilt + k * 0.06 + (hashUnit(`${parentId}:rt${k}`) - 0.5) * 0.15;
+      const e = Math.min(0.4, Math.max(0.05, ecc + k * 0.05 + (hashUnit(`${parentId}:re${k}`) - 0.5) * 0.08));
       placeOnOrbit(chunk, parentId, center, R, t, `${parentId}:ring${k}`, orbitSpeed(R) * speedMul, e, offsetY, tier);
     }
   };
@@ -1937,6 +2151,16 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
       .sort();
     const R1 = 58 + Math.min(projects.length, 8) * 7;
     placeOnOrbit(projects, focusGoalId, goalPos, R1, 0.16, `${focusGoalId}:f1`, orbitSpeed(R1) * 1.0, 0.08, 0, 1);
+    // Constraint D — budget: the task disk's outermost ring must fit inside
+    // the chord distance between adjacent projects, else neighbouring task
+    // disks will overlap. Log when we bust the budget rather than silently
+    // overlap; the visual will still draw but the dev console makes it
+    // diagnosable.
+    if (projects.length >= 2) {
+      const chord = R1 * Math.sin(Math.PI / projects.length);
+      const maxOutR = chord - LAYOUT_R_TASK_MAX - LAYOUT_SAFE_MARGIN / 2;
+      window.__nblaneLayoutBudget = { R1, chord, maxOutR, P: projects.length };
+    }
 
     const visible = new Set([focusGoalId, ...projects]);
     const candFrom = (id) =>
@@ -1975,15 +2199,29 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
         }
       });
 
-      // Tier 2 — tasks + project-only evidence share one concentric-ring system
-      // lifted above the project. Up to 5 nested rings, each at its own ecliptic
-      // tilt + ellipticity (see placeConcentric), so many tasks read as a layered
-      // solar system. Colour separates them: task brown, evidence purple.
-      const tier2 = [...tasks, ...evProjectOnly.sort()];
-      placeConcentric(tier2, pid, center, {
-        baseR: 22, gap: 14, tilt: 0.36, offsetY: 11, tier: 2, speedMul: 1.5, ecc: 0.1,
+      // Tier 2a — tasks alone share one concentric-ring disk around the
+      // project, so the disk reads as "task plate". Project-only evidence is
+      // pushed to its own outer comet orbit (tier 2b) instead of being mixed
+      // into the task disk, which used to leave a clump of dots welded onto
+      // the project body. With the tighter baseR/gap the disk stays inside
+      // the project↔project gap (≤21).
+      placeConcentric(tasks, pid, center, {
+        baseR: 10, gap: 6, tilt: 0.36, offsetY: 5, tier: 2, speedMul: 1.5, ecc: 0.1,
       });
-      tier2.forEach((x) => visible.add(x));
+      tasks.forEach((x) => visible.add(x));
+
+      if (evProjectOnly.length) {
+        // Project-only evidence orbit: a single faster comet ring further out
+        // than the task disk so it reads as evidence drifting around the
+        // project as a whole, not stitched onto any one task. Same comet
+        // visual the task-owned evidence uses (see Tier 3 below), so the eye
+        // sees one consistent "evidence = comet" cue everywhere.
+        evProjectOnly.sort();
+        const Rp = 18 + Math.min(evProjectOnly.length, 6) * 1.2;
+        const tiltp = 0.55 + hashUnit(`${pid}:ev`) * 0.5;
+        placeOnOrbit(evProjectOnly, pid, center, Rp, tiltp, `${pid}:ev`, orbitSpeed(Rp) * 4, 0.18, 0, 3);
+        evProjectOnly.forEach((x) => visible.add(x));
+      }
 
       // Tier 3 — task-generated evidence orbits its task as a tiny, fast comet
       // (small bright head + fading trail, drawn by the scene). The whipping comet
@@ -2010,8 +2248,8 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   // 1. Goals orbit the North Star, each on its own shell + inclination so the
   // orbits nest like a solar system rather than lying flat.
   const directions = byRole("direction");
-  const GOAL_BASE_R = 70;
-  const GOAL_RING_GAP = 26;
+  const GOAL_BASE_R = 80;
+  const GOAL_RING_GAP = 60;
   directions.forEach((node, i) => {
     const radius = GOAL_BASE_R + i * GOAL_RING_GAP;
     const tilt = 0.5 + (i - (directions.length - 1) / 2) * 0.34; // distinct inclinations
@@ -2041,7 +2279,11 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   projByGoal.forEach((ids, goalId) => {
     const center = positions.get(goalId) || corePos;
     ids.sort();
-    const radius = 26 + Math.min(ids.length, 6) * 2.5;
+    // Keep the project cloud tight to its goal: child orbit radius must stay well
+    // under the goal-to-goal gap (≈60) so adjacent goals read as separate solar
+    // systems with vacuum between them, not interpenetrating rings. Iron rule:
+    // child ≤ 0.4 × parent gap → cap is ~21 with GOAL_RING_GAP=60.
+    const radius = 12 + Math.min(ids.length, 6) * 1.5;
     placeOnOrbit(ids, goalId, center, radius, 0.5 + hashUnit(`${goalId}:t`) * 0.6, goalId, orbitSpeed(radius) * 1.4);
   });
   if (orphanProjects.length) {
@@ -2356,6 +2598,20 @@ function graph3DData(payload, nodes, focusGoalId = null) {
   });
   // Subtree mass drives goal size so a direction sun always dominates its swarm.
   const mass = subtreeMassByNode(links, treeNodes);
+  // Tasks that have at least one evidence (fruit) attached become "produced"
+  // overview indicators: in overview mode the per-task comet is too noisy so
+  // these tasks get a faint static halo instead — preserves the
+  // "produced evidence" semantic without the visual noise.
+  const tasksWithEvidence = new Set();
+  if (!focusGoalId) {
+    const leafIdSet = new Set(treeNodes.filter((n) => n.role === "leaf").map((n) => n.id));
+    asArray(galaxyPayload.graph.edges).forEach((edge) => {
+      const rel = edge.relation || edge.type;
+      if (rel === "generated_by" && leafIdSet.has(edge.from)) {
+        tasksWithEvidence.add(edge.from);
+      }
+    });
+  }
   return {
     nodes: treeNodes.map((node) => {
       const pos = positions.get(node.id) || { x: 0, y: DIRECTION_Y, z: 0 };
@@ -2364,11 +2620,14 @@ function graph3DData(payload, nodes, focusGoalId = null) {
       const isGoal = node.role === "direction";
       const weight = nodeVisualWeight(node);
       // Goals: size by how much work hangs under them (subtree mass), so the sun
-      // grows with its system and never shrinks below an orbiting project. Other
-      // roles keep the modest degree-based size, and are clamped well under the
-      // goal band so the hierarchy goal ≫ project > task reads at a glance.
+      // grows with its system and never shrinks below an orbiting project. Size
+      // encodes IMPORTANCE/mass only — derived PROJECT-completion progress is
+      // shown by a separate progress ARC around the goal (see _addGoalProgressArc
+      // in galaxy_scene.js), not by size, so the two channels stay independent.
+      // Other roles keep the modest degree-based size, clamped well under the goal
+      // band so the hierarchy goal ≫ project > task reads at a glance.
       const val = isGoal
-        ? Math.min(26, 11 + Math.sqrt(mass.get(node.id) || 0) * 3.4) * (weight.radius || 1)
+        ? Math.min(18, 11 + Math.sqrt(mass.get(node.id) || 0) * 2.2) * (weight.radius || 1)
         : Math.min(
             9,
             (isStar ? 3 : 5) + Math.min(7, nodeDegree) + (node.isPrimary ? 3 : 0) + (node.placeholder ? -1 : 0),
@@ -2392,6 +2651,10 @@ function graph3DData(payload, nodes, focusGoalId = null) {
         visualWeight: weight,
         // Tier-3 evidence orbits its task as a moon → rendered small + bright.
         moon: (nodeOrbits.get(node.id) || {}).tier === 3,
+        // Overview-only flag: this task has at least one evidence attached.
+        // Used by galaxy_scene to add a small static halo without the per-task
+        // comet (which only appears in focused mode).
+        hasEvidence: tasksWithEvidence.has(node.id),
       };
     }),
     links,
@@ -2686,6 +2949,25 @@ function Graph3DLegend({ payload, graphData, selectedNodeId = "", onSelectNode }
   const goals = nodes
     .filter((node) => node.role === "direction")
     .sort((a, b) => cleanText(a.label || a.id).localeCompare(cleanText(b.label || b.id)));
+  const LEGEND_STORAGE_KEY = "nblane.graph3d.legend.opened";
+  const [encodingOpen, setEncodingOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(LEGEND_STORAGE_KEY) === "0";
+    } catch (e) {
+      return false;
+    }
+  });
+  const toggleEncoding = () => {
+    setEncodingOpen((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(LEGEND_STORAGE_KEY, next ? "0" : "1");
+      } catch (e) {
+        // ignore — privacy modes block storage
+      }
+      return next;
+    });
+  };
   if (!northStar && !goals.length) {
     return null;
   }
@@ -2725,6 +3007,31 @@ function Graph3DLegend({ payload, graphData, selectedNodeId = "", onSelectNode }
           </div>
         </div>
       ) : null}
+      <div className={`hd-graph3d-nav-group hd-graph3d-encoding ${encodingOpen ? "open" : ""}`}>
+        <button
+          type="button"
+          className="hd-graph3d-encoding-toggle"
+          onClick={toggleEncoding}
+          aria-expanded={encodingOpen}
+        >
+          <span>{label(ui, "dashboard_graph_legend_encoding", "What the visuals mean")}</span>
+          <em>{encodingOpen ? "▾" : "▸"}</em>
+        </button>
+        {encodingOpen ? (
+          <ul
+            className="hd-graph3d-encoding-list"
+            onWheel={(e) => e.stopPropagation()}
+          >
+            <li><b>{label(ui, "dashboard_graph_legend_size", "Size")}</b> · {label(ui, "dashboard_graph_legend_size_desc", "subtree mass / scope")}</li>
+            <li><b>{label(ui, "dashboard_graph_legend_brightness", "Brightness")}</b> · {label(ui, "dashboard_graph_legend_brightness_desc", "mastery (skills) / lit by North Star (goals)")}</li>
+            <li><b>{label(ui, "dashboard_graph_legend_arc", "Progress arc")}</b> · {label(ui, "dashboard_graph_legend_arc_desc", "derived goal completion (mean of project completion)")}</li>
+            <li><b>{label(ui, "dashboard_graph_legend_grey", "Grey / frozen")}</b> · {label(ui, "dashboard_graph_legend_grey_desc", "stalled or archived/paused goal")}</li>
+            <li><b>{label(ui, "dashboard_graph_legend_comet", "Comet trail")}</b> · {label(ui, "dashboard_graph_legend_comet_desc", "evidence under a task (presence = produced)")}</li>
+            <li><b>{label(ui, "dashboard_graph_legend_octahedron", "Octahedron")}</b> · {label(ui, "dashboard_graph_legend_octahedron_desc", "scaffolding / placeholder node")}</li>
+            <li className="hint">{label(ui, "dashboard_graph_legend_hint", "Click any goal chip to dive in; click empty space to zoom out.")}</li>
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -3194,18 +3501,144 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
     };
   }, [minHeight, hasNodes]);
 
-  if (!hasNodes) {
+  const northStarSet = Boolean(payload.northStar?.isSet);
+  const goalCount = Math.max(
+    payload.activeGoals?.length || 0,
+    payload.goalCounts?.total || 0,
+  );
+  const skeletalState =
+    !hasNodes ||
+    (!northStarSet && goalCount === 0);
+
+  // Search hooks live up here (before any early return) so React's hook order
+  // stays stable across renders — react-hook-order #310 fires the moment a
+  // useState appears after a conditional return.
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return graphData.nodes
+      .filter((n) => cleanText(n.label || n.id).toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [searchQuery, graphData]);
+
+  if (skeletalState) {
+    // Canvas-internal onboarding: when the user has not yet set a North Star
+    // (and therefore the graph is a single empty shell), render a deliberate
+    // three-step guide INSIDE the dark canvas instead of an "all layers
+    // hidden" placeholder. The three steps map to the activation loop the
+    // critique calls out (North Star → goals → resume import).
     return (
-      <div className="hd-graph3d-stage hd-canvas-surface-empty">
-        <p className="hd-empty">{emptyMessage || label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+      <div className={compact ? "hd-graph3d-stage compact" : "hd-graph3d-stage"} ref={wrapRef}>
+        <div className="hd-graph3d-onboarding">
+          <span className="hd-graph3d-onboarding-eyebrow">
+            {label(ui, "dashboard_canvas_onboarding_eyebrow", "Start here")}
+          </span>
+          <h3>{label(ui, "dashboard_canvas_onboarding_title", "Build your growth galaxy")}</h3>
+          <ol>
+            <li className={northStarSet ? "done" : "active"}>
+              <strong>1 · {label(ui, "dashboard_canvas_onboarding_step_north_star", "Set your North Star")}</strong>
+              <p>{label(ui, "dashboard_canvas_onboarding_step_north_star_hint", "Name the single bright pursuit you want everything to orbit.")}</p>
+            </li>
+            <li className={!northStarSet ? "" : goalCount === 0 ? "active" : "done"}>
+              <strong>2 · {label(ui, "dashboard_canvas_onboarding_step_goal", "Add an active goal")}</strong>
+              <p>{label(ui, "dashboard_canvas_onboarding_step_goal_hint", "Each goal becomes a sun. Projects and tasks orbit underneath.")}</p>
+            </li>
+            <li className={goalCount === 0 ? "" : "active"}>
+              <strong>3 · {label(ui, "dashboard_canvas_onboarding_step_resume", "Paste a resume to seed history")}</strong>
+              <p>{label(ui, "dashboard_canvas_onboarding_step_resume_hint", "AI extracts evidence + skills; the galaxy fills itself in.")}</p>
+            </li>
+          </ol>
+          {emptyMessage && hasNodes ? (
+            <p className="hd-graph3d-onboarding-note">{emptyMessage}</p>
+          ) : null}
+        </div>
       </div>
     );
   }
 
+  // Keyboard navigation: when the canvas (or any non-input descendant) has
+  // focus, arrows / Tab cycle between goal suns + the North Star, Enter dives
+  // into the highlighted node (the same as a click), Esc fits back to overview.
+  const handleStageKeyDown = (event) => {
+    if (event.defaultPrevented) return;
+    const target = event.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+    const navOrder = [];
+    const trunk = graphData.nodes.find((n) => n.role === "trunk");
+    if (trunk) navOrder.push(trunk.id);
+    graphData.nodes
+      .filter((n) => n.role === "direction")
+      .sort((a, b) => cleanText(a.label || a.id).localeCompare(cleanText(b.label || b.id)))
+      .forEach((n) => navOrder.push(n.id));
+    if (!navOrder.length) return;
+    if (event.key === "Escape") {
+      onSelectNode?.("");
+      sceneRef.current?.fit();
+      event.preventDefault();
+      return;
+    }
+    const currentIdx = navOrder.indexOf(selectedNodeId);
+    const step = event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "Tab" && !event.shiftKey
+      ? 1
+      : event.key === "ArrowLeft" || event.key === "ArrowUp" || event.key === "Tab" && event.shiftKey
+      ? -1
+      : 0;
+    if (step !== 0) {
+      const nextIdx = currentIdx < 0 ? 0 : (currentIdx + step + navOrder.length) % navOrder.length;
+      onSelectNode?.(navOrder[nextIdx]);
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Enter" && selectedNodeId) {
+      const target = graphData.nodes.find((n) => n.id === selectedNodeId);
+      if (target) {
+        sceneRef.current?.focus(target);
+        event.preventDefault();
+      }
+    }
+  };
+
   return (
-    <div className={compact ? "hd-graph3d-stage compact" : "hd-graph3d-stage"} ref={wrapRef} data-testid="dashboard-3d-graph">
+    <div
+      className={compact ? "hd-graph3d-stage compact" : "hd-graph3d-stage"}
+      ref={wrapRef}
+      data-testid="dashboard-3d-graph"
+      tabIndex={0}
+      onKeyDown={handleStageKeyDown}
+    >
       <div className="hd-graph3d-force" ref={canvasHostRef} />
       <ResearchShower research={research} burstSignal={burstSignal} />
+      <div className="hd-graph3d-search">
+        <input
+          type="search"
+          placeholder={label(ui, "dashboard_graph_search_placeholder", "Search node…")}
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          aria-label={label(ui, "dashboard_graph_search_aria", "Search graph nodes")}
+        />
+        {searchMatches.length ? (
+          <ul className="hd-graph3d-search-results">
+            {searchMatches.map((node) => (
+              <li key={node.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectNode?.(node.id);
+                    sceneRef.current?.focus(node);
+                    setSearchQuery("");
+                  }}
+                >
+                  <i style={{ background: node.color || ROLE_COLORS[node.role] || "#9fb29c" }} />
+                  <span>{cleanText(node.label || node.id)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       <div className="hd-graph3d-toolbar">
         <button
           type="button"
@@ -3512,16 +3945,40 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
   const [exploreScope, setExploreScope] = useState("all");
   const [exploreQuery, setExploreQuery] = useState("");
   const [showPlaceholders, setShowPlaceholders] = useState(true);
+  const [showArchived, setShowArchived] = useState(() => {
+    try {
+      return window.localStorage.getItem("nblane.context.goalRail.showArchived") === "1";
+    } catch (e) {
+      return false;
+    }
+  });
+  const hasExtinguishedGoal = useMemo(
+    () => payload.graph.nodes.some(
+      (n) => n.type === "goal" && (n.status === "archived" || n.status === "paused"),
+    ),
+    [payload],
+  );
   const filterLayers = useMemo(() => graphLayers(payload), [payload]);
   const insight = useMemo(() => graphInsight(payload), [payload]);
-  const data = useMemo(() => flowData(payload, hiddenLayers, viewMode), [payload, hiddenLayers, viewMode]);
+  const data = useMemo(
+    () => flowData(payload, hiddenLayers, viewMode, { showArchived }),
+    [payload, hiddenLayers, viewMode, showArchived],
+  );
   const rawExploreNodes = useMemo(
     () => graphExploreNodes(payload, hiddenLayers, selectedNodeId, exploreScope),
     [payload, hiddenLayers, selectedNodeId, exploreScope],
   );
   const exploreNodes = useMemo(
-    () => filterExploreNodes(payload, rawExploreNodes, exploreQuery, showPlaceholders),
-    [payload, rawExploreNodes, exploreQuery, showPlaceholders],
+    () => {
+      const filtered = filterExploreNodes(payload, rawExploreNodes, exploreQuery, showPlaceholders);
+      if (showArchived) return filtered;
+      // Drop extinguished goals AND their subtrees — otherwise the orphaned
+      // children get adopted into the synthetic "Other" sun (see graph3DData /
+      // buildGalaxyInputs) and the hidden goal's work reappears under "Other".
+      const hidden = hiddenArchivedSubtreeIds(payload, showArchived);
+      return filtered.filter((n) => !hidden.has(n.id));
+    },
+    [payload, rawExploreNodes, exploreQuery, showPlaceholders, showArchived],
   );
 
   function toggleLayer(layer) {
@@ -3585,6 +4042,28 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
           <button className="hd-ghost hd-toolbar-reset" type="button" data-action="filter-reset" onClick={showAllLayers}>
             {label(ui, "dashboard_canvas_reset_filters", "Show all layers")}
           </button>
+        ) : null}
+        {hasExtinguishedGoal ? (
+          <label className="hd-canvas-archived-toggle">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setShowArchived(checked);
+                try {
+                  window.localStorage.setItem(
+                    "nblane.context.goalRail.showArchived",
+                    checked ? "1" : "0",
+                  );
+                } catch (e) {
+                  // ignore — privacy mode blocks storage
+                }
+              }}
+              data-action="toggle-archived-goals"
+            />
+            <span>{label(ui, "dashboard_show_archived_goals", "Show archived / paused goals (extinguished stars)")}</span>
+          </label>
         ) : null}
       </details>
 
@@ -4054,6 +4533,42 @@ function SkillProgressCard({ payload, onEmit, className = "" }) {
   const lit = Math.max(0, Number(payload.charts.skills.lit) || 0);
   const litRate = total ? (Number(payload.charts.skills.litRate) || (lit / total)) : 0;
   const segments = skillSegments(counts, total);
+  // Goal-relevant framing: count the distinct skills the active goals actually
+  // care about (via confirmed skill_links). 13/82 stays as the long-tail
+  // overview underneath; the centre figure becomes "lit goal-relevant / total
+  // goal-relevant" so the denominator is decision-relevant.
+  const alignment = payload.skillAlignment || {};
+  const targetSkillIds = new Set();
+  const byGoal = alignment.byGoal || {};
+  Object.values(byGoal).forEach((entry) => {
+    asArray(entry?.confirmed).forEach((link) => {
+      if (link?.nodeId) targetSkillIds.add(link.nodeId);
+    });
+  });
+  asArray(alignment.confirmedLinks).forEach((link) => {
+    if (link?.nodeId) targetSkillIds.add(link.nodeId);
+  });
+  const lockedSet = new Set(
+    asArray(payload.skills.target_learning_locked).map(
+      (n) => cleanText(n?.id || n?.node_id || n),
+    ).filter(Boolean),
+  );
+  const targetLocked = [...targetSkillIds].filter((id) => lockedSet.has(id)).length;
+  const targetTotal = targetSkillIds.size;
+  // Precise lit count: intersect skill_links node ids with the expert/solid
+  // bucket from payload.skills.items (already status-bucketed per node). Falls
+  // back to targetTotal − targetLocked when items aren't available.
+  const litStatusSet = new Set();
+  asArray(payload.skills?.items).forEach((item) => {
+    const status = cleanText(item?.status);
+    if (status === "expert" || status === "solid") {
+      const id = cleanText(item?.id);
+      if (id) litStatusSet.add(id);
+    }
+  });
+  const targetLit = litStatusSet.size
+    ? [...targetSkillIds].filter((id) => litStatusSet.has(id)).length
+    : Math.max(0, targetTotal - targetLocked);
   const summaryMessage = total
     ? `${label(ui, "dashboard_skill_progress_caption", "solid + expert lit rate")} · ${formatPercent(litRate)}`
     : label(ui, "dashboard_skill_progress_empty", "No skill tree data yet.");
@@ -4067,6 +4582,19 @@ function SkillProgressCard({ payload, onEmit, className = "" }) {
           <span className="hd-eyebrow">{label(ui, "dashboard_skill_progress_title", "Skill Progress")}</span>
           <h4>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</h4>
           <p className="hd-skill-head-copy">{summaryMessage}</p>
+          {targetTotal > 0 ? (
+            <p className="hd-skill-head-subline">
+              <strong>{targetLit}/{targetTotal}</strong>{" "}
+              {label(ui, "dashboard_skill_target_caption", "goal-relevant skills lit")}
+              {targetLocked ? (
+                <em>
+                  {" · "}
+                  {targetLocked}{" "}
+                  {label(ui, "dashboard_skill_target_blocked", "blocking the primary goal")}
+                </em>
+              ) : null}
+            </p>
+          ) : null}
           {!total && onEmit ? (
             <button
               className="hd-ghost hd-skill-empty-cta"
@@ -4114,6 +4642,20 @@ function SkillProgressCard({ payload, onEmit, className = "" }) {
           <div className="hd-skill-ring-center">
             <strong>{lit}/{total}</strong>
             <span>{label(ui, "dashboard_metric_skill_lit", "Skill lit")}</span>
+            {targetTotal > 0 ? (
+              <em className="hd-skill-ring-secondary">
+                {targetLit}/{targetTotal} {label(ui, "dashboard_skill_ring_target_label", "goal-relevant")}
+              </em>
+            ) : null}
+            {Number.isFinite(payload.trends?.deltas?.skills_lit) && payload.trends.deltas.skills_lit !== 0 ? (
+              <span className="hd-skill-ring-trend">
+                <DeltaChip value={payload.trends.deltas.skills_lit} kindLabel={label(ui, "dashboard_skill_delta_label", "skills lit this week")} />
+                <Sparkline
+                  series={payload.trends.sparkline?.skills_lit || []}
+                  tone={payload.trends.deltas.skills_lit > 0 ? "up" : "down"}
+                />
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -4158,29 +4700,54 @@ function HealthSummaryPanel({ payload, className = "" }) {
 function ActionQueue({ payload, onEmit, className = "" }) {
   const ui = payload.ui;
   const queueClassName = ["hd-side-panel", "hd-action-queue", className].filter(Boolean).join(" ");
+  const items = actionQueueItems(payload);
+  const [hero, ...rest] = items;
   return (
     <section className={queueClassName}>
       <header>
         <span className="hd-eyebrow">{label(ui, "dashboard_action_queue_title", "Action queue")}</span>
-        <strong>{label(ui, "dashboard_action_queue_title", "Action queue")}</strong>
+        <strong>{label(ui, "dashboard_action_next_title", "Next: what to do")}</strong>
       </header>
-      <div className="hd-action-list">
-        {actionQueueItems(payload).map((item) => (
+      {hero ? (
+        <button
+          key={hero.id}
+          className={`hd-action-hero ${hero.tone || ""}`}
+          type="button"
+          data-action="navigate"
+          data-dashboard-action={`queue-hero:${hero.id}`}
+          data-target={hero.path}
+          onClick={() => onEmit(navigationEvent(hero.path))}
+        >
+          <span className="hd-action-hero-eyebrow">{hero.eyebrow}</span>
+          <span className="hd-action-hero-row">
+            <strong className="hd-action-hero-title">{hero.title}</strong>
+            {Number(hero.count) > 0 ? <em className="hd-action-hero-count">{hero.count}</em> : null}
+            {(() => {
+              const deltas = payload.trends?.deltas || {};
+              const key = hero.id === "focus" ? "kanban_done" : hero.id === "evidence" ? "evidence_total" : null;
+              if (!key) return null;
+              return <DeltaChip value={deltas[key]} kindLabel={label(ui, "dashboard_action_hero_delta_label", "this week")} />;
+            })()}
+          </span>
+          {hero.why ? <span className="hd-action-hero-why">{hero.why}</span> : null}
+          {hero.detail ? <small className="hd-action-hero-detail">{hero.detail}</small> : null}
+        </button>
+      ) : null}
+      <div className="hd-action-rest">
+        {rest.map((item) => (
           <button
             key={item.id}
-            className={`hd-action-card ${item.tone || ""}`}
+            className={`hd-action-chip ${item.tone || ""}`}
             type="button"
             data-action="navigate"
             data-dashboard-action={`queue:${item.id}`}
             data-target={item.path}
             onClick={() => onEmit(navigationEvent(item.path))}
+            title={item.why}
           >
-            <span>{item.eyebrow}</span>
-            <strong>{item.title}</strong>
-            <small>{item.detail}</small>
-            <small className="hd-action-why">{item.why}</small>
-            <small className="hd-action-filter">{item.filter}</small>
-            <em>{item.count}</em>
+            <span className="hd-action-chip-eyebrow">{item.eyebrow}</span>
+            <span className="hd-action-chip-title">{item.title}</span>
+            {Number(item.count) > 0 ? <em className="hd-action-chip-count">{item.count}</em> : null}
           </button>
         ))}
       </div>
@@ -4215,7 +4782,13 @@ function Workbench({ payload, onEmit, readOnly = false, showActionQueue = true }
 }
 
 function Dashboard({ args }) {
-  const payload = useMemo(() => normalizePayload(args.payload || {}), [args]);
+  const payloadInput = args.payload || {};
+  const payloadRevision = payloadInput.revision || payloadInput.profile || "";
+  const payload = useMemo(
+    () => normalizePayload(payloadInput),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [payloadRevision],
+  );
   const requestedNodeId = useMemo(() => initialDashboardNodeId(), []);
   const [selectedNodeId, setSelectedNodeId] = useState(() => requestedNodeId);
   const [goalEditor, setGoalEditor] = useState(null);

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from collections import OrderedDict
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +38,7 @@ from nblane.core.io import (
     schema_node_index,
 )
 from nblane.core.paths import REPO_ROOT
+from nblane.core.yaml_io import fast_safe_load
 from nblane.core.profile_context import (
     COMPETENCY_STATUSES,
     GENERATED_BLOCKS,
@@ -112,16 +116,187 @@ def _profile_path(profile: ProfileRef) -> Path:
     return io_facade.profile_dir(profile)
 
 
+_SNAPSHOT_DAYS_LOOKBACK = 7
+_SNAPSHOT_FILENAME = "dashboard_snapshot.jsonl"
+_SNAPSHOT_KEYS: tuple[str, ...] = (
+    "skills_lit",
+    "skills_total",
+    "evidence_total",
+    "projects_done",
+    "kanban_done",
+)
+
+
+def _record_dashboard_snapshot(profile_path: Path, today_counts: dict) -> list[dict]:
+    """Append today's counts to ``state/dashboard_snapshot.jsonl`` (once/day).
+
+    Returns the snapshot history (newest first, cap 60 days) so the caller can
+    compute deltas without re-reading the file. Deliberately small + append-only:
+    cheap to write, robust to crashes, and trivially compatible with git diff.
+    """
+    state_dir = profile_path / "state"
+    snapshot_path = state_dir / _SNAPSHOT_FILENAME
+    history: list[dict] = []
+    if snapshot_path.exists():
+        try:
+            text = snapshot_path.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(row, dict) and row.get("date"):
+                history.append(row)
+    today_iso = date.today().isoformat()
+    has_today = history and history[-1].get("date") == today_iso
+    if not has_today:
+        row = {"date": today_iso}
+        for key in _SNAPSHOT_KEYS:
+            row[key] = int(today_counts.get(key, 0) or 0)
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            with snapshot_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False))
+                f.write("\n")
+            history.append(row)
+        except OSError:
+            # Failing to record a snapshot must NEVER block the dashboard render
+            # — trends just degrade to "no baseline yet".
+            pass
+        # Trim to ~60 days inline to keep the file small.
+        if len(history) > 60:
+            try:
+                tail = history[-60:]
+                snapshot_path.write_text(
+                    "\n".join(json.dumps(r, ensure_ascii=False) for r in tail) + "\n",
+                    encoding="utf-8",
+                )
+                history = tail
+            except OSError:
+                pass
+    return history
+
+
+def _dashboard_trends(history: list[dict], today_counts: dict) -> dict:
+    """Compute 7-day deltas + a short sparkline series from snapshot history."""
+    if not history:
+        return {"days_back": _SNAPSHOT_DAYS_LOOKBACK, "deltas": {}, "sparkline": {}}
+    today_iso = date.today().isoformat()
+    today_row = (
+        history[-1]
+        if history and history[-1].get("date") == today_iso
+        else {"date": today_iso, **{k: int(today_counts.get(k, 0) or 0) for k in _SNAPSHOT_KEYS}}
+    )
+    # Find the row >= 7 days ago (oldest still within the window, else oldest).
+    cutoff = (date.today() - timedelta(days=_SNAPSHOT_DAYS_LOOKBACK)).isoformat()
+    baseline = None
+    for row in history:
+        if row.get("date") and row["date"] <= cutoff:
+            baseline = row
+        else:
+            break
+    if baseline is None:
+        baseline = history[0]
+    deltas: dict[str, int] = {}
+    for key in _SNAPSHOT_KEYS:
+        try:
+            now = int(today_row.get(key, 0) or 0)
+            then = int(baseline.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        deltas[key] = now - then
+    sparkline: dict[str, list[int]] = {}
+    window = history[-min(len(history), 14):]
+    for key in _SNAPSHOT_KEYS:
+        series: list[int] = []
+        for row in window:
+            try:
+                series.append(int(row.get(key, 0) or 0))
+            except (TypeError, ValueError):
+                series.append(0)
+        sparkline[key] = series
+    return {
+        "days_back": _SNAPSHOT_DAYS_LOOKBACK,
+        "deltas": deltas,
+        "sparkline": sparkline,
+        "baseline_date": baseline.get("date") or "",
+    }
+
+
 def _profile_name(profile: ProfileRef) -> str:
     if isinstance(profile, Path):
         return profile.name
     return str(profile)
 
 
+_DASHBOARD_FINGERPRINT_FILES: tuple[str, ...] = (
+    "goals.yaml",
+    "skill-tree.yaml",
+    "evidence-pool.yaml",
+    "kanban.yaml",
+    "projects.yaml",
+    "project-board.yaml",
+    "sources.yaml",
+    "SKILL.md",
+    "outputs.yaml",
+)
+
+
+def _path_mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return -1
+
+
+def _profile_fingerprint(profile_path: Path) -> tuple[tuple[str, int], ...]:
+    """Return a stable mtime fingerprint for a profile's dashboard inputs.
+
+    Cheap (stat-only); changes on any meaningful write so the in-process
+    cache invalidates without explicit clear hooks.
+    """
+    return tuple(
+        (name, _path_mtime(profile_path / name))
+        for name in _DASHBOARD_FINGERPRINT_FILES
+    )
+
+
+def _stable_json(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+    except TypeError:
+        return repr(value)
+
+
+_DASHBOARD_PAYLOAD_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_DASHBOARD_PAYLOAD_CACHE_LIMIT = 8
+
+
+def _payload_revision(
+    profile_key: str,
+    fingerprint: tuple[tuple[str, int], ...],
+) -> str:
+    """Short stable revision string for the React payload memo key."""
+    max_mtime = max((mt for _, mt in fingerprint), default=0)
+    return f"{profile_key}:{max_mtime}"
+
+
+def clear_dashboard_payload_cache() -> None:
+    """Drop all cached dashboard payloads (call after profile writes)."""
+    _DASHBOARD_PAYLOAD_CACHE.clear()
+
+
 def _read_yaml_mapping(path: Path) -> dict:
     if not path.exists():
         return {}
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = fast_safe_load(path.read_text(encoding="utf-8"))
     return raw if isinstance(raw, dict) else {}
 
 
@@ -266,12 +441,34 @@ def _goal_payload(profile: ProfileRef) -> dict:
     return _goal_payload_from_goal(_current_goal(profile))
 
 
-def _goal_card_payload(goal: Goal, primary_id: str = "") -> dict:
-    """Return compact active-goal display metadata."""
+def _goal_card_payload(
+    goal: Goal,
+    primary_id: str = "",
+    goal_progress: dict[str, dict[str, Any]] | None = None,
+) -> dict:
+    """Return compact active-goal display metadata.
+
+    Includes derived progress / stall / days-to-target so the rail chips can
+    show urgency without forcing the React layer to recompute.
+    """
+    derived = (goal_progress or {}).get(goal.id, {}) if goal.id else {}
+    progress = derived.get("progress")
+    days_to_target: int | None = None
+    target_iso = (goal.target or "").strip()
+    if target_iso:
+        target_date = _parse_iso_date(target_iso)
+        if target_date is not None:
+            days_to_target = (target_date - date.today()).days
     return {
         **_goal_payload_from_goal(goal, editable=True),
         "id": goal.id,
         "is_primary": bool(goal.id and goal.id == primary_id),
+        "progress": float(progress) if isinstance(progress, (int, float)) else None,
+        "stalled": bool(derived.get("stalled")),
+        "days_since_activity": derived.get("days_since_activity"),
+        "target_date": target_iso,
+        "days_to_target": days_to_target,
+        "project_count": int(derived.get("project_count", 0) or 0),
     }
 
 
@@ -730,6 +927,127 @@ def dashboard_project_summary(profile: ProfileRef) -> dict:
     }
 
 
+# Days of no task activity under a goal before its sun reads as "stalled".
+_GOAL_STALL_DAYS = 30
+
+
+def _parse_iso_date(value: object) -> "date | None":
+    """Best-effort parse of an ISO date (YYYY-MM-DD…); None on anything odd."""
+    text = str(value or "").strip()
+    if len(text) < 10:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def dashboard_goal_progress(
+    profile: ProfileRef,
+    *,
+    kanban: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Derive per-goal progress + activity from PROJECT completion — zero manual entry.
+
+    The data model is Goal → Project → Task → Evidence. A goal is "done" when its
+    projects are done, so progress is the mean of its projects' completion:
+
+        project_completion = 1.0                       if status == "completed"
+                           = completed_milestones/total if milestones exist
+                           = done_tasks/total           otherwise (KanbanTask.done)
+                           = 0.0                        if the project is empty
+
+    Every input (project status, milestone status, task done) is already
+    maintained on the project board / kanban — this is a pure read, no new field
+    on Goal, nothing to keep in sync. Also returns a stall signal derived from the
+    most recent task activity (completed_on/started_on) under the goal, since
+    neither Goal nor ProjectCase carries a last-activity timestamp.
+
+    Returns ``{goal_id: {"progress": float|None, "stalled": bool,
+    "days_since_activity": int|None, "project_count": int}}``. ``progress`` is
+    None for a goal with no projects (so the UI can leave its sizing to mass).
+    """
+    board = load_project_board(profile)
+
+    tasks = kanban.get("tasks") if isinstance(kanban, dict) else None
+    task_done: dict[str, bool] = {}
+    task_activity: dict[str, date] = {}
+    tasks_by_project: dict[str, list[str]] = {}
+    for row in tasks or []:
+        if not isinstance(row, dict):
+            continue
+        tid = str(row.get("id") or "").strip()
+        if not tid:
+            continue
+        task_done[tid] = str(row.get("lifecycle") or "") == "done"
+        when = _parse_iso_date(row.get("completed_on")) or _parse_iso_date(
+            row.get("started_on")
+        )
+        if when is not None:
+            task_activity[tid] = when
+        pid = str(row.get("project_id") or "").strip()
+        if pid:
+            tasks_by_project.setdefault(pid, []).append(tid)
+
+    def _project_task_ids(case) -> list[str]:
+        ids = {str(t).strip() for t in (case.task_refs or []) if str(t).strip()}
+        ids.update(tasks_by_project.get(case.id, []))
+        return [t for t in ids if t]
+
+    def _project_completion(case) -> float:
+        status = str(getattr(case, "status", "") or "").strip()
+        if status == "completed":
+            return 1.0
+        milestones = list(getattr(case, "milestones", []) or [])
+        if milestones:
+            done = sum(
+                1 for m in milestones if str(getattr(m, "status", "")) == "completed"
+            )
+            return done / len(milestones)
+        ids = _project_task_ids(case)
+        if not ids:
+            return 0.0
+        done = sum(1 for tid in ids if task_done.get(tid))
+        return done / len(ids)
+
+    # Index projects by the goals they reference (link lives on ProjectCase.goal_refs).
+    projects_by_goal: dict[str, list[Any]] = {}
+    for case in board.project_cases:
+        if not getattr(case, "id", ""):
+            continue
+        for gid in getattr(case, "goal_refs", []) or []:
+            gid = str(gid or "").strip()
+            if gid:
+                projects_by_goal.setdefault(gid, []).append(case)
+
+    today = date.today()
+    out: dict[str, dict[str, Any]] = {}
+    for goal_id, cases in projects_by_goal.items():
+        completions = [_project_completion(c) for c in cases]
+        progress = sum(completions) / len(completions) if completions else None
+
+        latest: date | None = None
+        for case in cases:
+            for tid in _project_task_ids(case):
+                when = task_activity.get(tid)
+                if when is not None and (latest is None or when > latest):
+                    latest = when
+        days = (today - latest).days if latest is not None else None
+        stalled = bool(
+            days is not None
+            and days > _GOAL_STALL_DAYS
+            and (progress is None or progress < 1.0)
+        )
+        out[goal_id] = {
+            "progress": progress,
+            "stalled": stalled,
+            "days_since_activity": days,
+            "project_count": len(cases),
+        }
+    return out
+
+
+
 def dashboard_health_summary(profile: ProfileRef) -> dict:
     """Return profile-health counts and the first actionable issues."""
     if isinstance(profile, Path):
@@ -777,7 +1095,7 @@ def _blog_post_meta(path: Path) -> dict:
     end = text.find("\n---", 4)
     if end == -1:
         return {}
-    raw = yaml.safe_load(text[4:end]) or {}
+    raw = fast_safe_load(text[4:end]) or {}
     if not isinstance(raw, dict):
         return {}
     return raw
@@ -1251,18 +1569,25 @@ def _graph_payload(
         }
     )
     health_counts = health.get("counts") or {}
+    _h_err = int(health_counts.get("error", 0) or 0)
+    _h_warn = int(health_counts.get("warning", 0) or 0)
+    _h_info = int(health_counts.get("info", 0) or 0)
+    if _h_err:
+        _h_metric = f"{_ui_text(ui, 'dashboard_health_errors', 'Errors')} {_h_err}"
+    elif _h_warn:
+        _h_metric = f"{_ui_text(ui, 'dashboard_health_warnings', 'Warnings')} {_h_warn}"
+    elif _h_info:
+        _h_metric = f"{_ui_text(ui, 'dashboard_health_info', 'Info')} {_h_info}"
+    else:
+        _h_metric = _ui_text(ui, "dashboard_health_ok", "OK")
     nodes.append(
         {
             "id": "health",
             "type": "health",
             "label": _ui_text(ui, "dashboard_health_title", "Health"),
-            "metric": (
-                f"{health_counts.get('error', 0)}/"
-                f"{health_counts.get('warning', 0)}/"
-                f"{health_counts.get('info', 0)}"
-            ),
+            "metric": _h_metric,
             "record_id": "",
-            "status": "warning" if health_counts.get("warning", 0) else "ok",
+            "status": "warning" if _h_warn else "ok",
             "locked": False,
             "suggested": False,
             "owner_path": "pages/5_Profile_Health.py",
@@ -1377,6 +1702,12 @@ def profile_context_payload(profile: ProfileRef) -> dict:
         for title in LONG_NARRATIVE_SECTIONS
     }
     blocks = extract_generated_blocks(skill_content) if has_skill else {}
+    # Readiness chip: surface the same can_publish_context signal that the
+    # Profile Health page uses, so the drawer (where the user is editing the
+    # context) can show it honestly instead of forcing a navigation to a
+    # separate page just to learn whether the changes are publishable.
+    health = dashboard_health_summary(profile)
+    counts = health.get("counts") or {}
     return {
         "has_skill_md": has_skill,
         "identity": {field: identity.get(field, "") for field in IDENTITY_FIELDS},
@@ -1391,6 +1722,12 @@ def profile_context_payload(profile: ProfileRef) -> dict:
             block: blocks.get(block, "") for block in GENERATED_BLOCKS
         },
         "raw_markdown": skill_content,
+        "readiness": {
+            "context_ready": bool(health.get("context_ready")),
+            "errors": int(counts.get("error", 0) or 0),
+            "warnings": int(counts.get("warning", 0) or 0),
+            "owner_path": "pages/5_Profile_Health.py",
+        },
     }
 
 
@@ -1401,12 +1738,61 @@ def dashboard_payload(
     ai: dict[str, object] | None = None,
     skill_alignment_candidates: dict[str, list[dict[str, object]]] | None = None,
 ) -> dict:
+    """Return the stable JSON payload consumed by the React Home dashboard.
+
+    The body is mtime-keyed in-process cached: identical inputs against an
+    unchanged profile directory return the previously-built payload without
+    re-running ~9 sub-summaries that each re-parse YAML.
+    """
+    profile_path = _profile_path(profile)
+    profile_key = _profile_name(profile)
+    fingerprint = _profile_fingerprint(profile_path)
+    ui_key = _stable_json(ui)
+    ai_key = _stable_json(ai)
+    cand_key = _stable_json(skill_alignment_candidates)
+    # Cache key MUST include the resolved profile dir, not just the name —
+    # tests pass a Path under a temp dir and the name is reused across runs.
+    # Using the absolute path keeps two profiles named "alice" living in
+    # different directories from colliding.
+    cache_key = (
+        str(profile_path),
+        profile_key,
+        fingerprint,
+        ui_key,
+        ai_key,
+        cand_key,
+    )
+    hit = _DASHBOARD_PAYLOAD_CACHE.get(cache_key)
+    if hit is not None:
+        _DASHBOARD_PAYLOAD_CACHE.move_to_end(cache_key)
+        return hit
+    payload = _build_dashboard_payload(
+        profile,
+        ui=ui,
+        ai=ai,
+        skill_alignment_candidates=skill_alignment_candidates,
+    )
+    payload["revision"] = _payload_revision(profile_key, fingerprint)
+    _DASHBOARD_PAYLOAD_CACHE[cache_key] = payload
+    if len(_DASHBOARD_PAYLOAD_CACHE) > _DASHBOARD_PAYLOAD_CACHE_LIMIT:
+        _DASHBOARD_PAYLOAD_CACHE.popitem(last=False)
+    return payload
+
+
+def _build_dashboard_payload(
+    profile: ProfileRef,
+    *,
+    ui: dict[str, str] | None,
+    ai: dict[str, object] | None,
+    skill_alignment_candidates: dict[str, list[dict[str, object]]] | None,
+) -> dict:
     """Return the stable JSON payload consumed by the React Home dashboard."""
     kanban = dashboard_kanban_summary(profile)
     skills = dashboard_skill_summary(profile)
     pending = dashboard_pending_evidence_summary(profile)
     sources = dashboard_source_summary(profile)
     projects = dashboard_project_summary(profile)
+    goal_progress = dashboard_goal_progress(profile, kanban=kanban)
     health = dashboard_health_summary(profile)
     public = dashboard_public_summary(profile)
     claims = dashboard_claim_summary(profile)
@@ -1416,8 +1802,12 @@ def dashboard_payload(
     primary_goal = _goal_payload_from_goal(primary)
     active_goal_models = book.active_goals()
     active_goal_payloads = [
-        _goal_card_payload(goal, primary_goal_id)
+        _goal_card_payload(goal, primary_goal_id, goal_progress)
         for goal in active_goal_models
+    ]
+    all_goal_payloads = [
+        _goal_card_payload(goal, primary_goal_id, goal_progress)
+        for goal in book.goals
     ]
     north_star = north_star_payload_from_identity(
         _profile_identity(profile),
@@ -1429,12 +1819,13 @@ def dashboard_payload(
         primary_goal_id,
         skill_alignment_candidates,
     )
-    return {
+    payload = {
         "profile": _profile_name(profile),
         "north_star": north_star,
         "goal": primary_goal,
         "primary_goal": primary_goal,
         "active_goals": active_goal_payloads,
+        "all_goals": all_goal_payloads,
         "goal_counts": {
             "active": len(active_goal_models),
             "total": len(book.goals),
@@ -1487,9 +1878,31 @@ def dashboard_payload(
             health=health,
             ui=ui,
             all_goals=book.goals,
+            goal_progress=goal_progress,
         ),
         "quick_links": _quick_links_payload(ui),
         "profile_context": profile_context_payload(profile),
         "ai": dict(ai or {}),
         "ui": dict(ui or {}),
     }
+    # Daily snapshot + 7-day delta. Snapshot once/day per profile so the
+    # sparkline grows organically; trends ride alongside `charts` for the
+    # React layer to render delta chips (+2 this week) and tiny spark lines.
+    profile_path = _profile_path(profile)
+    today_counts = {
+        "skills_lit": int(skills.get("lit", 0) or 0),
+        "skills_total": int(skills.get("total", 0) or 0),
+        "evidence_total": int(
+            pending.get("total_evidence", 0)
+            or pending.get("evidence_total", 0)
+            or 0
+        ),
+        "projects_done": int(
+            (projects or {}).get("completed_total", 0)
+            or 0
+        ),
+        "kanban_done": int(kanban.get("done_total", 0) or 0),
+    }
+    history = _record_dashboard_snapshot(profile_path, today_counts)
+    payload["trends"] = _dashboard_trends(history, today_counts)
+    return payload

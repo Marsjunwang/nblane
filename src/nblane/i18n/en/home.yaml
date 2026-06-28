@@ -458,3 +458,53 @@ narrative_preview: Preview
 narrative_edit: Edit
 narrative_empty_preview: (empty)
 profile_context_unsaved_warning: You have unsaved changes. Discard them?
+
+# --- Dashboard 3D / chip / skill / onboarding / resume / profile readiness ---
+dashboard_graph_legend_encoding: What the visuals mean
+dashboard_graph_legend_size: Size
+dashboard_graph_legend_size_desc: subtree mass / scope
+dashboard_graph_legend_brightness: Brightness
+dashboard_graph_legend_brightness_desc: mastery (skills) / lit by North Star (goals)
+dashboard_graph_legend_arc: Progress arc
+dashboard_graph_legend_arc_desc: derived goal completion (mean of project completion)
+dashboard_graph_legend_grey: Grey / frozen
+dashboard_graph_legend_grey_desc: stalled or archived/paused goal
+dashboard_graph_legend_comet: Comet trail
+dashboard_graph_legend_comet_desc: evidence under a task (presence = produced)
+dashboard_graph_legend_octahedron: Octahedron
+dashboard_graph_legend_octahedron_desc: scaffolding / placeholder node
+dashboard_graph_legend_hint: Click any goal chip to dive in; click empty space to zoom out.
+dashboard_goal_overdue: Overdue
+dashboard_goal_overdue_short: d overdue
+dashboard_goal_due_in: Due in
+dashboard_goal_due_today: Due today
+dashboard_goal_days: d
+goal_strip_target: Target
+goal_no_current: No current goal set.
+goal_visibility_private: Private
+dashboard_skill_target_caption: goal-relevant skills lit
+dashboard_skill_target_blocked: blocking the primary goal
+dashboard_skill_ring_target_label: goal-relevant
+dashboard_skill_delta_label: skills lit this week
+quick_skill_map: Skill Map
+dashboard_show_archived_goals: Show archived / paused goals (extinguished stars)
+dashboard_graph_search_placeholder: Search node…
+dashboard_graph_search_aria: Search graph nodes
+dashboard_action_next_title: 'Next: what to do'
+dashboard_action_hero_delta_label: this week
+dashboard_canvas_onboarding_eyebrow: Start here
+dashboard_canvas_onboarding_title: Build your growth galaxy
+dashboard_canvas_onboarding_step_north_star: Set your North Star
+dashboard_canvas_onboarding_step_north_star_hint: Name the single bright pursuit you want everything to orbit.
+dashboard_canvas_onboarding_step_goal: Add an active goal
+dashboard_canvas_onboarding_step_goal_hint: Each goal becomes a sun. Projects and tasks orbit underneath.
+dashboard_canvas_onboarding_step_resume: Paste a resume to seed history
+dashboard_canvas_onboarding_step_resume_hint: AI extracts evidence + skills; the galaxy fills itself in.
+resume_upload_label: Or upload a resume (.pdf / .docx / .txt)
+resume_upload_extracted: Extracted {n} characters — review then Generate.
+profile_readiness_ok: Publishable — Agent will pick this up on next run
+profile_readiness_blocked_prefix: Blocked
+profile_readiness_issues: issue(s)
+profile_readiness_open: View Profile Health
+raw_generated_banner_title: Agent-owned sections
+raw_generated_lines: lines

@@ -458,3 +458,53 @@ narrative_preview: 预览
 narrative_edit: 编辑
 narrative_empty_preview: （空）
 profile_context_unsaved_warning: 有未保存的修改，确定要放弃吗？
+
+# --- Dashboard 3D / chip / skill / onboarding / resume / profile readiness ---
+dashboard_graph_legend_encoding: 视觉编码说明
+dashboard_graph_legend_size: 大小
+dashboard_graph_legend_size_desc: 子树质量 / 范围
+dashboard_graph_legend_brightness: 亮度
+dashboard_graph_legend_brightness_desc: 技能掌握度 / 目标被北极星点亮
+dashboard_graph_legend_arc: 进度弧
+dashboard_graph_legend_arc_desc: 目标完成度（各项目完成率均值）
+dashboard_graph_legend_grey: 灰白 / 冷寂
+dashboard_graph_legend_grey_desc: 停滞或已归档 / 暂停的目标
+dashboard_graph_legend_comet: 彗尾
+dashboard_graph_legend_comet_desc: 任务下方的证据（出现 = 已产出）
+dashboard_graph_legend_octahedron: 八面体
+dashboard_graph_legend_octahedron_desc: 占位 / 脚手架节点
+dashboard_graph_legend_hint: 点击任一目标行星进入；点击空白处缩回总览。
+dashboard_goal_overdue: 已逾期
+dashboard_goal_overdue_short: 天逾期
+dashboard_goal_due_in: 还有
+dashboard_goal_due_today: 今天到期
+dashboard_goal_days: 天
+goal_strip_target: 目标
+goal_no_current: 尚未设置当前目标。
+goal_visibility_private: 私有
+dashboard_skill_target_caption: 目标相关技能已点亮
+dashboard_skill_target_blocked: 阻塞主目标
+dashboard_skill_ring_target_label: 目标相关
+dashboard_skill_delta_label: 本周新点亮技能
+quick_skill_map: 技能图谱
+dashboard_show_archived_goals: 显示已归档 / 已暂停目标（熄灭星）
+dashboard_graph_search_placeholder: 搜索节点…
+dashboard_graph_search_aria: 搜索图谱节点
+dashboard_action_next_title: 下一步：去做什么
+dashboard_action_hero_delta_label: 本周
+dashboard_canvas_onboarding_eyebrow: 从这里开始
+dashboard_canvas_onboarding_title: 搭起你的成长星系
+dashboard_canvas_onboarding_step_north_star: 设定北极星
+dashboard_canvas_onboarding_step_north_star_hint: 一句话写下让一切围绕运转的最亮追求。
+dashboard_canvas_onboarding_step_goal: 添加一个活跃目标
+dashboard_canvas_onboarding_step_goal_hint: 每个目标都是一颗太阳，项目和任务在它周围公转。
+dashboard_canvas_onboarding_step_resume: 粘贴简历以建立历史
+dashboard_canvas_onboarding_step_resume_hint: AI 抽取证据与技能，星系会自动填充。
+resume_upload_label: 或上传一份简历（.pdf / .docx / .txt）
+resume_upload_extracted: 已抽取 {n} 个字符——审阅后点击「生成」。
+profile_readiness_ok: 可发布——Agent 将在下次运行时拾取
+profile_readiness_blocked_prefix: 阻塞
+profile_readiness_issues: 个问题
+profile_readiness_open: 打开档案体检
+raw_generated_banner_title: Agent 持有的段落
+raw_generated_lines: 行

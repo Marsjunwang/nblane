@@ -139,10 +139,36 @@ export function normalizeGoalCard(goal) {
     cleanText(source.id) ||
     cleanText(normalized.projection?.id) ||
     cleanText(normalized.editor?.id);
+  const rawProgress = source.progress;
+  const progress =
+    typeof rawProgress === "number"
+      ? rawProgress
+      : rawProgress === null || rawProgress === undefined || rawProgress === ""
+        ? null
+        : Number(rawProgress);
+  const rawDaysToTarget = source.days_to_target ?? source.daysToTarget;
+  const daysToTarget =
+    rawDaysToTarget === null || rawDaysToTarget === undefined || rawDaysToTarget === ""
+      ? null
+      : Number(rawDaysToTarget);
+  const rawDaysSinceActivity =
+    source.days_since_activity ?? source.daysSinceActivity;
+  const daysSinceActivity =
+    rawDaysSinceActivity === null ||
+    rawDaysSinceActivity === undefined ||
+    rawDaysSinceActivity === ""
+      ? null
+      : Number(rawDaysSinceActivity);
   return {
     ...normalized,
     id,
     isPrimary: Boolean(source.is_primary || source.isPrimary),
+    progress: Number.isFinite(progress) ? progress : null,
+    stalled: Boolean(source.stalled),
+    daysSinceActivity: Number.isFinite(daysSinceActivity) ? daysSinceActivity : null,
+    targetDate: cleanText(source.target_date || source.targetDate),
+    daysToTarget: Number.isFinite(daysToTarget) ? daysToTarget : null,
+    projectCount: Math.max(0, Number(source.project_count || source.projectCount) || 0),
   };
 }
 
@@ -197,6 +223,17 @@ export function normalizeGraphNode(node) {
     isPrimary: Boolean(source.is_primary || source.isPrimary),
     summary: cleanText(source.summary),
     description: cleanText(source.description),
+    // Derived goal state (project-completion progress + stall). progress is a
+    // number 0..1 or null (no projects); kept verbatim so the goal progress arc
+    // and stalled-grey rendering can read them. Whitelisted explicitly — the rest
+    // of this normalizer drops unknown fields.
+    progress:
+      typeof source.progress === "number"
+        ? source.progress
+        : source.progress === null || source.progress === undefined
+          ? null
+          : Number(source.progress),
+    stalled: Boolean(source.stalled),
     itemKind: cleanText(source.item_kind || source.itemKind),
     meta: asObject(source.meta),
     primaryAction: normalizeGraphAction(source.primary_action || source.primaryAction),
@@ -377,6 +414,7 @@ export function normalizeProfileContext(source) {
     generatedBlockText[block] =
       typeof generatedBlockRaw[block] === "string" ? generatedBlockRaw[block] : "";
   });
+  const readinessRaw = asObject(value.readiness);
   return {
     hasSkillMd: Boolean(value.has_skill_md || value.hasSkillMd),
     identityFields,
@@ -389,6 +427,12 @@ export function normalizeProfileContext(source) {
     generatedBlocks,
     generatedBlockText,
     rawMarkdown: typeof value.raw_markdown === "string" ? value.raw_markdown : "",
+    readiness: {
+      contextReady: Boolean(readinessRaw.context_ready || readinessRaw.contextReady),
+      errors: Math.max(0, Number(readinessRaw.errors) || 0),
+      warnings: Math.max(0, Number(readinessRaw.warnings) || 0),
+      ownerPath: cleanText(readinessRaw.owner_path || readinessRaw.ownerPath),
+    },
   };
 }
 
@@ -423,6 +467,7 @@ export function normalizeResumeIngest(source) {
   return {
     llmConfigured: Boolean(value.llm_configured || value.llmConfigured),
     hasPendingPatch: Boolean(value.has_pending_patch || value.hasPendingPatch),
+    allowStatusChange: Boolean(value.allow_status_change || value.allowStatusChange),
     merge,
   };
 }
@@ -437,10 +482,12 @@ export function normalizePayload(payload) {
   const graph = asObject(source.graph);
   return {
     profile: cleanText(source.profile, ""),
+    revision: cleanText(source.revision, ""),
     northStar: normalizeNorthStar(source.north_star || source.northStar),
     goal: normalizeGoal(source.goal),
     primaryGoal: normalizeGoal(source.primary_goal || source.primaryGoal || source.goal),
     activeGoals: asArray(source.active_goals || source.activeGoals).map(normalizeGoalCard),
+    allGoals: asArray(source.all_goals || source.allGoals).map(normalizeGoalCard),
     goalCounts: {
       active: Math.max(0, Number(asObject(source.goal_counts || source.goalCounts).active) || 0),
       total: Math.max(0, Number(asObject(source.goal_counts || source.goalCounts).total) || 0),
@@ -489,6 +536,26 @@ export function normalizePayload(payload) {
     canvasEmbed: asObject(source.canvas_embed || source.canvasEmbed),
     profileContext: normalizeProfileContext(source.profile_context || source.profileContext),
     resumeIngest: normalizeResumeIngest(source.resume_ingest || source.resumeIngest),
+    trends: (() => {
+      const t = asObject(source.trends);
+      const deltasRaw = asObject(t.deltas);
+      const sparkRaw = asObject(t.sparkline);
+      const deltas = {};
+      Object.keys(deltasRaw).forEach((k) => {
+        deltas[k] = Number(deltasRaw[k]) || 0;
+      });
+      const sparkline = {};
+      Object.keys(sparkRaw).forEach((k) => {
+        sparkline[k] = asArray(sparkRaw[k])
+          .map((n) => Number(n) || 0);
+      });
+      return {
+        daysBack: Math.max(1, Number(t.days_back || t.daysBack) || 7),
+        baselineDate: cleanText(t.baseline_date || t.baselineDate),
+        deltas,
+        sparkline,
+      };
+    })(),
     ai: asObject(source.ai),
     ui: asObject(source.ui),
   };
@@ -520,4 +587,89 @@ export function goalDraftFromFormData(formData) {
     alignment: cleanText(formData.get("alignment")),
     set_as_primary: formData.get("set_as_primary") === "on",
   };
+}
+
+// Parent→child CONTAINMENT relations: the real goal→project→task→evidence
+// nesting. Deliberately NARROWER than the full structural edge set — relations
+// like `supports`/`drives` link work to shared skills and to the North Star,
+// which would make almost every node transitively reachable from every goal and
+// defeat any "is this shared?" test. Containment is the spine buildGalaxyInputs
+// walks to decide a project's owning goal, so we mirror exactly that here.
+export const ARCHIVE_STRUCT_RELATIONS = new Set([
+  "contains", "alignment", "drives", "produces", "supports", "generated_by", "derives", "review",
+]);
+
+// The "work" tree-roles buildGalaxyInputs can re-parent into the synthetic
+// "Other" hub: projects (branch), tasks/outputs (leaf), evidence (fruit). The
+// archive cascade walks ONLY between these roles, which stops it at skills
+// (star), claims (constellation), the North Star (trunk) and sources (sand).
+// Those are shared hubs (every task supports a skill, every skill links to the
+// North Star); including them would make the whole graph transitively reachable
+// from any goal and the "is this shared work?" test below would always say yes.
+export const ARCHIVE_WORK_ROLES = new Set(["branch", "leaf", "fruit"]);
+
+// Ids to hide when the "show archived / paused goals" toggle is OFF: every
+// extinguished (archived|paused) goal PLUS the containment subtree that hangs
+// off it ALONE. The subtree has to go too — a project/task/evidence whose only
+// containing parent is a hidden goal would otherwise be detected as an orphan
+// and adopted into the synthetic "Other" hub (3D galaxy) or flung onto a stray
+// ring (2D flow), so toggling a goal OFF would paradoxically RELOCATE its work
+// into view instead of removing it.
+//
+// We cascade level-by-level along containment edges, not by transitive
+// reachability: a child is hidden only when EVERY one of its containing parents
+// is itself hidden. A project (or task) also contained by a still-visible goal
+// is shared work and stays — and because it stays, its own descendants are
+// reached from a visible parent and stay too. Returns an empty Set when the
+// toggle is ON or nothing is extinguished.
+// Ids to hide when the "show archived / paused goals" toggle is OFF: every
+// extinguished (archived|paused) goal PLUS the work that hangs off it ALONE.
+// The subtree has to go too — a project/task/evidence whose only parent is a
+// hidden goal would otherwise be detected as an orphan and adopted into the
+// synthetic "Other" hub (3D galaxy) or flung onto a stray ring (2D flow), so
+// toggling a goal OFF would paradoxically RELOCATE its work into view instead
+// of removing it.
+//
+// Cascade is level-by-level over work-role nodes, not transitive reachability:
+// a work node is hidden only when EVERY one of its structural parents is itself
+// hidden. A project (or task) also parented by a still-visible goal is shared
+// work and stays — and because it stays, its descendants keep a visible parent
+// and stay too. Returns an empty Set when the toggle is ON or nothing is
+// extinguished.
+export function hiddenArchivedSubtreeIds(payload, showArchived) {
+  if (showArchived) return new Set();
+  const nodes = asArray(payload?.graph?.nodes);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const isExtinguished = (n) =>
+    n && n.type === "goal" && (n.status === "archived" || n.status === "paused");
+  const extinguished = nodes.filter(isExtinguished);
+  if (!extinguished.length) return new Set();
+  const isWork = (id) => ARCHIVE_WORK_ROLES.has(byId.get(id)?.role);
+  const children = new Map(); // parent id -> [work child id]
+  const parents = new Map(); // work child id -> Set(parent id)
+  asArray(payload?.graph?.edges).forEach((e) => {
+    if (!ARCHIVE_STRUCT_RELATIONS.has(cleanText(e.relation || e.type))) return;
+    if (!isWork(e.to)) return; // only ever hide work-role nodes
+    if (!children.has(e.from)) children.set(e.from, []);
+    children.get(e.from).push(e.to);
+    if (!parents.has(e.to)) parents.set(e.to, new Set());
+    parents.get(e.to).add(e.from);
+  });
+  const hidden = new Set(extinguished.map((n) => n.id));
+  // BFS down the work tree. A node enters `hidden` only once all of its parents
+  // are hidden; then we descend into its children.
+  const queue = extinguished.map((n) => n.id);
+  while (queue.length) {
+    const id = queue.shift();
+    (children.get(id) || []).forEach((childId) => {
+      if (hidden.has(childId)) return;
+      const ps = parents.get(childId);
+      const allParentsHidden = ps && [...ps].every((p) => hidden.has(p));
+      if (allParentsHidden) {
+        hidden.add(childId);
+        queue.push(childId);
+      }
+    });
+  }
+  return hidden;
 }

@@ -21,6 +21,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const DUST_COLOR = 0x9fb0e0;
 
@@ -64,6 +65,11 @@ function makeSpaceGradient() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 2, 512);
   const tex = new THREE.CanvasTexture(c);
+  // Mark as sRGB so the tone-mapping + OutputPass pipeline round-trips it
+  // correctly. Without this the dark gradient is read as LINEAR, then ACES + sRGB
+  // re-encode brightens deep space into a washed-out blue that flattens the suns,
+  // halos and the day/night terminator into the background.
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
 }
@@ -96,6 +102,7 @@ export class GalaxyScene {
     this._orbMesh = new Map(); // nodeId -> orb mesh
     this._orbHalo = new Map(); // nodeId -> halo sprite
     this._comets = new Map(); // nodeId -> { line, positions:Float32Array, history:[Vector3] } for evidence moon trails
+    this._goalArcs = new Map(); // nodeId -> { ring, ringBg, radius } progress arc around a goal sun
     this._orbGlow = new Map(); // nodeId -> glow entry (for focus dimming)
     this._nodeOrbits = {}; // nodeId -> { parentId, a, b, tilt, swivel, baseAngle, speed }
     this._orbitOrder = []; // node ids ordered parent-before-child for animation
@@ -134,6 +141,7 @@ export class GalaxyScene {
     this._onPointerMove = this._onPointerMove.bind(this);
     this._onPointerLeave = this._onPointerLeave.bind(this);
     this._onClick = this._onClick.bind(this);
+    this._onDoubleClick = this._onDoubleClick.bind(this);
     this._animate = this._animate.bind(this);
   }
 
@@ -150,6 +158,13 @@ export class GalaxyScene {
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.setSize(this.width, this.height, false);
     renderer.setClearColor(new THREE.Color("#080c20"), 1);
+    // Tone mapping + sRGB output: without these, three.js renders emissive/bloom
+    // in raw linear space — washed-out, flat, "plastic" materials and a dim core.
+    // ACES filmic gives suns a proper bright-to-warm rolloff; exposure >1 lifts
+    // the whole scene so the North Star reads as a luminous body, not a grey ball.
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.35;
     renderer.domElement.style.display = "block";
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -158,21 +173,33 @@ export class GalaxyScene {
 
     const scene = new THREE.Scene();
     scene.background = makeSpaceGradient();
-    scene.fog = new THREE.FogExp2(0x070a1c, 0.0007);
+    // Atmospheric depth: exponential fog so the distant skill shell (≈230–270
+    // units out) recedes into the background instead of competing with the
+    // foreground goal suns — but eased back from 0.0019 so the brighter North
+    // Star light (see _coreLight) isn't swallowed and the scene isn't too black.
+    scene.fog = new THREE.FogExp2(0x070a1c, 0.0005);
     scene.add(this.linkGroup, this.trailGroup, this.selEdgeGroup, this.fxGroup, this.haloGroup, this.nodeGroup, this.labelGroup, this.focusLabelGroup);
     this.scene = scene;
 
     const camera = new THREE.PerspectiveCamera(52, this.width / this.height, 1, 4000);
-    camera.position.set(0, 150, 360);
+    camera.position.set(0, 120, 280);
     this.camera = camera;
 
-    scene.add(new THREE.AmbientLight(0x4a5a86, 1.3));
-    const key = new THREE.PointLight(0xbcd4ff, 1.1, 1600);
+    // Lighting for SELF-LUMINOUS goal stars (reverted from planet mode): goals
+    // glow on their own, so lighting just needs to model the smaller
+    // non-emissive children (projects/tasks) softly and not leave them black or
+    // plastic. Ambient eased down so the core PointLight reclaims its
+    // day/night terminator; a HemisphereLight then fills the dark side with a
+    // directional cool wash instead of a flat global lift.
+    scene.add(new THREE.AmbientLight(0x6c7aa6, 0.6));
+    scene.add(new THREE.HemisphereLight(0x2a3a66, 0x0a0f24, 0.3));
+    const key = new THREE.PointLight(0xbcd4ff, 1.0, 1600);
     key.position.set(120, 220, 200);
     scene.add(key);
-    const core = new THREE.PointLight(0xffe9b8, 1.4, 900);
+    const core = new THREE.PointLight(0xffe9b8, 2.2, 1100, 0.7);
     core.position.set(0, 10, 0);
     scene.add(core);
+    this._coreLight = core;
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -187,8 +214,14 @@ export class GalaxyScene {
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(this.width, this.height), 0.55, 0.85, 0.5);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(this.width, this.height), 0.6, 0.7, 0.65);
     composer.addPass(bloom);
+    // CRITICAL: when rendering through EffectComposer, renderer.toneMapping /
+    // outputColorSpace do NOT apply — the composer writes raw LINEAR colour to the
+    // canvas, which is why suns looked grey/flat/"plastic" and bloom never sang.
+    // OutputPass is the final pass that applies ACES tone mapping + sRGB to the
+    // composited (post-bloom) image. Without it the whole scene is washed out.
+    composer.addPass(new OutputPass());
     this.composer = composer;
     this.bloom = bloom;
 
@@ -198,6 +231,7 @@ export class GalaxyScene {
     renderer.domElement.addEventListener("pointermove", this._onPointerMove);
     renderer.domElement.addEventListener("pointerleave", this._onPointerLeave);
     renderer.domElement.addEventListener("click", this._onClick);
+    renderer.domElement.addEventListener("dblclick", this._onDoubleClick);
 
     this.raf = window.requestAnimationFrame(this._animate);
   }
@@ -214,9 +248,27 @@ export class GalaxyScene {
   }
 
   setData(graphData, sand) {
+    // Capture the previous id set BEFORE clearing the scene so we can flag
+    // newly-arrived nodes (e.g. fresh evidence/skills imported from a resume)
+    // for a one-shot bloom-in animation. First load is intentionally NOT
+    // animated — every node would shimmer, defeating the cue.
+    const prevIds = new Set(this.nodeById ? this.nodeById.keys() : []);
     this._clearScene();
     const nodes = graphData.nodes || [];
     this.nodeById = new Map(nodes.map((n) => [n.id, n]));
+    if (prevIds.size > 0) {
+      const added = new Set();
+      nodes.forEach((n) => {
+        if (n && n.id && !prevIds.has(n.id)) added.add(n.id);
+      });
+      // Cap how many things can shimmer at once — a giant resume ingest can
+      // produce 100+ new nodes, and animating them all at full brightness is
+      // both visually noisy and a GPU hit at the wrong moment.
+      this._newlyAdded = added.size > 80 ? new Set([...added].slice(0, 80)) : added;
+      this._newlyAddedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    } else {
+      this._newlyAdded = new Set();
+    }
     const posById = new Map(nodes.map((n) => [n.id, v3(n)]));
     this._posById = posById;
 
@@ -267,6 +319,7 @@ export class GalaxyScene {
     // frame we can compose nested orbits (a project follows its moving goal). ----
     this._nodeOrbits = graphData.nodeOrbits || {};
     this._roleById = new Map(nodes.map((n) => [n.id, n.role]));
+    this._statusById = new Map(nodes.map((n) => [n.id, String(n.status || "")]));
     this._childrenByParent = new Map();
     Object.entries(this._nodeOrbits).forEach(([id, o]) => {
       if (!o || !o.parentId) return;
@@ -333,13 +386,16 @@ export class GalaxyScene {
 
   _addCoreGlow(pos) {
     if (!pos) return;
-    // Bright core sphere + layered halo sprites.
+    // Bright core sphere + layered halo sprites. The North Star is the centre of
+    // gravity, so it must read as the single largest body — sized clearly above
+    // the biggest goal sun (goals cap at ~18, see _addOrb → core ≈ 1.8x). Halos
+    // scale with it.
     const orb = new THREE.Mesh(
-      new THREE.SphereGeometry(8, 28, 22),
+      new THREE.SphereGeometry(32, 28, 22),
       new THREE.MeshStandardMaterial({
         color: 0xffe9b8,
         emissive: 0xffd98f,
-        emissiveIntensity: 0.9,
+        emissiveIntensity: 1.5,
         roughness: 0.35,
       }),
     );
@@ -348,7 +404,7 @@ export class GalaxyScene {
     this.nodeGroup.add(orb);
     if (orb.userData.node) this.pickables.push(orb);
     this._coreOrb = orb;
-    this._coreHalos = [this._addHalo(pos, 0xffe6ad, 52, 0.7), this._addHalo(pos, 0xffcf80, 104, 0.3)];
+    this._coreHalos = [this._addHalo(pos, 0xffe6ad, 120, 0.7), this._addHalo(pos, 0xffcf80, 230, 0.3)];
   }
 
   _addHalo(pos, color, size, opacity) {
@@ -387,16 +443,28 @@ export class GalaxyScene {
     if (moon) {
       r = 0.55;
     } else if (node.role === "direction") {
-      // Goals are suns: `val` carries subtree mass (≈11..26), so let the radius
-      // ride that full range (≈8..17) instead of clamping it like a child orb.
-      // A goal must always out-size the projects orbiting it.
-      r = Math.max(8, Math.min(17, 4 + val * 0.52)) * (weight.radius || 1);
+      // Goals are suns: `val` carries subtree mass (≈11..18), so let the radius
+      // ride a moderate range (≈12..18). A goal must always out-size the projects
+      // orbiting it, yet stay clearly UNDER the North Star core (32, ≈1.8x the
+      // biggest goal) so the centre of gravity reads as the single largest body.
+      r = Math.max(12, Math.min(18, 7 + val * 0.5)) * (weight.radius || 1);
     } else {
-      // Children stay in a modest band well under the goal sun: projects a touch
-      // bigger than tasks/evidence, all clamped so a busy project never rivals a
-      // goal. `val` here is the degree-based size (≈3..9).
-      const baseR = node.role === "branch" ? 3.6 : node.role === "constellation" ? 3.4 : 3.0;
-      r = Math.max(2.2, Math.min(6.4, baseR * (0.7 + Math.min(1.0, val / 9)) * (weight.radius || 1)));
+      // Children get PER-ROLE size bands so a node's tier is readable from size
+      // alone (the strongest pre-attentive channel): projects clearly out-size
+      // tasks, tasks out-size evidence, none of them rival a goal sun. `val` here
+      // is the degree-based size (≈3..9). Bands: project 5..9, task 2.5..4.5,
+      // other children (constellation/output) ≈3..5.
+      const ride = 0.7 + Math.min(1.0, val / 9);
+      if (node.role === "branch") {
+        // Project.
+        r = Math.max(5, Math.min(9, 5 * ride)) * (weight.radius || 1);
+      } else if (node.role === "leaf") {
+        // Task / output.
+        r = Math.max(2.5, Math.min(4.5, 2.6 * ride)) * (weight.radius || 1);
+      } else {
+        // Project-tied evidence (fruit), claims (constellation), misc children.
+        r = Math.max(2.2, Math.min(5, 2.8 * ride)) * (weight.radius || 1);
+      }
     }
 
     // Planet-like material: a touch of metalness + lower roughness give a soft
@@ -405,16 +473,60 @@ export class GalaxyScene {
     // matte + dim. Moons (a task's generated-evidence satellite) are tiny but the
     // brightest body on screen — a sparkling firefly whose mere presence signals
     // "this task has already produced evidence".
-    const baseEmissive = placeholder ? 0.22 : moon ? 1.6 : 0.62;
-    const baseOpacity = placeholder ? 0.5 : 0.96;
+    //
+    // Goal suns are rendered as PLANETS lit by the North Star, NOT as self-glowing
+    // stars: the only warm light in the scene comes from the core PointLight, so
+    // each goal shows a lit core-facing hemisphere and a shadowed far side — a
+    // real day/night terminator. Progress is carried by SIZE (see main.jsx val),
+    // not brightness; a stalled goal desaturates toward grey + dims its faint
+    // ember so "stopped work" still reads pre-attentively as a cooling world.
+    const isGoal = node.role === "direction";
+    const stalled = isGoal && Boolean(node.stalled);
+    // Non-active goal lifecycle: completed = cool stable white star (achievement),
+    // archived/paused = burnt-out grey ember. Reads as "history" instead of
+    // disappearing — keeps the sense of accomplishment + the past trajectory.
+    const goalStatus = isGoal ? String(node.status || "active") : "";
+    const isCompletedGoal = goalStatus === "completed";
+    const isExtinguishedGoal = goalStatus === "archived" || goalStatus === "paused";
+    if (isGoal && !placeholder) {
+      // Self-luminous star: warm-white only nudges the hue so an active goal
+      // keeps its goal-coloured identity (the per-goal hashed colour) and a
+      // stalled goal cools by a small amount instead of flattening to grey.
+      // Previously a stalled goal lerped 0.5 into a steel-grey, which made
+      // EVERY goal in a profile that had not been touched recently read as
+      // generic dead matter — defeating the point of distinct goal colours.
+      color.lerp(new THREE.Color("#fff4e0"), stalled ? 0.18 : 0.35);
+      if (stalled) {
+        // Slight cool desat (still keeps the underlying hue legible).
+        color.lerp(new THREE.Color("#a8b1c5"), 0.18);
+      }
+      if (isCompletedGoal) {
+        color.lerp(new THREE.Color("#dde6ff"), 0.55);
+      } else if (isExtinguishedGoal) {
+        color.lerp(new THREE.Color("#6b7384"), 0.65);
+      }
+    }
+    let baseEmissive = placeholder ? 0.22 : moon ? 1.6 : 0.62;
+    if (isGoal && !placeholder) {
+      if (isExtinguishedGoal) {
+        baseEmissive = 0.3;
+      } else if (isCompletedGoal) {
+        baseEmissive = 0.95;
+      } else {
+        // Active goals: strong but under bloom threshold so core light still
+        // sculpts a day/night terminator instead of frying the whole sphere.
+        baseEmissive = stalled ? 0.7 : 1.0;
+      }
+    }
+    const baseOpacity = placeholder ? 0.5 : isExtinguishedGoal ? 0.78 : 0.98;
     const orb = new THREE.Mesh(
       new THREE.SphereGeometry(r, 32, 24),
       new THREE.MeshStandardMaterial({
         color,
         emissive: color.clone().multiplyScalar(0.9),
         emissiveIntensity: baseEmissive,
-        roughness: placeholder ? 0.7 : 0.42,
-        metalness: placeholder ? 0.0 : 0.22,
+        roughness: placeholder ? 0.7 : isGoal ? 0.55 : 0.42,
+        metalness: placeholder ? 0.0 : isGoal ? 0.1 : 0.22,
         transparent: true,
         opacity: baseOpacity,
       }),
@@ -430,48 +542,162 @@ export class GalaxyScene {
 
     // Glow halo, dimmer for placeholders; the moon keeps a tight vivid halo a few
     // times its (tiny) radius so the little comet nucleus twinkles bright without
-    // growing into a disc.
+    // growing into a disc. Goals (planet mode) get only a SMALL, faint halo: a
+    // big additive bloom would wash out the North-Star day/night terminator that
+    // is the whole point, so we keep it tight so the lit/shadow line stays crisp.
     const haloColor = color.clone().lerp(new THREE.Color("#ffffff"), moon ? 0.6 : 0.25);
-    const halo = this._addHalo(pos, haloColor.getHex(), moon ? 3.4 : r * (placeholder ? 2.4 : 3.4), placeholder ? 0.16 : moon ? 0.8 : 0.42);
+    const haloScale = moon ? 3.4 : isGoal ? r * 1.5 : r * (placeholder ? 2.4 : 3.4);
+    const haloOpacity = placeholder ? 0.16 : moon ? 0.8 : isGoal ? 0.18 : 0.42;
+    const halo = this._addHalo(pos, haloColor.getHex(), haloScale, haloOpacity);
     // Track for orbital animation: orb + halo move together each frame.
     this._orbMesh.set(node.id, orb);
     this._orbHalo.set(node.id, halo);
 
+    // Overview "produced evidence" cue: tasks with attached evidence get a
+    // small static halo (no comet — that's a focused-mode detail). Preserves
+    // the "this task has produced something" signal in zoomed-out view
+    // without the high-speed comet noise.
+    if (node.hasEvidence && !moon && node.role === "leaf" && !placeholder) {
+      const evidenceHalo = this._addHalo(
+        pos,
+        new THREE.Color("#f4c97a").getHex(),
+        r * 2.1,
+        0.34,
+      );
+      this._orbHalo.set(`${node.id}::evidence`, evidenceHalo);
+    }
+
+    // Goal progress arc: a thin ring around the goal whose lit sweep = derived
+    // project-completion progress (0..1). Progress is carried by this ARC, never
+    // by the goal's size or brightness, so importance (size) / lit-by-North-Star
+    // (brightness) / progress (arc) stay three independent channels.
+    if (isGoal && !placeholder && typeof node.progress === "number") {
+      this._addGoalProgressArc(node.id, r, node.progress, color, stalled);
+    }
+
     // Evidence moons get a fading comet trail — a vertex-coloured line whose tail
     // dims to nothing. The whipping comet (head + trail) is the sole cue that this
     // task has produced evidence, so the tier-3 orbit ring is intentionally absent.
-    if (moon) this._addCometTrail(node.id, color);
+    if (moon) this._addCometTrail(node.id, color, node);
   }
 
-  _addCometTrail(id, color) {
-    const LEN = 26; // trail samples (head → tail)
+  // A progress ring around a goal: a faint full background annulus + a bright
+  // foreground arc swept to `progress` (0..1). Built from filled RingGeometry
+  // (NOT THREE.Line — WebGL caps line width at 1px, so a line ring is nearly
+  // invisible). This is the ONLY channel that encodes derived project-completion
+  // progress — size stays mass, brightness stays North-Star lighting. Tracked in
+  // the per-frame loop so it stays glued + camera-facing as the goal orbits.
+  _addGoalProgressArc(id, orbR, progress, color, stalled) {
+    const p = Math.max(0, Math.min(1, Number(progress) || 0));
+    // Slim halo ring, hugging the goal: a 0.9-unit thick band ~1.4 units off
+    // the surface. The earlier 3-unit thick band sitting 3.5 units out felt
+    // like Saturn's rings — visually dominant + ugly. With a tighter, thinner
+    // band the progress reads as a subtle bracelet on the goal, not the main
+    // event.
+    const inner = orbR + 1.4;
+    const outer = orbR + 2.3;
+    const TAU = Math.PI * 2;
+    const arcColor = stalled ? new THREE.Color("#9aa0ad") : color.clone().lerp(new THREE.Color("#ffffff"), 0.35);
+
+    const group = new THREE.Group();
+
+    // Faint full-circle track (the "100%" reference) so a 20% arc reads as
+    // "20% of a ring" rather than a stray sliver.
+    const bg = new THREE.Mesh(
+      new THREE.RingGeometry(inner, outer, 96),
+      new THREE.MeshBasicMaterial({ color: 0x7889b4, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    group.add(bg);
+
+    // Bright foreground arc sweeping p·TAU from the top (12 o'clock), clockwise.
+    if (p > 0.001) {
+      const arc = new THREE.Mesh(
+        new THREE.RingGeometry(inner, outer, Math.max(3, Math.round(96 * p)), 1, Math.PI / 2 - p * TAU, p * TAU),
+        new THREE.MeshBasicMaterial({ color: arcColor.getHex(), transparent: true, opacity: stalled ? 0.55 : 0.85, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      group.add(arc);
+    }
+
+    group.userData.isGoalArc = true;
+    this.haloGroup.add(group);
+    this._goalArcs.set(id, { group, radius: outer });
+  }
+
+  // Map evidence quality to comet visuals. Defaults give every comet enough
+  // tail + brightness to be visible (the earlier defaults bottomed out at
+  // strength=0.35 / LEN=18 and made unrated evidence vanish on dark stages).
+  _cometProfile(node) {
+    const meta = (node && node.meta) || {};
+    const strength = String(meta.strength || "").toLowerCase();
+    const review = String(meta.review_status || (node && node.status) || "").toLowerCase();
+    const reviewed = review === "reviewed" || review === "accepted" || review === "verified";
+    let strengthScore;
+    if (strength === "strong" || strength === "high" || strength === "high_trust" || strength === "very_high") {
+      strengthScore = 1;
+    } else if (strength === "medium" || strength === "moderate" || strength === "mid" || strength === "ok") {
+      strengthScore = 0.7;
+    } else if (strength === "weak" || strength === "low" || strength === "low_trust" || strength === "draft") {
+      strengthScore = 0.45;
+    } else if (strength) {
+      // Unknown bucket — give it the default high-confidence "evidence exists"
+      // baseline rather than punishing it for not matching our enum.
+      strengthScore = 0.75;
+    } else {
+      strengthScore = 0.65;
+    }
+    const len = Math.round(18 + strengthScore * 20); // 18..38 samples, always visibly long
+    const headGlow = 0.75 + strengthScore * 0.25;    // 0.75..1.0 — comet head always bright
+    const tailWhitePeak = reviewed ? 0.55 : 0.32;    // unreviewed dims tip, still glows
+    let recencyDays = null;
+    const dateStr = String(meta.date || "");
+    if (dateStr) {
+      const t = Date.parse(dateStr);
+      if (!Number.isNaN(t)) {
+        recencyDays = Math.max(0, (Date.now() - t) / (1000 * 60 * 60 * 24));
+      }
+    }
+    // Recency NEVER drops the speed below 1.0 — older items just don't get the
+    // fresh-evidence boost. Previously we let recency throttle tier-3 orbits
+    // down to 0.55x, which combined with the focus-graded 0.29x slowdown made
+    // the comets nearly static. Now: undated = 1, fresh = 1.25, otherwise 1.
+    const recencyBoost =
+      recencyDays === null ? 1 : recencyDays < 7 ? 1.25 : recencyDays < 30 ? 1.05 : 1.0;
+    return { len, headGlow, tailWhitePeak, reviewed, strengthScore, recencyBoost };
+  }
+
+  _addCometTrail(id, color, node = null) {
+    const profile = this._cometProfile(node);
+    const LEN = profile.len;
     const positions = new Float32Array(LEN * 3);
     const colors = new Float32Array(LEN * 3);
     const geom = new THREE.BufferGeometry();
     for (let i = 0; i < LEN; i += 1) {
-      // Tail fades to black (additive blending → fades to invisible). The head end
-      // is pushed toward white so the leading point sparkles like a bright comet
-      // nucleus regardless of the evidence's own (purple) colour.
-      const f = 1 - i / (LEN - 1); // 1 at head → 0 at tail
-      const headGlow = Math.pow(f, 1.6); // concentrate brightness near the head
-      const white = 0.55 * Math.pow(f, 6); // only the very tip whitens
-      colors[i * 3] = Math.min(1, color.r * headGlow + white);
-      colors[i * 3 + 1] = Math.min(1, color.g * headGlow + white);
-      colors[i * 3 + 2] = Math.min(1, color.b * headGlow + white);
+      // Tail fades to black (additive blending → fades to invisible). Head
+      // brightness rides `strength` (stronger evidence = brighter head); only
+      // reviewed items get the bright-white nucleus tip, so unreviewed drafts
+      // read as "in flight, not yet vouched for".
+      const f = 1 - i / (LEN - 1);
+      const headIntensity = Math.pow(f, 1.6) * profile.headGlow;
+      const white = profile.tailWhitePeak * Math.pow(f, 6);
+      colors[i * 3] = Math.min(1, color.r * headIntensity + white);
+      colors[i * 3 + 1] = Math.min(1, color.g * headIntensity + white);
+      colors[i * 3 + 2] = Math.min(1, color.b * headIntensity + white);
     }
     geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.95,
+      // Reviewed comets sit at full glow; unreviewed dim a touch so a batch
+      // of new drafts does not strobe the user.
+      opacity: profile.reviewed ? 0.95 : 0.78,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const line = new THREE.Line(geom, mat);
     line.frustumCulled = false;
     this.trailGroup.add(line);
-    this._comets.set(id, { line, positions, history: [] });
+    this._comets.set(id, { line, positions, history: [], recencyBoost: profile.recencyBoost });
   }
 
   _advanceComet(comet, head) {
@@ -539,22 +765,41 @@ export class GalaxyScene {
     line.userData.parentId = orbit.parentId || null;
     line.userData.baseCenter = new THREE.Vector3(center.x, center.y, center.z);
     line.userData.baseOpacity = ringOpacity;
+    line.userData.tier = orbit.tier || null;
     this.linkGroup.add(line);
   }
 
-  _addSelectionEdge(a, b, color) {
+  _addSelectionEdge(a, b, color, options = {}) {
+    const { dashed = false, dashSize = 4, gapSize = 3, lineWidth = 1, completed = false } = options;
     const mid = a.clone().lerp(b, 0.5);
     mid.y += a.distanceTo(b) * 0.12;
     const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
     const geom = new THREE.BufferGeometry().setFromPoints(curve.getPoints(20));
-    const mat = new THREE.LineBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.7,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
+    // Completed paths (e.g. a task → reviewed evidence → lit skill chain) get
+    // a warm gold relight so the user can scan the canvas for "where did
+    // things actually pay off". Everything else keeps its semantic colour.
+    const finalColor = completed ? 0xffcf6b : color;
+    const mat = dashed
+      ? new THREE.LineDashedMaterial({
+          color: finalColor,
+          transparent: true,
+          opacity: completed ? 0.92 : 0.75,
+          dashSize,
+          gapSize,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          linewidth: lineWidth,
+        })
+      : new THREE.LineBasicMaterial({
+          color: finalColor,
+          transparent: true,
+          opacity: completed ? 0.92 : 0.7,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          linewidth: lineWidth,
+        });
     const line = new THREE.Line(geom, mat);
+    if (dashed) line.computeLineDistances();
     this.selEdgeGroup.add(line);
     return line;
   }
@@ -714,8 +959,30 @@ export class GalaxyScene {
         const otherId = e.source === sel ? e.target : e.source;
         const other = this._posById.get(otherId);
         if (!other) return;
-        const color = e.relation === "supports" || e.relation === "derives" ? 0x9fc0ff : 0xffd9a0;
-        const line = this._addSelectionEdge(here, other, color);
+        // Relation-typed visual encoding so the user can read structural ties
+        // (contains/alignment = solid hierarchy) apart from semantic ones
+        // (supports/derives = derivation, dashed). The colour palette stays
+        // close to the original blue/gold split so the new dashing is the
+        // only addition for the resting case.
+        const relation = String(e.relation || "");
+        const isContainment = relation === "contains" || relation === "alignment";
+        const isProduction = relation === "generated_by" || relation === "produces";
+        const isDerivation = relation === "supports" || relation === "derives";
+        const color =
+          isDerivation ? 0x9fc0ff :
+          isProduction ? 0xc8a6ff :
+          0xffd9a0;
+        // Goal/project status drives the "completed = gold" relight: an
+        // archived/paused goal does NOT glow gold, but a done task/evidence
+        // pair does, since the chain actually paid off.
+        const aStatus = this._statusById && this._statusById.get(e.source);
+        const bStatus = this._statusById && this._statusById.get(e.target);
+        const completed =
+          aStatus === "completed" || bStatus === "completed" ||
+          aStatus === "reviewed" || bStatus === "reviewed" ||
+          aStatus === "done" || bStatus === "done";
+        const dashed = isDerivation;
+        const line = this._addSelectionEdge(here, other, color, { dashed, completed });
         this._selEdgePairs.push({ line, aId: sel, bId: otherId });
       });
     }
@@ -751,6 +1018,11 @@ export class GalaxyScene {
         const curve = new THREE.QuadraticBezierCurve3(here, mid, other);
         line.geometry.setFromPoints(curve.getPoints(20));
         line.geometry.attributes.position.needsUpdate = true;
+        // Dashed lines need their per-vertex distance attribute refreshed on
+        // every reposition or the dash pattern walks/sticks as the line moves.
+        if (line.material && line.material.isLineDashedMaterial) {
+          line.computeLineDistances();
+        }
       });
     }
   }
@@ -780,7 +1052,7 @@ export class GalaxyScene {
     const center = box.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z, 80);
     const fov = (this.camera.fov * Math.PI) / 180;
-    let dist = (maxDim / 2 / Math.tan(fov / 2)) * 1.1;
+    let dist = (maxDim / 2 / Math.tan(fov / 2)) * 0.85;
     dist = Math.max(this.controls.minDistance + 20, Math.min(this.controls.maxDistance - 20, dist));
     // A 3/4 side view (moderate elevation) so orbits read as ellipses AND the
     // source spiral below is visible — not a flat top-down map.
@@ -846,6 +1118,10 @@ export class GalaxyScene {
     const inFocus = focus ? this._descendantsOf(focus) : null;
 
     // Orbs (direction/branch/leaf/fruit/constellation — stars live in the field).
+    // At OVERVIEW (no focus) we cull aggressively so the resting view is just the
+    // North Star + goal suns: tasks/evidence/claims hide, projects dim to faint
+    // pips. They reveal on goal focus. This turns the "dot-cloud blob" into a
+    // readable map. In a FOCUSED goal, only that subsystem stays lit.
     this._orbMesh.forEach((mesh, id) => {
       const role = this._roleById.get(id);
       let level = 1;
@@ -853,10 +1129,18 @@ export class GalaxyScene {
         if (inFocus.has(id)) level = 1;
         else if (role === "constellation") level = 0.32; // claims fade to context
         else level = 0; // North Star siblings + their subtrees hide
+      } else {
+        // Overview level-of-detail.
+        if (role === "direction") level = 1; // goal suns: the named map
+        else if (role === "branch") level = 0.35; // projects: faint pips
+        else if (role === "leaf" && mesh.userData.node?.hasEvidence) level = 0.32; // tasks-with-evidence: faint produced cue
+        else level = 0; // tasks, evidence, claims: hidden until you focus a goal
       }
       this._setMeshLOD(mesh, level);
       const halo = this._orbHalo.get(id);
       if (halo && halo.userData.glow) halo.userData.glow.vis = level;
+      const evHalo = this._orbHalo.get(`${id}::evidence`);
+      if (evHalo && evHalo.userData.glow) evHalo.userData.glow.vis = level;
       // Comet trail dims with its own node (the evidence moon).
       const comet = this._comets.get(id);
       if (comet) {
@@ -865,46 +1149,58 @@ export class GalaxyScene {
       }
     });
 
-    // North Star core: hidden while a goal subsystem is focused.
+    // North Star core: hidden while a goal subsystem is focused, dominant at overview.
     const coreLevel = focus ? 0 : 1;
     this._setMeshLOD(this._coreOrb, coreLevel);
     this._coreHalos.forEach((h) => {
       if (h && h.userData.glow) h.userData.glow.vis = coreLevel;
     });
 
-    // Orbit rings: keep only the focused subsystem's inner rings (projects around
-    // the goal, satellites around projects). Core-level rings (goal orbits +
-    // orphan rings) hide so the goal reads as its own little system.
+    // Orbit rings. Focused: keep only the focused subsystem's inner rings. Overview:
+    // keep only the goal orbit rings (parentId === core) as faint alignment lines;
+    // hide tier-2/3 (project/task/evidence) rings so 50 rings collapse to a handful.
     this.linkGroup.children.forEach((line) => {
       const pid = line.userData ? line.userData.parentId : null;
+      const tier = line.userData ? line.userData.tier : null;
       const baseOp = (line.userData && line.userData.baseOpacity) || 0.26;
       let level = 1;
-      if (focus) level = pid && inFocus.has(pid) && pid !== this._coreId ? 1 : 0;
+      if (focus) {
+        level = pid && inFocus.has(pid) && pid !== this._coreId ? 1 : 0;
+      } else {
+        // Overview: only goal orbits (tier 1 around the core / orphan core rings).
+        level = pid === this._coreId || tier === 1 ? 1 : 0;
+      }
       line.visible = level > 0.02;
       if (line.material) line.material.opacity = baseOp * level;
     });
 
-    // Skill shell + sand stay visible (the outer reference); gently dim the skill
-    // field when focused so the active subsystem reads as nearer.
+    // Skill shell + sand stay visible (the outer reference). Dim it both when
+    // focused (active subsystem reads nearer) AND at overview (it's background
+    // context that shouldn't compete with the goal suns).
     if (this.skillField && this.skillField.points.material.uniforms.uDim) {
-      this.skillField.points.material.uniforms.uDim.value = focus ? 0.55 : 1;
+      this.skillField.points.material.uniforms.uDim.value = focus ? 0.55 : 0.7;
     }
-    // Constellation figure-lines + category labels dim alongside the skill field.
-    const constLevel = focus ? 0.55 : 1;
+    // Constellation figure-lines dim as background context, but the category
+    // LABELS stay readable (the user needs to read the constellation names) —
+    // labels get their own higher level than the faint lines.
+    const constLineLevel = focus ? 0.5 : 0.6;
+    const constLabelLevel = focus ? 0.7 : 0.95;
     this._constLines.forEach((segs) => {
-      if (segs.material) segs.material.opacity = (segs.userData.baseOpacity || 0.16) * constLevel;
+      if (segs.material) segs.material.opacity = (segs.userData.baseOpacity || 0.16) * constLineLevel;
     });
     this._constLabels.forEach((sprite) => {
-      if (sprite.material) sprite.material.opacity = (sprite.userData.baseOpacity || 0.86) * constLevel;
+      if (sprite.material) sprite.material.opacity = (sprite.userData.baseOpacity || 0.86) * constLabelLevel;
     });
 
     this._rebuildFocusLabels();
   }
 
-  // Persistent name tags for the focused goal + its projects. Unlike the
-  // selection label (one node, rebuilt on select), these stay up the whole time a
-  // goal is open so the user — who is driving — always sees what each project is.
-  // The per-frame loop keeps them glued to the orbiting orbs (_repositionFocusLabels).
+  // Persistent name tags. In a focused goal: the goal + its direct projects. At
+  // overview (no focus): the North Star + every goal sun, so the resting view is a
+  // NAMED map of suns rather than a field of anonymous dots — the single biggest
+  // legibility win. Unlike the selection label (one node, rebuilt on select),
+  // these stay up so the user always sees what each sun is. The per-frame loop
+  // keeps them glued to the orbiting orbs (_repositionFocusLabels).
   _rebuildFocusLabels() {
     while (this.focusLabelGroup.children.length) {
       const c = this.focusLabelGroup.children.pop();
@@ -913,9 +1209,36 @@ export class GalaxyScene {
       this.focusLabelGroup.remove(c);
     }
     this._focusLabels = [];
+    if (!this.makeLabel) return;
     const focus = this._focusRootId;
-    if (!focus || !this.makeLabel) return;
-    // Label the goal itself + every direct project (role "branch") under it.
+
+    // Overview: label the North Star (trunk) + each goal (direction). Goals are
+    // the only nodes drawn at full size at overview (see _applyLevelOfDetail), so
+    // only they get names; projects/tasks/evidence reveal their labels on focus.
+    if (!focus) {
+      const overviewIds = [];
+      if (this._coreId) overviewIds.push(this._coreId);
+      this.nodeById.forEach((n, id) => {
+        if (n.role === "direction") overviewIds.push(id);
+      });
+      overviewIds.forEach((id) => {
+        const node = this.nodeById.get(id);
+        if (!node) return;
+        const isCore = id === this._coreId;
+        const sprite = this.makeLabel(node, isCore);
+        if (!sprite) return;
+        if (isCore) sprite.scale.multiplyScalar(1.5);
+        sprite.userData.baseOpacity = sprite.material.opacity;
+        const r = isCore ? 28 : 18;
+        sprite.userData.offsetY = r + 8;
+        this.focusLabelGroup.add(sprite);
+        this._focusLabels.push({ sprite, nodeId: id });
+      });
+      this._repositionFocusLabels();
+      return;
+    }
+
+    // Focused goal: the goal itself + every direct project (role "branch") under it.
     const ids = [focus, ...(this._childrenByParent.get(focus) || []).filter((id) => this._roleById.get(id) === "branch")];
     ids.forEach((id) => {
       const node = this.nodeById.get(id);
@@ -934,9 +1257,73 @@ export class GalaxyScene {
 
   _repositionFocusLabels() {
     if (!this._focusLabels.length) return;
+    // Screen-space LOD pass: project each label to clip space, clamp its
+    // on-screen height to 11–28px (so distant labels do not vanish and near
+    // ones do not blow up), and greedily hide overlapping siblings — keep one
+    // label per ~80×24px bucket. Without this, sprites either disappear past
+    // ~150 world units or pile into an unreadable mash on top of each other.
+    const camera = this.camera;
+    if (!camera) {
+      this._focusLabels.forEach(({ sprite, nodeId }) => {
+        const p = this._livePos.get(nodeId) || this._posById.get(nodeId);
+        if (p) sprite.position.set(p.x, p.y + (sprite.userData.offsetY || 12), p.z);
+      });
+      return;
+    }
+    const projection = new THREE.Vector3();
+    const renderer = this.renderer;
+    const sizeVec = renderer && renderer.getSize ? renderer.getSize(new THREE.Vector2()) : new THREE.Vector2(800, 500);
+    const viewportH = Math.max(120, sizeVec.y || 500);
+    const viewportW = Math.max(120, sizeVec.x || 800);
+    const occupied = new Map(); // bucket key -> priority
+    const BUCKET_W = 80;
+    const BUCKET_H = 24;
+    const items = [];
     this._focusLabels.forEach(({ sprite, nodeId }) => {
       const p = this._livePos.get(nodeId) || this._posById.get(nodeId);
-      if (p) sprite.position.set(p.x, p.y + (sprite.userData.offsetY || 12), p.z);
+      if (!p) return;
+      sprite.position.set(p.x, p.y + (sprite.userData.offsetY || 12), p.z);
+      projection.copy(sprite.position).project(camera);
+      const inFront = projection.z < 1 && projection.z > -1;
+      if (!inFront) {
+        sprite.visible = false;
+        return;
+      }
+      const screenX = (projection.x * 0.5 + 0.5) * viewportW;
+      const screenY = (1 - (projection.y * 0.5 + 0.5)) * viewportH;
+      // Priority by role: north star > goal > selected > project > task > evidence.
+      const role = this._roleById.get(nodeId);
+      const priority = role === "trunk" ? 0 : role === "direction" ? 1 : nodeId === this.selectedId ? 2 : role === "branch" ? 3 : role === "leaf" ? 4 : 5;
+      items.push({ sprite, nodeId, screenX, screenY, priority, projZ: projection.z });
+    });
+    items.sort((a, b) => a.priority - b.priority || a.projZ - b.projZ);
+    items.forEach((item) => {
+      const bx = Math.floor(item.screenX / BUCKET_W);
+      const by = Math.floor(item.screenY / BUCKET_H);
+      const key = `${bx}:${by}`;
+      if (occupied.has(key)) {
+        item.sprite.visible = false;
+        return;
+      }
+      occupied.set(key, item.priority);
+      item.sprite.visible = true;
+      // Clamp on-screen height by adjusting sprite world scale: distance from
+      // camera ∝ how much world-space the sprite eats per CSS pixel.
+      const dist = Math.max(1, item.sprite.position.distanceTo(camera.position));
+      const fovRad = ((camera.fov || 50) * Math.PI) / 180;
+      const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / viewportH;
+      const baseHeight = item.sprite.userData.baseLabelHeight || item.sprite.scale.y || 6;
+      if (!item.sprite.userData.baseLabelHeight) {
+        item.sprite.userData.baseLabelHeight = baseHeight;
+      }
+      const targetPx = item.priority <= 1 ? 22 : item.priority === 2 ? 20 : 14;
+      const targetWorld = targetPx * worldPerPixel;
+      const k = Math.max(0.45, Math.min(2.6, targetWorld / baseHeight));
+      const aspect = item.sprite.userData.baseAspect || (item.sprite.scale.x / item.sprite.scale.y);
+      if (!item.sprite.userData.baseAspect) {
+        item.sprite.userData.baseAspect = aspect;
+      }
+      item.sprite.scale.set(baseHeight * k * aspect, baseHeight * k, 1);
     });
   }
 
@@ -979,7 +1366,10 @@ export class GalaxyScene {
     const span = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(span.x, span.y, span.z, subtreeR * 2, 44);
     const fov = (this.camera.fov * Math.PI) / 180;
-    let dist = (maxDim / 2 / Math.tan(fov / 2)) * 1.25;
+    // Pad generously (1.6x) so the whole focused subsystem has breathing room and
+    // its tiers don't crowd the frame edges — 1.25x sat the rings right against
+    // the viewport.
+    let dist = (maxDim / 2 / Math.tan(fov / 2)) * 1.6;
     dist = Math.max(this.controls.minDistance + 8, Math.min(this.controls.maxDistance - 20, dist));
     const dir = new THREE.Vector3(0.15, 0.5, 1).normalize();
     this._tweenCamera(center.clone().add(dir.multiplyScalar(dist)), center, duration);
@@ -1013,6 +1403,8 @@ export class GalaxyScene {
 
   _onPointerDown(event) {
     this._downXY = { x: event.clientX, y: event.clientY };
+    this._downAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    this._lastInteractionAt = this._downAt;
     if (this.controls) this.controls.autoRotate = false;
     if (this._resumeTimer) window.clearTimeout(this._resumeTimer);
     this._resumeTimer = window.setTimeout(() => {
@@ -1030,6 +1422,7 @@ export class GalaxyScene {
   }
 
   _onPointerMove(event) {
+    this._lastInteractionAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (this._hoverScheduled) return;
     this._hoverScheduled = true;
     window.requestAnimationFrame(() => {
@@ -1062,24 +1455,53 @@ export class GalaxyScene {
   }
 
   _onClick(event) {
+    // Drag / long-press guards — anything that looks like a controlled gesture
+    // (long press or > ~8px screen drift) should NOT register as a click. The
+    // earlier ~6px threshold was too tight: a noisy trackpad would fire clicks
+    // mid-orbit. 64 squared ≈ 8px tolerance, in line with browser defaults.
     if (this._downXY) {
       const dx = event.clientX - this._downXY.x;
       const dy = event.clientY - this._downXY.y;
-      if (dx * dx + dy * dy > 36) return;
+      if (dx * dx + dy * dy > 64) return;
     }
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (this._downAt && now - this._downAt > 250) return; // long press = drag intent
     this._pointerNDC(event);
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(this.pickables, true);
     if (hits.length) {
       const node = this._resolvePick(hits[0].object);
       if (node) {
+        // Single click = SELECT ONLY (cheap, reversible). Focus / drill is
+        // reserved for double click (an explicit "open" gesture); this stops
+        // an accidental click while orbiting from yanking the camera into a
+        // sub-galaxy the user did not ask for.
+        this.onSelect?.(node.id);
+        return;
+      }
+    }
+    // Empty single click = clear selection, but DO NOT fit() — that camera
+    // tween is a big reversible action and should require an explicit double
+    // click on empty space (see _onDoubleClick below).
+    this.onSelect?.("");
+  }
+
+  _onDoubleClick(event) {
+    this._pointerNDC(event);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObjects(this.pickables, true);
+    if (hits.length) {
+      const node = this._resolvePick(hits[0].object);
+      if (node) {
+        // Double click = explicit drill / open: select then focus, the same
+        // big move the legend chips and search results trigger.
         this.onSelect?.(node.id);
         this.focus(node);
         return;
       }
     }
-    // Clicking empty space exits the focused subsystem: clear the React selection
-    // (so focusedGoalId resets to overview) and frame the whole galaxy.
+    // Empty double click = framing reset (Fit). Pair with the single-click
+    // "select nothing" so the two gestures are: light/reversible vs. heavy.
     this.onSelect?.("");
     this.fit();
   }
@@ -1088,13 +1510,46 @@ export class GalaxyScene {
 
   _updateOrbits(t) {
     if (!this._orbitOrder.length) return;
+    // Per-frame delta for phase accumulation (so a speed multiplier can change
+    // without the body jumping — phase continues smoothly from where it was).
+    // Clamped so a pause/resume of orbit motion can't inject a huge jump.
+    const dt = this._lastOrbitT == null ? 0 : Math.min(0.1, Math.max(0, t - this._lastOrbitT));
+    this._lastOrbitT = t;
     const core = this._livePos.get(this._coreId);
     for (let i = 0; i < this._orbitOrder.length; i += 1) {
       const id = this._orbitOrder[i];
       const o = this._nodeOrbits[id];
       if (!o) continue;
       const center = this._livePos.get(o.parentId) || (core || new THREE.Vector3());
-      const ang = o.baseAngle + o.speed * t;
+      // Focus-graded speed: tier-3 evidence comets whip at full pace ONLY when the
+      // user has selected their owning task; while you're just viewing the goal
+      // they slow (~4/14 of full) so the resting subsystem reads as structure, not
+      // a swarm. All other orbits keep their baked speed (mult = 1). The phase
+      // accumulator makes the speed change seamless (no positional jump).
+      let mult = 1;
+      if (o.tier === 3) {
+        mult = this.selectedId && o.parentId === this.selectedId ? 1 : 0.29;
+        // Recency boost — a fresh evidence comet whips faster than a stale one,
+        // so a quick scan of the goal reads "what's *moving* right now". The
+        // boost only kicks in once we're in focused-task mode (mult > 0); we
+        // never let the recency overlay add motion to an evidence subsystem
+        // that the overview meant to keep quiet.
+        const comet = this._comets && this._comets.get(id);
+        if (comet && Number.isFinite(comet.recencyBoost)) {
+          mult *= comet.recencyBoost;
+        }
+      }
+      // Archived / paused goals freeze entirely — a dead/dormant sun does not
+      // sweep its planets through space. Children inherit because their parent
+      // position stops moving anyway; we mute the child speed too so a frozen
+      // goal's whole subsystem reads as "history" rather than a ghost swarm.
+      const ownerStatus = this._statusById && this._statusById.get(o.parentId);
+      if (ownerStatus === "archived" || ownerStatus === "paused") mult = 0;
+      const selfStatus = this._statusById && this._statusById.get(id);
+      if (selfStatus === "archived" || selfStatus === "paused") mult = 0;
+      if (o.phase == null) o.phase = o.baseAngle;
+      o.phase += o.speed * mult * dt;
+      const ang = o.phase;
       // Match the layout's ellipse: semi-major a, semi-minor b, in-plane swivel,
       // then incline about the X axis by tilt. (Falls back to a circle if only a
       // legacy `radius` is present.)
@@ -1118,6 +1573,8 @@ export class GalaxyScene {
       if (mesh) mesh.position.copy(p);
       const halo = this._orbHalo.get(id);
       if (halo) halo.position.copy(p);
+      const evidenceHalo = this._orbHalo.get(`${id}::evidence`);
+      if (evidenceHalo) evidenceHalo.position.copy(p);
       // Comet trail: push the new head position, keep the last LEN samples, and
       // write them tail→head into the line buffer so the trail streams behind.
       const comet = this._comets.get(id);
@@ -1142,6 +1599,16 @@ export class GalaxyScene {
         base.z + (live.z - (init.z || 0)),
       );
     });
+    // Keep each goal progress arc glued to its goal and camera-facing (billboard)
+    // so the lit sweep always reads as a flat ring regardless of orbit position.
+    if (this._goalArcs.size && this.camera) {
+      this._goalArcs.forEach((arc, id) => {
+        const live = this._livePos.get(id) || this._posById.get(id);
+        if (!live) return;
+        arc.group.position.copy(live);
+        arc.group.quaternion.copy(this.camera.quaternion);
+      });
+    }
     // Keep the selected node's label + filaments glued to its moving position.
     if (this.selectedId) this._repositionSelection();
     // Keep the persistent focus labels glued to their orbiting projects.
@@ -1150,6 +1617,21 @@ export class GalaxyScene {
 
   _animate() {
     this.raf = window.requestAnimationFrame(this._animate);
+    // Adaptive frame skipping: when nothing is changing (no camera tween, no
+    // hover/select activity, controls idle), throttle to ~6 fps so we stop
+    // burning GPU on a static scene. Any interaction lifts us back to 60.
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const userActive = this._lastInteractionAt && (now - this._lastInteractionAt) < 1500;
+    const cameraTweening = Boolean(this._cameraTween);
+    const idle = !userActive && !cameraTweening && !this.controls?.autoRotate;
+    if (idle) {
+      if (this._lastIdleRenderAt && now - this._lastIdleRenderAt < 160) {
+        return; // skip — ~6 fps idle cap
+      }
+      this._lastIdleRenderAt = now;
+    } else {
+      this._lastIdleRenderAt = 0;
+    }
     this.frame += 1;
     const t = this.frame / 60;
 
@@ -1168,6 +1650,38 @@ export class GalaxyScene {
     // Slow dust drift.
     if (this.dust) this.dust.rotation.y = t * 0.01;
 
+    // Fade-in shimmer for newly-arrived nodes (resume ingest, etc). Bloom
+    // their emissiveIntensity for ~1200ms then settle back to baseline so the
+    // user sees what the import added without an indefinite glow.
+    if (this._newlyAdded && this._newlyAdded.size && this._newlyAddedAt) {
+      const elapsed = now - this._newlyAddedAt;
+      const FADE_MS = 1200;
+      if (elapsed >= FADE_MS) {
+        // Settle: restore baseEmissive once and clear the set.
+        this._newlyAdded.forEach((id) => {
+          const mesh = this._orbMesh.get(id);
+          if (mesh && mesh.material && "emissiveIntensity" in mesh.material) {
+            const base = mesh.userData.baseEmissive || 0.62;
+            mesh.material.emissiveIntensity = base;
+          }
+        });
+        this._newlyAdded.clear();
+        this._newlyAddedAt = 0;
+      } else {
+        const k = 1 - elapsed / FADE_MS; // 1 → 0
+        const boost = 1.6 * k;
+        this._newlyAdded.forEach((id) => {
+          const mesh = this._orbMesh.get(id);
+          if (mesh && mesh.material && "emissiveIntensity" in mesh.material) {
+            const base = mesh.userData.baseEmissive || 0.62;
+            mesh.material.emissiveIntensity = base * (1 + boost);
+          }
+        });
+        // Keep the loop awake while the animation is running.
+        this._lastInteractionAt = now;
+      }
+    }
+
     // Live orbital motion: recompute nested positions and move orbs + halos.
     if (this._orbitMotion) this._updateOrbits(t);
 
@@ -1181,8 +1695,37 @@ export class GalaxyScene {
     }
 
     this.controls?.update();
-    if (this.composer) this.composer.render();
-    else if (this.renderer) this.renderer.render(this.scene, this.camera);
+    // Frame-time sampling: average the last ~30 frames and tune bloom (or
+    // skip it outright) when we slip below ~30 fps. The bloom cost is the
+    // biggest swing factor on integrated GPUs, so trading bloom strength for
+    // FPS is the right knob.
+    const renderStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (this._adaptiveSkipBloom && this.renderer) {
+      this.renderer.render(this.scene, this.camera);
+    } else if (this.composer) {
+      this.composer.render();
+    } else if (this.renderer) {
+      this.renderer.render(this.scene, this.camera);
+    }
+    const renderEnd = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const dur = renderEnd - renderStart;
+    if (!this._frameTimes) this._frameTimes = [];
+    this._frameTimes.push(dur);
+    if (this._frameTimes.length > 30) this._frameTimes.shift();
+    if (this._frameTimes.length === 30 && this.frame % 60 === 0) {
+      const avg = this._frameTimes.reduce((a, b) => a + b, 0) / this._frameTimes.length;
+      if (this.bloom) {
+        if (avg > 30) {
+          this._adaptiveSkipBloom = true;
+        } else if (avg > 22) {
+          this._adaptiveSkipBloom = false;
+          this.bloom.strength = 0.3;
+        } else {
+          this._adaptiveSkipBloom = false;
+          this.bloom.strength = 0.6;
+        }
+      }
+    }
   }
 
   // ---------- teardown ----------
@@ -1229,6 +1772,7 @@ export class GalaxyScene {
     this._orbMesh = new Map();
     this._orbHalo = new Map();
     this._comets = new Map();
+    this._goalArcs = new Map();
     this._orbitOrder = [];
     this._childrenByParent = new Map();
     this._coreOrb = null;
@@ -1249,6 +1793,7 @@ export class GalaxyScene {
       this.renderer.domElement.removeEventListener("pointermove", this._onPointerMove);
       this.renderer.domElement.removeEventListener("pointerleave", this._onPointerLeave);
       this.renderer.domElement.removeEventListener("click", this._onClick);
+      this.renderer.domElement.removeEventListener("dblclick", this._onDoubleClick);
     }
     this._clearScene();
     this._clearGroup(this.fxGroup);
