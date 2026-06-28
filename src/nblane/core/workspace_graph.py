@@ -410,6 +410,7 @@ def workspace_graph_payload(
     claims: dict[str, Any] | None = None,
     ui: dict[str, str] | None = None,
     all_goals: list[Goal] | None = None,
+    goal_progress: dict[str, dict[str, Any]] | None = None,
     view: str = "context",
 ) -> dict[str, Any]:
     """Build a privacy-safe Growth Graph context payload."""
@@ -451,6 +452,7 @@ def workspace_graph_payload(
 
     goal_node_ids: dict[str, str] = {}
     shown_goals = [goal for goal in (all_goals or active_goals) if goal.id]
+    progress_by_goal = goal_progress or {}
     if not shown_goals:
         nodes.append(
             _node(
@@ -481,6 +483,8 @@ def workspace_graph_payload(
         node_id = f"goal:{goal_obj.id}"
         goal_node_ids[goal_obj.id] = node_id
         is_primary = bool(goal_obj.id and goal_obj.id == primary_goal_id)
+        prog = progress_by_goal.get(goal_obj.id) or {}
+        progress_value = prog.get("progress")
         nodes.append(
             _node(
                 id=node_id,
@@ -504,6 +508,15 @@ def workspace_graph_payload(
                 status="private" if payload.get("locked") else goal_obj.status,
                 locked=bool(payload.get("locked")),
                 is_primary=is_primary,
+                # Derived from PROJECT completion (see dashboard_goal_progress):
+                # rides existing board/kanban state, no manual entry. progress is
+                # None when the goal has no projects (UI then falls back to mass).
+                progress=(
+                    None if progress_value is None else round(float(progress_value), 4)
+                ),
+                stalled=bool(prog.get("stalled")),
+                days_since_activity=prog.get("days_since_activity"),
+                project_count=int(prog.get("project_count") or 0),
             )
         )
         edges.append(_edge("north_star", node_id, "alignment"))
@@ -914,6 +927,15 @@ def workspace_graph_payload(
                     "project_refs": _clean_string_list(evidence.get("project_refs")),
                     "skill_refs": _clean_string_list(evidence.get("skill_refs")),
                     "kanban_refs": _clean_string_list(evidence.get("kanban_refs")),
+                    # Surface raw signals so the 3D scene can map comet length /
+                    # head brightness / orbit speed to evidence quality. The
+                    # critique flagged that comets used to look the same for a
+                    # weak draft and a strongly-reviewed item — these fields fix
+                    # that with zero new backend math.
+                    "strength": str(evidence.get("strength") or ""),
+                    "confidence": str(evidence.get("confidence") or ""),
+                    "review_status": review_status,
+                    "date": str(evidence.get("date") or evidence.get("created_at") or ""),
                 },
             )
         )
@@ -1413,17 +1435,28 @@ def workspace_graph_payload(
     health_counts = health.get("counts") or {}
     health_warning = int(health_counts.get("warning", 0) or 0)
     health_error = int(health_counts.get("error", 0) or 0)
+    health_info = int(health_counts.get("info", 0) or 0)
+    if health_error:
+        health_metric = (
+            f"{_ui_text(ui, 'dashboard_health_errors', 'Errors')} {health_error}"
+        )
+    elif health_warning:
+        health_metric = (
+            f"{_ui_text(ui, 'dashboard_health_warnings', 'Warnings')} {health_warning}"
+        )
+    elif health_info:
+        health_metric = (
+            f"{_ui_text(ui, 'dashboard_health_info', 'Info')} {health_info}"
+        )
+    else:
+        health_metric = _ui_text(ui, "dashboard_health_ok", "OK")
     nodes.append(
         _node(
             id="health",
             type="health",
             layer="governance",
             label=_ui_text(ui, "dashboard_health_title", "Health"),
-            metric=(
-                f"{health_counts.get('error', 0)}/"
-                f"{health_counts.get('warning', 0)}/"
-                f"{health_counts.get('info', 0)}"
-            ),
+            metric=health_metric,
             status="risk" if health_error or health_warning else "ok",
             owner_path="pages/5_Profile_Health.py",
         )

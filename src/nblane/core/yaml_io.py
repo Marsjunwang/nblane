@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import IO, Any
 
 import yaml
+
+_FastLoader: type[yaml.SafeLoader] = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def fast_safe_load(stream: str | bytes | IO[str] | IO[bytes]) -> Any:
+    """Drop-in faster ``yaml.safe_load`` using ``CSafeLoader`` when available."""
+    return yaml.load(stream, Loader=_FastLoader)
 
 
 def _load_yaml_file(path: Path) -> object | None:
@@ -12,7 +20,7 @@ def _load_yaml_file(path: Path) -> object | None:
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return fast_safe_load(f)
 
 
 def _load_yaml_dict(path: Path) -> dict | None:

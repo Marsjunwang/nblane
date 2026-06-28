@@ -23,6 +23,35 @@ function identityLabel(ui, field) {
   return label(ui, map[field] || "", field);
 }
 
+// Scan a SKILL.md body for agent-owned `<!-- BEGIN GENERATED: name -->` /
+// `<!-- END GENERATED -->` blocks. Returns 1-indexed line ranges + the block
+// name so the raw editor can warn the user before they spend time editing
+// territory the next sync will overwrite.
+function findGeneratedRanges(markdown) {
+  if (!markdown || typeof markdown !== "string") return [];
+  const lines = markdown.split("\n");
+  const beginRe = /<!--\s*BEGIN GENERATED(?:[:\s]+([^\s>-][^>-]*?))?\s*-->/i;
+  const endRe = /<!--\s*END GENERATED.*?-->/i;
+  const ranges = [];
+  let openIdx = -1;
+  let openName = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (openIdx < 0) {
+      const m = line.match(beginRe);
+      if (m) {
+        openIdx = i;
+        openName = (m[1] || "").trim();
+      }
+    } else if (endRe.test(line)) {
+      ranges.push({ name: openName, start: openIdx + 1, end: i + 1 });
+      openIdx = -1;
+      openName = "";
+    }
+  }
+  return ranges;
+}
+
 function narrativeLabel(ui, title) {
   const map = {
     "Research Fingerprint": "profile_section_research_fingerprint",
@@ -236,6 +265,35 @@ export function ProfileContextDrawer({ open, onClose, ui, profileContext, onEmit
           {label(ui, "warning_no_skill_md", "SKILL.md not found.")}
         </div>
       ) : null}
+      {profileContext?.readiness ? (() => {
+        const r = profileContext.readiness;
+        const ok = Boolean(r.contextReady);
+        const issues = (r.errors || 0) + (r.warnings || 0);
+        return (
+          <div className={`hd-profile-readiness ${ok ? "ok" : "blocked"}`}>
+            <span className="hd-profile-readiness-dot" />
+            <strong>
+              {ok
+                ? label(ui, "profile_readiness_ok", "Publishable — Agent will pick this up on next run")
+                : label(ui, "profile_readiness_blocked_prefix", "Blocked")}
+            </strong>
+            {ok ? null : (
+              <span>
+                {` · ${issues} ${label(ui, "profile_readiness_issues", "issue(s)")}`}
+                {r.ownerPath ? (
+                  <button
+                    type="button"
+                    className="hd-link"
+                    onClick={() => onEmit?.({ action: "navigate", payload: { path: r.ownerPath } })}
+                  >
+                    {label(ui, "profile_readiness_open", "View Profile Health")}
+                  </button>
+                ) : null}
+              </span>
+            )}
+          </div>
+        );
+      })() : null}
       <p className="hd-drawer-info">
         {label(ui, "profile_context_caption", "")}
       </p>
@@ -482,8 +540,40 @@ export function ProfileContextDrawer({ open, onClose, ui, profileContext, onEmit
             {label(ui, "dashboard_drawer_profile_section_raw", "Raw Markdown")}
           </h3>
           <div className="hd-drawer-warning">
-            {label(ui, "raw_drift_warning", "")}
+            {label(
+              ui,
+              "raw_drift_warning",
+              "Editing raw Markdown lets you reach corners the structured tabs do not cover. Lines inside BEGIN/END GENERATED blocks are owned by the agent — manual edits there will be overwritten on the next sync.",
+            )}
           </div>
+          {(() => {
+            const ranges = findGeneratedRanges(rawMarkdown);
+            if (!ranges.length) return null;
+            return (
+              <div className="hd-profile-raw-banner">
+                <strong>
+                  {label(ui, "raw_generated_banner_title", "Agent-owned sections")}
+                </strong>
+                <ul>
+                  {ranges.map((range, idx) => (
+                    <li key={idx}>
+                      <code>{range.name || "block"}</code>{" "}
+                      <span>
+                        {label(ui, "raw_generated_lines", "lines")} {range.start}–{range.end}
+                      </span>{" "}
+                      <em>
+                        {label(
+                          ui,
+                          "generated_block_owner_hint",
+                          "Will be regenerated — keep manual edits outside this range.",
+                        )}
+                      </em>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
           <div className="hd-drawer-row">
             <label>{label(ui, "raw_label", "Edit SKILL.md")}</label>
             <textarea
@@ -491,6 +581,13 @@ export function ProfileContextDrawer({ open, onClose, ui, profileContext, onEmit
               onChange={(event) => setRawMarkdown(event.target.value)}
               rows={20}
             />
+            <p className="hd-drawer-info">
+              {label(
+                ui,
+                "generated_block_sync_hint",
+                "Save will round-trip through SKILL.md sync — generated blocks rewrite themselves.",
+              )}
+            </p>
           </div>
         </section>
       ) : null}

@@ -11,6 +11,12 @@ export default defineConfig({
     outDir: "static",
     emptyOutDir: true,
     cssCodeSplit: false,
+    // The Streamlit host loads a single entry chunk; raising the warning
+    // threshold instead of forcing chunk splitting keeps the integration
+    // simple. Adaptive rendering (galaxy_scene._adaptiveSkipBloom +
+    // idle-throttled rAF) is the bigger lever for actual wall-clock perf
+    // than transport size.
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         entryFileNames: "assets/home-dashboard.js",

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { HdDrawer } from "./drawer.jsx";
 import {
   resumeIngestApplyEvent,
@@ -13,10 +13,66 @@ function label(ui, key, fallback) {
 
 export function ResumeIngestDrawer({ open, onClose, ui, resume, onEmit }) {
   const [text, setText] = useState("");
-  const [allowStatus, setAllowStatus] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadInfo, setUploadInfo] = useState("");
+  // Initialise from the server-side stash so that re-opening the drawer after a
+  // remount (or after a generate→apply round-trip) keeps the user's choice
+  // rather than silently resetting to false.
+  const [allowStatus, setAllowStatus] = useState(Boolean(resume?.allowStatusChange));
+  useEffect(() => {
+    if (resume?.allowStatusChange !== undefined) {
+      setAllowStatus(Boolean(resume.allowStatusChange));
+    }
+  }, [resume?.allowStatusChange]);
   const llmConfigured = Boolean(resume?.llmConfigured);
   const merge = resume?.merge || null;
   const hasPending = Boolean(resume?.hasPendingPatch);
+
+  async function onFileChosen(event) {
+    setUploadError("");
+    setUploadInfo("");
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const lower = String(file.name || "").toLowerCase();
+    // PDF / DOCX must be parsed server-side; we send them as base64 through a
+    // dedicated event so the Streamlit host can re-use the same extractor that
+    // the file_uploader uses, then funnel the resulting text back through this
+    // textarea on the next rerun.
+    if (lower.endsWith(".pdf") || lower.endsWith(".docx")) {
+      try {
+        const buf = await file.arrayBuffer();
+        let bin = "";
+        const view = new Uint8Array(buf);
+        for (let i = 0; i < view.byteLength; i += 1) bin += String.fromCharCode(view[i]);
+        const b64 = window.btoa(bin);
+        onEmit?.({
+          action: "resume_ingest_upload",
+          payload: { filename: file.name, base64: b64 },
+        });
+        setUploadInfo(
+          label(
+            ui,
+            "resume_upload_uploading",
+            "Uploading {name} for server-side extraction…",
+          ).replace("{name}", file.name),
+        );
+      } catch (e) {
+        setUploadError(String(e && e.message) || "upload failed");
+      }
+      return;
+    }
+    // Plain text — parse locally.
+    try {
+      const t = await file.text();
+      setText(t);
+      setUploadInfo(
+        label(ui, "resume_upload_extracted", "Extracted {n} characters — review then Generate.")
+          .replace("{n}", String(t.length)),
+      );
+    } catch (e) {
+      setUploadError(String(e && e.message) || "could not read file");
+    }
+  }
 
   function generate() {
     if (!text.trim() || !llmConfigured) {
@@ -98,6 +154,21 @@ export function ResumeIngestDrawer({ open, onClose, ui, resume, onEmit }) {
         </div>
       ) : (
         <div className="hd-drawer-row">
+          <label>
+            {label(ui, "resume_upload_label", "Or upload a resume (.pdf / .docx / .txt)")}
+          </label>
+          <input
+            type="file"
+            accept=".pdf,.docx,.txt"
+            onChange={onFileChosen}
+            disabled={!llmConfigured}
+          />
+          {uploadInfo ? <p className="hd-drawer-info">{uploadInfo}</p> : null}
+          {uploadError ? <p className="hd-drawer-warning">{uploadError}</p> : null}
+        </div>
+      )}
+      {hasPending ? null : (
+        <div className="hd-drawer-row">
           <label>{label(ui, "resume_placeholder", "Paste resume…")}</label>
           <textarea
             value={text}
@@ -149,15 +220,17 @@ export function ResumeIngestDrawer({ open, onClose, ui, resume, onEmit }) {
             </div>
           ) : null}
           {merge.newEvidence.length ? (
-            <div>
-              <strong>
+            <div className="hd-resume-diff-group">
+              <strong className="hd-resume-diff-title hd-resume-diff-title-add">
+                <span className="hd-resume-diff-marker">+</span>
                 {label(
                   ui,
                   "dashboard_drawer_resume_preview_delta_new_evidence",
                   "New evidence",
                 )}
+                <em className="hd-resume-diff-count">{merge.newEvidence.length}</em>
               </strong>
-              <ul className="hd-drawer-list">
+              <ul className="hd-drawer-list hd-resume-diff-list add">
                 {merge.newEvidence.map((line, idx) => (
                   <li key={idx}>{line}</li>
                 ))}
@@ -165,15 +238,17 @@ export function ResumeIngestDrawer({ open, onClose, ui, resume, onEmit }) {
             </div>
           ) : null}
           {merge.treeDelta.length ? (
-            <div>
-              <strong>
+            <div className="hd-resume-diff-group">
+              <strong className="hd-resume-diff-title hd-resume-diff-title-change">
+                <span className="hd-resume-diff-marker">≈</span>
                 {label(
                   ui,
                   "dashboard_drawer_resume_preview_delta_tree",
                   "Skill-tree changes",
                 )}
+                <em className="hd-resume-diff-count">{merge.treeDelta.length}</em>
               </strong>
-              <ul className="hd-drawer-list">
+              <ul className="hd-drawer-list hd-resume-diff-list change">
                 {merge.treeDelta.map((line, idx) => (
                   <li key={idx}>{line}</li>
                 ))}

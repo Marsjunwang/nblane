@@ -1625,11 +1625,45 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> bool:
         _run_resume_generate(profile, text, allow_status)
         return True
     if action == "resume_ingest_apply":
-        allow_status = _dashboard_goal_bool(payload, "allow_status_change", False)
+        # Trust the React-supplied flag when present; otherwise fall back to the
+        # value the user set at generate time. Without the fallback the drawer
+        # remounting (different rerun cycle) would silently default to false.
+        if "allow_status_change" in payload:
+            allow_status = _dashboard_goal_bool(payload, "allow_status_change", False)
+        else:
+            allow_status = bool(
+                st.session_state.get(f"resume_ingest_allow_status_{profile}", False)
+            )
         _apply_resume_ingest(profile, allow_status)
         return True
     if action == "resume_ingest_discard":
         _discard_resume_ingest(profile)
+        return True
+    if action == "resume_ingest_upload":
+        # Server-side PDF / DOCX extraction → drop the resulting text back into
+        # the same textarea key the paste flow uses, so the user can review +
+        # tweak it before Generate. Keeps the React side stateless about
+        # file-format quirks.
+        import base64
+
+        from nblane.core.resume_extract import extract_resume_text
+
+        filename = str(payload.get("filename") or "")
+        b64 = str(payload.get("base64") or "")
+        try:
+            data = base64.b64decode(b64) if b64 else b""
+        except Exception as exc:
+            st.error(f"upload decode failed: {exc}")
+            return True
+        text, err = extract_resume_text(filename, data)
+        if err:
+            st.warning(err)
+            return True
+        if text:
+            st.session_state[f"resume_txt_{profile}"] = text
+            st.session_state[f"resume_upload_filled_{profile}"] = filename
+            st.success(f"Extracted {len(text)} characters from {filename}.")
+            st.rerun()
         return True
     if action == "profile_context_save":
         identity_raw = payload.get("identity_fields")
@@ -2159,6 +2193,12 @@ def _resume_ingest_payload(profile: str) -> dict:
     snapshot: dict[str, object] = {
         "llm_configured": llm_client.is_configured(),
         "has_pending_patch": pending is not None,
+        # Surface the generate-time toggle so the React drawer's checkbox can
+        # initialise to the stashed value after a remount — otherwise the
+        # checkbox always reads false even when the user enabled it earlier.
+        "allow_status_change": bool(
+            st.session_state.get(f"resume_ingest_allow_status_{profile}", False)
+        ),
         "merge": None,
     }
     if pending is None:
@@ -2218,8 +2258,13 @@ def _resume_ingest_payload(profile: str) -> dict:
     return snapshot
 
 
-def _run_resume_generate(profile: str, text: str, _allow_status_change: bool) -> None:
-    """Generate an ingest patch from raw text and stash it for review."""
+def _run_resume_generate(profile: str, text: str, allow_status_change: bool) -> None:
+    """Generate an ingest patch from raw text and stash it for review.
+
+    ``allow_status_change`` is captured at generate-time and persisted into
+    session state so the apply-time fallback (when the React drawer remounts
+    and the checkbox local state resets) still honours the user's intent.
+    """
     text = (text or "").strip()
     if not text:
         return
@@ -2240,6 +2285,7 @@ def _run_resume_generate(profile: str, text: str, _allow_status_change: bool) ->
         ]
     )
     st.session_state[f"resume_ingest_patch_{profile}"] = patch
+    st.session_state[f"resume_ingest_allow_status_{profile}"] = bool(allow_status_change)
     st.rerun()
 
 
@@ -2262,10 +2308,14 @@ def _apply_resume_ingest(profile: str, allow_status_change: bool) -> None:
         refresh_file_snapshots([_pool_path, _tree_path, _skill_md_path])
         stash_git_backup_results()
         st.session_state.pop(rkey, None)
+        st.session_state.pop(f"resume_ingest_allow_status_{profile}", None)
         st.success(ui["resume_applied"])
         render_git_backup_notices()
         st.rerun()
     else:
+        # Keep the patch in session so the drawer remains a recoverable
+        # workspace: the user can re-edit input, re-generate, or retry apply
+        # instead of starting over from a blank textarea.
         for e in apply_r.errors:
             st.error(e)
         for w in apply_r.warnings:
@@ -2275,12 +2325,43 @@ def _apply_resume_ingest(profile: str, allow_status_change: bool) -> None:
 def _discard_resume_ingest(profile: str) -> None:
     """Forget the pending ingest patch without writing anything."""
     st.session_state.pop(f"resume_ingest_patch_{profile}", None)
+    st.session_state.pop(f"resume_ingest_allow_status_{profile}", None)
     st.rerun()
 
 
 def _render_resume_ingest(profile: str) -> None:
     with st.expander(ui["profile_evidence_import_expander"], expanded=False):
         st.caption(ui["profile_evidence_import_caption"])
+        uploaded = st.file_uploader(
+            ui.get("resume_upload_label", "Or upload a resume (.pdf / .docx / .txt)"),
+            type=["pdf", "docx", "txt"],
+            key=f"resume_upload_{profile}",
+            help=ui.get(
+                "resume_upload_help",
+                "Pulls text from PDF/DOCX/TXT and feeds it into the same AI ingest path as the paste box below.",
+            ),
+        )
+        uploaded_text = ""
+        if uploaded is not None:
+            from nblane.core.resume_extract import extract_resume_text
+            data = uploaded.getvalue()
+            uploaded_text, upload_err = extract_resume_text(uploaded.name, data)
+            if upload_err:
+                st.warning(upload_err)
+            elif uploaded_text:
+                # Push the extracted text into the textarea via session_state
+                # before the widget renders, so the user sees it pre-filled
+                # without losing their ability to edit before generating.
+                marker_key = f"resume_upload_filled_{profile}"
+                if st.session_state.get(marker_key) != uploaded.name:
+                    st.session_state[f"resume_txt_{profile}"] = uploaded_text
+                    st.session_state[marker_key] = uploaded.name
+                st.success(
+                    ui.get(
+                        "resume_upload_extracted",
+                        "Extracted {n} characters — review below, then Generate.",
+                    ).format(n=len(uploaded_text))
+                )
         resume_text = st.text_area(
             ui["resume_placeholder"],
             height=140,
@@ -2642,27 +2723,12 @@ def _render_dashboard_top_actions(profile: str) -> None:
         else:
             with st.expander(ui["dashboard_ai_settings_title"], expanded=False):
                 _render_dashboard_ai_settings(profile)
-    canvas_base = _dashboard_canvas_base()
-    if canvas_base:
-        canvas_ok, canvas_message = _dashboard_canvas_status(canvas_base, profile)
-        canvas_url = _dashboard_canvas_url(canvas_base, profile)
-        if canvas_ok is False:
-            st.button(
-                ui["dashboard_open_8502_canvas"],
-                width="stretch",
-                disabled=True,
-                help=(
-                    ui["dashboard_canvas_sidecar_link_disabled_help"]
-                    + (f" {canvas_message}" if canvas_message else "")
-                ),
-            )
-            st.caption(ui["dashboard_canvas_sidecar_unavailable"].format(base=canvas_base))
-        else:
-            st.link_button(
-                ui["dashboard_open_8502_canvas"],
-                canvas_url,
-                width="stretch",
-            )
+    # The "Open 8502 Canvas" deep-link button is retired — the 3D graph now
+    # renders inline inside the React component, so the sidecar canvas was
+    # confusing duplicate UI. Leave the canvas server itself running (still
+    # serves /api/dashboard/payload for the React component), but stop
+    # surfacing the standalone link here.
+    canvas_base = ""
 
 
 def _render_home_capture_hint() -> None:

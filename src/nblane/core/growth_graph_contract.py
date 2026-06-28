@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from nblane.core.paths import REPO_ROOT
+from nblane.core.yaml_io import fast_safe_load
 
 CONTRACT_SCHEMA_VERSION = "1.1"
 GROWTH_GRAPH_DOC = REPO_ROOT / "docs" / "zh" / "product" / "growth-graph.md"
@@ -157,7 +158,7 @@ def _contract_from_doc(path: Path = GROWTH_GRAPH_DOC) -> dict[str, Any] | None:
     if match is None:
         return None
     try:
-        raw = yaml.safe_load(match.group("body")) or {}
+        raw = fast_safe_load(match.group("body")) or {}
     except yaml.YAMLError:
         return None
     return raw if isinstance(raw, dict) else None
