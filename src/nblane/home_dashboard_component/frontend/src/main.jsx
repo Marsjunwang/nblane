@@ -1936,6 +1936,17 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   });
   const byRole = (role) => nodes.filter((node) => node.role === role);
 
+  // Goal orbit geometry. Hoisted to the top of the layout scope because
+  // `placeSkillConstellations` (defined below) reads these to push the skill
+  // shell outside the outermost goal ring — and that helper is CALLED from the
+  // focus branch (clicking a goal) which runs BEFORE the goal-placement section.
+  // Declaring them only at the goal section left them in the temporal dead zone
+  // during a focused render → "Cannot access GOAL_BASE_R before initialization"
+  // → white screen whenever a goal was clicked. Single declaration, used by both
+  // the focus path and the overview goal rings.
+  const GOAL_BASE_R = 80;
+  const GOAL_RING_GAP = 60;
+
   // The galaxy has real 3D volume (a central bulge + arm waviness) so it never
   // collapses to an edge-on sheet. Rings grow outward by metaphor depth.
   // Nested orbital system (银河系/太阳系/地月系): the North Star is the center;
@@ -2256,9 +2267,8 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
 
   // 1. Goals orbit the North Star, each on its own shell + inclination so the
   // orbits nest like a solar system rather than lying flat.
+  // (GOAL_BASE_R / GOAL_RING_GAP are hoisted to the top of this function.)
   const directions = byRole("direction");
-  const GOAL_BASE_R = 80;
-  const GOAL_RING_GAP = 60;
   directions.forEach((node, i) => {
     const radius = GOAL_BASE_R + i * GOAL_RING_GAP;
     const tilt = 0.5 + (i - (directions.length - 1) / 2) * 0.34; // distinct inclinations
