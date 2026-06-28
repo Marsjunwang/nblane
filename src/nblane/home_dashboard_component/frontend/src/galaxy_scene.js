@@ -209,7 +209,7 @@ export class GalaxyScene {
     controls.minDistance = 80;
     controls.maxDistance = 1200;
     controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.42;
+    controls.autoRotateSpeed = 0.01;
     this.controls = controls;
 
     const composer = new EffectComposer(renderer);
