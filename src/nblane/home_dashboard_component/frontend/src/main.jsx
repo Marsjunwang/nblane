@@ -2304,7 +2304,7 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   if (orphanProjects.length) {
     orphanProjects.sort();
     const radius = GOAL_BASE_R + directions.length * GOAL_RING_GAP + 24;
-    placeOnOrbit(orphanProjects, core?.id || "__core__", corePos, radius, -0.5, "orphan", orbitSpeed(radius));
+    placeOnOrbit(orphanProjects, core?.id || "__core__", corePos, radius, -0.5, "orphan", orbitSpeed(radius), 0.18, 0, null, true);
   }
 
   // 3 + 4. Project sub-systems: tasks/outputs (leaves) and project-tied evidence
@@ -2387,12 +2387,16 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   if (orphanLeaves.length) {
     orphanLeaves.sort();
     const radius = GOAL_BASE_R + directions.length * GOAL_RING_GAP + 48;
-    placeOnOrbit(orphanLeaves, core?.id || "__core__", corePos, radius, 0.3, "orphanleaf", orbitSpeed(radius));
+    // Orphan-leaf catch-all orbit: the work itself still flies around, but the
+    // ring is an outer scaffold most users don't recognise as theirs. Skip the
+    // visible ellipse so the canvas stops looking like there's a giant empty
+    // orbit at the rim.
+    placeOnOrbit(orphanLeaves, core?.id || "__core__", corePos, radius, 0.3, "orphanleaf", orbitSpeed(radius), 0.18, 0, null, true);
   }
   if (orphanFruit.length) {
     orphanFruit.sort();
     const radius = GOAL_BASE_R + directions.length * GOAL_RING_GAP + 66;
-    placeOnOrbit(orphanFruit, core?.id || "__core__", corePos, radius, -0.3, "orphanfruit", orbitSpeed(radius));
+    placeOnOrbit(orphanFruit, core?.id || "__core__", corePos, radius, -0.3, "orphanfruit", orbitSpeed(radius), 0.18, 0, null, true);
   }
 
   // 5. Skills — grouped into per-category constellations placed around the galaxy
