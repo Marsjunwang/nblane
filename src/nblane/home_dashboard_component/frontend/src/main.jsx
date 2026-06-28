@@ -1969,7 +1969,7 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   // Place children evenly along an elliptical orbit around a parent. `tilt`
   // inclines the orbital plane; `swivel` rotates the ellipse within that plane;
   // `ecc` sets how oval it is. Deterministic (hashUnit, no random).
-  const placeOnOrbit = (children, parentId, center, radius, tilt, phaseSeed, speed, ecc = 0.18, centerOffsetY = 0, tier = null) => {
+  const placeOnOrbit = (children, parentId, center, radius, tilt, phaseSeed, speed, ecc = 0.18, centerOffsetY = 0, tier = null, skipRing = false) => {
     const n = Math.max(1, children.length);
     const a = radius; // semi-major
     const b = radius * (1 - ecc); // semi-minor
@@ -1999,7 +1999,7 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
     // array (e.g. a focused goal with zero projects) must never paint a hollow ellipse.
     // Tier 3 (evidence comets) draws no ring: the comet's own fading trail traces
     // the orbit, so a static ellipse there would just be redundant clutter.
-    if (children.length && tier !== 3) {
+    if (children.length && tier !== 3 && !skipRing) {
       orbits.push({ center: { x: center.x, y: cy, z: center.z }, a, b, tilt, swivel, phase, parentId, tier });
     }
   };
@@ -2080,6 +2080,15 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   const placeSkillConstellations = () => {
     const stars = byRole("star");
     if (!stars.length) return [];
+    // Push the skill shell outside the outermost goal orbit so constellations
+    // never collide with goal rings in fit mode. The outermost goal sits at
+    // GOAL_BASE_R + (N-1)·GOAL_RING_GAP; we add a healthy gap on top so cluster
+    // jitter (≤40) + per-skill scatter (≤32) still clears the goal band.
+    const directionCount = byRole("direction").length;
+    const goalsMaxRadius = directionCount
+      ? GOAL_BASE_R + Math.max(0, directionCount - 1) * GOAL_RING_GAP
+      : 0;
+    const skillShellBase = Math.max(230, goalsMaxRadius + 120);
     const NON_CATEGORY = new Set(["manual", "rule", "ai", "rule+ai", ""]);
     const catOf = (n) => {
       const m = cleanText(n.metric);
@@ -2100,7 +2109,7 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
       // + radius so the constellations don't sit on one perfect circle.
       const ringAng = ((ci + 0.5) / catCount) * Math.PI * 2;
       const lat = (hashUnit(`${cat}:lat`) - 0.5) * 0.9;
-      const CR = 230 + hashUnit(`${cat}:cr`) * 40;
+      const CR = skillShellBase + hashUnit(`${cat}:cr`) * 40;
       const center = {
         x: Math.cos(ringAng) * Math.cos(lat) * CR,
         y: 40 + Math.sin(lat) * CR * 0.5,
@@ -2253,7 +2262,13 @@ function growthGalaxyLayout(payload, nodes, focusGoalId = null) {
   directions.forEach((node, i) => {
     const radius = GOAL_BASE_R + i * GOAL_RING_GAP;
     const tilt = 0.5 + (i - (directions.length - 1) / 2) * 0.34; // distinct inclinations
-    placeOnOrbit([node.id], core?.id || "__core__", corePos, radius, tilt, `goal${i}`, orbitSpeed(radius));
+    // The synthetic "Other" goal hangs orphan work off a labelled hub but isn't
+    // a real direction the user set — drawing a top-level ring for it would
+    // mint a huge empty outer ellipse that reads as scaffolding noise. Place
+    // the orb on the orbit so its subsystem still nests cleanly, just skip
+    // the parent ring.
+    const skipRing = node.id === OTHER_GOAL_ID;
+    placeOnOrbit([node.id], core?.id || "__core__", corePos, radius, tilt, `goal${i}`, orbitSpeed(radius), 0.18, 0, null, skipRing);
   });
 
   // 2. Projects orbit their owning goal; orphan projects share one outer orbit
