@@ -3404,6 +3404,13 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
       return undefined;
     }
     const scene = new GalaxyScene();
+    // Debug hook for live motion sampling (Playwright probes etc). No
+    // functional impact — just a window reference that the cleanup below
+    // unwinds. Safe to keep in production: read-only access by the dev
+    // console / test harness, and removed when this view unmounts.
+    if (typeof window !== "undefined") {
+      window.__nblaneScene = scene;
+    }
     const rect = host.getBoundingClientRect();
     scene.mount(host, {
       width: rect.width || 900,
@@ -3434,6 +3441,9 @@ function Graph3DView({ payload, nodes, selectedNodeId, onSelectNode, emptyMessag
     return () => {
       scene.dispose();
       sceneRef.current = null;
+      if (typeof window !== "undefined" && window.__nblaneScene === scene) {
+        delete window.__nblaneScene;
+      }
     };
     // Mount only once per stage lifetime; data flows in via the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
