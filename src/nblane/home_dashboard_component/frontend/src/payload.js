@@ -163,6 +163,11 @@ export function normalizeGoalCard(goal) {
     ...normalized,
     id,
     isPrimary: Boolean(source.is_primary || source.isPrimary),
+    // Surface lifecycle status at top level: backend nests it under
+    // projection.status, but the chip rail / archived-toggle filter needs to
+    // distinguish active vs archived/paused/completed without digging into the
+    // projection object.
+    status: cleanText(source.status || normalized.projection?.status),
     progress: Number.isFinite(progress) ? progress : null,
     stalled: Boolean(source.stalled),
     daysSinceActivity: Number.isFinite(daysSinceActivity) ? daysSinceActivity : null,
