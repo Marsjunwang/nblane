@@ -100,6 +100,7 @@ from nblane.web_shared import (
     render_git_backup_notices,
     render_llm_unavailable,
     render_page_help,
+    seed_ui_language_before_nav,
     select_profile,
     stash_git_backup_results,
 )
@@ -145,6 +146,7 @@ def _sync_home_ui() -> None:
     ui = home_ui()
 
 
+seed_ui_language_before_nav()
 _sync_home_ui()
 
 st.set_page_config(
@@ -2874,6 +2876,11 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
 def main() -> None:
     """Run the Streamlit app with product-level navigation."""
     st.session_state["_nblane_native_navigation"] = True
+    # Restore the per-profile UI language BEFORE st.navigation builds the
+    # sidebar, so the nav labels render in the chosen language on the first
+    # paint (e.g. immediately after login) rather than only after the next
+    # navigation. See seed_ui_language_before_nav for the full rationale.
+    seed_ui_language_before_nav()
     _sync_home_ui()
     page = st.navigation(_navigation_pages(), expanded=True)
     page.run()

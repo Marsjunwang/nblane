@@ -4216,3 +4216,45 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+.hd-error-boundary {
+  margin: 24px;
+  padding: 24px 28px;
+  border: 1px solid var(--hd-line, #2a3450);
+  border-radius: 12px;
+  background: var(--hd-surface, #11182b);
+  color: var(--hd-ink, #e6ecff);
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+.hd-error-boundary h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.hd-error-boundary p {
+  margin: 0 0 16px;
+  opacity: 0.8;
+}
+
+.hd-error-boundary button {
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--hd-accent, #5b8cff);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hd-error-detail {
+  margin: 16px 0 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 200px;
+}

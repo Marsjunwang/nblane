@@ -339,6 +339,62 @@ def _ensure_llm_session_defaults(profile: str = "") -> None:
     apply_ui_language_from_session()
 
 
+def _default_profile_for(profiles: list[str]) -> str:
+    """Resolve the auto-selected profile from a visible list.
+
+    Mirrors the default-index logic in :func:`select_profile`: prefer profiles
+    with the lowest template score (most filled-in), then the most recently
+    touched among those. Returns an empty string for an empty list.
+    """
+    if not profiles:
+        return ""
+    scores = {name: _template_score(name) for name in profiles}
+    min_score = min(scores.values())
+    candidates = [name for name in profiles if scores[name] == min_score]
+    return _latest_profile(candidates)
+
+
+def _active_profile_guess() -> str:
+    """Resolve the active profile *without* rendering the sidebar selector.
+
+    Mirrors the default-selection logic in :func:`select_profile` (persisted
+    choice wins, else the lowest-template-score / most recently touched
+    profile) so callers that run before navigation can recover the same
+    profile the selectbox will land on. Returns an empty string when no profile
+    is visible yet.
+    """
+    prev = st.session_state.get(_PERSIST_KEY)
+    if isinstance(prev, str) and prev:
+        return prev
+    try:
+        profiles = allowed_profiles()
+    except Exception:
+        profiles = []
+    return _default_profile_for(profiles)
+
+
+def seed_ui_language_before_nav() -> None:
+    """Restore the persisted UI language *before* navigation is built.
+
+    ``st.navigation`` renders the sidebar labels from the current ``ui`` dict,
+    but the per-profile language preference lives in ``web-preferences.yaml``
+    and is only loaded into ``session_state`` once a page body calls
+    :func:`ensure_llm_session` / ``select_profile``. On the first rerun after
+    login the sidebar therefore renders in the default language and only
+    switches after the next navigation. Seeding the language here — keyed to
+    the profile we can resolve non-interactively — makes the sidebar render in
+    the right language on that very first paint. No-op once the language key is
+    already populated.
+    """
+    if st.session_state.get(_UI_LANG_KEY) in ("en", "zh"):
+        apply_ui_language_from_session()
+        return
+    profile = _active_profile_guess()
+    # _ensure_llm_session_defaults reads web-preferences.yaml, writes
+    # _UI_LANG_KEY into session_state, and calls apply_ui_language_from_session.
+    _ensure_llm_session_defaults(profile)
+
+
 def _sync_llm_provider_preset() -> None:
     """When provider changes, load its default base URL and model."""
     provider = st.session_state.get(_LLM_PROVIDER_KEY, "Custom")
@@ -1655,17 +1711,7 @@ def select_profile() -> str:
         if not profiles:
             st.info(u["no_profiles_yet"])
         else:
-            scores = {
-                name: _template_score(name)
-                for name in profiles
-            }
-            min_score = min(scores.values())
-            candidates = [
-                name
-                for name in profiles
-                if scores[name] == min_score
-            ]
-            default_name = _latest_profile(candidates)
+            default_name = _default_profile_for(profiles)
             default_idx = profiles.index(default_name)
 
             prev = st.session_state.get(_PERSIST_KEY)

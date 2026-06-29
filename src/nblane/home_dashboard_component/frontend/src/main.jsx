@@ -264,14 +264,32 @@ function setComponentValue(value) {
 }
 
 function initStreamlitBridge(onRender) {
+  let rendered = false;
   window.addEventListener("message", (event) => {
     if (event.data?.type !== RENDER) {
       return;
     }
+    rendered = true;
     onRender(event.data?.args || {});
   });
-  sendBack(READY, { apiVersion: 1 });
-  window.setTimeout(() => setFrameHeight(), 0);
+  // Re-announce READY a few times with backoff. Streamlit only sends the first
+  // RENDER (which carries the payload) in response to our READY ping; if that
+  // ping is dropped during a parent rerun — e.g. the st.rerun() right after
+  // login — the component never receives a payload and paints blank until the
+  // user navigates away and back. Repeating READY until the first RENDER
+  // arrives makes that handshake self-heal instead of requiring a manual round
+  // trip. Pings stop as soon as any RENDER lands.
+  const announce = (attempt) => {
+    if (rendered) {
+      return;
+    }
+    sendBack(READY, { apiVersion: 1 });
+    window.setTimeout(() => setFrameHeight(), 0);
+    if (attempt < 6) {
+      window.setTimeout(() => announce(attempt + 1), 150 * (attempt + 1));
+    }
+  };
+  announce(0);
 }
 
 function standaloneConfig() {
@@ -5118,5 +5136,48 @@ function App() {
   return <Dashboard args={args} />;
 }
 
+// Without a boundary, any throw during render unmounts the whole tree and the
+// iframe paints pure white with no hint of what happened (this is exactly how
+// the GOAL_BASE_R temporal-dead-zone crash surfaced). Catch render errors here
+// so the user sees a recoverable message + the actual error instead of a blank
+// frame, and so we can still report a sane frame height.
+class DashboardErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    // Surface the height so Streamlit does not collapse the iframe to 0px.
+    window.setTimeout(() => setFrameHeight(420), 0);
+    // eslint-disable-next-line no-console
+    console.error("Dashboard render error:", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="hd-error-boundary" role="alert">
+          <h2>Dashboard failed to render</h2>
+          <p>The growth graph hit an error while drawing. Reloading usually clears it.</p>
+          <button type="button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+          <pre className="hd-error-detail">{String(this.state.error?.message || this.state.error)}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const root = createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(
+  <DashboardErrorBoundary>
+    <App />
+  </DashboardErrorBoundary>,
+);
