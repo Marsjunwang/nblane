@@ -38,15 +38,50 @@
       top: 0;
       z-index: 10;
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) auto;
-      gap: 10px;
-      align-items: center;
-      padding: 10px;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      gap: 8px 10px;
+      align-items: start;
+      padding: 8px 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: rgba(255, 255, 255, .96);
       box-shadow: 0 2px 10px rgba(23, 33, 31, .05);
     }
+    .kb-toolbar-controls {
+      grid-column: 2;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .kb-toolbar-meta {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      min-height: 18px;
+    }
+    .kb-toolbar-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 800;
+      line-height: 1;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    .kb-toolbar-toggle:hover { border-color: rgba(33, 104, 91, .55); color: var(--accent-strong); }
+    .kb-toolbar-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
     .kb-quick { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(140px, 190px) 38px 38px; gap: 8px; }
     .kb-quick-more { grid-column: 1 / -1; display: grid; gap: 8px; }
     .kb-quick-more textarea {
@@ -499,6 +534,7 @@
       .kb-topbar { grid-template-columns: 1fr; }
       .kb-quick { grid-template-columns: 1fr; }
       .kb-icon-button { width: 100%; }
+      .kb-toolbar-controls { grid-column: 1; justify-content: flex-start; }
       .kb-board { grid-template-columns: repeat(4, minmax(230px, 82vw)); }
       .kb-focus-layout { grid-template-columns: 1fr; }
       .kb-focus-main .kb-card-list { grid-template-columns: 1fr; }
@@ -532,6 +568,16 @@
       ai_gap_short: "Gap",
       ai_subtasks: "Draft subtasks",
       ai_subtasks_short: "Sub",
+      auto_dates: "Auto dates",
+      auto_dates_short: "Auto dates",
+      auto_dates_help: "Auto-set started / completed dates on column move",
+      focus_mode: "Focus mode",
+      focus_mode_short: "Focus",
+      focus_mode_help: "Doing full width; other columns in tabs",
+      metric_total: "Total",
+      reload: "Reload",
+      save: "Save",
+      unsaved: "Unsaved changes",
       alignment_cancel: "Cancel",
       alignment_assumptions: "Assumptions",
       alignment_confirm: "Use this understanding",
@@ -618,6 +664,7 @@
     let openMenuId = "";
     let menuOutsideBound = false;
     let openMoreFieldsByTask = {};
+    let viewOverride = {};
 
     function send(type, data) {
       window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
@@ -736,7 +783,13 @@
       return asObj(args.ai_state || asObj(args.payload).ai_state);
     }
     function focusMode() {
-      return Boolean(settings().focus_mode);
+      return Boolean(viewPref("focus_mode"));
+    }
+    function viewPref(name) {
+      if (Object.prototype.hasOwnProperty.call(viewOverride, name)) {
+        return Boolean(viewOverride[name]);
+      }
+      return Boolean(settings()[name]);
     }
     function sectionOrder(rawSections) {
       const configured = asArr(settings().section_order || settings().sections)
@@ -1455,7 +1508,23 @@
                 <textarea name="quick-notes" rows="2" placeholder="${attr(label("details"))}" aria-label="${attr(label("details"))}"></textarea>
               </div>` : ""}
             </form>
-            <div class="kb-status">${esc(text(aiState().status || ""))}</div>
+            <div class="kb-toolbar-controls">
+              <label class="kb-toolbar-toggle" title="${attr(label("auto_dates_help"))}">
+                <input type="checkbox" data-view-pref="auto_dates" ${viewPref("auto_dates") ? "checked" : ""}>
+                <span>${esc(label("auto_dates_short", label("auto_dates")))}</span>
+              </label>
+              <label class="kb-toolbar-toggle" title="${attr(label("focus_mode_help"))}">
+                <input type="checkbox" data-view-pref="focus_mode" ${viewPref("focus_mode") ? "checked" : ""}>
+                <span>${esc(label("focus_mode_short", label("focus_mode")))}</span>
+              </label>
+              <button type="button" class="kb-head-button" data-board-reload title="${attr(label("reload"))}" aria-label="${attr(label("reload"))}">⟳</button>
+              <button type="button" class="kb-head-button primary" data-board-save>${esc(label("save"))}</button>
+            </div>
+            <div class="kb-toolbar-meta">
+              <span class="kb-count" title="${attr(label("metric_total"))}">${esc(label("metric_total"))} ${esc(text(settings().total_tasks ?? 0))}</span>
+              ${settings().is_dirty ? `<span class="kb-pill warn" title="${attr(label("unsaved"))}">${esc(label("unsaved"))}</span>` : ""}
+              <span class="kb-status">${esc(text(aiState().status || ""))}</span>
+            </div>
           </div>
           <div class="kb-workspace">
             ${renderWorkspace()}
@@ -1582,6 +1651,20 @@
           });
         }
       }
+      document.querySelectorAll("[data-view-pref]").forEach((box) => {
+        box.addEventListener("change", () => {
+          const name = box.dataset.viewPref;
+          if (name !== "auto_dates" && name !== "focus_mode") return;
+          const value = Boolean(box.checked);
+          viewOverride[name] = value;
+          render();
+          emit("set_view_pref", { name, value });
+        });
+      });
+      const reloadBtn = document.querySelector("[data-board-reload]");
+      if (reloadBtn) reloadBtn.addEventListener("click", () => emit("reload_board", {}));
+      const saveBtn = document.querySelector("[data-board-save]");
+      if (saveBtn) saveBtn.addEventListener("click", () => emit("save_board", {}));
       document.querySelectorAll("[data-focus-section]").forEach((button) => {
         button.addEventListener("click", () => {
           focusSection = button.dataset.focusSection;
@@ -1808,6 +1891,13 @@
       if (data.type !== RENDER) return;
       args = data.args || {};
       board = normalizeBoard();
+      // Drop optimistic view overrides once the server-side settings catch up.
+      const liveSettings = settings();
+      Object.keys(viewOverride).forEach((name) => {
+        if (Boolean(liveSettings[name]) === Boolean(viewOverride[name])) {
+          delete viewOverride[name];
+        }
+      });
       selectedId = text(asObj(args.ui || asObj(args.payload).ui).selected_card_id || selectedId);
       quickSection = quickSection || board.find((s) => s.key === "Queue")?.key || board[0]?.key || "";
       render();

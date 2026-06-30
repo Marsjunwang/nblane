@@ -221,10 +221,12 @@ move_to: Move to
 kb_stay: (stay)
 kb_move_help: Buttons below only change which **column** the task is in (not a “completion status” menu).
 kb_auto_dates: Auto-set started / completed dates on column move
+kb_auto_dates_short: Auto dates
 kb_auto_dates_help: When moving into Doing, sets started_on if empty. When moving into Done, sets completed_on if empty.
 kb_more_fields: More fields
 kb_more_fields_help: Optional notes, dates, or values kept when moving across columns.
 kb_focus_mode: Focus mode (Doing full width; other columns in tabs)
+kb_focus_mode_short: Focus
 kb_focus_mode_help: Hides the four-column grid. Use tabs for Queue, Done, and Someday / Maybe when you only want to execute.
 kb_links_preview: Links (click to open)
 kb_subtask_progress: '{done} / {total} subtasks done'

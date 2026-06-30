@@ -142,6 +142,19 @@ def home_ui() -> dict[str, str]:
     return merged
 
 
+def login_ui(lang: str) -> dict[str, str]:
+    """Login page strings for an explicit language.
+
+    The login page renders *before* authentication, when no profile — and thus
+    no per-profile ``ui_lang`` — is resolvable. It must not depend on the
+    process-global UI language (``_lang()``); pass the desired language
+    directly so the login page can default to English regardless of the
+    ``UI_LANG`` the process was started with.
+    """
+    lg = lang if lang in ("en", "zh") else "en"
+    return dict(_load("login", lg))
+
+
 def status_label(ui: dict[str, str], raw: str) -> str:
     """Map schema status value to a display label."""
     return ui.get(f"status_{raw}", raw)

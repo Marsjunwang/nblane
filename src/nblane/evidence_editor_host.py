@@ -810,7 +810,7 @@ class EvidenceEditorHost:
             ),
         )
         if mark_crystallized:
-            self._mark_tasks_crystallized(
+            self._crystallize_and_archive(
                 [str(item.get("task_id", "") or "") for item in valid_rows]
             )
         for warning in warnings:
@@ -1074,7 +1074,7 @@ class EvidenceEditorHost:
             self.ui.get("ee_done_tasks_done", "Created/updated {n} from Done tasks."),
         )
         if saved and mark_crystallized:
-            self._mark_tasks_crystallized([p.get("task_id") for p in proposals])
+            self._crystallize_and_archive([p.get("task_id") for p in proposals])
         return saved
 
     def _fallback_formatted_content(self, prop: dict) -> str:
@@ -1091,33 +1091,6 @@ class EvidenceEditorHost:
             lines.append("Preserved task source:")
             lines.append(original)
         return "\n".join(lines).strip()
-
-    def _mark_tasks_crystallized(self, task_ids: list) -> None:
-        """Set ``crystallized`` on the given Done tasks (best effort)."""
-        from dataclasses import replace
-
-        from nblane.core.io import KANBAN_DONE, parse_kanban, save_kanban
-
-        wanted = {str(t).strip() for t in (task_ids or []) if str(t).strip()}
-        if not wanted:
-            return
-        kanban_path = self.pdir / "kanban.md"
-        sections = parse_kanban(self.profile)
-        done_tasks = sections.get(KANBAN_DONE) or []
-        changed = False
-        for index, task in enumerate(done_tasks):
-            tid = str(getattr(task, "id", "") or "").strip()
-            if tid in wanted and not getattr(task, "crystallized", False):
-                done_tasks[index] = replace(task, crystallized=True)
-                changed = True
-        if not changed:
-            return
-        sections[KANBAN_DONE] = done_tasks
-        assert_files_current([kanban_path])
-        save_kanban(self.profile, sections)
-        refresh_file_snapshots([kanban_path])
-        stash_git_backup_results()
-        clear_web_cache()
 
     def _active_evidence_task_ids(self) -> set[str]:
         """Task ids referenced by active (non-deprecated) evidence provenance.
@@ -1175,12 +1148,29 @@ class EvidenceEditorHost:
         except Exception:  # pragma: no cover - sync is best effort
             pass
 
-    def _apply_archive_done_tasks(self, task_ids: list) -> bool:
-        """Archive selected Done tasks into kanban-archive.md (mutates kanban)."""
-        from nblane.core.io import archive_kanban_done_tasks
+    def _archive_done_tasks(
+        self,
+        task_ids: list,
+        *,
+        crystallize: bool,
+        missing_ok: bool,
+        success_message: str | None,
+    ) -> bool:
+        """Archive selected Done tasks into kanban-archive.md (mutates kanban).
+
+        When ``crystallize`` is set, the archived copies are flagged
+        ``crystallized`` first so the archive preserves that they were
+        ingested. ``missing_ok`` lets evidence flows skip ids that already
+        left the Done column (e.g. updated existing evidence) instead of
+        erroring. Returns False on hard failure; archiving zero tasks when
+        ``missing_ok`` is a no-op success.
+        """
+        from dataclasses import replace
+
+        from nblane.core.io import KANBAN_DONE, archive_kanban_done_tasks
 
         sections, indexes, missing = self._done_indexes_for_task_ids(task_ids)
-        if missing:
+        if missing and not missing_ok:
             st.error(
                 self.ui.get(
                     "ee_done_housekeeping_missing",
@@ -1189,8 +1179,16 @@ class EvidenceEditorHost:
             )
             return False
         if not indexes:
+            if missing_ok:
+                return True
             st.info(self.ui.get("ee_bulk_none", "No rows selected."))
             return False
+        if crystallize:
+            done_tasks = list(sections.get(KANBAN_DONE) or [])
+            for index in indexes:
+                if not getattr(done_tasks[index], "crystallized", False):
+                    done_tasks[index] = replace(done_tasks[index], crystallized=True)
+            sections[KANBAN_DONE] = done_tasks
         archive_path = self.pdir / "kanban-archive.md"
         kanban_path = self.pdir / "kanban.md"
         project_path = self.pdir / "project-board.yaml"
@@ -1200,12 +1198,48 @@ class EvidenceEditorHost:
         refresh_file_snapshots([archive_path, kanban_path, project_path])
         stash_git_backup_results()
         clear_web_cache()
-        st.success(
-            self.ui.get(
-                "done_housekeeping_archived", "Archived {n} task(s)."
-            ).format(n=len(indexes))
-        )
+        if success_message:
+            st.success(success_message.format(n=len(indexes)))
         return True
+
+    def _apply_archive_done_tasks(self, task_ids: list) -> bool:
+        """Housekeeping: archive selected Done tasks (no crystallize flag)."""
+        return self._archive_done_tasks(
+            task_ids,
+            crystallize=False,
+            missing_ok=False,
+            success_message=self.ui.get(
+                "done_housekeeping_archived", "Archived {n} task(s)."
+            ),
+        )
+
+    def _crystallize_and_archive(self, task_ids: list) -> None:
+        """Mark evidence-ingested Done tasks crystallized, then archive them.
+
+        Called after evidence rows are saved, so the source tasks leave the
+        active Done column. Best effort: a failed archive warns but never
+        rolls back the evidence that was already written.
+        """
+        ids = [str(t).strip() for t in (task_ids or []) if str(t).strip()]
+        if not ids:
+            return
+        try:
+            archived = self._archive_done_tasks(
+                ids,
+                crystallize=True,
+                missing_ok=True,
+                success_message=None,
+            )
+        except Exception:  # pragma: no cover - archive is best effort post-save
+            archived = False
+        if not archived:
+            st.warning(
+                self.ui.get(
+                    "ee_done_archive_after_save_failed",
+                    "Evidence saved, but the source task(s) stayed on the board "
+                    "— archive them from Housekeeping.",
+                )
+            )
 
     def _apply_delete_done_tasks(self, task_ids: list) -> bool:
         """Delete selected Done tasks, blocking any cited by active evidence."""

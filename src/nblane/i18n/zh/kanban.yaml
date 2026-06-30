@@ -221,10 +221,12 @@ move_to: 移动到
 kb_stay: （留在本列）
 kb_move_help: 下方按钮只改变任务所在**列**，不是「完成状态」菜单。
 kb_auto_dates: 移动列时自动填写开始/结束日期
+kb_auto_dates_short: 自动日期
 kb_auto_dates_help: 移入「进行中」时若 started_on 为空则填当天；移入「已完成」时若 completed_on 为空则填当天。
 kb_more_fields: 更多字段
 kb_more_fields_help: 可选补充、日期，或从其他列带过来需要保留的字段。
 kb_focus_mode: 专注模式（进行中全宽，其余列在标签页）
+kb_focus_mode_short: 专注
 kb_focus_mode_help: 隐藏四列并排布局；需要时再在标签中打开「排队」「已完成」「以后再说」。
 kb_links_preview: 链接（点击打开）
 kb_subtask_progress: 子任务 {done} / {total} 已完成

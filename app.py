@@ -104,7 +104,7 @@ from nblane.web_shared import (
     select_profile,
     stash_git_backup_results,
 )
-from nblane.web_auth import require_login
+from nblane.web_auth import render_login_gate, require_login
 
 ui: dict[str, str] = {}
 
@@ -2876,6 +2876,10 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
 def main() -> None:
     """Run the Streamlit app with product-level navigation."""
     st.session_state["_nblane_native_navigation"] = True
+    # Gate BEFORE st.navigation: an unauthenticated visitor gets the standalone
+    # login page (no sidebar, English-first) and never reaches the nav tree.
+    # This also avoids painting nav in the env-default language before login.
+    render_login_gate()
     # Restore the per-profile UI language BEFORE st.navigation builds the
     # sidebar, so the nav labels render in the chosen language on the first
     # paint (e.g. immediately after login) rather than only after the next

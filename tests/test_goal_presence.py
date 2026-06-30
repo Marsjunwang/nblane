@@ -146,11 +146,16 @@ class TestGoalPresenceI18n(unittest.TestCase):
             "    render_git_backup_notices()",
             source,
         )
-        self.assertIn(
-            'st.session_state["_nblane_native_navigation"] = True\n'
-            "    _sync_home_ui()\n    page = st.navigation(",
-            source,
-        )
+        # main() must gate before nav, seed the language, and sync Home copy
+        # all before st.navigation builds the sidebar, so nav labels render in
+        # the right language on the first paint. Assert ordering rather than an
+        # exact adjacency so intervening lines (the login gate, comments) don't
+        # make this brittle.
+        nav_pos = source.index("page = st.navigation(")
+        gate_pos = source.index("render_login_gate()")
+        seed_pos = source.index("seed_ui_language_before_nav()\n    _sync_home_ui()")
+        self.assertLess(gate_pos, nav_pos)
+        self.assertLess(seed_pos, nav_pos)
 
     def test_page_ui_refreshes_after_sidebar_language(self) -> None:
         """Pages must refresh UI strings after sidebar settings are applied."""

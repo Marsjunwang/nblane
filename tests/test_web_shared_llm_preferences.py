@@ -77,5 +77,57 @@ class TestWebSharedLlmPreferences(unittest.TestCase):
         self.assertEqual(state[web_shared._LLM_MODEL_CHOICE_KEY], "qwen3.6-plus")
 
 
+class TestSeedUiLanguageBeforeNav(unittest.TestCase):
+    @contextmanager
+    def _patch(self, state: dict, prefs: dict, *, profile: str):
+        with (
+            patch.object(web_shared.st, "session_state", state),
+            patch.object(web_shared, "_active_profile_guess", return_value=profile),
+            patch.object(web_shared, "load_web_preferences", return_value=prefs),
+            patch.object(
+                web_shared.llm_client,
+                "current_config",
+                return_value={"base_url": "", "model": ""},
+            ),
+            patch.object(web_shared, "apply_ui_language_from_session"),
+        ):
+            yield
+
+    def test_post_login_reseeds_profile_language_over_env_default(self) -> None:
+        # Pre-login the env default (zh) was seeded with no profile attached.
+        state: dict = {web_shared._UI_LANG_KEY: "zh"}
+        en_prefs = _prefs("OpenAI", "https://api.openai.com/v1", "gpt-4o")
+        en_prefs["ai"]["llm"]["ui_lang"] = "en"
+        # Once the profile is resolvable, the sidebar must pick up its "en".
+        with self._patch(state, en_prefs, profile="alice"):
+            web_shared.seed_ui_language_before_nav()
+
+        self.assertEqual(state[web_shared._UI_LANG_KEY], "en")
+        self.assertEqual(state[web_shared._LLM_PREFS_PROFILE_KEY], "alice")
+
+    def test_noop_when_language_already_seeded_for_same_profile(self) -> None:
+        state: dict = {
+            web_shared._UI_LANG_KEY: "en",
+            web_shared._LLM_PREFS_PROFILE_KEY: "alice",
+        }
+        en_prefs = _prefs("OpenAI", "https://api.openai.com/v1", "gpt-4o")
+        en_prefs["ai"]["llm"]["ui_lang"] = "en"
+        with self._patch(state, en_prefs, profile="alice"):
+            with patch.object(web_shared, "_ensure_llm_session_defaults") as ensure:
+                web_shared.seed_ui_language_before_nav()
+        # Same profile + valid language: must not re-read preferences.
+        ensure.assert_not_called()
+
+    def test_pre_login_keeps_env_default_when_no_profile(self) -> None:
+        state: dict = {web_shared._UI_LANG_KEY: "zh"}
+        prefs: dict = {}
+        with self._patch(state, prefs, profile=""):
+            with patch.object(web_shared, "_ensure_llm_session_defaults") as ensure:
+                web_shared.seed_ui_language_before_nav()
+        # No resolvable profile: keep the already-good value, don't clobber it.
+        ensure.assert_not_called()
+        self.assertEqual(state[web_shared._UI_LANG_KEY], "zh")
+
+
 if __name__ == "__main__":
     unittest.main()

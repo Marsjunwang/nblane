@@ -1,0 +1,8 @@
+login_title: nblane
+login_subtitle: Sign in to continue.
+login_user_id: User ID
+login_password: Password
+login_submit: Sign in
+login_error: Invalid user ID or password.
+login_lang_label: Language
+login_request_help: 'Need an account? Contact your administrator to request a user ID and password. (TODO: replace with real instructions)'

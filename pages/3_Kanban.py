@@ -103,7 +103,6 @@ from nblane.web_shared import (
     kanban_ai_suffix,
     select_profile,
     stash_git_backup_results,
-    ui_emoji_enabled,
 )
 
 apply_ui_language_from_session()
@@ -821,6 +820,15 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
     labels.update(
         {
             "add": ui["add"],
+            "auto_dates": ui["kb_auto_dates"],
+            "auto_dates_short": ui.get("kb_auto_dates_short", ui["kb_auto_dates"]),
+            "auto_dates_help": ui["kb_auto_dates_help"],
+            "focus_mode": ui["kb_focus_mode"],
+            "focus_mode_short": ui.get("kb_focus_mode_short", ui["kb_focus_mode"]),
+            "focus_mode_help": ui["kb_focus_mode_help"],
+            "metric_total": ui["metric_total"],
+            "reload": ui["reload"],
+            "unsaved": ui["kb_unsaved_subtasks"],
             "ai_done": ui["ingest_generate"],
             "ai_gap": ui.get("kb_ai_gap", "Analyze gap"),
             "ai_done_short": ui.get("kb_ai_done_short", "Evd"),
@@ -1731,6 +1739,37 @@ def _handle_board_event(
             st.info(ui.get("kb_open_activity_detail", "Open Activity details"))
         return
 
+    if action == "set_view_pref":
+        name = str(payload.get("name") or "").strip()
+        if name not in {"auto_dates", "focus_mode"}:
+            return
+        st.session_state[_view_pref_key(profile, name)] = bool(payload.get("value"))
+        _persist_view_pref(profile, name)
+        st.rerun()
+        return
+
+    if action == "reload_board":
+        pdir = profile_dir(profile)
+        _load_into_state(profile)
+        _clear_kanban_dirty(profile)
+        _bump_kanban_widget_epoch(profile)
+        refresh_file_snapshots(
+            [
+                pdir / "kanban.md",
+                pdir / "activity-log.yaml",
+                pdir / "agent-activity.yaml",
+                pdir / "ai-runs.yaml",
+            ]
+        )
+        st.rerun()
+        return
+
+    if action == "save_board":
+        _auto_save(profile, sections)
+        st.toast(ui["saved"])
+        st.rerun()
+        return
+
     if action in ("move_card", "reorder"):
         found, card_applied, ok = _apply_board_card_payload(
             profile=profile,
@@ -2285,89 +2324,17 @@ with header_left:
             key=f"kanban_ai_settings:{selected}",
         ):
             _render_kanban_ai_settings(selected, ui)
-    settings_col, _spacer_col = st.columns(
-        [2, 1],
-        gap="small",
-        vertical_alignment="bottom",
-    )
-    with settings_col:
-        _init_view_prefs(selected)
-        auto_dates = st.checkbox(
-            ui["kb_auto_dates"],
-            key=_view_pref_key(selected, "auto_dates"),
-            help=ui["kb_auto_dates_help"],
-            on_change=_persist_view_pref,
-            args=(selected, "auto_dates"),
-        )
-        focus_mode = st.checkbox(
-            ui["kb_focus_mode"],
-            key=_view_pref_key(selected, "focus_mode"),
-            help=ui["kb_focus_mode_help"],
-            on_change=_persist_view_pref,
-            args=(selected, "focus_mode"),
-        )
-        actions_col, _actions_spacer = st.columns(
-            [1, 2],
-            gap="small",
-            vertical_alignment="bottom",
-        )
-        with actions_col:
-            reload_col, save_col = st.columns(
-                [1, 1],
-                gap="small",
-                vertical_alignment="bottom",
-            )
-            with reload_col:
-                if st.button(
-                    ui["reload"],
-                    use_container_width=True,
-                    help=ui.get("kb_reload_help"),
-                ):
-                    _load_into_state(selected)
-                    _clear_kanban_dirty(selected)
-                    _bump_kanban_widget_epoch(selected)
-                    refresh_file_snapshots(
-                        [
-                            _kanban_path,
-                            _activity_path,
-                            _agent_activity_path,
-                            _ai_runs_path,
-                        ]
-                    )
-                    st.rerun()
-            with save_col:
-                if st.button(
-                    ui["save"],
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    sections = _get_sections(selected)
-                    _auto_save(selected, sections)
-                    st.success(ui["saved"])
-        if _kanban_is_dirty(selected):
-            st.caption(ui["kb_unsaved_subtasks"])
+    # View toggles, Reload/Save, and the Total chip now live inside the
+    # React board's compact toolbar; we only seed the persisted prefs here.
+    _init_view_prefs(selected)
+    auto_dates = bool(st.session_state.get(_view_pref_key(selected, "auto_dates"), True))
+    focus_mode = bool(st.session_state.get(_view_pref_key(selected, "focus_mode"), False))
 with header_calendar:
     _render_toolbar_checkin(selected, _pdir, ui)
 
 sections = _get_sections(selected)
 
 total_tasks = sum(len(tasks) for tasks in sections.values())
-doing_count = len(sections.get(KANBAN_DOING, []))
-done_count = len(sections.get(KANBAN_DONE, []))
-
-mc1, mc2, mc3 = st.columns(3)
-use_emoji = ui_emoji_enabled()
-mc1.metric(ui["metric_total"], total_tasks)
-mc2.metric(
-    ui["metric_doing"] if use_emoji else kanban_section_label(KANBAN_DOING),
-    doing_count,
-)
-mc3.metric(
-    ui["metric_done"] if use_emoji else kanban_section_label(KANBAN_DONE),
-    done_count,
-)
-
-st.divider()
 
 # -- Unified board -----------------------------------------------
 
@@ -2378,6 +2345,8 @@ board_event = st_kanban_board(
         "section_order": list(KANBAN_BOARD_SECTIONS),
         "auto_dates": auto_dates,
         "focus_mode": focus_mode,
+        "total_tasks": total_tasks,
+        "is_dirty": _kanban_is_dirty(selected),
         "lang": llm_client.ui_language(),
         "project_options": _project_options_payload(selected),
         "project_label_maps": _project_label_maps_payload(selected),

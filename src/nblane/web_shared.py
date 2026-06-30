@@ -383,13 +383,27 @@ def seed_ui_language_before_nav() -> None:
     login the sidebar therefore renders in the default language and only
     switches after the next navigation. Seeding the language here — keyed to
     the profile we can resolve non-interactively — makes the sidebar render in
-    the right language on that very first paint. No-op once the language key is
-    already populated.
+    the right language on that very first paint.
+
+    The language key is only trustworthy when it was seeded *for the profile we
+    now resolve to*. Before login no profile is resolvable, so we seed from the
+    environment default (e.g. ``UI_LANG=zh``) and leave ``_LLM_PREFS_PROFILE_KEY``
+    unset. That env-default value must NOT block a re-seed once the real profile
+    — and its per-profile ``ui_lang`` — becomes available on the first post-login
+    paint; otherwise the sidebar renders in the env-default language and only
+    switches on the next navigation (the lag this function exists to remove).
     """
-    if st.session_state.get(_UI_LANG_KEY) in ("en", "zh"):
+    profile = _active_profile_guess()
+    seeded_for = st.session_state.get(_LLM_PREFS_PROFILE_KEY)
+    have_lang = st.session_state.get(_UI_LANG_KEY) in ("en", "zh")
+    # Re-seed when we have no language yet, or when the profile we can now
+    # resolve differs from the one the current language was seeded for. When no
+    # profile is resolvable (pre-login), keep an already-good value instead of
+    # clobbering it back to the env default.
+    needs_reseed = (not have_lang) or (bool(profile) and seeded_for != profile)
+    if not needs_reseed:
         apply_ui_language_from_session()
         return
-    profile = _active_profile_guess()
     # _ensure_llm_session_defaults reads web-preferences.yaml, writes
     # _UI_LANG_KEY into session_state, and calls apply_ui_language_from_session.
     _ensure_llm_session_defaults(profile)

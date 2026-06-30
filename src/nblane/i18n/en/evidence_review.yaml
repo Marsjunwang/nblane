@@ -407,13 +407,14 @@ ee_done_tasks_create: Create evidence
 ee_done_tasks_none: No Done tasks to ingest.
 ee_done_tasks_done: Created/updated {n} from Done tasks.
 ee_done_has_evidence: has evidence
-ee_done_mark_crystallized: Mark selected tasks crystallized after save
+ee_done_mark_crystallized: Crystallize & archive selected tasks after save
 ee_done_housekeeping_title: Housekeeping (archive / delete)
 ee_done_housekeeping_hint: These act on the kanban board, not evidence. Deleting a task cited by active evidence is blocked — archive it instead.
 ee_done_archive_selected: Archive selected
 ee_done_delete_selected: Delete selected
 ee_done_delete_confirm: Delete selected Done tasks? Tasks cited by active evidence are blocked.
 ee_done_housekeeping_missing: 'Task(s) not in Done: {ids}.'
+ee_done_archive_after_save_failed: Evidence saved, but the source task(s) stayed on the board — archive them from Housekeeping.
 # batch select + bulk actions
 ee_batch_mode: Batch select
 ee_bulk_selected: selected

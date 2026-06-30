@@ -28,6 +28,9 @@ function verifyHtml(html, label) {
     "Someday / Maybe",
     "archive_done_card",
     "confirm_subtask_alignment",
+    "set_view_pref",
+    "reload_board",
+    "save_board",
   ];
   for (const needle of required) {
     if (!html.includes(needle)) {

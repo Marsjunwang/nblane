@@ -993,7 +993,7 @@ function DoneTasksPicker({ tasks, labels, emit, onClose }) {
         </div>
         <label className="ee-check">
           <input type="checkbox" checked={mark} onChange={() => setMark((m) => !m)} />
-          {label(labels, "ee_done_mark_crystallized", "Mark selected tasks crystallized after save")}
+          {label(labels, "ee_done_mark_crystallized", "Crystallize & archive selected tasks after save")}
         </label>
         <div className="ee-detail-actions">
           <button
@@ -1114,7 +1114,7 @@ function DonePreviewPanel({ preview, labels, emit }) {
       </div>
       <label className="ee-check">
         <input type="checkbox" checked={mark} onChange={() => setMark((m) => !m)} />
-        {label(labels, "ee_done_mark_crystallized", "Mark accepted tasks crystallized after save")}
+        {label(labels, "ee_done_mark_crystallized", "Crystallize & archive accepted tasks after save")}
       </label>
       <div className="ee-row-btns">
         <button

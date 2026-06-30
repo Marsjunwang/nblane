@@ -13,11 +13,13 @@ from nblane.core import auth as auth_core
 from nblane.core import git_backup
 from nblane.core.profile_io import list_profiles
 from nblane.core.team_io import list_teams
+from nblane.web_i18n import login_ui
 from nblane.web_page_shell import ensure_wide_page_shell
 
 _SESSION_USER_ID = "_nblane_auth_user_id"
 _SIDECAR_AUTH_SYNC_KEY = "_nblane_sidecar_auth_sync"
 _SIDECAR_AUTH_LOGOUT_KEY = "_nblane_sidecar_auth_logout"
+_LOGIN_LANG_KEY = "_nblane_login_lang"
 
 
 def _local_user() -> auth_core.User:
@@ -175,22 +177,71 @@ def logout() -> None:
 
 
 def _render_login(users: dict[str, auth_core.User]) -> None:
-    """Render password login and stop the current page."""
+    """Render the standalone password login page and stop the current page.
+
+    Runs before navigation is built, so it renders no sidebar. The page starts
+    in English regardless of the process ``UI_LANG`` and offers an ``EN | 中``
+    toggle; the per-profile UI language only takes over after login.
+    """
     _render_sidecar_logout_bridge()
-    st.title("nblane")
-    st.caption("Sign in to continue.")
+    lang = st.session_state.setdefault(_LOGIN_LANG_KEY, "en")
+    u = login_ui(lang)
+
+    title_col, en_col, zh_col = st.columns([6, 1, 1])
+    with title_col:
+        st.title(u["login_title"])
+    with en_col:
+        if st.button(
+            "EN",
+            key="_nblane_login_lang_en",
+            disabled=lang == "en",
+            use_container_width=True,
+        ):
+            st.session_state[_LOGIN_LANG_KEY] = "en"
+            st.rerun()
+    with zh_col:
+        if st.button(
+            "中",
+            key="_nblane_login_lang_zh",
+            disabled=lang == "zh",
+            use_container_width=True,
+        ):
+            st.session_state[_LOGIN_LANG_KEY] = "zh"
+            st.rerun()
+
+    st.caption(u["login_subtitle"])
     with st.form("nblane_login_form"):
-        user_id = st.text_input("User ID")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Sign in", type="primary")
+        user_id = st.text_input(u["login_user_id"])
+        password = st.text_input(u["login_password"], type="password")
+        submitted = st.form_submit_button(u["login_submit"], type="primary")
     if submitted:
         user = users.get(user_id.strip())
         if user and auth_core.verify_password(password, user.password_hash):
             st.session_state[_SESSION_USER_ID] = user.id
             git_backup.set_actor(user.id)
             st.rerun()
-        st.error("Invalid user ID or password.")
+        st.error(u["login_error"])
+    st.info(u["login_request_help"])
     st.stop()
+
+
+def render_login_gate() -> bool:
+    """Gate the app before navigation is built.
+
+    Returns ``True`` when the request may proceed to ``st.navigation`` (auth
+    disabled, or a user is already signed in). When no user is signed in,
+    renders the standalone login page and stops — the call does not return.
+    Unlike :func:`require_login`, this draws no sidebar, so an unauthenticated
+    visitor never sees the navigation tree. Per-page ``require_login`` still
+    runs in each page body and owns ``git_backup`` setup + the sidebar.
+    """
+    ensure_wide_page_shell()
+    if not auth_enabled():
+        return True
+    users = _load_users_or_stop()
+    if current_user() is None:
+        _render_login(users)
+    return True
 
 
 def require_login() -> auth_core.User:

@@ -689,11 +689,15 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertEqual(match[0].get("origin"), "kanban_task")
         self.assertEqual(match[0].get("date"), "2026-02-01")
         self.assertTrue(match[0].get("formatted_content"))
-        # The task is now crystallized in kanban.md.
-        self.assertIn(
-            "crystallized: true",
+        # The task left the active Done column and moved to the archive,
+        # carrying its crystallized flag.
+        self.assertNotIn(
+            "kb_det",
             (self.pdir / "kanban.md").read_text(encoding="utf-8"),
         )
+        archive_text = (self.pdir / "kanban-archive.md").read_text(encoding="utf-8")
+        self.assertIn("kb_det", archive_text)
+        self.assertIn("crystallized: true", archive_text)
 
     def test_prepare_done_ai_preview_blocks_missing_completed_on(self) -> None:
         (self.pdir / "kanban.md").write_text(
@@ -798,6 +802,15 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertEqual(match[0]["strength"], "medium")
         by_id = {n["id"]: n for n in self._tree_nodes()}
         self.assertIn(match[0]["id"], by_id["ros2_basics"].get("evidence_refs") or [])
+        # Accepting the preview crystallizes the source task and archives it,
+        # so it leaves the active Done column.
+        self.assertNotIn(
+            "kb_ai",
+            (self.pdir / "kanban.md").read_text(encoding="utf-8"),
+        )
+        archive_text = (self.pdir / "kanban-archive.md").read_text(encoding="utf-8")
+        self.assertIn("kb_ai", archive_text)
+        self.assertIn("crystallized: true", archive_text)
 
     def test_done_ai_duplicate_rows_block_accept(self) -> None:
         (self.pdir / "kanban.md").write_text(

@@ -407,13 +407,14 @@ ee_done_tasks_create: 生成证据
 ee_done_tasks_none: 没有可入库的 Done 任务。
 ee_done_tasks_done: 已从 Done 任务生成/更新 {n} 行。
 ee_done_has_evidence: 已有证据
-ee_done_mark_crystallized: 保存后将所选任务标记为已固化
+ee_done_mark_crystallized: 保存后结晶并归档所选任务
 ee_done_housekeeping_title: 清场（归档 / 删除）
 ee_done_housekeeping_hint: 这些操作作用于看板而非证据。被活跃证据引用的任务不允许删除——请改为归档。
 ee_done_archive_selected: 归档所选
 ee_done_delete_selected: 删除所选
 ee_done_delete_confirm: 删除所选 Done 任务？被活跃证据引用的任务会被拦截。
 ee_done_housekeeping_missing: '任务不在 Done 列：{ids}。'
+ee_done_archive_after_save_failed: 证据已保存，但源任务仍留在看板上——请到「清场」手动归档。
 # 批量选择与批量操作
 ee_batch_mode: 批量选择
 ee_bulk_selected: 已选
