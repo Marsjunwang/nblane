@@ -414,6 +414,8 @@ ee_done_fallback: Fallback
 ee_done_fallback_confirm: 使用不含 AI 评分的确定式 fallback？
 ee_done_tasks_none: 没有可入库的 Done 任务。
 ee_done_tasks_done: 已从 Done 任务生成/更新 {n} 行。
+ee_done_skill_links_done: 已更新 Done 任务的技能关联。
+ee_done_archive_only_done: 已接受 {n} 个未生成新证据的 Done 任务，并完成结晶归档。
 ee_done_has_evidence: 已有证据
 ee_done_mark_crystallized: 保存后结晶并归档所选任务
 ee_done_housekeeping_title: 清场（归档 / 删除）
@@ -428,7 +430,11 @@ ee_done_skill_link_attaches: 关联到
 ee_done_link_status: → {status}
 ee_done_view_content: 查看内容
 ee_done_hide_content: 收起内容
-ee_done_no_evidence_selected: 请至少选择一条证据。
+ee_done_no_evidence_selected: 请至少选择一条证据，或选择一个仅归档任务。
+ee_done_no_action_selected: 请至少选择一条证据，或为仅归档任务保留“结晶并归档”。
+ee_done_archive_only: 仅归档
+ee_done_skipped_reason: 跳过原因
+ee_done_accept_selected: 接受所选建议
 ee_done_source_excerpt: 原文摘录
 ee_done_original_content: 任务原文
 # 批量选择与批量操作

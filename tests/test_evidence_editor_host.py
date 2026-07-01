@@ -818,6 +818,169 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertIn("kb_ai", archive_text)
         self.assertIn("crystallized: true", archive_text)
 
+    def test_done_ai_partial_accept_archives_skipped_task(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] AI detector\n"
+            "  - id: kb_ai\n"
+            "  - completed_on: 2026-02-02\n"
+            "  - project_id: project:demo\n"
+            "  - outcome: detector improved\n"
+            "- [x] Team cleanup\n"
+            "  - id: kb_skip\n"
+            "  - completed_on: 2026-02-03\n"
+            "  - project_id: project:demo\n"
+            "  - outcome: cleaned board labels\n",
+            encoding="utf-8",
+        )
+        ai_patch = {
+            "evidence_entries": [
+                {
+                    "id": "ai_ev",
+                    "title": "AI normalized detector",
+                    "summary": "Detector work was completed.",
+                    "formatted_content": "## Detector\n\nCompleted detector work.",
+                    "strength": "medium",
+                    "confidence": "high",
+                    "kanban_refs": ["kanban:kb_ai"],
+                }
+            ],
+            "node_updates": [],
+            "skipped_tasks": [
+                {
+                    "task_id": "kb_skip",
+                    "reason": "too_vague",
+                    "detail": "Cleanup does not describe a durable evidence fact.",
+                }
+            ],
+        }
+        with patch(
+            "nblane.evidence_editor_host.ingest_kanban_done_json",
+            return_value=(ai_patch, None),
+        ), patch(
+            "nblane.evidence_editor_host.kanban_ai_backend",
+            return_value="llm",
+        ), patch(
+            "nblane.evidence_editor_host.current_goal_agent_context",
+            return_value="",
+        ):
+            ok = self.host.handle_event(
+                {
+                    "action": "prepare_done_task_evidence",
+                    "event_id": "done-ai-partial-1",
+                    "payload": {"task_ids": ["kb_ai", "kb_skip"]},
+                }
+            )
+        self.assertTrue(ok)
+        preview = self.fake_st.session_state[self.host._done_preview_state_key()]
+        self.assertTrue(preview["can_accept"])
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(preview["archive_only_count"], 1)
+        skip_row = next(r for r in preview["rows"] if r["task_id"] == "kb_skip")
+        self.assertFalse(skip_row["valid"])
+        self.assertTrue(skip_row["archive_only"])
+        self.assertEqual(skip_row["skip_reason"], "too_vague")
+        self.assertIn("Cleanup", " ".join(skip_row["blockers"]))
+
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-ai-partial-apply-1",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": True,
+                    "selected_task_ids": ["kb_ai", "kb_skip"],
+                    "selected_node_keys": [],
+                },
+            }
+        )
+        self.assertTrue(ok)
+        rows = self._pool()
+        self.assertEqual(
+            len([r for r in rows if r.get("origin_ref") == "kanban:kb_ai"]),
+            1,
+        )
+        self.assertEqual(
+            [r for r in rows if r.get("origin_ref") == "kanban:kb_skip"],
+            [],
+        )
+        kanban_text = (self.pdir / "kanban.md").read_text(encoding="utf-8")
+        self.assertNotIn("kb_ai", kanban_text)
+        self.assertNotIn("kb_skip", kanban_text)
+        archive_text = (self.pdir / "kanban-archive.md").read_text(encoding="utf-8")
+        self.assertIn("kb_ai", archive_text)
+        self.assertIn("kb_skip", archive_text)
+        self.assertEqual(archive_text.count("crystallized: true"), 2)
+
+    def test_done_ai_archive_only_accept_without_evidence_rows(self) -> None:
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] Meeting cleanup\n"
+            "  - id: kb_skip\n"
+            "  - completed_on: 2026-02-03\n"
+            "  - project_id: project:demo\n"
+            "  - outcome: cleaned board labels\n",
+            encoding="utf-8",
+        )
+        ai_patch = {
+            "evidence_entries": [],
+            "node_updates": [],
+            "skipped_tasks": [
+                {
+                    "task_id": "kanban:kb_skip",
+                    "reason": "not_evidence",
+                    "detail": "Administrative cleanup only.",
+                }
+            ],
+        }
+        with patch(
+            "nblane.evidence_editor_host.ingest_kanban_done_json",
+            return_value=(ai_patch, None),
+        ), patch(
+            "nblane.evidence_editor_host.kanban_ai_backend",
+            return_value="llm",
+        ), patch(
+            "nblane.evidence_editor_host.current_goal_agent_context",
+            return_value="",
+        ):
+            ok = self.host.handle_event(
+                {
+                    "action": "prepare_done_task_evidence",
+                    "event_id": "done-ai-archive-only-1",
+                    "payload": {"task_ids": ["kb_skip"]},
+                }
+            )
+        self.assertTrue(ok)
+        preview = self.fake_st.session_state[self.host._done_preview_state_key()]
+        self.assertTrue(preview["can_accept"])
+        self.assertEqual(preview["valid_count"], 0)
+        self.assertEqual(preview["archive_only_count"], 1)
+
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-ai-archive-only-apply-1",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": True,
+                    "selected_task_ids": ["kb_skip"],
+                    "selected_node_keys": [],
+                },
+            }
+        )
+        self.assertTrue(ok)
+        self.assertEqual(
+            [r for r in self._pool() if r.get("origin_ref") == "kanban:kb_skip"],
+            [],
+        )
+        self.assertNotIn(
+            "kb_skip",
+            (self.pdir / "kanban.md").read_text(encoding="utf-8"),
+        )
+        archive_text = (self.pdir / "kanban-archive.md").read_text(encoding="utf-8")
+        self.assertIn("kb_skip", archive_text)
+        self.assertIn("crystallized: true", archive_text)
+
     def _prepare_single_done_preview(self) -> dict:
         """Prepare a one-task preview (evidence + one skill link) and return it."""
         (self.pdir / "kanban.md").write_text(

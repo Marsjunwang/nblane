@@ -32,6 +32,13 @@ class TestKanbanPromptGrading(unittest.TestCase):
             self.assertIn("kanban:", prompt)
             self.assertIn("kanban_refs", prompt)
 
+    def test_prompt_requests_skipped_tasks_for_no_evidence(self) -> None:
+        """The Done AI protocol explains tasks that should not create rows."""
+        for prompt in (_system_prompt_kanban_zh(), _system_prompt_kanban_en()):
+            self.assertIn("skipped_tasks", prompt)
+            self.assertIn("already_covered", prompt)
+            self.assertIn("too_vague", prompt)
+
 
 class TestProfileIngestLlm(unittest.TestCase):
     """Kanban Done ingest can swap AI backends."""

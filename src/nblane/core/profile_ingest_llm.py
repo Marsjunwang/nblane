@@ -255,6 +255,43 @@ def _kanban_evidence_contract_en() -> str:
     )
 
 
+def _kanban_skip_protocol_zh() -> str:
+    """Ask the model to explain Done tasks that should not create rows."""
+    return (
+        "### skipped_tasks（不能生成 evidence 时必填）\n\n"
+        "- 对每个被选中的 Done task：如果没有为它输出新的 evidence_entries 行，"
+        "请在 skipped_tasks 中输出一项，解释为什么不生成新证据。\n"
+        "- skipped_tasks 每项字段：task_id、reason、detail。\n"
+        "reason 仅限 not_evidence | too_vague | already_covered | "
+        "out_of_scope | insufficient_source。\n"
+        "- already_covered 表示该事实已由 Current evidence pool 中的旧证据覆盖；"
+        "这时不要重复写 evidence_entries，可在 node_updates 中引用已有证据 id。\n"
+        "- skipped_tasks 只解释跳过原因。除非 node_updates 明确引用已有证据 id，"
+        "否则不要为跳过任务输出技能更新。宿主可能仍会把这些 Done 任务"
+        "标记 crystallized 并归档。\n\n"
+    )
+
+
+def _kanban_skip_protocol_en() -> str:
+    """Ask the model to explain Done tasks that should not create rows."""
+    return (
+        "### skipped_tasks (required when no evidence row is created)\n\n"
+        "- For every selected Done task: if you do not output a new "
+        "evidence_entries row for it, add one skipped_tasks item explaining "
+        "why no new evidence should be created.\n"
+        "- skipped_tasks fields: task_id, reason, detail. reason must be one "
+        "of not_evidence | too_vague | already_covered | out_of_scope | "
+        "insufficient_source.\n"
+        "- already_covered means the fact is already covered by an existing "
+        "Current evidence pool id; do not duplicate it in evidence_entries, "
+        "but node_updates may reference that existing evidence id.\n"
+        "- skipped_tasks only explains the skip. Do not emit skill updates "
+        "for skipped tasks unless node_updates cites existing evidence ids. "
+        "The host may still mark these Done tasks crystallized and archive "
+        "them.\n\n"
+    )
+
+
 def _evidence_grading_zh() -> str:
     """Ask the model to pre-grade evidence strength/confidence (kanban)."""
     return (
@@ -383,12 +420,13 @@ def _system_prompt_kanban_zh() -> str:
     return (
         "你是技术复盘助手。用户给出看板「已完成」条目与允许的 schema、"
         "证据池与技能树摘要。\n"
-        "只输出一个 JSON：evidence_entries、node_updates。\n"
+        "只输出一个 JSON：evidence_entries、node_updates、skipped_tasks。\n"
         "node_updates 每项字段：id（必须是 Allowed nodes 中的技能节点 id；"
         "字段名必须写作 id，禁止写 node_id、skill_id 或 node）、"
         "evidence_refs、status、rationale。\n\n"
         + _evidence_grading_zh()
         + _evidence_provenance_kanban_zh()
+        + _kanban_skip_protocol_zh()
         + "### 出处（必填）\n\n"
         "- evidence_entries 每项必须含 **source_excerpt**：从对应 Done 任务原文"
         "（title/context/outcome/notes/subtask）中**照抄或极短摘录**一两句，"
@@ -402,7 +440,7 @@ def _system_prompt_kanban_zh() -> str:
         + _kanban_evidence_contract_zh()
         + "\n"
         + _status_rubric_kanban_zh()
-        + "\n无把握则 evidence_entries 与 node_updates 可为 []。"
+        + "\n无把握则 evidence_entries、node_updates、skipped_tasks 可为 []。"
     )
 
 
@@ -410,12 +448,13 @@ def _system_prompt_kanban_en() -> str:
     """System prompt: Done tasks → JSON (English UI)."""
     return (
         "You map completed kanban tasks to evidence and skill nodes. "
-        "Output one JSON: evidence_entries, node_updates.\n"
+        "Output one JSON: evidence_entries, node_updates, skipped_tasks.\n"
         "Each node_updates item fields: id (must be an allowed skill node id; "
         "the field name must be exactly id, not node_id, skill_id, or node), "
         "evidence_refs, status, rationale.\n\n"
         + _evidence_grading_en()
         + _evidence_provenance_kanban_en()
+        + _kanban_skip_protocol_en()
         + "### Provenance (required)\n\n"
         "- Each evidence_entries item MUST include **source_excerpt**: "
         "a short literal quote from the Done task (title/context/outcome/"
@@ -462,6 +501,7 @@ def _append_kanban_user_reminder(body: str) -> str:
             "不要把池中已有证据再写进 evidence_entries；"
             "能复用则直接引用池中 id。"
             "新增行必须有 title；"
+            "没有新证据行的 Done 任务必须写进 skipped_tasks；"
             "evidence_refs 可用本 JSON 新行 id、first_1/ev_2，"
             "或池中已有 id。"
             "status 默认 learning；"
@@ -472,6 +512,8 @@ def _append_kanban_user_reminder(body: str) -> str:
             "\n\nKanban final check: do not duplicate pool rows in "
             "evidence_entries; reuse existing pool ids in refs when the same "
             "work. New rows need titles. "
+            "Done tasks without a new evidence row must be listed in "
+            "skipped_tasks. "
             "evidence_refs: new ids, first_1/ev_2, or existing pool ids. "
             "Default learning; solid only for paper / linked OSS / "
             "strong baseline-numbered metrics."

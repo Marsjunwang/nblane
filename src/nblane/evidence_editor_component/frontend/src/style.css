@@ -266,6 +266,8 @@ button { cursor: pointer; }
 .ee-done-preview-list { display: flex; flex-direction: column; gap: 5px; }
 .ee-preview-row { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
 .ee-preview-invalid { border-color: #d8a53a; background: #fffaf0; }
+.ee-preview-archive-only { border-color: #8aa8b8; background: #f3f8fa; }
+.ee-preview-archive-badge { margin-left: 6px; border-color: #5c7a91; color: #345b73; background: #edf5f8; }
 .ee-preview-title { font-weight: 700; }
 .ee-preview-meta { color: var(--muted); font-size: 11px; }
 .ee-preview-summary { font-size: 12px; line-height: 1.4; }

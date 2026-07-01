@@ -82,6 +82,7 @@ class TestParseIngestPatch(unittest.TestCase):
         p = parse_ingest_patch(None)
         self.assertEqual(p.evidence_entries, [])
         self.assertEqual(p.node_updates, [])
+        self.assertEqual(p.skipped_tasks, [])
 
     def test_round_trip_keys(self) -> None:
         """Preserves list entries."""
@@ -103,6 +104,32 @@ class TestParseIngestPatch(unittest.TestCase):
         self.assertEqual(
             p.evidence_entries[0]["project_refs"],
             ["project:demo"],
+        )
+
+    def test_skipped_tasks_are_preserved(self) -> None:
+        """Done AI skip explanations are parsed but not merged as evidence."""
+        raw = {
+            "skipped_tasks": [
+                {
+                    "task_id": "kb_1",
+                    "reason": "not_evidence",
+                    "detail": "Housekeeping only.",
+                },
+                "ignore me",
+            ],
+        }
+
+        p = parse_ingest_patch(raw)
+
+        self.assertEqual(
+            p.skipped_tasks,
+            [
+                {
+                    "task_id": "kb_1",
+                    "reason": "not_evidence",
+                    "detail": "Housekeeping only.",
+                }
+            ],
         )
 
     def test_node_update_id_aliases_are_normalized(self) -> None:

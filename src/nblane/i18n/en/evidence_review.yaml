@@ -414,6 +414,8 @@ ee_done_fallback: Fallback
 ee_done_fallback_confirm: Use deterministic fallback without AI grading?
 ee_done_tasks_none: No Done tasks to ingest.
 ee_done_tasks_done: Created/updated {n} from Done tasks.
+ee_done_skill_links_done: Updated Done skill links.
+ee_done_archive_only_done: Accepted {n} Done task(s) without new evidence and archived them.
 ee_done_has_evidence: has evidence
 ee_done_mark_crystallized: Crystallize & archive selected tasks after save
 ee_done_housekeeping_title: Housekeeping (archive / delete)
@@ -428,7 +430,11 @@ ee_done_skill_link_attaches: attaches to
 ee_done_link_status: → {status}
 ee_done_view_content: View content
 ee_done_hide_content: Hide content
-ee_done_no_evidence_selected: Select at least one evidence row.
+ee_done_no_evidence_selected: Select at least one evidence row or archive-only task.
+ee_done_no_action_selected: Select at least one evidence row or keep crystallize enabled for archive-only tasks.
+ee_done_archive_only: archive only
+ee_done_skipped_reason: skipped
+ee_done_accept_selected: Accept selected recommendations
 ee_done_source_excerpt: Source excerpt
 ee_done_original_content: Original task text
 # batch select + bulk actions

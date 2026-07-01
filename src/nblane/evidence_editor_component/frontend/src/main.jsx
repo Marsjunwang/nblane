@@ -1076,7 +1076,7 @@ function DonePreviewPanel({ preview, labels, emit }) {
     if (!preview) return;
     const tasks = new Set();
     asArray(preview.rows).forEach((item) => {
-      if (item.valid) tasks.add(cleanText(item.task_id));
+      if (item.valid || item.archive_only) tasks.add(cleanText(item.task_id));
     });
     setPickedTasks(tasks);
     const links = new Set();
@@ -1093,6 +1093,19 @@ function DonePreviewPanel({ preview, labels, emit }) {
   const blockers = asArray(preview.task_blockers);
   const blockingErrors = asArray(preview.blocking_errors);
   const nodeUpdates = asArray(preview.node_updates);
+  const evidenceTotal = preview.valid_count || 0;
+  const archiveOnlyTotal = preview.archive_only_count || 0;
+  const acceptedTotal =
+    preview.acceptable_count || evidenceTotal + archiveOnlyTotal;
+  const pickedEvidenceCount = rows.filter(
+    (item) => item.valid && pickedTasks.has(cleanText(item.task_id))
+  ).length;
+  const pickedArchiveOnlyCount = rows.filter(
+    (item) => item.archive_only && pickedTasks.has(cleanText(item.task_id))
+  ).length;
+  const hasEffectiveSelection =
+    pickedTasks.size > 0 &&
+    (mark || pickedEvidenceCount > 0 || pickedLinks.size > 0);
 
   const toggleTask = (id) =>
     setPickedTasks((prev) => {
@@ -1140,23 +1153,38 @@ function DonePreviewPanel({ preview, labels, emit }) {
           {rows.map((item, idx) => {
             const row = item.row || {};
             const taskId = cleanText(item.task_id);
+            const archiveOnly = !!item.archive_only;
+            const selectable = !!item.valid || archiveOnly;
             const isOpen = expanded.has(taskId);
             const hasBody =
               !!cleanText(row.formatted_content) ||
               !!cleanText(row.source_excerpt) ||
               !!cleanText(row.original_content);
+            const reason = cleanText(item.skip_reason);
             return (
-              <div key={`${taskId}-${idx}`} className={`ee-preview-row${item.valid ? "" : " ee-preview-invalid"}`}>
+              <div
+                key={`${taskId}-${idx}`}
+                className={`ee-preview-row${item.valid || archiveOnly ? "" : " ee-preview-invalid"}${archiveOnly ? " ee-preview-archive-only" : ""}`}
+              >
                 <div className="ee-preview-head">
                   <input
                     type="checkbox"
-                    disabled={!item.valid}
-                    checked={item.valid && pickedTasks.has(taskId)}
+                    disabled={!selectable}
+                    checked={selectable && pickedTasks.has(taskId)}
                     onChange={() => toggleTask(taskId)}
-                    title={item.valid ? "" : label(labels, "ee_done_no_evidence_selected", "Select at least one evidence row.")}
+                    title={
+                      selectable
+                        ? ""
+                        : label(labels, "ee_done_no_evidence_selected", "Select at least one evidence row or archive-only task.")
+                    }
                   />
                   <div className="ee-preview-title">
-                    {item.valid ? "✓" : "!"} {cleanText(row.title) || cleanText(item.task_title) || taskId}
+                    {item.valid ? "✓" : archiveOnly ? "↪" : "!"} {cleanText(row.title) || cleanText(item.task_title) || taskId}
+                    {archiveOnly && (
+                      <span className="ee-badge ee-preview-archive-badge">
+                        {label(labels, "ee_done_archive_only", "archive only")}
+                      </span>
+                    )}
                   </div>
                   {hasBody && (
                     <button
@@ -1171,7 +1199,9 @@ function DonePreviewPanel({ preview, labels, emit }) {
                   )}
                 </div>
                 <div className="ee-preview-meta">
-                  {cleanText(row.date) || "no date"} · {asArray(row.project_refs).join(", ") || "no project"} · {cleanText(row.strength) || "no strength"} / {cleanText(row.confidence) || "no confidence"}
+                  {cleanText(row.date) || "no date"} · {asArray(row.project_refs).join(", ") || "no project"} · {archiveOnly
+                    ? `${label(labels, "ee_done_skipped_reason", "skipped")}${reason ? `: ${reason}` : ""}`
+                    : `${cleanText(row.strength) || "no strength"} / ${cleanText(row.confidence) || "no confidence"}`}
                 </div>
                 {cleanText(row.summary) && <div className="ee-preview-summary">{cleanText(row.summary)}</div>}
                 {isOpen && (
@@ -1239,7 +1269,7 @@ function DonePreviewPanel({ preview, labels, emit }) {
         </div>
       )}
       <div className="ee-preview-meta">
-        {pickedTasks.size}/{preview.valid_count || 0} evidence · {preview.invalid_count || 0} invalid · {pickedLinks.size}/{nodeUpdates.length} skill links
+        {pickedTasks.size}/{acceptedTotal} accepted · {pickedEvidenceCount}/{evidenceTotal} evidence · {pickedArchiveOnlyCount}/{archiveOnlyTotal} {label(labels, "ee_done_archive_only", "archive only")} · {preview.invalid_count || 0} invalid · {pickedLinks.size}/{nodeUpdates.length} skill links
       </div>
       <label className="ee-check">
         <input type="checkbox" checked={mark} onChange={() => setMark((m) => !m)} />
@@ -1249,7 +1279,7 @@ function DonePreviewPanel({ preview, labels, emit }) {
         <button
           type="button"
           className="ee-btn-primary"
-          disabled={!preview.can_accept || pickedTasks.size === 0}
+          disabled={!preview.can_accept || !hasEffectiveSelection}
           onClick={() =>
             emit(
               applyDoneTaskEvidenceEvent(
@@ -1261,7 +1291,7 @@ function DonePreviewPanel({ preview, labels, emit }) {
             )
           }
         >
-          {label(labels, "ee_done_accept_valid", "Accept all valid recommendations")}
+          {label(labels, "ee_done_accept_selected", "Accept selected recommendations")}
         </button>
         <button
           type="button"

@@ -55,9 +55,16 @@ def parse_ingest_patch(data: dict | None) -> IngestPatch:
         for item in raw_nodes:
             if isinstance(item, dict):
                 nodes.append(_normalize_node_update_row(item))
+    raw_skipped = data.get("skipped_tasks")
+    skipped: list[dict] = []
+    if isinstance(raw_skipped, list):
+        for item in raw_skipped:
+            if isinstance(item, dict):
+                skipped.append(item)
     return IngestPatch(
         evidence_entries=entries,
         node_updates=nodes,
+        skipped_tasks=skipped,
     )
 
 
@@ -172,6 +179,7 @@ def filter_ingest_patch(
         IngestPatch(
             evidence_entries=new_entries,
             node_updates=new_nodes,
+            skipped_tasks=copy.deepcopy(p.skipped_tasks),
         ),
         warnings,
     )

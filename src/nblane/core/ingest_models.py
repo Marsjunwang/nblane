@@ -11,6 +11,7 @@ class IngestPatch:
 
     evidence_entries: list[dict] = field(default_factory=list)
     node_updates: list[dict] = field(default_factory=list)
+    skipped_tasks: list[dict] = field(default_factory=list)
 
 
 @dataclass

@@ -114,6 +114,16 @@ EDITOR_SAVE_LIST_FIELDS = frozenset(
     {"project_refs", "experience_refs", "source_refs"}
 )
 
+DONE_SKIP_REASONS = frozenset(
+    {
+        "not_evidence",
+        "too_vague",
+        "already_covered",
+        "out_of_scope",
+        "insufficient_source",
+    }
+)
+
 
 def compact_evidence_row(row: dict) -> dict:
     """Drop empty optional fields before writing YAML. Pure."""
@@ -401,7 +411,15 @@ class EvidenceEditorHost:
         task_blockers = list(task_blockers or [])
         blocking_errors = list(blocking_errors or [])
         valid_count = sum(1 for row in rows if row.get("valid"))
-        invalid_ai_count = sum(1 for row in rows if not row.get("valid"))
+        archive_only_count = sum(1 for row in rows if row.get("archive_only"))
+        acceptable_count = sum(
+            1 for row in rows if row.get("valid") or row.get("archive_only")
+        )
+        invalid_ai_count = sum(
+            1
+            for row in rows
+            if not row.get("valid") and not row.get("archive_only")
+        )
         return {
             "preview_id": uuid4().hex,
             "selected_task_ids": selected_ids,
@@ -412,15 +430,56 @@ class EvidenceEditorHost:
             "ai_error": ai_error,
             "blocking_errors": blocking_errors,
             "valid_count": valid_count,
+            "archive_only_count": archive_only_count,
+            "acceptable_count": acceptable_count,
             "invalid_count": invalid_ai_count + len(task_blockers),
-            # Accept as long as at least one valid row exists: a poorly-graded
-            # row no longer blocks the good ones (apply writes only valid rows).
+            # Accept as long as there is at least one handled task: a valid
+            # evidence row writes to the pool, while archive_only rows can be
+            # crystallized/archived without inventing evidence.
             # ai_error / blocking_errors still gate, since those signal AI
             # confusion (e.g. multiple rows for one task) that warrants a retry.
-            "can_accept": bool(valid_count)
+            "can_accept": bool(acceptable_count)
             and not ai_error
             and not blocking_errors,
         }
+
+    def _done_skip_by_task_id(
+        self,
+        skipped_tasks: list[dict],
+        selected_task_ids: set[str],
+    ) -> dict[str, dict]:
+        """Normalize LLM skipped_tasks rows by selected kanban task id."""
+        out: dict[str, dict] = {}
+        for raw in skipped_tasks or []:
+            if not isinstance(raw, dict):
+                continue
+            tid = ""
+            for key in ("task_id", "id", "origin_ref", "kanban_ref"):
+                tid = str(raw.get(key, "") or "").strip()
+                if tid:
+                    break
+            if not tid:
+                refs = raw.get("kanban_refs")
+                if isinstance(refs, list):
+                    for ref in refs:
+                        tid = str(ref or "").strip()
+                        if tid:
+                            break
+            rid = kanban_ref_id(tid)
+            if rid:
+                tid = rid
+            if tid not in selected_task_ids:
+                continue
+            reason = str(raw.get("reason", "") or "").strip()
+            if reason not in DONE_SKIP_REASONS:
+                reason = "not_evidence"
+            detail = (
+                str(raw.get("detail", "") or "").strip()
+                or str(raw.get("rationale", "") or "").strip()
+                or str(raw.get("note", "") or "").strip()
+            )
+            out.setdefault(tid, {"reason": reason, "detail": detail})
+        return out
 
     def _prepare_done_task_evidence(self, task_ids: list | None) -> bool:
         """Run strict Done-task validation, then AI preview. Does not write."""
@@ -520,6 +579,10 @@ class EvidenceEditorHost:
             str(getattr(task, "id", "") or "").strip(): task
             for task in valid_tasks
         }
+        skip_by_task_id = self._done_skip_by_task_id(
+            parsed.skipped_tasks,
+            selected_task_ids,
+        )
         grouped: dict[str, list[tuple[int, dict]]] = {tid: [] for tid in selected_task_ids}
         unmapped: list[dict] = []
         for ordinal, raw in enumerate(parsed.evidence_entries, start=1):
@@ -568,9 +631,22 @@ class EvidenceEditorHost:
                     rows.append(item)
                 continue
             if not candidates:
-                blocking_errors.append(
-                    f"AI did not return evidence row for task {tid}."
-                )
+                skipped = skip_by_task_id.get(tid, {})
+                reason = str(skipped.get("reason", "") or "not_evidence")
+                detail = str(skipped.get("detail", "") or "").strip()
+                if not detail:
+                    detail = "AI did not return evidence row for this task."
+                project_id = str(getattr(task, "project_id", "") or "").strip()
+                row = {
+                    "origin": "kanban_task",
+                    "origin_ref": kanban_ref(tid),
+                    "date": str(getattr(task, "completed_on", "") or ""),
+                }
+                if project_id:
+                    row["project_refs"] = [project_id]
+                blockers = [f"AI skipped evidence generation ({reason})."]
+                if detail:
+                    blockers.append(detail)
                 rows.append(
                     {
                         "task_id": tid,
@@ -578,18 +654,13 @@ class EvidenceEditorHost:
                         "ordinal": 0,
                         "ai_id": "",
                         "existing_id": existing_id,
-                        "row": {
-                            "origin": "kanban_task",
-                            "origin_ref": kanban_ref(tid),
-                            "project_refs": [
-                                str(getattr(task, "project_id", "") or "").strip()
-                            ],
-                            "date": str(getattr(task, "completed_on", "") or ""),
-                        },
+                        "row": row,
                         "valid": False,
-                        "blockers": [
-                            "AI did not return evidence row for this task."
-                        ],
+                        "archive_only": True,
+                        "skipped": True,
+                        "skip_reason": reason,
+                        "skip_detail": detail,
+                        "blockers": blockers,
                     }
                 )
                 continue
@@ -656,6 +727,13 @@ class EvidenceEditorHost:
                         label_by_id[nid] = str(node.get("label") or nid)
         # Map every evidence ref the LLM might use -> the row's display title.
         title_by_ref: dict[str, str] = {}
+        for entry in self._pool_entries():
+            eid = str(entry.get("id", "") or "").strip()
+            if not eid:
+                continue
+            title = str(entry.get("title", "") or "").strip()
+            if title:
+                title_by_ref[eid] = title
         for item in rows:
             title = (
                 str((item.get("row") or {}).get("title", "") or "").strip()
@@ -796,21 +874,60 @@ class EvidenceEditorHost:
         if not preview.get("can_accept"):
             st.error("Done evidence preview has blockers; retry AI or fix tasks first.")
             return False
-        valid_rows = [r for r in (preview.get("rows") or []) if r.get("valid")]
+        preview_rows = [
+            r for r in (preview.get("rows") or []) if isinstance(r, dict)
+        ]
+        acceptable_rows = [
+            r for r in preview_rows if r.get("valid") or r.get("archive_only")
+        ]
         if selected_task_ids is not None:
             task_pick = {
                 str(t).strip() for t in selected_task_ids if str(t).strip()
             }
-            valid_rows = [
+            accepted_rows = [
                 r
-                for r in valid_rows
+                for r in acceptable_rows
                 if str(r.get("task_id", "") or "").strip() in task_pick
             ]
-        if not valid_rows:
+        else:
+            accepted_rows = acceptable_rows
+        valid_rows = [r for r in accepted_rows if r.get("valid")]
+        accepted_task_ids: list[str] = []
+        seen_task_ids: set[str] = set()
+        for item in accepted_rows:
+            tid = str(item.get("task_id", "") or "").strip()
+            if tid and tid not in seen_task_ids:
+                accepted_task_ids.append(tid)
+                seen_task_ids.add(tid)
+        archive_task_ids = accepted_task_ids if mark_crystallized else []
+        selected_updates = [
+            dict(u)
+            for u in (preview.get("node_updates") or [])
+            if isinstance(u, dict)
+        ]
+        if selected_node_keys is not None:
+            key_pick = {
+                str(k).strip() for k in selected_node_keys if str(k).strip()
+            }
+            selected_updates = [
+                u
+                for u in selected_updates
+                if str(u.get("key", "") or "").strip() in key_pick
+            ]
+        if not accepted_rows:
             st.warning(
                 self.ui.get(
                     "ee_done_no_evidence_selected",
-                    "Select at least one evidence row.",
+                    "Select at least one evidence row or archive-only task.",
+                )
+            )
+            return False
+        if not valid_rows and not archive_task_ids and not selected_updates:
+            st.warning(
+                self.ui.get(
+                    "ee_done_no_action_selected",
+                    "Select at least one evidence row or keep crystallize enabled "
+                    "for archive-only tasks.",
                 )
             )
             return False
@@ -823,7 +940,7 @@ class EvidenceEditorHost:
             if str(r.get("id", "") or "").strip()
         }
         ref_map: dict[str, str] = {}
-        final_ids: set[str] = set()
+        final_ids: set[str] = set(existing_ids)
         changed = 0
         for item in valid_rows:
             row = dict(item.get("row") or {})
@@ -871,20 +988,6 @@ class EvidenceEditorHost:
         tree = load_skill_tree_raw(self.profile)
         tree_changed = False
         warnings: list[str] = []
-        selected_updates = [
-            dict(u)
-            for u in (preview.get("node_updates") or [])
-            if isinstance(u, dict)
-        ]
-        if selected_node_keys is not None:
-            key_pick = {
-                str(k).strip() for k in selected_node_keys if str(k).strip()
-            }
-            selected_updates = [
-                u
-                for u in selected_updates
-                if str(u.get("key", "") or "").strip() in key_pick
-            ]
         if isinstance(tree, dict) and selected_updates:
             tree, tree_changed, warnings = self._apply_node_updates_from_done_preview(
                 tree=tree,
@@ -896,19 +999,44 @@ class EvidenceEditorHost:
             warnings.append("skill-tree.yaml not found; skipped skill links.")
             tree = None
 
-        self._save_pool_and_tree(
-            [compact_evidence_row(r) for r in entries],
-            tree if tree_changed else None,
-            self.ui.get("ee_done_tasks_done", "Created/updated {n} from Done tasks.").format(
-                n=changed
-            ),
-        )
-        if mark_crystallized:
-            self._crystallize_and_archive(
-                [str(item.get("task_id", "") or "") for item in valid_rows]
-            )
         for warning in warnings:
             st.warning(warning)
+        if not changed and not tree_changed and not archive_task_ids:
+            st.warning(
+                self.ui.get(
+                    "ee_done_no_action_selected",
+                    "Select at least one evidence row or keep crystallize enabled "
+                    "for archive-only tasks.",
+                )
+            )
+            return False
+        if changed:
+            self._save_pool_and_tree(
+                [compact_evidence_row(r) for r in entries],
+                tree if tree_changed else None,
+                self.ui.get(
+                    "ee_done_tasks_done",
+                    "Created/updated {n} from Done tasks.",
+                ).format(n=changed),
+            )
+        elif tree_changed and isinstance(tree, dict):
+            self._save_tree(
+                tree,
+                self.ui.get(
+                    "ee_done_skill_links_done",
+                    "Updated Done skill links.",
+                ),
+            )
+        if archive_task_ids:
+            self._crystallize_and_archive(archive_task_ids)
+            if not changed:
+                st.success(
+                    self.ui.get(
+                        "ee_done_archive_only_done",
+                        "Accepted {n} Done task(s) without new evidence and "
+                        "archived them.",
+                    ).format(n=len(archive_task_ids))
+                )
         st.session_state.pop(self._done_preview_state_key(), None)
         return True
 
