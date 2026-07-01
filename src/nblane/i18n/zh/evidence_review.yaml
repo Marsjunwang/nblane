@@ -400,10 +400,18 @@ ee_dup_not_duplicate: 不是重复
 ee_dup_ai_running: 正在扫描重复…
 ee_dup_none: 未发现疑似重复。
 ee_dup_resolved: 已处理重复（保留 {k}）。
-# Done 任务 -> 证据（确定式，无 LLM）
+# Done 任务 -> 证据（AI 预览优先，确定式 fallback）
 ee_done_tasks_title: Done 任务 → 证据
-ee_done_tasks_hint: 从 Done 任务确定式生成 v2 证据行（不调用 AI）。已入库的任务会被标记。
+ee_done_tasks_hint: 优先用 AI 预览 Done 任务证据；被拦截的任务需要补齐日期、项目和项目目标后才能生成证据。
 ee_done_tasks_create: 生成证据
+ee_done_ai_preview: AI 预览
+ee_done_ai_preview_title: Done 任务 AI 预览
+ee_done_ai_preview_running: 正在准备 AI 预览...
+ee_done_ai_preview_ready: AI 预览已准备好。
+ee_done_ai_preview_blocked: AI 预览需要处理后才能接受。只有在希望跳过 AI 评分时才使用 Fallback。
+ee_retry_ai: 重试 AI
+ee_done_fallback: Fallback
+ee_done_fallback_confirm: 使用不含 AI 评分的确定式 fallback？
 ee_done_tasks_none: 没有可入库的 Done 任务。
 ee_done_tasks_done: 已从 Done 任务生成/更新 {n} 行。
 ee_done_has_evidence: 已有证据

@@ -400,10 +400,18 @@ ee_dup_not_duplicate: Not a duplicate
 ee_dup_ai_running: Scanning for duplicates…
 ee_dup_none: No duplicate candidates found.
 ee_dup_resolved: Resolved duplicate (kept {k}).
-# done tasks -> evidence (deterministic, no LLM)
+# done tasks -> evidence (AI preview first, deterministic fallback)
 ee_done_tasks_title: Done tasks → evidence
-ee_done_tasks_hint: Create v2 evidence rows from Done tasks (no AI). Already-ingested tasks are marked.
+ee_done_tasks_hint: AI previews Done evidence first. Blocked tasks need date, project, and project goal before evidence can be created.
 ee_done_tasks_create: Create evidence
+ee_done_ai_preview: AI preview
+ee_done_ai_preview_title: Done AI preview
+ee_done_ai_preview_running: Preparing AI preview...
+ee_done_ai_preview_ready: AI preview is ready.
+ee_done_ai_preview_blocked: AI preview needs attention before it can be accepted. Use Fallback only when you want deterministic evidence without AI grading.
+ee_retry_ai: Retry AI
+ee_done_fallback: Fallback
+ee_done_fallback_confirm: Use deterministic fallback without AI grading?
 ee_done_tasks_none: No Done tasks to ingest.
 ee_done_tasks_done: Created/updated {n} from Done tasks.
 ee_done_has_evidence: has evidence

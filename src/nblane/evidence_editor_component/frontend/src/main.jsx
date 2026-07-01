@@ -1119,7 +1119,7 @@ function DonePreviewPanel({ preview, labels, emit }) {
   return (
     <div className={`ee-done-preview${preview.can_accept ? "" : " ee-done-preview-blocked"}`}>
       <div className="ee-section-h">
-        {label(labels, "ee_done_ai_preview", "Done AI preview")}
+        {label(labels, "ee_done_ai_preview_title", "Done AI preview")}
       </div>
       {preview.ai_error && <div className="ee-warn-line">{preview.ai_error}</div>}
       {blockingErrors.map((err) => (

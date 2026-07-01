@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from nblane.core import llm as llm_client
 from nblane.core.io import (
     load_evidence_pool_raw,
@@ -14,6 +16,37 @@ from nblane.core.models import KanbanTask
 from nblane.core.profile_ingest import (
     pool_tree_summaries_for_prompt,
 )
+
+
+def _positive_env_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(5.0, value)
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(256, value)
+
+
+def _kanban_done_llm_timeout_seconds() -> float:
+    return _positive_env_float(
+        "KANBAN_DONE_LLM_TIMEOUT_SECONDS",
+        max(llm_client.timeout_seconds(), 180.0),
+    )
+
+
+def _kanban_done_llm_max_tokens(task_count: int = 1) -> int:
+    task_budget = max(4096, 2048 + max(1, int(task_count or 1)) * 1200)
+    return _positive_env_int(
+        "KANBAN_DONE_LLM_MAX_TOKENS",
+        min(llm_client.max_tokens_default(), task_budget),
+    )
 
 
 def _status_rubric_zh() -> str:
@@ -648,7 +681,13 @@ def ingest_kanban_done_json(
     )
     if use_codex:
         return _codex_ingest_json(profile_name, system, user)
-    reply = llm_client.chat(system, user, temperature=0.2)
+    reply = llm_client.chat(
+        system,
+        user,
+        temperature=0.2,
+        timeout=_kanban_done_llm_timeout_seconds(),
+        max_tokens=_kanban_done_llm_max_tokens(len(done_tasks)),
+    )
     if reply.startswith("LLM error:") or reply.startswith(
         "AI features not configured"
     ):

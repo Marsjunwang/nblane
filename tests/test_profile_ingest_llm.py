@@ -36,6 +36,56 @@ class TestKanbanPromptGrading(unittest.TestCase):
 class TestProfileIngestLlm(unittest.TestCase):
     """Kanban Done ingest can swap AI backends."""
 
+    def test_kanban_done_ingest_uses_preview_llm_budget(self) -> None:
+        """Done AI preview gets a longer timeout and bounded output budget."""
+
+        with (
+            patch(
+                "nblane.core.profile_ingest_llm.llm_client.is_configured",
+                return_value=True,
+            ),
+            patch(
+                "nblane.core.profile_ingest_llm._load_schema_index_for_profile",
+                return_value=("robotics", {"vla": {"label": "VLA"}}),
+            ),
+            patch(
+                "nblane.core.profile_ingest_llm.load_evidence_pool_raw",
+                return_value={},
+            ),
+            patch(
+                "nblane.core.profile_ingest_llm.load_skill_tree_raw",
+                return_value={},
+            ),
+            patch(
+                "nblane.core.profile_ingest_llm.pool_tree_summaries_for_prompt",
+                return_value=("(empty)", "(empty)"),
+            ),
+            patch(
+                "nblane.core.profile_ingest_llm._kanban_done_llm_timeout_seconds",
+                return_value=222.0,
+            ),
+            patch(
+                "nblane.core.profile_ingest_llm._kanban_done_llm_max_tokens",
+                return_value=333,
+            ) as max_tokens,
+            patch(
+                "nblane.core.profile_ingest_llm.llm_client.chat",
+                return_value='{"evidence_entries": [], "node_updates": []}',
+            ) as chat,
+        ):
+            patch_json, error = ingest_kanban_done_json(
+                "alice",
+                [KanbanTask(title="Finish VLA memory review", id="task-1")],
+                goal_context="Robotics demo",
+                ai_backend="llm",
+            )
+
+        self.assertIsNone(error)
+        self.assertEqual(patch_json, {"evidence_entries": [], "node_updates": []})
+        self.assertEqual(chat.call_args.kwargs["timeout"], 222.0)
+        self.assertEqual(chat.call_args.kwargs["max_tokens"], 333)
+        max_tokens.assert_called_once_with(1)
+
     def test_kanban_done_ingest_can_use_codex_without_llm_config(self) -> None:
         """Codex backend bypasses LLM config and returns parsed JSON."""
 

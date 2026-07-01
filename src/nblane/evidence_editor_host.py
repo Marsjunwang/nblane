@@ -506,7 +506,6 @@ class EvidenceEditorHost:
                 selected_ids=ids,
                 task_blockers=task_blockers,
                 ai_error=msg,
-                blocking_errors=[msg],
             )
             st.session_state[self._done_preview_state_key()] = preview
             st.error(msg)
