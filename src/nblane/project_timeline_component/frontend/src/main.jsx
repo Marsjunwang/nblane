@@ -128,32 +128,6 @@ function initStreamlitBridge(onRender) {
   window.setTimeout(() => setFrameHeight(), 0);
 }
 
-// Open Evidence Review for a task WITHOUT navigating the board away. The
-// component iframe is same-origin with the parent Streamlit app, so we open a
-// new browser tab pointed at the Evidence Review page (carrying the task ref in
-// the query string). Falls back to the Python switch_page event if blocked
-// (popup blocker, cross-origin) so the action never silently no-ops.
-function openEvidenceTab(taskId, emitFallback) {
-  try {
-    const parentLoc = window.parent && window.parent.location;
-    const origin = parentLoc ? parentLoc.origin : window.location.origin;
-    const qs = `kanban_task=${encodeURIComponent(taskId)}&source_page=${encodeURIComponent("Project Board")}`;
-    const url = `${origin}/Evidence_Review?${qs}`;
-    // NOTE: do NOT pass "noopener" here -- with noopener, window.open() returns
-    // null even on success, which would make us think it failed and fire the
-    // switch_page fallback too (navigating the board away -- the exact jarring
-    // behavior we're avoiding). Open normally, then sever opener for safety.
-    const win = window.open(url, "_blank");
-    if (win) {
-      try { win.opener = null; } catch (e) { /* ignore */ }
-      return;
-    }
-  } catch (e) {
-    /* cross-origin or blocked -> fall through to Python navigation */
-  }
-  if (emitFallback) emitFallback();
-}
-
 function label(labels, key, fallback) {
   const v = labels?.[key];
   return v == null || v === "" ? fallback : v;
@@ -569,7 +543,7 @@ function TaskDetailBody({ t, project, labels, emit, compact = false }) {
       {t.done && (
         <div className="tl-detail-actions">
           <button className="tl-btn tl-btn-primary"
-                  onClick={() => openEvidenceTab(t.id, () => emit(openEvidenceForTaskEvent(t.id, cid)))}>
+                  onClick={() => emit(openEvidenceForTaskEvent(t.id, cid))}>
             → {label(labels, "tl_to_evidence", "Distill to evidence")}
           </button>
         </div>
