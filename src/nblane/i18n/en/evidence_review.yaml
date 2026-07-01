@@ -415,6 +415,14 @@ ee_done_delete_selected: Delete selected
 ee_done_delete_confirm: Delete selected Done tasks? Tasks cited by active evidence are blocked.
 ee_done_housekeeping_missing: 'Task(s) not in Done: {ids}.'
 ee_done_archive_after_save_failed: Evidence saved, but the source task(s) stayed on the board — archive them from Housekeeping.
+ee_done_skill_links: Skill links
+ee_done_skill_link_attaches: attaches to
+ee_done_link_status: → {status}
+ee_done_view_content: View content
+ee_done_hide_content: Hide content
+ee_done_no_evidence_selected: Select at least one evidence row.
+ee_done_source_excerpt: Source excerpt
+ee_done_original_content: Original task text
 # batch select + bulk actions
 ee_batch_mode: Batch select
 ee_bulk_selected: selected

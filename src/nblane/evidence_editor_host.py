@@ -604,11 +604,12 @@ class EvidenceEditorHost:
                 )
             )
         rows.extend(unmapped)
+        node_updates = self._annotate_done_node_updates(rows, parsed.node_updates)
         preview = self._done_preview_payload(
             selected_ids=ids,
             rows=rows,
             task_blockers=task_blockers,
-            node_updates=parsed.node_updates,
+            node_updates=node_updates,
             blocking_errors=blocking_errors,
         )
         st.session_state[self._done_preview_state_key()] = preview
@@ -626,6 +627,68 @@ class EvidenceEditorHost:
                 )
             )
         return True
+
+    def _annotate_done_node_updates(
+        self,
+        rows: list[dict],
+        node_updates: list[dict],
+    ) -> list[dict]:
+        """Attach display label / stable key / evidence titles to skill links.
+
+        The LLM returns node_updates carrying only a node id, a target status,
+        and evidence_refs (ai_id / ev_N / first_N ordinals). The preview panel
+        needs human-readable context to let a person confirm each link, and a
+        stable key so apply can honor a per-link selection. Preview rows are
+        immutable once stored, so the update's list index is a stable key.
+        """
+        # Resolve schema node labels once (best-effort; fall back to node id).
+        label_by_id: dict[str, str] = {}
+        tree = load_skill_tree_raw(self.profile)
+        schema_name = (
+            str(tree.get("schema", "") or "").strip()
+            if isinstance(tree, dict)
+            else ""
+        )
+        if schema_name:
+            schema_raw = load_schema_raw(schema_name)
+            if isinstance(schema_raw, dict):
+                for nid, node in schema_node_index(schema_raw).items():
+                    if isinstance(node, dict):
+                        label_by_id[nid] = str(node.get("label") or nid)
+        # Map every evidence ref the LLM might use -> the row's display title.
+        title_by_ref: dict[str, str] = {}
+        for item in rows:
+            title = (
+                str((item.get("row") or {}).get("title", "") or "").strip()
+                or str(item.get("task_title", "") or "").strip()
+                or str(item.get("task_id", "") or "").strip()
+            )
+            if not title:
+                continue
+            ordinal = int(item.get("ordinal") or 0)
+            ai_id = str(item.get("ai_id", "") or "").strip()
+            if ordinal > 0:
+                for ref in (ordinal, f"ev_{ordinal}", f"first_{ordinal}"):
+                    title_by_ref[str(ref)] = title
+            if ai_id:
+                title_by_ref[ai_id] = title
+        annotated: list[dict] = []
+        for idx, update in enumerate(node_updates):
+            if not isinstance(update, dict):
+                continue
+            out = dict(update)
+            nid = str(out.get("id", "") or "").strip()
+            out["key"] = f"nu_{idx}"
+            out["label"] = label_by_id.get(nid, nid)
+            link_refs: list[str] = []
+            for raw_ref in out.get("evidence_refs") or []:
+                key = str(raw_ref or "").strip()
+                if not key:
+                    continue
+                link_refs.append(title_by_ref.get(key, key))
+            out["link_refs"] = link_refs
+            annotated.append(out)
+        return annotated
 
     def _apply_node_updates_from_done_preview(
         self,
@@ -714,8 +777,16 @@ class EvidenceEditorHost:
         self,
         preview_id: str,
         mark_crystallized: bool,
+        selected_task_ids: list | None = None,
+        selected_node_keys: list | None = None,
     ) -> bool:
-        """Accept a strict AI Done preview and write evidence + skill links."""
+        """Accept a strict AI Done preview and write evidence + skill links.
+
+        *selected_task_ids* / *selected_node_keys* let the panel accept a subset:
+        None means "all" (back-compat); a list restricts to those items. An empty
+        list is an explicit "none" — for tasks that blocks, for node keys it just
+        writes evidence without any skill link.
+        """
         preview = st.session_state.get(self._done_preview_state_key())
         if not isinstance(preview, dict):
             st.warning("No Done evidence preview is available.")
@@ -727,8 +798,22 @@ class EvidenceEditorHost:
             st.error("Done evidence preview has blockers; retry AI or fix tasks first.")
             return False
         valid_rows = [r for r in (preview.get("rows") or []) if r.get("valid")]
+        if selected_task_ids is not None:
+            task_pick = {
+                str(t).strip() for t in selected_task_ids if str(t).strip()
+            }
+            valid_rows = [
+                r
+                for r in valid_rows
+                if str(r.get("task_id", "") or "").strip() in task_pick
+            ]
         if not valid_rows:
-            st.warning("No valid Done evidence rows to accept.")
+            st.warning(
+                self.ui.get(
+                    "ee_done_no_evidence_selected",
+                    "Select at least one evidence row.",
+                )
+            )
             return False
 
         entries = self._pool_entries()
@@ -787,18 +872,28 @@ class EvidenceEditorHost:
         tree = load_skill_tree_raw(self.profile)
         tree_changed = False
         warnings: list[str] = []
-        if isinstance(tree, dict):
+        selected_updates = [
+            dict(u)
+            for u in (preview.get("node_updates") or [])
+            if isinstance(u, dict)
+        ]
+        if selected_node_keys is not None:
+            key_pick = {
+                str(k).strip() for k in selected_node_keys if str(k).strip()
+            }
+            selected_updates = [
+                u
+                for u in selected_updates
+                if str(u.get("key", "") or "").strip() in key_pick
+            ]
+        if isinstance(tree, dict) and selected_updates:
             tree, tree_changed, warnings = self._apply_node_updates_from_done_preview(
                 tree=tree,
-                node_updates=[
-                    dict(u)
-                    for u in (preview.get("node_updates") or [])
-                    if isinstance(u, dict)
-                ],
+                node_updates=selected_updates,
                 ref_map=ref_map,
                 final_ids=final_ids,
             )
-        elif preview.get("node_updates"):
+        elif selected_updates and not isinstance(tree, dict):
             warnings.append("skill-tree.yaml not found; skipped skill links.")
             tree = None
 
@@ -2147,6 +2242,8 @@ class EvidenceEditorHost:
             return self._apply_done_task_evidence(
                 str(payload.get("preview_id") or ""),
                 bool(payload.get("mark_crystallized")),
+                payload.get("selected_task_ids"),
+                payload.get("selected_node_keys"),
             )
         if action == "done_tasks_to_evidence":
             return self._apply_done_tasks_to_evidence(

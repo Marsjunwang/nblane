@@ -415,6 +415,14 @@ ee_done_delete_selected: 删除所选
 ee_done_delete_confirm: 删除所选 Done 任务？被活跃证据引用的任务会被拦截。
 ee_done_housekeeping_missing: '任务不在 Done 列：{ids}。'
 ee_done_archive_after_save_failed: 证据已保存，但源任务仍留在看板上——请到「清场」手动归档。
+ee_done_skill_links: 技能关联
+ee_done_skill_link_attaches: 关联到
+ee_done_link_status: → {status}
+ee_done_view_content: 查看内容
+ee_done_hide_content: 收起内容
+ee_done_no_evidence_selected: 请至少选择一条证据。
+ee_done_source_excerpt: 原文摘录
+ee_done_original_content: 任务原文
 # 批量选择与批量操作
 ee_batch_mode: 批量选择
 ee_bulk_selected: 已选

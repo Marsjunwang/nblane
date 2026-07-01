@@ -1065,10 +1065,57 @@ function DoneTasksPicker({ tasks, labels, emit, onClose }) {
 
 function DonePreviewPanel({ preview, labels, emit }) {
   const [mark, setMark] = useState(true);
+  const [pickedTasks, setPickedTasks] = useState(() => new Set());
+  const [pickedLinks, setPickedLinks] = useState(() => new Set());
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  // Seed selections (all valid evidence + all skill links) whenever a fresh
+  // preview arrives; keyed on preview_id so a Retry AI re-seeds cleanly.
+  const previewId = preview ? cleanText(preview.preview_id) : "";
+  useEffect(() => {
+    if (!preview) return;
+    const tasks = new Set();
+    asArray(preview.rows).forEach((item) => {
+      if (item.valid) tasks.add(cleanText(item.task_id));
+    });
+    setPickedTasks(tasks);
+    const links = new Set();
+    asArray(preview.node_updates).forEach((u) => {
+      const k = cleanText(u.key);
+      if (k) links.add(k);
+    });
+    setPickedLinks(links);
+    setExpanded(new Set());
+  }, [previewId]);
+
   if (!preview) return null;
   const rows = asArray(preview.rows);
   const blockers = asArray(preview.task_blockers);
   const blockingErrors = asArray(preview.blocking_errors);
+  const nodeUpdates = asArray(preview.node_updates);
+
+  const toggleTask = (id) =>
+    setPickedTasks((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleLink = (k) =>
+    setPickedLinks((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  const toggleExpand = (id) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const linkStatus = (status) =>
+    label(labels, "ee_done_link_status", "→ {status}").replace("{status}", status);
+
   return (
     <div className={`ee-done-preview${preview.can_accept ? "" : " ee-done-preview-blocked"}`}>
       <div className="ee-section-h">
@@ -1092,15 +1139,69 @@ function DonePreviewPanel({ preview, labels, emit }) {
         <div className="ee-done-preview-list">
           {rows.map((item, idx) => {
             const row = item.row || {};
+            const taskId = cleanText(item.task_id);
+            const isOpen = expanded.has(taskId);
+            const hasBody =
+              !!cleanText(row.formatted_content) ||
+              !!cleanText(row.source_excerpt) ||
+              !!cleanText(row.original_content);
             return (
-              <div key={`${item.task_id}-${idx}`} className={`ee-preview-row${item.valid ? "" : " ee-preview-invalid"}`}>
-                <div className="ee-preview-title">
-                  {item.valid ? "✓" : "!"} {cleanText(row.title) || cleanText(item.task_title) || item.task_id}
+              <div key={`${taskId}-${idx}`} className={`ee-preview-row${item.valid ? "" : " ee-preview-invalid"}`}>
+                <div className="ee-preview-head">
+                  <input
+                    type="checkbox"
+                    disabled={!item.valid}
+                    checked={item.valid && pickedTasks.has(taskId)}
+                    onChange={() => toggleTask(taskId)}
+                    title={item.valid ? "" : label(labels, "ee_done_no_evidence_selected", "Select at least one evidence row.")}
+                  />
+                  <div className="ee-preview-title">
+                    {item.valid ? "✓" : "!"} {cleanText(row.title) || cleanText(item.task_title) || taskId}
+                  </div>
+                  {hasBody && (
+                    <button
+                      type="button"
+                      className="ee-btn-sm ee-preview-expand"
+                      onClick={() => toggleExpand(taskId)}
+                    >
+                      {isOpen
+                        ? `▾ ${label(labels, "ee_done_hide_content", "Hide content")}`
+                        : `▸ ${label(labels, "ee_done_view_content", "View content")}`}
+                    </button>
+                  )}
                 </div>
                 <div className="ee-preview-meta">
                   {cleanText(row.date) || "no date"} · {asArray(row.project_refs).join(", ") || "no project"} · {cleanText(row.strength) || "no strength"} / {cleanText(row.confidence) || "no confidence"}
                 </div>
                 {cleanText(row.summary) && <div className="ee-preview-summary">{cleanText(row.summary)}</div>}
+                {isOpen && (
+                  <div className="ee-preview-detail">
+                    {cleanText(row.formatted_content) && (
+                      <div
+                        className="ee-md ee-preview-body"
+                        dangerouslySetInnerHTML={{
+                          __html: renderMarkdown(row.formatted_content),
+                        }}
+                      />
+                    )}
+                    {cleanText(row.source_excerpt) && (
+                      <div className="ee-preview-sub">
+                        <div className="ee-preview-sub-h">
+                          {label(labels, "ee_done_source_excerpt", "Source excerpt")}
+                        </div>
+                        <div className="ee-preview-sub-body">{cleanText(row.source_excerpt)}</div>
+                      </div>
+                    )}
+                    {cleanText(row.original_content) && (
+                      <details className="ee-preview-raw">
+                        <summary>
+                          {label(labels, "ee_done_original_content", "Original task text")}
+                        </summary>
+                        <pre className="ee-mono">{cleanText(row.original_content)}</pre>
+                      </details>
+                    )}
+                  </div>
+                )}
                 {asArray(item.blockers).length > 0 && (
                   <div className="ee-preview-blockers">{asArray(item.blockers).join(" ")}</div>
                 )}
@@ -1109,8 +1210,36 @@ function DonePreviewPanel({ preview, labels, emit }) {
           })}
         </div>
       )}
+      {nodeUpdates.length > 0 && (
+        <div className="ee-done-links">
+          <div className="ee-section-h">
+            {label(labels, "ee_done_skill_links", "Skill links")} ({pickedLinks.size}/{nodeUpdates.length})
+          </div>
+          {nodeUpdates.map((u) => {
+            const k = cleanText(u.key);
+            const refs = asArray(u.link_refs).filter(Boolean).join(", ");
+            const status = cleanText(u.status);
+            return (
+              <label key={k} className="ee-check ee-done-link-row">
+                <input
+                  type="checkbox"
+                  checked={pickedLinks.has(k)}
+                  onChange={() => toggleLink(k)}
+                />
+                <span className="ee-preview-title">{cleanText(u.label) || cleanText(u.id)}</span>
+                {status && <span className="ee-badge ee-badge-muted">{linkStatus(status)}</span>}
+                {refs && (
+                  <span className="ee-preview-meta">
+                    {label(labels, "ee_done_skill_link_attaches", "attaches to")}: {refs}
+                  </span>
+                )}
+              </label>
+            );
+          })}
+        </div>
+      )}
       <div className="ee-preview-meta">
-        {preview.valid_count || 0} valid · {preview.invalid_count || 0} invalid · {asArray(preview.node_updates).length} skill link suggestions
+        {pickedTasks.size}/{preview.valid_count || 0} evidence · {preview.invalid_count || 0} invalid · {pickedLinks.size}/{nodeUpdates.length} skill links
       </div>
       <label className="ee-check">
         <input type="checkbox" checked={mark} onChange={() => setMark((m) => !m)} />
@@ -1120,8 +1249,17 @@ function DonePreviewPanel({ preview, labels, emit }) {
         <button
           type="button"
           className="ee-btn-primary"
-          disabled={!preview.can_accept}
-          onClick={() => emit(applyDoneTaskEvidenceEvent(preview.preview_id, mark))}
+          disabled={!preview.can_accept || pickedTasks.size === 0}
+          onClick={() =>
+            emit(
+              applyDoneTaskEvidenceEvent(
+                preview.preview_id,
+                mark,
+                Array.from(pickedTasks),
+                Array.from(pickedLinks)
+              )
+            )
+          }
         >
           {label(labels, "ee_done_accept_valid", "Accept all valid recommendations")}
         </button>

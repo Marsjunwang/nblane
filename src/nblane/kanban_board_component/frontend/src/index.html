@@ -38,9 +38,9 @@
       top: 0;
       z-index: 10;
       display: grid;
-      grid-template-columns: minmax(260px, 1fr) auto;
+      grid-template-columns: minmax(240px, 1fr) auto;
       gap: 8px 10px;
-      align-items: start;
+      align-items: center;
       padding: 8px 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -55,13 +55,11 @@
       align-items: center;
       justify-content: flex-end;
     }
-    .kb-toolbar-meta {
-      grid-column: 1 / -1;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
-      min-height: 18px;
+    .kb-toolbar-status {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .kb-toolbar-toggle {
       display: inline-flex;
@@ -147,18 +145,18 @@
     .kb-workspace { display: grid; gap: 12px; align-items: start; }
     .kb-board {
       display: grid;
-      grid-template-columns: repeat(4, minmax(210px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(3, minmax(210px, 1fr)) minmax(150px, .7fr);
+      gap: 8px;
       overflow-x: auto;
       padding-bottom: 2px;
     }
     .kb-column {
       min-width: 210px;
-      min-height: 540px;
+      min-height: 120px;
       display: grid;
       grid-template-rows: auto 1fr;
       gap: 8px;
-      padding: 10px;
+      padding: 9px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--soft);
@@ -167,7 +165,7 @@
     .kb-column.is-stage-queue { border-left: 3px solid var(--info); }
     .kb-column.is-stage-doing { border-left: 3px solid var(--accent); background: var(--soft-strong); }
     .kb-column.is-stage-done { border-left: 3px solid #9fcabc; }
-    .kb-column.is-stage-side { opacity: .82; border-left: 3px solid var(--line); }
+    .kb-column.is-stage-side { min-width: 150px; opacity: .82; border-left: 3px solid var(--line); }
     .kb-column.is-stage-side .kb-column-head strong { color: var(--muted); }
     .kb-stage-step {
       display: inline-flex;
@@ -202,7 +200,7 @@
       font-weight: 780;
       line-height: 1;
     }
-    .kb-card-list { display: grid; align-content: start; gap: 8px; min-height: 420px; }
+    .kb-card-list { display: grid; align-content: start; gap: 8px; min-height: 60px; }
     .kb-card {
       display: grid;
       gap: 7px;
@@ -345,7 +343,7 @@
       overflow-wrap: anywhere;
     }
     .kb-read-line strong { color: var(--ink); font-weight: 780; }
-    .kb-read-subtasks { display: grid; gap: 5px; margin-top: 1px; }
+    .kb-read-subtasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 5px 12px; margin-top: 1px; }
     .kb-check-row.is-compact { font-size: .78rem; min-height: 22px; }
     .kb-check-row.is-compact input { height: 15px; width: 15px; }
     .kb-empty { color: var(--muted); font-size: .84rem; padding: 10px 2px; }
@@ -473,7 +471,7 @@
     .kb-uncrystallized { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #ead5ab; border-radius: 8px; background: #fff9ed; }
     .kb-focus-layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(220px, 1fr); gap: 12px; align-items: start; }
     .kb-focus-main, .kb-focus-side { min-width: 0; }
-    .kb-focus-main .kb-column { min-height: 620px; }
+    .kb-focus-main .kb-column { min-height: 200px; }
     .kb-focus-main .kb-card-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
     .kb-focus-main .kb-card.is-editing { grid-column: 1 / -1; }
     .kb-focus-side { display: grid; gap: 8px; min-width: 0; }
@@ -489,7 +487,7 @@
       font-weight: 780;
     }
     .kb-tab.is-active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
-    .kb-focus-side .kb-column { min-width: 0; min-height: 620px; }
+    .kb-focus-side .kb-column { min-width: 0; min-height: 200px; }
     .kb-card.is-focus-tag:not(.is-selected):not(.is-editing) {
       min-height: 72px;
       gap: 7px;
@@ -535,9 +533,11 @@
       .kb-quick { grid-template-columns: 1fr; }
       .kb-icon-button { width: 100%; }
       .kb-toolbar-controls { grid-column: 1; justify-content: flex-start; }
+      .kb-toolbar-status { max-width: 100%; }
       .kb-board { grid-template-columns: repeat(4, minmax(230px, 82vw)); }
       .kb-focus-layout { grid-template-columns: 1fr; }
       .kb-focus-main .kb-card-list { grid-template-columns: 1fr; }
+      .kb-read-subtasks { grid-template-columns: 1fr; }
       .kb-grid-2 { grid-template-columns: 1fr; }
     }
   </style>
@@ -671,7 +671,8 @@
     }
     function setHeight() {
       const requested = Number(args.height || 760);
-      const real = Math.max(420, document.body.scrollHeight + 12, requested);
+      const floor = Math.min(420, requested);
+      const real = Math.max(floor, document.body.scrollHeight + 12);
       send(SET_HEIGHT, { height: real });
     }
     function asObj(value) {
@@ -1509,6 +1510,9 @@
               </div>` : ""}
             </form>
             <div class="kb-toolbar-controls">
+              <span class="kb-count" title="${attr(label("metric_total"))}">${esc(label("metric_total"))} ${esc(text(settings().total_tasks ?? 0))}</span>
+              ${settings().is_dirty ? `<span class="kb-pill warn" title="${attr(label("unsaved"))}">${esc(label("unsaved"))}</span>` : ""}
+              ${aiState().status ? `<span class="kb-status kb-toolbar-status" title="${attr(text(aiState().status))}">${esc(text(aiState().status))}</span>` : ""}
               <label class="kb-toolbar-toggle" title="${attr(label("auto_dates_help"))}">
                 <input type="checkbox" data-view-pref="auto_dates" ${viewPref("auto_dates") ? "checked" : ""}>
                 <span>${esc(label("auto_dates_short", label("auto_dates")))}</span>
@@ -1519,11 +1523,6 @@
               </label>
               <button type="button" class="kb-head-button" data-board-reload title="${attr(label("reload"))}" aria-label="${attr(label("reload"))}">⟳</button>
               <button type="button" class="kb-head-button primary" data-board-save>${esc(label("save"))}</button>
-            </div>
-            <div class="kb-toolbar-meta">
-              <span class="kb-count" title="${attr(label("metric_total"))}">${esc(label("metric_total"))} ${esc(text(settings().total_tasks ?? 0))}</span>
-              ${settings().is_dirty ? `<span class="kb-pill warn" title="${attr(label("unsaved"))}">${esc(label("unsaved"))}</span>` : ""}
-              <span class="kb-status">${esc(text(aiState().status || ""))}</span>
             </div>
           </div>
           <div class="kb-workspace">

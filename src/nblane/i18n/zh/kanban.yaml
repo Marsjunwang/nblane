@@ -51,6 +51,7 @@ kb_checkin_delete: 删除
 kb_checkin_delete_help: 从 activity-log.yaml 删除这条打卡记录。
 kb_checkin_type_learning: 学习
 kb_checkin_type_exercise: 锻炼
+kb_checkin_type_custom: 自定义
 kb_checkin_detail_empty: 无详情
 kb_checkin_links_count: '{count} 个链接'
 kb_checkin_minutes: '{minutes:g} 分钟'
@@ -58,11 +59,16 @@ kb_checkin_strip_title: 最近 14 天
 kb_checkin_today_short: 今
 kb_checkin_strip_learning_short: 学{count}
 kb_checkin_strip_exercise_short: 练{count}
+kb_checkin_strip_custom_short: 记{count}
 kb_checkin_day_help: 打开这一天，新增或删除打卡。
 kb_checkin_day_records: 当天记录
 kb_checkin_day_records_empty: 这一天还没有学习/锻炼记录。
 kb_checkin_add_learning: 新增学习
 kb_checkin_add_exercise: 新增锻炼
+kb_checkin_add_custom: 新增自定义
+kb_checkin_legend_learning: 学习
+kb_checkin_legend_exercise: 锻炼
+kb_checkin_legend_custom: 自定义
 kb_checkin_no_marks: 未打卡
 kb_summary_records: 本月记录
 kb_summary_records_empty: 本月还没有学习/锻炼记录。
@@ -116,6 +122,11 @@ kb_learning_checkin_links: 链接列表
 kb_learning_checkin_links_placeholder: 每行一个链接。
 kb_learning_checkin_submit: 记录学习
 kb_learning_checkin_required: 请填写学习记录或至少一个链接。
+kb_custom_checkin_note: 自定义记录
+kb_custom_checkin_note_placeholder: 今天想记录点什么？
+kb_custom_checkin_tag: 标签（可选）
+kb_custom_checkin_tag_placeholder: 如 阅读、冥想、心情
+kb_custom_checkin_required: 请填写内容再记录自定义打卡。
 kb_learning_summary: 摘要
 kb_learning_summary_placeholder: 用一两句话说明这个资源为什么重要。
 kb_learning_lines_placeholder: 每行一条。
@@ -173,6 +184,7 @@ kb_summary_exercise_days: 锻炼天数
 kb_calendar_weekdays: 一,二,三,四,五,六,日
 kb_calendar_learning_short: 学 {count}
 kb_calendar_exercise_short: 练 {count}
+kb_calendar_custom_short: 记 {count}
 kb_habit_empty_hint: 先在“习惯”视图里新增一个习惯，再回来打卡。
 kb_habit_pick: 习惯
 kb_habit_count: 数量

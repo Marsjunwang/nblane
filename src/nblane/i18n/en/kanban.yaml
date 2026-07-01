@@ -51,6 +51,7 @@ kb_checkin_delete: Delete
 kb_checkin_delete_help: Remove this check-in from activity-log.yaml.
 kb_checkin_type_learning: Learning
 kb_checkin_type_exercise: Exercise
+kb_checkin_type_custom: Custom
 kb_checkin_detail_empty: No details
 kb_checkin_links_count: '{count} links'
 kb_checkin_minutes: '{minutes:g} min'
@@ -58,11 +59,16 @@ kb_checkin_strip_title: Recent 14 days
 kb_checkin_today_short: Today
 kb_checkin_strip_learning_short: L{count}
 kb_checkin_strip_exercise_short: E{count}
+kb_checkin_strip_custom_short: C{count}
 kb_checkin_day_help: Open this day to add or delete check-ins.
 kb_checkin_day_records: Day records
 kb_checkin_day_records_empty: No learning/exercise records on this day.
 kb_checkin_add_learning: Add learning
 kb_checkin_add_exercise: Add exercise
+kb_checkin_add_custom: Add custom
+kb_checkin_legend_learning: Learning
+kb_checkin_legend_exercise: Exercise
+kb_checkin_legend_custom: Custom
 kb_checkin_no_marks: No marks
 kb_summary_records: Monthly records
 kb_summary_records_empty: No learning/exercise records this month.
@@ -116,6 +122,11 @@ kb_learning_checkin_links: Links
 kb_learning_checkin_links_placeholder: One link per line.
 kb_learning_checkin_submit: Record learning
 kb_learning_checkin_required: Add a note or at least one link.
+kb_custom_checkin_note: Custom note
+kb_custom_checkin_note_placeholder: What do you want to log today?
+kb_custom_checkin_tag: Label (optional)
+kb_custom_checkin_tag_placeholder: e.g. reading, meditation, mood
+kb_custom_checkin_required: Add a note to record a custom check-in.
 kb_learning_summary: Summary
 kb_learning_summary_placeholder: One or two lines about why this resource matters.
 kb_learning_lines_placeholder: One item per line.
@@ -173,6 +184,7 @@ kb_summary_exercise_days: Exercise days
 kb_calendar_weekdays: Mon,Tue,Wed,Thu,Fri,Sat,Sun
 kb_calendar_learning_short: Learn {count}
 kb_calendar_exercise_short: Exercise {count}
+kb_calendar_custom_short: Custom {count}
 kb_habit_empty_hint: Add a habit in the Habits view before checking it in here.
 kb_habit_pick: Habit
 kb_habit_count: Count

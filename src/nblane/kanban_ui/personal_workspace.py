@@ -27,8 +27,9 @@ from nblane.web_shared import (
 
 LEARNING_HABIT_ID = "learning"
 EXERCISE_HABIT_ID = "exercise"
+CUSTOM_HABIT_ID = "custom"
 LEGACY_EXERCISE_HABIT_IDS = ("锻炼",)
-WORKSPACE_HABIT_IDS = (LEARNING_HABIT_ID, EXERCISE_HABIT_ID)
+WORKSPACE_HABIT_IDS = (LEARNING_HABIT_ID, EXERCISE_HABIT_ID, CUSTOM_HABIT_ID)
 
 EXERCISE_TYPES = (
     "running",
@@ -83,6 +84,8 @@ def workspace_habit_refs(checkin: Checkin) -> set[str]:
         legacy in refs for legacy in LEGACY_EXERCISE_HABIT_IDS
     ):
         out.add(EXERCISE_HABIT_ID)
+    if CUSTOM_HABIT_ID in refs:
+        out.add(CUSTOM_HABIT_ID)
     return out
 
 
@@ -93,6 +96,8 @@ def workspace_habit_id(checkin: Checkin) -> str:
         return LEARNING_HABIT_ID
     if EXERCISE_HABIT_ID in refs:
         return EXERCISE_HABIT_ID
+    if CUSTOM_HABIT_ID in refs:
+        return CUSTOM_HABIT_ID
     return ""
 
 
@@ -100,11 +105,12 @@ def daily_workspace_counts(
     activity: ActivityLog,
     days: list[date],
 ) -> dict[str, dict[str, int]]:
-    """Return learning/exercise counts for selected days."""
+    """Return learning/exercise/custom counts for selected days."""
     out = {
         day.isoformat(): {
             LEARNING_HABIT_ID: 0,
             EXERCISE_HABIT_ID: 0,
+            CUSTOM_HABIT_ID: 0,
         }
         for day in days
     }
@@ -212,6 +218,19 @@ def _ensure_exercise_habit(profile_path: Path) -> None:
     )
 
 
+def _ensure_custom_habit(profile_path: Path) -> None:
+    """Ensure the built-in custom check-in habit exists."""
+    add_habit(
+        profile_path,
+        "Custom",
+        kind="custom",
+        cadence="daily",
+        target=HabitTarget(count=1.0, unit="session"),
+        tags=["flow/habit", "habit/custom", "custom"],
+        notes="Freeform daily check-in anchor.",
+    )
+
+
 def _clean_lines(value: object) -> list[str]:
     """Return non-empty unique lines from text or a sequence."""
     out: list[str] = []
@@ -259,6 +278,7 @@ def _count_text(day_counts: dict[str, int], ui: dict[str, str]) -> str:
     bits: list[str] = []
     learning = day_counts.get(LEARNING_HABIT_ID, 0)
     exercise = day_counts.get(EXERCISE_HABIT_ID, 0)
+    custom = day_counts.get(CUSTOM_HABIT_ID, 0)
     if learning:
         bits.append(
             ui.get("kb_calendar_learning_short", "Learn {count}").format(
@@ -271,6 +291,12 @@ def _count_text(day_counts: dict[str, int], ui: dict[str, str]) -> str:
                 count=exercise
             )
         )
+    if custom:
+        bits.append(
+            ui.get("kb_calendar_custom_short", "Custom {count}").format(
+                count=custom
+            )
+        )
     return " · ".join(bits)
 
 
@@ -279,6 +305,7 @@ def _strip_count_text(day_counts: dict[str, int], ui: dict[str, str]) -> str:
     bits: list[str] = []
     learning = day_counts.get(LEARNING_HABIT_ID, 0)
     exercise = day_counts.get(EXERCISE_HABIT_ID, 0)
+    custom = day_counts.get(CUSTOM_HABIT_ID, 0)
     if learning:
         bits.append(
             ui.get("kb_checkin_strip_learning_short", "L{count}").format(
@@ -289,6 +316,12 @@ def _strip_count_text(day_counts: dict[str, int], ui: dict[str, str]) -> str:
         bits.append(
             ui.get("kb_checkin_strip_exercise_short", "E{count}").format(
                 count=exercise
+            )
+        )
+    if custom:
+        bits.append(
+            ui.get("kb_checkin_strip_custom_short", "C{count}").format(
+                count=custom
             )
         )
     return " ".join(bits)
@@ -540,6 +573,43 @@ def _record_exercise(
     )
 
 
+def _custom_summary(note: str, tag: str) -> str:
+    """Build a compact custom check-in summary, tag-prefixed when present."""
+    clean_note = ""
+    for line in _clean_lines(note):
+        clean_note = line[:120]
+        break
+    clean_tag = str(tag or "").strip()
+    if clean_tag and clean_note:
+        return f"{clean_tag}: {clean_note}"[:140]
+    return clean_tag or clean_note
+
+
+def _record_custom(
+    profile_path: Path,
+    *,
+    when: date,
+    note: str,
+    tag: str,
+) -> None:
+    """Persist one freeform custom check-in."""
+    _ensure_custom_habit(profile_path)
+    tags = ["flow/habit", "habit/custom", "custom"]
+    clean_tag = str(tag or "").strip()
+    if clean_tag:
+        tags.append(f"custom/{clean_tag}")
+    add_activity_checkin(
+        profile_path,
+        CUSTOM_HABIT_ID,
+        when=when,
+        count=1.0,
+        unit="session",
+        summary=_custom_summary(note, tag),
+        note=note,
+        tags=tags,
+    )
+
+
 def record_learning_checkin(
     profile_path: Path,
     *,
@@ -588,6 +658,28 @@ def record_exercise_checkin(
         _show_activity_log_parse_error(exc)
 
 
+def record_custom_checkin(
+    profile_path: Path,
+    *,
+    when: date,
+    note: str,
+    tag: str = "",
+) -> None:
+    """Persist one freeform custom check-in and refresh file state."""
+    path = _activity_log_path(profile_path)
+    try:
+        assert_files_current([path])
+        _record_custom(
+            profile_path,
+            when=when,
+            note=str(note or "").strip(),
+            tag=str(tag or "").strip(),
+        )
+        _refresh_activity(path)
+    except ActivityLogParseError as exc:
+        _show_activity_log_parse_error(exc)
+
+
 def delete_workspace_checkin(
     profile_path: Path,
     checkin_id: str,
@@ -611,6 +703,8 @@ def _checkin_kind_label(checkin: Checkin, ui: dict[str, str]) -> str:
         return ui.get("kb_checkin_type_learning", "Learning")
     if habit_id == EXERCISE_HABIT_ID:
         return ui.get("kb_checkin_type_exercise", "Exercise")
+    if habit_id == CUSTOM_HABIT_ID:
+        return ui.get("kb_checkin_type_custom", "Custom")
     return habit_id or "-"
 
 
@@ -642,6 +736,11 @@ def _checkin_detail(checkin: Checkin, ui: dict[str, str]) -> str:
             bits.append(checkin.notes.splitlines()[0][:80])
         if bits:
             return " · ".join(bits)
+    if habit_id == CUSTOM_HABIT_ID:
+        if checkin.summary:
+            return checkin.summary
+        if checkin.notes:
+            return checkin.notes.splitlines()[0][:120]
     return ui.get("kb_checkin_detail_empty", "No details")
 
 

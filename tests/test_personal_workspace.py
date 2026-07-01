@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 from nblane.core.activity_log import ActivityLog, Checkin
 from nblane.core.paths import REPO_ROOT
 from nblane.kanban_ui.personal_workspace import (
+    CUSTOM_HABIT_ID,
     EXERCISE_HABIT_ID,
     LEARNING_HABIT_ID,
     checkin_calendar_payload_from_activity,
@@ -25,6 +26,7 @@ from nblane.kanban_ui.personal_workspace import (
     checkin_month_payload_from_activity,
     daily_workspace_counts,
     month_day_window,
+    record_custom_checkin,
     record_learning_checkin,
     recent_day_window,
     workspace_habit_id,
@@ -64,6 +66,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
                 Checkin(date=target.isoformat(), habit_id="learning"),
                 Checkin(date=target.isoformat(), habit_id="exercise"),
                 Checkin(date=target.isoformat(), habit_id="锻炼"),
+                Checkin(date=target.isoformat(), habit_id="custom"),
                 Checkin(date=target.isoformat(), habit_id="deep_work"),
             ]
         )
@@ -71,11 +74,13 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
         counts = daily_workspace_counts(log, [target])
 
         self.assertEqual(workspace_habit_id(log.checkins[2]), "exercise")
+        self.assertEqual(workspace_habit_id(log.checkins[3]), "custom")
         self.assertEqual(
             counts[target.isoformat()],
             {
                 LEARNING_HABIT_ID: 1,
                 EXERCISE_HABIT_ID: 2,
+                CUSTOM_HABIT_ID: 1,
             },
         )
 
@@ -129,7 +134,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
         self.assertTrue(payload["days"][-1]["is_today"])
         self.assertEqual(
             payload["days"][-1]["counts"],
-            {"learning": 1, "exercise": 1},
+            {"learning": 1, "exercise": 1, "custom": 0},
         )
         self.assertEqual(payload["days"][-1]["marker_text"], "学1 练1")
         self.assertEqual(
@@ -233,7 +238,7 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
         self.assertNotIn("2026-05-01", by_date)
         self.assertEqual(
             by_date[target.isoformat()]["counts"],
-            {"learning": 1, "exercise": 1},
+            {"learning": 1, "exercise": 1, "custom": 0},
         )
         self.assertEqual(
             by_date[target.isoformat()]["marker_text"],
@@ -454,6 +459,97 @@ class TestPersonalWorkspaceHelpers(unittest.TestCase):
             duration_min=45.0,
             intensity="hard",
             note="Tempo run",
+        )
+
+    def test_record_custom_checkin_persists_and_counts(self) -> None:
+        """A custom check-in lands in counts and serializes with kind=custom."""
+        target = date(2026, 4, 28)
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "demo"
+            profile_path.mkdir()
+            with (
+                patch(
+                    "nblane.kanban_ui.personal_workspace.assert_files_current"
+                ),
+                patch(
+                    "nblane.kanban_ui.personal_workspace.refresh_file_snapshots"
+                ),
+                patch(
+                    "nblane.kanban_ui.personal_workspace.stash_git_backup_results"
+                ),
+            ):
+                record_custom_checkin(
+                    profile_path,
+                    when=target,
+                    note="Meditated 10 minutes",
+                    tag="mindfulness",
+                )
+
+            payload = checkin_month_payload(
+                "demo",
+                profile_path,
+                {},
+                year=2026,
+                month=4,
+                today=target,
+            )
+
+        by_date = {item["date"]: item for item in payload["days"] if item}
+        day = by_date[target.isoformat()]
+        self.assertEqual(day["counts"][CUSTOM_HABIT_ID], 1)
+        records = day["records"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["kind"], "custom")
+        self.assertIn("Meditated 10 minutes", records[0]["detail"])
+        self.assertIn("mindfulness", records[0]["detail"])
+
+    def test_toolbar_custom_form_saves_note_and_tag(self) -> None:
+        """Toolbar custom check-ins pass the note and optional label through."""
+        helpers = _load_kanban_page_helpers()
+
+        class FakeForm:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeStreamlit:
+            def form(self, *args, **kwargs):
+                return FakeForm()
+
+            def text_input(self, *args, **kwargs):
+                return "reading"
+
+            def text_area(self, *args, **kwargs):
+                return "Finished a chapter"
+
+            def form_submit_button(self, *args, **kwargs):
+                return True
+
+            def warning(self, *args, **kwargs):
+                raise AssertionError("should not warn on a valid note")
+
+            def rerun(self):
+                raise RuntimeError("rerun")
+
+        with (
+            patch.object(helpers, "st", FakeStreamlit()),
+            patch.object(helpers, "record_custom_checkin") as mock_record,
+        ):
+            with self.assertRaises(RuntimeError):
+                helpers._render_add_custom_form(
+                    "demo",
+                    Path("/tmp/demo"),
+                    date(2026, 4, 28),
+                    {},
+                )
+
+        mock_record.assert_called_once_with(
+            Path("/tmp/demo"),
+            when=date(2026, 4, 28),
+            note="Finished a chapter",
+            tag="reading",
         )
 
 

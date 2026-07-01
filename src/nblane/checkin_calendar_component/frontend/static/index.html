@@ -27,6 +27,10 @@
       --exercise-border: #86efac;
       --exercise-text: #166534;
       --exercise-soft: #f0fdf4;
+      --custom-bg: #fde68a;
+      --custom-border: #fcd34d;
+      --custom-text: #92400e;
+      --custom-soft: #fffbeb;
     }
     * { box-sizing: border-box; }
     html,
@@ -84,6 +88,14 @@
       border-color: var(--select-hover-border);
       color: var(--select-hover-text);
     }
+    .kb-cal-title-wrap {
+      align-items: center;
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      min-width: 0;
+      overflow: hidden;
+    }
     .kb-cal-title {
       background: transparent;
       border: 1px solid transparent;
@@ -93,6 +105,7 @@
       font-weight: 900;
       height: 1.55rem;
       line-height: 1.35rem;
+      max-width: 100%;
       overflow: hidden;
       text-align: center;
       text-overflow: ellipsis;
@@ -147,7 +160,8 @@
       font-weight: 900;
     }
     .kb-cal-day.has-learning,
-    .kb-cal-day.has-exercise {
+    .kb-cal-day.has-exercise,
+    .kb-cal-day.has-custom {
       background: var(--soft);
       border-color: var(--line);
     }
@@ -155,7 +169,8 @@
       background: linear-gradient(135deg, var(--learning-soft) 0%, var(--exercise-soft) 100%);
     }
     .kb-cal-day.selected.has-learning,
-    .kb-cal-day.selected.has-exercise {
+    .kb-cal-day.selected.has-exercise,
+    .kb-cal-day.selected.has-custom {
       background: var(--select-bg);
       border-color: var(--select-border);
     }
@@ -208,6 +223,38 @@
       bottom: 0;
       color: var(--exercise-text);
       right: 0;
+    }
+    .kb-cal-badge.custom {
+      background: var(--custom-bg);
+      border-color: var(--custom-border);
+      bottom: 0;
+      color: var(--custom-text);
+      left: 0;
+    }
+    .kb-cal-legend {
+      align-items: center;
+      display: inline-flex;
+      gap: 4px;
+      justify-content: center;
+    }
+    .kb-cal-dot {
+      border: 1px solid transparent;
+      border-radius: 999px;
+      display: inline-block;
+      height: 9px;
+      width: 9px;
+    }
+    .kb-cal-dot.learning {
+      background: var(--learning-bg);
+      border-color: var(--learning-border);
+    }
+    .kb-cal-dot.exercise {
+      background: var(--exercise-bg);
+      border-color: var(--exercise-border);
+    }
+    .kb-cal-dot.custom {
+      background: var(--custom-bg);
+      border-color: var(--custom-border);
     }
   </style>
 </head>
@@ -292,6 +339,7 @@
     function markerHtml(counts, ui) {
       const learning = Number(counts && counts.learning ? counts.learning : 0);
       const exercise = Number(counts && counts.exercise ? counts.exercise : 0);
+      const custom = Number(counts && counts.custom ? counts.custom : 0);
       let out = "";
       if (learning) {
         const tmpl = text(ui.kb_checkin_strip_learning_short || ui.kb_calendar_learning_short || "L{count}");
@@ -301,7 +349,23 @@
         const tmpl = text(ui.kb_checkin_strip_exercise_short || ui.kb_calendar_exercise_short || "E{count}");
         out += `<span class="kb-cal-badge exercise">${esc(tmpl.replace("{count}", exercise))}</span>`;
       }
+      if (custom) {
+        const tmpl = text(ui.kb_checkin_strip_custom_short || ui.kb_calendar_custom_short || "C{count}");
+        out += `<span class="kb-cal-badge custom">${esc(tmpl.replace("{count}", custom))}</span>`;
+      }
       return out;
+    }
+
+    function legendHtml(ui) {
+      const items = [
+        ["learning", text(ui.kb_checkin_legend_learning || "Learning")],
+        ["exercise", text(ui.kb_checkin_legend_exercise || "Exercise")],
+        ["custom", text(ui.kb_checkin_legend_custom || "Custom")],
+      ];
+      const dots = items
+        .map(([cls, name]) => `<span class="kb-cal-dot ${cls}" title="${esc(name)}" aria-label="${esc(name)}"></span>`)
+        .join("");
+      return `<span class="kb-cal-legend" role="img">${dots}</span>`;
     }
 
     function render() {
@@ -335,6 +399,7 @@
         if (item.is_today) classes.push("today");
         if (Number(counts.learning || 0)) classes.push("has-learning");
         if (Number(counts.exercise || 0)) classes.push("has-exercise");
+        if (Number(counts.custom || 0)) classes.push("has-custom");
         const label = `${day} ${text(item.summary || "")}`.trim();
         return `
           <button
@@ -355,7 +420,10 @@
         <div class="kb-cal-mini">
           <div class="kb-cal-nav">
             <button type="button" class="kb-cal-nav-btn" data-action="prev_month" data-month="${esc(prev)}" data-day="${esc(dayLabelFromMonth(prev))}" aria-label="${esc(ui.previous_month || "Previous month")}">&lsaquo;</button>
-            <button type="button" class="kb-cal-title" data-action="today" data-month="${esc(todayMonth)}" data-day="${esc(today)}" aria-label="${esc(ui.kb_checkin_today_short || "Today")}" title="${esc(ui.kb_checkin_today_short || "Today")}">${esc(title)}</button>
+            <div class="kb-cal-title-wrap">
+              <button type="button" class="kb-cal-title" data-action="today" data-month="${esc(todayMonth)}" data-day="${esc(today)}" aria-label="${esc(ui.kb_checkin_today_short || "Today")}" title="${esc(ui.kb_checkin_today_short || "Today")}">${esc(title)}</button>
+              ${legendHtml(ui)}
+            </div>
             <button type="button" class="kb-cal-nav-btn" data-action="next_month" data-month="${esc(next)}" data-day="${esc(dayLabelFromMonth(next))}" aria-label="${esc(ui.next_month || "Next month")}">&rsaquo;</button>
           </div>
           <div class="kb-cal-grid kb-cal-weekdays">${weekdayCells}</div>

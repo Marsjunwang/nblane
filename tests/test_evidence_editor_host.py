@@ -783,6 +783,12 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertEqual(row["origin_ref"], "kanban:kb_ai")
         self.assertEqual(row["project_refs"], ["project:demo"])
         self.assertIn("AI detector", row["original_content"])
+        # Preview annotates each skill link so the panel can render + select it.
+        nu = preview["node_updates"][0]
+        self.assertEqual(nu["key"], "nu_0")
+        self.assertEqual(nu["id"], "ros2_basics")
+        self.assertTrue(nu["label"])
+        self.assertEqual(nu["link_refs"], ["AI normalized detector"])
 
         ok = self.host.handle_event(
             {
@@ -811,6 +817,135 @@ class TestEvidenceEditorHost(unittest.TestCase):
         archive_text = (self.pdir / "kanban-archive.md").read_text(encoding="utf-8")
         self.assertIn("kb_ai", archive_text)
         self.assertIn("crystallized: true", archive_text)
+
+    def _prepare_single_done_preview(self) -> dict:
+        """Prepare a one-task preview (evidence + one skill link) and return it."""
+        (self.pdir / "kanban.md").write_text(
+            "## Done\n\n"
+            "- [x] AI detector\n"
+            "  - id: kb_ai\n"
+            "  - completed_on: 2026-02-02\n"
+            "  - project_id: project:demo\n"
+            "  - outcome: detector improved\n",
+            encoding="utf-8",
+        )
+        ai_patch = {
+            "evidence_entries": [
+                {
+                    "id": "ai_ev",
+                    "title": "AI normalized detector",
+                    "summary": "Detector work was completed.",
+                    "formatted_content": "## Detector\n\nCompleted detector work.",
+                    "strength": "medium",
+                    "confidence": "high",
+                    "kanban_refs": ["kanban:kb_ai"],
+                }
+            ],
+            "node_updates": [
+                {"id": "ros2_basics", "evidence_refs": ["ai_ev"], "status": "learning"}
+            ],
+        }
+        with patch(
+            "nblane.evidence_editor_host.ingest_kanban_done_json",
+            return_value=(ai_patch, None),
+        ), patch(
+            "nblane.evidence_editor_host.kanban_ai_backend", return_value="llm"
+        ), patch(
+            "nblane.evidence_editor_host.current_goal_agent_context", return_value=""
+        ):
+            self.host.handle_event(
+                {
+                    "action": "prepare_done_task_evidence",
+                    "event_id": "done-ai-prep",
+                    "payload": {"task_ids": ["kb_ai"]},
+                }
+            )
+        return self.fake_st.session_state[self.host._done_preview_state_key()]
+
+    def test_apply_done_deselect_skill_link_writes_evidence_only(self) -> None:
+        preview = self._prepare_single_done_preview()
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-apply-noskill",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": False,
+                    "selected_task_ids": ["kb_ai"],
+                    "selected_node_keys": [],
+                },
+            }
+        )
+        self.assertTrue(ok)
+        match = [r for r in self._pool() if r.get("origin_ref") == "kanban:kb_ai"]
+        self.assertEqual(len(match), 1)
+        by_id = {n["id"]: n for n in self._tree_nodes()}
+        # Evidence written, but the deselected skill link was NOT applied.
+        self.assertNotIn(
+            match[0]["id"], by_id["ros2_basics"].get("evidence_refs") or []
+        )
+
+    def test_apply_done_select_skill_link_applies_it(self) -> None:
+        preview = self._prepare_single_done_preview()
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-apply-skill",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": False,
+                    "selected_task_ids": ["kb_ai"],
+                    "selected_node_keys": ["nu_0"],
+                },
+            }
+        )
+        self.assertTrue(ok)
+        match = [r for r in self._pool() if r.get("origin_ref") == "kanban:kb_ai"]
+        by_id = {n["id"]: n for n in self._tree_nodes()}
+        self.assertIn(
+            match[0]["id"], by_id["ros2_basics"].get("evidence_refs") or []
+        )
+
+    def test_apply_done_empty_task_selection_blocks(self) -> None:
+        preview = self._prepare_single_done_preview()
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-apply-none",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": False,
+                    "selected_task_ids": [],
+                    "selected_node_keys": ["nu_0"],
+                },
+            }
+        )
+        self.assertFalse(ok)
+        # Nothing written; the source task stays on the board.
+        self.assertEqual(
+            [r for r in self._pool() if r.get("origin_ref") == "kanban:kb_ai"], []
+        )
+
+    def test_apply_done_backcompat_no_selection_writes_all(self) -> None:
+        preview = self._prepare_single_done_preview()
+        ok = self.host.handle_event(
+            {
+                "action": "apply_done_task_evidence",
+                "event_id": "done-apply-all",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "mark_crystallized": False,
+                },
+            }
+        )
+        self.assertTrue(ok)
+        match = [r for r in self._pool() if r.get("origin_ref") == "kanban:kb_ai"]
+        self.assertEqual(len(match), 1)
+        by_id = {n["id"]: n for n in self._tree_nodes()}
+        # Omitting both selection fields keeps the old "all" behavior.
+        self.assertIn(
+            match[0]["id"], by_id["ros2_basics"].get("evidence_refs") or []
+        )
 
     def test_done_ai_duplicate_rows_block_accept(self) -> None:
         (self.pdir / "kanban.md").write_text(

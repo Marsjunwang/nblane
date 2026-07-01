@@ -48,10 +48,17 @@ export const refreshCrystallizedEvent = (taskIds) =>
 // Done tasks -> evidence (deterministic, incl. non-crystallized; no LLM).
 export const prepareDoneTaskEvidenceEvent = (taskIds) =>
   makeEvent("prepare_done_task_evidence", { task_ids: taskIds });
-export const applyDoneTaskEvidenceEvent = (previewId, markCrystallized = true) =>
+export const applyDoneTaskEvidenceEvent = (
+  previewId,
+  markCrystallized = true,
+  selectedTaskIds = null,
+  selectedNodeKeys = null
+) =>
   makeEvent("apply_done_task_evidence", {
     preview_id: previewId,
     mark_crystallized: !!markCrystallized,
+    selected_task_ids: Array.isArray(selectedTaskIds) ? selectedTaskIds : null,
+    selected_node_keys: Array.isArray(selectedNodeKeys) ? selectedNodeKeys : null,
   });
 export const doneTasksToEvidenceEvent = (taskIds, markCrystallized = false) =>
   makeEvent("done_tasks_to_evidence", {

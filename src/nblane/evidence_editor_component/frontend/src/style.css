@@ -270,5 +270,17 @@ button { cursor: pointer; }
 .ee-preview-meta { color: var(--muted); font-size: 11px; }
 .ee-preview-summary { font-size: 12px; line-height: 1.4; }
 .ee-preview-blockers { color: var(--warn); font-size: 12px; line-height: 1.35; }
+.ee-preview-head { display: flex; align-items: center; gap: 6px; }
+.ee-preview-head .ee-preview-title { flex: 1 1 auto; }
+.ee-preview-head input[type="checkbox"] { flex: 0 0 auto; }
+.ee-preview-expand { flex: 0 0 auto; }
+.ee-preview-detail { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.ee-preview-body { font-size: 12px; }
+.ee-preview-sub-h { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.ee-preview-sub-body { font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
+.ee-preview-raw summary { font-size: 11px; color: var(--muted); cursor: pointer; }
+.ee-preview-raw pre { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
+.ee-done-links { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
+.ee-done-link-row { align-items: baseline; flex-wrap: wrap; }
 .ee-batch-detail { gap: 10px; }
 .ee-bulk-reformat-preview { background: var(--soft); }

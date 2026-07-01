@@ -60,6 +60,7 @@ from nblane.kanban_ui.personal_workspace import (
     EXERCISE_TYPES,
     checkin_month_payload,
     delete_workspace_checkin,
+    record_custom_checkin,
     record_exercise_checkin,
     record_learning_checkin,
 )
@@ -1380,6 +1381,22 @@ def _render_month_calendar(
                 "kb_checkin_strip_exercise_short",
                 ui.get("kb_calendar_exercise_short", "E{count}"),
             ),
+            "kb_checkin_strip_custom_short": ui.get(
+                "kb_checkin_strip_custom_short",
+                ui.get("kb_calendar_custom_short", "C{count}"),
+            ),
+            "kb_checkin_legend_learning": ui.get(
+                "kb_checkin_legend_learning",
+                ui.get("kb_checkin_type_learning", "Learning"),
+            ),
+            "kb_checkin_legend_exercise": ui.get(
+                "kb_checkin_legend_exercise",
+                ui.get("kb_checkin_type_exercise", "Exercise"),
+            ),
+            "kb_checkin_legend_custom": ui.get(
+                "kb_checkin_legend_custom",
+                ui.get("kb_checkin_type_custom", "Custom"),
+            ),
             "previous_month": ui.get("kb_checkin_prev_month", "Previous month"),
             "next_month": ui.get("kb_checkin_next_month", "Next month"),
         },
@@ -1641,6 +1658,58 @@ def _render_add_exercise_form(
     st.rerun()
 
 
+def _render_add_custom_form(
+    profile: str,
+    profile_path,
+    selected_day: date,
+    ui: dict[str, str],
+) -> None:
+    """Render the selected-day custom check-in form."""
+    with st.form(
+        f"kb_toolbar_custom_form_{profile}_{selected_day.isoformat()}",
+        clear_on_submit=True,
+    ):
+        tag = st.text_input(
+            ui.get("kb_custom_checkin_tag", "Label (optional)"),
+            key=f"kb_toolbar_custom_tag_{profile}_{selected_day.isoformat()}",
+            placeholder=ui.get(
+                "kb_custom_checkin_tag_placeholder",
+                "e.g. reading, meditation, mood",
+            ),
+        )
+        note = st.text_area(
+            ui.get("kb_custom_checkin_note", "Custom note"),
+            key=f"kb_toolbar_custom_note_{profile}_{selected_day.isoformat()}",
+            height=76,
+            placeholder=ui.get(
+                "kb_custom_checkin_note_placeholder",
+                "What do you want to log today?",
+            ),
+        )
+        submitted = st.form_submit_button(
+            ui.get("kb_checkin_add_custom", "Add custom"),
+            type="primary",
+            use_container_width=True,
+        )
+    if not submitted:
+        return
+    if not str(note or "").strip():
+        st.warning(
+            ui.get(
+                "kb_custom_checkin_required",
+                "Add a note to record a custom check-in.",
+            )
+        )
+        return
+    record_custom_checkin(
+        profile_path,
+        when=selected_day,
+        note=str(note or "").strip(),
+        tag=str(tag or "").strip(),
+    )
+    st.rerun()
+
+
 def _render_toolbar_checkin(
     profile: str,
     profile_path,
@@ -1697,6 +1766,11 @@ def _render_toolbar_checkin(
             expanded=False,
         ):
             _render_add_exercise_form(profile, profile_path, selected_day, ui)
+        with st.expander(
+            ui.get("kb_checkin_add_custom", "Add custom"),
+            expanded=False,
+        ):
+            _render_add_custom_form(profile, profile_path, selected_day, ui)
 
 
 def _handle_board_event(
