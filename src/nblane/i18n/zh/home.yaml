@@ -125,9 +125,9 @@ dashboard_ai_save: 保存 AI 设置
 dashboard_ai_saved: 首页 AI 设置已保存。
 dashboard_ai_test_goal_skill_match: 测试目标-技能模型
 dashboard_ai_test_ok: 模型测试成功（{seconds}s）。
-dashboard_open_8502_canvas: 打开 8502 画布
-dashboard_canvas_sidecar_unavailable: 8502 画布当前不可达：{base}；已使用本地首页回退视图。
-dashboard_canvas_sidecar_link_disabled_help: 请先启动或转发 8502 画布 sidecar，再使用这个入口。
+dashboard_open_fullscreen_galaxy: 打开全屏星系
+dashboard_canvas_sidecar_unavailable: 全屏星系当前不可达：{base}；已使用本地首页回退视图。
+dashboard_canvas_sidecar_link_disabled_help: 请先启动或转发 Dashboard sidecar，再使用这个入口。
 dashboard_research_title: 研究
 dashboard_graph_hero_title: 实时成长图谱
 dashboard_graph_hero_caption: 用一张紧凑 3D 图把今天的目标、来源、证据、技能和输出串起来。
@@ -236,7 +236,7 @@ dashboard_graph_focus_selected: 聚焦所选
 dashboard_graph_meteor_shower: 流星雨
 dashboard_graph_meteor_shower_hint: 来一场研究流星雨
 dashboard_other_goal: 其他
-dashboard_open_8503: 打开 8503
+dashboard_open_main_app: 返回主应用
 dashboard_explore_title: 图谱
 dashboard_explore_nodes: 图谱节点
 dashboard_explore_all: 全部
@@ -488,6 +488,11 @@ dashboard_skill_ring_target_label: 目标相关
 dashboard_skill_delta_label: 本周新点亮技能
 quick_skill_map: 技能图谱
 dashboard_show_archived_goals: 显示已归档 / 已暂停目标（熄灭星）
+goal_status_active: 进行中
+goal_status_draft: 草稿
+goal_status_archived: 已归档
+goal_status_completed: 已完成
+goal_status_paused: 已暂停
 dashboard_graph_search_placeholder: 搜索节点…
 dashboard_graph_search_aria: 搜索图谱节点
 dashboard_action_next_title: 下一步：去做什么

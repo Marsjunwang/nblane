@@ -405,8 +405,8 @@ def dashboard_payload(profile: str) -> dict:
     canvas_ok, _canvas_message = _dashboard_canvas_status(canvas_base, profile)
     if canvas_base and canvas_ok is not False:
         encoded_profile = quote(profile, safe="")
-        # Only the standalone deep link is used now (the "Open 8502 Canvas"
-        # button); the embedded-iframe canvas was removed from the dashboard.
+        # Feeds the "Open Fullscreen Galaxy" overlay on the inline 3D hero
+        # (GraphHeroPanel); the embedded-iframe canvas stays removed.
         payload["canvas_embed"] = {
             "standalone_url": f"{canvas_base}/dashboard?profile={encoded_profile}",
         }
@@ -2725,12 +2725,9 @@ def _render_dashboard_top_actions(profile: str) -> None:
         else:
             with st.expander(ui["dashboard_ai_settings_title"], expanded=False):
                 _render_dashboard_ai_settings(profile)
-    # The "Open 8502 Canvas" deep-link button is retired — the 3D graph now
-    # renders inline inside the React component, so the sidecar canvas was
-    # confusing duplicate UI. Leave the canvas server itself running (still
-    # serves /api/dashboard/payload for the React component), but stop
-    # surfacing the standalone link here.
-    canvas_base = ""
+    # The old page-level "Open 8502 Canvas" button is retired in favor of the
+    # "Open Fullscreen Galaxy" overlay rendered inline on the 3D hero itself
+    # (GraphHeroPanel in main.jsx), fed by payload["canvas_embed"].
 
 
 def _render_home_capture_hint() -> None:

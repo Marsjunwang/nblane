@@ -93,7 +93,7 @@ async function embeddedDashboardCanvasFrame(page) {
   throw new Error("Embedded 8502 Dashboard Canvas frame did not become ready.");
 }
 
-test("8503 Dashboard exposes top-right guide, AI settings, optional 8502 Canvas link, and scales", async ({ page }, testInfo) => {
+test("8503 Dashboard exposes top-right guide, AI settings, optional fullscreen galaxy link, and scales", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openStreamlitDashboard(page);
@@ -113,7 +113,7 @@ test("8503 Dashboard exposes top-right guide, AI settings, optional 8502 Canvas 
   await expect(page.locator("body")).toContainText(/LLM[:：][\s\S]*Codex[:：]|Codex[:：][\s\S]*LLM[:：]/);
   await expect(page.getByRole("button", { name: /测试模型|Test model/ }).first()).toBeVisible();
 
-  await expect(page.getByText(/打开 8502 Canvas|Open 8502 Canvas/).first()).toBeVisible();
+  await expect(page.getByText(/打开全屏星系|Open Fullscreen Galaxy/).first()).toBeVisible();
 
   const dashboard = await homeDashboardFrame(page);
   await expect(dashboard.locator(".hd-graph-hero")).toBeVisible();

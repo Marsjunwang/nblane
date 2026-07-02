@@ -862,10 +862,15 @@ button {
   display: inline-flex;
   font-size: 12px;
   font-weight: 780;
+  gap: 6px;
   min-height: 34px;
   padding: 7px 11px;
   text-decoration: none;
   white-space: nowrap;
+}
+
+.hd-graph-hero-fullscreen span {
+  font-size: 14px;
 }
 
 .hd-graph-hero .hd-graph3d-stage {
@@ -1138,6 +1143,63 @@ button {
   background: var(--hd-paper);
   box-shadow: 0 2px 6px rgba(23, 33, 30, .08);
   color: var(--hd-ink);
+}
+
+.hd-segmented-overlay {
+  background: rgba(15, 25, 50, .72);
+  border: 1px solid rgba(255, 255, 255, .18);
+  backdrop-filter: blur(6px);
+  left: 12px;
+  position: absolute;
+  top: 12px;
+  z-index: 8;
+}
+
+.hd-segmented-overlay button {
+  color: rgba(255, 255, 255, .72);
+}
+
+.hd-segmented-overlay button.active {
+  background: rgba(255, 255, 255, .14);
+  box-shadow: none;
+  color: #fff;
+}
+
+.hd-canvas-panel-fullbleed {
+  display: block;
+  height: 100vh;
+  position: relative;
+}
+
+.hd-canvas-panel-fullbleed .hd-explore-canvas.fullbleed {
+  border-radius: 0;
+  display: block;
+  height: 100%;
+  margin: 0;
+  min-height: 0;
+}
+
+.hd-canvas-panel-fullbleed .hd-graph3d-stage {
+  border-radius: 0;
+  height: 100%;
+}
+
+.hd-canvas-archived-toggle-overlay {
+  background: rgba(15, 25, 50, .72);
+  border: 1px solid rgba(255, 255, 255, .18);
+  backdrop-filter: blur(6px);
+  border-radius: 10px;
+  bottom: 12px;
+  color: rgba(255, 255, 255, .82);
+  font-size: 12px;
+  padding: 8px 10px;
+  position: absolute;
+  right: 12px;
+  z-index: 8;
+}
+
+.hd-canvas-archived-toggle-overlay .hd-canvas-archived-toggle {
+  color: inherit;
 }
 
 .hd-canvas-toolbar {
@@ -4091,6 +4153,13 @@ button {
   flex: 1 1 auto;
   display: grid;
   gap: 14px;
+}
+
+.hd-drawer-body .hd-inspector {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .hd-drawer-foot {

@@ -19,8 +19,12 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
-        entryFileNames: "assets/home-dashboard.js",
-        assetFileNames: "assets/home-dashboard.css",
+        // Content-hashed names so a redeploy always busts the browser cache
+        // (the sidecar serves these with a 24h max-age and discovers the
+        // current set by globbing the assets dir, so it picks up new hashes
+        // automatically and stale ones just 404 harmlessly).
+        entryFileNames: "assets/home-dashboard.[hash].js",
+        assetFileNames: "assets/home-dashboard.[hash][extname]",
       },
     },
   },

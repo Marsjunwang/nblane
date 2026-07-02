@@ -1333,6 +1333,55 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("focus_path", data["payload"]["graph"])
         self.assertIn("contract", data["payload"]["graph"])
 
+    def test_dashboard_payload_requires_auth_cookie_when_auth_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(
+                os.environ,
+                {
+                    "NBLANE_AUTH_FILE": str(self._auth_file(root)),
+                    "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                    "NBLANE_RESEARCH_ASSET_ROOT": str(root / "assets"),
+                },
+                clear=False,
+            ):
+                profile = self._profile(root)
+                client = self._client(profile)
+
+                page = client.get("/dashboard?profile=alice")
+                payload = client.get("/api/dashboard/payload?profile=alice")
+
+        self.assertEqual(page.status_code, 401)
+        self.assertEqual(payload.status_code, 401)
+
+    def test_dashboard_payload_auth_handoff_sets_cookie_and_checks_profile_access(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(
+                os.environ,
+                {
+                    "NBLANE_AUTH_FILE": str(self._auth_file(root)),
+                    "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                    "NBLANE_RESEARCH_ASSET_ROOT": str(root / "assets"),
+                },
+                clear=False,
+            ):
+                profile = self._profile(root)
+                client = self._client(profile)
+                handoff = mint_auth_handoff_token("alice")
+
+                page = client.get(
+                    f"/dashboard?profile=alice&auth_handoff={quote(handoff, safe='')}"
+                )
+                payload = client.get("/api/dashboard/payload?profile=alice")
+                forbidden = client.get("/api/dashboard/payload?profile=bob")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(AUTH_SESSION_COOKIE_NAME, page.headers.get("set-cookie", ""))
+        self.assertEqual(payload.status_code, 200)
+        self.assertTrue(payload.json()["ok"])
+        self.assertEqual(forbidden.status_code, 403)
+
     def test_paper_library_api_previews_and_deletes_paper_record(self) -> None:
         source_id = "source:paper:grounded"
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

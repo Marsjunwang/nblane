@@ -125,9 +125,9 @@ dashboard_ai_save: Save AI settings
 dashboard_ai_saved: Dashboard AI settings saved.
 dashboard_ai_test_goal_skill_match: Test goal-skill model
 dashboard_ai_test_ok: Model test succeeded ({seconds}s).
-dashboard_open_8502_canvas: Open 8502 Canvas
-dashboard_canvas_sidecar_unavailable: 8502 Dashboard Canvas is not reachable at {base}; using the local Dashboard fallback.
-dashboard_canvas_sidecar_link_disabled_help: Start or forward the 8502 Dashboard Canvas sidecar to use this link.
+dashboard_open_fullscreen_galaxy: Open Fullscreen Galaxy
+dashboard_canvas_sidecar_unavailable: The fullscreen galaxy is not reachable at {base}; using the local Dashboard fallback.
+dashboard_canvas_sidecar_link_disabled_help: Start or forward the Dashboard sidecar to use this link.
 dashboard_research_title: Research
 dashboard_graph_hero_title: Live growth graph
 dashboard_graph_hero_caption: A compact 3D map of today's goals, sources, evidence, skills, and outputs.
@@ -236,7 +236,7 @@ dashboard_graph_focus_selected: Focus
 dashboard_graph_meteor_shower: Meteor shower
 dashboard_graph_meteor_shower_hint: Fire a research meteor shower
 dashboard_other_goal: Other
-dashboard_open_8503: Open 8503
+dashboard_open_main_app: Back to app
 dashboard_explore_title: Graph
 dashboard_explore_nodes: Graph nodes
 dashboard_explore_all: All
@@ -488,6 +488,11 @@ dashboard_skill_ring_target_label: goal-relevant
 dashboard_skill_delta_label: skills lit this week
 quick_skill_map: Skill Map
 dashboard_show_archived_goals: Show archived / paused goals (extinguished stars)
+goal_status_active: Active
+goal_status_draft: Draft
+goal_status_archived: Archived
+goal_status_completed: Completed
+goal_status_paused: Paused
 dashboard_graph_search_placeholder: Search node…
 dashboard_graph_search_aria: Search graph nodes
 dashboard_action_next_title: 'Next: what to do'

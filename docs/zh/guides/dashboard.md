@@ -25,8 +25,8 @@ North Star
 
 - **North Star**：长期方向，来自 `SKILL.md` 的 Profile Context。private 模式下不会把明文送入 Dashboard payload。
 - **Primary Goal**：当前阶段目标，来自 `goals.yaml`。Dashboard 用它决定优先展示哪些任务、source、skill gap 和输出机会。
-- **Active Goals**：当前还在推进的目标。8503 内嵌 8502 Canvas 时这里只做上下文展示；本地 fallback inspector 可见时才提供点击编辑 / 切换。
-- **Context Canvas**：Growth Graph 的可视化投影。8503 首屏默认显示 Canvas summary 和 Focus Path 摘要，需要时再加载内嵌 8502 画布；本地 fallback 默认优先看 Focus Path / attention；独立 8502 Canvas 默认进入 3D Graph，适合大图探索。
+- **Active Goals**：当前还在推进的目标。主应用（8501）内嵌的 3D hero 里这里只做上下文展示；点击编辑 / 切换只在主应用可用。
+- **Context Canvas**：Growth Graph 的可视化投影。主应用首屏内嵌渲染 3D hero，并提供“打开全屏星系”入口跳到独立 `/dashboard` 全屏页；独立全屏页默认进入 3D Graph，只读，适合大图探索。
 - **Inspector**：点击节点后的详情区。真实节点应提供 owner page 或直接动作；placeholder 节点只表示系统还没有对应事实源或记录。
 - **Workbench**：今日工作区，集中显示 capture、Doing、Evidence Review、Gap、Output 和 Health 信号。
 
@@ -63,7 +63,7 @@ Dashboard 的按钮不能只是“看起来可点”。每个可见按钮点击�
 - **表单出现**：添加目标、编辑目标这类按钮只有在 inspector 会显示表单时才出现。
 - **写入反馈**：Capture source、Save goal、Archive、Confirm links 必须显示成功 / 失败，并在 rerun 后看到计数或状态变化。
 
-8502 standalone / embed 当前按**只读 Canvas**处理：不显示 Capture、Save goal、Archive、Set primary、Skill match 这类写入控件。需要写入时从 8502 跳回 8503，由 Streamlit 负责 profile 选择、快照、确认和错误反馈。
+独立 `/dashboard` standalone / embed 当前按**只读 Canvas**处理：不显示 Capture、Save goal、Archive、Set primary、Skill match 这类写入控件。需要写入时从 `/dashboard` 跳回主应用（生产为 8501），由 Streamlit 负责 profile 选择、快照、确认和错误反馈。
 
 ## AI 设置
 
@@ -88,27 +88,34 @@ Research 里的论文搜索、翻译、Reader 和 DeepRead 使用 Research 页�
 
 API key、token、cookie、authorization 不会写入 profile 文件。未配置模型时，Dashboard 应显示统一的未配置提示，并保留规则匹配和手动操作。
 
-## 8502 与 8503
+## 主应用与 `/dashboard` 全屏页
 
-- **8503 Streamlit**：负责 profile 选择、安全写入、全局导航、AI 设置、fallback 和审阅流程。
-- **8502 FastAPI sidecar**：负责高交互 Reader、Paper Library，以及可选的独立 Dashboard canvas。
+端口口径：生产是 `8501`（Streamlit 主应用）+ `8502`（FastAPI sidecar）；普通本机开发用
+`8503`（Streamlit）+ `8502`；与生产同机并行的隔离开发用 `18503` + `18502`。`8503`
+只是本机开发端口，不会出现在生产环境里，任何用户可见文案或链接都不应硬编码它。
 
-Dashboard Canvas 支持这些 URL 形态：
+- **主应用（生产 8501）**：负责 profile 选择、安全写入、全局导航、AI 设置、fallback 和审阅流程。首屏内嵌渲染 3D hero（Graph Hero），并提供“打开全屏星系”入口。
+- **FastAPI sidecar（8502）**：负责高交互 Reader、Paper Library，以及只读的独立全屏 `/dashboard` 页。
+
+`/dashboard` 全屏页支持这些 URL 形态：
 
 ```text
-http://127.0.0.1:8502/dashboard?profile=<profile>
-http://127.0.0.1:8502/dashboard?profile=<profile>&view=focus
-http://127.0.0.1:8502/dashboard?profile=<profile>&view=canvas
-http://127.0.0.1:8502/dashboard?profile=<profile>&view=attention
-http://127.0.0.1:8502/dashboard?profile=<profile>&view=3d
-http://127.0.0.1:8502/dashboard?profile=<profile>&view=3d&node=<node_id>
+/dashboard?profile=<profile>
+/dashboard?profile=<profile>&view=focus
+/dashboard?profile=<profile>&view=canvas
+/dashboard?profile=<profile>&view=attention
+/dashboard?profile=<profile>&view=3d
+/dashboard?profile=<profile>&view=3d&node=<node_id>
 ```
 
-8503 首页会先显示 Canvas summary：包括 Focus Path 预览、attention / node 数量和“打开 8502 Canvas”入口。用户点击“加载内嵌画布”后，才会按需加载 8502 iframe，并使用 `view=focus` 呈现可读主路径；需要旋转、缩放或探索完整关系时，再打开 8502 standalone 或切到 3D Graph。
+生产环境下 Caddy 把 `/dashboard*` 反代到 8502，浏览器可以直接访问
+`https://<domain>/dashboard?profile=<profile>`；本地直连时映射为
+`http://127.0.0.1:8502/dashboard?profile=<profile>`。
 
-Canvas summary 中的 Focus Path 节点会打开 8502 standalone，并携带 `view=3d&node=<node_id>`。8502 会初始选中对应节点，右侧 Explore list 支持搜索、按 layer 分组，以及隐藏 placeholder 节点，适合在大图中继续定位上下游关系。
+主应用首屏 3D hero 右上角有“打开全屏星系”overlay 入口（`data-action="open-fullscreen-galaxy"`），新标签页打开全屏页，并带上当前选中节点（`view=3d&node=<node_id>`）。全屏页选中 / 聚焦节点时会用 `history.replaceState` 更新地址栏的 `node` 参数，方便复制分享当前视图。
 
-8503 在注入 iframe 前会检查 8502 是否可达。8502 不可达时，顶部入口会禁用并显示提示，页面继续使用本地 React Dashboard fallback，不应出现空白大 iframe。
+全屏页顶部有“返回主应用”链接，默认同源指向 `/`；生产同源部署下无需额外配置，本地开发由
+`NBLANE_STREAMLIT_BASE_URL` 显式指定对应端口。
 
 本地开发建议同时启动：
 
@@ -117,15 +124,16 @@ PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
   --host 127.0.0.1 --port 8502 --reload --reload-dir src
 
 NBLANE_READER_API_BASE=http://127.0.0.1:8502 \
+NBLANE_STREAMLIT_BASE_URL=http://127.0.0.1:8503 \
 PYTHONPATH=src .venv/bin/streamlit run app.py \
   --server.address=127.0.0.1 --server.port=8503 --server.headless=true
 ```
 
-8502 未启动时，8503 Dashboard 不应白屏，应继续提供 Streamlit component 或 native fallback。
+8502 不可达时，主应用首屏“打开全屏星系”入口应隐藏（而不是链接到一个 404），继续显示本地内嵌 3D hero。
 
 ## 缩放与响应式策略
 
-8503 的 Dashboard React 组件运行在 Streamlit component iframe 里，所以浏览器窗口宽度不等于组件实际可用宽度。开启 Streamlit 侧栏、浏览器放大、IDE port forwarding 页面外壳变窄时，`1440px` 浏览器宽度可能只给 Dashboard 约 `980px` 的有效宽度，`1280px` 可能只剩约 `820px`，再窄时会落到约 `720px`。
+主应用（生产 8501，本机开发 8503）里的 Dashboard React 组件运行在 Streamlit component iframe 里，所以浏览器窗口宽度不等于组件实际可用宽度。开启 Streamlit 侧栏、浏览器放大、IDE port forwarding 页面外壳变窄时，`1440px` 浏览器宽度可能只给 Dashboard 约 `980px` 的有效宽度，`1280px` 可能只剩约 `820px`，再窄时会落到约 `720px`。
 
 因此响应式断点要按**组件有效宽度**设计，而不是按浏览器 viewport 设计：
 
@@ -151,10 +159,13 @@ npx playwright test tests/e2e/dashboard_8503.spec.ts \
   --config=tests/e2e/playwright.config.ts --reporter=line
 ```
 
+`tests/e2e/dashboard_8503.spec.ts` 文件名里的 `8503` 只是历史命名，测试本身跑在
+`NBLANE_DASHBOARD_8503_BASE_URL` 指定的 Streamlit 端口上（生产语义上对应 8501）。
+
 重点看四类结果：
 
 - **非空可视化**：3D canvas 的像素统计不能是白屏；Focus Path 节点数应大于 3。
-- **响应式**：`1440 x 1000`、`1280 x 900`、`1024 x 900`、`390 x 820` 下无页面级横向滚动；8503 首页 Graph Hero 在中等有效宽度下不能过早单列堆叠。
+- **响应式**：`1440 x 1000`、`1280 x 900`、`1024 x 900`、`390 x 820` 下无页面级横向滚动；主应用首屏 Graph Hero 在中等有效宽度下不能过早单列堆叠。
 - **按钮反馈**：每个按钮要有跳转、active 状态、Inspector 更新、表单出现或写入提示。
 - **折叠控件**：`More filters`、`更多字段` closed 状态下内部 input / button 不占布局、不可聚焦。
 

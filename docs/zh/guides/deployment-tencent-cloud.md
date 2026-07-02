@@ -234,12 +234,36 @@ your-domain.com {
         reverse_proxy 127.0.0.1:8502
     }
 
+    handle /paper-library* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /dashboard* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/dashboard/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/research/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /auth/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
     reverse_proxy 127.0.0.1:8501
 }
 ```
 
 这里必须使用 `handle /reader/*`，不要使用 `handle_path /reader/*`；后者会剥掉
-FastAPI 需要的 `/reader` 路由前缀。
+FastAPI 需要的 `/reader` 路由前缀。同理 `/dashboard*`、`/api/dashboard/*`、
+`/paper-library*`、`/auth/*` 都必须用 `handle`（不是 `handle_path`），否则
+FastAPI 侧的路由前缀会被剥掉，`/dashboard?profile=...` 会 404 或路由到错误的
+处理函数。`/auth/*` 承载 8501/8503 → 8502 的登录态 handoff，缺失这条会导致
+生产环境下打开 `/dashboard` 返回 401。
 
 Streamlit 只监听 `127.0.0.1:8501`，Reader API 只监听 `127.0.0.1:8502`，
 不要在腾讯云安全组开放 `8501` 或 `8502`。

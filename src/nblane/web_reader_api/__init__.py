@@ -966,8 +966,7 @@ async def dashboard_view(request: Request, profile: str = "", embed: str = ""):
             "scripts": assets["scripts"],
             "styles": assets["styles"],
             "streamlit_base_json": json.dumps(
-                os.getenv("NBLANE_STREAMLIT_BASE_URL", "http://127.0.0.1:8503").strip()
-                or "http://127.0.0.1:8503",
+                os.getenv("NBLANE_STREAMLIT_BASE_URL", "").strip(),
                 ensure_ascii=False,
             ),
             "embed_json": json.dumps(str(embed or "").strip().lower() in {"1", "true", "yes"}, ensure_ascii=False),

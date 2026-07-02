@@ -38,6 +38,7 @@ import {
 } from "./events.js";
 import { ResumeIngestDrawer } from "./resume_ingest.jsx";
 import { ProfileContextDrawer } from "./profile_context.jsx";
+import { HdDrawer } from "./drawer.jsx";
 
 const READY = "streamlit:componentReady";
 const SET_VALUE = "streamlit:setComponentValue";
@@ -305,7 +306,10 @@ function standaloneTargetUrl(path, streamlitBase = "") {
   if (/^https?:\/\//i.test(clean)) {
     return clean;
   }
-  const base = cleanText(streamlitBase, "http://127.0.0.1:8503").replace(/\/+$/, "");
+  // No configured base means same-origin: production sits behind a reverse
+  // proxy where "/" already resolves to the Streamlit app, and 8503 is a
+  // local-dev-only port that never exists in production.
+  const base = cleanText(streamlitBase).replace(/\/+$/, "");
   return `${base}/${clean.replace(/^\/+/, "")}`;
 }
 
@@ -400,13 +404,7 @@ function nodeActionBundle(payload, node, readOnly = false) {
 }
 
 function dashboardCanvasEmbed(payload) {
-  // The 8502 standalone canvas link has been retired — it duplicated the
-  // in-place 3D graph without adding value, and the entry point was confusing
-  // users. Returning null short-circuits every `embed?.standaloneUrl ?` guard
-  // so the link, the iframe hooks, and the related node-permalink logic all
-  // disappear from the rendered tree.
-  void payload;
-  return null;
+  return asObject(payload?.canvasEmbed).standaloneUrl ? asObject(payload.canvasEmbed) : null;
 }
 
 function label(ui, key, fallback) {
@@ -3937,8 +3935,16 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
             <p>{label(ui, "dashboard_graph_hero_caption", "A compact 3D map of today’s goals, sources, evidence, skills, and outputs.")}</p>
           </div>
           {embed?.standaloneUrl ? (
-            <a href={dashboardNodeUrl(embed.standaloneUrl, selectedNode?.id || "")} target="_blank" rel="noreferrer" data-action="open-8502-canvas">
-              {label(ui, "dashboard_open_8502_canvas", "Open 8502 Canvas")}
+            <a
+              className="hd-graph-hero-fullscreen"
+              href={dashboardNodeUrl(embed.standaloneUrl, selectedNode?.id || "")}
+              target="_blank"
+              rel="noreferrer"
+              data-action="open-fullscreen-galaxy"
+              title={label(ui, "dashboard_open_fullscreen_galaxy", "Open Fullscreen Galaxy")}
+            >
+              <span aria-hidden="true">⤢</span>
+              {label(ui, "dashboard_open_fullscreen_galaxy", "Open Fullscreen Galaxy")}
             </a>
           ) : null}
         </header>
@@ -3996,7 +4002,7 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
   );
 }
 
-function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreateGoal, viewMode, setViewMode, readOnly = false }) {
+function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreateGoal, viewMode, setViewMode, readOnly = false, defaultShowArchived = false, fullBleed = false }) {
   const ui = payload.ui;
   const [hiddenLayers, setHiddenLayers] = useState(() => new Set());
   const [exploreScope, setExploreScope] = useState("all");
@@ -4004,9 +4010,14 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
   const [showPlaceholders, setShowPlaceholders] = useState(true);
   const [showArchived, setShowArchived] = useState(() => {
     try {
-      return window.localStorage.getItem("nblane.context.goalRail.showArchived") === "1";
+      const stored = window.localStorage.getItem("nblane.context.goalRail.showArchived");
+      // The fullscreen standalone page wants history dimmed-but-visible by
+      // default (a "hide history to declutter" toggle), while the embed and
+      // the goal rail keep the existing hidden-by-default behavior. Only fall
+      // back to that default when the user has never touched the toggle.
+      return stored === null ? defaultShowArchived : stored === "1";
     } catch (e) {
-      return false;
+      return defaultShowArchived;
     }
   });
   const hasExtinguishedGoal = useMemo(
@@ -4056,6 +4067,127 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
 
   const allLayersHidden = filterLayers.length > 0 && hiddenLayers.size >= filterLayers.length;
 
+  const viewSwitcher = (
+    <div className={fullBleed ? "hd-segmented hd-segmented-overlay" : "hd-segmented"}>
+      <button className={viewMode === "focus" ? "active" : ""} type="button" data-action="view-toggle" data-view="focus" onClick={() => setViewMode("focus")}>
+        {label(ui, "dashboard_view_focus_path", "Focus Path")}
+      </button>
+      <button className={viewMode === "canvas" ? "active" : ""} type="button" data-action="view-toggle" data-view="canvas" onClick={() => setViewMode("canvas")}>
+        {label(ui, "dashboard_view_canvas", "2D Canvas")}
+      </button>
+      <button className={viewMode === "attention" ? "active" : ""} type="button" data-action="view-toggle" data-view="attention" onClick={() => setViewMode("attention")}>
+        {label(ui, "dashboard_view_attention", "Attention")}
+      </button>
+      <button className={viewMode === "3d" ? "active" : ""} type="button" data-action="view-toggle" data-view="3d" onClick={() => setViewMode("3d")}>
+        {label(ui, "dashboard_view_3d_graph", "3D Graph")}
+      </button>
+    </div>
+  );
+
+  const archivedToggle = hasExtinguishedGoal ? (
+    <label className="hd-canvas-archived-toggle">
+      <input
+        type="checkbox"
+        checked={showArchived}
+        onChange={(event) => {
+          const checked = event.target.checked;
+          setShowArchived(checked);
+          try {
+            window.localStorage.setItem(
+              "nblane.context.goalRail.showArchived",
+              checked ? "1" : "0",
+            );
+          } catch (e) {
+            // ignore — privacy mode blocks storage
+          }
+        }}
+        data-action="toggle-archived-goals"
+      />
+      <span>{label(ui, "dashboard_show_archived_goals", "Show archived / paused goals (extinguished stars)")}</span>
+    </label>
+  ) : null;
+
+  const stage = viewMode === "focus" ? (
+    <FocusPathView payload={payload} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
+  ) : viewMode === "attention" ? (
+    <AttentionCanvasView payload={payload} onSelectNode={onSelectNode} />
+  ) : viewMode === "3d" ? (
+    <div className={fullBleed ? "hd-explore-canvas fullbleed" : "hd-explore-canvas"}>
+      {allLayersHidden ? (
+        <div className="hd-canvas-surface hd-canvas-surface-empty">
+          <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+        </div>
+      ) : (
+        <>
+          <Graph3DView
+            payload={payload}
+            nodes={exploreNodes}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={onSelectNode}
+            emptyMessage={label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}
+          />
+          {fullBleed ? null : (
+            <ExploreNodeList
+              payload={payload}
+              nodes={exploreNodes}
+              selectedNodeId={selectedNodeId}
+              scope={exploreScope}
+              setScope={setExploreScope}
+              query={exploreQuery}
+              setQuery={setExploreQuery}
+              showPlaceholders={showPlaceholders}
+              setShowPlaceholders={setShowPlaceholders}
+              onSelectNode={onSelectNode}
+            />
+          )}
+        </>
+      )}
+    </div>
+  ) : (
+    <div className="hd-flow-wrap">
+      {allLayersHidden ? (
+        <div className="hd-canvas-surface hd-canvas-surface-empty">
+          <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
+        </div>
+      ) : (
+        <ReactFlow
+          nodes={data.nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId }))}
+          edges={data.edges}
+          nodeTypes={NODE_TYPES}
+          defaultEdgeOptions={{
+            interactionWidth: 18,
+          }}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          minZoom={0.36}
+          maxZoom={1.5}
+          panOnDrag
+          zoomOnScroll
+          nodesDraggable={false}
+          onNodeClick={(_, node) => onSelectNode(node.id)}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background color="#dde6e1" gap={24} size={1} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      )}
+    </div>
+  );
+
+  if (fullBleed) {
+    // The fullscreen /dashboard page wants the galaxy to be the whole page:
+    // no header, no filter drawer, no attention summary competing with the
+    // stage. The view switcher survives as a small edge overlay (still
+    // reachable, still honors ?view= deep-links) instead of a segmented bar.
+    return (
+      <section className="hd-canvas-panel hd-canvas-panel-fullbleed">
+        {viewSwitcher}
+        {archivedToggle ? <div className="hd-canvas-archived-toggle-overlay">{archivedToggle}</div> : null}
+        {stage}
+      </section>
+    );
+  }
+
   return (
     <section className="hd-canvas-panel">
       <header>
@@ -4063,20 +4195,7 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
           <span className="hd-eyebrow">{label(ui, "dashboard_graph_eyebrow", "Canvas")}</span>
           <h3>{label(ui, "dashboard_graph_title", "Context Canvas")}</h3>
         </div>
-        <div className="hd-segmented">
-          <button className={viewMode === "focus" ? "active" : ""} type="button" data-action="view-toggle" data-view="focus" onClick={() => setViewMode("focus")}>
-            {label(ui, "dashboard_view_focus_path", "Focus Path")}
-          </button>
-          <button className={viewMode === "canvas" ? "active" : ""} type="button" data-action="view-toggle" data-view="canvas" onClick={() => setViewMode("canvas")}>
-            {label(ui, "dashboard_view_canvas", "2D Canvas")}
-          </button>
-          <button className={viewMode === "attention" ? "active" : ""} type="button" data-action="view-toggle" data-view="attention" onClick={() => setViewMode("attention")}>
-            {label(ui, "dashboard_view_attention", "Attention")}
-          </button>
-          <button className={viewMode === "3d" ? "active" : ""} type="button" data-action="view-toggle" data-view="3d" onClick={() => setViewMode("3d")}>
-            {label(ui, "dashboard_view_3d_graph", "3D Graph")}
-          </button>
-        </div>
+        {viewSwitcher}
       </header>
 
       <details className="hd-canvas-toolbar">
@@ -4100,28 +4219,7 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
             {label(ui, "dashboard_canvas_reset_filters", "Show all layers")}
           </button>
         ) : null}
-        {hasExtinguishedGoal ? (
-          <label className="hd-canvas-archived-toggle">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(event) => {
-                const checked = event.target.checked;
-                setShowArchived(checked);
-                try {
-                  window.localStorage.setItem(
-                    "nblane.context.goalRail.showArchived",
-                    checked ? "1" : "0",
-                  );
-                } catch (e) {
-                  // ignore — privacy mode blocks storage
-                }
-              }}
-              data-action="toggle-archived-goals"
-            />
-            <span>{label(ui, "dashboard_show_archived_goals", "Show archived / paused goals (extinguished stars)")}</span>
-          </label>
-        ) : null}
+        {archivedToggle}
       </details>
 
       <CanvasSetupBanner
@@ -4135,70 +4233,7 @@ function ContextCanvas({ payload, selectedNodeId, onSelectNode, onEmit, onCreate
 
       <AttentionSummary payload={payload} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
 
-      {viewMode === "focus" ? (
-        <FocusPathView payload={payload} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />
-      ) : viewMode === "attention" ? (
-        <AttentionCanvasView payload={payload} onSelectNode={onSelectNode} />
-      ) : viewMode === "3d" ? (
-        <div className="hd-explore-canvas">
-          {allLayersHidden ? (
-            <div className="hd-canvas-surface hd-canvas-surface-empty">
-              <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
-            </div>
-          ) : (
-            <>
-              <Graph3DView
-                payload={payload}
-                nodes={exploreNodes}
-                selectedNodeId={selectedNodeId}
-                onSelectNode={onSelectNode}
-                emptyMessage={label(ui, "dashboard_explore_no_matches", "No graph nodes match this filter.")}
-              />
-              <ExploreNodeList
-                payload={payload}
-                nodes={exploreNodes}
-                selectedNodeId={selectedNodeId}
-                scope={exploreScope}
-                setScope={setExploreScope}
-                query={exploreQuery}
-                setQuery={setExploreQuery}
-                showPlaceholders={showPlaceholders}
-                setShowPlaceholders={setShowPlaceholders}
-                onSelectNode={onSelectNode}
-              />
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="hd-flow-wrap">
-          {allLayersHidden ? (
-            <div className="hd-canvas-surface hd-canvas-surface-empty">
-              <p className="hd-empty">{label(ui, "dashboard_canvas_no_layers", "All layers are hidden.")}</p>
-            </div>
-          ) : (
-            <ReactFlow
-              nodes={data.nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId }))}
-              edges={data.edges}
-              nodeTypes={NODE_TYPES}
-              defaultEdgeOptions={{
-                interactionWidth: 18,
-              }}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              minZoom={0.36}
-              maxZoom={1.5}
-              panOnDrag
-              zoomOnScroll
-              nodesDraggable={false}
-              onNodeClick={(_, node) => onSelectNode(node.id)}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background color="#dde6e1" gap={24} size={1} />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          )}
-        </div>
-      )}
+      {stage}
     </section>
   );
 }
@@ -4875,14 +4910,19 @@ function Dashboard({ args }) {
     return () => window.cancelAnimationFrame(frame);
   }, [goalEditor?.mode, goalEditor?.goalId, readOnlyCanvas]);
 
+  const fullBleedStandalone = args.standalone && !args.embed;
   useEffect(() => {
     const availableIds = new Set(payload.graph.nodes.map((node) => node.id));
     if (requestedNodeId && !availableIds.size && selectedNodeId === requestedNodeId) {
       window.setTimeout(() => setFrameHeight(), 0);
       return;
     }
-    const nextPreferred = preferredNode(payload);
     const requestedAvailable = requestedNodeId && availableIds.has(requestedNodeId);
+    // The fullscreen standalone page keeps the inspector drawer closed by
+    // default (the galaxy fills the viewport) rather than auto-selecting a
+    // "preferred" node on load — a deep-linked ?node= is the one case that
+    // should still populate the selection so the drawer opens on it.
+    const nextPreferred = fullBleedStandalone ? null : preferredNode(payload);
     const nextId = availableIds.has(selectedNodeId)
       ? selectedNodeId
       : requestedAvailable
@@ -4892,7 +4932,7 @@ function Dashboard({ args }) {
       setSelectedNodeId(nextId);
     }
     window.setTimeout(() => setFrameHeight(), 0);
-  }, [payload, requestedNodeId, selectedNodeId]);
+  }, [payload, requestedNodeId, selectedNodeId, fullBleedStandalone]);
 
   function emit(event) {
     if (args.standalone) {
@@ -4908,7 +4948,7 @@ function Dashboard({ args }) {
         return;
       }
       if (action === "set_north_star_display_open_profile_context") {
-        const target = standaloneTargetUrl("", args.streamlitBase) || cleanText(args.streamlitBase, "http://127.0.0.1:8503");
+        const target = standaloneTargetUrl("", args.streamlitBase) || cleanText(args.streamlitBase, "/");
         if (args.embed && window.top && window.top !== window) {
           window.top.location.href = target;
         } else {
@@ -4940,6 +4980,18 @@ function Dashboard({ args }) {
   const handleSelectNode = (nodeId) => {
     setSelectedNodeId(nodeId);
     setGoalEditor(null);
+    if (args.standalone && !args.embed && typeof window !== "undefined") {
+      // Keep the address bar shareable as the user explores: replaceState (not
+      // pushState) so the browser Back button exits cleanly to the main app
+      // instead of walking through every node the user clicked.
+      const url = new URL(window.location.href);
+      if (nodeId) {
+        url.searchParams.set("node", nodeId);
+      } else {
+        url.searchParams.delete("node");
+      }
+      window.history.replaceState(null, "", url);
+    }
   };
 
   const selectedGoalId = useMemo(() => {
@@ -5010,9 +5062,13 @@ function Dashboard({ args }) {
     </div>
   );
 
-  return (
-    <main className={args.embed ? "hd-shell hd-shell-embed" : "hd-shell"}>
-      {args.standalone && !args.embed ? (
+  if (args.standalone && !args.embed) {
+    // The fullscreen /dashboard page is a different animal from the embed and
+    // in-app hero: the galaxy should fill the viewport instead of sharing
+    // space with a permanent inspector column, so the InspectorPanel becomes
+    // an on-demand right-side drawer that opens on node select/focus.
+    return (
+      <main className="hd-shell hd-shell-standalone">
         <section className="hd-standalone-top">
           <div>
             <span className="hd-eyebrow">{label(payload.ui, "dashboard_graph_eyebrow", "Context")}</span>
@@ -5025,11 +5081,43 @@ function Dashboard({ args }) {
                 : `${label(payload.ui, "profile", "Profile")}: ${payload.profile}`}
             </p>
           </div>
-          <a href={cleanText(args.streamlitBase, "http://127.0.0.1:8503")} data-action="open-8503">
-            {label(payload.ui, "dashboard_open_8503", "Open 8503")}
+          <a href={cleanText(args.streamlitBase, "/")} data-action="open-main-app">
+            {label(payload.ui, "dashboard_open_main_app", "Back to app")}
           </a>
         </section>
-      ) : null}
+        <ContextCanvas
+          payload={payload}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={handleSelectNode}
+          onEmit={emit}
+          onCreateGoal={() => setGoalEditor({ mode: "create" })}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          readOnly={readOnlyCanvas}
+          defaultShowArchived
+          fullBleed
+        />
+        <HdDrawer
+          open={Boolean(selectedNodeId)}
+          onClose={() => handleSelectNode("")}
+          title={label(payload.ui, "dashboard_graph_title", "Context Canvas")}
+        >
+          <InspectorPanel
+            payload={payload}
+            selectedNodeId={selectedNodeId}
+            goalEditor={goalEditor}
+            setGoalEditor={setGoalEditor}
+            onEmit={emit}
+            readOnly={readOnlyCanvas}
+            embedded
+          />
+        </HdDrawer>
+      </main>
+    );
+  }
+
+  return (
+    <main className={args.embed ? "hd-shell hd-shell-embed" : "hd-shell"}>
       {args.embed ? (
         <div className="hd-canvas-workbench hd-canvas-workbench-embed">
           <ContextCanvas
@@ -5099,7 +5187,7 @@ function App() {
     embed: Boolean(standalone?.embed),
     loading: Boolean(standalone && !standalone.payload),
     error: "",
-    streamlitBase: cleanText(standalone?.streamlitBase, "http://127.0.0.1:8503"),
+    streamlitBase: cleanText(standalone?.streamlitBase),
   });
   useEffect(() => {
     if (!standalone) {
