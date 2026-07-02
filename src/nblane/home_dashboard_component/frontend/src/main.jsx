@@ -3937,7 +3937,7 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
           {embed?.standaloneUrl ? (
             <a
               className="hd-graph-hero-fullscreen"
-              href={dashboardNodeUrl(embed.standaloneUrl, selectedNode?.id || "")}
+              href={dashboardNodeUrl(embed.standaloneUrl, "")}
               target="_blank"
               rel="noreferrer"
               data-action="open-fullscreen-galaxy"
@@ -4883,6 +4883,11 @@ function Dashboard({ args }) {
   );
   const requestedNodeId = useMemo(() => initialDashboardNodeId(), []);
   const [selectedNodeId, setSelectedNodeId] = useState(() => requestedNodeId);
+  // The deep-linked ?node= is a one-shot: it seeds the initial selection, but
+  // once the user closes the drawer (or picks another node) it must not be
+  // re-applied, otherwise the auto-select effect keeps snapping the selection
+  // back to it and the drawer cannot be closed.
+  const deepLinkConsumedRef = useRef(false);
   const [goalEditor, setGoalEditor] = useState(null);
   const [viewMode, setViewMode] = useState(() => initialDashboardViewMode(args));
   const [resumeIngestOpen, setResumeIngestOpen] = useState(false);
@@ -4917,17 +4922,23 @@ function Dashboard({ args }) {
       window.setTimeout(() => setFrameHeight(), 0);
       return;
     }
-    const requestedAvailable = requestedNodeId && availableIds.has(requestedNodeId);
+    const requestedAvailable =
+      !deepLinkConsumedRef.current && requestedNodeId && availableIds.has(requestedNodeId);
     // The fullscreen standalone page keeps the inspector drawer closed by
     // default (the galaxy fills the viewport) rather than auto-selecting a
     // "preferred" node on load — a deep-linked ?node= is the one case that
-    // should still populate the selection so the drawer opens on it.
+    // should still populate the selection so the drawer opens on it, but only
+    // on first load: once the graph nodes exist we mark the deep link consumed
+    // so closing the drawer (selectedNodeId="") is not undone on the next run.
     const nextPreferred = fullBleedStandalone ? null : preferredNode(payload);
     const nextId = availableIds.has(selectedNodeId)
       ? selectedNodeId
       : requestedAvailable
       ? requestedNodeId
       : cleanText(nextPreferred?.id);
+    if (availableIds.size) {
+      deepLinkConsumedRef.current = true;
+    }
     if (nextId !== selectedNodeId) {
       setSelectedNodeId(nextId);
     }

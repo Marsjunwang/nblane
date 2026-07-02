@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import time
 from urllib.parse import quote
+import urllib.error
 import urllib.request
 
 import yaml
@@ -421,7 +422,13 @@ def _dashboard_canvas_base() -> str:
         or "http://127.0.0.1:8502"
     )
     if raw.lower() in {"0", "false", "off", "none"}:
-        return ""
+        # Same-origin sentinel (production sets NBLANE_READER_API_BASE=0 so the
+        # sidecar is reached through Caddy, not an absolute URL). Reuse the
+        # Research/Reader resolver instead of treating "0" as "entry disabled",
+        # otherwise the "Open Fullscreen Galaxy" overlay never renders on 8501.
+        from nblane.research_ui._helpers import _sidecar_base_for_same_origin_mode
+
+        return _sidecar_base_for_same_origin_mode().rstrip("/")
     return raw.rstrip("/")
 
 
@@ -460,6 +467,16 @@ def _dashboard_canvas_status(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             ok = 200 <= int(getattr(response, "status", 200)) < 400
             message = "" if ok else f"HTTP {getattr(response, 'status', '')}".strip()
+    except urllib.error.HTTPError as exc:
+        # 401/403 means the sidecar is up but auth-gated. The server-side check
+        # has no browser cookie, so it always sees 401 in production; treat that
+        # as reachable (the browser will carry the auth cookie / handoff).
+        if exc.code in {401, 403}:
+            ok = True
+            message = ""
+        else:
+            ok = False
+            message = f"HTTP {exc.code}".strip()
     except Exception as exc:
         ok = False
         message = str(exc)

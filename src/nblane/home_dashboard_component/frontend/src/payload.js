@@ -538,7 +538,11 @@ export function normalizePayload(payload) {
       };
     })(),
     quickLinks: asArray(source.quick_links).map(asObject).filter((link) => cleanText(link.path)),
-    canvasEmbed: asObject(source.canvas_embed || source.canvasEmbed),
+    canvasEmbed: (() => {
+      const raw = asObject(source.canvas_embed || source.canvasEmbed);
+      const standaloneUrl = cleanText(raw.standalone_url || raw.standaloneUrl);
+      return standaloneUrl ? { ...raw, standaloneUrl } : {};
+    })(),
     profileContext: normalizeProfileContext(source.profile_context || source.profileContext),
     resumeIngest: normalizeResumeIngest(source.resume_ingest || source.resumeIngest),
     trends: (() => {

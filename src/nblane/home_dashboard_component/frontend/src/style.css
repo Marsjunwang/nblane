@@ -1153,10 +1153,18 @@ button {
   position: absolute;
   top: 12px;
   z-index: 8;
+  /* The absolute overlay shrinks to fit, so longer i18n labels (e.g. the
+     Chinese 焦点路径/2D画布/关注/3D全局图) used to squeeze the flex buttons
+     until they wrapped and their rounded backgrounds stacked into one blurry
+     clump. Let the bar wrap into tidy rows and keep each button intact. */
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
 }
 
 .hd-segmented-overlay button {
   color: rgba(255, 255, 255, .72);
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .hd-segmented-overlay button.active {

@@ -83,6 +83,51 @@ sudo systemctl restart nblane-reader nblane
 
 如果使用 `uv sync` 管理虚拟环境，也要在重启前完成 sync；不要只复制代码而跳过依赖同步。
 
+## 更新前端组件（Dashboard / Reader / Paper Library / Blog 编辑器）
+
+`src/nblane/**/frontend/` 下的 React/Vite 组件是**预构建**的：编译产物提交在
+`frontend/static/assets/home-dashboard.<hash>.js|css`，生产运行时直接 serve 这些静态文件，
+**不在生产机上跑构建**。因此只改前端源码（`frontend/src/*.jsx`、`*.js`、`*.css`）而不重新构建，
+生产**看不到任何变化**——运行的仍是旧 bundle。
+
+改动任一前端组件后，必须在能联网的机器（本地或生产均可）重新构建，并把新产物一起提交：
+
+```bash
+cd src/nblane/home_dashboard_component/frontend
+# 生产机通常没有 node_modules（被 .gitignore 忽略）。首次构建先装依赖，
+# 走代理时显式带上，否则拉包失败：
+HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 npm ci
+npm test          # 组件单测，应全绿
+npm run build     # 产出内容哈希文件名 home-dashboard.<hash>.js/css
+```
+
+构建要点：
+
+- Vite 用**内容哈希**命名产物。每次源码变化，`.js`/`.css` 文件名的 hash 都会变，旧哈希文件被删、
+  新哈希文件新增、`static/index.html` 自动更新引用。sidecar 用 `HOME_DASHBOARD_ASSET_DIR.glob("*.js")`
+  运行时扫目录拾取新哈希，无需改代码。
+- **新旧产物都要纳入提交**：`git add` 时把被删的旧 `home-dashboard.*.js|css`、新增的新哈希文件、
+  以及改动的 `index.html` 一起提交。漏提交任何一个都会导致生产资产 404 / 加载旧版。
+- `node_modules/` 已在 `.gitignore`，不要提交。
+
+**重启哪个服务（这一步最容易漏）：** dashboard 全屏页 `/dashboard` 由 **8502（reader）** serve，
+主应用首页 3D hero 由 **8501（streamlit）** serve，两者共用同一份 `home_dashboard_component` bundle。
+改了这个组件后，**两个服务都要重启**，只重启 8501 会让 8502 继续用旧 bundle（页面卡死、按钮点不动等）：
+
+```bash
+sudo systemctl restart nblane-reader nblane
+```
+
+**浏览器缓存：** 前端发版后，浏览器可能仍缓存旧 bundle。验证时先 `Ctrl+Shift+R` 硬刷新；
+若 `target="_blank"` 打开的 8502 全屏页仍是旧版，用 DevTools → Network 勾 Disable cache 再刷，
+或开无痕窗口。用 DevTools Network 里实际加载的 `home-dashboard.<hash>.js` 文件名对比生产产物，
+可确认浏览器是否拿到新版。
+
+**同源模式与 Dashboard Canvas 入口：** 生产用 `NBLANE_READER_API_BASE=0`（同源哨兵值，
+sidecar 走 Caddy 反代而非绝对 URL）。主应用首页「打开全屏星系」入口的 `canvas_base` 会把 `=0`
+解析成同源域名；健康检查命中 auth-gated sidecar 返回 401/403 时应视为“可达但需登录”，不是不可达。
+若入口不显示，先确认这两点。
+
 Reader 全文翻译依赖长时间 LLM 调用。生产环境如通过 SOCKS 代理访问模型，建议保留默认的
 `NBLANE_STREAM_PAPER_TRANSLATION=1`，让 `research.paper_translate` 用流式响应收完整 JSON，
 避免长非流式响应在代理层一直无结果。大论文还应给 Reader 后台任务更长预算，例如在
