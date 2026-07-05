@@ -67,6 +67,7 @@ from nblane.core.io import (
 from nblane.core.kanban_archive import kanban_ref, kanban_ref_id
 from nblane.core.models import EVIDENCE_CONFIDENCES, EVIDENCE_STRENGTHS
 from nblane.core.profile_ingest_llm import reformat_evidence
+from nblane.core.profile_ingest_llm import grade_output_evidence
 from nblane.core.profile_ingest_llm import ingest_kanban_done_json
 from nblane.core.sync import write_generated_blocks
 from nblane.core.web_preferences import load_web_preferences, update_web_preferences
@@ -228,6 +229,9 @@ class EvidenceEditorHost:
 
     def _done_preview_state_key(self) -> str:
         return self._k("done_preview")
+
+    def _output_preview_state_key(self) -> str:
+        return self._k("output_preview")
 
     def _bulk_reformat_state_key(self) -> str:
         return self._k("bulk_reformat")
@@ -1845,6 +1849,234 @@ class EvidenceEditorHost:
         )
         return True
 
+    def _output_preview_payload(
+        self,
+        *,
+        rows: list[dict] | None = None,
+        blockers: list[str] | None = None,
+        ai_error: str = "",
+    ) -> dict:
+        rows = list(rows or [])
+        blockers = list(blockers or [])
+        valid_count = sum(1 for r in rows if r.get("valid"))
+        return {
+            "preview_id": uuid4().hex,
+            "rows": rows,
+            "blockers": blockers,
+            "ai_error": ai_error,
+            "valid_count": valid_count,
+            "can_accept": bool(valid_count) and not blockers and not ai_error,
+        }
+
+    def _prepare_output_evidence(self, items: list | None) -> bool:
+        """Build output/blog proposals, AI-grade each, stash an editable preview.
+
+        Mirrors the Done-task flow: nothing is written here. The AI pre-fills
+        strength/confidence/summary/formatted_content; the human confirms in the
+        preview, then ``apply_output_evidence`` writes the reviewed rows.
+        """
+        raw_items = items if isinstance(items, list) else []
+        clean_items = [item for item in raw_items if isinstance(item, dict)]
+        if not clean_items:
+            st.info(self.ui.get("ee_bulk_none", "No rows selected."))
+            return False
+
+        entries = self._pool_entries()
+        existing_ids = {
+            str(r.get("id", "") or "").strip()
+            for r in entries
+            if str(r.get("id", "") or "").strip()
+        }
+        source_index = active_source_index(entries)
+        outputs_by_id, blogs_by_route = self._output_source_maps()
+
+        # Build deterministic proposals first (reuses all readiness/blocker gating).
+        proposals: list[dict] = []
+        selected_keys: set[str] = set()
+        duplicate_keys: set[str] = set()
+        for item in clean_items:
+            proposal = self._output_evidence_proposal(
+                item,
+                entries=entries,
+                existing_ids=existing_ids,
+                outputs_by_id=outputs_by_id,
+                blogs_by_route=blogs_by_route,
+            )
+            source_key = str(proposal.get("source_key") or "").strip()
+            if source_key:
+                if source_key in selected_keys:
+                    duplicate_keys.add(source_key)
+                selected_keys.add(source_key)
+            proposals.append(proposal)
+            source_rows = source_index.get(("output", source_key)) or []
+            if len(source_rows) == 0 and isinstance(proposal.get("row"), dict):
+                rid = str(proposal["row"].get("id", "") or "").strip()
+                if rid:
+                    existing_ids.add(rid)
+
+        target_lang = llm_client.reply_language()
+        rows: list[dict] = []
+        with st.spinner(
+            self.ui.get("ee_output_ai_preview_running", "Grading outputs with AI...")
+        ):
+            for proposal in proposals:
+                source_key = str(proposal.get("source_key") or "").strip()
+                base_row = proposal.get("row")
+                blockers = list(proposal.get("blockers") or [])
+                if source_key in duplicate_keys:
+                    blockers.append("Selected more than once.")
+                source_rows = source_index.get(("output", source_key)) or []
+                if len(source_rows) > 1:
+                    blockers.append(
+                        "Multiple active evidence rows already use this source."
+                    )
+                if not isinstance(base_row, dict) or blockers:
+                    rows.append(
+                        {
+                            "source_key": source_key,
+                            "output_id": str(proposal.get("output_id") or ""),
+                            "source_kind": str(proposal.get("source_kind") or "output"),
+                            "status": str(proposal.get("status") or ""),
+                            "row": base_row if isinstance(base_row, dict) else {},
+                            "valid": False,
+                            "blockers": blockers or ["Output source could not be resolved."],
+                        }
+                    )
+                    continue
+                graded, err = grade_output_evidence(
+                    self.profile, base_row, target_lang=target_lang
+                )
+                row = dict(base_row)
+                row_blockers: list[str] = []
+                if graded:
+                    for key in ("summary", "formatted_content", "language"):
+                        val = str(graded.get(key, "") or "").strip()
+                        if val:
+                            row[key] = val
+                    strength = str(graded.get("strength", "") or "").strip()
+                    if strength in EVIDENCE_STRENGTHS:
+                        row["strength"] = strength
+                    confidence = str(graded.get("confidence", "") or "").strip()
+                    if confidence in EVIDENCE_CONFIDENCES:
+                        row["confidence"] = confidence
+                else:
+                    # AI grading failed: still allow the row (deterministic fields
+                    # stand); the human fills strength/confidence in the preview.
+                    row_blockers.append(
+                        self.ui.get(
+                            "ee_output_ai_grade_failed",
+                            "AI grading unavailable; set strength/confidence manually.",
+                        )
+                    )
+                rows.append(
+                    {
+                        "source_key": source_key,
+                        "output_id": str(proposal.get("output_id") or ""),
+                        "source_kind": str(proposal.get("source_kind") or "output"),
+                        "status": str(proposal.get("status") or ""),
+                        "row": row,
+                        "valid": True,
+                        "warnings": row_blockers,
+                        "blockers": [],
+                    }
+                )
+        preview = self._output_preview_payload(rows=rows)
+        st.session_state[self._output_preview_state_key()] = preview
+        return True
+
+    def _apply_output_evidence(
+        self,
+        preview_id: str,
+        selected_rows: list | None = None,
+    ) -> bool:
+        """Write the human-reviewed output-evidence preview to the pool.
+
+        *selected_rows* carries per-row confirmed fields (strength/confidence/
+        summary/...) keyed by source_key. Reuses the same create/merge write path
+        as bulk_create_from_output.
+        """
+        preview = st.session_state.get(self._output_preview_state_key())
+        if not isinstance(preview, dict):
+            st.warning(self.ui.get("ee_output_preview_missing", "No output preview is available."))
+            return False
+        if preview_id and preview.get("preview_id") != preview_id:
+            st.warning(self.ui.get("ee_output_preview_stale", "Output preview is stale; run AI grading again."))
+            return False
+
+        confirmed_by_key: dict[str, dict] = {}
+        for item in (selected_rows or []):
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("source_key", "") or "").strip()
+            fields = item.get("fields")
+            if key and isinstance(fields, dict):
+                confirmed_by_key[key] = fields
+
+        preview_rows = [
+            r for r in (preview.get("rows") or []) if isinstance(r, dict) and r.get("valid")
+        ]
+        # If the panel sent an explicit selection, restrict to it.
+        if selected_rows is not None:
+            preview_rows = [
+                r
+                for r in preview_rows
+                if str(r.get("source_key", "") or "").strip() in confirmed_by_key
+            ]
+        if not preview_rows:
+            st.warning(self.ui.get("ee_output_none_selected", "No output evidence selected."))
+            return False
+
+        entries = self._pool_entries()
+        source_index = active_source_index(entries)
+        by_id = pool_index_by_id(entries)
+        changed = 0
+        for preview_row in preview_rows:
+            source_key = str(preview_row.get("source_key", "") or "").strip()
+            row = dict(preview_row.get("row") or {})
+            if not source_key or not row:
+                continue
+            # Overlay human-confirmed grading fields.
+            fields = confirmed_by_key.get(source_key, {})
+            for key in ("strength", "confidence", "summary", "formatted_content", "review_status", "public_readiness"):
+                val = str(fields.get(key, "") or "").strip()
+                if val:
+                    row[key] = val
+            source_rows = source_index.get(("output", source_key)) or []
+            if len(source_rows) > 1:
+                st.error(
+                    f"{source_key}: multiple active evidence rows already use this source."
+                )
+                return False
+            if source_rows:
+                eid = str(source_rows[0].get("id", "") or "").strip()
+                idx = by_id.get(eid)
+                if idx is None:
+                    st.error(f"{source_key}: existing evidence row is missing.")
+                    return False
+                merged = merge_source_refresh(entries[idx], row)
+                # merge_source_refresh preserves human review fields on the old
+                # row; the newly-confirmed grading is authoritative, so re-apply.
+                for key in ("strength", "confidence", "summary", "formatted_content"):
+                    val = str(row.get(key, "") or "").strip()
+                    if val:
+                        merged[key] = val
+                entries[idx] = compact_evidence_row(merged)
+            else:
+                entries.append(compact_evidence_row(row))
+                rid = str(row.get("id", "") or "").strip()
+                if rid:
+                    by_id[rid] = len(entries) - 1
+            changed += 1
+        st.session_state.pop(self._output_preview_state_key(), None)
+        self._save_pool(
+            entries,
+            self.ui.get(
+                "ee_output_bulk_created",
+                "Created/updated {n} evidence row(s) from outputs.",
+            ).format(n=changed),
+        )
+        return True
+
     def _infer_projects_from_related_evidence(self, evidence_ids: object) -> list[str]:
         return self._infer_projects_from_related_evidence_in_entries(
             self._pool_entries(),
@@ -2415,6 +2647,13 @@ class EvidenceEditorHost:
             return self._apply_bulk_confirm_ai_reformat(
                 str(payload.get("preview_id") or "")
             )
+        if action == "prepare_output_evidence":
+            return self._prepare_output_evidence(payload.get("items") or [])
+        if action == "apply_output_evidence":
+            return self._apply_output_evidence(
+                str(payload.get("preview_id") or ""),
+                payload.get("rows"),
+            )
         if action == "bulk_create_from_output":
             return self._apply_bulk_create_from_output(payload.get("items") or [])
         if action == "ignore_output_candidates":
@@ -2472,6 +2711,9 @@ class EvidenceEditorHost:
         done_preview = st.session_state.get(self._done_preview_state_key())
         if done_preview:
             payload["done_preview"] = done_preview
+        output_preview = st.session_state.get(self._output_preview_state_key())
+        if output_preview:
+            payload["output_preview"] = output_preview
         bulk_reformat = st.session_state.get(self._bulk_reformat_state_key())
         if bulk_reformat:
             payload["bulk_reformat_preview"] = bulk_reformat

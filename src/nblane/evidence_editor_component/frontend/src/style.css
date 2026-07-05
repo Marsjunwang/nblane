@@ -278,6 +278,11 @@ button { cursor: pointer; }
 .ee-preview-head .ee-preview-title { flex: 1 1 auto; }
 .ee-preview-head input[type="checkbox"] { flex: 0 0 auto; }
 .ee-preview-expand { flex: 0 0 auto; }
+.ee-preview-grade { display: flex; gap: 10px; margin: 4px 0; }
+.ee-preview-grade .ee-field { flex: 1 1 0; }
+.ee-output-list-toggle { align-self: flex-start; margin: 4px 0; }
+.ee-sources-details > summary { cursor: pointer; list-style: revert; }
+.ee-sources-details > summary::-webkit-details-marker { display: revert; }
 .ee-preview-detail { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .ee-preview-body { font-size: 12px; }
 .ee-preview-sub-h { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }

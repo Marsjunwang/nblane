@@ -26,6 +26,8 @@ import {
   confirmAiReformatEvent,
   bulkRequestAiReformatEvent,
   bulkConfirmAiReformatEvent,
+  prepareOutputEvidenceEvent,
+  applyOutputEvidenceEvent,
   bulkCreateFromOutputEvent,
   ignoreOutputCandidatesEvent,
   restoreOutputCandidatesEvent,
@@ -443,8 +445,10 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
           </>
         )}
         {sourceOptions.length > 0 && (
-          <>
-            <div className="ee-chips-label">{label(labels, "ee_link_source", "Sources")}</div>
+          <details className="ee-sources-details">
+            <summary className="ee-chips-label">
+              {label(labels, "ee_link_source", "Sources")} ({sourceRefs.length}/{sourceOptions.length})
+            </summary>
             <div className="ee-chips">
               {sourceOptions.map((opt) => {
                 const on = sourceRefs.includes(opt.id);
@@ -460,7 +464,7 @@ function DetailPane({ row, payload, labels, emit, reformatPreview }) {
                 );
               })}
             </div>
-          </>
+          </details>
         )}
         <div className="ee-chips-label">
           {label(labels, "ee_link_skill", "Skills")}
@@ -1305,6 +1309,165 @@ function DonePreviewPanel({ preview, labels, emit }) {
   );
 }
 
+function OutputPreviewPanel({ preview, payload, labels, emit }) {
+  const [fields, setFields] = useState({});
+  const [picked, setPicked] = useState(() => new Set());
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  const previewId = preview ? cleanText(preview.preview_id) : "";
+  useEffect(() => {
+    if (!preview) return;
+    const seedFields = {};
+    const seedPicked = new Set();
+    asArray(preview.rows).forEach((item) => {
+      const key = cleanText(item.source_key);
+      const row = item.row || {};
+      seedFields[key] = {
+        strength: cleanText(row.strength),
+        confidence: cleanText(row.confidence),
+      };
+      if (item.valid) seedPicked.add(key);
+    });
+    setFields(seedFields);
+    setPicked(seedPicked);
+    setExpanded(new Set());
+  }, [previewId]);
+
+  if (!preview) return null;
+  const rows = asArray(preview.rows);
+  const setField = (key, name, value) =>
+    setFields((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), [name]: value } }));
+  const toggle = (key) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  const toggleExpand = (key) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+  const pickedCount = rows.filter(
+    (item) => item.valid && picked.has(cleanText(item.source_key))
+  ).length;
+
+  const confirm = () => {
+    const selected = rows
+      .filter((item) => item.valid && picked.has(cleanText(item.source_key)))
+      .map((item) => {
+        const key = cleanText(item.source_key);
+        return { source_key: key, fields: fields[key] || {} };
+      });
+    if (!selected.length) return;
+    emit(applyOutputEvidenceEvent(preview.preview_id, selected));
+  };
+
+  return (
+    <div className={`ee-done-preview${preview.can_accept ? "" : " ee-done-preview-blocked"}`}>
+      <div className="ee-section-h">
+        {label(labels, "ee_output_ai_preview_title", "Output AI preview")}
+      </div>
+      {preview.ai_error && <div className="ee-warn-line">{preview.ai_error}</div>}
+      {asArray(preview.blockers).map((b) => (
+        <div key={b} className="ee-warn-line">{b}</div>
+      ))}
+      <div className="ee-done-preview-list">
+        {rows.map((item, idx) => {
+          const key = cleanText(item.source_key);
+          const row = item.row || {};
+          const f = fields[key] || {};
+          const isOpen = expanded.has(key);
+          const hasBody =
+            !!cleanText(row.formatted_content) || !!cleanText(row.original_content);
+          return (
+            <div
+              key={`${key}-${idx}`}
+              className={`ee-preview-row${item.valid ? "" : " ee-preview-invalid"}`}
+            >
+              <div className="ee-preview-head">
+                <input
+                  type="checkbox"
+                  disabled={!item.valid}
+                  checked={item.valid && picked.has(key)}
+                  onChange={() => toggle(key)}
+                />
+                <div className="ee-preview-title">
+                  {item.valid ? "✓" : "!"} {cleanText(row.title) || key}
+                </div>
+                {hasBody && (
+                  <button
+                    type="button"
+                    className="ee-btn-sm ee-preview-expand"
+                    onClick={() => toggleExpand(key)}
+                  >
+                    {isOpen
+                      ? `▾ ${label(labels, "ee_done_hide_content", "Hide content")}`
+                      : `▸ ${label(labels, "ee_done_view_content", "View content")}`}
+                  </button>
+                )}
+              </div>
+              <div className="ee-preview-meta">
+                {cleanText(item.source_kind) || "output"} · {cleanText(row.date) || "no date"} · {asArray(row.project_refs).join(", ") || "no project"}
+              </div>
+              {item.valid && (
+                <div className="ee-preview-grade">
+                  <label className="ee-field">
+                    <span>{label(labels, "field_strength", "strength")}</span>
+                    <select value={cleanText(f.strength)} onChange={(e) => setField(key, "strength", e.target.value)}>
+                      <option value="" />
+                      {optionList(payload, "strength_options").map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="ee-field">
+                    <span>{label(labels, "field_confidence", "confidence")}</span>
+                    <select value={cleanText(f.confidence)} onChange={(e) => setField(key, "confidence", e.target.value)}>
+                      <option value="" />
+                      {optionList(payload, "confidence_options").map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+              {cleanText(row.summary) && <div className="ee-preview-summary">{cleanText(row.summary)}</div>}
+              {isOpen && cleanText(row.formatted_content) && (
+                <div
+                  className="ee-md ee-preview-body"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(row.formatted_content) }}
+                />
+              )}
+              {asArray(item.warnings).length > 0 && (
+                <div className="ee-preview-blockers">{asArray(item.warnings).join(" ")}</div>
+              )}
+              {asArray(item.blockers).length > 0 && (
+                <div className="ee-preview-blockers">{asArray(item.blockers).join(" ")}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="ee-preview-meta">
+        {pickedCount}/{preview.valid_count || 0} {label(labels, "ee_output_selected", "selected")}
+      </div>
+      <div className="ee-row-btns">
+        <button
+          type="button"
+          className="ee-btn-primary"
+          disabled={pickedCount === 0}
+          onClick={confirm}
+        >
+          {label(labels, "ee_output_accept_selected", "Create selected evidence")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function outputKey(o) {
   return cleanText(o.source_key) || `${cleanText(o.source_kind) || "output"}:${cleanText(o.id)}`;
 }
@@ -1332,6 +1495,9 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
   const [showBlocked, setShowBlocked] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   const [showExisting, setShowExisting] = useState(false);
+  // The source list is long; keep it collapsed by default so it doesn't eat
+  // the page. The head (toggles + primary button) stays visible.
+  const [listOpen, setListOpen] = useState(false);
 
   useEffect(() => {
     const nextProjects = {};
@@ -1403,12 +1569,14 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
     .map((o) => outputEventItem(o, [selectedProject(o)]));
   const selectedCount = selectedItems.length;
   const createText = formatCountLabel(
-    label(labels, "ee_output_bulk_create", "Create selected evidence ({n})"),
+    label(labels, "ee_output_prepare_ai", "Grade with AI & preview ({n})"),
     selectedCount
   );
   const createSelected = () => {
     if (!selectedItems.length) return;
-    emit(bulkCreateFromOutputEvent(selectedItems));
+    // Two-step: AI grades strength/confidence into a preview the human
+    // confirms (mirrors the Done-task flow), instead of writing immediately.
+    emit(prepareOutputEvidenceEvent(selectedItems));
     onClose();
   };
 
@@ -1440,8 +1608,21 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
           {createText}
         </button>
       </div>
-      {visibleOutputs.length === 0 && <span className="ee-muted">{label(labels, "ee_no_outputs", "No outputs")}</span>}
-      {visibleOutputs.map((o) => {
+      <button
+        type="button"
+        className="ee-btn-sm ee-output-list-toggle"
+        onClick={() => setListOpen((v) => !v)}
+      >
+        {(listOpen ? "▾ " : "▸ ") +
+          formatCountLabel(
+            label(labels, "ee_output_source_list", "Convertible sources ({n})"),
+            visibleOutputs.length
+          )}
+      </button>
+      {listOpen && visibleOutputs.length === 0 && (
+        <span className="ee-muted">{label(labels, "ee_no_outputs", "No outputs")}</span>
+      )}
+      {listOpen && visibleOutputs.map((o) => {
         const key = outputKey(o);
         const blockers = asArray(o.blockers);
         const pid = selectedProject(o);
@@ -1728,6 +1909,7 @@ function App() {
   const reformatPreview = payload.reformat_preview || null;
   const bulkReformatPreview = payload.bulk_reformat_preview || null;
   const donePreview = payload.done_preview || null;
+  const outputPreview = payload.output_preview || null;
   const duplicateCandidates = asArray(payload.duplicate_candidates);
   const rowsById = useMemo(() => {
     const m = {};
@@ -1848,6 +2030,8 @@ function App() {
       )}
 
       <DonePreviewPanel preview={donePreview} labels={labels} emit={emit} />
+
+      <OutputPreviewPanel preview={outputPreview} payload={payload} labels={labels} emit={emit} />
 
       {duplicateCandidates.length > 0 && (
         <DuplicatePanel

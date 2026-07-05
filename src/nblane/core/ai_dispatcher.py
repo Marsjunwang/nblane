@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -806,6 +807,30 @@ def generate_ai_patch(
     meta_patch: dict[str, Any] = {}
 
     if clean_operation == "reorganize":
+        # Reorganize is format-only: it never adds/removes/rewords content, so a
+        # summary of the ORIGINAL body equals a summary of the reorganized body.
+        # That lets the summary run concurrently with reorganize instead of
+        # serially after it -- the summary overlaps reorganize's streaming and is
+        # usually done by the time reorganize returns, so it adds ~no extra wait.
+        # Auto-fill only when the author has not written a summary.
+        summary_holder: dict[str, str] = {}
+        summary_thread: threading.Thread | None = None
+        if not _clean_text(meta.get("summary")).strip():
+            def _run_summary() -> None:
+                summary_holder["value"] = _summarize_document(
+                    meta=meta,
+                    markdown=markdown,
+                    lang=lang,
+                    model=clean_model or None,
+                )
+
+            summary_thread = threading.Thread(
+                target=_run_summary,
+                name="nblane-reorganize-summary",
+                daemon=True,
+            )
+            summary_thread.start()
+
         # Reorganize handles its own chunking for long documents; produce the
         # full reorganized body and skip the generic single-call path below.
         reorganized, truncated = _reorganize_document(
@@ -825,16 +850,9 @@ def generate_ai_patch(
                 "Part of the AI output was cut off at the model's token limit; "
                 "the result may be incomplete. Try again or raise LLM_MAX_TOKENS."
             )
-        # Reorganize already read the whole document; auto-fill a summary while
-        # we have the full (reorganized) body -- but only when the author has
-        # not written one, and never let a summary failure break reorganize.
-        if not _clean_text(meta.get("summary")).strip():
-            summary = _summarize_document(
-                meta=meta,
-                markdown=reorganized,
-                lang=lang,
-                model=clean_model or None,
-            )
+        if summary_thread is not None:
+            summary_thread.join()
+            summary = summary_holder.get("value", "")
             if summary:
                 meta_patch["summary"] = summary
             else:

@@ -95,7 +95,15 @@ export const bulkRequestAiReformatEvent = (ids) =>
 export const bulkConfirmAiReformatEvent = (previewId) =>
   makeEvent("bulk_confirm_ai_reformat", { preview_id: previewId });
 
-// Output -> evidence.
+// Output -> evidence. Two-step: prepare (AI grades strength/confidence into a
+// preview) then confirm (write the human-reviewed rows).
+export const prepareOutputEvidenceEvent = (items) =>
+  makeEvent("prepare_output_evidence", { items: Array.isArray(items) ? items : [] });
+export const applyOutputEvidenceEvent = (previewId, rows = null) =>
+  makeEvent("apply_output_evidence", {
+    preview_id: previewId,
+    rows: Array.isArray(rows) ? rows : null,
+  });
 export const bulkCreateFromOutputEvent = (items) =>
   makeEvent("bulk_create_from_output", { items: Array.isArray(items) ? items : [] });
 export const ignoreOutputCandidatesEvent = (items, reason = "not_evidence") =>

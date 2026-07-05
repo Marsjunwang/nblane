@@ -646,6 +646,82 @@ class TestEvidenceEditorHost(unittest.TestCase):
         # draft sources never auto-publish; readiness stays a human decision.
         self.assertEqual(row["public_readiness"], "private")
 
+    def test_prepare_and_apply_output_evidence_ai_grades_then_confirms(self) -> None:
+        before = len(self._pool())
+        self._write_outputs(
+            [
+                {
+                    "id": "graded_out",
+                    "title": "Graded output",
+                    "status": "published",
+                    "date": "2026-03-08",
+                    "summary": "Original summary.",
+                    "body": "Some real delivered work with a github.com/org/repo link.",
+                    "project_refs": ["project:demo"],
+                },
+            ]
+        )
+        # Prepare: AI pre-grades strength/confidence into a preview (no write).
+        with patch(
+            "nblane.evidence_editor_host.grade_output_evidence",
+            return_value=(
+                {
+                    "summary": "AI summary.",
+                    "formatted_content": "# Graded\nbody",
+                    "strength": "strong",
+                    "confidence": "high",
+                    "language": "en",
+                },
+                None,
+            ),
+        ):
+            ok = self.host.handle_event(
+                {
+                    "action": "prepare_output_evidence",
+                    "event_id": "out-prep-1",
+                    "payload": {
+                        "items": [
+                            {"output_id": "graded_out", "source_kind": "output"},
+                        ]
+                    },
+                }
+            )
+        self.assertTrue(ok)
+        # Nothing written yet; a preview is stashed.
+        self.assertEqual(len(self._pool()), before)
+        preview = self.fake_st.session_state[self.host._output_preview_state_key()]
+        self.assertIsInstance(preview, dict)
+        prow = preview["rows"][0]
+        self.assertTrue(prow["valid"])
+        self.assertEqual(prow["row"]["strength"], "strong")
+        self.assertEqual(prow["row"]["confidence"], "high")
+
+        # Confirm: human tweaks confidence, then writes.
+        ok = self.host.handle_event(
+            {
+                "action": "apply_output_evidence",
+                "event_id": "out-apply-1",
+                "payload": {
+                    "preview_id": preview["preview_id"],
+                    "rows": [
+                        {
+                            "source_key": "output:graded_out",
+                            "fields": {"strength": "strong", "confidence": "medium"},
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertTrue(ok)
+        self.assertEqual(len(self._pool()), before + 1)
+        row = next(
+            r for r in self._pool() if r.get("origin_ref") == "output:graded_out"
+        )
+        self.assertEqual(row["strength"], "strong")
+        # Human-confirmed value wins over the AI's "high".
+        self.assertEqual(row["confidence"], "medium")
+        self.assertEqual(row["public_readiness"], "private")
+
     def test_ignore_and_restore_output_candidates_only_touch_preferences(self) -> None:
         self._write_outputs(
             [

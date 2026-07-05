@@ -872,3 +872,105 @@ def reformat_evidence(
         return None, "reformat produced no usable fields"
     proposed["language"] = target_lang
     return proposed, None
+
+
+_OUTPUT_GRADE_KEYS = ("summary", "formatted_content", "strength", "confidence")
+
+
+def _output_grade_system_prompt(target_lang: str) -> str:
+    """System prompt: reformat + pre-grade one output/blog-derived evidence row."""
+    grading = _evidence_grading_zh() if target_lang == "zh" else _evidence_grading_en()
+    if target_lang == "zh":
+        return (
+            "你是一个成果证据规范化助手。给定一篇已发布/草稿产出"
+            "（博客、项目更新、论文等）的原始内容与元信息，把它整理成一条"
+            "规范的能力证据，并预判其强度与信心。\n"
+            "严格要求：\n"
+            "1. 只输出 JSON：{\"summary\":..., \"formatted_content\":..., "
+            "\"strength\":..., \"confidence\":...}。\n"
+            "2. summary 为 1-3 句中文摘要；formatted_content 为结构化 Markdown 正文，"
+            "可读并保留原始事实。\n"
+            "3. 事实只能来自所给内容，不要编造数字或成果。\n"
+            "4. 绝不返回或改写 original_content 本身。\n"
+            "5. 全部用中文输出。\n\n" + grading
+        )
+    return (
+        "You normalize one output-derived evidence row (a published/draft blog, "
+        "project update, paper, etc.) and pre-grade it. Given its raw content "
+        "and metadata, produce a clean capability-evidence row.\n"
+        "Strict rules:\n"
+        '1. Output JSON only: {"summary":..., "formatted_content":..., '
+        '"strength":..., "confidence":...}.\n'
+        "2. summary is 1-3 sentences; formatted_content is structured Markdown "
+        "that is readable and preserves the original facts.\n"
+        "3. Facts must come only from the given content. Do not invent metrics.\n"
+        "4. Never return or rewrite original_content itself.\n"
+        "5. Write everything in English.\n\n" + grading
+    )
+
+
+def _output_grade_user_message(row: dict) -> str:
+    def _g(key: str) -> str:
+        return str(row.get(key, "") or "").strip()
+
+    return (
+        "Current fields:\n"
+        f"- type: {_g('type')}\n"
+        f"- origin: {_g('origin')}\n"
+        f"- origin_ref: {_g('origin_ref')}\n"
+        f"- title: {_g('title')}\n"
+        f"- date: {_g('date')}\n"
+        f"- url: {_g('url')}\n"
+        f"- summary: {_g('summary')}\n\n"
+        "original_content (source of truth, do not rewrite):\n"
+        "<<<\n"
+        f"{_g('original_content')}\n"
+        ">>>\n\n"
+        "Return the JSON object now."
+    )
+
+
+def grade_output_evidence(
+    profile: str,
+    row: dict,
+    *,
+    target_lang: str | None = None,
+) -> tuple[dict | None, str | None]:
+    """Reformat + pre-grade one output/blog-derived evidence row.
+
+    Returns ``(proposed, error)`` where *proposed* carries
+    ``summary``/``formatted_content``/``strength``/``confidence`` (+ ``language``)
+    for a human to confirm. Never touches original_content, origin, refs, or
+    status. Does not save. strength/confidence are dropped here if invalid; the
+    caller re-validates against the enums before use.
+    """
+    target_lang = (target_lang or llm_client.reply_language() or "en").strip()
+    target_lang = "zh" if target_lang == "zh" else "en"
+
+    if not str(row.get("original_content", "") or "").strip() and not str(
+        row.get("summary", "") or ""
+    ).strip():
+        return None, "no original_content to grade"
+    if not llm_client.is_configured():
+        return None, "LLM not configured"
+
+    system = _output_grade_system_prompt(target_lang)
+    user = _output_grade_user_message(row)
+    reply = llm_client.chat(system, user, temperature=0.2)
+    if reply.startswith("LLM error:") or reply.startswith(
+        "AI features not configured"
+    ):
+        return None, reply
+    data = extract_json_object(reply)
+    if data is None:
+        return None, "Could not parse grading JSON from LLM."
+
+    proposed: dict = {}
+    for key in _OUTPUT_GRADE_KEYS:
+        val = str(data.get(key, "") or "").strip()
+        if val:
+            proposed[key] = val
+    if not proposed:
+        return None, "grading produced no usable fields"
+    proposed["language"] = target_lang
+    return proposed, None

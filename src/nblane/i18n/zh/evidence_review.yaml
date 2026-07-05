@@ -353,6 +353,16 @@ ee_output_restore: 恢复
 ee_output_ignored_badge: 已跳过
 ee_output_has_update: 有更新
 ee_output_synced: 已同步
+ee_output_prepare_ai: AI 评级并预览（{n}）
+ee_output_source_list: 可转证据的来源（{n}）
+ee_output_ai_preview_title: Output AI 预览
+ee_output_ai_preview_running: 正在用 AI 评级 output...
+ee_output_ai_grade_failed: AI 评级不可用，请手动设置 strength/confidence。
+ee_output_accept_selected: 创建选中的证据
+ee_output_selected: 已选
+ee_output_preview_missing: 没有可用的 output 预览。
+ee_output_preview_stale: Output 预览已过期，请重新用 AI 评级。
+ee_output_none_selected: 未选中任何 output 证据。
 ee_duplicate_candidates: 查找重复
 ee_backfill_project: 回填项目引用
 ee_cancel: 取消

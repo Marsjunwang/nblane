@@ -353,6 +353,16 @@ ee_output_restore: Restore
 ee_output_ignored_badge: skipped
 ee_output_has_update: has update
 ee_output_synced: synced
+ee_output_prepare_ai: Grade with AI & preview ({n})
+ee_output_source_list: Convertible sources ({n})
+ee_output_ai_preview_title: Output AI preview
+ee_output_ai_preview_running: Grading outputs with AI...
+ee_output_ai_grade_failed: AI grading unavailable; set strength/confidence manually.
+ee_output_accept_selected: Create selected evidence
+ee_output_selected: selected
+ee_output_preview_missing: No output preview is available.
+ee_output_preview_stale: Output preview is stale; run AI grading again.
+ee_output_none_selected: No output evidence selected.
 ee_duplicate_candidates: Find duplicates
 ee_backfill_project: Backfill project refs
 ee_cancel: Cancel
