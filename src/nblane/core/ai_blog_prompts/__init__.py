@@ -24,6 +24,7 @@ REQUIRED_PROMPTS = (
     "tone",
     "outline",
     "reorganize",
+    "summarize",
     "nl_to_latex",
     "diagram",
     "caption",

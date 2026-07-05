@@ -53,7 +53,9 @@ class AIBlogPhase3Tests(unittest.TestCase):
             patch_payload = ai_dispatcher.generate_ai_patch(
                 profile="alice",
                 slug="post",
-                meta={"title": "Draft"},
+                # Pre-set summary so the auto-summary step is skipped and this
+                # test stays focused on the reorganize call's parameters.
+                meta={"title": "Draft", "summary": "Already written."},
                 markdown="messy body " * 50,
                 selected_block={"cursor_block_id": "b1"},
                 operation="reorganize",
@@ -64,9 +66,127 @@ class AIBlogPhase3Tests(unittest.TestCase):
         self.assertEqual(patch_payload["block_patches"], [])
         self.assertIn("Clean body.", patch_payload["markdown_fallback"])
         self.assertFalse(patch_payload["warnings"])
+        # Author summary is preserved (not overwritten by auto-summary).
+        self.assertEqual(patch_payload.get("meta_patch", {}).get("summary"), None)
         # Output ceiling must exceed the low default so long articles aren't cut.
         self.assertIsNotNone(captured.get("max_tokens"))
         self.assertGreaterEqual(int(captured["max_tokens"]), len("messy body " * 50))
+
+    def test_reorganize_auto_fills_summary_when_missing(self) -> None:
+        """Reorganize auto-generates a summary into meta_patch when absent."""
+        calls: list[str] = []
+
+        def fake_chat(system, user, *_args, **kwargs):
+            calls.append(user)
+            # Distinguish the summarize call by its operation field (the
+            # reorganize prompt itself contains the word "summarize").
+            if '"operation": "summarize"' in user:
+                return "A concise generated summary of the whole document."
+            return "# Title\n\nClean body.\n\n## Section\nMore."
+
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", side_effect=fake_chat):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={"title": "Draft"},  # no summary -> should be generated
+                markdown="messy body " * 50,
+                selected_block={"cursor_block_id": "b1"},
+                operation="reorganize",
+            )
+
+        self.assertEqual(
+            patch_payload["meta_patch"]["summary"],
+            "A concise generated summary of the whole document.",
+        )
+        # Body still fully replaced; summary rides alongside in meta_patch.
+        self.assertIn("Clean body.", patch_payload["markdown_fallback"])
+        self.assertFalse(patch_payload["warnings"])
+
+    def test_reorganize_summary_failure_degrades_silently(self) -> None:
+        """A failing summary step must not break reorganize; it warns instead."""
+
+        def fake_chat(system, user, *_args, **kwargs):
+            if '"operation": "summarize"' in user:
+                return "LLM error: upstream timeout"
+            return "# Title\n\nClean body."
+
+        with patch("nblane.core.ai_dispatcher.llm_client.chat", side_effect=fake_chat):
+            patch_payload = ai_dispatcher.generate_ai_patch(
+                profile="alice",
+                slug="post",
+                meta={"title": "Draft"},
+                markdown="messy body " * 50,
+                selected_block={"cursor_block_id": "b1"},
+                operation="reorganize",
+            )
+
+        # Reorganize still succeeds with the full body...
+        self.assertIn("Clean body.", patch_payload["markdown_fallback"])
+        # ...no summary written...
+        self.assertNotIn("summary", patch_payload.get("meta_patch", {}))
+        # ...and the user is told to add one manually.
+        self.assertTrue(
+            any("summary" in w.lower() for w in patch_payload["warnings"])
+        )
+
+    def test_reorganize_prompt_omits_duplicate_target_excerpt(self) -> None:
+        """The reorganize prompt must not echo the body via target_text.
+
+        Regression: reorganize sends the whole body in article_excerpt AND
+        also carried target_text/surrounding_blocks (the cursor region). That
+        overlap made the model copy the overlapping content into its output --
+        doubling it, and once per chunk in the long-document path -- so the
+        reorganized document came back with duplicated sections.
+        """
+        import json
+
+        target = ai_dispatcher._target_from_selection(
+            {
+                "block_id": "b1",
+                "cursor_block_id": "b1",
+                "selection_text": "This exact sentence must not be duplicated.",
+                "surrounding_blocks": [
+                    {"type": "paragraph", "text": "Surrounding paragraph text."}
+                ],
+            }
+        )
+        body = "# Title\n\nThis exact sentence must not be duplicated.\n\n## Section\nMore."
+        prompt = ai_dispatcher._build_user_prompt(
+            operation="reorganize",
+            instruction="reorganize",
+            meta={"title": "Draft"},
+            markdown=body,
+            target=target,
+            prompt="",
+            visual_kind="",
+        )
+        payload = json.loads(prompt)
+        # Whole-document op: full body present, no selection/target overlap.
+        self.assertEqual(payload["article_excerpt"], body)
+        self.assertNotIn("target_text", payload)
+        self.assertNotIn("surrounding_blocks", payload)
+
+    def test_non_whole_document_prompt_keeps_target_context(self) -> None:
+        """Selection-scoped ops still get target_text + a trimmed excerpt."""
+        import json
+
+        target = ai_dispatcher._target_from_selection(
+            {"block_id": "b1", "selection_text": "polish this line"}
+        )
+        prompt = ai_dispatcher._build_user_prompt(
+            operation="polish",
+            instruction="polish",
+            meta={},
+            markdown="full body " * 500,
+            target=target,
+            prompt="",
+            visual_kind="",
+        )
+        payload = json.loads(prompt)
+        self.assertEqual(payload["target_text"], "polish this line")
+        self.assertIn("surrounding_blocks", payload)
+        # Non-whole-document excerpt stays trimmed, not the entire body.
+        self.assertLessEqual(len(payload["article_excerpt"]), len("full body " * 500))
 
     def test_reorganize_warns_when_output_truncated(self) -> None:
         def fake_chat(*_args, **kwargs):
@@ -126,7 +246,9 @@ class AIBlogPhase3Tests(unittest.TestCase):
             patch_payload = ai_dispatcher.generate_ai_patch(
                 profile="alice",
                 slug="post",
-                meta={"title": "Draft"},
+                # Pre-set summary so this test only exercises chunking, not the
+                # auto-summary step (which would add extra chat calls).
+                meta={"title": "Draft", "summary": "Already written."},
                 markdown="\n\n".join(f"Paragraph {i} body text here." for i in range(200)),
                 selected_block={"cursor_block_id": "b1"},
                 operation="reorganize",

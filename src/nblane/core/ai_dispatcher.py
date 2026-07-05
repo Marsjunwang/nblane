@@ -34,6 +34,13 @@ _REPLACE_OPERATIONS = {
     "formula",
 }
 
+# Operations that consume the whole document body and return the whole body.
+# They must NOT also receive a target/selection excerpt: it duplicates content
+# already in article_excerpt and the model echoes the overlap back, copying it
+# (once per chunk in the long-document path). Keep in sync with the frontend
+# AI_WHOLE_DOCUMENT_OPERATIONS set.
+_WHOLE_DOCUMENT_OPERATIONS = {"reorganize"}
+
 
 def _clean_text(value: object) -> str:
     return "" if value is None else str(value)
@@ -458,17 +465,6 @@ def _build_user_prompt(
     prompt: str,
     visual_kind: str,
 ) -> str:
-    context = _context_text(target, markdown)
-    surrounding = [
-        {
-            "type": _clean_text(block.get("type")),
-            "text": _trim(block.get("text"), 420),
-        }
-        for block in target.surrounding_blocks
-        if isinstance(block, dict)
-    ]
-    # Whole-document operations need the full body, not a truncated excerpt.
-    article_excerpt = markdown if operation == "reorganize" else _trim(markdown, 2200)
     payload = {
         "operation": operation,
         "instruction": instruction,
@@ -478,10 +474,26 @@ def _build_user_prompt(
         "summary": _clean_text(meta.get("summary")).strip(),
         "abstract": _clean_text(meta.get("abstract")).strip(),
         "tags": meta.get("tags") if isinstance(meta.get("tags"), list) else [],
-        "target_text": context,
-        "surrounding_blocks": surrounding,
-        "article_excerpt": article_excerpt,
     }
+    if operation in _WHOLE_DOCUMENT_OPERATIONS:
+        # Whole-document rewrites (reorganize) consume the full body and return
+        # the full body. A selection/target excerpt here would be a *duplicate*
+        # of content already inside article_excerpt, and the model echoes the
+        # overlap back into its output -- doubling that region once, and once
+        # per chunk in the long-document path (target is reused for every
+        # chunk), which is the multi-copy bug. So the body is the only content.
+        payload["article_excerpt"] = markdown
+    else:
+        payload["target_text"] = _context_text(target, markdown)
+        payload["surrounding_blocks"] = [
+            {
+                "type": _clean_text(block.get("type")),
+                "text": _trim(block.get("text"), 420),
+            }
+            for block in target.surrounding_blocks
+            if isinstance(block, dict)
+        ]
+        payload["article_excerpt"] = _trim(markdown, 2200)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -678,6 +690,77 @@ def _reorganize_document(
     return combined, truncated_any
 
 
+# Summary is used as the blog post's <meta name="description"> (SEO / social
+# cards), so keep it short and plain-text.
+_SUMMARY_MAX_CHARS = 220
+
+
+def _summarize_document(
+    *,
+    meta: dict[str, Any],
+    markdown: str,
+    lang: str,
+    model: str | None,
+) -> str:
+    """Generate a one-paragraph summary of the whole document.
+
+    Reads the entire (reorganized) body -- for very long documents that exceed
+    the input budget it map-reduces: summarize each chunk, then compress the
+    per-chunk summaries into one. Returns "" on any failure so the caller can
+    silently skip writing a summary (the primary operation must not fail just
+    because the summary step did).
+    """
+
+    body = _clean_text(markdown).strip()
+    if not body:
+        return ""
+    system = get_prompt("inline_system", lang)
+    instruction = get_prompt("summarize", lang)
+
+    def _summarize_one(text: str) -> str:
+        user = json.dumps(
+            {
+                "operation": "summarize",
+                "instruction": instruction,
+                "title": _clean_text(meta.get("title")).strip(),
+                "article_excerpt": text,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        reply = llm_client.chat(
+            system,
+            user,
+            temperature=0.2,
+            model=model,
+            max_tokens=512,
+        )
+        if reply.startswith("LLM error:") or reply.startswith("AI features not configured."):
+            raise RuntimeError(reply)
+        return _strip_code_fence(reply).strip()
+
+    # Reserve headroom so the summary prompt itself stays well under the ceiling.
+    ceiling = llm_client.max_tokens_default()
+    input_char_budget = max(4000, int(ceiling * 3 * 2.0))
+    try:
+        if len(body) <= input_char_budget:
+            summary = _summarize_one(body)
+        else:
+            # Map: summarize each chunk. Reduce: summarize the joined summaries.
+            chunks = _chunk_markdown(body, max(1200, int(ceiling * 3 * 0.40)))
+            partials = [s for s in (_summarize_one(chunk) for chunk in chunks) if s]
+            if not partials:
+                return ""
+            summary = _summarize_one("\n\n".join(partials))
+    except Exception:
+        return ""
+
+    summary = re.sub(r"\s+", " ", summary).strip()
+    if len(summary) > _SUMMARY_MAX_CHARS:
+        summary = summary[:_SUMMARY_MAX_CHARS].rstrip(" ,.;:，。；：")
+    return summary
+
+
 def generate_ai_patch(
     *,
     profile: str,
@@ -720,6 +803,7 @@ def generate_ai_patch(
     assets: list[AIAsset] = []
     block_patches: list[AIBlockPatch] = []
     visual_payload: dict[str, Any] | None = None
+    meta_patch: dict[str, Any] = {}
 
     if clean_operation == "reorganize":
         # Reorganize handles its own chunking for long documents; produce the
@@ -741,6 +825,22 @@ def generate_ai_patch(
                 "Part of the AI output was cut off at the model's token limit; "
                 "the result may be incomplete. Try again or raise LLM_MAX_TOKENS."
             )
+        # Reorganize already read the whole document; auto-fill a summary while
+        # we have the full (reorganized) body -- but only when the author has
+        # not written one, and never let a summary failure break reorganize.
+        if not _clean_text(meta.get("summary")).strip():
+            summary = _summarize_document(
+                meta=meta,
+                markdown=reorganized,
+                lang=lang,
+                model=clean_model or None,
+            )
+            if summary:
+                meta_patch["summary"] = summary
+            else:
+                warnings.append(
+                    "Could not auto-generate a summary; add one manually if needed."
+                )
     else:
         user = _build_user_prompt(
             operation=clean_operation,
@@ -958,6 +1058,7 @@ def generate_ai_patch(
         ai_source_id=ai_source_id,
         operation=clean_operation,  # type: ignore[arg-type]
         target=target,
+        meta_patch=meta_patch,
         block_patches=block_patches,
         markdown_fallback=markdown_fallback,
         assets=assets,

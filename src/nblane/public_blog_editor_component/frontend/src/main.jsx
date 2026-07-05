@@ -1278,6 +1278,19 @@ function inlineCandidatePatchFromBlock(block, detail = {}) {
   };
 }
 
+function isWholeDocumentPatch(patch) {
+  // A patch rewrites the whole body when its operation is a whole-document op
+  // (reorganize) OR when the backend flagged the target range as full_document
+  // (e.g. reviewer "check" repairs that return an entire rewritten body in
+  // markdown_fallback). Applying such a patch at the cursor would append the
+  // whole rewritten body on top of the existing one and duplicate the document.
+  const operation = cleanText(patch?.operation).toLowerCase();
+  if (AI_WHOLE_DOCUMENT_OPERATIONS.has(operation)) {
+    return true;
+  }
+  return asObject(patch?.target?.range).full_document === true;
+}
+
 function patchDefaultPlacement(patch) {
   const operation = cleanText(patch?.operation).toLowerCase();
   const blockPatches = asArray(patch?.block_patches).map(asObject);
@@ -4467,12 +4480,12 @@ function ShellEditor(props) {
     }
     let markdown = latestMarkdownRef.current;
     const fallback = cleanText(normalized.markdown_fallback).trim();
-    const isWholeDocument = AI_WHOLE_DOCUMENT_OPERATIONS.has(
-      cleanText(normalized.operation).toLowerCase(),
-    );
+    const isWholeDocument = isWholeDocumentPatch(normalized);
     if (isWholeDocument) {
-      // Reorganize and similar rewrite the entire body: replace the document
-      // wholesale from markdown_fallback instead of patching/appending blocks.
+      // Reorganize and full-document reviewer repairs rewrite the entire body:
+      // replace the document wholesale from markdown_fallback. Inserting it at
+      // the cursor instead would append the whole rewritten body on top of the
+      // existing one, duplicating the document.
       if (!fallback) {
         setError("AI returned no document content.");
         return;
