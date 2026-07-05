@@ -256,6 +256,8 @@ button { cursor: pointer; }
 .ee-done-meta { font-size: 11px; color: var(--muted); }
 .ee-done-blockers { font-size: 11px; color: var(--warn); line-height: 1.35; }
 .ee-badge-muted { color: var(--muted); border-color: var(--line); }
+.ee-badge-warn { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
+.ee-badge-ok { color: var(--ok); border-color: var(--ok); }
 
 /* Done AI preview */
 .ee-done-preview {

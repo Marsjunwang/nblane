@@ -68,6 +68,56 @@ def find_active_by_source(
     return rows[0] if len(rows) == 1 else None
 
 
+# Fields refreshed from the source on update: objective facts about the
+# source itself. Everything else on the old row survives untouched, in
+# particular the human review outcome (strength/confidence/review_status/
+# public_readiness/link_skills/experience_refs/project_refs) and any
+# human-polished summary/formatted_content.
+_SOURCE_REFRESH_FIELDS = (
+    "title",
+    "original_content",
+    "original_content_hash",
+    "source_content_hash",
+    "original_language",
+    "date",
+    "url",
+)
+
+
+def merge_source_refresh(old_row: dict, new_row: dict) -> dict:
+    """Patch an existing evidence row with a re-pulled source, in place semantics.
+
+    Refreshes objective source facts (title/original_content/hashes/date/url)
+    from ``new_row``. Preserves every human-reviewed field on ``old_row``
+    (strength, confidence, review_status, public_readiness, link references,
+    project_refs) untouched. ``summary``/``formatted_content`` are only taken
+    from ``new_row`` when the old row does not already have a human/AI value --
+    once populated they are assumed to have been reviewed and are left alone.
+
+    When the source content actually changed (``source_content_hash`` differs),
+    ``review_status`` is bumped back to ``needs_review`` so a stale "reviewed"
+    row does not silently pass a refreshed source.
+    """
+    merged = dict(old_row)
+    merged["id"] = old_row.get("id", "")
+
+    for key in _SOURCE_REFRESH_FIELDS:
+        value = new_row.get(key)
+        if value:
+            merged[key] = value
+
+    for key in ("summary", "formatted_content"):
+        if not _clean(old_row.get(key)) and new_row.get(key):
+            merged[key] = new_row[key]
+
+    old_hash = _clean(old_row.get("source_content_hash"))
+    new_hash = _clean(new_row.get("source_content_hash"))
+    if old_hash and new_hash and old_hash != new_hash:
+        merged["review_status"] = "needs_review"
+
+    return merged
+
+
 def _output_original_content(output: dict) -> str:
     """Compose a meta header + short body preview as the preserved source."""
     lines: list[str] = []
@@ -135,6 +185,7 @@ def evidence_row_from_output(
     )
 
     original_content = _output_original_content(output)
+    full_body = _clean(output.get("body"))
     title = _clean(output.get("title")) or output_id
     summary = _clean(output.get("summary"))
 
@@ -154,6 +205,7 @@ def evidence_row_from_output(
         "origin_detail": origin_detail,
         "original_content": original_content,
         "original_content_hash": content_hash(original_content),
+        "source_content_hash": content_hash(full_body) or content_hash(original_content),
         "original_language": detect_language(original_content),
         "language": target_lang,
         "review_status": "needs_review",
@@ -231,6 +283,7 @@ def evidence_row_from_blog_post(
         suffix += 1
 
     original_content = _blog_original_content(post)
+    full_body = _clean(getattr(post, "body", ""))
     title = _clean(getattr(post, "title", "")) or route
     summary = _clean(getattr(post, "summary", ""))
     status = _clean(getattr(post, "status", ""))
@@ -249,6 +302,7 @@ def evidence_row_from_blog_post(
         else "Blog",
         "original_content": original_content,
         "original_content_hash": content_hash(original_content),
+        "source_content_hash": content_hash(full_body) or content_hash(original_content),
         "original_language": detect_language(original_content),
         "language": target_lang,
         "review_status": "needs_review",

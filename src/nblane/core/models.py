@@ -109,6 +109,7 @@ class EvidenceRecord:
     language: str = ""
     original_language: str = ""
     original_content_hash: str = ""
+    source_content_hash: str = ""
     deprecated: bool = False
     replaced_by: str = ""
 
@@ -175,6 +176,7 @@ class EvidenceRecord:
             language=str(d.get("language", "") or ""),
             original_language=str(d.get("original_language", "") or ""),
             original_content_hash=str(d.get("original_content_hash", "") or ""),
+            source_content_hash=str(d.get("source_content_hash", "") or ""),
             deprecated=bool(d.get("deprecated", False)),
             replaced_by=str(d.get("replaced_by", "") or ""),
         )
@@ -226,6 +228,8 @@ class EvidenceRecord:
             out["original_language"] = self.original_language
         if self.original_content_hash:
             out["original_content_hash"] = self.original_content_hash
+        if self.source_content_hash:
+            out["source_content_hash"] = self.source_content_hash
         if self.deprecated:
             out["deprecated"] = True
         if self.replaced_by:

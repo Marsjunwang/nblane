@@ -585,11 +585,12 @@ class TestEvidenceEditorHost(unittest.TestCase):
                     "project_refs": ["project:demo"],
                 },
                 {
-                    "id": "draft",
-                    "title": "Draft",
-                    "status": "draft",
+                    # No summary/formatted_content -- still blocked regardless
+                    # of status.
+                    "id": "missing_summary",
+                    "title": "Missing summary",
+                    "status": "published",
                     "date": "2026-03-06",
-                    "summary": "Draft summary.",
                     "project_refs": ["project:demo"],
                 },
             ]
@@ -601,7 +602,7 @@ class TestEvidenceEditorHost(unittest.TestCase):
                 "payload": {
                     "items": [
                         {"output_id": "good", "source_kind": "output"},
-                        {"output_id": "draft", "source_kind": "output"},
+                        {"output_id": "missing_summary", "source_kind": "output"},
                     ]
                 },
             }
@@ -610,6 +611,40 @@ class TestEvidenceEditorHost(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(self._pool(), before)
         self.fake_st.error.assert_called()
+
+    def test_bulk_create_from_output_allows_draft_source(self) -> None:
+        before = self._pool()
+        self._write_outputs(
+            [
+                {
+                    "id": "confidential_draft",
+                    "title": "Confidential draft",
+                    "status": "draft",
+                    "date": "2026-03-06",
+                    "summary": "Draft summary.",
+                    "project_refs": ["project:demo"],
+                },
+            ]
+        )
+        ok = self.host.handle_event(
+            {
+                "action": "bulk_create_from_output",
+                "event_id": "out-bulk-draft",
+                "payload": {
+                    "items": [
+                        {"output_id": "confidential_draft", "source_kind": "output"},
+                    ]
+                },
+            }
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(len(self._pool()), len(before) + 1)
+        row = next(
+            r for r in self._pool() if r.get("origin_ref") == "output:confidential_draft"
+        )
+        # draft sources never auto-publish; readiness stays a human decision.
+        self.assertEqual(row["public_readiness"], "private")
 
     def test_ignore_and_restore_output_candidates_only_touch_preferences(self) -> None:
         self._write_outputs(

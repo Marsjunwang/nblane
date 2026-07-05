@@ -1364,6 +1364,7 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
   };
 
   const canCreateRow = (o) => {
+    if (o.already_has_evidence && !o.source_changed) return false;
     const pid = selectedProject(o);
     return !!o.source_ready && !!pid && validProjectIds.has(pid);
   };
@@ -1392,7 +1393,7 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
 
   const visibleOutputs = asArray(outputs).filter((o) => {
     if (o.ignored) return showIgnored;
-    if (o.already_has_evidence) return showExisting;
+    if (o.already_has_evidence) return o.source_changed || showExisting;
     if (!o.source_ready) return showBlocked;
     return true;
   });
@@ -1459,9 +1460,14 @@ function OutputEvidencePanel({ outputs, projectOptions, labels, emit, onClose })
             <div className="ee-output-main">
               <div className="ee-output-title">
                 {cleanText(o.label)}
-                {o.already_has_evidence && (
-                  <span className="ee-badge ee-badge-muted">
-                    {label(labels, "ee_done_has_evidence", "has evidence")}
+                {o.already_has_evidence && o.source_changed && (
+                  <span className="ee-badge ee-badge-warn">
+                    {label(labels, "ee_output_has_update", "has update")}
+                  </span>
+                )}
+                {o.already_has_evidence && !o.source_changed && (
+                  <span className="ee-badge ee-badge-ok">
+                    {label(labels, "ee_output_synced", "synced")}
                   </span>
                 )}
                 {o.ignored && (

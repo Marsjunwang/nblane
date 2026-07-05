@@ -35,6 +35,7 @@ V2_ROW = {
     "language": "en",
     "original_language": "zh",
     "original_content_hash": "sha256:9f2a1b3c4d5e",
+    "source_content_hash": "sha256:abc123",
     "review_status": "reviewed",
     "public_readiness": "private",
     "project_refs": ["project:gac"],
@@ -54,6 +55,7 @@ class TestEvidenceRecordV2RoundTrip(unittest.TestCase):
         self.assertEqual(rec.language, "en")
         self.assertEqual(rec.original_language, "zh")
         self.assertEqual(rec.original_content_hash, "sha256:9f2a1b3c4d5e")
+        self.assertEqual(rec.source_content_hash, "sha256:abc123")
         back = rec.to_dict()
         for key in (
             "origin",
@@ -64,6 +66,7 @@ class TestEvidenceRecordV2RoundTrip(unittest.TestCase):
             "language",
             "original_language",
             "original_content_hash",
+            "source_content_hash",
         ):
             self.assertEqual(back[key], V2_ROW[key], key)
 
@@ -138,6 +141,7 @@ class TestCompactRowV2(unittest.TestCase):
             "language": "en",
             "original_language": "zh",
             "original_content_hash": "sha256:abc",
+            "source_content_hash": "sha256:def",
             "original_content": "原文",
             "formatted_content": "# Body",
         }
@@ -149,6 +153,7 @@ class TestCompactRowV2(unittest.TestCase):
             "language",
             "original_language",
             "original_content_hash",
+            "source_content_hash",
             "original_content",
             "formatted_content",
         ):
@@ -176,6 +181,7 @@ class TestEvidenceRowPayloadV2(unittest.TestCase):
         self.assertEqual(
             payload["original_content_hash"], "sha256:9f2a1b3c4d5e"
         )
+        self.assertEqual(payload["source_content_hash"], "sha256:abc123")
 
 
 class TestSchemaVersionStampedOnSave(unittest.TestCase):

@@ -296,14 +296,18 @@ class TestEditorPayload(unittest.TestCase):
                     mod.PROFILES_DIR = val
 
         options = {item["id"]: item for item in payload["output_options"]}
-        self.assertEqual(payload["migration_summary"]["output_candidates"], 2)
+        # ready_project, ready_needs_project, and draft (convertible now).
+        self.assertEqual(payload["migration_summary"]["output_candidates"], 3)
         self.assertTrue(options["ready_project"]["source_ready"])
         self.assertFalse(options["ready_project"]["requires_project_selection"])
         self.assertTrue(options["ready_needs_project"]["source_ready"])
         self.assertTrue(options["ready_needs_project"]["requires_project_selection"])
-        self.assertFalse(options["draft"]["source_ready"])
+        # draft is convertible (confidential content that can't be published
+        # yet can still become private evidence); it just needs a project pick.
+        self.assertTrue(options["draft"]["source_ready"])
         self.assertFalse(options["missing_summary"]["source_ready"])
         self.assertTrue(options["already"]["already_has_evidence"])
+        self.assertFalse(options["already"]["source_changed"])
         self.assertFalse(options["already"]["source_ready"])
         self.assertTrue(options["ignored"]["ignored"])
         self.assertFalse(options["ignored"]["source_ready"])

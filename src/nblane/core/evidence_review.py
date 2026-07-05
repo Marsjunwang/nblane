@@ -24,6 +24,7 @@ from nblane.core.evidence_from_output import (
     evidence_row_from_output,
     evidence_source_key,
 )
+from nblane.core.evidence_migrate import content_hash
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
     EVIDENCE_LANGUAGES,
@@ -979,6 +980,9 @@ def _evidence_row_payload(
         "original_content_hash": str(
             row.get("original_content_hash", "") or ""
         ),
+        "source_content_hash": str(
+            row.get("source_content_hash", "") or ""
+        ),
         "deprecated": bool(row.get("deprecated", False)),
         "replaced_by": str(row.get("replaced_by", "") or ""),
         "skill_refs": [item["id"] for item in used_by],
@@ -1098,6 +1102,25 @@ def _read_profile_yaml(path: Path) -> dict:
     return _load_yaml_dict(path) or {}
 
 
+def _source_changed(existing_rows: list[dict[str, Any]], row_probe: dict[str, Any]) -> bool:
+    """True when a source's current full-text hash differs from its evidence row.
+
+    A single active evidence row for this source is required (matches the
+    "one row updates in place" contract in ``_apply_bulk_create_from_output``);
+    multiple active rows are a data problem surfaced elsewhere, not a refresh
+    candidate. A missing hash on the stored row (pre-existing evidence created
+    before this field existed) is treated as unchanged rather than a false
+    "has update" -- it gets backfilled the next time the row is touched.
+    """
+    if len(existing_rows) != 1:
+        return False
+    old_hash = str(existing_rows[0].get("source_content_hash", "") or "").strip()
+    if not old_hash:
+        return False
+    new_hash = str(row_probe.get("source_content_hash", "") or "").strip()
+    return bool(new_hash) and new_hash != old_hash
+
+
 def _output_options(profile: str | Path) -> list[dict[str, object]]:
     """Output/blog rows that could become evidence (create_from_output picker)."""
     from nblane.core import public_site
@@ -1143,11 +1166,16 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
     def _resolution(project_refs: object) -> dict[str, Any]:
         return validate_internal_project_refs(project_refs, project_index)
 
+    # draft/archived sources may hold confidential content that will never be
+    # published; they can still become (private) evidence. trashed/empty are
+    # deleted content and stay blocked.
+    _CONVERTIBLE_STATUSES = {"published", "draft", "archived"}
+
     def _status_blocker(label: str, status: str) -> list[str]:
-        if status == "published":
+        if status in _CONVERTIBLE_STATUSES:
             return []
         shown = status or "draft"
-        return [f"{label} status is {shown}; publish it before creating evidence."]
+        return [f"{label} status is {shown}; it cannot become evidence."]
 
     def _source_ready_row(
         *,
@@ -1156,6 +1184,7 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         status: str,
         date: str,
         already_has_evidence: bool,
+        source_changed: bool,
         ignored: bool,
         has_original_content: bool,
         has_formatted_content: bool,
@@ -1165,7 +1194,7 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         blockers: list[str] = []
         if ignored:
             blockers.append(f"{label} was skipped in Evidence Review.")
-        if already_has_evidence:
+        if already_has_evidence and not source_changed:
             blockers.append(f"{label} already has evidence.")
         blockers.extend(_status_blocker(label, status))
         if not date:
@@ -1176,8 +1205,8 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
             blockers.append(f"{label} has no formatted_content.")
         source_ready = (
             not ignored
-            and not already_has_evidence
-            and status == "published"
+            and (not already_has_evidence or source_changed)
+            and status in _CONVERTIBLE_STATUSES
             and bool(date)
             and has_original_content
             and has_formatted_content
@@ -1237,19 +1266,22 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         res = _resolution(refs)
         date = _date_from_output(out)
         source_key = f"output:{oid}"
-        already_has_evidence = ("output", source_key) in source_index
+        existing_rows = source_index.get(("output", source_key)) or []
+        already_has_evidence = bool(existing_rows)
         row_probe = evidence_row_from_output(
             {**out, "project_refs": res["refs"]},
             profile=profile,
             existing_ids=set(),
             target_lang="en",
         )
+        source_changed = _source_changed(existing_rows, row_probe)
         readiness = _source_ready_row(
             source_key=source_key,
             label="Output",
             status=str(out.get("status", "") or ""),
             date=date,
             already_has_evidence=already_has_evidence,
+            source_changed=source_changed,
             ignored=source_key in ignored_keys,
             has_original_content=bool(
                 str(row_probe.get("original_content", "") or "").strip()
@@ -1269,6 +1301,7 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
                 "status": str(out.get("status", "") or ""),
                 "date": date,
                 "already_has_evidence": already_has_evidence,
+                "source_changed": source_changed,
                 "project_refs": res["refs"],
                 "project_resolution_status": res["status"],
                 "project_resolution_ok": bool(res["ok"]),
@@ -1285,7 +1318,8 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         res = _resolution(refs)
         date = str(getattr(post, "date", "") or "").strip()
         source_key = f"blog:{route}"
-        already_has_evidence = ("output", source_key) in source_index
+        existing_rows = source_index.get(("output", source_key)) or []
+        already_has_evidence = bool(existing_rows)
         row_probe = evidence_row_from_blog_post(
             post,
             profile=profile,
@@ -1293,12 +1327,14 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
             existing_ids=set(),
             target_lang="en",
         )
+        source_changed = _source_changed(existing_rows, row_probe)
         readiness = _source_ready_row(
             source_key=source_key,
             label="Blog post",
             status=str(getattr(post, "status", "") or ""),
             date=date,
             already_has_evidence=already_has_evidence,
+            source_changed=source_changed,
             ignored=source_key in ignored_keys,
             has_original_content=bool(
                 str(row_probe.get("original_content", "") or "").strip()
@@ -1318,6 +1354,7 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
                 "status": str(getattr(post, "status", "") or ""),
                 "date": date,
                 "already_has_evidence": already_has_evidence,
+                "source_changed": source_changed,
                 "project_refs": res["refs"],
                 "project_resolution_status": res["status"],
                 "project_resolution_ok": bool(res["ok"]),

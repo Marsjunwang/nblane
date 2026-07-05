@@ -28,6 +28,7 @@ from nblane.core.evidence_from_output import (
     evidence_row_from_blog_post,
     evidence_row_from_output,
     evidence_source_key,
+    merge_source_refresh,
 )
 from nblane.core.evidence_migrate import (
     content_hash,
@@ -124,6 +125,12 @@ DONE_SKIP_REASONS = frozenset(
     }
 )
 
+# Output/blog statuses that may become evidence. draft/archived sources can
+# hold confidential content that will never be published; evidence built from
+# them still defaults to public_readiness=private (see evidence_from_output).
+# trashed/empty is deleted content and stays blocked.
+_OUTPUT_CONVERTIBLE_STATUSES = frozenset({"published", "draft", "archived"})
+
 
 def compact_evidence_row(row: dict) -> dict:
     """Drop empty optional fields before writing YAML. Pure."""
@@ -147,6 +154,7 @@ def compact_evidence_row(row: dict) -> dict:
         "language",
         "original_language",
         "original_content_hash",
+        "source_content_hash",
         "original_content",
         "formatted_content",
     ):
@@ -1714,9 +1722,9 @@ class EvidenceEditorHost:
             internal_project_goal_index(self.profile),
         )
         blockers: list[str] = []
-        if status != "published":
+        if status not in _OUTPUT_CONVERTIBLE_STATUSES:
             blockers.append(
-                f"Output source status is {status or 'draft'}; publish it before creating evidence."
+                f"Output source status is {status or 'draft'}; it cannot become evidence."
             )
         if not str(row.get("date", "") or "").strip():
             blockers.append("Output source has no date; evidence requires a date.")
@@ -1729,6 +1737,7 @@ class EvidenceEditorHost:
             "source_kind": source_kind,
             "output_id": output_id,
             "source_key": source_key,
+            "status": status,
             "row": row,
             "blockers": blockers,
         }
@@ -1809,10 +1818,17 @@ class EvidenceEditorHost:
                 if idx is None:
                     st.error(f"{source_key}: existing evidence row is missing.")
                     return False
-                merged = dict(entries[idx])
-                merged.update(row)
-                merged["id"] = eid
+                merged = merge_source_refresh(entries[idx], row)
                 entries[idx] = compact_evidence_row(merged)
+                if str(proposal.get("status") or "") == "published" and str(
+                    entries[idx].get("public_readiness") or "private"
+                ) == "private":
+                    st.info(
+                        self.ui.get(
+                            "ee_output_source_published_hint",
+                            "{source}: source is now published; consider making this evidence public.",
+                        ).format(source=source_key)
+                    )
             else:
                 entries.append(compact_evidence_row(row))
                 rid = str(row.get("id", "") or "").strip()

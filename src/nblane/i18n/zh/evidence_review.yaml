@@ -351,6 +351,8 @@ ee_output_show_existing: 显示已有 evidence
 ee_output_ignore: 跳过
 ee_output_restore: 恢复
 ee_output_ignored_badge: 已跳过
+ee_output_has_update: 有更新
+ee_output_synced: 已同步
 ee_duplicate_candidates: 查找重复
 ee_backfill_project: 回填项目引用
 ee_cancel: 取消
@@ -386,6 +388,7 @@ ee_output_bulk_created: 已从输出创建/更新 {n} 条证据。
 ee_output_ignored: 已跳过 {n} 个输出候选。
 ee_output_restored: 已恢复 {n} 个输出候选。
 ee_output_missing: 未找到该输出。
+ee_output_source_published_hint: "{source}：来源已发布，可考虑将此证据设为公开。"
 ee_reformat_failed: AI 重新格式化失败。
 ee_duplicates_hint: 重复检测尚未接入。
 ee_preview: 预览

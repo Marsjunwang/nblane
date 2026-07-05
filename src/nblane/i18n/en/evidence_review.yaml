@@ -351,6 +351,8 @@ ee_output_show_existing: Show existing evidence
 ee_output_ignore: Skip
 ee_output_restore: Restore
 ee_output_ignored_badge: skipped
+ee_output_has_update: has update
+ee_output_synced: synced
 ee_duplicate_candidates: Find duplicates
 ee_backfill_project: Backfill project refs
 ee_cancel: Cancel
@@ -386,6 +388,7 @@ ee_output_bulk_created: Created/updated {n} evidence row(s) from outputs.
 ee_output_ignored: Skipped {n} output candidate(s).
 ee_output_restored: Restored {n} output candidate(s).
 ee_output_missing: Output not found.
+ee_output_source_published_hint: "{source}: source is now published; consider making this evidence public."
 ee_reformat_failed: AI reformat failed.
 ee_duplicates_hint: Duplicate scan is not yet wired.
 ee_preview: Preview

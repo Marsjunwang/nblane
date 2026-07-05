@@ -217,7 +217,7 @@ def _normalize_evidence_row(row: dict) -> dict | None:
         out["original_language"] = original_language
     # v2 free-text: .strip() trims only the outer whitespace of the whole
     # string, leaving internal newlines intact.
-    for key in ("origin_ref", "origin_detail", "original_content_hash"):
+    for key in ("origin_ref", "origin_detail", "original_content_hash", "source_content_hash"):
         val = row.get(key)
         if val is not None and str(val).strip():
             out[key] = str(val).strip()
