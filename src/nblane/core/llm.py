@@ -307,6 +307,21 @@ def ui_language() -> str:
     return "zh" if _UI_LANG == "zh" else "en"
 
 
+def _thinking_extra_body(enable_thinking: bool | None) -> dict[str, object]:
+    """Build ``extra_body`` to toggle reasoning models' thinking phase.
+
+    Qwen3 ("thinking") models emit a long ``reasoning_content`` phase before
+    any answer ``content``; for format-only transforms (reorganize, polish,
+    translate, ...) that phase is pure latency with no visible progress, so
+    callers pass ``enable_thinking=False`` to skip it. ``None`` leaves the
+    provider default untouched. Providers that don't recognize the key ignore
+    it, so this stays safe across OpenAI-compatible backends.
+    """
+    if enable_thinking is None:
+        return {}
+    return {"enable_thinking": bool(enable_thinking)}
+
+
 def chat(
     system: str,
     user: str,
@@ -318,6 +333,7 @@ def chat(
     timeout: float | None = None,
     max_tokens: int | None = None,
     meta_out: dict | None = None,
+    enable_thinking: bool | None = None,
 ) -> str:
     """Send a single-turn chat and return the reply text.
 
@@ -326,6 +342,9 @@ def chat(
 
     When *meta_out* is provided it is populated with response metadata such as
     ``finish_reason`` so callers can detect length-truncated output.
+
+    *enable_thinking* toggles reasoning models' thinking phase (see
+    :func:`_thinking_extra_body`); ``None`` uses the provider default.
     """
     reload_env_if_changed()
     if not is_configured():
@@ -343,6 +362,7 @@ def chat(
             timeout=timeout or timeout_seconds(),
         )
         use_stream = stream or stream_callback is not None
+        extra_body = _thinking_extra_body(enable_thinking)
         response = client.chat.completions.create(
             model=str(model or "").strip() or _MODEL,
             temperature=temperature,
@@ -352,6 +372,7 @@ def chat(
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            **({"extra_body": extra_body} if extra_body else {}),
         )
         if use_stream:
             return _collect_stream_text(response, stream_callback, meta_out=meta_out)
@@ -374,11 +395,15 @@ def chat_messages(
     timeout: float | None = None,
     max_tokens: int | None = None,
     meta_out: dict | None = None,
+    enable_thinking: bool | None = None,
 ) -> str:
     """Multi-turn chat: *system* plus *messages* (user/assistant only).
 
     Each item must have ``role`` ``user`` or ``assistant`` and
     ``content`` text. Returns assistant text or an error string on failure.
+
+    *enable_thinking* toggles reasoning models' thinking phase (see
+    :func:`_thinking_extra_body`); ``None`` uses the provider default.
     """
     reload_env_if_changed()
     if not is_configured():
@@ -407,12 +432,14 @@ def chat_messages(
             timeout=timeout or timeout_seconds(),
         )
         use_stream = stream or stream_callback is not None
+        extra_body = _thinking_extra_body(enable_thinking)
         response = client.chat.completions.create(
             model=str(model or "").strip() or _MODEL,
             temperature=temperature,
             stream=use_stream,
             max_tokens=max_tokens if max_tokens is not None else max_tokens_default(),
             messages=api_messages,
+            **({"extra_body": extra_body} if extra_body else {}),
         )
         if use_stream:
             return _collect_stream_text(response, stream_callback, meta_out=meta_out)

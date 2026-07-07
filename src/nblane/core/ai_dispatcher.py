@@ -402,6 +402,22 @@ def _operation(value: object, visual_kind: str = "") -> str:
     return "visual" if visual_kind == "diagram" else "polish"
 
 
+# Format-only / mechanical transforms: they reshape or restate existing text
+# and gain nothing from a reasoning model's chain-of-thought. On thinking
+# models (e.g. Qwen3) that pre-answer phase is pure latency with no visible
+# progress -- the blog editor just spins -- so we skip it for these.
+_FORMAT_ONLY_OPERATIONS = {"reorganize", "polish", "shorten", "tone", "translate"}
+
+
+def _thinking_for_operation(operation: str) -> bool | None:
+    """Return ``False`` to skip thinking for format-only ops, else ``None``.
+
+    ``None`` leaves the provider default so operations that genuinely benefit
+    from reasoning (expand, rewrite, outline, ...) are unaffected.
+    """
+    return False if operation in _FORMAT_ONLY_OPERATIONS else None
+
+
 def _target_from_selection(selected_block: dict[str, Any]) -> AIPatchTarget:
     range_payload = _as_dict(selected_block.get("range"))
     block_ids = [
@@ -594,6 +610,7 @@ def _reorganize_document(
     prompt: str,
     model: str | None,
     stream_callback: Callable[[str], None] | None,
+    enable_thinking: bool | None = None,
 ) -> tuple[str, bool]:
     """Reorganize the WHOLE document, chunking long bodies to dodge truncation.
 
@@ -630,6 +647,7 @@ def _reorganize_document(
             model=model,
             max_tokens=max(ceiling, estimated_out + 256),
             meta_out=chat_meta,
+            enable_thinking=enable_thinking,
         )
         if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
             raise RuntimeError(raw)
@@ -681,6 +699,7 @@ def _reorganize_document(
             max_tokens=min(ceiling, chunk_estimate + 512),
             timeout=chunk_timeout,
             meta_out=chat_meta,
+            enable_thinking=enable_thinking,
         )
         if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
             raise RuntimeError(raw)
@@ -735,6 +754,7 @@ def _summarize_document(
             temperature=0.2,
             model=model,
             max_tokens=512,
+            enable_thinking=False,
         )
         if reply.startswith("LLM error:") or reply.startswith("AI features not configured."):
             raise RuntimeError(reply)
@@ -842,6 +862,7 @@ def generate_ai_patch(
             prompt=prompt,
             model=clean_model or None,
             stream_callback=stream_callback,
+            enable_thinking=_thinking_for_operation("reorganize"),
         )
         raw = reorganized
         raw_text = reorganized
@@ -878,6 +899,7 @@ def generate_ai_patch(
             stream_callback=stream_callback,
             model=clean_model or None,
             meta_out=chat_meta,
+            enable_thinking=_thinking_for_operation(clean_operation),
         )
         if raw.startswith("LLM error:") or raw.startswith("AI features not configured."):
             raise RuntimeError(raw)
