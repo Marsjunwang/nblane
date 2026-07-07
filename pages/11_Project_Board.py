@@ -72,12 +72,15 @@ from nblane.web_shared import (
     assert_files_current,
     ensure_file_snapshot,
     refresh_file_snapshots,
+    render_action_ai_settings,
     render_current_goal_strip,
     render_git_backup_notices,
     render_page_help,
     select_profile,
     stash_git_backup_results,
 )
+
+_PROJECT_BOARD_AI_ACTIONS = ("project.suggest_refs",)
 
 apply_ui_language_from_session()
 
@@ -2008,11 +2011,21 @@ def main() -> None:
         st.caption(ui["page_context_line"])
     with head_goal:
         render_current_goal_strip(selected, compact=True, align="right")
-    render_page_help(
-        ui,
-        key=f"project_board_help:{selected}",
-        docs_path=f"docs/{llm_client.ui_language()}/guides/project-board.md",
-    )
+    help_col, ai_col = st.columns(2, gap="small")
+    with help_col:
+        render_page_help(
+            ui,
+            key=f"project_board_help:{selected}",
+            docs_path=f"docs/{llm_client.ui_language()}/guides/project-board.md",
+        )
+    with ai_col:
+        with st.popover(ui.get("ai_config_short", "AI"), key=f"project_board_ai_settings:{selected}"):
+            render_action_ai_settings(
+                selected,
+                _PROJECT_BOARD_AI_ACTIONS,
+                ui=ui,
+                key_prefix="project_board",
+            )
 
     # Component path: the React timeline owns the overview chips, the inline
     # create-project form, and the per-project rows in one compact surface, so

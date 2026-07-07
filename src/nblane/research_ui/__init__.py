@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from .context import ResearchContext
-from .ai_config import _render_ai_config_panel
 from ._helpers import _render_pdf_import_warnings, _render_research_help, _render_research_sidecar_status
 from .source_inbox import (
     _render_candidate_preview,
@@ -17,7 +16,6 @@ from .connectors import _render_connectors
 
 __all__ = [
     "ResearchContext",
-    "_render_ai_config_panel",
     "_render_candidate_preview",
     "_render_claims_citations",
     "_render_connectors",

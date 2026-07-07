@@ -19,20 +19,27 @@ profile_created: Profile '{name}' created.
 ai_not_configured: AI not configured (rule-based only)
 ai_add_key_caption: Set an API key in the sidebar AI / LLM settings, or add `LLM_API_KEY` to `.env`.
 llm_settings_title: AI / LLM
+llm_connection_title: Connection
+llm_language_title: Language
+llm_advanced_title: Advanced
 llm_provider: Provider
 llm_base_url: Base URL
 llm_model: Model
 llm_custom_model: Custom model
 llm_custom_model_choice: Custom…
 llm_api_key: API key
-llm_api_key_help: Session only. Leave blank to keep an existing key from this session or .env.
+llm_api_key_help: Leave blank to keep the existing key.
 llm_ui_lang: Interface language
 llm_reply_lang: Model reply language
 llm_reply_lang_en: English
 llm_reply_lang_zh: Chinese
+llm_reply_lang_auto: Follow input
 llm_configured: 'AI enabled: {label}'
 llm_not_configured: API key is not set.
-llm_session_only: These settings apply to this app session and are not written to disk.
+llm_connection_save: Save connection
+llm_connection_verifying: Verifying connection…
+llm_connection_ok: 'Connected: {label}'
+llm_connection_error: 'Connection failed: {detail}'
 page_help_short: Guide
 page_help_docs_link: '[Open full guide]({path})'
 page_help_docs_open_inline: Open full guide

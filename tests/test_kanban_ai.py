@@ -818,7 +818,7 @@ nodes:
         self.assertIn("archive_done_card", frontend)
         self.assertIn("archive_confirm", frontend)
         self.assertNotIn('emit("request_done_ingest"', frontend)
-        self.assertIn("llm_client.reply_language()}_{kanban_ai_backend(profile)}", shared)
+        self.assertIn("llm_client.reply_language_mode()}_{backend}", shared)
         self.assertIn("def kanban_ai_backend_key(profile: str)", shared)
 
     def test_parse_filters_existing_vague_and_duplicate_subtasks(

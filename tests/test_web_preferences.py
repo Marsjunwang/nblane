@@ -117,7 +117,9 @@ class TestWebPreferences(unittest.TestCase):
                 alice = load_web_preferences("alice")
                 bob = load_web_preferences("bob")
 
-        self.assertEqual(alice["ai"]["llm"]["provider"], "OpenAI")
+        self.assertEqual(alice["ai"]["llm"]["ui_lang"], "zh")
+        self.assertEqual(alice["ai"]["llm"]["reply_lang"], "en")
+        self.assertNotIn("provider", alice["ai"]["llm"])
         self.assertEqual(alice["ai"]["paper"]["translation_backend"], "codex")
         self.assertEqual(alice["ai"]["paper"]["translation_model"], "qwen-plus")
         self.assertEqual(alice["ai"]["paper"]["deep_read_model"], "gpt-5.1-codex")
@@ -177,7 +179,7 @@ class TestWebPreferences(unittest.TestCase):
         normalized = normalize_web_preferences(raw, profile="alice")
         dumped = str(normalized)
 
-        self.assertEqual(normalized["ai"]["llm"]["provider"], "OpenAI")
+        self.assertNotIn("provider", normalized["ai"]["llm"])
         self.assertEqual(normalized["ai"]["kanban_backend"], "codex")
         self.assertEqual(normalized["ai"]["actions"]["research.paper_translate"]["llm_model"], "qwen-plus")
         self.assertEqual(normalized["ai"]["actions"]["research.paper_search_codex"]["codex_model"], "gpt-5.1-codex")
@@ -272,7 +274,7 @@ class TestWebPreferences(unittest.TestCase):
                 text = web_preferences_path("alice").read_text(encoding="utf-8")
                 prefs = load_web_preferences("alice")
 
-        self.assertEqual(prefs["ai"]["llm"]["provider"], "Custom")
+        self.assertNotIn("provider", prefs["ai"]["llm"])
         self.assertEqual(prefs["ai"]["kanban_backend"], "codex")
         self.assertNotIn("sk-nope", text)
         self.assertNotIn("api_key", text)

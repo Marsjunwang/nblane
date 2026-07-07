@@ -62,7 +62,6 @@ from nblane.core.research_papers import (
     upload_paper_library_pdf,
 )
 from nblane.core.research_sources import add_research_source, load_research_sources, save_research_sources
-from nblane.core.web_preferences import load_web_preferences
 from nblane.research_paper_reader_component.events import ANNOTATION_UPDATE
 from nblane.web_i18n import home_ui
 
@@ -750,19 +749,18 @@ def _paper_library_codex_idle_timeout_seconds(body: dict[str, object], reasoning
 
 
 def _paper_library_reply_language(profile_path: Path, body: dict[str, object], query: str) -> str:
+    """Resolve reply language for a paper-library request.
+
+    An explicit ``reply_language``/``reply_lang`` in the request body always
+    wins. Otherwise this defers to the shared ``llm.reply_language()``
+    resolver (fed the query text so "auto" mode can detect the language from
+    it), so the reader no longer has its own CJK-detection/defaulting rule
+    that could disagree with the rest of the app.
+    """
     clean = _clean_text(body.get("reply_language") or body.get("reply_lang")).lower()
     if clean in {"en", "zh"}:
         return clean
-    try:
-        preferences = load_web_preferences(profile_path)
-    except Exception:
-        preferences = {}
-    ai = preferences.get("ai") if isinstance(preferences.get("ai"), dict) else {}
-    llm = ai.get("llm") if isinstance(ai.get("llm"), dict) else {}
-    clean = _clean_text(llm.get("reply_lang")).lower()
-    if clean in {"en", "zh"}:
-        return clean
-    return "zh" if any("\u4e00" <= char <= "\u9fff" for char in query) else ""
+    return llm_client.reply_language(text=query)
 
 
 def _reader_settings(payload: dict[str, object], page: int, target_lang: str) -> dict[str, object]:

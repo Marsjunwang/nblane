@@ -23,6 +23,7 @@ _SECRET_KEY_RE = re.compile(
 )
 _AI_BACKENDS = {"llm", "codex"}
 _LANGUAGES = {"en", "zh"}
+_REPLY_LANGUAGES = {"en", "zh", "auto"}
 _GRANULARITIES = {"milestone", "checklist", "implementation"}
 AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "research.paper_search_codex": "codex",
@@ -130,7 +131,7 @@ def normalize_web_preferences(
     )
     backend = _clean_text(ai.get("kanban_backend"))
     ui_lang = _language(llm.get("ui_lang"))
-    reply_lang = _language(llm.get("reply_lang"))
+    reply_lang = _reply_language(llm.get("reply_lang"))
     granularity = _clean_text(kanban.get("subtask_granularity"))
     if granularity not in _GRANULARITIES:
         granularity = ""
@@ -141,10 +142,6 @@ def normalize_web_preferences(
         "updated": _clean_text(source.get("updated")),
         "ai": {
             "llm": {
-                "provider": _clean_text(llm.get("provider")),
-                "base_url": _clean_text(llm.get("base_url")),
-                "model": _clean_text(llm.get("model")),
-                "custom_model": _clean_text(llm.get("custom_model")),
                 "ui_lang": ui_lang,
                 "reply_lang": reply_lang,
             },
@@ -324,6 +321,11 @@ def _clean_bool(value: object, *, default: bool) -> bool:
 def _language(value: object) -> str:
     clean = _clean_text(value).lower()
     return clean if clean in _LANGUAGES else ""
+
+
+def _reply_language(value: object) -> str:
+    clean = _clean_text(value).lower()
+    return clean if clean in _REPLY_LANGUAGES else ""
 
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

@@ -58,6 +58,7 @@ class TestChatMessages(unittest.TestCase):
         from nblane.core import llm
 
         original = llm.current_config(mask_key=False)
+        original_reply_mode = llm.reply_language_mode()
         with patch.dict(
             os.environ,
             {
@@ -75,7 +76,7 @@ class TestChatMessages(unittest.TestCase):
                     api_key=str(original["api_key"]),
                     model=str(original["model"]),
                     ui_lang=str(original["ui_lang"]),
-                    reply_lang=str(original["reply_lang"]),
+                    reply_lang=original_reply_mode,
                 )
 
     def test_visual_config_reuses_llm_key_for_dashscope(self) -> None:

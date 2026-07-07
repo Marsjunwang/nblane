@@ -778,7 +778,7 @@ def generate_ai_patch(
 ) -> dict[str, Any]:
     """Generate an AI patch candidate without mutating the document."""
 
-    lang = llm_client.reply_language()
+    lang = llm_client.reply_language(text=prompt or markdown)
     clean_visual_kind = _clean_text(visual_kind).strip().lower()
     requested_visual_kind = clean_visual_kind
     if clean_visual_kind in {"diagram", "mermaid", "flowchart", "sequence", "state", "class", "mindmap"}:

@@ -41,6 +41,7 @@ from typing import Any
 import yaml
 
 from nblane.core import git_backup
+from nblane.core import llm as llm_client
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir, validate_profile_name
 from nblane.core.research_sources import (
@@ -7836,10 +7837,16 @@ def _paper_search_codex_home_policy(filters: dict[str, Any]) -> str:
 
 
 def _paper_search_reply_language(query: str, filters: dict[str, Any]) -> str:
+    """Resolve reply language for a paper search request.
+
+    An explicit ``reply_language``/``reply_lang`` filter always wins;
+    otherwise defers to the shared ``llm.reply_language()`` resolver (fed
+    the query text) instead of a separate, locally duplicated CJK sniff.
+    """
     clean = _clean_text(filters.get("reply_language") or filters.get("reply_lang")).lower()
     if clean in {"en", "zh"}:
         return clean
-    return "zh" if re.search(r"[\u4e00-\u9fff]", _clean_text(query)) else ""
+    return llm_client.reply_language(text=query)
 
 
 def _positive_float(value: object) -> float | None:

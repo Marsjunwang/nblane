@@ -95,16 +95,6 @@ const AI_PROMPT_REQUIRED_OPERATIONS = new Set(["formula", "visual"]);
 // Operations that rewrite the WHOLE document: their markdown_fallback replaces
 // the entire editor body rather than being appended at a block.
 const AI_WHOLE_DOCUMENT_OPERATIONS = new Set(["reorganize"]);
-// Lightweight model picker options. Empty value = server default (LLM_MODEL).
-// Persisted per-profile in localStorage so each writer keeps their pick.
-const AI_MODEL_OPTIONS = [
-  { value: "", labelKey: "ai_model_default" },
-  { value: "qwen3.6-plus", labelKey: "" },
-  { value: "qwen3-max", labelKey: "" },
-  { value: "qwen-plus", labelKey: "" },
-  { value: "qwen-turbo", labelKey: "" },
-];
-const AI_MODEL_STORAGE_PREFIX = "nb-blog-ai-model:";
 const WRITE_ACTIONS = new Set([
   "markdown_changed",
   "save_post",
@@ -166,8 +156,6 @@ const DEFAULT_LABELS = {
   ai_patch_regenerate: "Regenerate",
   ai_patch_reject: "Reject",
   ai_patch_target: "Target",
-  ai_model_label: "AI model",
-  ai_model_default: "Default",
   ai_stream_cancel: "Cancel",
   ai_stream_cancelled: "Cancelled",
   ai_stream_failed: "AI generation failed",
@@ -466,34 +454,6 @@ function persistLayout(storageKey, state) {
   }
 }
 
-function readStoredAIModel(profileKey) {
-  if (!profileKey || typeof window === "undefined") {
-    return "";
-  }
-  try {
-    return cleanText(
-      window.localStorage.getItem(AI_MODEL_STORAGE_PREFIX + profileKey) || "",
-    );
-  } catch (_err) {
-    return "";
-  }
-}
-
-function persistAIModel(profileKey, model) {
-  if (!profileKey || typeof window === "undefined") {
-    return;
-  }
-  try {
-    const key = AI_MODEL_STORAGE_PREFIX + profileKey;
-    if (model) {
-      window.localStorage.setItem(key, model);
-    } else {
-      window.localStorage.removeItem(key);
-    }
-  } catch (_err) {
-    // localStorage can be unavailable in private browsing or embedded contexts.
-  }
-}
 
 function normalizeMeta(raw) {
   const meta = { ...asObject(raw) };
@@ -3209,11 +3169,6 @@ function ShellEditor(props) {
   const [outlineVersion, setOutlineVersion] = useState(0);
   const [treeUiVersion, setTreeUiVersion] = useState(0);
 
-  const aiModelProfileKey = cleanText(args.profile || documentId || "default");
-  const [aiModel, setAiModel] = useState(() =>
-    readStoredAIModel(aiModelProfileKey),
-  );
-  const aiModelRef = useRef(aiModel);
 
   const latestMarkdownRef = useRef(initialMarkdown);
   const loadedDocumentRef = useRef("");
@@ -3324,18 +3279,6 @@ function ShellEditor(props) {
     setStatusFilter(initialStatusFilter);
   }, [initialStatusFilter]);
 
-  // Keep the AI model ref in sync and persist the writer's pick per profile.
-  useEffect(() => {
-    aiModelRef.current = aiModel;
-    persistAIModel(aiModelProfileKey, aiModel);
-  }, [aiModel, aiModelProfileKey]);
-
-  // Re-read the stored model when the active profile changes.
-  useEffect(() => {
-    const stored = readStoredAIModel(aiModelProfileKey);
-    aiModelRef.current = stored;
-    setAiModel(stored);
-  }, [aiModelProfileKey]);
 
   useEffect(() => {
     if (largePreview.key && !largePreviewRow) {
@@ -4385,7 +4328,7 @@ function ShellEditor(props) {
       visual_kind: cleanText(request.visual_kind),
       selected_block: selectionContext,
       stream_id: streamId,
-      model: cleanText(request.model || aiModelRef.current),
+      model: cleanText(request.model),
       markdown: markdownBeforeAI,
       dirty: computeDirty(markdownBeforeAI, draftMetaRef.current),
     });
@@ -4871,25 +4814,6 @@ function ShellEditor(props) {
           >
             {label(labels, "ai_action_reorganize", "Reorganize")}
           </button>
-          <label className="nb-ai-model-picker" title={label(labels, "ai_model_label", "AI model")}>
-            <span className="nb-ai-model-picker-label">
-              {label(labels, "ai_model_label", "AI model")}
-            </span>
-            <select
-              className="nb-select"
-              value={aiModel}
-              disabled={Boolean(pendingAIAction)}
-              onChange={(event) => setAiModel(cleanText(event.target.value))}
-            >
-              {AI_MODEL_OPTIONS.map((option) => (
-                <option key={option.value || "__default__"} value={option.value}>
-                  {option.labelKey
-                    ? label(labels, option.labelKey, option.value)
-                    : option.value}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
         <div className="nb-toolbar-actions compact">
           <button

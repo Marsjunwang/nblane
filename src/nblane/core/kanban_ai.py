@@ -885,7 +885,7 @@ def generate_kanban_task_alignment_options(
         task_title=task.title,
         task_text=format_kanban_task_for_ai(task),
         ai_context=ai_context,
-        reply_language=llm.reply_language(),
+        reply_language=llm.reply_language(text=task.title),
         context_refs=[f"kanban:{task_id}"],
         require_review=record_activity,
     )
@@ -1209,7 +1209,7 @@ def generate_kanban_subtask_proposals_detailed(
         ai_context=ai_context,
         granularity=granularity,
         subtask_style_hint=subtask_style_hint,
-        reply_language=llm.reply_language(),
+        reply_language=llm.reply_language(text=task.title),
         context_refs=[f"kanban:{task_id}"],
         require_review=record_activity,
     )

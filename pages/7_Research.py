@@ -7,7 +7,6 @@ import streamlit as st
 from nblane.core.io import profile_dir
 from nblane.research_ui import (
     ResearchContext,
-    _render_ai_config_panel,
     _render_candidate_preview,
     _render_claims_citations,
     _render_connectors,
@@ -27,9 +26,22 @@ from nblane.web_i18n import research_ui
 from nblane.web_shared import (
     apply_ui_language_from_session,
     ensure_file_snapshot,
+    render_action_ai_settings,
     render_current_goal_strip,
     render_git_backup_notices,
     select_profile,
+)
+
+_RESEARCH_AI_ACTIONS = (
+    "research.paper_search_codex",
+    "research.paper_translate",
+    "research.paper_explain_selection",
+    "research.paper_source_guide",
+    "research.paper_review_card",
+    "research.paper_qa",
+    "research.paper_claim_extract",
+    "research.paper_deep_read_codex",
+    "research.paper_compare_codex",
 )
 
 apply_ui_language_from_session()
@@ -94,7 +106,12 @@ with _head_goal:
             key=f"research_ai_config_popover:{selected}",
             use_container_width=False,
         ):
-            _render_ai_config_panel(ctx)
+            render_action_ai_settings(
+                selected,
+                _RESEARCH_AI_ACTIONS,
+                ui=ui,
+                key_prefix="research",
+            )
 
 inbox = load_research_sources(selected)
 

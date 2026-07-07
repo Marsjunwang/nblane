@@ -19,20 +19,27 @@ profile_created: 已创建档案「{name}」。
 ai_not_configured: 未配置 AI（仅规则模式）
 ai_add_key_caption: 可在侧边栏 AI / LLM 设置里填写 API key，也可在 `.env` 中设置 `LLM_API_KEY`。
 llm_settings_title: AI / LLM
+llm_connection_title: 连接
+llm_language_title: 语言
+llm_advanced_title: 高级
 llm_provider: 服务商
 llm_base_url: Base URL
 llm_model: 模型
 llm_custom_model: 自定义模型
 llm_custom_model_choice: 自定义…
 llm_api_key: API key
-llm_api_key_help: 仅当前会话生效。留空会继续使用本会话或 .env 中已有的 key。
+llm_api_key_help: 留空将保留已有的 key。
 llm_ui_lang: 界面语言
 llm_reply_lang: 模型回复语言
 llm_reply_lang_en: 英文
 llm_reply_lang_zh: 中文
+llm_reply_lang_auto: 跟随输入
 llm_configured: AI 已启用：{label}
 llm_not_configured: 尚未设置 API key。
-llm_session_only: 这些设置只应用到当前页面会话，不会写入磁盘。
+llm_connection_save: 保存连接
+llm_connection_verifying: 正在验证连接…
+llm_connection_ok: 已连接：{label}
+llm_connection_error: 连接失败：{detail}
 page_help_short: 使用说明
 page_help_docs_link: '[打开完整说明]({path})'
 page_help_docs_open_inline: 打开完整说明

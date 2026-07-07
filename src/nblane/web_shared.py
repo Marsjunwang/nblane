@@ -202,10 +202,16 @@ def kanban_ai_backend(profile: str) -> str:
 
 
 def kanban_ai_suffix(profile: str) -> str:
-    """Return the language/backend suffix for Kanban AI draft caches."""
+    """Return the language/backend suffix for Kanban AI draft caches.
+
+    Uses the raw reply-language *mode* (zh/en/auto), not the language a
+    specific request resolves to -- otherwise "auto" would key every draft
+    under whichever language the UI happens to be in, even though different
+    tasks under "auto" can resolve to different reply languages.
+    """
 
     backend = kanban_ai_backend(profile)
-    base_suffix = f"{llm_client.reply_language()}_{kanban_ai_backend(profile)}"
+    base_suffix = f"{llm_client.reply_language_mode()}_{backend}"
     model = _kanban_ai_model_preference(profile, backend)
     model_suffix = re.sub(r"[^a-zA-Z0-9_.-]+", "_", model).strip("_") or "default"
     return f"{base_suffix}_{model_suffix}"
@@ -265,8 +271,14 @@ def _llm_model_options(provider: str) -> list[str]:
     return [*models, _LLM_CUSTOM_MODEL_CHOICE]
 
 
-def _ensure_llm_session_defaults(profile: str = "") -> None:
-    """Seed sidebar LLM widgets from the current runtime config."""
+def _reset_llm_session_for_profile_change(profile: str) -> bool:
+    """Clear stale LLM widget state when the active profile changed.
+
+    Returns True if a reset happened. Shared by the connection and language
+    seeders so a profile switch clears both, but each seeder still only
+    *sets* the widget keys it owns -- reassigning a key after its widget
+    has already rendered this run raises a StreamlitAPIException.
+    """
     profile_changed = bool(
         profile
         and st.session_state.get(_LLM_PREFS_PROFILE_KEY) != profile
@@ -286,35 +298,21 @@ def _ensure_llm_session_defaults(profile: str = "") -> None:
         ):
             st.session_state.pop(key, None)
         st.session_state[_LLM_PREFS_PROFILE_KEY] = profile
+    return profile_changed
+
+
+def _ensure_connection_session_defaults(profile: str = "") -> None:
+    """Seed Connection widgets (provider/base_url/model) from ``.env``."""
+    profile_changed = _reset_llm_session_for_profile_change(profile)
+    llm_client.reload_env_if_changed()
     cfg = llm_client.current_config(mask_key=False)
-    prefs = load_web_preferences(profile) if profile else {}
-    ai_prefs = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
-    llm_prefs = (
-        ai_prefs.get("llm")
-        if isinstance(ai_prefs.get("llm"), dict)
-        else {}
-    )
-    base_url = str(llm_prefs.get("base_url") or cfg.get("base_url") or "")
-    model = str(llm_prefs.get("model") or cfg.get("model") or "")
-    ui_lang = _session_or_env_language(
-        _UI_LANG_KEY,
-        _UI_LANG_WIDGET_KEY,
-        "UI_LANG",
-    )
-    reply_lang = _session_or_env_language(
-        _LLM_REPLY_LANG_KEY,
-        _LLM_REPLY_LANG_WIDGET_KEY,
-        "LLM_REPLY_LANG",
-    )
-    provider = str(llm_prefs.get("provider") or "").strip() or _llm_provider_for(
-        base_url
-    )
-    if provider not in _LLM_PROVIDER_PRESETS:
-        provider = _llm_provider_for(base_url)
-    ui_lang = str(llm_prefs.get("ui_lang") or "").strip() or ui_lang
-    reply_lang = str(llm_prefs.get("reply_lang") or "").strip() or reply_lang
+    # Connection (base_url/model/provider) is deployment-wide and comes only
+    # from .env / the runtime client, never from per-profile YAML.
+    base_url = str(cfg.get("base_url") or "")
+    model = str(cfg.get("model") or "")
+    provider = _llm_provider_for(base_url)
     model_options = _llm_model_options(provider)
-    custom_model = str(llm_prefs.get("custom_model") or model)
+    custom_model = model
     model_choice = model if model in model_options else _LLM_CUSTOM_MODEL_CHOICE
 
     # Keep widgets aligned with the persisted profile/default config until the
@@ -326,17 +324,57 @@ def _ensure_llm_session_defaults(profile: str = "") -> None:
         st.session_state[_LLM_BASE_URL_KEY] = base_url
         st.session_state[_LLM_CUSTOM_MODEL_KEY] = custom_model
         st.session_state[_LLM_MODEL_CHOICE_KEY] = model_choice
-        st.session_state[_UI_LANG_KEY] = ui_lang
-        st.session_state[_LLM_REPLY_LANG_KEY] = reply_lang
 
     st.session_state.setdefault(_LLM_PROVIDER_KEY, provider)
     st.session_state.setdefault(_LLM_LAST_PROVIDER_KEY, provider)
     st.session_state.setdefault(_LLM_BASE_URL_KEY, base_url)
     st.session_state.setdefault(_LLM_CUSTOM_MODEL_KEY, custom_model)
     st.session_state.setdefault(_LLM_MODEL_CHOICE_KEY, model_choice)
+
+
+def _ensure_language_session_defaults(profile: str = "") -> None:
+    """Seed Language widgets (ui_lang/reply_lang) from profile prefs/env."""
+    profile_changed = _reset_llm_session_for_profile_change(profile)
+    prefs = load_web_preferences(profile) if profile else {}
+    ai_prefs = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    llm_prefs = (
+        ai_prefs.get("llm")
+        if isinstance(ai_prefs.get("llm"), dict)
+        else {}
+    )
+    ui_lang = _session_or_env_language(
+        _UI_LANG_KEY,
+        _UI_LANG_WIDGET_KEY,
+        "UI_LANG",
+    )
+    reply_lang = _session_or_env_language(
+        _LLM_REPLY_LANG_KEY,
+        _LLM_REPLY_LANG_WIDGET_KEY,
+        "LLM_REPLY_LANG",
+    )
+    ui_lang = str(llm_prefs.get("ui_lang") or "").strip() or ui_lang
+    reply_lang = str(llm_prefs.get("reply_lang") or "").strip() or reply_lang
+
+    if profile_changed or not st.session_state.get(_LLM_PREFS_DIRTY_KEY):
+        st.session_state[_UI_LANG_KEY] = ui_lang
+        st.session_state[_LLM_REPLY_LANG_KEY] = reply_lang
+
     st.session_state.setdefault(_UI_LANG_KEY, ui_lang)
     st.session_state.setdefault(_LLM_REPLY_LANG_KEY, reply_lang)
     apply_ui_language_from_session()
+
+
+def _ensure_llm_session_defaults(profile: str = "") -> None:
+    """Seed both Connection and Language widgets from runtime config.
+
+    Used by callers that need both without rendering the Connection/Language
+    widgets separately (``ensure_llm_session``, the combined
+    ``render_llm_settings``). Pages that render Connection and Language as
+    separate sections must call the individual seeders instead, since each
+    widget key may only be assigned once per run.
+    """
+    _ensure_connection_session_defaults(profile)
+    _ensure_language_session_defaults(profile)
 
 
 def _default_profile_for(profiles: list[str]) -> str:
@@ -404,9 +442,9 @@ def seed_ui_language_before_nav() -> None:
     if not needs_reseed:
         apply_ui_language_from_session()
         return
-    # _ensure_llm_session_defaults reads web-preferences.yaml, writes
+    # _ensure_language_session_defaults reads web-preferences.yaml, writes
     # _UI_LANG_KEY into session_state, and calls apply_ui_language_from_session.
-    _ensure_llm_session_defaults(profile)
+    _ensure_language_session_defaults(profile)
 
 
 def _sync_llm_provider_preset() -> None:
@@ -446,17 +484,11 @@ def _normalize_llm_model_choice(provider: str) -> None:
 
 def _apply_llm_sidebar_config(
     *,
-    base_url: str,
-    model: str,
-    api_key: str,
     ui_lang: str,
     reply_lang: str,
 ) -> None:
-    """Apply sidebar values to the process-wide LLM client."""
+    """Apply sidebar language values to the process-wide LLM client."""
     llm_client.configure(
-        base_url=base_url,
-        model=model,
-        api_key=api_key or None,
         ui_lang=ui_lang,
         reply_lang=reply_lang,
     )
@@ -465,24 +497,16 @@ def _apply_llm_sidebar_config(
 def _persist_llm_preferences(
     *,
     profile: str,
-    provider: str,
-    base_url: str,
-    model: str,
-    custom_model: str,
     ui_lang: str,
     reply_lang: str,
 ) -> None:
-    """Persist non-secret sidebar LLM preferences for one profile."""
+    """Persist non-secret sidebar language preferences for one profile."""
 
     update_web_preferences(
         profile,
         {
             "ai": {
                 "llm": {
-                    "provider": provider,
-                    "base_url": base_url,
-                    "model": model,
-                    "custom_model": custom_model,
                     "ui_lang": ui_lang,
                     "reply_lang": reply_lang,
                 }
@@ -572,202 +596,22 @@ def _read_page_help_docs(docs_path: str) -> str:
     return ""
 
 
-def _action_preferences(prefs: dict[str, object]) -> dict[str, dict[str, object]]:
-    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
-    actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
-    return {
-        str(name): dict(value)
-        for name, value in actions.items()
-        if isinstance(value, dict)
-    }
-
-
-def _action_config_row(
-    u: dict[str, str],
-    actions: dict[str, dict[str, object]],
-    page: str,
-    action: str,
-) -> dict[str, str]:
-    pref = actions.get(action, {})
-    configured_backend = str(pref.get("backend") or "").strip()
-    default_backend = AI_ACTION_DEFAULT_BACKENDS.get(action, "llm")
-    backend = configured_backend or default_backend
-    model = str(
-        pref.get("codex_model" if backend == "codex" else "llm_model")
-        or ""
-    ).strip()
-    return {
-        u.get("ai_config_overview_col_page", "Page"): page,
-        u.get("ai_config_overview_col_action", "Action"): action,
-        u.get("ai_config_overview_col_backend", "Backend"): backend,
-        u.get("ai_config_overview_col_model", "Model"): (
-            model or u.get("ai_config_overview_default_model", "app default")
-        ),
-        u.get("ai_config_overview_col_source", "Source"): (
-            u.get("ai_config_overview_profile_override", "profile override")
-            if configured_backend or model
-            else u.get("ai_config_overview_app_default", "app default")
-        ),
-    }
-
-
-def _render_ai_scope_flow(
-    u: dict[str, str],
-    *,
-    llm_ready: bool,
-    codex_ready: bool,
-    override_count: int,
-) -> None:
-    items = [
-        (
-            u.get("ai_scope_global_llm", "Global LLM"),
-            u.get("ai_scope_ready", "ready") if llm_ready else u.get("ai_scope_missing", "missing"),
-        ),
-        (
-            u.get("ai_scope_page_actions", "Page actions"),
-            u.get("ai_scope_overrides_count", "{count} override(s)").format(
-                count=override_count
-            ),
-        ),
-        (
-            u.get("ai_scope_codex", "Codex"),
-            u.get("ai_scope_ready", "ready") if codex_ready else u.get("ai_scope_missing", "missing"),
-        ),
-        (
-            u.get("ai_scope_review_gate", "Review gate"),
-            u.get("ai_scope_candidate_first", "candidate-first writes"),
-        ),
-    ]
-    html = [
-        "<style>",
-        ".nblane-ai-flow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:.35rem 0 1rem;}",
-        ".nblane-ai-step{border:1px solid rgba(120,120,120,.35);border-radius:8px;padding:10px 12px;min-width:135px;background:rgba(120,120,120,.06);}",
-        ".nblane-ai-step strong{display:block;font-size:.88rem;margin-bottom:3px;}",
-        ".nblane-ai-step span{font-size:.78rem;opacity:.78;}",
-        ".nblane-ai-arrow{align-self:center;opacity:.45;}",
-        "</style>",
-        '<div class="nblane-ai-flow">',
-    ]
-    for index, (title, detail) in enumerate(items):
-        if index:
-            html.append('<div class="nblane-ai-arrow">→</div>')
-        html.append(
-            f'<div class="nblane-ai-step"><strong>{title}</strong><span>{detail}</span></div>'
-        )
-    html.append("</div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
-
-
-def _render_ai_config_overview(profile: str, u: dict[str, str]) -> None:
-    prefs = load_web_preferences(profile) if profile else {}
-    actions = _action_preferences(prefs)
-    llm_cfg = llm_client.current_config(mask_key=True)
-    codex_status = _codex_status(profile)
-    action_groups: list[tuple[str, tuple[str, ...]]] = [
-        (
-            u.get("ai_page_dashboard", "Dashboard"),
-            ("dashboard.goal_skill_match", "dashboard.graph_insights"),
-        ),
-        (
-            u.get("ai_page_evidence", "Evidence Review"),
-            ("kanban.subtasks", "kanban.task_alignment"),
-        ),
-        (
-            u.get("ai_page_research", "Research"),
-            (
-                "research.paper_search_codex",
-                "research.paper_translate",
-                "research.paper_review_card",
-                "research.paper_deep_read",
-            ),
-        ),
-        (
-            u.get("ai_page_kanban", "Kanban"),
-            ("kanban.subtasks", "kanban.task_alignment"),
-        ),
-        (
-            u.get("ai_page_project", "Project Board"),
-            ("project.suggest_refs",),
-        ),
-    ]
-    rows = [
-        _action_config_row(u, actions, page, action)
-        for page, group_actions in action_groups
-        for action in group_actions
-    ]
-    override_count = sum(
-        1
-        for value in actions.values()
-        if str(value.get("backend") or value.get("llm_model") or value.get("codex_model") or "").strip()
-    )
-    with st.popover(
-        u.get("ai_config_overview_title", "AI config overview"),
-        key=_codex_widget_key(profile, "ai_config_overview"),
-    ):
-        st.caption(
-            u.get(
-                "ai_config_overview_caption",
-                "See which global runtime and profile-level action preferences are in effect.",
-            )
-        )
-        _render_ai_scope_flow(
-            u,
-            llm_ready=llm_client.is_configured(),
-            codex_ready=codex_status.installed and codex_status.logged_in,
-            override_count=override_count,
-        )
-        c_llm, c_codex = st.columns(2)
-        with c_llm:
-            st.markdown(f"**{u.get('ai_config_overview_llm_title', 'Global LLM')}**")
-            st.caption(
-                u.get("ai_config_overview_llm_line", "Provider: {provider} · Model: {model}").format(
-                    provider=str(llm_cfg.get("base_url") or "-"),
-                    model=str(llm_cfg.get("model") or "-"),
-                )
-            )
-            st.caption(
-                u.get("ai_config_overview_llm_scope", "API key is session/env scoped; page actions store non-secret preferences.")
-            )
-        with c_codex:
-            st.markdown(f"**{u.get('ai_config_overview_codex_title', 'Codex')}**")
-            st.caption(
-                (
-                    u.get("codex_logged_in", "Codex login: ready.")
-                    if codex_status.logged_in
-                    else u.get("codex_not_logged_in", "Codex login is not ready.")
-                )
-            )
-            st.caption(
-                u.get("codex_scope_hint", "Auth and CLI config are shared for this deployment; profile config only stores non-secret preferences.")
-            )
-        st.markdown(f"**{u.get('ai_config_overview_actions_title', 'Page action preferences')}**")
-        st.table(rows)
-
-
-def _session_llm_model() -> str:
-    """Derive the active model from the session model-choice widgets."""
-    model_choice = st.session_state.get(_LLM_MODEL_CHOICE_KEY)
-    if model_choice == _LLM_CUSTOM_MODEL_CHOICE:
-        return str(st.session_state.get(_LLM_CUSTOM_MODEL_KEY, "") or "").strip()
-    return str(model_choice or "").strip()
-
-
 def ensure_llm_session(profile: str = "") -> None:
     """Seed and apply the LLM/Codex runtime config without rendering UI.
 
     The settings *widgets* now live on a dedicated Settings page, but every
     page still needs the process-wide ``llm_client`` configured from the
     persisted profile preferences / session state. This replays the same side
-    effects ``render_llm_settings`` used to perform inline on each page:
-    seed session defaults, then push them into the LLM client. An empty API
-    key is passed through as ``None`` so the env / .env key is preserved.
+    effects ``render_llm_settings`` used to perform inline on each page: seed
+    session defaults, then push language into the LLM client. The connection
+    (base_url/api_key/model) is deployment-wide and lives in ``.env``, not
+    session state, so it is refreshed here via ``reload_env_if_changed``
+    rather than pushed from session widgets.
     """
-    _ensure_llm_session_defaults(profile)
+    llm_client.reload_env_if_changed()
+    _ensure_language_session_defaults(profile)
     _ensure_codex_session_defaults(profile)
     _apply_llm_sidebar_config(
-        base_url=str(st.session_state.get(_LLM_BASE_URL_KEY, "") or "").strip(),
-        model=_session_llm_model(),
-        api_key=str(st.session_state.get(_LLM_API_KEY_KEY, "") or "").strip(),
         ui_lang=str(st.session_state.get(_UI_LANG_KEY, "") or ""),
         reply_lang=str(st.session_state.get(_LLM_REPLY_LANG_KEY, "") or ""),
     )
@@ -787,131 +631,363 @@ def _render_sidebar_ai_status(u: dict[str, str]) -> None:
         st.caption("⚪ " + u.get("sidebar_ai_off", "AI not configured"))
 
 
-def render_llm_settings(profile: str = "", *, expanded: bool = False) -> None:
-    """Render app-wide LLM settings. Used on the dedicated Settings page."""
-    _ensure_llm_session_defaults(profile)
+def render_connection_settings(profile: str = "") -> None:
+    """Render the deployment-wide LLM connection (base URL/model/API key).
+
+    Unlike language and per-action preferences, the connection is shared by
+    the whole deployment and lives in ``.env``, not per-profile YAML. Changes
+    only take effect on explicit Save, which writes ``.env`` and runs a
+    one-shot verification ping.
+    """
+    _ensure_connection_session_defaults(profile)
     u = common_ui()
 
-    with st.expander(u["llm_settings_title"], expanded=expanded):
-        if profile:
-            _render_ai_config_overview(profile, u)
-            _render_kanban_ai_backend_selector(profile, u)
-            _render_codex_sidebar_entry(profile, u)
-            st.divider()
+    provider_names = list(_LLM_PROVIDER_PRESETS)
+    provider = st.selectbox(
+        u["llm_provider"],
+        provider_names,
+        key=_LLM_PROVIDER_KEY,
+    )
+    _sync_llm_provider_preset()
+    provider = st.session_state.get(_LLM_PROVIDER_KEY, provider)
+    _normalize_llm_model_choice(provider)
 
-        provider_names = list(_LLM_PROVIDER_PRESETS)
-        provider = st.selectbox(
-            u["llm_provider"],
-            provider_names,
-            key=_LLM_PROVIDER_KEY,
-            on_change=_mark_llm_preferences_dirty,
-        )
-        _sync_llm_provider_preset()
-        provider = st.session_state.get(_LLM_PROVIDER_KEY, provider)
-        _normalize_llm_model_choice(provider)
+    base_url = st.text_input(
+        u["llm_base_url"],
+        key=_LLM_BASE_URL_KEY,
+    ).strip()
 
-        base_url = st.text_input(
-            u["llm_base_url"],
-            key=_LLM_BASE_URL_KEY,
-            on_change=_mark_llm_preferences_dirty,
+    model_options = _llm_model_options(provider)
+    model_choice = st.selectbox(
+        u["llm_model"],
+        model_options,
+        format_func=lambda value: (
+            u["llm_custom_model_choice"]
+            if value == _LLM_CUSTOM_MODEL_CHOICE
+            else value
+        ),
+        key=_LLM_MODEL_CHOICE_KEY,
+    )
+    if model_choice == _LLM_CUSTOM_MODEL_CHOICE:
+        model = st.text_input(
+            u["llm_custom_model"],
+            key=_LLM_CUSTOM_MODEL_KEY,
         ).strip()
+    else:
+        model = model_choice
+        st.session_state[_LLM_CUSTOM_MODEL_KEY] = model_choice
 
-        model_options = _llm_model_options(provider)
-        model_choice = st.selectbox(
-            u["llm_model"],
-            model_options,
-            format_func=lambda value: (
-                u["llm_custom_model_choice"]
-                if value == _LLM_CUSTOM_MODEL_CHOICE
-                else value
-            ),
-            key=_LLM_MODEL_CHOICE_KEY,
-            on_change=_mark_llm_preferences_dirty,
-        )
-        if model_choice == _LLM_CUSTOM_MODEL_CHOICE:
-            model = st.text_input(
-                u["llm_custom_model"],
-                key=_LLM_CUSTOM_MODEL_KEY,
-                on_change=_mark_llm_preferences_dirty,
-            ).strip()
+    api_key_input = st.text_input(
+        u["llm_api_key"],
+        type="password",
+        help=u["llm_api_key_help"],
+        key=_LLM_API_KEY_KEY,
+    ).strip()
+
+    if llm_client.is_configured():
+        st.caption(u["llm_configured"].format(label=llm_client.model_label()))
+    else:
+        st.caption(u["llm_not_configured"])
+
+    if st.button(u["llm_connection_save"], type="primary"):
+        api_key = api_key_input or llm_client.api_key_unmasked()
+        llm_client.set_env_connection(base_url, api_key, model)
+        with st.spinner(u["llm_connection_verifying"]):
+            result = llm_client.verify_connection()
+        if result.get("ok"):
+            st.success(
+                u["llm_connection_ok"].format(label=llm_client.model_label())
+            )
         else:
-            model = model_choice
-            st.session_state[_LLM_CUSTOM_MODEL_KEY] = model_choice
+            st.error(u["llm_connection_error"].format(detail=result.get("detail", "")))
 
-        api_key = st.text_input(
-            u["llm_api_key"],
-            type="password",
-            help=u["llm_api_key_help"],
-            key=_LLM_API_KEY_KEY,
-        ).strip()
 
-        _prepare_language_widget(
-            _UI_LANG_KEY,
-            _UI_LANG_WIDGET_KEY,
-            "UI_LANG",
-        )
-        _prepare_language_widget(
-            _LLM_REPLY_LANG_KEY,
-            _LLM_REPLY_LANG_WIDGET_KEY,
-            "LLM_REPLY_LANG",
-        )
+def render_language_settings(profile: str = "") -> None:
+    """Render UI language and reply language. Applies live, per-profile."""
+    _ensure_language_session_defaults(profile)
+    u = common_ui()
 
-        ui_lang = st.selectbox(
-            u["llm_ui_lang"],
-            ["zh", "en"],
-            format_func=lambda value: (
-                u["llm_reply_lang_zh"]
-                if value == "zh"
-                else u["llm_reply_lang_en"]
-            ),
-            key=_UI_LANG_WIDGET_KEY,
-            on_change=_sync_language_widget_to_persistent,
-            args=(_UI_LANG_KEY, _UI_LANG_WIDGET_KEY),
-        )
+    _prepare_language_widget(
+        _UI_LANG_KEY,
+        _UI_LANG_WIDGET_KEY,
+        "UI_LANG",
+    )
+    _prepare_language_widget(
+        _LLM_REPLY_LANG_KEY,
+        _LLM_REPLY_LANG_WIDGET_KEY,
+        "LLM_REPLY_LANG",
+    )
 
-        reply_lang = st.selectbox(
-            u["llm_reply_lang"],
-            ["en", "zh"],
-            format_func=lambda value: (
-                u["llm_reply_lang_zh"]
-                if value == "zh"
-                else u["llm_reply_lang_en"]
-            ),
-            key=_LLM_REPLY_LANG_WIDGET_KEY,
-            on_change=_sync_language_widget_to_persistent,
-            args=(_LLM_REPLY_LANG_KEY, _LLM_REPLY_LANG_WIDGET_KEY),
-        )
-        st.session_state[_UI_LANG_KEY] = ui_lang
-        st.session_state[_LLM_REPLY_LANG_KEY] = reply_lang
+    ui_lang = st.selectbox(
+        u["llm_ui_lang"],
+        ["zh", "en"],
+        format_func=lambda value: (
+            u["llm_reply_lang_zh"] if value == "zh" else u["llm_reply_lang_en"]
+        ),
+        key=_UI_LANG_WIDGET_KEY,
+        on_change=_sync_language_widget_to_persistent,
+        args=(_UI_LANG_KEY, _UI_LANG_WIDGET_KEY),
+    )
 
-        _apply_llm_sidebar_config(
-            base_url=base_url,
-            model=model,
-            api_key=api_key,
+    reply_lang = st.selectbox(
+        u["llm_reply_lang"],
+        ["zh", "en", "auto"],
+        format_func=lambda value: (
+            u["llm_reply_lang_zh"]
+            if value == "zh"
+            else u["llm_reply_lang_en"]
+            if value == "en"
+            else u["llm_reply_lang_auto"]
+        ),
+        key=_LLM_REPLY_LANG_WIDGET_KEY,
+        on_change=_sync_language_widget_to_persistent,
+        args=(_LLM_REPLY_LANG_KEY, _LLM_REPLY_LANG_WIDGET_KEY),
+    )
+    st.session_state[_UI_LANG_KEY] = ui_lang
+    st.session_state[_LLM_REPLY_LANG_KEY] = reply_lang
+
+    _apply_llm_sidebar_config(ui_lang=ui_lang, reply_lang=reply_lang)
+    if profile and st.session_state.get(_LLM_PREFS_DIRTY_KEY):
+        _persist_llm_preferences(
+            profile=profile,
             ui_lang=ui_lang,
             reply_lang=reply_lang,
         )
-        if profile and st.session_state.get(_LLM_PREFS_DIRTY_KEY):
-            _persist_llm_preferences(
-                profile=profile,
-                provider=provider,
-                base_url=base_url,
-                model=model,
-                custom_model=str(st.session_state.get(_LLM_CUSTOM_MODEL_KEY) or ""),
-                ui_lang=ui_lang,
-                reply_lang=reply_lang,
-            )
-            st.session_state[_LLM_PREFS_DIRTY_KEY] = False
+        st.session_state[_LLM_PREFS_DIRTY_KEY] = False
 
-        if llm_client.is_configured():
-            st.caption(
-                u["llm_configured"].format(
-                    label=llm_client.model_label()
-                )
+
+_ACTION_MODEL_DEFAULT = "__default__"
+_ACTION_MODEL_CUSTOM = "__custom__"
+_ACTION_BACKEND_DEFAULT = "__default__"
+_ACTION_CODEX_MODEL_SUGGESTIONS = (
+    "gpt-5.5",
+    "gpt-5.1-codex",
+    "gpt-5-codex",
+)
+
+
+def _action_prefs_for(profile: str, actions: tuple[str, ...]) -> dict[str, dict[str, str]]:
+    prefs = load_web_preferences(profile)
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    stored_actions = ai.get("actions") if isinstance(ai.get("actions"), dict) else {}
+    out: dict[str, dict[str, str]] = {}
+    for action_name in actions:
+        action = (
+            stored_actions.get(action_name)
+            if isinstance(stored_actions.get(action_name), dict)
+            else {}
+        )
+        out[action_name] = {
+            "backend": str(action.get("backend") or "").strip(),
+            "llm_model": str(action.get("llm_model") or "").strip(),
+            "codex_model": str(action.get("codex_model") or "").strip(),
+        }
+    return out
+
+
+def _action_model_picker(
+    u: dict[str, str],
+    *,
+    label: str,
+    widget_key: str,
+    current: str,
+    default_model: str,
+    suggestions: tuple[str, ...],
+) -> str:
+    suggestion_list: list[str] = []
+    for value in (default_model, *suggestions):
+        clean = str(value or "").strip()
+        if clean and clean not in suggestion_list:
+            suggestion_list.append(clean)
+    current = str(current or "").strip()
+    options = [_ACTION_MODEL_DEFAULT, *suggestion_list, _ACTION_MODEL_CUSTOM]
+    if current and current not in suggestion_list:
+        initial = _ACTION_MODEL_CUSTOM
+    elif current:
+        initial = current
+    else:
+        initial = _ACTION_MODEL_DEFAULT
+    choice = st.selectbox(
+        label,
+        options,
+        index=options.index(initial),
+        format_func=lambda value: (
+            u.get("ai_config_use_default", "Use app default")
+            if value == _ACTION_MODEL_DEFAULT
+            else u.get("ai_config_custom_model", "Custom model")
+            if value == _ACTION_MODEL_CUSTOM
+            else value
+        ),
+        key=f"{widget_key}:choice",
+    )
+    if choice == _ACTION_MODEL_DEFAULT:
+        return ""
+    if choice == _ACTION_MODEL_CUSTOM:
+        return st.text_input(
+            u.get("ai_config_custom_model", "Custom model"),
+            value=current if current and current not in suggestion_list else "",
+            key=f"{widget_key}:custom",
+        ).strip()
+    return str(choice).strip()
+
+
+def _action_backend_picker(
+    u: dict[str, str],
+    *,
+    label: str,
+    widget_key: str,
+    current: str,
+    default_backend: str,
+) -> str:
+    options = [_ACTION_BACKEND_DEFAULT, "llm", "codex"]
+    current = str(current or "").strip()
+    initial = current if current in {"llm", "codex"} else _ACTION_BACKEND_DEFAULT
+    default_label = "Codex" if default_backend == "codex" else "LLM"
+    choice = st.selectbox(
+        label,
+        options,
+        index=options.index(initial),
+        format_func=lambda value: (
+            f"{u.get('ai_config_use_default', 'Use app default')} ({default_label})"
+            if value == _ACTION_BACKEND_DEFAULT
+            else "LLM"
+            if value == "llm"
+            else "Codex"
+        ),
+        key=f"{widget_key}:choice",
+    )
+    return "" if choice == _ACTION_BACKEND_DEFAULT else str(choice).strip()
+
+
+def _action_effective_caption(
+    u: dict[str, str],
+    action_name: str,
+    config: dict[str, str],
+    *,
+    llm_default: str,
+) -> str:
+    default_backend = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+    backend = str(config.get("backend") or "").strip() or default_backend
+    model = str(
+        (config.get("codex_model") if backend == "codex" else config.get("llm_model"))
+        or (llm_default if backend != "codex" else "")
+    ).strip()
+    model_label = model or (
+        u.get("ai_config_codex_cli_default", "Codex CLI default")
+        if backend == "codex"
+        else u.get("missing", "missing")
+    )
+    backend_label = "Codex" if backend == "codex" else "LLM"
+    return (
+        f"{u.get('ai_config_effective_backend', 'Effective backend')}: {backend_label} · "
+        f"{u.get('ai_config_effective_model', 'Effective model')}: {model_label}"
+    )
+
+
+def render_action_ai_settings(
+    profile: str,
+    actions: tuple[str, ...],
+    *,
+    ui: dict[str, str] | None = None,
+    key_prefix: str = "",
+) -> None:
+    """Render the shared per-action AI backend/model picker for one page.
+
+    Every AI-capable page renders this same component, scoped to only the
+    actions it owns, inside an identical "AI" popover. It writes only
+    ``ai.actions.<action>`` for the given *actions* -- never the legacy
+    ``ai.kanban_backend`` / ``ai.paper.*`` fields other panels used to touch.
+    Model suggestions are derived from the currently configured provider
+    (via the deployment-wide ``.env`` connection), so the choices offered
+    always match what the deployment's API key can actually call.
+    """
+    u = ui if ui is not None else common_ui()
+    if not profile or not actions:
+        return
+
+    current = _action_prefs_for(profile, actions)
+    llm_cfg = llm_client.current_config(mask_key=True)
+    llm_default = str(llm_cfg.get("model") or "").strip()
+    provider = _llm_provider_for(llm_client.base_url())
+    llm_suggestions = tuple(
+        model
+        for model in _llm_model_options(provider)
+        if model != _LLM_CUSTOM_MODEL_CHOICE
+    )
+    codex_cfg = codex_adapter.current_config(profile=profile or None)
+    codex_default = str(codex_cfg.model or "").strip()
+
+    safe_prefix = re.sub(r"[^a-zA-Z0-9_-]+", "_", key_prefix or "actions").strip("_")
+    form_key = f"ai_action_settings:{safe_prefix}:{profile}"
+
+    next_actions: dict[str, dict[str, str]] = {}
+    with st.form(form_key, border=False):
+        st.caption(
+            u.get(
+                "ai_config_caption",
+                "Choose the AI backend and model per feature. Leave fields on app "
+                "default to follow the deployment connection configured in Settings.",
             )
-        else:
-            st.caption(u["llm_not_configured"])
-        st.caption(u["llm_session_only"])
+        )
+        for action_name in actions:
+            action_cfg = current.get(action_name, {})
+            default_backend = AI_ACTION_DEFAULT_BACKENDS.get(action_name, "llm")
+            label = u.get(f"ai_config_label_{action_name}", action_name)
+            help_text = u.get(f"ai_config_help_{action_name}", "")
+            st.markdown(f"**{label}**")
+            if help_text:
+                st.caption(help_text)
+            cols = st.columns([1.05, 1.25, 1.25], gap="small")
+            widget_key = f"{form_key}:{action_name}"
+            with cols[0]:
+                backend = _action_backend_picker(
+                    u,
+                    label=u.get("ai_config_backend", "Backend"),
+                    widget_key=f"{widget_key}:backend",
+                    current=action_cfg.get("backend", ""),
+                    default_backend=default_backend,
+                )
+            with cols[1]:
+                llm_model = _action_model_picker(
+                    u,
+                    label=u.get("ai_config_llm_model", "LLM model"),
+                    widget_key=f"{widget_key}:llm_model",
+                    current=action_cfg.get("llm_model", ""),
+                    default_model=llm_default,
+                    suggestions=llm_suggestions,
+                )
+            with cols[2]:
+                codex_model = _action_model_picker(
+                    u,
+                    label=u.get("ai_config_codex_model", "Codex model"),
+                    widget_key=f"{widget_key}:codex_model",
+                    current=action_cfg.get("codex_model", ""),
+                    default_model=codex_default,
+                    suggestions=_ACTION_CODEX_MODEL_SUGGESTIONS,
+                )
+            next_config = {
+                "backend": backend,
+                "llm_model": llm_model,
+                "codex_model": codex_model,
+            }
+            st.caption(_action_effective_caption(u, action_name, next_config, llm_default=llm_default))
+            next_actions[action_name] = next_config
+        if st.form_submit_button(u.get("save", "Save"), type="primary", use_container_width=True):
+            update_web_preferences(profile, {"ai": {"actions": next_actions}})
+            st.success(u.get("ai_config_saved", "AI preferences saved."))
+            st.rerun()
+
+
+def render_llm_settings(profile: str = "", *, expanded: bool = False) -> None:
+    """Render app-wide LLM settings. Used on the dedicated Settings page."""
+    u = common_ui()
+
+    with st.expander(u["llm_settings_title"], expanded=expanded):
+        st.markdown(f"**{u['llm_connection_title']}**")
+        render_connection_settings(profile)
+        st.divider()
+        st.markdown(f"**{u['llm_language_title']}**")
+        render_language_settings(profile)
 
 
 def _codex_widget_key(profile: str, name: str) -> str:
@@ -1057,41 +1133,6 @@ def _ensure_profile_codex_config_editor_state(profile: str) -> None:
 def _codex_status(profile: str) -> codex_adapter.CodexStatus:
     return codex_adapter.codex_status(
         codex_adapter.current_config(profile=profile or None)
-    )
-
-
-def _render_kanban_ai_backend_selector(profile: str, u: dict[str, str]) -> None:
-    key = kanban_ai_backend_key(profile)
-    if key not in st.session_state:
-        st.session_state[key] = _kanban_ai_backend_preference(profile)
-    st.selectbox(
-        u.get("kb_ai_backend", "Kanban AI Engine"),
-        list(_KANBAN_AI_BACKENDS),
-        key=key,
-        format_func=lambda value: u.get(
-            f"kb_ai_backend_{value}",
-            str(value).upper(),
-        ),
-        help=u.get(
-            "kb_ai_backend_help",
-            "Choose the engine used by Kanban AI actions.",
-        ),
-    )
-    update_web_preferences(
-        profile,
-        {
-            "ai": {
-                "kanban_backend": kanban_ai_backend(profile),
-                "actions": {
-                    "kanban.task_alignment": {
-                        "backend": kanban_ai_backend(profile),
-                    },
-                    "kanban.subtasks": {
-                        "backend": kanban_ai_backend(profile),
-                    },
-                },
-            }
-        },
     )
 
 

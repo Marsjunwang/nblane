@@ -15,11 +15,14 @@ for the current Python process/session.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
+from pathlib import Path
 
 from nblane.core.paths import REPO_ROOT
 
-_ENV_FILE = REPO_ROOT / ".env"
+_env_file_override = os.getenv("NBLANE_ENV_FILE", "").strip()
+_ENV_FILE = Path(_env_file_override) if _env_file_override else REPO_ROOT / ".env"
 
 try:
     from dotenv import load_dotenv
@@ -28,10 +31,22 @@ try:
 except ImportError:
     pass
 
+_CJK_RE = re.compile(r"[一-鿿]")
+
+
+def _env_file_mtime() -> float:
+    try:
+        return _ENV_FILE.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+_ENV_FILE_MTIME: float = _env_file_mtime()
+
 _DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _DEFAULT_MODEL = "qwen3.6-plus"
 _DEFAULT_UI_LANG = "en"
-_DEFAULT_REPLY_LANG = "en"
+_DEFAULT_REPLY_LANG = ""
 _DEFAULT_TIMEOUT_SECONDS = 90.0
 # OpenAI-compatible gateways (DashScope qwen in particular) cap the output at a
 # low default (~2000 tokens) when ``max_tokens`` is omitted, which silently
@@ -74,6 +89,101 @@ def configure(
         _UI_LANG = ui_lang.strip().lower()
     if reply_lang is not None:
         _REPLY_LANG = reply_lang.strip().lower()
+
+
+def set_env_connection(base_url: str, api_key: str, model: str) -> None:
+    """Persist the deployment-wide LLM connection to ``.env`` and apply it live.
+
+    Writes only ``LLM_BASE_URL``/``LLM_API_KEY``/``LLM_MODEL`` via
+    ``dotenv.set_key``, which edits the file in place and preserves comments
+    and unrelated variables. Raises ``RuntimeError`` if python-dotenv's
+    ``set_key`` isn't available rather than risk a destructive rewrite.
+    """
+    try:
+        from dotenv import set_key
+    except ImportError as exc:
+        raise RuntimeError(
+            "python-dotenv is required to save LLM connection settings"
+        ) from exc
+
+    global _ENV_FILE_MTIME
+
+    if not _ENV_FILE.exists():
+        _ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _ENV_FILE.touch(mode=0o600)
+        os.chmod(_ENV_FILE, 0o600)
+
+    clean_base_url = base_url.strip() or _DEFAULT_BASE_URL
+    clean_api_key = api_key.strip()
+    clean_model = model.strip() or _DEFAULT_MODEL
+
+    set_key(str(_ENV_FILE), "LLM_BASE_URL", clean_base_url)
+    set_key(str(_ENV_FILE), "LLM_API_KEY", clean_api_key)
+    set_key(str(_ENV_FILE), "LLM_MODEL", clean_model)
+
+    os.environ["LLM_BASE_URL"] = clean_base_url
+    os.environ["LLM_API_KEY"] = clean_api_key
+    os.environ["LLM_MODEL"] = clean_model
+
+    configure(base_url=clean_base_url, api_key=clean_api_key, model=clean_model)
+    _ENV_FILE_MTIME = _env_file_mtime()
+
+
+def reload_env_if_changed() -> None:
+    """Reload connection vars from ``.env`` if the file changed on disk.
+
+    Lets a separate process (e.g. the Reader API sidecar) pick up a
+    connection change made through the UI of another process, within one
+    request, without a restart. Only ``LLM_BASE_URL``/``LLM_API_KEY``/
+    ``LLM_MODEL`` are reloaded; language stays session/profile-scoped.
+    """
+    global _ENV_FILE_MTIME
+
+    current_mtime = _env_file_mtime()
+    if current_mtime <= _ENV_FILE_MTIME:
+        return
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_ENV_FILE, override=True)
+    except ImportError:
+        return
+
+    configure(
+        base_url=os.getenv("LLM_BASE_URL", ""),
+        api_key=os.getenv("LLM_API_KEY", ""),
+        model=os.getenv("LLM_MODEL", ""),
+    )
+    _ENV_FILE_MTIME = current_mtime
+
+
+def verify_connection(*, timeout: float | None = None) -> dict[str, str | bool]:
+    """Send a minimal ping to confirm the current connection actually works.
+
+    Returns ``{"ok": bool, "detail": str}``. On failure, ``detail`` carries
+    the raw exception text truncated to a bounded length so a wrong key or
+    model is diagnosable without dumping an unbounded provider error body.
+    """
+    if not is_configured():
+        return {"ok": False, "detail": "no api key configured"}
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            base_url=_BASE_URL,
+            api_key=_API_KEY,
+            timeout=min(timeout or 15.0, timeout_seconds()),
+        )
+        client.chat.completions.create(
+            model=_MODEL,
+            temperature=0,
+            max_tokens=5,
+            messages=[{"role": "user", "content": "reply OK"}],
+        )
+        return {"ok": True, "detail": ""}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:300]}
 
 
 def _masked_api_key(value: str) -> str:
@@ -159,13 +269,33 @@ def max_tokens_default() -> int:
     return max(256, value)
 
 
-def reply_language() -> str:
-    """Return the configured reply language code ('en' or 'zh').
+def reply_language(text: str | None = None) -> str:
+    """Return the resolved reply language code ('en' or 'zh').
 
-    Reads ``LLM_REPLY_LANG`` from the environment.  Any value
-    other than ``'zh'`` falls back to ``'en'``.
+    ``LLM_REPLY_LANG`` is ``"zh"``/``"en"`` for a fixed reply language, or
+    ``"auto"`` (also the default when unset) to follow the input: when
+    *text* is given, detect Chinese vs. English from its characters; when no
+    *text* is available, fall back to the UI language.
     """
-    return "zh" if _REPLY_LANG == "zh" else "en"
+    if _REPLY_LANG == "zh":
+        return "zh"
+    if _REPLY_LANG == "en":
+        return "en"
+    if text:
+        return "zh" if _CJK_RE.search(text) else "en"
+    return ui_language()
+
+
+def reply_language_mode() -> str:
+    """Return the raw configured reply-language mode ('zh'/'en'/'auto').
+
+    Unlike :func:`reply_language`, this is not resolved against any input
+    text — callers that need a stable cache key (rather than the language a
+    specific request would resolve to) should use this instead.
+    """
+    if _REPLY_LANG in ("zh", "en"):
+        return _REPLY_LANG
+    return "auto"
 
 
 def ui_language() -> str:
@@ -197,6 +327,7 @@ def chat(
     When *meta_out* is provided it is populated with response metadata such as
     ``finish_reason`` so callers can detect length-truncated output.
     """
+    reload_env_if_changed()
     if not is_configured():
         return (
             "AI features not configured. "
@@ -249,6 +380,7 @@ def chat_messages(
     Each item must have ``role`` ``user`` or ``assistant`` and
     ``content`` text. Returns assistant text or an error string on failure.
     """
+    reload_env_if_changed()
     if not is_configured():
         return (
             "AI features not configured. "

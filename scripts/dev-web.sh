@@ -242,6 +242,7 @@ stop_sessions
 
 tmux new-session -d -s "$reader_session" -c "$repo_root" \
   "NBLANE_ROOT='$dev_root' \
+   NBLANE_ENV_FILE='$repo_root/.env' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
    ${auth_env} ${grobid_env} ${lang_env} ${llm_env} \
@@ -249,6 +250,7 @@ tmux new-session -d -s "$reader_session" -c "$repo_root" \
 
 tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
   "NBLANE_ROOT='$dev_root' \
+   NBLANE_ENV_FILE='$repo_root/.env' \
    NBLANE_READER_API_BASE='$reader_base' \
    NBLANE_DASHBOARD_CANVAS_BASE='$reader_base' \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
