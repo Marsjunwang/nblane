@@ -107,24 +107,8 @@ dashboard_ai_codex_default: Codex 默认
 dashboard_ai_effective: 实际使用：{backend} · {model}
 dashboard_ai_effective_backend: 实际后端：{backend}
 dashboard_ai_effective_model: 实际模型：{model}
-dashboard_ai_test: 测试
-dashboard_ai_test_model: 测试模型
-dashboard_ai_available: 可用
-dashboard_ai_unavailable: 不可用
-dashboard_ai_llm_unconfigured: LLM API key 未配置。
-dashboard_ai_model_available: 模型测试成功（{seconds}s）。
-dashboard_ai_configured: 已配置
-dashboard_ai_missing: 缺失
-dashboard_ai_missing_key: 缺少 key
-dashboard_ai_installed: 已安装
-dashboard_ai_logged_in: 已登录
-dashboard_ai_login_unknown: 登录状态未知
-dashboard_ai_llm_status: LLM：{status} · {model}
-dashboard_ai_codex_status: Codex：{status}
 dashboard_ai_save: 保存 AI 设置
 dashboard_ai_saved: 首页 AI 设置已保存。
-dashboard_ai_test_goal_skill_match: 测试目标-技能模型
-dashboard_ai_test_ok: 模型测试成功（{seconds}s）。
 dashboard_open_fullscreen_galaxy: 打开全屏星系
 dashboard_canvas_sidecar_unavailable: 全屏星系当前不可达：{base}；已使用本地首页回退视图。
 dashboard_canvas_sidecar_link_disabled_help: 请先启动或转发 Dashboard sidecar，再使用这个入口。

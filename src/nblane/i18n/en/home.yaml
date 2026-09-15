@@ -107,24 +107,8 @@ dashboard_ai_codex_default: Codex default
 dashboard_ai_effective: 'Effective: {backend} · {model}'
 dashboard_ai_effective_backend: 'Effective backend: {backend}'
 dashboard_ai_effective_model: 'Effective model: {model}'
-dashboard_ai_test: Test
-dashboard_ai_test_model: Test model
-dashboard_ai_available: available
-dashboard_ai_unavailable: unavailable
-dashboard_ai_llm_unconfigured: LLM API key is not configured.
-dashboard_ai_model_available: Model test succeeded ({seconds}s).
-dashboard_ai_configured: configured
-dashboard_ai_missing: missing
-dashboard_ai_missing_key: missing key
-dashboard_ai_installed: installed
-dashboard_ai_logged_in: logged in
-dashboard_ai_login_unknown: login unknown
-dashboard_ai_llm_status: 'LLM: {status} · {model}'
-dashboard_ai_codex_status: 'Codex: {status}'
 dashboard_ai_save: Save AI settings
 dashboard_ai_saved: Dashboard AI settings saved.
-dashboard_ai_test_goal_skill_match: Test goal-skill model
-dashboard_ai_test_ok: Model test succeeded ({seconds}s).
 dashboard_open_fullscreen_galaxy: Open Fullscreen Galaxy
 dashboard_canvas_sidecar_unavailable: The fullscreen galaxy is not reachable at {base}; using the local Dashboard fallback.
 dashboard_canvas_sidecar_link_disabled_help: Start or forward the Dashboard sidecar to use this link.

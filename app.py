@@ -6,7 +6,6 @@ Run with:
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import date
 import os
 from pathlib import Path
@@ -536,52 +535,6 @@ def _dashboard_ai_action_payload(profile: str) -> dict[str, dict[str, str]]:
         }
         for action_name, _label_key, _help_key in _DASHBOARD_AI_ACTIONS
     }
-
-
-def _test_dashboard_ai_action(profile: str, action_name: str) -> None:
-    """Run a tiny availability test for one Dashboard AI action."""
-    config = _dashboard_effective_ai_config(profile, action_name)
-    backend = config["backend"]
-    model = config["model"]
-    started = time.perf_counter()
-    if backend == "codex":
-        codex_config = codex_adapter.current_config(profile=profile)
-        if model:
-            codex_config = replace(codex_config, model=model)
-        result = codex_adapter.run_readonly_codex_prompt(
-            profile,
-            "Return exactly OK. Do not edit files.",
-            config=codex_config,
-            timeout_seconds=min(float(codex_config.timeout_seconds or 30.0), 30.0),
-        )
-        latency = time.perf_counter() - started
-        if result.ok:
-            st.success(ui["dashboard_ai_test_ok"].format(seconds=f"{latency:.1f}"))
-        else:
-            st.warning(
-                codex_adapter.readable_codex_error(
-                    result.error,
-                    result.stderr,
-                    result.output,
-                    result.stdout,
-                )
-            )
-        return
-
-    if not llm_client.is_configured():
-        render_llm_unavailable(ui)
-        return
-    reply = llm_client.chat(
-        "Return exactly OK. No prose.",
-        "OK",
-        temperature=0,
-        model=model or None,
-    )
-    latency = time.perf_counter() - started
-    if reply.startswith("LLM error:") or reply.startswith("AI features not configured"):
-        st.warning(reply)
-    else:
-        st.success(ui["dashboard_ai_test_ok"].format(seconds=f"{latency:.1f}"))
 
 
 def _render_goal_preview(goal: Goal) -> None:
