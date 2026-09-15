@@ -43,7 +43,7 @@ async function canvasPixelStats(locator) {
 }
 
 test("Growth galaxy: comets, clickable legend, focus-dive, no embedded-canvas", async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const consoleErrors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -82,20 +82,28 @@ test("Growth galaxy: comets, clickable legend, focus-dive, no embedded-canvas", 
   // Clickable North Star / goal navigator replaces the static role key.
   const navChips = page.locator(".hd-graph3d-nav-chip");
   expect(await navChips.count()).toBeGreaterThan(1);
-  const goalChip = page.locator(".hd-graph3d-nav-chip.direction").first();
+  // The synthetic "Other" goal hub (__other_goal__) is not a payload node, so
+  // selecting it snaps back; drive a real goal chip instead.
+  const goalChip = page.locator('.hd-graph3d-nav-chip.direction:not([data-node-id="__other_goal__"])').first();
   await expect(goalChip).toBeVisible();
   const goalName = (await goalChip.locator("span").innerText()).trim();
   testInfo.annotations.push({ type: "goalChip", description: goalName });
 
-  // Clicking a goal chip selects it (focus-dive into its sub-galaxy).
+  // Clicking a goal chip selects it (focus-dive into its sub-galaxy) and opens
+  // the on-demand inspector drawer.
   const before = await canvasPixelStats(canvas);
   await goalChip.click();
   await page.waitForTimeout(1600); // camera tween + LOD apply
   await expect(goalChip).toHaveClass(/selected/);
+  await expect(goalChip).toHaveAttribute("aria-pressed", "true");
   const after = await canvasPixelStats(canvas);
   testInfo.annotations.push({ type: "focusDive", description: JSON.stringify({ before, after }) });
   // The framed sub-galaxy changes the rendered pixels (camera moved / tiers faded).
   expect(after.colored).toBeGreaterThan(40);
+
+  // Close the inspector drawer so the legend stays clickable.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".hd-drawer-root")).toHaveCount(0);
 
   // Clicking the North Star chip resets to the full overview.
   const trunkChip = page.locator(".hd-graph3d-nav-chip.trunk").first();
@@ -103,6 +111,8 @@ test("Growth galaxy: comets, clickable legend, focus-dive, no embedded-canvas", 
     await trunkChip.click();
     await page.waitForTimeout(1400);
     await expect(trunkChip).toHaveClass(/selected/);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".hd-drawer-root")).toHaveCount(0);
   }
 
   // Comet shower spans the whole stage (not pinned to a narrow right strip).

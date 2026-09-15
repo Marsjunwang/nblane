@@ -3,6 +3,27 @@ import { expect, test } from "@playwright/test";
 // Star-tree hero on the Streamlit home dashboard; the URL resolves against
 // the configured use.baseURL.
 
+// The isolated instance's default profile may have an empty graph (no 3D
+// canvas in the hero); the seeded `dev` profile carries a full skill tree.
+async function ensureDevProfile(page) {
+  await page.waitForSelector('[data-testid="stSidebar"]', { timeout: 20_000 });
+  await page.waitForSelector('[data-baseweb="select"]', { timeout: 20_000 });
+  const sidebar = page.locator('[data-testid="stSidebar"]');
+  const text = await sidebar.innerText().catch(() => "");
+  if (/当前档案[\s\S]*\bdev\b|Current profile[\s\S]*\bdev\b/.test(text)) return;
+  const profileSelect = sidebar.locator('[data-baseweb="select"]').first();
+  await profileSelect.click();
+  const opt = page.getByRole("option", { name: /^\s*dev\s*$/ }).first();
+  if (await opt.count()) {
+    await opt.click();
+  } else {
+    await page.keyboard.type("dev");
+    await page.keyboard.press("Enter");
+  }
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+}
+
 async function homeDashboardFrame(page) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     for (const frame of page.frames()) {
@@ -58,6 +79,7 @@ test("star-tree 3D view renders with bloom stars and no console errors", async (
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await ensureDevProfile(page);
 
   const dashboard = await homeDashboardFrame(page);
   await expect(dashboard.locator(".hd-graph-hero")).toBeVisible({ timeout: 30_000 });

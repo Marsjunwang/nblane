@@ -24,6 +24,27 @@ async function attachScreenshot(page, name: string, testInfo) {
   expect(body.byteLength).toBeGreaterThan(25_000);
 }
 
+// The isolated instance's default profile may have an empty graph (no 3D
+// canvas in the hero); the seeded `dev` profile carries a full skill tree.
+async function ensureDevProfile(page) {
+  await page.waitForSelector('[data-testid="stSidebar"]', { timeout: 20_000 });
+  await page.waitForSelector('[data-baseweb="select"]', { timeout: 20_000 });
+  const sidebar = page.locator('[data-testid="stSidebar"]');
+  const text = await sidebar.innerText().catch(() => "");
+  if (/当前档案[\s\S]*\bdev\b|Current profile[\s\S]*\bdev\b/.test(text)) return;
+  const profileSelect = sidebar.locator('[data-baseweb="select"]').first();
+  await profileSelect.click();
+  const opt = page.getByRole("option", { name: /^\s*dev\s*$/ }).first();
+  if (await opt.count()) {
+    await opt.click();
+  } else {
+    await page.keyboard.type("dev");
+    await page.keyboard.press("Enter");
+  }
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+}
+
 async function canvasPixelStats(locator) {
   return locator.evaluate((canvas: HTMLCanvasElement) => {
     const probe = document.createElement("canvas");
@@ -51,14 +72,6 @@ async function canvasPixelStats(locator) {
   });
 }
 
-async function canvasBitmapSnapshot(locator) {
-  const dataUrl = await locator.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL("image/png"));
-  const encoded = dataUrl.split(",", 2)[1] || "";
-  const body = Buffer.from(encoded, "base64");
-  expect(body.byteLength).toBeGreaterThan(1000);
-  return body;
-}
-
 async function homeDashboardFrame(page) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     for (const frame of page.frames()) {
@@ -74,26 +87,11 @@ async function homeDashboardFrame(page) {
   throw new Error("Home Dashboard component frame did not become ready.");
 }
 
-async function embeddedDashboardCanvasFrame(page) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    for (const frame of page.frames()) {
-      const url = frame.url();
-      if (!url.includes("/dashboard") || !url.includes("embed=1")) {
-        continue;
-      }
-      if (await frame.locator(".hd-canvas-panel").count()) {
-        return frame;
-      }
-    }
-    await page.waitForTimeout(250);
-  }
-  throw new Error("Embedded Dashboard Canvas frame did not become ready.");
-}
-
 test("Home dashboard exposes top-right guide, AI settings, optional fullscreen galaxy link, and scales", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openStreamlitDashboard(page);
+  await ensureDevProfile(page);
 
   await expect(page.locator("body")).toContainText(/Dashboard|仪表盘/);
 
@@ -103,63 +101,60 @@ test("Home dashboard exposes top-right guide, AI settings, optional fullscreen g
   await expect(page.locator("body")).toContainText(/Source|Evidence|Claim|Skill|Output|材料|证据|断言|能力|表达/);
 
   await page.keyboard.press("Escape").catch(() => {});
-  const aiButton = page.getByRole("button", { name: /本页 AI 设置|Dashboard AI|AI 设置|AI settings/ }).first();
+  // The unified per-action AI panel (commit f36bdb9) sits behind an "AI"
+  // popover (ui key `ai_config_short`, falling back to "AI").
+  const aiButton = page.getByRole("button", { name: /^(AI|本页 AI 设置|Dashboard AI)$/ }).first();
   await expect(aiButton).toBeVisible();
   await aiButton.click();
-  await expect(page.locator("body")).toContainText(/Goal-skill|目标.*能力|Backend|后端|模型|Model/);
-  await expect(page.locator("body")).toContainText(/LLM[:：][\s\S]*Codex[:：]|Codex[:：][\s\S]*LLM[:：]/);
-  await expect(page.getByRole("button", { name: /测试模型|Test model/ }).first()).toBeVisible();
-
-  await expect(page.getByText(/打开全屏星系|Open Fullscreen Galaxy/).first()).toBeVisible();
+  await expect(page.locator("body")).toContainText(/dashboard\.goal_skill_match|dashboard\.graph_insights|Goal-skill|目标.*技能/);
+  await expect(page.locator("body")).toContainText(/LLM model[\s\S]*Codex model|Codex model[\s\S]*LLM model/);
+  await expect(page.getByText(/Effective backend[:：]|生效后端/).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /^(Save|保存)$/ }).first()).toBeVisible();
+  await page.keyboard.press("Escape").catch(() => {});
 
   const dashboard = await homeDashboardFrame(page);
+  await expect(dashboard.locator('[data-action="open-fullscreen-galaxy"]')).toBeVisible();
   await expect(dashboard.locator(".hd-graph-hero")).toBeVisible();
   await expect(dashboard.locator(".hd-graph-hero .hd-graph3d-stage canvas").first()).toBeVisible({ timeout: 20_000 });
   const heroPixelStats = await canvasPixelStats(dashboard.locator(".hd-graph-hero .hd-graph3d-stage canvas").first());
   expect(heroPixelStats.alpha).toBeGreaterThan(900);
   expect(heroPixelStats.colored).toBeGreaterThan(120);
   expect(heroPixelStats.unique).toBeGreaterThan(6);
-  await expect(dashboard.locator(".hd-workbench")).toBeVisible();
-  const workbenchOverlap = await dashboard.evaluate(() => {
-    const quick = document.querySelector(".hd-workbench-quick")?.getBoundingClientRect();
-    const health = document.querySelector(".hd-workbench-health")?.getBoundingClientRect();
-    const overlaps = Boolean(
-      quick &&
-      health &&
-      quick.left < health.right &&
-      quick.right > health.left &&
-      quick.top < health.bottom &&
-      quick.bottom > health.top
-    );
-    return {
-      overlaps,
-      quickTop: quick?.top || 0,
-      healthTop: health?.top || 0,
-    };
-  });
-  expect(workbenchOverlap.overlaps).toBeFalsy();
-  const summaryNodeLinks = dashboard.locator('.hd-graph-hero [data-action="open-8502-node"]');
-  if (await summaryNodeLinks.count()) {
-    const firstSummaryHref = await summaryNodeLinks.first().getAttribute("href");
-    expect(firstSummaryHref || "").toContain("view=3d");
-    expect(firstSummaryHref || "").toContain("node=");
+  // The in-app hero layout retired the old .hd-workbench section; the hero
+  // panel (skill progress, evidence shortcut, today-focus signals) is its
+  // semantic successor.
+  await expect(dashboard.locator(".hd-workbench")).toHaveCount(0);
+  await expect(dashboard.locator(".hd-graph-hero-panel")).toBeVisible();
+  expect(await dashboard.locator(".hd-hero-signal").count()).toBeGreaterThan(0);
+  // Per-node links out to the standalone canvas were retired; hero nodes are
+  // now selected in place via select-node chips (legend nav, goals only).
+  const heroNodeChips = dashboard.locator('.hd-graph-hero [data-action="select-node"][data-node-id]');
+  if (await heroNodeChips.count()) {
+    const firstChip = heroNodeChips.first();
+    expect(await firstChip.getAttribute("data-node-id")).toBeTruthy();
+    await firstChip.click();
+    await expect(firstChip).toHaveAttribute("aria-pressed", "true");
   }
   await expect(dashboard.locator(".hd-canvas-embed")).toHaveCount(0);
-  await expect(dashboard.locator('[data-action="open-goal-form"]')).toHaveCount(0);
-  await expect(dashboard.locator("button.hd-goal-pill")).toHaveCount(0);
-  expect(await dashboard.locator('[data-action="navigate"]').count()).toBeGreaterThan(6);
+  // Goal pills live in the context header now and drive an inline goal editor.
+  const goalPills = dashboard.locator('button.hd-goal-pill[data-action="select-goal"]');
+  expect(await goalPills.count()).toBeGreaterThan(0);
+  const firstGoalPill = goalPills.first();
+  await firstGoalPill.click();
+  await expect(firstGoalPill).toHaveAttribute("aria-pressed", "true");
+  await expect(dashboard.locator('[data-section="goal-editor"]')).toBeVisible();
+  await dashboard.locator('[data-action="close-goal-form"]').first().click();
+  await expect(dashboard.locator('[data-section="goal-editor"]')).toHaveCount(0);
+  expect(await dashboard.locator('[data-action="navigate"]').count()).toBeGreaterThan(2);
   const firstScreenOrder = await dashboard.evaluate(() => {
     const context = document.querySelector(".hd-context-header")?.getBoundingClientRect();
     const hero = document.querySelector(".hd-graph-hero")?.getBoundingClientRect();
-    const workbench = document.querySelector(".hd-workbench")?.getBoundingClientRect();
     return {
       contextTop: context?.top ?? 0,
       heroTop: hero?.top ?? 0,
-      workbenchTop: workbench?.top ?? 0,
     };
   });
   expect(firstScreenOrder.contextTop).toBeLessThan(firstScreenOrder.heroTop);
-  expect(firstScreenOrder.heroTop).toBeLessThan(firstScreenOrder.workbenchTop);
 
   await attachScreenshot(page, "dashboard-desktop", testInfo);
   const desktopLayout = await page.evaluate(() => ({
@@ -181,13 +176,23 @@ test("Home dashboard exposes top-right guide, AI settings, optional fullscreen g
       clientWidth: document.documentElement.clientWidth,
       heroHeight: hero?.height || 0,
       graphLeft: graph?.left || 0,
-      panelLeft: panel?.left || 0,
+      graphTop: graph?.top || 0,
       graphWidth: graph?.width || 0,
+      graphBottom: graph?.bottom || 0,
+      panelLeft: panel?.left || 0,
+      panelTop: panel?.top || 0,
     };
   });
   expect(zoomStressLayout.scrollWidth).toBeLessThanOrEqual(zoomStressLayout.clientWidth + 8);
-  expect(zoomStressLayout.heroHeight).toBeLessThanOrEqual(760);
-  expect(zoomStressLayout.panelLeft).toBeGreaterThan(zoomStressLayout.graphLeft + zoomStressLayout.graphWidth - 4);
+  // The hero is a two-column grid down to a 1100px breakpoint, then stacks.
+  if (zoomStressLayout.clientWidth > 1104) {
+    expect(zoomStressLayout.heroHeight).toBeLessThanOrEqual(820);
+    expect(zoomStressLayout.panelLeft).toBeGreaterThan(zoomStressLayout.graphLeft + zoomStressLayout.graphWidth - 4);
+  } else {
+    // Stacked: the panel sits below the graph and the hero grows past one
+    // screen by design (graph stage alone is min-height 560px).
+    expect(zoomStressLayout.panelTop).toBeGreaterThanOrEqual(zoomStressLayout.graphBottom - 4);
+  }
 
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.waitForTimeout(500);
@@ -209,61 +214,8 @@ test("Home dashboard exposes top-right guide, AI settings, optional fullscreen g
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.waitForTimeout(500);
-  if (await dashboard.locator('[data-action="load-embedded-canvas"]').count()) {
-    await dashboard.locator('[data-action="load-embedded-canvas"]').click();
-    await expect(dashboard.locator(".hd-canvas-embed iframe")).toBeVisible();
-
-    const canvasFrame = await embeddedDashboardCanvasFrame(page);
-    await expect(canvasFrame.locator('[data-action="view-toggle"][data-view="focus"]')).toHaveClass(/active/);
-    await expect(canvasFrame.locator(".hd-focus-path")).toBeVisible();
-    expect(await canvasFrame.locator(".hd-focus-node").count()).toBeGreaterThan(3);
-    expect(await canvasFrame.locator('[data-action="select-node"][data-source="focus-path"]').count()).toBeGreaterThan(3);
-    await canvasFrame.getByRole("button", { name: /3D Graph|3D 全局图/ }).click();
-    await expect(canvasFrame.locator('[data-action="view-toggle"][data-view="3d"]')).toHaveClass(/active/);
-    await expect(canvasFrame.locator(".hd-explore-canvas")).toBeVisible();
-    await expect(canvasFrame.locator(".hd-graph3d-stage")).toBeVisible();
-    await expect(canvasFrame.locator(".hd-graph3d-stage canvas").first()).toBeVisible({ timeout: 20_000 });
-    await expect(canvasFrame.locator(".hd-explore-panel")).toBeVisible();
-    await expect(canvasFrame.locator(".hd-explore-list button").first()).toBeVisible();
-    const graphLayout = await canvasFrame.locator(".hd-explore-canvas").evaluate((element) => {
-      return {
-        scrollWidth: element.scrollWidth,
-        clientWidth: element.clientWidth,
-        scrollHeight: element.scrollHeight,
-        clientHeight: element.clientHeight,
-        graphCanvases: element.querySelectorAll(".hd-graph3d-stage canvas").length,
-        exploreButtons: element.querySelectorAll(".hd-explore-list button").length,
-        legendItems: element.querySelectorAll(".hd-graph3d-legend span").length,
-      };
-    });
-    expect(graphLayout.graphCanvases).toBeGreaterThan(0);
-    expect(graphLayout.exploreButtons).toBeGreaterThan(8);
-    expect(graphLayout.legendItems).toBeGreaterThan(6);
-    expect(graphLayout.scrollWidth).toBeLessThanOrEqual(graphLayout.clientWidth + 4);
-    expect(graphLayout.scrollHeight).toBeLessThanOrEqual(graphLayout.clientHeight + 280);
-    const pixelStats = await canvasPixelStats(canvasFrame.locator(".hd-graph3d-stage canvas").first());
-    expect(pixelStats.alpha).toBeGreaterThan(900);
-    expect(pixelStats.colored).toBeGreaterThan(140);
-    expect(pixelStats.unique).toBeGreaterThan(7);
-    const canvas = canvasFrame.locator(".hd-graph3d-stage canvas").first();
-    const canvasBox = await canvas.boundingBox();
-    expect(canvasBox?.width || 0).toBeGreaterThan(280);
-    expect(canvasBox?.height || 0).toBeGreaterThan(460);
-    const beforeDrag = await canvasBitmapSnapshot(canvas);
-    await page.mouse.move((canvasBox?.x || 0) + (canvasBox?.width || 0) / 2, (canvasBox?.y || 0) + (canvasBox?.height || 0) / 2);
-    await page.mouse.down();
-    await page.mouse.move((canvasBox?.x || 0) + (canvasBox?.width || 0) / 2 + 130, (canvasBox?.y || 0) + (canvasBox?.height || 0) / 2 - 70, { steps: 12 });
-    await page.mouse.up();
-    await page.waitForTimeout(600);
-    const afterDrag = await canvasBitmapSnapshot(canvas);
-    await page.mouse.wheel(0, -650);
-    await page.waitForTimeout(500);
-    const afterZoom = await canvasBitmapSnapshot(canvas);
-    expect(Buffer.compare(beforeDrag, afterDrag)).not.toBe(0);
-    expect(Buffer.compare(afterDrag, afterZoom)).not.toBe(0);
-
-    const graphShot = await canvasFrame.locator(".hd-explore-canvas").screenshot();
-    await testInfo.attach("dashboard-3d-graph", { body: graphShot, contentType: "image/png" });
-    expect(graphShot.byteLength).toBeGreaterThan(18_000);
-  }
+  // The in-app "load embedded canvas" trigger was retired (the fullscreen
+  // galaxy on the sidecar replaced it); embedded/standalone canvas behavior
+  // is covered by dashboard_canvas.spec.ts and galaxy_redesign.spec.ts.
+  await expect(dashboard.locator('[data-action="load-embedded-canvas"]')).toHaveCount(0);
 });

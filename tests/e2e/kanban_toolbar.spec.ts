@@ -75,8 +75,10 @@ test("Kanban toolbar folds toggles, Reload/Save, and Total into the board", asyn
   // Reload + Save buttons live in the toolbar.
   await expect(frame.locator("[data-board-reload]")).toBeVisible({ timeout: 8_000 });
   await expect(frame.locator("[data-board-save]")).toBeVisible({ timeout: 8_000 });
-  // The compact Total chip is present.
-  await expect(frame.locator(".kb-toolbar-meta .kb-count")).toBeVisible({ timeout: 8_000 });
+  // The compact Total chip is present (it lives directly inside the toolbar
+  // controls row now; the old .kb-toolbar-meta wrapper is gone).
+  await expect(frame.locator(".kb-toolbar-controls .kb-count").first()).toBeVisible({ timeout: 8_000 });
+  await expect(frame.locator(".kb-toolbar-controls .kb-count").first()).toContainText(/Total|总计|总数/);
 
   // Toggling focus mode flips the layout client-side (focus layout appears).
   await frame.locator('[data-view-pref="focus_mode"]').check();

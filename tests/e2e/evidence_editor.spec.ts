@@ -152,10 +152,21 @@ test("detail pane stays open on the same row after an action (no page jump)", as
   const frame = await findEditorFrame(page);
   expect(frame, "evidence editor iframe should be present").not.toBeNull();
 
-  // Open the first row and capture its id from the detail header.
+  // Open the first row and capture its id from the detail header. Reading
+  // innerText can race a Streamlit fragment rerun (the element detaches
+  // mid-read), so poll until the meta line is readable instead.
   await frame.locator(".ee-li").first().click();
   await expect(frame.locator(".ee-detail")).toBeVisible({ timeout: 8_000 });
-  const metaBefore = await frame.locator(".ee-meta").innerText();
+  let metaBefore = "";
+  await expect
+    .poll(
+      async () => {
+        metaBefore = await frame.locator(".ee-meta").first().innerText().catch(() => "");
+        return metaBefore;
+      },
+      { timeout: 15_000 }
+    )
+    .toMatch(/id:\s*[^\s·]+/);
   const idMatch = metaBefore.match(/id:\s*([^\s·]+)/);
   expect(idMatch, "detail meta should show the row id").not.toBeNull();
   const rowId = idMatch[1];
@@ -169,8 +180,7 @@ test("detail pane stays open on the same row after an action (no page jump)", as
   const frame2 = await findEditorFrame(page);
   expect(frame2, "editor iframe should re-mount").not.toBeNull();
   await expect(frame2.locator(".ee-detail")).toBeVisible({ timeout: 10_000 });
-  const metaAfter = await frame2.locator(".ee-meta").innerText();
-  expect(metaAfter).toContain(rowId);
+  await expect(frame2.locator(".ee-meta")).toContainText(rowId, { timeout: 10_000 });
 
   const body = await page.screenshot({ fullPage: true });
   await testInfo.attach("selection-preserved", { body, contentType: "image/png" });
@@ -273,9 +283,11 @@ test("Done tasks -> evidence picker opens and lists Done tasks", async ({ page }
   await page.waitForTimeout(800);
 
   // The modal renders with its create action (disabled until a task is picked).
+  // The primary action is now "AI preview" (ee_done_ai_preview); the old
+  // deterministic "Create evidence" button moved behind the Fallback path.
   await expect(frame.locator(".ee-modal")).toBeVisible({ timeout: 8_000 });
   await expect(
-    frame.getByRole("button", { name: /生成证据|Create evidence/ })
+    frame.getByRole("button", { name: /AI 预览|AI preview/ })
   ).toBeVisible({ timeout: 8_000 });
 
   const body = await page.screenshot({ fullPage: true });

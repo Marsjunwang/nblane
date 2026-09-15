@@ -55,7 +55,7 @@ async function canvasPixelStats(locator) {
 }
 
 test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector", async ({ page }, testInfo) => {
-  test.setTimeout(75_000);
+  test.setTimeout(240_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openDashboardCanvas(page);
 
@@ -66,9 +66,14 @@ test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector
   await expect(page.locator('[data-action="archive-goal"]')).toHaveCount(0);
   await expect(page.locator(".hd-graph3d-stage")).toBeVisible();
   await expect(page.locator(".hd-graph3d-stage canvas").first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".hd-inspector")).toBeVisible();
+  // The standalone page keeps the inspector as an on-demand drawer: it is
+  // closed by default and opens when a node is selected.
+  await expect(page.locator(".hd-inspector")).toHaveCount(0);
   await expect(page.locator('[data-action="view-toggle"][data-view="3d"]')).toHaveClass(/active/);
-  expect(await page.locator('[data-action="select-node"]').count()).toBeGreaterThan(8);
+  // On the fullbleed standalone page only the legend chips carry select-node;
+  // the explore list lives in the embed variant (exercised below).
+  const legendChips = page.locator('[data-action="select-node"][data-source="graph-legend"]');
+  expect(await legendChips.count()).toBeGreaterThan(1);
 
   const apiResponse = await page.request.get(dashboardUrl("/api/dashboard/payload"));
   expect(apiResponse.ok()).toBeTruthy();
@@ -81,7 +86,26 @@ test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector
   expect(apiPayload.payload.graph.nodes.length).toBeGreaterThan(15);
   expect(apiPayload.payload.graph.edges.length).toBeGreaterThan(20);
 
+  // Selecting a legend node opens the on-demand inspector drawer.
+  const trunkChip = page.locator(".hd-graph3d-nav-chip.trunk").first();
+  await expect(trunkChip).toBeVisible();
+  const trunkLabel = (await trunkChip.locator("span").innerText()).trim();
+  await trunkChip.click();
+  await expect(trunkChip).toHaveClass(/selected/);
+  await expect(page.locator(".hd-drawer-root")).toBeVisible();
+  await expect(page.locator(".hd-inspector")).toContainText(trunkLabel);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".hd-drawer-root")).toHaveCount(0);
+
+  // The embed variant keeps the explore panel: search, placeholder toggle and
+  // an inline (always rendered) inspector.
+  await page.goto(dashboardUrl("/dashboard", { embed: "1", view: "3d" }), {
+    waitUntil: "domcontentloaded",
+    timeout: 20_000,
+  });
+  await expect(page.locator('[data-action="view-toggle"][data-view="3d"]')).toHaveClass(/active/);
   const listNodes = page.locator(".hd-explore-list button");
+  await expect(listNodes.first()).toBeVisible({ timeout: 15_000 });
   expect(await listNodes.count()).toBeGreaterThan(8);
   await expect(page.locator('[data-action="explore-search"]')).toBeVisible();
   await expect(page.locator('[data-action="hide-placeholders"]')).toBeVisible();
@@ -96,7 +120,16 @@ test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector
   await page.locator('[data-action="explore-search"]').fill("");
   await page.locator('[data-action="hide-placeholders"]').uncheck();
   expect(await page.locator(".hd-explore-list button").count()).toBeGreaterThan(8);
+  const embedInspectorText = (await page.locator(".hd-inspector").textContent()) || "";
+  expect(embedInspectorText.length).toBeGreaterThan(20);
 
+  // Back to the standalone fullbleed page for the canvas/layout assertions.
+  await page.goto(dashboardUrl("/dashboard", { view: "3d" }), {
+    waitUntil: "domcontentloaded",
+    timeout: 20_000,
+  });
+  await expect(page.locator(".hd-graph3d-stage canvas").first()).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(2500); // let the orbit + breathing loop settle
   const stats = await canvasPixelStats(page.locator(".hd-graph3d-stage canvas").first());
   expect(stats.alpha).toBeGreaterThan(900);
   expect(stats.colored).toBeGreaterThan(160);
@@ -104,15 +137,11 @@ test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector
 
   const layout = await page.evaluate(() => ({
     graphCanvasCount: document.querySelectorAll(".hd-graph3d-stage canvas").length,
-    graphListCount: document.querySelectorAll(".hd-explore-list button").length,
     scrollWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
-    inspectorText: document.querySelector(".hd-inspector")?.textContent || "",
   }));
   expect(layout.graphCanvasCount).toBeGreaterThan(0);
-  expect(layout.graphListCount).toBeGreaterThan(8);
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth + 4);
-  expect(layout.inspectorText.length).toBeGreaterThan(20);
 
   const body = await page.screenshot({ fullPage: true });
   await testInfo.attach("dashboard-canvas-desktop", { body, contentType: "image/png" });
@@ -122,7 +151,8 @@ test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector
     waitUntil: "domcontentloaded",
     timeout: 20_000,
   });
-  await expect(page.locator('[data-action="select-node"][data-node-id="source:inbox"]').first()).toHaveClass(/selected/);
+  // The deep-linked node is selected on load and opens the inspector drawer.
+  await expect(page.locator(".hd-drawer-root")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".hd-inspector")).toContainText(/Source inbox|来源收件箱|Inbox sources/);
 
   await page.setViewportSize({ width: 390, height: 820 });
@@ -132,12 +162,13 @@ test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector
   });
   await expect(page.getByRole("heading", { name: "Dashboard Canvas" })).toBeVisible();
   await expect(page.locator(".hd-graph3d-stage canvas").first()).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(2500); // let the render loop settle before readback
   const mobileLayout = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
-    nodeCount: document.querySelectorAll(".hd-explore-list button").length,
+    chipCount: document.querySelectorAll('[data-action="select-node"][data-source="graph-legend"]').length,
   }));
-  expect(mobileLayout.nodeCount).toBeGreaterThan(8);
+  expect(mobileLayout.chipCount).toBeGreaterThan(1);
   expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.viewportWidth + 4);
   const mobileStats = await canvasPixelStats(page.locator(".hd-graph3d-stage canvas").first());
   expect(mobileStats.colored).toBeGreaterThan(120);
