@@ -5,10 +5,7 @@ import { expect, test } from "@playwright/test";
 //  - the timeline React component renders;
 //  - "Create project" is folded into the component toolbar (not a Streamlit
 //    expander), and the overview counts sit on the legend row.
-// Drives the live 18503 UI on the `dev` profile.
-
-const baseUrl =
-  process.env.NBLANE_STREAMLIT_BASE_URL || "http://127.0.0.1:18503";
+// Drives the live Streamlit UI (use.baseURL) on the `dev` profile.
 
 async function ensureDevProfile(page) {
   await page.waitForSelector('[data-testid="stSidebar"]', { timeout: 20_000 });
@@ -51,15 +48,15 @@ async function findTimelineFrame(page) {
 test("Project Board homepage shows the timeline with in-component create", async ({ page }, testInfo) => {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Project_Board`, {
+    response = await page.goto("/Project_Board", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Project Board page unavailable on 18503.");
+    test.skip(true, "Project Board page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);

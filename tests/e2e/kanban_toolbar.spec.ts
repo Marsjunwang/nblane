@@ -3,10 +3,7 @@ import { expect, test } from "@playwright/test";
 // Smoke check for the compacted Kanban toolbar: the view toggles, Reload/Save,
 // and the Total chip now live INSIDE the React board's sticky toolbar, and the
 // old tall Streamlit-side checkbox/button/metric stack is gone.
-// Drives the live 18503 UI on the `dev` profile.
-
-const baseUrl =
-  process.env.NBLANE_STREAMLIT_BASE_URL || "http://127.0.0.1:18503";
+// Drives the live Streamlit UI (use.baseURL) on the `dev` profile.
 
 async function ensureDevProfile(page) {
   await page.waitForSelector('[data-testid="stSidebar"]', { timeout: 20_000 });
@@ -49,15 +46,15 @@ async function findBoardFrame(page) {
 test("Kanban toolbar folds toggles, Reload/Save, and Total into the board", async ({ page }, testInfo) => {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Kanban`, {
+    response = await page.goto("/Kanban", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Kanban page unavailable on 18503.");
+    test.skip(true, "Kanban page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);

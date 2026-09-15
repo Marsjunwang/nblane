@@ -5,13 +5,17 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readerBaseURL } from "./helpers";
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(e2eDir, "../..");
-const profileName = process.env.NBLANE_E2E_8502_PROFILE || "e2e-paper-library";
+const profileName = process.env.NBLANE_PAPER_LIBRARY_E2E_PROFILE || "e2e-paper-library";
 let tempRoot = "";
 let server: ChildProcessWithoutNullStreams | null = null;
-let baseUrl = process.env.NBLANE_E2E_8502_BASE_URL?.replace(/\/$/, "") || "";
+// When NBLANE_E2E_READER_BASE points at an already-running sidecar we test
+// that instance; otherwise the spec spawns its own isolated one on a free
+// port (see beforeAll), so it never depends on the shared dev ports.
+let baseUrl = (process.env.NBLANE_E2E_READER_BASE || "").trim() ? readerBaseURL() : "";
 let serverOutput = "";
 
 function writeFixtureProfile(root: string) {
@@ -36,7 +40,7 @@ function writeFixtureProfile(root: string) {
             authors: ["Ada Lovelace", "Grace Hopper"],
             published: "2026",
             tags: ["e2e", "workspace"],
-            summary: "A deterministic paper used by the 8502 Paper Library browser test.",
+            summary: "A deterministic paper used by the Paper Library browser test.",
             notes: "Should move into a collection without a Streamlit rerun.",
           },
           {
@@ -94,8 +98,8 @@ async function waitForHttp(url: string, timeoutMs = 20_000) {
   throw new Error(`Timed out waiting for ${url}: ${lastError}\n${serverOutput}`);
 }
 
-async function startIsolated8502() {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nblane-paper-library-8502-"));
+async function startIsolatedReader() {
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nblane-paper-library-e2e-"));
   writeFixtureProfile(tempRoot);
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -133,7 +137,7 @@ async function stableScreenshot(page, name: string, testInfo) {
 
 test.beforeAll(async () => {
   if (!baseUrl) {
-    await startIsolated8502();
+    await startIsolatedReader();
   }
 });
 
@@ -146,7 +150,7 @@ test.afterAll(async () => {
   }
 });
 
-test("8502 standalone Paper Library covers collection, delete preview, and screenshots", async ({ page }, testInfo) => {
+test("Standalone Paper Library covers collection, delete preview, and screenshots", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${baseUrl}/paper-library?profile=${encodeURIComponent(profileName)}`, {
     waitUntil: "domcontentloaded",
@@ -179,7 +183,7 @@ test("8502 standalone Paper Library covers collection, delete preview, and scree
   expect(desktopLayout.tree!.right).toBeLessThanOrEqual(desktopLayout.list!.left + 2);
   expect(desktopLayout.list!.right).toBeLessThanOrEqual(desktopLayout.detail!.left + 2);
   expect(desktopLayout.scrollWidth).toBeLessThanOrEqual(desktopLayout.viewportWidth + 4);
-  await stableScreenshot(page, "paper-library-8502-desktop", testInfo);
+  await stableScreenshot(page, "paper-library-desktop", testInfo);
 
   await page.getByRole("button", { name: "New collection" }).first().click();
   const createDialog = page.getByRole("dialog");
@@ -234,5 +238,5 @@ test("8502 standalone Paper Library covers collection, delete preview, and scree
   }));
   expect(mobileLayout.hasDetail).toBeTruthy();
   expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.viewportWidth + 4);
-  await stableScreenshot(page, "paper-library-8502-mobile", testInfo);
+  await stableScreenshot(page, "paper-library-mobile", testInfo);
 });

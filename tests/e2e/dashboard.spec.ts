@@ -1,22 +1,19 @@
 import { expect, test } from "@playwright/test";
 
-const baseUrl =
-  process.env.NBLANE_DASHBOARD_8503_BASE_URL ||
-  process.env.NBLANE_STREAMLIT_BASE_URL ||
-  "http://127.0.0.1:8503";
-
+// Targets the Streamlit home dashboard; the URL resolves against the
+// configured use.baseURL (see playwright.config.ts).
 async function openStreamlitDashboard(page) {
   let response;
   try {
-    response = await page.goto(baseUrl, {
+    response = await page.goto("/", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 8503 Streamlit dashboard or set NBLANE_DASHBOARD_8503_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Dashboard is not available at the configured 8503 URL.");
+    test.skip(true, "Dashboard is not available at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
 }
@@ -90,10 +87,10 @@ async function embeddedDashboardCanvasFrame(page) {
     }
     await page.waitForTimeout(250);
   }
-  throw new Error("Embedded 8502 Dashboard Canvas frame did not become ready.");
+  throw new Error("Embedded Dashboard Canvas frame did not become ready.");
 }
 
-test("8503 Dashboard exposes top-right guide, AI settings, optional fullscreen galaxy link, and scales", async ({ page }, testInfo) => {
+test("Home dashboard exposes top-right guide, AI settings, optional fullscreen galaxy link, and scales", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openStreamlitDashboard(page);
@@ -164,7 +161,7 @@ test("8503 Dashboard exposes top-right guide, AI settings, optional fullscreen g
   expect(firstScreenOrder.contextTop).toBeLessThan(firstScreenOrder.heroTop);
   expect(firstScreenOrder.heroTop).toBeLessThan(firstScreenOrder.workbenchTop);
 
-  await attachScreenshot(page, "dashboard-8503-desktop", testInfo);
+  await attachScreenshot(page, "dashboard-desktop", testInfo);
   const desktopLayout = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
@@ -203,7 +200,7 @@ test("8503 Dashboard exposes top-right guide, AI settings, optional fullscreen g
   }));
   expect(narrowFrameLayout.scrollWidth).toBeLessThanOrEqual(narrowFrameLayout.clientWidth + 8);
   expect(narrowFrameLayout.canvasCount).toBeGreaterThan(0);
-  await attachScreenshot(page, "dashboard-8503-scaled-1024", testInfo);
+  await attachScreenshot(page, "dashboard-scaled-1024", testInfo);
   const scaledLayout = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
@@ -266,7 +263,7 @@ test("8503 Dashboard exposes top-right guide, AI settings, optional fullscreen g
     expect(Buffer.compare(afterDrag, afterZoom)).not.toBe(0);
 
     const graphShot = await canvasFrame.locator(".hd-explore-canvas").screenshot();
-    await testInfo.attach("dashboard-8503-3d-graph", { body: graphShot, contentType: "image/png" });
+    await testInfo.attach("dashboard-3d-graph", { body: graphShot, contentType: "image/png" });
     expect(graphShot.byteLength).toBeGreaterThan(18_000);
   }
 });

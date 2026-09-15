@@ -8,7 +8,7 @@ test("dashboard fix plan: scroll to 3D galaxy + verify", async ({ page }) => {
       console.log("[browser-error]", msg.text());
     }
   });
-  await page.goto("http://127.0.0.1:18503", { waitUntil: "networkidle" });
+  await page.goto("/", { waitUntil: "networkidle" });
   await page.waitForTimeout(2500);
 
   const sel = page.locator('[data-testid="stSidebar"] [data-baseweb="select"]').first();

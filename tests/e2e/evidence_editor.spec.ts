@@ -1,13 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-// Closed-loop check for the v2 evidence React editor on the 18503 Streamlit UI.
+// Closed-loop check for the v2 evidence React editor on the Streamlit UI.
 // Validates: page loads, dev profile selected, the React editor iframe renders
 // the toolbar + list, and a row can be opened in the detail pane.
-
-const baseUrl =
-  process.env.NBLANE_EVIDENCE_EDITOR_BASE_URL ||
-  process.env.NBLANE_STREAMLIT_BASE_URL ||
-  "http://127.0.0.1:18503";
+// The page URL resolves against the configured use.baseURL.
 
 async function ensureDevProfile(page) {
   // Streamlit hydrates the sidebar asynchronously; wait for it.
@@ -54,15 +50,15 @@ async function findEditorFrame(page) {
 test("evidence editor renders in the React component iframe", async ({ page }, testInfo) => {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+    response = await page.goto("/Evidence_Review", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Evidence Review page unavailable on 18503.");
+    test.skip(true, "Evidence Review page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);
@@ -103,15 +99,15 @@ test("evidence editor renders in the React component iframe", async ({ page }, t
 test("run migration backfills v2 provenance and persists", async ({ page }, testInfo) => {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+    response = await page.goto("/Evidence_Review", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Evidence Review page unavailable on 18503.");
+    test.skip(true, "Evidence Review page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);
@@ -139,15 +135,15 @@ test("run migration backfills v2 provenance and persists", async ({ page }, test
 test("detail pane stays open on the same row after an action (no page jump)", async ({ page }, testInfo) => {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+    response = await page.goto("/Evidence_Review", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Evidence Review page unavailable on 18503.");
+    test.skip(true, "Evidence Review page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);
@@ -183,15 +179,15 @@ test("detail pane stays open on the same row after an action (no page jump)", as
 test("find duplicates surfaces a candidate pair and deprecate resolves it", async ({ page }, testInfo) => {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+    response = await page.goto("/Evidence_Review", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Evidence Review page unavailable on 18503.");
+    test.skip(true, "Evidence Review page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);
@@ -231,15 +227,15 @@ test("find duplicates surfaces a candidate pair and deprecate resolves it", asyn
 async function openEditor(page) {
   let response;
   try {
-    response = await page.goto(`${baseUrl}/Evidence_Review`, {
+    response = await page.goto("/Evidence_Review", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
   } catch {
-    test.skip(true, "Run the 18503 Streamlit UI or set NBLANE_STREAMLIT_BASE_URL.");
+    test.skip(true, "Run the Streamlit UI (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Evidence Review page unavailable on 18503.");
+    test.skip(true, "Evidence Review page unavailable at the configured baseURL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(3000);

@@ -1,9 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { readerBaseURL } from "./helpers";
 
-const baseUrl =
-  process.env.NBLANE_DASHBOARD_8502_BASE_URL ||
-  process.env.NBLANE_READER_API_BASE ||
-  "http://127.0.0.1:8502";
+// Standalone Dashboard Canvas is served by the Reader API sidecar.
+const baseUrl = readerBaseURL();
 const profileName = process.env.NBLANE_DASHBOARD_E2E_PROFILE || "template";
 
 function dashboardUrl(pathname = "/dashboard", params: Record<string, string> = {}): string {
@@ -21,10 +20,10 @@ async function openDashboardCanvas(page) {
       timeout: 20_000,
     });
   } catch {
-    test.skip(true, "Run the 8502 Reader API sidecar or set NBLANE_DASHBOARD_8502_BASE_URL.");
+    test.skip(true, "Run the Reader API sidecar (scripts/dev-web.sh --isolated) or set NBLANE_E2E_READER_BASE.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Dashboard Canvas is not available at the configured 8502 URL.");
+    test.skip(true, "Dashboard Canvas is not available at the configured sidecar URL.");
   }
 }
 
@@ -55,7 +54,7 @@ async function canvasPixelStats(locator) {
   });
 }
 
-test("8502 standalone Dashboard Canvas renders the 3D graph, attention, and inspector", async ({ page }, testInfo) => {
+test("Standalone Dashboard Canvas renders the 3D graph, attention, and inspector", async ({ page }, testInfo) => {
   test.setTimeout(75_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openDashboardCanvas(page);
@@ -116,7 +115,7 @@ test("8502 standalone Dashboard Canvas renders the 3D graph, attention, and insp
   expect(layout.inspectorText.length).toBeGreaterThan(20);
 
   const body = await page.screenshot({ fullPage: true });
-  await testInfo.attach("dashboard-canvas-8502-desktop", { body, contentType: "image/png" });
+  await testInfo.attach("dashboard-canvas-desktop", { body, contentType: "image/png" });
   expect(body.byteLength).toBeGreaterThan(20_000);
 
   await page.goto(dashboardUrl("/dashboard", { view: "3d", node: "source:inbox" }), {
@@ -144,6 +143,6 @@ test("8502 standalone Dashboard Canvas renders the 3D graph, attention, and insp
   expect(mobileStats.colored).toBeGreaterThan(120);
   expect(mobileStats.unique).toBeGreaterThan(6);
   const mobileBody = await page.screenshot({ fullPage: true });
-  await testInfo.attach("dashboard-canvas-8502-mobile", { body: mobileBody, contentType: "image/png" });
+  await testInfo.attach("dashboard-canvas-mobile", { body: mobileBody, contentType: "image/png" });
   expect(mobileBody.byteLength).toBeGreaterThan(18_000);
 });

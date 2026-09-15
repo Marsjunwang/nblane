@@ -1,15 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-const e2eBaseUrl = process.env.NBLANE_E2E_BASE_URL || "http://127.0.0.1:8510/Public_Site";
-
+// The Blog editor lives on the Output Studio page (the former Public_Site
+// page was removed); the page URL slug comes from pages/6_Output_Studio.py.
 async function openEditor(page) {
   try {
-    await page.goto(e2eBaseUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.goto("/Output_Studio", { waitUntil: "domcontentloaded", timeout: 20000 });
   } catch {
-    test.skip(true, "Set NBLANE_E2E_BASE_URL or run the Streamlit app on port 8510.");
+    test.skip(true, "Run the Streamlit app (scripts/dev-web.sh --isolated) or set NBLANE_E2E_BASE_URL.");
   }
   await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-  const blogTab = page.getByText(/^Blog$/).first();
+  const blogTab = page.getByText(/^Blog$|^博客$/).first();
   if (await blogTab.count()) {
     await blogTab.click();
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});

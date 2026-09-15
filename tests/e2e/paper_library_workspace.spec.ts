@@ -1,33 +1,17 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { e2eDataRoot, readerBaseURL, streamlitPageURL } from "./helpers";
 
-function findRepoRoot(): string {
-  let current = process.cwd();
-  for (let index = 0; index < 8; index += 1) {
-    if (
-      fs.existsSync(path.join(current, "profiles")) &&
-      fs.existsSync(path.join(current, "tests", "e2e"))
-    ) {
-      return current;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      break;
-    }
-    current = parent;
-  }
-  return process.cwd();
-}
-
-const repoRoot = findRepoRoot();
 const profileName = process.env.NBLANE_PAPER_LIBRARY_E2E_PROFILE || "paper-library-e2e";
-const e2eBaseUrl =
-  process.env.NBLANE_PAPER_LIBRARY_E2E_BASE_URL ||
-  process.env.NBLANE_E2E_BASE_URL ||
-  "http://127.0.0.1:8502";
+// The standalone Paper Library workspace is served by the Reader API sidecar.
+const e2eBaseUrl = readerBaseURL();
+// Deep-link target exercised by the Overview tests: the Streamlit Research page.
+const overviewReturnURL = streamlitPageURL("/Research");
 
-const profileDir = path.join(repoRoot, "profiles", profileName);
+// Fixtures must land in the data root of the instance under test
+// (.dev-data for the isolated dev instance, repo root otherwise).
+const profileDir = path.join(e2eDataRoot(), "profiles", profileName);
 const researchDir = path.join(profileDir, "research");
 
 function yamlString(value: string): string {
@@ -48,7 +32,7 @@ nodes:
   - id: paper-node:e2e-fixture
     title: Fixture Collection
     parent_id: ""
-    description: Papers used by the 8502 Playwright fixture.
+    description: Papers used by the Playwright fixture.
     color: teal
     order: 10
     status: active
@@ -172,10 +156,10 @@ async function openPaperLibrary(page, params: Record<string, string> = {}) {
       timeout: 20_000,
     });
   } catch {
-    test.skip(true, "Run the 8502 Reader API sidecar or set NBLANE_PAPER_LIBRARY_E2E_BASE_URL.");
+    test.skip(true, "Run the Reader API sidecar (scripts/dev-web.sh --isolated) or set NBLANE_E2E_READER_BASE.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Paper Library workspace is not available at the configured 8502 URL.");
+    test.skip(true, "Paper Library workspace is not available at the configured sidecar URL.");
   }
   await expect(page.locator(".paper-tree-shell.is-standalone")).toBeVisible();
   await expect(page.locator(".paper-workbench")).toBeVisible();
@@ -236,7 +220,7 @@ test.afterAll(() => {
   cleanupFixtureProfile();
 });
 
-test("8502 standalone Paper Library completes core workspace actions", async ({ page }) => {
+test("Standalone Paper Library completes core workspace actions", async ({ page }) => {
   await openPaperLibrary(page);
   await expect(page.locator(".paper-reading-card")).toContainText("Abstract Preview");
   await expect(page.locator(".paper-reading-card")).toContainText("PDF ready paper used to verify Open Reader actions");
@@ -329,14 +313,14 @@ test("8502 standalone Paper Library completes core workspace actions", async ({ 
   ).not.toBeChecked();
 });
 
-test("8502 Paper Library consumes Overview deep links", async ({ page }) => {
+test("Paper Library consumes Overview deep links", async ({ page }) => {
   await openPaperLibrary(page, {
     view: "needs_extraction",
     detail_id: "source:e2e:pdf-ready",
     focus: "artifacts",
     action: "run_extraction",
     return_to: "overview",
-    return_url: "http://127.0.0.1:8503/Research",
+    return_url: overviewReturnURL,
   });
 
   const url = new URL(page.url());
@@ -345,7 +329,7 @@ test("8502 Paper Library consumes Overview deep links", async ({ page }) => {
   expect(url.searchParams.get("focus")).toBe("artifacts");
   expect(url.searchParams.get("action")).toBe("run_extraction");
   expect(url.searchParams.get("return_to")).toBe("overview");
-  expect(url.searchParams.get("return_url")).toBe("http://127.0.0.1:8503/Research");
+  expect(url.searchParams.get("return_url")).toBe(overviewReturnURL);
 
   await expect(paperCard(page, "source:e2e:pdf-ready")).toBeVisible();
   await expect(paperCard(page, "source:e2e:pdf-ready")).toHaveClass(/is-deep-linked/);
@@ -353,7 +337,7 @@ test("8502 Paper Library consumes Overview deep links", async ({ page }) => {
   await expect(page.locator('[data-deep-link-action="run_extraction"]')).toContainText("Run extraction");
   await expect(page.locator(".paper-detail-actions button.is-suggested").filter({ hasText: "Run extraction" })).toBeVisible();
   await expect(page.locator(".paper-return-link")).toContainText("Back to Overview");
-  await expect(page.locator(".paper-return-link")).toHaveAttribute("href", "http://127.0.0.1:8503/Research");
+  await expect(page.locator(".paper-return-link")).toHaveAttribute("href", overviewReturnURL);
 
   await openPaperLibrary(page, {
     view: "all",
@@ -361,14 +345,14 @@ test("8502 Paper Library consumes Overview deep links", async ({ page }) => {
     focus: "translations",
     action: "retry_translation",
     return_to: "overview",
-    return_url: "http://127.0.0.1:8503/Research",
+    return_url: overviewReturnURL,
   });
   await expect(page.locator('[data-focus-section="translations"]')).toHaveClass(/is-focused/);
   await expect(page.locator('[data-deep-link-action="retry_translation"]')).toContainText("Retry translation");
   await expect(page.locator(".paper-detail-actions button.is-suggested").filter({ hasText: "Retry translation" })).toBeVisible();
 });
 
-test("8502 Paper Library shows retry translation job progress", async ({ page }) => {
+test("Paper Library shows retry translation job progress", async ({ page }) => {
   const sourceId = "source:e2e:pdf-ready";
   await openPaperLibrary(page, {
     view: "all",
@@ -479,7 +463,7 @@ test("8502 Paper Library shows retry translation job progress", async ({ page })
   )).toBeLessThanOrEqual(2);
 });
 
-test("8502 Paper Library shows run extraction fallback-ready progress", async ({ page }) => {
+test("Paper Library shows run extraction fallback-ready progress", async ({ page }) => {
   const sourceId = "source:e2e:pdf-ready";
   await openPaperLibrary(page, {
     view: "all",
@@ -573,7 +557,7 @@ test("8502 Paper Library shows run extraction fallback-ready progress", async ({
   await expect(page.locator(".paper-workbench")).toBeVisible();
 });
 
-test("8502 Paper Library force GROBID upgrade sends explicit override", async ({ page }) => {
+test("Paper Library force GROBID upgrade sends explicit override", async ({ page }) => {
   const sourceId = "source:e2e:pdf-ready";
   await openPaperLibrary(page, {
     view: "all",
@@ -659,7 +643,7 @@ test("8502 Paper Library force GROBID upgrade sends explicit override", async ({
   expect(sawForceOverride).toBe(true);
 });
 
-test("8502 Paper Library screenshot smoke covers desktop laptop and narrow layouts", async ({ page }, testInfo) => {
+test("Paper Library screenshot smoke covers desktop laptop and narrow layouts", async ({ page }, testInfo) => {
   const cases = [
     {
       name: "desktop-pdf-ready",

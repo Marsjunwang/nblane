@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const baseUrl =
-  process.env.NBLANE_STREAMLIT_BASE_URL || "http://127.0.0.1:18503";
+// Star-tree hero on the Streamlit home dashboard; the URL resolves against
+// the configured use.baseURL.
 
 async function homeDashboardFrame(page) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -56,7 +56,7 @@ test("star-tree 3D view renders with bloom stars and no console errors", async (
   page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
 
   const dashboard = await homeDashboardFrame(page);

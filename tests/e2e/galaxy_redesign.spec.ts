@@ -1,13 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { readerBaseURL } from "./helpers";
 
-// Closed-loop verification for the growth-galaxy redesign on the 18502 standalone
-// Dashboard Canvas (no auth, dev profile): full-stage comet shower, clickable
-// North Star / goal legend that selects + focus-dives, fixed orbit rings (no NaN),
-// refined materials, and the removed "Load embedded canvas" UI.
-const baseUrl =
-  process.env.NBLANE_DASHBOARD_8502_BASE_URL ||
-  process.env.NBLANE_READER_API_BASE ||
-  "http://127.0.0.1:18502";
+// Closed-loop verification for the growth-galaxy redesign on the standalone
+// Dashboard Canvas served by the Reader API sidecar (no auth, dev profile):
+// full-stage comet shower, clickable North Star / goal legend that selects +
+// focus-dives, fixed orbit rings (no NaN), refined materials, and the removed
+// "Load embedded canvas" UI.
+const baseUrl = readerBaseURL();
 const profileName = process.env.NBLANE_DASHBOARD_E2E_PROFILE || "dev";
 
 function dashboardUrl(pathname = "/dashboard", params: Record<string, string> = {}): string {
@@ -43,7 +42,7 @@ async function canvasPixelStats(locator) {
   });
 }
 
-test("18502 growth galaxy: comets, clickable legend, focus-dive, no embedded-canvas", async ({ page }, testInfo) => {
+test("Growth galaxy: comets, clickable legend, focus-dive, no embedded-canvas", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
   page.on("console", (msg) => {
@@ -56,10 +55,10 @@ test("18502 growth galaxy: comets, clickable legend, focus-dive, no embedded-can
   try {
     response = await page.goto(dashboardUrl(), { waitUntil: "domcontentloaded", timeout: 20_000 });
   } catch {
-    test.skip(true, "Run the 18502 Reader API sidecar or set NBLANE_DASHBOARD_8502_BASE_URL.");
+    test.skip(true, "Run the Reader API sidecar (scripts/dev-web.sh --isolated) or set NBLANE_E2E_READER_BASE.");
   }
   if (!response || response.status() >= 400) {
-    test.skip(true, "Dashboard Canvas is not available at the configured 18502 URL.");
+    test.skip(true, "Dashboard Canvas is not available at the configured sidecar URL.");
   }
 
   // 3D scene renders.
@@ -74,9 +73,9 @@ test("18502 growth galaxy: comets, clickable legend, focus-dive, no embedded-can
   expect(stats.colored).toBeGreaterThan(120);
   expect(stats.unique).toBeGreaterThan(5);
 
-  // "Load embedded canvas" is gone everywhere; "Open 8502 Canvas" link path stays
-  // intact (it lives in the Streamlit hero, not the standalone canvas, so just
-  // assert the removed control is absent here).
+  // "Load embedded canvas" is gone everywhere; the "Open Fullscreen Galaxy"
+  // link path stays intact (it lives in the Streamlit hero, not the
+  // standalone canvas, so just assert the removed control is absent here).
   await expect(page.locator('[data-action="load-embedded-canvas"]')).toHaveCount(0);
   await expect(page.getByText(/Load embedded canvas|加载内嵌画布/)).toHaveCount(0);
 
