@@ -14,10 +14,22 @@ source_of_truth: true
 推荐把代码和私有数据分开：
 
 ```text
-/srv/nblane-app       # 本仓库代码，运行 Streamlit
+/srv/nblane-app       # 本仓库代码（git clone，运行 Streamlit）
 /srv/nblane-data      # 私有数据仓库，含 profiles/ schemas/ teams/ auth/
 /srv/nblane-assets    # 大文件资产，不进 Git，含 Research PDF
 ```
+
+代码目录用 git 部署，不用 rsync / scp 裸拷贝：
+
+```bash
+sudo -u nblane git clone https://github.com/<org>/nblane.git /srv/nblane-app
+```
+
+git 部署的好处：`git log` 能精确确认线上版本，`git status` 能发现线上手工改动
+造成的漂移，回滚是 `git checkout <旧 commit>` + 重启。仓库的 `.gitignore` 已覆盖
+`.env`、`.venv`、`profiles/*`、`dist/`、`node_modules` 等本地产物，git 工作区与
+这些文件共存无冲突。生产本地若有无须入库的目录（如 `.deploy-backups/`），写进
+`.git/info/exclude`，不要为此改仓库的 `.gitignore`。
 
 `/srv/nblane-data` 中至少包含：
 
@@ -60,21 +72,15 @@ nblane auth hash-password
 
 ## 更新代码与依赖
 
-生产环境升级代码后，要重装 nblane 包本身并同步 Python 依赖，再重启两个服务；
-只 `git pull` 复制代码而不重装包时，非 editable 安装下改动不会生效。尤其是使用
-`ALL_PROXY=socks5://...`、`HTTPS_PROXY=socks5://...` 或 mihomo/clash SOCKS
-出口时，必须安装 `httpx[socks]`，否则 LLM / Reader / Research 的外部请求会报：
-
-```text
-Using SOCKS proxy, but the 'socksio' package is not installed.
-```
-
-本仓库已把 `httpx[socks]` 写入 `pyproject.toml` 和 `requirements.txt`。生产更新时执行：
+生产更新以 git 为准（首次部署见上文"目录布局"的 git clone）：
 
 ```bash
 cd /srv/nblane-app
-.venv/bin/python -m pip install -e .
-.venv/bin/python -m pip install -r requirements.txt
+sudo -u nblane git fetch origin
+sudo -u nblane git status -sb          # 应显示与 origin/main 同步；有本地改动先排查漂移
+sudo -u nblane git pull --ff-only      # 只快进；失败说明线上有脏改动，不要强拉
+.venv/bin/python -m pip install -e .   # 重装 nblane 包本身，只 git pull 不重装时
+.venv/bin/python -m pip install -r requirements.txt   # 非 editable 安装下改动不生效
 .venv/bin/python - <<'PY'
 import socksio
 print("socksio ok")
@@ -82,7 +88,18 @@ PY
 sudo systemctl restart nblane-reader nblane
 ```
 
-如果使用 `uv sync` 管理虚拟环境，也要在重启前完成 sync；不要只复制代码而跳过依赖同步。
+尤其是使用 `ALL_PROXY=socks5://...`、`HTTPS_PROXY=socks5://...` 或 mihomo/clash
+SOCKS 出口时，必须安装 `httpx[socks]`（本仓库已写入 `pyproject.toml` 和
+`requirements.txt`），否则 LLM / Reader / Research 的外部请求会报：
+
+```text
+Using SOCKS proxy, but the 'socksio' package is not installed.
+```
+
+回滚：`sudo -u nblane git checkout <旧 commit>` 后重跑上面的 pip + restart；
+回到最新用 `git checkout main && git pull --ff-only`。
+
+如果使用 `uv sync` 管理虚拟环境，也要在重启前完成 sync；不要只拉代码而跳过依赖同步。
 
 ## 更新前端组件（Dashboard / Reader / Paper Library / Blog 编辑器）
 
