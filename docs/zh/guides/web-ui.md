@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-24
+last_verified: 2026-09-15
 source_of_truth: true
 ---
 
@@ -105,7 +105,10 @@ curl http://127.0.0.1:18070/api/isalive
 scripts/dev-web.sh --isolated --grobid
 ```
 
-不加 `--grobid` 时，开发脚本默认使用 PyMuPDF fallback，避免误连生产 GROBID。
+不加 `--grobid` 时，开发脚本会设置 `NBLANE_RESEARCH_PDF_BACKEND=pymupdf`，强制使用
+PyMuPDF fallback，避免误连生产 GROBID。PDF 后端开关 `NBLANE_RESEARCH_PDF_BACKEND`
+取值 `pymupdf|grobid|auto`，默认 `auto`：按 `NBLANE_GROBID_URL` 探测 GROBID，
+不可达时自动回退 PyMuPDF；显式设为 `pymupdf` 可完全禁用探测。
 
 如果需要手动启动而不是用脚本，本地开发没有 Caddy 反向代理时，需要先启动 sidecar，并让
 Streamlit iframe 指向浏览器能访问的 sidecar 地址：
@@ -144,7 +147,7 @@ tmux kill-session -t nblane-dev-streamlit-ui 2>/dev/null || true
 tmux new-session -d -s nblane-dev-reader-api -c "$PWD" \
   'NBLANE_ROOT=.dev-data \
    NBLANE_RESEARCH_ASSET_ROOT=.dev-assets/research \
-   NBLANE_RESEARCH_STRUCTURE_BACKEND=pymupdf \
+   NBLANE_RESEARCH_PDF_BACKEND=pymupdf \
    PYTHONPATH=src .venv/bin/uvicorn nblane.web_reader_api:app \
     --host 127.0.0.1 --port 18502'
 
@@ -155,7 +158,7 @@ tmux new-session -d -s nblane-dev-streamlit-ui -c "$PWD" \
    NBLANE_DASHBOARD_CANVAS_BASE=http://127.0.0.1:18502 \
    NBLANE_STREAMLIT_BASE_URL=http://127.0.0.1:18503 \
    NBLANE_RESEARCH_ASSET_ROOT=.dev-assets/research \
-   NBLANE_RESEARCH_STRUCTURE_BACKEND=pymupdf \
+   NBLANE_RESEARCH_PDF_BACKEND=pymupdf \
    PYTHONPATH=src .venv/bin/streamlit run app.py \
     --server.address=127.0.0.1 --server.port=18503 --server.headless=true'
 ```
@@ -587,10 +590,6 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 - 只负责静态站校验、预览和构建，不编辑 Blog / Resume / Known Info。
 - 默认构建到 `dist/public/<profile>`；可选择是否包含 draft/private 预览内容，并填写生产 `Base URL` 生成 SEO 与子路径部署链接。
-
-### 5.13 Public Site 兼容入口（`pages/6_Public_Site.py`）
-
-- 旧入口保留为跳转页，指向 **Output Studio** 与 **Public Build**，避免旧链接失效。
 
 ---
 

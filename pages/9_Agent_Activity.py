@@ -231,7 +231,7 @@ def _owner_page(target_owner: str) -> str:
     return {
         "evidence_pool": "pages/2_Evidence_Review.py",
         "kanban": "pages/3_Kanban.py",
-        "public_site": "pages/6_Public_Site.py",
+        "public_site": "pages/6_Output_Studio.py",
         "skill_tree": "pages/1_Skill_Tree.py",
         "research": "pages/7_Research.py",
         "work": "pages/3_Kanban.py",

@@ -6,6 +6,7 @@ import base64
 import binascii
 import asyncio
 import hashlib
+import ipaddress
 import json
 import mimetypes
 import os
@@ -100,12 +101,56 @@ _PAPER_LIBRARY_EVENT_JOBS_LOCK = threading.Lock()
 app = FastAPI(title="nblane Paper Reader API")
 
 
+def _loopback_name(value: str) -> bool:
+    """Return True for loopback host names/addresses (localhost, 127.0.0.0/8, ::1)."""
+
+    text = (value or "").strip().lower()
+    if not text:
+        return False
+    if text == "localhost" or text.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def _null_origin_is_local(request: Request) -> bool:
+    """Return True when an ``Origin: null`` request verifiably stays on this machine.
+
+    Streamlit renders custom components inside a sandboxed iframe, so the
+    legitimate local Paper Library embed always sends ``Origin: null`` — but
+    any website can forge the same header (a sandboxed iframe on an arbitrary
+    page produces it too). In the auth-less local mode we therefore only trust
+    the header when the request targets a loopback host or arrives over a
+    loopback connection, which keeps the Streamlit-on-localhost embed working
+    while rejecting calls aimed at a non-loopback interface of the machine.
+    """
+
+    host = (request.headers.get("host") or "").split("@")[-1].strip()
+    if host.startswith("["):
+        host_name = host[1:].split("]", 1)[0]
+    else:
+        host_name = host.rsplit(":", 1)[0] if ":" in host else host
+    if _loopback_name(host_name):
+        return True
+    client_host = request.client.host if request.client else ""
+    return _loopback_name(client_host)
+
+
 def _is_local_paper_library_embed(request: Request) -> bool:
-    """Return True for Streamlit sandbox iframe calls into local Paper Library APIs."""
+    """Return True for Streamlit sandbox iframe calls into local Paper Library APIs.
+
+    The legitimate client is the Streamlit custom component iframe (always
+    ``Origin: null``) on an auth-less local deployment; the loopback gate in
+    ``_null_origin_is_local`` keeps forged null-Origin calls out.
+    """
 
     if auth_core.auth_configured():
         return False
     if (request.headers.get("origin") or "").strip().lower() != "null":
+        return False
+    if not _null_origin_is_local(request):
         return False
     path = str(request.url.path or "")
     return path.startswith("/api/research/") and "/paper-library" in path
@@ -422,8 +467,21 @@ def _request_context(request: Request, source_id: str) -> ReaderActionContext:
 
 
 def _same_origin_mutation(request: Request) -> None:
+    """Reject cross-origin/cross-site mutations before they reach endpoint logic.
+
+    The recognized local Paper Library embed is exempted first: Chromium labels
+    every fetch from a sandboxed opaque-origin iframe ``cross-site`` — even the
+    legitimate loopback one — so the Fetch Metadata check below must run only
+    after that early return, and cannot distinguish a forged null-Origin embed
+    from the real one. Clients that omit ``Sec-Fetch-Site`` entirely (curl,
+    httpx, older browsers) fall through to the Origin/Referer check unchanged.
+    """
+
     if _is_local_paper_library_embed(request):
         return
+    fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="cross-site reader mutation rejected")
     host = (request.headers.get("host") or "").split("@")[-1].lower()
     for header in ("origin", "referer"):
         raw = request.headers.get(header)

@@ -2,7 +2,7 @@
 
 ## status: draft
 owner: product
-last_verified: 2026-05-19
+last_verified: 2026-09-15
 source_of_truth: true
 
 # Paper Reading Studio 开发文档
@@ -1136,8 +1136,12 @@ GROBID 适合学术 PDF：
 
 ```bash
 NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+NBLANE_RESEARCH_PDF_BACKEND=grobid
 ```
+
+`NBLANE_RESEARCH_PDF_BACKEND` 取值 `pymupdf|grobid|auto`，默认 `auto`：按
+`NBLANE_GROBID_URL` 探测 GROBID，不可达时回退 PyMuPDF；设为 `pymupdf` 可强制
+禁用 GROBID 探测。
 
 行为：
 
@@ -1172,7 +1176,7 @@ curl http://127.0.0.1:8070/api/isalive
 
 ```bash
 NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+NBLANE_RESEARCH_PDF_BACKEND=grobid
 ```
 
 依赖和启动要求：

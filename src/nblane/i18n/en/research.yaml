@@ -141,6 +141,7 @@ badge_private_source: Private source
 badge_needs_structured_extraction: Needs structured extraction
 badge_grobid_unavailable: GROBID unavailable
 badge_fallback_extraction: Fallback extraction
+grobid_disabled_backend: GROBID is disabled (NBLANE_RESEARCH_PDF_BACKEND=pymupdf or NBLANE_GROBID_URL=off); structured extraction uses PyMuPDF page text.
 ready: Ready
 risk: Risk
 reading_mode: Mode

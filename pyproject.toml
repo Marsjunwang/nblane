@@ -76,6 +76,20 @@ include = ["nblane*", "schemas*"]
     "templates/*.html",
     "static/assets/*",
 ]
+"nblane.paper_library_component" = [
+    "frontend/static/index.html",
+    "frontend/static/assets/*",
+]
+"nblane.project_board_component" = [
+    "frontend/static/index.html",
+]
+"nblane.project_timeline_component" = [
+    "frontend/static/index.html",
+    "frontend/static/assets/*",
+]
+"schemas" = [
+    "*.yaml",
+]
 
 [tool.streamlit.component]
 components = [

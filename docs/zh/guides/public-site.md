@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-13
+last_verified: 2026-09-15
 source_of_truth: true
 ---
 
@@ -350,7 +350,7 @@ Web UI 已拆为 **Output Studio** 与 **Public Build**：
   evidence 到公开项目的人工整理。
 - **Web UI：** **Output Studio** 页面含 Generate、Profile、Blog、Resume、
   Known Info；**Public Build** 页面含 Validate、Preview、Build。旧 **Public Site**
-  入口保留为跳转页。
+  兼容跳转页已删除，统一从这两个页面进入。
 - **静态输出：** 首页、Blog、Projects、Outputs、可选 Resume、复制后的媒体、
   Blog cover 展示、Open Graph / Twitter 图片、`robots.txt`、`sitemap.xml` 与页面
   meta description。

@@ -23,18 +23,17 @@ from nblane.core.research_workspace import (
 
 
 class TestPublicSiteSplit(unittest.TestCase):
-    def test_compat_and_split_pages_exist(self) -> None:
+    def test_split_pages_exist(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        compat = root / "pages" / "6_Public_Site.py"
         output = root / "pages" / "6_Output_Studio.py"
         build = root / "pages" / "10_Public_Build.py"
         output_module = root / "src" / "nblane" / "web_output_studio.py"
 
-        self.assertTrue(compat.exists())
+        # The old compat redirect page was removed; the split pages are the
+        # only registered entries under st.navigation.
+        self.assertFalse((root / "pages" / "6_Public_Site.py").exists())
         self.assertTrue(output.exists())
         self.assertTrue(build.exists())
-        self.assertIn("pages/6_Output_Studio.py", compat.read_text(encoding="utf-8"))
-        self.assertIn("pages/10_Public_Build.py", compat.read_text(encoding="utf-8"))
         output_text = output.read_text(encoding="utf-8")
         build_text = build.read_text(encoding="utf-8")
         self.assertIn("from nblane.web_output_studio import main", output_text)

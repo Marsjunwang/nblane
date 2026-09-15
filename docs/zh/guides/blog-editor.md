@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-08
+last_verified: 2026-09-15
 source_of_truth: true
 ---
 
@@ -23,7 +23,7 @@ npm install   # 首次或依赖变动后
 npm run build
 ```
 
-打开浏览器访问 `http://127.0.0.1:8510`，左侧选择 Profile，进入 **Output Studio** 页 → **Blog** Tab。旧 **Public Site** 入口会跳转到 Output Studio / Public Build。
+打开浏览器访问 `http://127.0.0.1:8510`，左侧选择 Profile，进入 **Output Studio** 页 → **Blog** Tab。旧 **Public Site** 页面已删除：内容生产统一在 **Output Studio**，站点校验与构建在 **Public Build**。
 
 环境最低要求：
 - Streamlit ≥ 1.31（`@st.fragment` 依赖）

@@ -20,8 +20,10 @@ from nblane.core.research_papers import (
     PaperSegment,
     PaperSearchResult,
     PaperStructureUnit,
+    _grobid_url,
     _paper_search_query_variants,
     _paper_translation_batches,
+    _pdf_backend,
     _merge_reader_outlines,
     _reader_outline_from_segments,
     _reader_outline_from_structure_units,
@@ -57,6 +59,7 @@ from nblane.core.research_papers import (
     paper_pdf_asset_path,
     paper_rows,
     position_paper_library_node,
+    process_grobid_fulltext,
     purge_paper_library_node,
     pymupdf_available,
     paper_citation_diagnostics,
@@ -3841,6 +3844,128 @@ class TestResearchPapers(unittest.TestCase):
         self.assertTrue(status["available"])
         self.assertEqual(status["attempts"], 2)
         self.assertEqual(urlopen_mock.call_count, 2)
+
+    @staticmethod
+    def _clear_pdf_backend_env() -> None:
+        os.environ.pop("NBLANE_RESEARCH_PDF_BACKEND", None)
+        os.environ.pop("NBLANE_GROBID_URL", None)
+
+    def test_pdf_backend_defaults_to_auto_with_local_default_url(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            self._clear_pdf_backend_env()
+            self.assertEqual(_pdf_backend(), "auto")
+            self.assertEqual(_grobid_url(), "http://127.0.0.1:8070")
+
+    def test_pymupdf_backend_skips_grobid_probe(self) -> None:
+        with (
+            patch.dict(os.environ, {"NBLANE_RESEARCH_PDF_BACKEND": "pymupdf"}, clear=False),
+            patch("nblane.core.research_papers.urllib.request.urlopen") as urlopen_mock,
+        ):
+            self.assertEqual(_pdf_backend(), "pymupdf")
+            self.assertEqual(_grobid_url(), "")
+            status = grobid_readiness()
+
+        self.assertFalse(status["available"])
+        self.assertEqual(status["status"], "disabled")
+        self.assertEqual(status["attempts"], 0)
+        urlopen_mock.assert_not_called()
+
+    def test_grobid_url_off_forces_pymupdf_case_insensitive(self) -> None:
+        with (
+            patch.dict(os.environ, {"NBLANE_GROBID_URL": "OFF"}, clear=False),
+            patch("nblane.core.research_papers.urllib.request.urlopen") as urlopen_mock,
+        ):
+            os.environ.pop("NBLANE_RESEARCH_PDF_BACKEND", None)
+            self.assertEqual(_pdf_backend(), "pymupdf")
+            self.assertEqual(_grobid_url(), "")
+            status = grobid_readiness()
+
+        self.assertEqual(status["status"], "disabled")
+        urlopen_mock.assert_not_called()
+
+    def test_grobid_backend_still_probes_default_url(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "NBLANE_RESEARCH_PDF_BACKEND": "grobid",
+                    "NBLANE_GROBID_READINESS_ATTEMPTS": "1",
+                    "NBLANE_GROBID_READINESS_TIMEOUT_SECONDS": "0.01",
+                },
+                clear=False,
+            ),
+            patch(
+                "nblane.core.research_papers.urllib.request.urlopen",
+                side_effect=TimeoutError("probe timed out"),
+            ) as urlopen_mock,
+        ):
+            os.environ.pop("NBLANE_GROBID_URL", None)
+            self.assertEqual(_pdf_backend(), "grobid")
+            status = grobid_readiness()
+
+        self.assertFalse(status["available"])
+        self.assertEqual(status["status"], "unavailable")
+        self.assertEqual(status["url"], "http://127.0.0.1:8070")
+        self.assertEqual(urlopen_mock.call_count, 1)
+
+    def test_explicit_probe_url_overrides_disabled_backend(self) -> None:
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size):
+                return b"true"
+
+        with (
+            patch.dict(os.environ, {"NBLANE_RESEARCH_PDF_BACKEND": "pymupdf"}, clear=False),
+            patch(
+                "nblane.core.research_papers.urllib.request.urlopen",
+                return_value=FakeResponse(),
+            ) as urlopen_mock,
+        ):
+            status = grobid_readiness("http://grobid.example")
+
+        self.assertTrue(status["available"])
+        self.assertEqual(urlopen_mock.call_count, 1)
+
+    def test_process_grobid_fulltext_raises_when_backend_disabled(self) -> None:
+        with (
+            patch.dict(os.environ, {"NBLANE_GROBID_URL": "none"}, clear=False),
+            patch("nblane.core.research_papers.urllib.request.urlopen") as urlopen_mock,
+        ):
+            os.environ.pop("NBLANE_RESEARCH_PDF_BACKEND", None)
+            with self.assertRaisesRegex(RuntimeError, "disabled"):
+                process_grobid_fulltext("alice", "source:paper:grounded")
+
+        urlopen_mock.assert_not_called()
+
+    def test_extract_segments_with_pymupdf_backend_never_probes_grobid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with (
+                patch.dict(os.environ, {"NBLANE_RESEARCH_PDF_BACKEND": "pymupdf"}, clear=False),
+                patch("nblane.core.research_papers.urllib.request.urlopen") as urlopen_mock,
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+            ):
+                save_paper_pages(
+                    profile,
+                    source_id,
+                    [PaperPage(source_id=source_id, page=1, text="Fallback paragraph.")],
+                )
+                segments = extract_paper_segments(profile, source_id, backend="auto")
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertEqual(segments[0].text, "Fallback paragraph.")
+        urlopen_mock.assert_not_called()
+        self.assertEqual(source.metadata.get("grobid_status"), "disabled")
+        self.assertFalse(source.metadata.get("grobid_available"))
 
     def test_fallback_segments_clear_needs_structured_extraction_badge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

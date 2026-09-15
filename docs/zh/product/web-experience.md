@@ -3,7 +3,7 @@
 ## status: active
 
 owner: product
-last_verified: 2026-05-13
+last_verified: 2026-09-15
 source_of_truth: true
 
 # Web 体验设计（Streamlit）
@@ -573,7 +573,7 @@ Goal
 - Research claim 与 Evidence claim 分离：`research/claims.yaml` 保存 source-aware draft / ready / promoted / dismissed claim；进入 evidence 时仍生成 `needs_review` 候选，不自动改 skill status。
 - Blog front matter 已支持 `related_sources`、`related_research_claims`、`related_citations`；发布校验会检查 private source、未 promoted research claim、citation/chunk 断链和敏感 quote。
 - Connector 第一版支持 arXiv、Semantic Scholar、GitHub 自动导入；X/Twitter 与小红书保留手动导入 / 官方授权边界。`research/connectors.yaml` 不保存 token、cookie 或 API key，CLI 提供 `nblane research connector sync`。
-- Output Studio 与 Public Build 已拆成 `pages/6_Output_Studio.py` 和 `pages/10_Public_Build.py`；旧 `pages/6_Public_Site.py` 保留为兼容跳转页。
+- Output Studio 与 Public Build 已拆成 `pages/6_Output_Studio.py` 和 `pages/10_Public_Build.py`；旧 `pages/6_Public_Site.py` 兼容跳转页已删除（st.navigation 下未注册，无法正常访问）。
 - Home 首屏已改为原生 Streamlit 摘要先渲染：Scope strip、当前目标、本周执行、待整理证据和主操作先出现，React Context Canvas 下移到后续区域加载。
 - 中文导航已采用中文主标签 + 英文别名；Work 顺序调整为 Project Board -> Kanban -> Gap Analysis -> Research -> Evidence Review，Growth 顺序收敛为 Skill Map -> Review -> Health -> Agent Activity。
 

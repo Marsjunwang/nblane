@@ -141,6 +141,7 @@ badge_private_source: 私有来源
 badge_needs_structured_extraction: 需要结构化解析
 badge_grobid_unavailable: GROBID 不可用
 badge_fallback_extraction: 备用解析
+grobid_disabled_backend: GROBID 已禁用（NBLANE_RESEARCH_PDF_BACKEND=pymupdf 或 NBLANE_GROBID_URL=off），结构化解析将使用 PyMuPDF 页面文本。
 ready: 就绪
 risk: 风险
 reading_mode: 模式

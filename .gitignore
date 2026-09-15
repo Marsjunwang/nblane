@@ -28,3 +28,6 @@ profiles/*
 
 # Local / learned schema expansion (can mirror private skill choices)
 schemas/.learned/
+
+# mihomo proxy config (local network tooling, may contain subscription tokens)
+/config.yaml

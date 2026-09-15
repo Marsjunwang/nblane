@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-09-15
 source_of_truth: true
 ---
 
@@ -39,9 +39,8 @@ sudo chown -R nblane:nblane /srv/nblane-assets
 
 ```bash
 NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
-NBLANE_RESEARCH_PDF_BACKEND=pymupdf
+NBLANE_RESEARCH_PDF_BACKEND=auto
 NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
 ```
 
 迁移服务器时需要同步 `/srv/nblane-data` 和 `/srv/nblane-assets`；profile 文件中只保存
@@ -61,7 +60,8 @@ nblane auth hash-password
 
 ## 更新代码与依赖
 
-生产环境升级代码后，先同步 Python 依赖，再重启两个服务。尤其是使用
+生产环境升级代码后，要重装 nblane 包本身并同步 Python 依赖，再重启两个服务；
+只 `git pull` 复制代码而不重装包时，非 editable 安装下改动不会生效。尤其是使用
 `ALL_PROXY=socks5://...`、`HTTPS_PROXY=socks5://...` 或 mihomo/clash SOCKS
 出口时，必须安装 `httpx[socks]`，否则 LLM / Reader / Research 的外部请求会报：
 
@@ -73,6 +73,7 @@ Using SOCKS proxy, but the 'socksio' package is not installed.
 
 ```bash
 cd /srv/nblane-app
+.venv/bin/python -m pip install -e .
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python - <<'PY'
 import socksio
@@ -174,8 +175,9 @@ Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
 Environment=NBLANE_DATA_GIT_AUTOPUSH=1
 Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
-Environment=NBLANE_RESEARCH_PDF_BACKEND=pymupdf
+Environment=NBLANE_RESEARCH_PDF_BACKEND=auto
 Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
+Environment=NBLANE_READER_API_BASE=0
 EnvironmentFile=-/srv/nblane-data/.env
 ExecStart=/srv/nblane-app/.venv/bin/streamlit run app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true
 Restart=always
@@ -224,10 +226,12 @@ Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
 Environment=NBLANE_CODEX_BIN=/home/nblane/.local/bin/codex
 Environment=NBLANE_CODEX_HOME=/home/nblane/.codex
-Environment=NBLANE_RESEARCH_PDF_BACKEND=pymupdf
+Environment=NBLANE_RESEARCH_PDF_BACKEND=auto
 Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
+Environment=NBLANE_READER_API_BASE=0
 EnvironmentFile=-/srv/nblane-data/.env
-ExecStart=/srv/nblane-app/.venv/bin/uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --workers 2
+# 任务状态（搜索 / 翻译 / AI 流）保存在单进程内存中，禁止多 worker。
+ExecStart=/srv/nblane-app/.venv/bin/uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --workers 1
 Restart=always
 RestartSec=5
 
@@ -238,6 +242,16 @@ WantedBy=multi-user.target
 Reader sidecar 不会继承 Streamlit service 的语言变量；`UI_LANG` 必须同时配置在
 `nblane.service` 和 `nblane-reader.service`，否则 Reader payload 里的按钮和提示会回到
 英文默认值。
+
+`--workers` 必须保持 `1`：论文搜索、全文翻译、blog AI 流等任务状态全部保存在
+sidecar 的单进程内存中；多 worker 下 start 与 poll / SSE / cancel 请求会被分发到不同
+进程，约半数请求报 404（如 "search job not found"）。需要扩容时先把任务表换成
+文件 / Redis 等外部存储后端，再考虑多 worker。
+
+两个 service 都设了 `NBLANE_READER_API_BASE=0`（同源哨兵）：Streamlit 页面生成的
+iframe / 链接 URL 不含 host，浏览器走同源相对路径，由 Caddy 按路径分流到 8502。
+漏配时会回退硬编码的 `http://127.0.0.1:8502`，公网浏览器无法访问该地址，
+Paper Library / Reader iframe 会整片空白。
 
 启动：
 
@@ -299,19 +313,45 @@ your-domain.com {
         reverse_proxy 127.0.0.1:8502
     }
 
+    handle /blog-editor* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/blog/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/site/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
     reverse_proxy 127.0.0.1:8501
 }
 ```
 
 这里必须使用 `handle /reader/*`，不要使用 `handle_path /reader/*`；后者会剥掉
 FastAPI 需要的 `/reader` 路由前缀。同理 `/dashboard*`、`/api/dashboard/*`、
-`/paper-library*`、`/auth/*` 都必须用 `handle`（不是 `handle_path`），否则
+`/paper-library*`、`/auth/*`、`/blog-editor*`、`/api/blog/*`、`/api/site/*`
+都必须用 `handle`（不是 `handle_path`），否则
 FastAPI 侧的路由前缀会被剥掉，`/dashboard?profile=...` 会 404 或路由到错误的
 处理函数。`/auth/*` 承载 8501/8503 → 8502 的登录态 handoff，缺失这条会导致
-生产环境下打开 `/dashboard` 返回 401。
+生产环境下打开 `/dashboard` 返回 401。`/blog-editor*`、`/api/blog/*`、`/api/site/*`
+承载 Output Studio 的完整 Blog 编辑器、AI 流接口与公开站点构建接口，缺失时编辑器
+404、发布不可达。
 
 Streamlit 只监听 `127.0.0.1:8501`，Reader API 只监听 `127.0.0.1:8502`，
 不要在腾讯云安全组开放 `8501` 或 `8502`。
+
+HTTPS 生产环境把 `NBLANE_AUTH_COOKIE_SECURE=1` 写入 `/srv/nblane-data/.env`，
+登录 cookie 会带 `Secure` 标记、只经 HTTPS 传输；默认关闭，仅用于无 HTTPS 的
+本地调试。
+
+应用层不实现登录限流：在反向代理层兜底，例如给 Caddy 装 `rate_limit` 插件限制
+`/auth/*` 的尝试频率，或用 fail2ban 盯访问日志中的登录 401。
+
+注意：登录态 handoff token 与 reader token 以 URL query 传递（iframe 场景的现实
+约束，handoff token 有效期 120 秒），会进入 Caddy 访问日志和浏览器历史。确保
+访问日志权限受控、定期轮转，不要送进公网可达的日志聚合服务。
 
 ## Paper Reading PDF 后端
 
@@ -369,8 +409,12 @@ curl http://127.0.0.1:8070/api/isalive
 
 ```bash
 NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+NBLANE_RESEARCH_PDF_BACKEND=grobid
 ```
+
+`NBLANE_RESEARCH_PDF_BACKEND` 取值 `pymupdf|grobid|auto`（默认 `auto`）：`auto`
+会按 `NBLANE_GROBID_URL` 探测 GROBID、不可达时回退 PyMuPDF；部署了 GROBID 时显式
+设为 `grobid` 只是更明确。
 
 维护命令：
 
@@ -381,7 +425,9 @@ sudo docker restart nblane-grobid
 sudo docker stop nblane-grobid
 ```
 
-如果不部署 GROBID，可暂时删除或留空 `NBLANE_GROBID_URL`；Reader 仍能使用已抽取的 page text、
+如果不部署 GROBID，设置 `NBLANE_RESEARCH_PDF_BACKEND=pymupdf`（或把 `NBLANE_GROBID_URL`
+显式设为 `off`）关闭探测；仅删除或留空 `NBLANE_GROBID_URL` 不会禁用——空值会回退默认
+地址 `http://127.0.0.1:8070` 继续探测。Reader 仍能使用已抽取的 page text、
 手工 annotations、chunks、claims、citations 和导出功能。
 
 ## 腾讯云安全组与备案

@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import quote
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from nblane.core.auth import (
@@ -39,7 +40,7 @@ from nblane.core.research_sources import (
     load_research_sources,
     save_research_sources,
 )
-from nblane.web_reader_api import app
+from nblane.web_reader_api import _is_local_paper_library_embed, app
 
 PDF_BYTES = b"""%PDF-1.4
 1 0 obj
@@ -776,13 +777,14 @@ class TestWebReaderApi(unittest.TestCase):
                 "/api/research/alice/paper-library/search",
                 headers={
                     "Origin": "null",
+                    "Host": "127.0.0.1:8502",
                     "Access-Control-Request-Method": "POST",
                     "Access-Control-Request-Headers": "content-type",
                 },
             )
             missing_query = client.post(
                 "/api/research/alice/paper-library/search",
-                headers={"Origin": "null"},
+                headers={"Origin": "null", "Host": "127.0.0.1:8502"},
                 json={"mode": "codex", "query": ""},
             )
             rows = [
@@ -842,6 +844,163 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(len(imported_ids), 1)
         self.assertIn(imported_ids[0], sources)
         self.assertEqual(sources[imported_ids[0]].metadata["open_access_pdf_url"], "https://example.com/paper.pdf")
+
+    @staticmethod
+    def _embed_request(host: str, client_host: str | None) -> Request:
+        scope: dict[str, object] = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/research/alice/paper-library/events",
+            "raw_path": b"/api/research/alice/paper-library/events",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"origin", b"null"), (b"host", host.encode())],
+            "server": ("testserver", 80),
+        }
+        if client_host is not None:
+            scope["client"] = (client_host, 54321)
+        return Request(scope)
+
+    def test_null_origin_embed_requires_loopback_host_or_client(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NBLANE_AUTH_FILE", None)
+            self.assertTrue(_is_local_paper_library_embed(self._embed_request("127.0.0.1:8502", "203.0.113.10")))
+            self.assertTrue(_is_local_paper_library_embed(self._embed_request("localhost:8502", "203.0.113.10")))
+            self.assertTrue(_is_local_paper_library_embed(self._embed_request("[::1]:8502", "203.0.113.10")))
+            self.assertTrue(_is_local_paper_library_embed(self._embed_request("203.0.113.10:8502", "127.0.0.1")))
+            self.assertFalse(_is_local_paper_library_embed(self._embed_request("203.0.113.10:8502", "203.0.113.11")))
+            self.assertFalse(_is_local_paper_library_embed(self._embed_request("paper.example.com", None)))
+
+    def test_null_origin_embed_never_allowed_when_auth_configured(self) -> None:
+        with patch.dict(os.environ, {"NBLANE_AUTH_FILE": "/tmp/nblane-test-users.yaml"}, clear=False):
+            self.assertFalse(_is_local_paper_library_embed(self._embed_request("127.0.0.1:8502", "127.0.0.1")))
+
+    def test_null_origin_embed_rejected_for_non_loopback_host(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            os.environ.pop("NBLANE_AUTH_FILE", None)
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            preflight = client.options(
+                "/api/research/alice/paper-library/search",
+                headers={
+                    "Origin": "null",
+                    "Host": "203.0.113.10:8502",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            mutation = client.post(
+                "/api/research/alice/paper-library/events",
+                headers={"Origin": "null", "Host": "203.0.113.10:8502"},
+                json={"type": "noop"},
+            )
+            local_mutation = client.post(
+                "/api/research/alice/paper-library/events",
+                headers={"Origin": "null", "Host": "127.0.0.1:8502"},
+                json={"type": "noop"},
+            )
+
+        self.assertNotIn("access-control-allow-origin", preflight.headers)
+        self.assertNotEqual(preflight.status_code, 204)
+        self.assertEqual(mutation.status_code, 403)
+        self.assertNotIn("access-control-allow-origin", mutation.headers)
+        self.assertNotEqual(local_mutation.status_code, 403)
+        self.assertEqual(local_mutation.headers["access-control-allow-origin"], "null")
+
+    def test_sec_fetch_site_cross_site_mutations_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            os.environ.pop("NBLANE_AUTH_FILE", None)
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            url = "/api/research/alice/paper-library/events"
+
+            cross_site_no_origin = client.post(
+                url,
+                headers={"Sec-Fetch-Site": "cross-site"},
+                json={"type": "noop"},
+            )
+            cross_site_matching_origin = client.post(
+                url,
+                headers={"Origin": "http://testserver", "Sec-Fetch-Site": "cross-site"},
+                json={"type": "noop"},
+            )
+            cross_site_any_case = client.post(
+                url,
+                headers={"Origin": "http://testserver", "Sec-Fetch-Site": "Cross-Site"},
+                json={"type": "noop"},
+            )
+            same_site = client.post(
+                url,
+                headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-site"},
+                json={"type": "noop"},
+            )
+            same_origin = client.post(
+                url,
+                headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"},
+                json={"type": "noop"},
+            )
+            user_initiated = client.post(
+                url,
+                headers={"Origin": "http://testserver", "Sec-Fetch-Site": "none"},
+                json={"type": "noop"},
+            )
+            header_missing = client.post(
+                url,
+                headers={"Origin": "http://testserver"},
+                json={"type": "noop"},
+            )
+
+        self.assertEqual(cross_site_no_origin.status_code, 403)
+        self.assertEqual(cross_site_no_origin.json()["detail"], "cross-site reader mutation rejected")
+        self.assertEqual(cross_site_matching_origin.status_code, 403)
+        self.assertEqual(cross_site_any_case.status_code, 403)
+        self.assertNotEqual(same_site.status_code, 403)
+        self.assertNotEqual(same_origin.status_code, 403)
+        self.assertNotEqual(user_initiated.status_code, 403)
+        self.assertNotEqual(header_missing.status_code, 403)
+
+    def test_sec_fetch_site_cross_site_still_allows_local_null_origin_embed(self) -> None:
+        # Chromium labels every sandboxed (opaque-origin) iframe fetch cross-site,
+        # so the recognized loopback embed must stay exempt or legit writes break.
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            os.environ.pop("NBLANE_AUTH_FILE", None)
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            embed_mutation = client.post(
+                "/api/research/alice/paper-library/events",
+                headers={
+                    "Origin": "null",
+                    "Host": "127.0.0.1:8502",
+                    "Sec-Fetch-Site": "cross-site",
+                },
+                json={"type": "noop"},
+            )
+
+        self.assertNotEqual(embed_mutation.status_code, 403)
+        self.assertEqual(embed_mutation.headers["access-control-allow-origin"], "null")
 
     def test_paper_library_import_reports_pdf_download_warning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

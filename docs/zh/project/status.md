@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-09-15
 source_of_truth: true
 ---
 
@@ -30,7 +30,7 @@ nblane 当前功能可用，但产品结构还没有完全收束。主要问题�
 | Web UI | 已实现 | Streamlit 多页应用 |
 | Research Workspace | 初版已实现 | source/chunk/claim/citation/synthesis + connectors |
 | Output Studio / Public Build | 已实现 | profile/blog/resume/project output 生产与静态构建拆分 |
-| Public Site | 兼容入口 | 旧页面跳转到 Output Studio / Public Build |
+| Public Site 旧页面 | 已删除 | 兼容跳转页已移除，由 Output Studio / Public Build 承接 |
 | Blog Editor | 已实现 | BlockNote、sidecar、AI patch、visual、Reviewer |
 | MCP Server | 初版已实现 | profile resources + write tools |
 | Cursor Skill | 初版已实现 | `sync-cursor` 生成规则文件 |

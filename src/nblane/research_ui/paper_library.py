@@ -13,6 +13,7 @@ from nblane.core.paper_library_workspace import (
     resolve_paper_library_runtime,
 )
 from nblane.core.research_papers import (
+    _pdf_backend,
     auto_chunk_paper,
     create_paper_library_node,
     ensure_paper_reading_artifacts,
@@ -616,51 +617,41 @@ def _render_grobid_status_block(ctx, source=None) -> None:
     ui = ctx.ui
     configured = bool(os.getenv("NBLANE_GROBID_URL", "").strip())
     with st.expander(_l(ui, "grobid_readiness", "GROBID readiness"), expanded=False):
-        if not configured:
+        if _pdf_backend() == "pymupdf":
             st.info(
-                _l(ui, 
+                _l(ui,
+                    "grobid_disabled_backend",
+                    "GROBID is disabled (NBLANE_RESEARCH_PDF_BACKEND=pymupdf or NBLANE_GROBID_URL=off); structured extraction uses PyMuPDF page text.",
+                )
+            )
+        elif not configured:
+            st.info(
+                _l(ui,
                     "grobid_not_configured",
                     "NBLANE_GROBID_URL is not configured; structured extraction will try the local GROBID default and fall back if unavailable.",
                 )
             )
-            if source is not None:
-                metadata = source.metadata or {}
-                warnings = metadata.get("structured_extraction_warnings") or []
-                notices = metadata.get("structured_extraction_notices") or []
-                for notice in notices:
-                    st.info(str(notice))
-                for warning in warnings:
-                    st.warning(str(warning))
-                st.caption(
-                    " · ".join(
-                        [
-                            f"structure_backend={metadata.get('structure_backend', '') or 'missing'}",
-                            f"structured_extracted_at={metadata.get('structured_extracted_at', '') or 'never'}",
-                        ]
-                    )
+        else:
+            try:
+                status = grobid_readiness()
+                if status.get("available"):
+                    st.success(str(status.get("message") or "GROBID available."))
+                else:
+                    st.warning(str(status.get("message") or "GROBID unavailable."))
+                st.code(
+                    yaml.dump(status, allow_unicode=True, default_flow_style=False, sort_keys=False),
+                    language="yaml",
                 )
-            return
-        try:
-            status = grobid_readiness()
-            if status.get("available"):
-                st.success(str(status.get("message") or "GROBID available."))
-            else:
-                st.warning(str(status.get("message") or "GROBID unavailable."))
-            st.code(
-                yaml.dump(status, allow_unicode=True, default_flow_style=False, sort_keys=False),
-                language="yaml",
-            )
-        except Exception as exc:
-            st.warning(str(exc))
+            except Exception as exc:
+                st.warning(str(exc))
         if source is not None:
             metadata = source.metadata or {}
             warnings = metadata.get("structured_extraction_warnings") or []
             notices = metadata.get("structured_extraction_notices") or []
             for notice in notices:
                 st.info(str(notice))
-            if warnings:
-                for warning in warnings:
-                    st.warning(str(warning))
+            for warning in warnings:
+                st.warning(str(warning))
             st.caption(
                 " · ".join(
                     [

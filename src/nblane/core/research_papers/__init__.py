@@ -98,6 +98,8 @@ from ._constants import (
     PDF_DOWNLOAD_TIMEOUT_SECONDS_DEFAULT,
     PDF_DOWNLOAD_IDLE_TIMEOUT_SECONDS_DEFAULT,
     PDF_DOWNLOAD_CHUNK_BYTES,
+    GROBID_DEFAULT_URL,
+    GROBID_OFF_VALUES,
     GROBID_FULLTEXT_TIMEOUT_SECONDS_DEFAULT,
     GROBID_RETRY_COOLDOWN_SECONDS_DEFAULT,
     PAPER_TRANSLATION_BATCH_SIZE_DEFAULT,
@@ -1537,10 +1539,70 @@ def _grobid_readiness_attempts() -> int:
     return max(1, min(5, configured if configured is not None else 3))
 
 
+_pdf_backend_cache: tuple[tuple[str, str], str] | None = None
+
+
+def _pdf_backend() -> str:
+    """Resolve the PDF structure backend switch from the environment.
+
+    ``NBLANE_RESEARCH_PDF_BACKEND`` accepts ``auto`` (default: probe GROBID,
+    fall back to PyMuPDF page text when unavailable), ``grobid`` (require
+    GROBID), and ``pymupdf`` (never probe GROBID). Setting
+    ``NBLANE_GROBID_URL`` to ``off``/``none`` (case-insensitive) also forces
+    ``pymupdf`` when the backend variable itself is unset or ``auto``.
+    The parsed result is cached and re-parsed when either variable changes.
+    """
+
+    global _pdf_backend_cache
+    raw_backend = _clean_text(os.getenv("NBLANE_RESEARCH_PDF_BACKEND")).lower()
+    raw_url = _clean_text(os.getenv("NBLANE_GROBID_URL"))
+    key = (raw_backend, raw_url)
+    if _pdf_backend_cache is not None and _pdf_backend_cache[0] == key:
+        return _pdf_backend_cache[1]
+    backend = raw_backend if raw_backend in {"auto", "grobid", "pymupdf"} else "auto"
+    if backend == "auto" and raw_url.lower() in GROBID_OFF_VALUES:
+        backend = "pymupdf"
+    _pdf_backend_cache = (key, backend)
+    return backend
+
+
+def _grobid_url(url: str | None = None) -> str:
+    """Return the effective GROBID base URL, or "" when GROBID is disabled.
+
+    An explicit *url* argument always wins (UI probe override); otherwise the
+    backend switch is honored before falling back to ``NBLANE_GROBID_URL``
+    and finally the local default.
+    """
+
+    explicit = _clean_text(url)
+    if explicit:
+        return explicit
+    if _pdf_backend() == "pymupdf":
+        return ""
+    configured = _clean_text(os.getenv("NBLANE_GROBID_URL"))
+    if configured.lower() in GROBID_OFF_VALUES:
+        return ""
+    return configured or GROBID_DEFAULT_URL
+
+
 def grobid_readiness(url: str | None = None) -> dict[str, object]:
     """Return display-ready readiness information for a GROBID service."""
 
-    base = _clean_text(url or os.getenv("NBLANE_GROBID_URL")) or "http://127.0.0.1:8070"
+    base = _grobid_url(url)
+    if not base:
+        return {
+            "available": False,
+            "status": "disabled",
+            "url": "",
+            "endpoint": "",
+            "message": (
+                "GROBID is disabled by configuration "
+                "(NBLANE_RESEARCH_PDF_BACKEND=pymupdf or NBLANE_GROBID_URL=off)."
+            ),
+            "attempts": 0,
+            "badges": [],
+            "badge_details": [],
+        }
     endpoint = base.rstrip("/") + "/api/isalive"
     badges: list[str] = []
     badge_details: list[dict[str, str]] = []
@@ -1607,7 +1669,12 @@ def _grobid_fulltext_timeout_seconds() -> float:
 def process_grobid_fulltext(profile: str | Path, source_id: str) -> GrobidDocument:
     """Call GROBID ``processFulltextDocument`` for one paper PDF."""
 
-    base = _clean_text(os.getenv("NBLANE_GROBID_URL")) or "http://127.0.0.1:8070"
+    base = _grobid_url()
+    if not base:
+        raise RuntimeError(
+            "GROBID is disabled by configuration "
+            "(NBLANE_RESEARCH_PDF_BACKEND=pymupdf or NBLANE_GROBID_URL=off)."
+        )
     pdf_bytes = load_paper_pdf_bytes(profile, source_id)
     boundary = "----nblane-paper-boundary"
     fields = {

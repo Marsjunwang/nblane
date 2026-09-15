@@ -8,8 +8,8 @@ mode="local"
 command="start"
 reload="0"
 profile="${NBLANE_DEV_PROFILE:-dev}"
-reader_port="${NBLANE_DEV_READER_PORT:-8502}"
-streamlit_port="${NBLANE_DEV_STREAMLIT_PORT:-8503}"
+reader_port="${NBLANE_DEV_READER_PORT:-}"
+streamlit_port="${NBLANE_DEV_STREAMLIT_PORT:-}"
 grobid_port="${NBLANE_DEV_GROBID_PORT:-18070}"
 use_grobid="0"
 runtime="${NBLANE_PAPER_LIBRARY_RUNTIME:-fastapi_iframe}"
@@ -61,12 +61,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --isolated)
       mode="isolated"
-      if [[ "${NBLANE_DEV_READER_PORT:-}" == "" ]]; then
-        reader_port="18502"
-      fi
-      if [[ "${NBLANE_DEV_STREAMLIT_PORT:-}" == "" ]]; then
-        streamlit_port="18503"
-      fi
       shift
       ;;
     --reload)
@@ -125,9 +119,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -x ".venv/bin/uvicorn" || ! -x ".venv/bin/streamlit" ]]; then
-  echo "Missing .venv tools. Run: python3 -m venv .venv && .venv/bin/pip install -e ." >&2
-  exit 1
+# Resolve port defaults after the argument loop so CLI flags always win over
+# the --isolated defaults regardless of argument order.
+if [[ -z "$reader_port" ]]; then
+  if [[ "$mode" == "isolated" ]]; then
+    reader_port="18502"
+  else
+    reader_port="8502"
+  fi
+fi
+if [[ -z "$streamlit_port" ]]; then
+  if [[ "$mode" == "isolated" ]]; then
+    streamlit_port="18503"
+  else
+    streamlit_port="8503"
+  fi
 fi
 
 if [[ "$command" == "start" && -f "$env_file" ]]; then
@@ -182,6 +188,16 @@ if [[ "$command" == "status" ]]; then
   exit 0
 fi
 
+# --- start-only prerequisites (stop/status above must work without them) ---
+if [[ ! -x ".venv/bin/uvicorn" || ! -x ".venv/bin/streamlit" ]]; then
+  echo "Missing .venv tools. Run: python3 -m venv .venv && .venv/bin/pip install -e ." >&2
+  exit 1
+fi
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "tmux is required for dev sessions. Install it (e.g. sudo apt install tmux) and retry." >&2
+  exit 1
+fi
+
 if [[ "$mode" == "isolated" ]]; then
   mkdir -p "$dev_root/profiles" "$dev_root/schemas" "$dev_root/teams" "$asset_root"
   if [[ ! -d "$dev_root/profiles/template" ]]; then
@@ -189,6 +205,7 @@ if [[ "$mode" == "isolated" ]]; then
   fi
   if [[ ! -d "$dev_root/schemas" || -z "$(find "$dev_root/schemas" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
     cp -a "$repo_root/schemas/." "$dev_root/schemas/"
+    rm -rf "$dev_root/schemas/.learned"
   fi
   if [[ ! -d "$dev_root/teams" || -z "$(find "$dev_root/teams" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
     cp -a "$repo_root/teams/." "$dev_root/teams/"
@@ -207,9 +224,9 @@ fi
 
 grobid_env=""
 if [[ "$use_grobid" == "1" ]]; then
-  grobid_env="NBLANE_GROBID_URL=http://127.0.0.1:${grobid_port} NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid"
+  grobid_env="NBLANE_GROBID_URL=http://127.0.0.1:${grobid_port} NBLANE_RESEARCH_PDF_BACKEND=grobid"
 else
-  grobid_env="NBLANE_GROBID_URL= NBLANE_RESEARCH_STRUCTURE_BACKEND=pymupdf"
+  grobid_env="NBLANE_RESEARCH_PDF_BACKEND=pymupdf"
 fi
 
 auth_env=""
@@ -225,40 +242,100 @@ if [[ "${LLM_REPLY_LANG:-}" == "en" || "${LLM_REPLY_LANG:-}" == "zh" ]]; then
   lang_env="${lang_env} LLM_REPLY_LANG=${LLM_REPLY_LANG}"
 fi
 
-# Forward LLM credentials into the tmux child processes. The script sources
-# the repo .env above (set -a), but --isolated runs point NBLANE_ROOT at
-# .dev-data, so llm.py's load_dotenv(REPO_ROOT/.env) misses the repo .env and
-# AI features report "not configured". Pass the already-exported vars through
-# explicitly, mirroring lang_env. Each is single-quoted to survive spaces.
-llm_env=""
-for var in LLM_API_KEY LLM_BASE_URL LLM_MODEL VISUAL_API_KEY DASHSCOPE_API_KEY; do
-  value="${!var:-}"
-  if [[ -n "$value" ]]; then
-    llm_env="${llm_env} ${var}='${value}'"
+# LLM credentials must never appear on the tmux command line (`ps` would show
+# them). Each session sources the env file itself before starting the server;
+# only non-sensitive settings stay on the command line. The explicit VAR=value
+# prefixes below still override whatever the env file defines for this run.
+env_load=""
+if [[ -f "$env_file" ]]; then
+  env_load="set -a; . '$env_file'; set +a;"
+fi
+
+port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH 2>/dev/null | awk -v port="$port" '{split($4, parts, ":"); if (parts[length(parts)] == port) found=1} END {exit(found ? 0 : 1)}'
+    return $?
   fi
-done
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
+port_owner() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnpH 2>/dev/null | awk -v port="$port" '{split($4, parts, ":"); if (parts[length(parts)] == port) print}' || true
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+  fi
+}
+
+wait_for_free_port() {
+  # Briefly tolerate a just-stopped previous session releasing the port.
+  local port="$1" attempt
+  for ((attempt=0; attempt<10; attempt++)); do
+    if ! port_in_use "$port"; then
+      return 0
+    fi
+    sleep 0.3
+  done
+  return 1
+}
 
 stop_sessions
 
+for port in "$reader_port" "$streamlit_port"; do
+  if ! wait_for_free_port "$port"; then
+    echo "Port ${port} is already in use:" >&2
+    port_owner "$port" >&2
+    echo "Stop that process first, or pick another port via --reader-port/--streamlit-port." >&2
+    exit 1
+  fi
+done
+
 tmux new-session -d -s "$reader_session" -c "$repo_root" \
-  "NBLANE_ROOT='$dev_root' \
-   NBLANE_ENV_FILE='$repo_root/.env' \
+  "${env_load} \
+   NBLANE_ROOT='$dev_root' \
+   NBLANE_ENV_FILE='$env_file' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
-   ${auth_env} ${grobid_env} ${lang_env} ${llm_env} \
+   ${auth_env} ${grobid_env} ${lang_env} \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
 
 tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
-  "NBLANE_ROOT='$dev_root' \
-   NBLANE_ENV_FILE='$repo_root/.env' \
+  "${env_load} \
+   NBLANE_ROOT='$dev_root' \
+   NBLANE_ENV_FILE='$env_file' \
    NBLANE_READER_API_BASE='$reader_base' \
    NBLANE_DASHBOARD_CANVAS_BASE='$reader_base' \
    NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
    NBLANE_PAPER_LIBRARY_RUNTIME='$runtime' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
-   ${auth_env} ${grobid_env} ${lang_env} ${llm_env} \
+   ${auth_env} ${grobid_env} ${lang_env} \
    PYTHONPATH=src .venv/bin/streamlit run app.py \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
+
+if command -v curl >/dev/null 2>&1; then
+  reader_health="${reader_base}/auth/session-ok"
+  healthy="0"
+  for ((attempt=0; attempt<20; attempt++)); do
+    if curl -fsS -o /dev/null --max-time 2 "$reader_health" 2>/dev/null; then
+      healthy="1"
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$healthy" != "1" ]]; then
+    echo "Reader API did not come up at ${reader_health}." >&2
+    echo "Inspect logs: tmux capture-pane -pt ${reader_session} -S -200" >&2
+    exit 1
+  fi
+else
+  echo "curl not found; skipping Reader API health check at ${reader_base}/auth/session-ok." >&2
+fi
 
 echo "Started ${mode} development Web UI."
 echo "  root:        ${dev_root}"

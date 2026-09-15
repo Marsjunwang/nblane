@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-24
+last_verified: 2026-09-15
 source_of_truth: true
 ---
 
@@ -460,7 +460,7 @@ NBLANE_CODEX_ATTEMPTS=1
 
 # 可选 Paper Reading 结构化抽取
 NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+NBLANE_RESEARCH_PDF_BACKEND=grobid
 ```
 
 nblane 启动时会通过 `python-dotenv` 自动加载该文件。
@@ -487,7 +487,7 @@ curl http://127.0.0.1:8070/api/isalive
 
 ```bash
 NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_STRUCTURE_BACKEND=grobid
+NBLANE_RESEARCH_PDF_BACKEND=grobid
 ```
 
 然后重启 Streamlit。若不启动 GROBID，Reader 仍可使用 PDF 阅读、高亮、
