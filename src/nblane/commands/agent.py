@@ -12,20 +12,25 @@ from nblane.core.agent_tasks import (
     sync_agent_harness_snippet,
 )
 from nblane.core.file_write import atomic_write_text
+from nblane.core.mcp_client_config import build_openclaw_mcp_snippet
 
 
 def cmd_sync_agent_harness(
     target: str,
     *,
     out_path: str | None = None,
+    profile: str | None = None,
 ) -> None:
-    """Print or write a Codex/OpenCode harness config snippet."""
+    """Print or write a Codex/OpenCode/OpenClaw harness config snippet."""
 
-    try:
-        body = sync_agent_harness_snippet(target)
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
+    if target == "openclaw":
+        body = build_openclaw_mcp_snippet(profile)
+    else:
+        try:
+            body = sync_agent_harness_snippet(target)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
     if out_path:
         path = Path(out_path)
         path.parent.mkdir(parents=True, exist_ok=True)

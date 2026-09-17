@@ -33,7 +33,7 @@ Commands:
                                     Inspect Public Site file tree
     nblane research connector sync <name> --all [--dry-run]
                                     Sync Research Workspace connectors
-    nblane sync-agent-harness --target codex|opencode
+    nblane sync-agent-harness --target codex|opencode|openclaw
                                     Print external harness config snippet
     nblane agent handoff <task_id> --target codex|opencode [--profile name]
                                     Print external agent handoff instructions
@@ -374,13 +374,18 @@ def main() -> None:
 
     p_agent_harness = sub.add_parser(
         "sync-agent-harness",
-        help="Print or write Codex/OpenCode harness config snippets",
+        help="Print or write Codex/OpenCode/OpenClaw harness config snippets",
     )
     p_agent_harness.add_argument(
         "--target",
         required=True,
-        choices=["codex", "opencode"],
+        choices=["codex", "opencode", "openclaw"],
         help="External agent harness target",
+    )
+    p_agent_harness.add_argument(
+        "--profile",
+        default=None,
+        help="Profile name for the NBLANE_PROFILE env (openclaw target only)",
     )
     p_agent_harness.add_argument(
         "--out",
@@ -992,6 +997,7 @@ def main() -> None:
         cmd_sync_agent_harness(
             args.target,
             out_path=args.out,
+            profile=args.profile,
         )
     elif args.command == "agent":
         if args.agent_command == "handoff":
