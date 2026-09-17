@@ -441,6 +441,91 @@ export function normalizeProfileContext(source) {
   };
 }
 
+export function normalizeAgentActivity(source) {
+  const value = asObject(source);
+  return {
+    total: Math.max(0, Number(value.total) || 0),
+    pendingTotal: Math.max(0, Number(value.pending_total ?? value.pendingTotal) || 0),
+    pendingTitles: asArray(value.pending_titles || value.pendingTitles)
+      .map((item) => cleanText(item))
+      .filter(Boolean),
+    path: cleanText(value.path, "pages/9_Agent_Activity.py"),
+  };
+}
+
+export function normalizeDailyBrief(source) {
+  const value = asObject(source);
+  const focus = asObject(value.focus);
+  const decisions = asObject(value.decisions);
+  const risks = asObject(value.risks);
+  const research = asObject(value.research);
+  return {
+    date: cleanText(value.date),
+    aiSummary: cleanText(value.ai_summary || value.aiSummary),
+    aiBackend: cleanText(value.ai_backend || value.aiBackend),
+    focus: {
+      goalId: cleanText(focus.goal_id || focus.goalId),
+      goalLabel: cleanText(focus.goal_label || focus.goalLabel),
+      goalSet: Boolean(focus.goal_set || focus.goalSet),
+      goalLocked: Boolean(focus.goal_locked || focus.goalLocked),
+      taskTitle: cleanText(focus.task_title || focus.taskTitle),
+      taskBlockedBy: cleanText(focus.task_blocked_by || focus.taskBlockedBy),
+      doingTotal: Math.max(0, Number(focus.doing_total ?? focus.doingTotal) || 0),
+      path: cleanText(focus.path, "pages/3_Kanban.py"),
+    },
+    decisions: {
+      evidencePending: Math.max(0, Number(decisions.evidence_pending ?? decisions.evidencePending) || 0),
+      agentPending: Math.max(0, Number(decisions.agent_pending ?? decisions.agentPending) || 0),
+      evidencePath: cleanText(decisions.evidence_path || decisions.evidencePath, "pages/2_Evidence_Review.py"),
+      agentPath: cleanText(decisions.agent_path || decisions.agentPath, "pages/9_Agent_Activity.py"),
+    },
+    risks: {
+      healthErrors: Math.max(0, Number(risks.health_errors ?? risks.healthErrors) || 0),
+      healthWarnings: Math.max(0, Number(risks.health_warnings ?? risks.healthWarnings) || 0),
+      stalledDoing: asArray(risks.stalled_doing || risks.stalledDoing)
+        .map((row) => {
+          const item = asObject(row);
+          return {
+            id: cleanText(item.id),
+            title: cleanText(item.title),
+            days: Math.max(0, Number(item.days) || 0),
+          };
+        })
+        .filter((row) => row.title || row.id),
+      stalledDoingCount: Math.max(0, Number(risks.stalled_doing_count ?? risks.stalledDoingCount) || 0),
+      healthPath: cleanText(risks.health_path || risks.healthPath, "pages/5_Profile_Health.py"),
+      kanbanPath: cleanText(risks.kanban_path || risks.kanbanPath, "pages/3_Kanban.py"),
+    },
+    research: {
+      inbox: Math.max(0, Number(research.inbox) || 0),
+      active: Math.max(0, Number(research.active) || 0),
+      path: cleanText(research.path, "pages/7_Research.py"),
+    },
+  };
+}
+
+export function normalizeCommandBar(source) {
+  const value = asObject(source);
+  const pendingRaw = asObject(value.pending_intent || value.pendingIntent);
+  const pending = cleanText(pendingRaw.id)
+    ? {
+        id: cleanText(pendingRaw.id),
+        kind: cleanText(pendingRaw.kind),
+        title: cleanText(pendingRaw.title),
+        column: cleanText(pendingRaw.column),
+        due: cleanText(pendingRaw.due),
+        tags: asArray(pendingRaw.tags).map((item) => cleanText(item)).filter(Boolean),
+        raw: cleanText(pendingRaw.raw),
+      }
+    : null;
+  return {
+    enabled: Boolean(value.enabled),
+    placeholder: cleanText(value.placeholder),
+    help: Boolean(value.help),
+    pendingIntent: pending,
+  };
+}
+
 export function normalizeResumeIngest(source) {
   const value = asObject(source);
   const mergeRaw = value.merge && typeof value.merge === "object" ? value.merge : null;
@@ -545,6 +630,9 @@ export function normalizePayload(payload) {
     })(),
     profileContext: normalizeProfileContext(source.profile_context || source.profileContext),
     resumeIngest: normalizeResumeIngest(source.resume_ingest || source.resumeIngest),
+    agentActivity: normalizeAgentActivity(source.agent_activity || source.agentActivity),
+    dailyBrief: normalizeDailyBrief(source.daily_brief || source.dailyBrief),
+    commandBar: normalizeCommandBar(source.command_bar || source.commandBar),
     trends: (() => {
       const t = asObject(source.trends);
       const deltasRaw = asObject(t.deltas);

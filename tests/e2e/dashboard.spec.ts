@@ -106,7 +106,7 @@ test("Home dashboard exposes top-right guide, AI settings, optional fullscreen g
   const aiButton = page.getByRole("button", { name: /^(AI|本页 AI 设置|Dashboard AI)$/ }).first();
   await expect(aiButton).toBeVisible();
   await aiButton.click();
-  await expect(page.locator("body")).toContainText(/dashboard\.goal_skill_match|dashboard\.graph_insights|Goal-skill|目标.*技能/);
+  await expect(page.locator("body")).toContainText(/dashboard\.goal_skill_match|dashboard\.daily_brief|Goal-skill|目标.*技能/);
   await expect(page.locator("body")).toContainText(/LLM model[\s\S]*Codex model|Codex model[\s\S]*LLM model/);
   await expect(page.getByText(/Effective backend[:：]|生效后端/).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Save|保存)$/ }).first()).toBeVisible();

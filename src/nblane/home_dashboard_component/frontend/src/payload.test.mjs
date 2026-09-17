@@ -5,6 +5,9 @@ import { goalDisplay, goalDraftFromFormData, hiddenArchivedSubtreeIds, normalize
 import {
   archiveGoalEvent,
   captureInboxSubmitEvent,
+  commandBarConfirmEvent,
+  commandBarDiscardEvent,
+  commandBarSubmitEvent,
   confirmGoalSkillLinksEvent,
   createGoalSubmitEvent,
   editGoalSubmitEvent,
@@ -195,6 +198,113 @@ test("empty payload still renders stable defaults", () => {
   assert.equal(display.visibility, "");
 });
 
+test("normalizes daily brief and agent activity", () => {
+  const payload = normalizePayload({
+    agent_activity: {
+      total: 5,
+      pending_total: 2,
+      pending_titles: ["Writeback A", "Writeback B"],
+      path: "pages/9_Agent_Activity.py",
+    },
+    daily_brief: {
+      date: "2026-09-16",
+      ai_summary: "Focus on the demo today.",
+      ai_backend: "llm",
+      focus: {
+        goal_id: "g1",
+        goal_label: "Robotics demo",
+        goal_set: true,
+        goal_locked: false,
+        task_title: "Ship robot demo",
+        task_blocked_by: "calibration data",
+        doing_total: 2,
+        path: "pages/3_Kanban.py",
+      },
+      decisions: {
+        evidence_pending: 3,
+        agent_pending: 2,
+        evidence_path: "pages/2_Evidence_Review.py",
+        agent_path: "pages/9_Agent_Activity.py",
+      },
+      risks: {
+        health_errors: 1,
+        health_warnings: 2,
+        stalled_doing: [{ id: "task_ship_demo", title: "Ship robot demo", days: 21 }],
+        stalled_doing_count: 1,
+        health_path: "pages/5_Profile_Health.py",
+        kanban_path: "pages/3_Kanban.py",
+      },
+      research: { inbox: 4, active: 1, path: "pages/7_Research.py" },
+    },
+  });
+
+  assert.equal(payload.agentActivity.pendingTotal, 2);
+  assert.deepEqual(payload.agentActivity.pendingTitles, ["Writeback A", "Writeback B"]);
+  assert.equal(payload.agentActivity.path, "pages/9_Agent_Activity.py");
+  assert.equal(payload.dailyBrief.date, "2026-09-16");
+  assert.equal(payload.dailyBrief.aiSummary, "Focus on the demo today.");
+  assert.equal(payload.dailyBrief.focus.goalLabel, "Robotics demo");
+  assert.equal(payload.dailyBrief.focus.taskBlockedBy, "calibration data");
+  assert.equal(payload.dailyBrief.decisions.evidencePending, 3);
+  assert.equal(payload.dailyBrief.decisions.agentPath, "pages/9_Agent_Activity.py");
+  assert.equal(payload.dailyBrief.risks.healthWarnings, 2);
+  assert.equal(payload.dailyBrief.risks.stalledDoing[0].days, 21);
+  assert.equal(payload.dailyBrief.research.inbox, 4);
+});
+
+test("missing daily brief and agent activity default safely", () => {
+  const payload = normalizePayload({});
+
+  assert.equal(payload.agentActivity.pendingTotal, 0);
+  assert.equal(payload.dailyBrief.date, "");
+  assert.equal(payload.dailyBrief.aiSummary, "");
+  assert.equal(payload.dailyBrief.decisions.evidencePending, 0);
+  assert.equal(payload.dailyBrief.decisions.agentPath, "pages/9_Agent_Activity.py");
+  assert.deepEqual(payload.dailyBrief.risks.stalledDoing, []);
+});
+
+test("normalizes command bar with pending intent", () => {
+  const payload = normalizePayload({
+    command_bar: {
+      enabled: true,
+      placeholder: "Command…",
+      help: true,
+      pending_intent: {
+        id: "intent:kanban.add:abc123",
+        kind: "kanban.add",
+        title: "校准数据集",
+        column: "Doing",
+        due: "2026-09-17",
+        tags: ["robot", "sim"],
+        raw: "把校准数据集加到 Doing 明天前 #robot #sim",
+      },
+    },
+  });
+
+  assert.equal(payload.commandBar.enabled, true);
+  assert.equal(payload.commandBar.placeholder, "Command…");
+  assert.equal(payload.commandBar.help, true);
+  assert.equal(payload.commandBar.pendingIntent.id, "intent:kanban.add:abc123");
+  assert.equal(payload.commandBar.pendingIntent.kind, "kanban.add");
+  assert.equal(payload.commandBar.pendingIntent.title, "校准数据集");
+  assert.equal(payload.commandBar.pendingIntent.column, "Doing");
+  assert.equal(payload.commandBar.pendingIntent.due, "2026-09-17");
+  assert.deepEqual(payload.commandBar.pendingIntent.tags, ["robot", "sim"]);
+});
+
+test("command bar defaults to disabled empty state", () => {
+  const payload = normalizePayload({});
+
+  assert.equal(payload.commandBar.enabled, false);
+  assert.equal(payload.commandBar.placeholder, "");
+  assert.equal(payload.commandBar.help, false);
+  assert.equal(payload.commandBar.pendingIntent, null);
+  const noPending = normalizePayload({
+    command_bar: { enabled: true, pending_intent: { kind: "kanban.add" } },
+  });
+  assert.equal(noPending.commandBar.pendingIntent, null);
+});
+
 test("events return stable action shapes", () => {
   const nav = navigationEvent("pages/3_Kanban.py");
   const capture = captureInboxSubmitEvent({ title: "Paper note", tags: ["research"] });
@@ -232,6 +342,16 @@ test("events return stable action shapes", () => {
   assert.equal(manual.payload.node_id, "ros2_basics");
   assert.equal(confirm.action, "confirm_goal_skill_links");
   assert.equal(confirm.payload.links[0].node_id, "ros2_basics");
+
+  const cmdSubmit = commandBarSubmitEvent("把X加到Doing");
+  const cmdConfirm = commandBarConfirmEvent("intent:kanban.add:abc123");
+  const cmdDiscard = commandBarDiscardEvent("intent:kanban.add:abc123");
+  assert.equal(cmdSubmit.action, "command_bar_submit");
+  assert.equal(cmdSubmit.payload.text, "把X加到Doing");
+  assert.equal(cmdConfirm.action, "command_bar_confirm");
+  assert.equal(cmdConfirm.payload.intent_id, "intent:kanban.add:abc123");
+  assert.equal(cmdDiscard.action, "command_bar_discard");
+  assert.equal(cmdDiscard.payload.intent_id, "intent:kanban.add:abc123");
 });
 
 test("goal form draft keeps create primary intent", () => {

@@ -25,6 +25,9 @@ import {
 } from "./payload.js";
 import {
   archiveGoalEvent,
+  commandBarConfirmEvent,
+  commandBarDiscardEvent,
+  commandBarSubmitEvent,
   confirmGoalSkillLinksEvent,
   createGoalSubmitEvent,
   editGoalSubmitEvent,
@@ -719,6 +722,12 @@ function actionQueueItems(payload) {
   const evidence = quickLink(payload, "evidence_review", "pages/2_Evidence_Review.py", label(ui, "quick_evidence_review", "Evidence Review"));
   const gap = quickLink(payload, "gap", "pages/2_Gap_Analysis.py", label(ui, "quick_gap", "Gap Analysis"));
   const output = quickLink(payload, "public_site", "pages/6_Output_Studio.py", label(ui, "quick_public_site", "Output Studio"));
+  const agentActivity = quickLink(payload, "agent_activity", "pages/9_Agent_Activity.py", label(ui, "dashboard_brief_agent_activity_link", "Agent Activity"));
+  const healthLink = quickLink(payload, "profile_health", "pages/5_Profile_Health.py", label(ui, "quick_profile_health", "Profile Health"));
+  const agentPending = Number(payload.agentActivity?.pendingTotal || 0);
+  const agentTitles = asArray(payload.agentActivity?.pendingTitles).map((t) => cleanText(t)).filter(Boolean);
+  const healthErrors = Number(payload.charts.health.error || 0);
+  const healthWarnings = Number(payload.charts.health.warning || 0);
   const items = [
     {
       id: "evidence",
@@ -734,6 +743,36 @@ function actionQueueItems(payload) {
       filter: `pending=${metrics.evidenceAttention}`,
       path: evidence.path,
       tone: metrics.evidenceAttention ? "warning" : "",
+    },
+    {
+      id: "agent_activity",
+      count: agentPending,
+      eyebrow: label(ui, "dashboard_queue_agent_activity", "Agent writebacks"),
+      title: agentPending
+        ? label(ui, "dashboard_action_review_agent", "Review agent writebacks")
+        : label(ui, "dashboard_agent_queue_empty", "No agent writebacks waiting"),
+      detail: agentTitles.join(" / ") || label(ui, "dashboard_agent_queue_empty", "No agent writebacks waiting"),
+      why: agentPending
+        ? label(ui, "dashboard_action_why_agent", "Agent-proposed changes wait for your approval before any file is written.")
+        : label(ui, "dashboard_action_why_clear", "No urgent queue is blocking the daily path."),
+      filter: `agent=${agentPending}`,
+      path: agentActivity.path,
+      tone: agentPending ? "warning" : "",
+    },
+    {
+      id: "health",
+      count: metrics.healthAlerts,
+      eyebrow: label(ui, "dashboard_queue_health", "Profile health"),
+      title: metrics.healthAlerts
+        ? label(ui, "dashboard_action_fix_health", "Fix profile health")
+        : label(ui, "dashboard_health_queue_clear", "No health errors or warnings"),
+      detail: `${label(ui, "dashboard_brief_health_issues", "Health errors / warnings")}: ${healthErrors} / ${healthWarnings}`,
+      why: metrics.healthAlerts
+        ? label(ui, "dashboard_action_why_health", "Health errors and warnings can block context publishing and reviews.")
+        : label(ui, "dashboard_action_why_clear", "No urgent queue is blocking the daily path."),
+      filter: `health=${metrics.healthAlerts}`,
+      path: healthLink.path,
+      tone: metrics.healthAlerts ? "warning" : "",
     },
     {
       id: "focus",
@@ -823,6 +862,109 @@ function TodayFocusStrip({ payload, onEmit }) {
   );
 }
 
+function DailyBriefChip({ path, labelText, actionId, onEmit }) {
+  return (
+    <button
+      className="hd-daily-brief-chip"
+      type="button"
+      data-action="navigate"
+      data-dashboard-action={`brief:${actionId}`}
+      data-target={path}
+      onClick={() => onEmit(navigationEvent(path))}
+    >
+      {labelText}
+    </button>
+  );
+}
+
+function DailyBriefBanner({ payload, onEmit }) {
+  const ui = payload.ui;
+  const brief = payload.dailyBrief;
+  if (!brief || !brief.date) return null;
+  const focus = brief.focus;
+  const decisions = brief.decisions;
+  const risks = brief.risks;
+  const research = brief.research;
+  const goalText = focus.goalLocked
+    ? label(ui, "goal_private_locked", "Private goal")
+    : focus.goalLabel ||
+      (focus.goalSet
+        ? label(ui, "dashboard_brief_goal_hidden", "Goal set (hidden)")
+        : label(ui, "dashboard_brief_no_goal", "No primary goal set"));
+  const taskText = focus.taskTitle || label(ui, "dashboard_brief_no_task", "No Doing task yet — pick today's work.");
+  const blockedText = focus.taskBlockedBy
+    ? ` · ${label(ui, "dashboard_graph_blocked", "Blocked")}: ${focus.taskBlockedBy}`
+    : "";
+  const stalledTemplate = label(ui, "dashboard_brief_stalled_doing", "{n} stalled Doing task(s)");
+  const stalledDaysTemplate = label(ui, "dashboard_brief_stalled_days", "{days}d");
+  const researchText = label(ui, "dashboard_brief_research_detail", "Inbox {inbox} · Active {active}")
+    .replace("{inbox}", String(research.inbox))
+    .replace("{active}", String(research.active));
+  const hasRisk = risks.healthErrors + risks.healthWarnings > 0 || risks.stalledDoingCount > 0;
+
+  return (
+    <section className="hd-daily-brief" data-section="daily-brief" aria-label={label(ui, "dashboard_brief_title", "Daily brief")}>
+      <header className="hd-daily-brief-header">
+        <div>
+          <span className="hd-eyebrow">{label(ui, "dashboard_brief_title", "Daily brief")}</span>
+          <h3>{brief.date}</h3>
+        </div>
+        {brief.aiSummary ? (
+          <span className="hd-daily-brief-ai-badge" title={label(ui, "dashboard_brief_ai_caption", "Drafted by AI from today's heuristic snapshot.")}>
+            {label(ui, "dashboard_brief_ai_badge", "AI")}
+          </span>
+        ) : null}
+      </header>
+      {brief.aiSummary ? <p className="hd-daily-brief-summary">{brief.aiSummary}</p> : null}
+      <div className="hd-daily-brief-grid">
+        <div className="hd-daily-brief-cell">
+          <span className="hd-daily-brief-eyebrow">{label(ui, "dashboard_brief_focus_eyebrow", "Today's focus")}</span>
+          <strong>{goalText}</strong>
+          <small>{taskText}{blockedText}</small>
+          <div className="hd-daily-brief-actions">
+            <DailyBriefChip path={focus.path} labelText={label(ui, "quick_kanban", "Kanban")} actionId="focus" onEmit={onEmit} />
+          </div>
+        </div>
+        <div className={`hd-daily-brief-cell ${decisions.evidencePending + decisions.agentPending > 0 ? "warning" : ""}`}>
+          <span className="hd-daily-brief-eyebrow">{label(ui, "dashboard_brief_decisions_eyebrow", "Awaiting your decision")}</span>
+          <strong>{decisions.evidencePending + decisions.agentPending}</strong>
+          <small>
+            {label(ui, "dashboard_brief_decision_evidence", "Evidence to review")}: {decisions.evidencePending}
+            {" · "}
+            {label(ui, "dashboard_brief_decision_agent", "Agent writebacks")}: {decisions.agentPending}
+          </small>
+          <div className="hd-daily-brief-actions">
+            <DailyBriefChip path={decisions.evidencePath} labelText={label(ui, "quick_evidence_review", "Evidence Review")} actionId="decisions-evidence" onEmit={onEmit} />
+            <DailyBriefChip path={decisions.agentPath} labelText={label(ui, "dashboard_brief_agent_activity_link", "Agent Activity")} actionId="decisions-agent" onEmit={onEmit} />
+          </div>
+        </div>
+        <div className={`hd-daily-brief-cell ${hasRisk ? "warning" : ""}`}>
+          <span className="hd-daily-brief-eyebrow">{label(ui, "dashboard_brief_risks_eyebrow", "Risks")}</span>
+          <strong>{risks.healthErrors + risks.healthWarnings > 0 ? `${risks.healthErrors} / ${risks.healthWarnings}` : "0"}</strong>
+          <small>{label(ui, "dashboard_brief_health_issues", "Health errors / warnings")}</small>
+          {risks.stalledDoingCount > 0 ? (
+            <small>
+              {stalledTemplate.replace("{n}", String(risks.stalledDoingCount))}
+              {risks.stalledDoing.length ? `: ${risks.stalledDoing.map((row) => `${row.title} (${stalledDaysTemplate.replace("{days}", String(row.days))})`).join(", ")}` : ""}
+            </small>
+          ) : null}
+          <div className="hd-daily-brief-actions">
+            <DailyBriefChip path={risks.healthPath} labelText={label(ui, "quick_profile_health", "Profile Health")} actionId="risks-health" onEmit={onEmit} />
+          </div>
+        </div>
+        <div className="hd-daily-brief-cell">
+          <span className="hd-daily-brief-eyebrow">{label(ui, "dashboard_brief_research_eyebrow", "Research")}</span>
+          <strong>{research.active}</strong>
+          <small>{researchText}</small>
+          <div className="hd-daily-brief-actions">
+            <DailyBriefChip path={research.path} labelText={label(ui, "quick_research", "Research")} actionId="research" onEmit={onEmit} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function skillSegments(counts, total) {
   const raw = SKILL_STATUS_META.map((item) => ({
     ...item,
@@ -851,6 +993,107 @@ function skillSegments(counts, total) {
     offset += length + gap;
     return segment;
   });
+}
+
+function CommandBar({ payload, onEmit }) {
+  const ui = payload.ui;
+  const bar = payload.commandBar || {};
+  const pending = bar.pendingIntent;
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const text = cleanText(draft);
+    if (!text) return;
+    onEmit(commandBarSubmitEvent(text));
+    setDraft("");
+  };
+  const kindLabel = pending
+    ? label(
+        ui,
+        pending.kind === "evidence.capture"
+          ? "dashboard_command_bar_kind_evidence_capture"
+          : "dashboard_command_bar_kind_kanban_add",
+        pending.kind,
+      )
+    : "";
+  const pendingMeta = pending
+    ? [
+        pending.kind === "kanban.add" && pending.column
+          ? `${label(ui, "dashboard_command_bar_column", "Column")}: ${pending.column}`
+          : "",
+        pending.due ? `${label(ui, "dashboard_command_bar_due", "Due")}: ${pending.due}` : "",
+        pending.tags.length
+          ? `${label(ui, "dashboard_command_bar_tags", "Tags")}: ${pending.tags.map((t) => `#${t}`).join(" ")}`
+          : "",
+      ].filter(Boolean)
+    : [];
+
+  return (
+    <div className="hd-command-bar" data-section="command-bar">
+      <div className="hd-command-bar-row">
+        <input
+          className="hd-command-bar-input"
+          type="text"
+          value={draft}
+          placeholder={bar.placeholder || label(ui, "dashboard_command_bar_placeholder", "Command…")}
+          aria-label={label(ui, "dashboard_command_bar_aria", "Command bar")}
+          data-action="command-bar-input"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <button
+          className="hd-primary hd-command-bar-submit"
+          type="button"
+          data-action="command-bar-submit"
+          disabled={!cleanText(draft)}
+          onClick={submit}
+        >
+          {label(ui, "dashboard_command_bar_submit", "Run")}
+        </button>
+      </div>
+      {bar.help ? (
+        <p className="hd-command-bar-help" data-section="command-bar-help">
+          {label(ui, "dashboard_command_bar_help", "")}
+        </p>
+      ) : null}
+      {pending ? (
+        <div className="hd-command-bar-pending" data-section="command-bar-pending">
+          <div className="hd-command-bar-pending-copy">
+            <span className="hd-eyebrow">{label(ui, "dashboard_command_bar_pending_title", "Confirm before writing")}</span>
+            <strong>{pending.title}</strong>
+            <small>
+              {kindLabel}
+              {pendingMeta.length ? ` · ${pendingMeta.join(" · ")}` : ""}
+            </small>
+          </div>
+          <div className="hd-command-bar-pending-actions">
+            <button
+              className="hd-primary"
+              type="button"
+              data-action="command-bar-confirm"
+              data-intent-id={pending.id}
+              onClick={() => onEmit(commandBarConfirmEvent(pending.id))}
+            >
+              {label(ui, "dashboard_command_bar_confirm", "Confirm write")}
+            </button>
+            <button
+              className="hd-ghost"
+              type="button"
+              data-action="command-bar-discard"
+              data-intent-id={pending.id}
+              onClick={() => onEmit(commandBarDiscardEvent(pending.id))}
+            >
+              {label(ui, "dashboard_command_bar_discard", "Discard")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal, onOpenResumeIngest, onOpenProfileContext, canEditGoals = true, canSelectGoals = true, showToday = true, selectedGoalId = "" }) {
@@ -1030,6 +1273,10 @@ function ContextHeader({ payload, onEmit, onCreateGoal, onSelectGoal, onEditGoal
       </div>
 
       {showToday ? <TodayFocusStrip payload={payload} onEmit={onEmit} /> : null}
+
+      {canEditGoals && payload.commandBar?.enabled ? (
+        <CommandBar payload={payload} onEmit={onEmit} />
+      ) : null}
 
       <div className="hd-context-actions">
         {canEditGoals ? (
@@ -3907,6 +4154,9 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
     return map;
   }, [payload]);
   const evidenceItem = itemsById.get("evidence");
+  const decisionItems = ["agent_activity", "health"]
+    .map((id) => itemsById.get(id))
+    .filter(Boolean);
   const signalTiles = ["output", "focus", "gap"]
     .map((id) => itemsById.get(id))
     .filter(Boolean);
@@ -3976,6 +4226,28 @@ function GraphHeroPanel({ payload, embed, selectedNodeId, onSelectNode, onEmit }
               <em>{evidenceItem.count}</em>
             </button>
           ) : null}
+        </div>
+
+        <div className="hd-hero-decisions" aria-label={label(ui, "dashboard_decision_queue_title", "Awaiting your decision")}>
+          <span className="hd-hero-decisions-title">{label(ui, "dashboard_decision_queue_title", "Awaiting your decision")}</span>
+          <div className="hd-hero-decisions-grid">
+            {decisionItems.map((item) => (
+              <button
+                key={item.id}
+                className={`hd-hero-decision ${item.tone || ""}`}
+                type="button"
+                data-action="navigate"
+                data-dashboard-action={`hero-decision:${item.id}`}
+                data-target={item.path}
+                title={item.why}
+                onClick={() => onEmit(navigationEvent(item.path))}
+              >
+                <span>{item.eyebrow}</span>
+                <strong>{item.count}</strong>
+                <small>{item.title}</small>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="hd-hero-signal-grid" aria-label={label(ui, "dashboard_today_focus_title", "Today focus")}>
@@ -5167,6 +5439,7 @@ function Dashboard({ args }) {
       />
       {inlineGoalEditor}
 
+      {useDailyGraphHero ? <DailyBriefBanner payload={payload} onEmit={emit} /> : null}
       {canvasSurface}
       {useDailyGraphHero ? null : <Workbench payload={payload} onEmit={emit} readOnly={readOnlyCanvas} showActionQueue={!useDailyGraphHero} />}
       <ResumeIngestDrawer

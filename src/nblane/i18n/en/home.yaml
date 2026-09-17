@@ -88,15 +88,15 @@ dashboard_help_body: |-
 
   Use **Evidence Review** for Done tasks, unlinked evidence, claim candidates, and status risks. AI can suggest links or summaries, but confirmed facts still require review.
 
-  **Dashboard AI settings** only affect Dashboard actions such as goal-skill matching and graph insights. Research has its own Research AI settings for paper search, translation, Reader, and DeepRead.
+  **Dashboard AI settings** only affect Dashboard actions such as goal-skill matching and the daily brief. Research has its own Research AI settings for paper search, translation, Reader, and DeepRead.
 
   8503 owns safe profile selection and writes. 8502 can host a richer canvas or reader surface when the sidecar is running.
 dashboard_ai_settings_title: Dashboard AI
 dashboard_ai_settings_caption: These settings only affect Dashboard AI actions for the active profile. Research, Kanban, and other pages keep their own page-level AI preferences. API keys are never written here.
 dashboard_ai_action_goal_skill_match: Goal-skill match
 dashboard_ai_action_goal_skill_match_help: Suggest skill nodes for a goal. Candidates must be confirmed before saving.
-dashboard_ai_action_graph_insights: Graph insights
-dashboard_ai_action_graph_insights_help: Summarize graph risks and next actions without changing files.
+dashboard_ai_action_daily_brief: Daily brief
+dashboard_ai_action_daily_brief_help: Draft a one-paragraph daily brief grounded in the heuristic snapshot. Never changes files; falls back to the heuristic brief when unconfigured.
 dashboard_ai_backend: Backend
 dashboard_ai_llm_model: LLM model
 dashboard_ai_codex_model: Codex model
@@ -497,3 +497,44 @@ profile_readiness_issues: issue(s)
 profile_readiness_open: View Profile Health
 raw_generated_banner_title: Agent-owned sections
 raw_generated_lines: lines
+dashboard_brief_title: Daily brief
+dashboard_brief_ai_caption: Drafted by AI from today's heuristic snapshot.
+dashboard_brief_ai_badge: AI
+dashboard_brief_focus_eyebrow: Today's focus
+dashboard_brief_decisions_eyebrow: Awaiting your decision
+dashboard_brief_risks_eyebrow: Risks
+dashboard_brief_research_eyebrow: Research
+dashboard_brief_no_goal: No primary goal set
+dashboard_brief_goal_hidden: Goal set (hidden)
+dashboard_brief_no_task: No Doing task yet — pick today's work.
+dashboard_brief_decision_evidence: Evidence to review
+dashboard_brief_decision_agent: Agent writebacks
+dashboard_brief_health_issues: Health errors / warnings
+dashboard_brief_stalled_doing: '{n} stalled Doing task(s)'
+dashboard_brief_stalled_days: '{days}d'
+dashboard_brief_research_detail: 'Inbox {inbox} · Active {active}'
+dashboard_brief_agent_activity_link: Agent Activity
+dashboard_brief_open: Open
+dashboard_decision_queue_title: Awaiting your decision
+dashboard_queue_agent_activity: Agent writebacks
+dashboard_action_review_agent: Review agent writebacks
+dashboard_agent_queue_empty: No agent writebacks waiting
+dashboard_action_why_agent: Agent-proposed changes wait for your approval before any file is written.
+dashboard_queue_health: Profile health
+dashboard_action_fix_health: Fix profile health
+dashboard_health_queue_clear: No health errors or warnings
+dashboard_action_why_health: Health errors and warnings can block context publishing and reviews.
+dashboard_command_bar_placeholder: 'Command: add a task, log evidence, open a page…'
+dashboard_command_bar_aria: Command bar
+dashboard_command_bar_submit: Run
+dashboard_command_bar_help: 'Examples: "add calibrate dataset to Doing tomorrow #robot" · "把X加到Queue 周五前" · "log evidence: finished demo integration" · "记一条证据：…" · "open Kanban" · "打开研究" · "weekly summary" · "这周做了什么"'
+dashboard_command_bar_pending_title: Confirm before writing
+dashboard_command_bar_kind_kanban_add: Add kanban task
+dashboard_command_bar_kind_evidence_capture: Capture evidence
+dashboard_command_bar_column: Column
+dashboard_command_bar_due: Due
+dashboard_command_bar_tags: Tags
+dashboard_command_bar_confirm: Confirm write
+dashboard_command_bar_discard: Discard
+dashboard_command_bar_kanban_added: 'Added task: {title}'
+dashboard_command_bar_intent_missing: That intent expired — please retype the command.

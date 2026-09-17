@@ -170,6 +170,15 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Generate a short caption and alt text candidate for the supplied "
         "image intent. Keep it factual and avoid private details."
     ),
+    "dashboard.daily_brief": (
+        "Write one short daily brief paragraph (2-4 sentences) for the user's "
+        "growth dashboard, grounded ONLY in the supplied heuristic snapshot "
+        "(focus, decisions, risks, research). Name the concrete focus task or "
+        "goal, the largest decision queue, and the top risk. Do not invent "
+        "tasks, evidence, numbers, or dates. Respect payload.reply_language "
+        "('zh' or 'en') for the prose. "
+        'Return one JSON object: {"brief": "<paragraph>"}.'
+    ),
 }
 
 

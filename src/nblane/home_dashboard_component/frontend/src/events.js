@@ -37,6 +37,18 @@ export function openSectionEvent(section) {
   return makeEvent("open_section", { section: String(section || "") });
 }
 
+export function commandBarSubmitEvent(text) {
+  return makeEvent("command_bar_submit", { text: String(text || "") });
+}
+
+export function commandBarConfirmEvent(intentId) {
+  return makeEvent("command_bar_confirm", { intent_id: String(intentId || "") });
+}
+
+export function commandBarDiscardEvent(intentId) {
+  return makeEvent("command_bar_discard", { intent_id: String(intentId || "") });
+}
+
 export function requestGoalSkillRuleMatchEvent(goalId) {
   return makeEvent("request_goal_skill_rule_match", { goal_id: String(goalId || "") });
 }

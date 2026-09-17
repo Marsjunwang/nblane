@@ -1,7 +1,7 @@
 ---
 status: draft
 owner: docs
-last_verified: 2026-05-23
+last_verified: 2026-09-16
 ---
 
 # Dashboard 使用说明
@@ -26,9 +26,24 @@ North Star
 - **North Star**：长期方向，来自 `SKILL.md` 的 Profile Context。private 模式下不会把明文送入 Dashboard payload。
 - **Primary Goal**：当前阶段目标，来自 `goals.yaml`。Dashboard 用它决定优先展示哪些任务、source、skill gap 和输出机会。
 - **Active Goals**：当前还在推进的目标。主应用（8501）内嵌的 3D hero 里这里只做上下文展示；点击编辑 / 切换只在主应用可用。
+- **Daily Brief（今日简报）**：Context Header 与 Graph Hero 之间的全宽简报条。启发式部分由 `core/daily_brief.py` 从 payload 已有数据派生（今日焦点 = 主目标 + Doing 顶部任务；待你决策 = 待审 evidence 数 + agent-activity pending 数；风险 = health errors/warnings + 停滞超过 14 天的 Doing 任务；研究动态 = source 收件箱 / 活跃数），搭 `dashboard_payload` 的 mtime 指纹缓存，不引入额外每次 rerun 的重读。配置了 `dashboard.daily_brief` AI 动作时，会用启发式快照作 grounding 经 AI gateway 生成一段话简报（按 payload revision + 日期 + backend/model + 语言缓存，失败也缓存），未配置 / 出错 / `NBLANE_DISABLE_NETWORK_LOOKUPS` 时静默回退为纯启发式简报。每条目都带可点击的 action chip，跳转对应页面。
 - **Context Canvas**：Growth Graph 的可视化投影。主应用首屏内嵌渲染 3D hero，并提供“打开全屏星系”入口跳到独立 `/dashboard` 全屏页；独立全屏页默认进入 3D Graph，只读，适合大图探索。
 - **Inspector**：点击节点后的详情区。真实节点应提供 owner page 或直接动作；placeholder 节点只表示系统还没有对应事实源或记录。
-- **Workbench**：今日工作区，集中显示 capture、Doing、Evidence Review、Gap、Output 和 Health 信号。
+- **行动队列 / 待你决策**：Graph Hero 右栏顶部的决策队列覆盖待审 evidence（跳 Evidence Review）、agent-activity pending writebacks（跳 Agent Activity）和 health errors/warnings（跳 Profile Health）；每个条目都是可点击跳转的按钮，不是纯数字。原有统计卡（技能进度、Health、Research）保留在队列下方。
+
+## Command Bar（命令栏）
+
+Context Header 底部（次目标 rail 之下、操作按钮之上）有一行命令输入栏，只在主应用可编辑模式下渲染（standalone / embed 只读模式不显示；`payload.command_bar.enabled` 缺省即隐藏）。
+
+输入一行自然语言后回车或点「执行」，前端发 `command_bar_submit {text}` 事件；`app.py` 用 `core/intent.py` 的离线启发式解析器 `parse_intent` 路由：
+
+- **写类意图**（`kanban.add`、`evidence.capture`）**先确认后写入**：submit 只把解析结果（动作类型 / 标题 / 列 / 截止日期 / 标签）存为 pending intent，下一帧命令栏下方出现确认卡；点「确认写入」发 `command_bar_confirm {intent_id}` 才真正执行，点「放弃」发 `command_bar_discard {intent_id}` 清掉 pending。
+  - `kanban.add` 确认时从磁盘现取 kanban（`parse_kanban`）→ 追加任务（Doing 落 `started_on=今天`；due 以 `due: <iso>` 存进 task details；tags 逗号连接）→ `ensure_kanban_task_ids` → `core/kanban_merge.save_kanban_with_merge(profile, sections, base=None)`（冲突时 union 合并）保存 → 刷新文件快照 + toast。
+  - `evidence.capture` 确认时复用首页 capture inbox 的既有写入通道（Research Source Inbox，`capture_event="command_bar"` 标记来源），保持单一写入路径。
+- **只读意图直接执行**：`navigate`（如「打开看板」）跳对应页面；`review.weekly_summary`（如「这周做了什么」）跳 `pages/8_Review.py`。
+- **未识别**（`unknown`）不写任何数据，下一帧在命令栏下方显示一行示例命令帮助（单帧一次性）。
+
+命令栏事件只影响当前 profile；pending intent 按 profile 存在 session state 里，confirm 时校验 `intent_id` 匹配才执行。
 
 ## 图谱元素
 
@@ -80,7 +95,7 @@ Dashboard 顶部 **本页 AI 设置** 只配置 Dashboard 页面自己的 AI 动
 当前 Dashboard 至少覆盖：
 
 - `dashboard.goal_skill_match`：为 goal 生成 skill link 候选。
-- `dashboard.graph_insights`：为图谱风险和下一步生成摘要候选。
+- `dashboard.daily_brief`：用启发式简报快照作 grounding 生成一段话今日简报；只读，不写文件，未配置时首页回退为启发式简报。
 
 Research 里的论文搜索、翻译、Reader 和 DeepRead 使用 Research 页右上角的 **Research AI 配置**；
 看板的拆任务、gap 路由、任务理解和 Done -> evidence 使用侧栏里的 **看板 AI 引擎** 或对应页面配置。

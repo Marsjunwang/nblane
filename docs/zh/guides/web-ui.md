@@ -382,7 +382,7 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 - **页面级 AI 设置原则** — 侧栏提供默认运行时和 profile 级 Codex 配置；页面右上角的
   AI 设置只覆盖本页动作。例如 Dashboard 的 **本页 AI 设置** 只影响
-  `dashboard.goal_skill_match` / `dashboard.graph_insights`，Research 的
+  `dashboard.goal_skill_match` / `dashboard.daily_brief`，Research 的
   **Research AI 配置** 只影响论文搜索、翻译、Reader 和 DeepRead。Dashboard 与
   Research 的页面级 AI 面板都提供 backend、LLM model、Codex model 和逐动作
   **Test model**；测试只验证当前行配置，不会写文件。

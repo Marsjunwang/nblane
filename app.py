@@ -29,6 +29,11 @@ from nblane.core.home_dashboard import (
     dashboard_skill_summary as _dashboard_skill_summary,
 )
 from nblane.core.evidence_review import EVIDENCE_REVIEW_PAGE
+from nblane.core.daily_brief import ai_daily_brief_summary
+from nblane.core.command_bar import (
+    apply_kanban_add_intent,
+    resolve_command_text,
+)
 from nblane.core import llm as llm_client
 from nblane.core.web_preferences import (
     AI_ACTION_DEFAULT_BACKENDS,
@@ -116,9 +121,9 @@ _DASHBOARD_AI_ACTIONS: tuple[tuple[str, str, str], ...] = (
         "dashboard_ai_action_goal_skill_match_help",
     ),
     (
-        "dashboard.graph_insights",
-        "dashboard_ai_action_graph_insights",
-        "dashboard_ai_action_graph_insights_help",
+        "dashboard.daily_brief",
+        "dashboard_ai_action_daily_brief",
+        "dashboard_ai_action_daily_brief_help",
     ),
 )
 def _sync_home_ui() -> None:
@@ -274,7 +279,12 @@ def _capture_kind(raw_kind: str) -> str:
     }.get(raw_kind, "other")
 
 
-def _capture_home_research_source(profile: str, payload: dict) -> None:
+def _capture_home_research_source(
+    profile: str,
+    payload: dict,
+    *,
+    capture_event: str = "capture_inbox_submit",
+) -> None:
     """Capture one Home dashboard source into Research Source Inbox."""
     title = _home_capture_text(payload, "title")
     if not title:
@@ -287,7 +297,7 @@ def _capture_home_research_source(profile: str, payload: dict) -> None:
     metadata: dict[str, object] = {
         "source_surface": "home_capture",
         "graph_layer": "source",
-        "capture_event": "capture_inbox_submit",
+        "capture_event": capture_event,
     }
     if source_url:
         metadata["source_url"] = source_url
@@ -369,6 +379,30 @@ def dashboard_public_summary(profile: str) -> dict:
     return _dashboard_public_summary(profile)
 
 
+def _run_daily_brief_ai(profile: str, payload: dict) -> dict[str, str]:
+    """Return the cached AI daily-brief summary; empty means heuristic-only.
+
+    Routing follows the ``dashboard.daily_brief`` action preferences; the
+    core layer caches by payload revision + date + backend/model so reruns
+    never re-call the provider, and falls back silently on any failure.
+    """
+    brief = payload.get("daily_brief") if isinstance(payload, dict) else None
+    if not isinstance(brief, dict):
+        return {"summary": "", "backend": ""}
+    ai_config = _dashboard_effective_ai_config(profile, "dashboard.daily_brief")
+    backend = ai_config["backend"]
+    if backend != "codex" and not llm_client.is_configured():
+        return {"summary": "", "backend": ""}
+    return ai_daily_brief_summary(
+        profile,
+        brief,
+        backend=backend,
+        model=ai_config["model"],
+        revision=str(payload.get("revision") or ""),
+        lang=llm_client.reply_language(),
+    )
+
+
 def dashboard_payload(profile: str) -> dict:
     """React Home dashboard payload."""
     ai_payload = {
@@ -383,6 +417,22 @@ def dashboard_payload(profile: str) -> dict:
         skill_alignment_candidates=_goal_skill_candidates_for_home(profile),
     )
     payload["resume_ingest"] = _resume_ingest_payload(profile)
+    # Replace (never mutate in place) the cached brief sub-dict: the AI
+    # summary lives outside the payload cache, keyed by revision+date+model.
+    brief_ai = _run_daily_brief_ai(profile, payload)
+    payload["daily_brief"] = {
+        **(payload.get("daily_brief") or {}),
+        "ai_summary": brief_ai.get("summary") or "",
+        "ai_backend": brief_ai.get("backend") or "",
+    }
+    pending_intent = st.session_state.get(_command_bar_pending_key(profile))
+    payload["command_bar"] = {
+        "enabled": True,
+        "placeholder": ui["dashboard_command_bar_placeholder"],
+        # One-shot: the unknown-command help hint shows for a single frame.
+        "help": bool(st.session_state.pop(_command_bar_help_key(profile), False)),
+        "pending_intent": pending_intent if isinstance(pending_intent, dict) else None,
+    }
     canvas_base = _dashboard_canvas_base()
     canvas_ok, _canvas_message = _dashboard_canvas_status(canvas_base, profile)
     if canvas_base and canvas_ok is not False:
@@ -1169,6 +1219,77 @@ def _set_primary_goal(profile: str, payload: dict) -> None:
     _save_goal_book_for_home(profile, book, ui["goal_primary_saved"])
 
 
+def _command_bar_pending_key(profile: str) -> str:
+    return f"_command_bar_pending_{profile}"
+
+
+def _command_bar_help_key(profile: str) -> str:
+    return f"_command_bar_help_{profile}"
+
+
+def _handle_command_bar_submit(profile: str, payload: dict) -> None:
+    """Route one command bar line; write intents only become pending here."""
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return
+    resolution = resolve_command_text(text)
+    outcome = str(resolution.get("outcome") or "help")
+    if outcome == "pending":
+        st.session_state[_command_bar_pending_key(profile)] = resolution.get("intent")
+        st.session_state.pop(_command_bar_help_key(profile), None)
+        st.rerun()
+        return
+    if outcome == "navigate":
+        st.session_state.pop(_command_bar_help_key(profile), None)
+        page = str(resolution.get("page") or "").strip()
+        if page:
+            st.switch_page(page)
+        return
+    st.session_state[_command_bar_help_key(profile)] = True
+    st.rerun()
+
+
+def _handle_command_bar_confirm(profile: str, payload: dict) -> None:
+    """Execute the stashed pending intent after the user confirms it."""
+    pending = st.session_state.get(_command_bar_pending_key(profile))
+    if not isinstance(pending, dict):
+        return
+    intent_id = str(payload.get("intent_id") or "").strip()
+    if intent_id and intent_id != str(pending.get("id") or ""):
+        st.warning(ui["dashboard_command_bar_intent_missing"])
+        return
+    kind = str(pending.get("kind") or "")
+    if kind == "kanban.add":
+        task = apply_kanban_add_intent(profile, pending)
+        if task is None:
+            st.warning(ui["dashboard_command_bar_intent_missing"])
+            return
+        st.session_state.pop(_command_bar_pending_key(profile), None)
+        refresh_file_snapshots([profile_dir(profile) / "kanban.md"])
+        stash_git_backup_results()
+        clear_web_cache()
+        st.toast(ui["dashboard_command_bar_kanban_added"].format(title=task.title))
+        st.rerun()
+        return
+    if kind == "evidence.capture":
+        st.session_state.pop(_command_bar_pending_key(profile), None)
+        # Single write channel: the same Research Source Inbox path the Home
+        # capture drawer uses, just tagged with the command bar provenance.
+        _capture_home_research_source(
+            profile,
+            {"title": str(pending.get("title") or ""), "type": "note"},
+            capture_event="command_bar",
+        )
+        return
+    st.warning(ui["dashboard_command_bar_intent_missing"])
+
+
+def _handle_command_bar_discard(profile: str, payload: dict) -> None:
+    """Drop the pending intent without writing anything."""
+    st.session_state.pop(_command_bar_pending_key(profile), None)
+    st.rerun()
+
+
 def _handle_home_dashboard_event(event: dict | None, profile: str) -> bool:
     """Handle one new event emitted by the React Home dashboard."""
     if not isinstance(event, dict):
@@ -1187,6 +1308,15 @@ def _handle_home_dashboard_event(event: dict | None, profile: str) -> bool:
 
     if action == "capture_inbox_submit":
         _capture_home_research_source(profile, payload)
+        return True
+    if action == "command_bar_submit":
+        _handle_command_bar_submit(profile, payload)
+        return True
+    if action == "command_bar_confirm":
+        _handle_command_bar_confirm(profile, payload)
+        return True
+    if action == "command_bar_discard":
+        _handle_command_bar_discard(profile, payload)
         return True
     if action == "edit_goal_submit":
         _edit_dashboard_goal(profile, payload)
@@ -1675,6 +1805,101 @@ def _render_home_scope_strip(payload: dict) -> None:
     c4.metric(ui["dashboard_scope_health"], _health_summary_text(health_summary))
 
 
+def _render_home_daily_brief(payload: dict) -> None:
+    """Render the Daily Brief natively when the React bundle is unavailable."""
+    brief = payload.get("daily_brief") or {}
+    if not brief:
+        return
+    focus = brief.get("focus") or {}
+    decisions = brief.get("decisions") or {}
+    risks = brief.get("risks") or {}
+    research = brief.get("research") or {}
+
+    st.subheader(ui["dashboard_brief_title"])
+    ai_summary = str(brief.get("ai_summary") or "").strip()
+    if ai_summary:
+        st.markdown(ai_summary)
+        st.caption(ui["dashboard_brief_ai_caption"])
+
+    focus_col, decisions_col, risks_col, research_col = st.columns(4)
+    with focus_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_brief_focus_eyebrow']}**")
+            if focus.get("goal_locked"):
+                st.write(ui["goal_private_locked"])
+            elif focus.get("goal_label"):
+                st.write(str(focus["goal_label"]))
+            else:
+                st.write(ui["dashboard_brief_no_goal"])
+            task_title = str(focus.get("task_title") or "").strip()
+            if task_title:
+                st.caption(task_title)
+            elif int(focus.get("doing_total", 0) or 0) == 0:
+                st.caption(ui["dashboard_brief_no_task"])
+            _page_link(
+                str(focus.get("path") or "pages/3_Kanban.py"),
+                ui["quick_kanban"],
+                help_text=ui["quick_kanban_help"],
+            )
+    with decisions_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_brief_decisions_eyebrow']}**")
+            st.metric(
+                ui["dashboard_brief_decision_evidence"],
+                int(decisions.get("evidence_pending", 0) or 0),
+            )
+            st.metric(
+                ui["dashboard_brief_decision_agent"],
+                int(decisions.get("agent_pending", 0) or 0),
+            )
+            _page_link(
+                str(decisions.get("evidence_path") or EVIDENCE_REVIEW_PAGE),
+                ui["quick_evidence_review"],
+                help_text=ui["quick_evidence_review_help"],
+            )
+            _page_link(
+                str(decisions.get("agent_path") or "pages/9_Agent_Activity.py"),
+                ui["dashboard_brief_agent_activity_link"],
+            )
+    with risks_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_brief_risks_eyebrow']}**")
+            st.metric(
+                ui["dashboard_brief_health_issues"],
+                f"{int(risks.get('health_errors', 0) or 0)} / "
+                f"{int(risks.get('health_warnings', 0) or 0)}",
+            )
+            stalled = risks.get("stalled_doing") or []
+            stalled_count = int(risks.get("stalled_doing_count", 0) or 0)
+            if stalled_count:
+                titles = ", ".join(
+                    str(row.get("title") or "") for row in stalled[:2] if row.get("title")
+                )
+                st.caption(
+                    ui["dashboard_brief_stalled_doing"].format(n=stalled_count)
+                    + (f" · {titles}" if titles else "")
+                )
+            _page_link(
+                str(risks.get("health_path") or "pages/5_Profile_Health.py"),
+                ui["quick_profile_health"],
+                help_text=ui["quick_profile_health_help"],
+            )
+    with research_col:
+        with st.container(border=True):
+            st.markdown(f"**{ui['dashboard_brief_research_eyebrow']}**")
+            st.caption(
+                ui["dashboard_brief_research_detail"].format(
+                    inbox=int(research.get("inbox", 0) or 0),
+                    active=int(research.get("active", 0) or 0),
+                )
+            )
+            _page_link(
+                str(research.get("path") or "pages/7_Research.py"),
+                ui["quick_research"],
+                help_text=ui["quick_research_help"],
+            )
+
+
 def _render_home_priority_cards(payload: dict) -> None:
     goal_payload = payload.get("primary_goal") or payload.get("goal") or {}
     kanban_summary = payload.get("kanban") or {}
@@ -1742,6 +1967,9 @@ def _render_home_native_fallback(payload: dict) -> None:
     public_summary = payload.get("public") or {}
 
     _render_home_scope_strip(payload)
+    st.divider()
+
+    _render_home_daily_brief(payload)
     st.divider()
 
     _render_home_priority_cards(payload)

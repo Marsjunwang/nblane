@@ -641,6 +641,17 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             },
         ),
     ),
+    "dashboard.daily_brief": AIActionSpec(
+        name="dashboard.daily_brief",
+        owner="dashboard",
+        default_backend="direct_llm",
+        # No rule fallback: the heuristic brief already covers the
+        # unconfigured/failure case, so a template "AI" text would be a lie.
+        fallback_backend="",
+        output_mode="json",
+        activity_policy="none",
+        schema=schema_for_keys(["brief"]),
+    ),
 }
 
 

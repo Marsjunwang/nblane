@@ -64,6 +64,7 @@ class TestAIGateway(unittest.TestCase):
                 "profile.resume_ingest",
                 "profile.kanban_ingest",
                 "output.visual_caption",
+                "dashboard.daily_brief",
             },
         )
 

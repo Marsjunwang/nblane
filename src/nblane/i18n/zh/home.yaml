@@ -88,15 +88,15 @@ dashboard_help_body: |-
 
   用 **证据审阅** 处理已完成任务、未链接证据、claim 候选和状态风险。AI 可以生成候选和摘要，但事实确认仍需要人工审阅。
 
-  **本页 AI 设置**只影响首页内的目标-技能匹配和图谱洞察。研究工作台有自己的研究 AI 设置，用于论文搜索、翻译、阅读器和深读。
+  **本页 AI 设置**只影响首页内的目标-技能匹配和今日简报。研究工作台有自己的研究 AI 设置，用于论文搜索、翻译、阅读器和深读。
 
   8503 负责安全的档案选择与写入；8502 sidecar 启动后可承载更高交互的画布或阅读器界面。
 dashboard_ai_settings_title: 本页 AI 设置
 dashboard_ai_settings_caption: 这些设置只影响当前档案的首页 AI 动作。研究、看板等页面保留自己的页面级 AI 设置；这里不会写入 API key。
 dashboard_ai_action_goal_skill_match: 目标-技能匹配
 dashboard_ai_action_goal_skill_match_help: 为目标建议技能节点。候选必须确认后才会保存。
-dashboard_ai_action_graph_insights: 图谱洞察
-dashboard_ai_action_graph_insights_help: 总结图谱风险和下一步，不直接修改文件。
+dashboard_ai_action_daily_brief: 今日简报
+dashboard_ai_action_daily_brief_help: 基于启发式快照生成一段今日简报。不修改文件；未配置或出错时回退为启发式简报。
 dashboard_ai_backend: 后端
 dashboard_ai_llm_model: LLM 模型
 dashboard_ai_codex_model: Codex 模型
@@ -497,3 +497,44 @@ profile_readiness_issues: 个问题
 profile_readiness_open: 打开档案体检
 raw_generated_banner_title: Agent 持有的段落
 raw_generated_lines: 行
+dashboard_brief_title: 今日简报
+dashboard_brief_ai_caption: 由 AI 基于今日启发式快照生成。
+dashboard_brief_ai_badge: AI
+dashboard_brief_focus_eyebrow: 今日焦点
+dashboard_brief_decisions_eyebrow: 待你决策
+dashboard_brief_risks_eyebrow: 风险
+dashboard_brief_research_eyebrow: 研究动态
+dashboard_brief_no_goal: 尚未设置主目标
+dashboard_brief_goal_hidden: 已设置目标（隐藏）
+dashboard_brief_no_task: 还没有进行中的任务——先选定今天的工作。
+dashboard_brief_decision_evidence: 待审证据
+dashboard_brief_decision_agent: 待审 agent 回写
+dashboard_brief_health_issues: 健康错误 / 警告
+dashboard_brief_stalled_doing: '{n} 个停滞的 Doing 任务'
+dashboard_brief_stalled_days: '{days} 天'
+dashboard_brief_research_detail: '收件箱 {inbox} · 活跃 {active}'
+dashboard_brief_agent_activity_link: Agent 活动
+dashboard_brief_open: 打开
+dashboard_decision_queue_title: 待你决策
+dashboard_queue_agent_activity: Agent 回写
+dashboard_action_review_agent: 审阅 agent 回写
+dashboard_agent_queue_empty: 没有待审的 agent 回写
+dashboard_action_why_agent: agent 提出的修改会先等你批准，然后才写入文件。
+dashboard_queue_health: 档案健康
+dashboard_action_fix_health: 修复档案健康问题
+dashboard_health_queue_clear: 没有健康错误或警告
+dashboard_action_why_health: 健康错误和警告会阻塞上下文发布与审阅。
+dashboard_command_bar_placeholder: 命令：加任务、记证据、打开页面…
+dashboard_command_bar_aria: 命令栏
+dashboard_command_bar_submit: 执行
+dashboard_command_bar_help: 示例：「把校准数据集加到 Doing 明天前 #robot」「add X to Queue Friday」「记一条证据：完成了 demo 联调」「log evidence: …」「打开看板」「open Research」「这周做了什么」「weekly summary」
+dashboard_command_bar_pending_title: 写入前请确认
+dashboard_command_bar_kind_kanban_add: 新增看板任务
+dashboard_command_bar_kind_evidence_capture: 记录证据
+dashboard_command_bar_column: 列
+dashboard_command_bar_due: 截止
+dashboard_command_bar_tags: 标签
+dashboard_command_bar_confirm: 确认写入
+dashboard_command_bar_discard: 放弃
+dashboard_command_bar_kanban_added: 已添加任务：{title}
+dashboard_command_bar_intent_missing: 这个意图已失效，请重新输入命令。
