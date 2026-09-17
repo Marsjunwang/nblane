@@ -446,6 +446,7 @@ class KanbanTask:
     crystallized: bool = False
     project_id: str = ""
     milestone_id: str = ""
+    agent_task_id: str = ""
     tags: str = ""
     subtasks: list[KanbanSubtask] = field(default_factory=list)
     details: list[str] = field(default_factory=list)

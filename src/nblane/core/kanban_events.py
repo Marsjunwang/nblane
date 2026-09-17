@@ -6,7 +6,15 @@ import re
 from dataclasses import replace
 from datetime import date
 
+from nblane.core.command_bar import kanban_task_from_intent
+from nblane.core.intent import IntentAction, parse_intent
 from nblane.core.kanban_ai import KanbanSubtaskProposal
+from nblane.core.kanban_io import (
+    KANBAN_DOING,
+    KANBAN_DONE,
+    KANBAN_QUEUE,
+    KANBAN_SOMEDAY,
+)
 from nblane.core.models import KanbanSubtask, KanbanTask
 
 
@@ -96,6 +104,7 @@ def apply_kanban_card_update(
         "tags",
         "project_id",
         "milestone_id",
+        "agent_task_id",
     ):
         if field in card:
             changes[field] = _clean_text(card.get(field))
@@ -431,3 +440,71 @@ def discard_task_ai_state(
     if normalized_scope in {"all", "errors"} and isinstance(errors_by_task, dict):
         changed = errors_by_task.pop(task_key, None) is not None or changed
     return changed
+
+
+_INTENT_COLUMN_TO_SECTION = {
+    "Doing": KANBAN_DOING,
+    "Queue": KANBAN_QUEUE,
+    "Someday": KANBAN_SOMEDAY,
+}
+
+
+def build_quick_add_task(
+    text: str,
+    *,
+    section: str,
+    context: str = "",
+    notes: object = None,
+    auto_dates: bool = True,
+    today: date | None = None,
+) -> tuple[str, KanbanTask, IntentAction]:
+    """Build ``(target_section, task, intent) for one quick-add submission.
+
+    A ``kanban.add`` intent that extracted a due date, tags, or a non-Doing
+    column becomes a structured card in the parsed column, projected with
+    the same field mapping as the Home command bar
+    (``command_bar.kanban_task_from_intent``); anything else keeps the
+    legacy plain-title card in *section*.
+    """
+    intent = parse_intent(text, today=today)
+    structured = (
+        intent.kind == "kanban.add"
+        and bool(intent.title)
+        and bool(intent.due or intent.tags or intent.column != "Doing")
+    )
+    if structured:
+        task = kanban_task_from_intent(
+            {
+                "title": intent.title,
+                "column": intent.column,
+                "due": intent.due,
+                "tags": intent.tags,
+            },
+            today=today,
+        )
+        target = _INTENT_COLUMN_TO_SECTION.get(intent.column, KANBAN_DOING)
+        if not auto_dates and task.started_on:
+            task = replace(task, started_on=None)
+    else:
+        target = section
+        task = KanbanTask(title=_clean_text(text))
+
+    clean_context = _clean_text(context)
+    if clean_context:
+        task = replace(task, context=clean_context)
+    note_details = split_kanban_details(notes) if notes is not None else []
+    if note_details:
+        task = replace(task, details=[*task.details, *note_details])
+
+    day = (today or date.today()).isoformat()
+    if target == KANBAN_DONE and not task.done:
+        task = replace(task, done=True)
+        if auto_dates and not _clean_text(task.completed_on):
+            task = replace(task, completed_on=day)
+    if (
+        target == KANBAN_DOING
+        and auto_dates
+        and not _clean_text(task.started_on)
+    ):
+        task = replace(task, started_on=day)
+    return target, task, intent

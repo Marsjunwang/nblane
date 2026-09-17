@@ -1558,7 +1558,11 @@ def _done_task_options(profile: str | Path) -> list[dict[str, object]]:
     picker can show, but not hide, already-ingested tasks.
     """
     from nblane.core.evidence_migrate import refresh_from_crystallized_tasks
+    from nblane.core.kanban_io import materialize_kanban_task_ids
 
+    # Generated ids are random until persisted; make sure the picker ids the
+    # panel sends back resolve against later parses of kanban.md.
+    materialize_kanban_task_ids(profile)
     sections = io_facade.parse_kanban(profile)
     done_tasks = sections.get(KANBAN_DONE) or []
     project_index = internal_project_goal_index(profile)

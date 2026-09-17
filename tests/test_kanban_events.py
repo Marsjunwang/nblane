@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from nblane.core.kanban_ai import (
     KanbanSubtaskProposal,
@@ -13,6 +14,7 @@ from nblane.core.kanban_events import (
     alignment_context_from_payload,
     apply_kanban_card_update,
     apply_kanban_subtask_toggle,
+    build_quick_add_task,
     discard_subtask_proposal_at,
     discard_task_ai_state,
     event_subtask_index,
@@ -155,6 +157,18 @@ class TestKanbanEvents(unittest.TestCase):
         assert updated is not None
         self.assertEqual(updated.project_id, "project:demo")
         self.assertEqual(updated.milestone_id, "milestone:first")
+
+    def test_apply_card_update_sets_and_clears_agent_task_id(self) -> None:
+        """Edit payloads can bind or clear the dispatched agent task."""
+        task = KanbanTask(title="Task", id="task-1")
+        bound = apply_kanban_card_update(task, {"agent_task_id": " agenttask_x "})
+        self.assertIsNotNone(bound)
+        assert bound is not None
+        self.assertEqual(bound.agent_task_id, "agenttask_x")
+        cleared = apply_kanban_card_update(bound, {"agent_task_id": ""})
+        self.assertIsNotNone(cleared)
+        assert cleared is not None
+        self.assertEqual(cleared.agent_task_id, "")
 
     def test_event_subtask_index_supports_new_and_old_payloads(self) -> None:
         """Current index and older subtask-id payloads both resolve."""
@@ -510,6 +524,74 @@ class TestKanbanEvents(unittest.TestCase):
             [(item.title, item.done) for item in updated.subtasks],
             [("Keep existing", True)],
         )
+
+
+class TestBuildQuickAddTask(unittest.TestCase):
+    """NL quick-add intents build structured cards; plain text stays plain."""
+
+    def test_intent_with_due_tags_column_builds_structured_card(self) -> None:
+        section, task, intent = build_quick_add_task(
+            "把评审 Narwal 论文加到 Queue #papers 周五前",
+            section="Doing",
+            today=date(2026, 9, 16),
+        )
+        self.assertEqual(intent.kind, "kanban.add")
+        self.assertEqual(section, "Queue")
+        self.assertEqual(task.title, "评审 Narwal 论文")
+        self.assertEqual(task.tags, "papers")
+        self.assertIn("due: 2026-09-18", task.details)
+        self.assertFalse(task.done)
+
+    def test_intent_doing_gets_started_on_only_with_auto_dates(self) -> None:
+        section, task, _ = build_quick_add_task(
+            "新增任务 修 bug #backend 明天前",
+            section="Queue",
+            auto_dates=True,
+            today=date(2026, 9, 16),
+        )
+        self.assertEqual(section, "Doing")
+        self.assertEqual(task.started_on, "2026-09-16")
+        _s2, task_no_dates, _i2 = build_quick_add_task(
+            "新增任务 修 bug #backend 明天前",
+            section="Queue",
+            auto_dates=False,
+            today=date(2026, 9, 16),
+        )
+        self.assertIsNone(task_no_dates.started_on)
+        self.assertEqual(task_no_dates.tags, "backend")
+
+    def test_plain_title_keeps_legacy_behavior(self) -> None:
+        section, task, intent = build_quick_add_task(
+            "just a plain title",
+            section="Queue",
+            context="ctx",
+            notes="line one\nline two",
+            today=date(2026, 9, 16),
+        )
+        self.assertEqual(intent.kind, "unknown")
+        self.assertEqual(section, "Queue")
+        self.assertEqual(task.title, "just a plain title")
+        self.assertEqual(task.context, "ctx")
+        self.assertEqual(task.details, ["line one", "line two"])
+
+    def test_done_section_legacy_marks_done_with_date(self) -> None:
+        section, task, _ = build_quick_add_task(
+            "wrap up notes",
+            section="Done",
+            today=date(2026, 9, 16),
+        )
+        self.assertEqual(section, "Done")
+        self.assertTrue(task.done)
+        self.assertEqual(task.completed_on, "2026-09-16")
+
+    def test_notes_merge_after_due_detail(self) -> None:
+        section, task, _ = build_quick_add_task(
+            "加到 Queue 写文档 #docs 后天前",
+            section="Queue",
+            notes="extra note",
+            today=date(2026, 9, 16),
+        )
+        self.assertEqual(task.details, ["due: 2026-09-18", "extra note"])
 
 
 if __name__ == "__main__":

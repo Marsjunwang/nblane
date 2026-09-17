@@ -249,6 +249,30 @@ kb_drag_title: 拖拽看板
 kb_drag_help: 可在列内或跨列拖动卡片，然后应用排序。下方详细卡片编辑器仍负责字段内容。
 kb_drag_applied: 已应用拖拽看板顺序。
 kb_drag_stale: 拖拽结果已过期或不完整，请重新加载后再试。
+kb_merge_external_notice: kanban.md 已被其他入口更新，已合并最新内容并保存你的修改。
+kb_merge_dropped: kanban.md 已被其他入口更新；你的 {n} 项修改因目标任务已不存在而被放弃：{titles}。
+kb_dispatch_agent: 派给 agent
+kb_dispatch_harness: 执行器
+kb_dispatch_role: 角色
+kb_dispatch_role_researcher: 研究员
+kb_dispatch_role_resume_strategist: 简历策略
+kb_dispatch_role_remote_dev: 远程开发
+kb_dispatch_role_reviewer: 评审员
+kb_dispatch_instruction: 补充指令（可选）
+kb_dispatch_instruction_ph: 例如：先处理风险最高的部分
+kb_dispatch_confirm: 派单
+kb_dispatch_sent: 已派单，去 {harness} 领取。
+kb_agent_task_id: Agent 派单
+kb_agent_status_draft: 草稿
+kb_agent_status_ready: 待领取
+kb_agent_status_handed_off: 已交接
+kb_agent_status_running: 运行中
+kb_agent_status_candidate_ready: 候选待审
+kb_agent_status_applied: 已应用
+kb_agent_status_failed: 失败
+kb_agent_status_cancelled: 已取消
+kb_quick_add_parsed: 已添加「{title}」到{section}{extras}
+kb_quick_add_evidence_hint: 这看起来是证据记录——请前往 Evidence Review 页录入，看板未创建卡片。
 kb_done_render_limit: 此处仅显示 {shown}/{total} 个「已完成」卡片。完整列表请使用上方整理区或「已完成 → 证据」。
 kb_title_required: 任务标题不能为空。
 kb_invalid_date: 日期字段请使用 YYYY-MM-DD：{fields}。
@@ -335,6 +359,7 @@ kb_granularity_milestone: 里程碑
 kb_granularity_checklist: 清单
 kb_granularity_implementation: 实现细节
 kb_no_subtask_proposals: 没有生成可用的子任务草案。
+kb_ai_pending: AI 处理中…
 kb_subtask_error_generic: 没有生成可用的子任务草案。
 kb_subtask_error_task_not_found: 没有找到这个看板任务。
 kb_subtask_error_gap_error: 这个任务的能力缺口分析没有跑通。

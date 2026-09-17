@@ -69,6 +69,18 @@ def snapshot_file(path: Path) -> FileSnapshot:
     )
 
 
+def snapshot_matches(path: Path, expected: FileSnapshot) -> bool:
+    """True when *path* still matches *expected* (content hash decides)."""
+    current = snapshot_file(path)
+    if current == expected:
+        return True
+    return bool(
+        current.exists
+        and expected.exists
+        and current.sha256 == expected.sha256
+    )
+
+
 def assert_unchanged(
     path: Path,
     expected: FileSnapshot,
@@ -76,14 +88,7 @@ def assert_unchanged(
     label: str | None = None,
 ) -> None:
     """Raise FileConflictError when *path* differs from *expected*."""
-    current = snapshot_file(path)
-    if current == expected:
-        return
-    if (
-        current.exists
-        and expected.exists
-        and current.sha256 == expected.sha256
-    ):
+    if snapshot_matches(path, expected):
         return
     name = label or str(path)
     raise FileConflictError(

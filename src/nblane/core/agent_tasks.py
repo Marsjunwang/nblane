@@ -256,6 +256,94 @@ def create_agent_task(
     return item
 
 
+def dispatch_agent_task_for_kanban(
+    profile: str,
+    task: Any,
+    *,
+    harness: str = "codex",
+    role: str = "researcher",
+    instruction: str = "",
+    section: str = "",
+) -> dict[str, Any]:
+    """Dispatch one kanban card to an external agent harness.
+
+    Every dispatch creates a fresh task id (repeat dispatches keep their own
+    history); the card id goes to ``related.kanban_task_id`` so prior
+    dispatches of the same card stay queryable. A linked Agent Activity
+    tracking item is appended up front, so a later
+    ``submit_agent_task_candidate`` mirrors into the review queue. Returns
+    the created (activity-linked) agent task dict.
+    """
+    from nblane.core import agent_activity
+
+    clean_harness = _clean_text(harness).lower()
+    if clean_harness not in AGENT_HARNESSES:
+        clean_harness = "codex"
+    clean_role = _clean_text(role).lower()
+    if clean_role not in AGENT_ROLES:
+        clean_role = "researcher"
+    kanban_task_id = _clean_text(getattr(task, "id", ""))
+    title = _clean_text(getattr(task, "title", "")) or "Kanban task"
+    subtasks = [
+        {
+            "title": _clean_text(getattr(subtask, "title", "")),
+            "done": bool(getattr(subtask, "done", False)),
+        }
+        for subtask in (getattr(task, "subtasks", None) or [])
+        if _clean_text(getattr(subtask, "title", ""))
+    ]
+    item = create_agent_task(
+        profile,
+        target_harness=clean_harness,
+        role=clean_role,
+        title=title,
+        input_refs=[f"kanban:{kanban_task_id}"] if kanban_task_id else [],
+        related={
+            "kanban_task_id": kanban_task_id,
+            "kanban_section": _clean_text(section),
+        },
+        payload={
+            "kanban_task_id": kanban_task_id,
+            "instruction": _clean_text(instruction),
+            "task": {
+                "title": title,
+                "context": _clean_text(getattr(task, "context", "")),
+                "why": _clean_text(getattr(task, "why", "")),
+                "blocked_by": _clean_text(getattr(task, "blocked_by", "")),
+                "outcome": _clean_text(getattr(task, "outcome", "")),
+                "tags": _clean_text(getattr(task, "tags", "")),
+                "subtasks": subtasks,
+                "details": [
+                    _clean_text(detail)
+                    for detail in (getattr(task, "details", None) or [])
+                    if _clean_text(detail)
+                ],
+            },
+        },
+        action_name="kanban.dispatch_agent",
+        status="ready",
+    )
+    activity_item = agent_activity.append_activity_item(
+        profile,
+        {
+            "kind": "candidate",
+            "candidate_type": "agent_dispatch",
+            "source_page": "Kanban",
+            "source_ref": kanban_task_id,
+            "target_owner": "kanban",
+            "title": title,
+            "summary": f"Dispatched to {clean_harness} ({clean_role}).",
+            "payload": {
+                "agent_task_id": item["id"],
+                "target_harness": clean_harness,
+                "role": clean_role,
+            },
+        },
+    )
+    linked = link_activity_item(profile, item["id"], activity_item["id"])
+    return linked or item
+
+
 def get_agent_task(profile: str, task_id: str) -> dict[str, Any] | None:
     """Return one task by id for a profile."""
 
@@ -664,6 +752,7 @@ __all__ = [
     "AGENT_TASKS_FILENAME",
     "AGENT_TASK_STATUSES",
     "create_agent_task",
+    "dispatch_agent_task_for_kanban",
     "find_agent_task",
     "get_agent_task",
     "link_activity_item",

@@ -54,6 +54,7 @@ from nblane.core.io import (
     save_kanban,
     save_skill_tree,
 )
+from nblane.core.kanban_io import materialize_kanban_task_ids
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
     EVIDENCE_PUBLIC_READINESS,
@@ -603,6 +604,9 @@ def _link_skill_to_evidence(skill_id: str, evidence_ids: list[str]) -> None:
 
 def _render_done_ingest(review: dict) -> None:
     st.subheader(ui["done_queue_title"])
+    # Generated task ids are random until persisted; make sure ids captured
+    # into kanban_refs below resolve against later parses of kanban.md.
+    materialize_kanban_task_ids(selected)
     sections = parse_kanban(selected)
     pending_done = [
         task

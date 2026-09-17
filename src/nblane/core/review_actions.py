@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -294,23 +294,7 @@ def _mark_done_crystallized(
     for task in sections.get(KANBAN_DONE, []):
         task_id = _clean_text(task.id)
         if task_id and task_id in task_ids and not task.crystallized:
-            updated_done.append(
-                KanbanTask(
-                    title=task.title,
-                    done=task.done,
-                    id=task.id,
-                    context=task.context,
-                    why=task.why,
-                    blocked_by=task.blocked_by,
-                    outcome=task.outcome,
-                    started_on=task.started_on,
-                    completed_on=task.completed_on,
-                    crystallized=True,
-                    tags=task.tags,
-                    subtasks=list(task.subtasks),
-                    details=list(task.details),
-                )
-            )
+            updated_done.append(replace(task, crystallized=True))
             changed = True
         else:
             updated_done.append(task)

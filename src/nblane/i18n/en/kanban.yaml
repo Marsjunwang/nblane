@@ -249,6 +249,30 @@ kb_drag_title: Drag board
 kb_drag_help: Drag cards across columns or within a column, then apply. The detailed card editor below remains the source for fields.
 kb_drag_applied: Applied the drag-board order.
 kb_drag_stale: Drag order was stale or incomplete; reload and try again.
+kb_merge_external_notice: kanban.md was updated elsewhere; merged the latest content and saved your change.
+kb_merge_dropped: 'kanban.md was updated elsewhere; {n} of your changes could not be replayed because the target task no longer exists: {titles}.'
+kb_dispatch_agent: Dispatch to agent
+kb_dispatch_harness: Harness
+kb_dispatch_role: Role
+kb_dispatch_role_researcher: Researcher
+kb_dispatch_role_resume_strategist: Resume strategist
+kb_dispatch_role_remote_dev: Remote dev
+kb_dispatch_role_reviewer: Reviewer
+kb_dispatch_instruction: Extra instruction (optional)
+kb_dispatch_instruction_ph: e.g. focus on the riskiest part first
+kb_dispatch_confirm: Dispatch
+kb_dispatch_sent: Dispatched — pick it up in {harness}.
+kb_agent_task_id: Agent task
+kb_agent_status_draft: draft
+kb_agent_status_ready: ready
+kb_agent_status_handed_off: handed off
+kb_agent_status_running: running
+kb_agent_status_candidate_ready: candidate ready
+kb_agent_status_applied: applied
+kb_agent_status_failed: failed
+kb_agent_status_cancelled: cancelled
+kb_quick_add_parsed: Added “{title}” to {section}{extras}
+kb_quick_add_evidence_hint: That looks like evidence — capture it on the Evidence Review page; no card was created.
 kb_done_render_limit: Showing {shown}/{total} Done cards here. Use housekeeping or Done -> evidence above for the full list.
 kb_title_required: Task title is required.
 kb_invalid_date: 'Use YYYY-MM-DD for date fields: {fields}.'
@@ -335,6 +359,7 @@ kb_granularity_milestone: Milestone
 kb_granularity_checklist: Checklist
 kb_granularity_implementation: Implementation
 kb_no_subtask_proposals: No usable subtask draft was generated.
+kb_ai_pending: AI working…
 kb_subtask_error_generic: No usable subtask draft was generated.
 kb_subtask_error_task_not_found: Kanban task was not found.
 kb_subtask_error_gap_error: Gap analysis could not run for this task.

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
+from pathlib import Path
+from uuid import uuid4
 
 from nblane.core import git_backup
 from nblane.core.file_write import atomic_write_text
@@ -51,6 +52,8 @@ def _normalize_kanban_meta_key(raw_key: str) -> str | None:
         return "project_id"
     if k in ("milestone_id", "milestone"):
         return "milestone_id"
+    if k in ("agent_task_id", "agent_task"):
+        return "agent_task_id"
     if k in ("context", "why", "outcome", "started_on", "completed_on"):
         return k
     if k == "tags":
@@ -94,6 +97,8 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
         task.project_id = val.strip()
     elif field == "milestone_id" and isinstance(val, str):
         task.milestone_id = val.strip()
+    elif field == "agent_task_id" and isinstance(val, str):
+        task.agent_task_id = val.strip()
     elif field == "tags" and isinstance(val, str):
         task.tags = val.strip()
 
@@ -189,7 +194,7 @@ def _kanban_skip_placeholder_title(title: str) -> bool:
 
 
 def _clean_task_text(value: object) -> str:
-    """Return a stripped string for id hashing and comparisons."""
+    """Return a stripped string for id handling and comparisons."""
     return str(value or "").strip()
 
 
@@ -217,59 +222,17 @@ def _iter_kanban_section_names(
     return ordered
 
 
-def _kanban_task_id_payload(
-    profile: str,
-    section: str,
-    task: KanbanTask,
-) -> str:
-    """Canonical task content used for deterministic legacy ids."""
-    parts = [
-        _clean_task_text(profile),
-        section,
-        _clean_task_text(task.title),
-        "1" if task.done else "0",
-        _clean_task_text(task.context),
-        _clean_task_text(task.why),
-        _clean_task_text(task.blocked_by),
-        _clean_task_text(task.outcome),
-        _clean_task_text(task.started_on),
-        _clean_task_text(task.completed_on),
-        "1" if task.crystallized else "0",
-        _clean_task_text(task.project_id),
-        _clean_task_text(task.milestone_id),
-    ]
-    for subtask in task.subtasks:
-        parts.extend(
-            [
-                "subtask",
-                "1" if subtask.done else "0",
-                _clean_task_text(subtask.title),
-            ]
-        )
-    for detail in task.details:
-        parts.extend(["detail", _clean_task_text(detail)])
-    return "\x1f".join(parts)
+def _new_kanban_task_id(used: set[str]) -> str:
+    """Return a fresh random task id not present in *used*.
 
-
-def _generated_kanban_task_id(
-    profile: str,
-    section: str,
-    task: KanbanTask,
-) -> str:
-    """Generate a deterministic compact id for a legacy task."""
-    payload = _kanban_task_id_payload(profile, section, task)
-    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
-    return f"kb_{digest}"
-
-
-def _unique_kanban_task_id(base: str, used: set[str]) -> str:
-    """Return *base* or a deterministic suffixed variant not in *used*."""
-    candidate = base
-    suffix = 2
-    while candidate in used:
-        candidate = f"{base}_{suffix}"
-        suffix += 1
-    return candidate
+    Ids are random (``kb_`` + 12 hex chars), not content-derived, so editing
+    a task never changes its id. The id becomes stable once it is rendered
+    back into kanban.md (first save).
+    """
+    while True:
+        candidate = f"kb_{uuid4().hex[:12]}"
+        if candidate not in used:
+            return candidate
 
 
 def ensure_kanban_task_ids(
@@ -278,8 +241,11 @@ def ensure_kanban_task_ids(
 ) -> dict[str, list[KanbanTask]]:
     """Return a copy of *sections* where every task has a stable id.
 
-    Existing non-empty ids are preserved, except duplicate ids after the
-    first occurrence are replaced with deterministic generated ids.
+    Existing non-empty ids are preserved verbatim, except duplicate ids
+    after the first occurrence, which are replaced with fresh random ids.
+    Tasks without an id receive a random ``kb_`` id that is unique within
+    the board; the *profile* argument is kept for call-site compatibility
+    and no longer influences generation.
     """
     out: dict[str, list[KanbanTask]] = {}
     used: set[str] = set()
@@ -289,12 +255,7 @@ def ensure_kanban_task_ids(
             raw_id = getattr(task, "id", "")
             task_id = _clean_task_text(raw_id)
             if not task_id or task_id in used:
-                generated = _generated_kanban_task_id(
-                    profile,
-                    section,
-                    task,
-                )
-                task_id = _unique_kanban_task_id(generated, used)
+                task_id = _new_kanban_task_id(used)
             if task_id == raw_id:
                 task = _copy_kanban_task(task)
             else:
@@ -549,11 +510,10 @@ def kanban_snapshot_to_moves(
     ]
 
 
-def parse_kanban_text(
+def _parse_kanban_sections(
     content: str,
-    profile: str,
 ) -> dict[str, list[KanbanTask]]:
-    """Parse raw kanban markdown into section -> task list."""
+    """Parse raw kanban markdown into section -> task list (no id fill)."""
     sections: dict[str, list[KanbanTask]] = {
         s: [] for s in KANBAN_SECTIONS
     }
@@ -668,16 +628,66 @@ def parse_kanban_text(
     if current_task is not None and current_section in sections:
         sections[current_section].append(current_task)
 
-    return ensure_kanban_task_ids(sections, profile)
+    return sections
 
 
-def parse_kanban(name: str) -> dict[str, list[KanbanTask]]:
+def parse_kanban_text(
+    content: str,
+    profile: str,
+) -> dict[str, list[KanbanTask]]:
+    """Parse raw kanban markdown into section -> task list.
+
+    Tasks without an id bullet receive a freshly generated random id; the id
+    only becomes stable once the board is saved back to kanban.md.
+    """
+    return ensure_kanban_task_ids(_parse_kanban_sections(content), profile)
+
+
+def kanban_path(profile: str | Path) -> Path:
+    """Return the kanban.md path for a profile name or profile directory."""
+    if isinstance(profile, Path):
+        return profile / "kanban.md"
+    return profile_dir(profile) / "kanban.md"
+
+
+def parse_kanban(name: str | Path) -> dict[str, list[KanbanTask]]:
     """Parse kanban.md into section -> task list."""
-    path = profile_dir(name) / "kanban.md"
+    path = kanban_path(name)
     if not path.exists():
         return {s: [] for s in KANBAN_SECTIONS}
     content = path.read_text(encoding="utf-8")
-    return parse_kanban_text(content, name)
+    profile_name = path.parent.name if isinstance(name, Path) else name
+    return parse_kanban_text(content, profile_name)
+
+
+def materialize_kanban_task_ids(profile: str | Path) -> bool:
+    """Persist generated ids for kanban tasks that have none on disk.
+
+    Generated ids are random, so they only stay stable across parses once
+    they are written back to kanban.md. Flows that match tasks by id across
+    separate parses (Done -> evidence picker, crystallized refresh) call
+    this first so a legacy id-less file gains persisted ids up front.
+    Returns True when kanban.md was rewritten.
+    """
+    path = kanban_path(profile)
+    if not path.exists():
+        return False
+    name = path.parent.name
+    sections = _parse_kanban_sections(path.read_text(encoding="utf-8"))
+    missing = any(
+        not _clean_task_text(getattr(task, "id", ""))
+        for tasks in sections.values()
+        for task in tasks
+    )
+    if not missing:
+        return False
+    ensured = ensure_kanban_task_ids(sections, name)
+    atomic_write_text(path, render_kanban(name, ensured))
+    git_backup.record_change(
+        [path],
+        action=f"materialize {name}/kanban.md task ids",
+    )
+    return True
 
 
 def _render_kanban_task_lines(
@@ -712,6 +722,8 @@ def _render_kanban_task_lines(
         meta_pairs.append(("project_id", task.project_id.strip()))
     if task.milestone_id.strip():
         meta_pairs.append(("milestone_id", task.milestone_id.strip()))
+    if task.agent_task_id.strip():
+        meta_pairs.append(("agent_task_id", task.agent_task_id.strip()))
     tags_text = _kanban_tags_text(task.tags)
     if tags_text:
         meta_pairs.append(("tags", tags_text))
@@ -767,15 +779,16 @@ def render_kanban(
 
 
 def save_kanban(
-    name: str,
+    name: str | Path,
     sections: dict[str, list[KanbanTask]],
 ) -> None:
     """Write kanban.md back from structured sections."""
-    path = profile_dir(name) / "kanban.md"
-    atomic_write_text(path, render_kanban(name, sections))
+    profile_name = name.name if isinstance(name, Path) else name
+    path = kanban_path(name)
+    atomic_write_text(path, render_kanban(profile_name, sections))
     git_backup.record_change(
         [path],
-        action=f"update {name}/kanban.md",
+        action=f"update {profile_name}/kanban.md",
     )
 
 

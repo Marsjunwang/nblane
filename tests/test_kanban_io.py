@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from nblane.core.kanban_io import (
     apply_kanban_reorder,
     ensure_kanban_task_ids,
     kanban_snapshot_to_moves,
+    materialize_kanban_task_ids,
     parse_kanban_text,
 )
 from nblane.core.io import (
@@ -247,8 +249,8 @@ class TestKanbanParseRender(unittest.TestCase):
         parsed = parse_kanban_text(text, "p")
         self.assertEqual(parsed[KANBAN_DOING][0].tags, "research, robotics")
 
-    def test_legacy_tasks_get_deterministic_ids(self) -> None:
-        """Old files without id meta receive stable generated ids."""
+    def test_legacy_tasks_get_stable_ids_after_save(self) -> None:
+        """Id-less legacy files gain random ids that persist once saved."""
         md = """# x · Kanban
 
 > Updated: 2026-01-01
@@ -263,11 +265,9 @@ class TestKanbanParseRender(unittest.TestCase):
 ---
 """
         first = self._parse_markdown("p", md)
-        second = self._parse_markdown("p", md)
         task = first[KANBAN_DOING][0]
         self.assertEqual(task.details, ["plain line"])
         self.assertTrue(task.id.startswith("kb_"))
-        self.assertEqual(task.id, second[KANBAN_DOING][0].id)
         rendered = render_kanban("p", first)
         self.assertIn(f"  - id: {task.id}", rendered)
         with tempfile.TemporaryDirectory() as tmp:
@@ -281,7 +281,117 @@ class TestKanbanParseRender(unittest.TestCase):
                 parsed = parse_kanban("p")
                 save_kanban("p", parsed)
             saved = (prof / "kanban.md").read_text(encoding="utf-8")
-        self.assertIn(f"  - id: {task.id}", saved)
+            self.assertIn(f"  - id: {parsed[KANBAN_DOING][0].id}", saved)
+            # Once saved, the id survives re-parsing and later edits.
+            again = parse_kanban_text(saved, "p")
+            self.assertEqual(
+                again[KANBAN_DOING][0].id,
+                parsed[KANBAN_DOING][0].id,
+            )
+            edited = {
+                section: [
+                    (
+                        replace(task, title="T1 renamed")
+                        if task.id == parsed[KANBAN_DOING][0].id
+                        else task
+                    )
+                    for task in tasks
+                ]
+                for section, tasks in again.items()
+            }
+            rerendered = render_kanban("p", edited)
+            self.assertIn(
+                f"  - id: {parsed[KANBAN_DOING][0].id}",
+                rerendered,
+            )
+
+    def test_id_stays_stable_when_task_content_changes(self) -> None:
+        """Editing title/metadata never changes a persisted task id."""
+        sections = {
+            KANBAN_DOING: [],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [KanbanTask(title="Original title")],
+            KANBAN_SOMEDAY: [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "p"
+            prof.mkdir()
+            with patch(
+                "nblane.core.io.profile_dir",
+                lambda _n: prof,
+            ):
+                save_kanban("p", sections)
+                first = parse_kanban("p")[KANBAN_QUEUE][0]
+                self.assertTrue(first.id.startswith("kb_"))
+                edited_sections = parse_kanban("p")
+                edited_sections[KANBAN_QUEUE][0] = replace(
+                    edited_sections[KANBAN_QUEUE][0],
+                    title="Completely different title",
+                    context="new context",
+                    subtasks=[KanbanSubtask(title="step")],
+                )
+                save_kanban("p", edited_sections)
+                reread = parse_kanban("p")[KANBAN_QUEUE][0]
+            self.assertEqual(reread.id, first.id)
+            self.assertEqual(reread.title, "Completely different title")
+
+    def test_same_title_new_tasks_get_distinct_ids(self) -> None:
+        """Two identical brand-new tasks never share a generated id."""
+        sections = {
+            KANBAN_DOING: [],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [
+                KanbanTask(title="Same title"),
+                KanbanTask(title="Same title"),
+            ],
+            KANBAN_SOMEDAY: [],
+        }
+        ensured = ensure_kanban_task_ids(sections, "p")
+        ids = [task.id for task in ensured[KANBAN_QUEUE]]
+        self.assertEqual(len(set(ids)), 2)
+        self.assertTrue(all(task_id.startswith("kb_") for task_id in ids))
+        # Round-trip through markdown: both ids persist.
+        back = parse_kanban_text(render_kanban("p", ensured), "p")
+        self.assertEqual(
+            [task.id for task in back[KANBAN_QUEUE]],
+            ids,
+        )
+
+    def test_materialize_kanban_task_ids_persists_only_when_missing(self) -> None:
+        """materialize writes id bullets for id-less files, else is a no-op."""
+        md = """# p · Kanban
+
+---
+
+## Queue
+
+- [ ] Legacy task
+
+---
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "p"
+            prof.mkdir()
+            kanban = prof / "kanban.md"
+            kanban.write_text(md, encoding="utf-8")
+            self.assertTrue(materialize_kanban_task_ids(prof))
+            written = kanban.read_text(encoding="utf-8")
+            self.assertIn("  - id: kb_", written)
+            first_id = parse_kanban_text(written, "p")[KANBAN_QUEUE][0].id
+            # Second run: all ids persisted, no rewrite.
+            self.assertFalse(materialize_kanban_task_ids(prof))
+            self.assertEqual(kanban.read_text(encoding="utf-8"), written)
+            # Edit the task; the materialized id stays put.
+            sections = parse_kanban(prof)
+            sections[KANBAN_QUEUE][0] = replace(
+                sections[KANBAN_QUEUE][0],
+                title="Edited legacy task",
+            )
+            save_kanban(prof, sections)
+            self.assertEqual(
+                parse_kanban(prof)[KANBAN_QUEUE][0].id,
+                first_id,
+            )
 
     def test_existing_id_stays_stable(self) -> None:
         """Existing id meta parses and renders unchanged."""
@@ -306,6 +416,42 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertIn("  - id: task-alpha", rendered)
         again = self._parse_markdown("p", rendered)
         self.assertEqual(again[KANBAN_QUEUE][0].id, "task-alpha")
+
+    def test_agent_task_id_meta_roundtrip(self) -> None:
+        """agent_task_id parses and renders like other task metadata."""
+        md = """# x · Kanban
+
+> Updated: 2026-01-01
+
+---
+
+## Doing
+
+- [ ] Dispatched task
+  - id: task-dispatch
+  - agent_task_id: agenttask_20260916_abcd1234
+
+---
+"""
+        back = self._parse_markdown("p", md)
+        task = back[KANBAN_DOING][0]
+        self.assertEqual(task.agent_task_id, "agenttask_20260916_abcd1234")
+        rendered = render_kanban("p", back)
+        self.assertIn("  - agent_task_id: agenttask_20260916_abcd1234", rendered)
+        again = self._parse_markdown("p", rendered)
+        self.assertEqual(
+            again[KANBAN_DOING][0].agent_task_id,
+            "agenttask_20260916_abcd1234",
+        )
+        # Clearing the field (unbind) renders no agent_task_id bullet.
+        cleared = {
+            section: [
+                replace(t, agent_task_id="") if t.id == "task-dispatch" else t
+                for t in tasks
+            ]
+            for section, tasks in again.items()
+        }
+        self.assertNotIn("agent_task_id", render_kanban("p", cleared))
 
     def test_project_and_milestone_meta_roundtrip(self) -> None:
         """Project Board task metadata parses and renders without loss."""
@@ -370,7 +516,7 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertEqual(task.details, ["keep this note"])
 
     def test_ensure_kanban_task_ids_is_pure_and_unique(self) -> None:
-        """ensure_kanban_task_ids returns copies with deterministic ids."""
+        """ensure_kanban_task_ids copies, preserves existing ids, dedups."""
         sections = {
             KANBAN_DOING: [
                 KanbanTask(title="Same"),
@@ -381,14 +527,16 @@ class TestKanbanParseRender(unittest.TestCase):
             KANBAN_SOMEDAY: [],
         }
         ensured = ensure_kanban_task_ids(sections, "p")
-        ensured_again = ensure_kanban_task_ids(sections, "p")
         ids = [task.id for task in ensured[KANBAN_DOING]]
+        self.assertEqual(len(set(ids)), 2)
+        self.assertTrue(all(task_id.startswith("kb_") for task_id in ids))
+        self.assertEqual(sections[KANBAN_DOING][0].id, "")
+        # Re-ensuring never rewrites ids that already exist.
+        ensured_again = ensure_kanban_task_ids(ensured, "p")
         self.assertEqual(
             ids,
             [task.id for task in ensured_again[KANBAN_DOING]],
         )
-        self.assertEqual(len(set(ids)), 2)
-        self.assertEqual(sections[KANBAN_DOING][0].id, "")
 
     def test_apply_kanban_reorder_moves_by_id(self) -> None:
         """Reorder/move operations preserve task ids and input sections."""

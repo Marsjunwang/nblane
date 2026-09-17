@@ -1,10 +1,11 @@
 """Link evidence rows back to the kanban tasks they came from.
 
 Evidence generated from Done tasks carries ``kanban_refs`` like ``kanban:<id>``.
-The task id is deterministic (content + section hashed) and preserved through
-archiving, so a ref captured at ingest still resolves after the task moves to
-kanban-archive.md. These helpers attach refs at ingest and resolve them back to
-the live ``KanbanTask`` (from kanban.md or kanban-archive.md) for display.
+The task id is random, assigned on first save, and preserved verbatim through
+later edits and archiving, so a ref captured at ingest still resolves after the
+task moves to kanban-archive.md. These helpers attach refs at ingest and
+resolve them back to the live ``KanbanTask`` (from kanban.md or
+kanban-archive.md) for display.
 """
 
 from __future__ import annotations

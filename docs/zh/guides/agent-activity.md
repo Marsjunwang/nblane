@@ -8,6 +8,10 @@ Agent Activity 是跨页面 AI / Agent 候选的审计队列。
 - 处理失败的 apply 或 Codex 任务。
 - 追踪某个候选来自哪个页面、会写到哪里。
 
+## 候选来源
+
+除各页面的 AI 动作外，Kanban 卡片的「派给 agent」也会在这里建跟踪项：外部 agent（Codex / opencode）提交结果后，对应看板卡片的徽标变为「候选待审」，点击可跳回本页审批。
+
 ## 推荐流程
 
 1. 先按状态筛选 pending 或 failed。

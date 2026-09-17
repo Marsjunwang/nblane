@@ -22,26 +22,41 @@ from nblane.core.kanban_io import (
     ensure_kanban_task_ids,
     kanban_snapshot_to_moves,
 )
+from nblane.core.kanban_merge import (
+    copy_kanban_sections as _copy_kanban_sections,
+    save_kanban_with_merge as _save_kanban_with_merge,
+)
 from nblane.core.kanban_events import (
     alignment_context_from_payload as _alignment_context_from_payload,
     append_ai_proposal_details as _append_ai_proposal_details,
     apply_kanban_card_update as _apply_task_update,
+    build_quick_add_task as _build_quick_add_task,
     discard_subtask_proposal_at as _discard_subtask_proposal_at,
     discard_task_ai_state as _discard_task_ai_state,
     event_subtask_index as _event_subtask_index,
     invalid_kanban_card_date_fields as _invalid_card_date_fields,
-    split_kanban_details,
     subtask_proposals_from_payload as _subtask_proposals_from_payload,
 )
+from nblane.core.agent_tasks import (
+    AGENT_HARNESSES,
+    AGENT_ROLES,
+    dispatch_agent_task_for_kanban as _dispatch_agent_task_for_kanban,
+    load_agent_tasks as _load_agent_tasks,
+)
+from nblane.core.intent import parse_intent as _parse_intent
 from nblane.core.kanban_ai import (
     KanbanTaskAlignment,
     KanbanSubtaskGenerationResult,
     KanbanSubtaskProposal,
-    analyze_kanban_task_gap,
     apply_kanban_subtask_proposals,
-    generate_kanban_task_alignment_options,
-    generate_kanban_subtask_proposals_detailed,
 )
+from nblane.core.kanban_ai_tasks import (
+    KIND_ALIGNMENTS as _AI_KIND_ALIGNMENTS,
+    KIND_GAP as _AI_KIND_GAP,
+    KIND_SUBTASKS as _AI_KIND_SUBTASKS,
+)
+from nblane.core.models import GapResult
+from nblane import kanban_ai_jobs as _kanban_ai_jobs
 from nblane.core.io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -130,12 +145,49 @@ def _state_key(profile: str) -> str:
     return f"kanban_{profile}"
 
 
+def _kanban_base_key(profile: str) -> str:
+    """Session key for the merge base: sections as of last load/save."""
+    return f"kanban_base_{profile}"
+
+
+def _kanban_notice_key(profile: str) -> str:
+    """Session key for warnings that must survive st.rerun()."""
+    return f"kanban_merge_notices_{profile}"
+
+
+def _stash_kanban_notice(profile: str, message: str) -> None:
+    """Queue a warning to render on the next frame (post-rerun safe)."""
+    if not message:
+        return
+    st.session_state.setdefault(_kanban_notice_key(profile), []).append(
+        message
+    )
+
+
+def _render_kanban_merge_notices(profile: str) -> None:
+    """Render and clear stashed warnings from the previous run."""
+    notices = st.session_state.pop(_kanban_notice_key(profile), [])
+    for message in notices:
+        st.warning(message)
+
+
+def _remember_kanban_base(
+    profile: str,
+    sections: dict[str, list[KanbanTask]],
+) -> None:
+    """Snapshot sections as the known on-disk state for conflict merges."""
+    st.session_state[_kanban_base_key(profile)] = _copy_kanban_sections(
+        sections
+    )
+
+
 def _load_into_state(profile: str) -> None:
     """Load kanban from file into session state."""
     st.session_state[_state_key(profile)] = ensure_kanban_task_ids(
         parse_kanban(profile),
         profile,
     )
+    _remember_kanban_base(profile, st.session_state[_state_key(profile)])
 
 
 def _view_pref_key(profile: str, name: str) -> str:
@@ -181,17 +233,48 @@ def _auto_save(
 ) -> None:
     """Persist changes to kanban.md.
 
-    The board auto-saves on every interaction, so it uses last-write-wins
-    rather than the manual-editor conflict guard: blocking here would discard
-    in-memory edits and pop the "reload latest" prompt on every save. Each
-    write is still committed via git_backup, so history stays recoverable.
+    The board auto-saves on every interaction. When kanban.md changed on
+    disk since our last load/save (home-page quick add, MCP, CLI, another
+    page), the save no longer silently overwrites: the delta held in
+    *sections* relative to the remembered base is replayed onto the latest
+    on-disk state, so both sides survive. Changes whose target task was
+    deleted externally are dropped with a warning. Each write is still
+    committed via git_backup, so history stays recoverable.
     """
     path = profile_dir(profile) / "kanban.md"
     project_path = profile_dir(profile) / "project-board.yaml"
-    ensured = ensure_kanban_task_ids(sections, profile)
+    result = _save_kanban_with_merge(
+        profile,
+        sections,
+        st.session_state.get(_kanban_base_key(profile)),
+        expected_snapshot=ensure_file_snapshot(path),
+    )
     sections.clear()
-    sections.update(ensured)
-    save_kanban(profile, sections)
+    sections.update(result.sections)
+    _remember_kanban_base(profile, sections)
+    if result.merged_external:
+        if result.dropped_changes:
+            titles = ", ".join(
+                change.label for change in result.dropped_changes
+            )
+            # Handlers rerun right after saving; stash the warning so it
+            # renders on the next frame instead of vanishing.
+            _stash_kanban_notice(
+                profile,
+                kanban_ui().get(
+                    "kb_merge_dropped",
+                    "kanban.md was updated elsewhere; {n} of your changes "
+                    "could not be replayed: {titles}.",
+                ).format(n=len(result.dropped_changes), titles=titles),
+            )
+        else:
+            st.toast(
+                kanban_ui().get(
+                    "kb_merge_external_notice",
+                    "kanban.md was updated elsewhere; merged the latest "
+                    "content and saved your change.",
+                )
+            )
     sync_project_board_from_kanban(profile, sections)
     refresh_file_snapshots([path, project_path])
     stash_git_backup_results()
@@ -209,6 +292,7 @@ def _sync_kanban_sections_state(
     sections.clear()
     sections.update(ensured)
     st.session_state[_state_key(profile)] = sections
+    _remember_kanban_base(profile, sections)
 
 
 def _copy_task_for_subtask_toggle(task: KanbanTask) -> KanbanTask:
@@ -440,8 +524,13 @@ def _task_links(task: KanbanTask) -> list[dict[str, str]]:
     return out
 
 
-def _task_payload(task: KanbanTask) -> dict:
+def _task_payload(
+    task: KanbanTask,
+    agent_index: dict[str, dict] | None = None,
+) -> dict:
     """Serialize a KanbanTask for the unified board component."""
+    agent_task_id = str(task.agent_task_id or "").strip()
+    agent_task = (agent_index or {}).get(agent_task_id) or {}
     return {
         "id": task.id,
         "title": task.title,
@@ -456,6 +545,9 @@ def _task_payload(task: KanbanTask) -> dict:
         "crystallized": task.crystallized,
         "project_id": task.project_id,
         "milestone_id": task.milestone_id,
+        "agent_task_id": agent_task_id,
+        "agent_status": str(agent_task.get("status") or ""),
+        "agent_activity_id": str(agent_task.get("activity_item_id") or ""),
         "subtasks": [
             {
                 "id": f"subtask-{i}",
@@ -554,6 +646,10 @@ def _board_ai_state(profile: str, ui: dict[str, str]) -> dict:
     alignments = st.session_state.get(_subtask_alignments_key(profile), {})
     errors = st.session_state.get(_subtask_errors_key(profile), {})
     gaps = st.session_state.get(_gap_results_key(profile), {})
+    pending = _kanban_ai_jobs.pending_by_task(
+        profile,
+        kanban_ai_suffix(profile),
+    )
     ai_backend = kanban_ai_backend(profile)
     if ai_backend == "codex":
         status = ui.get("kb_ai_backend_codex_status", "Codex: read-only local")
@@ -565,6 +661,7 @@ def _board_ai_state(profile: str, ui: dict[str, str]) -> dict:
         )
     return {
         "status": status,
+        "pending_by_task": pending,
         "proposals_by_task": {
             task_id: [
                 _proposal_payload(proposal)
@@ -605,13 +702,147 @@ def _board_ai_state(profile: str, ui: dict[str, str]) -> dict:
     }
 
 
+def _collect_kanban_ai_result(
+    profile: str,
+    kanban_task_id: str,
+    kind: str,
+    snap: dict,
+) -> None:
+    """Move one finished background AI job into the board's session state.
+
+    Writes the same session keys the synchronous flow used, so all
+    downstream consumers (card payload, expanders) work unchanged. Runs in
+    the Streamlit script (fragment), never in the worker thread.
+    """
+    status = str(snap.get("status") or "")
+    if status == "cancelled":
+        return
+    ui = kanban_ui()
+    if kind == _AI_KIND_GAP:
+        result = snap.get("result")
+        if status != "done" or result is None:
+            result = GapResult(
+                error=str(snap.get("error") or "AI gap analysis failed.")
+            )
+        state = st.session_state.setdefault(_gap_results_key(profile), {})
+        state[kanban_task_id] = result
+        return
+
+    if kind == _AI_KIND_ALIGNMENTS:
+        alignments = snap.get("result") if status == "done" else None
+        if not alignments:
+            fallback = ui.get(
+                "kb_no_alignment_options",
+                "No task understanding options were generated.",
+            )
+            _stash_kanban_notice(
+                profile,
+                fallback
+                if status == "done"
+                else str(snap.get("error") or fallback),
+            )
+            return
+        alignments_by_task = st.session_state.setdefault(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        alignments_by_task[kanban_task_id] = alignments
+        proposals_by_task = st.session_state.get(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        _discard_task_ai_state(
+            proposals_by_task,
+            None,
+            errors_by_task,
+            kanban_task_id,
+            scope="drafts",
+        )
+        if isinstance(errors_by_task, dict):
+            errors_by_task.pop(kanban_task_id, None)
+        return
+
+    if kind == _AI_KIND_SUBTASKS:
+        result = snap.get("result")
+        if status != "done" or not isinstance(
+            result, KanbanSubtaskGenerationResult
+        ):
+            result = KanbanSubtaskGenerationResult(
+                error_key="generic",
+                message=str(snap.get("error") or "AI subtask drafting failed."),
+            )
+        if not result.proposals:
+            state = st.session_state.setdefault(
+                _subtask_errors_key(profile), {}
+            )
+            state[kanban_task_id] = result
+            _stash_kanban_notice(
+                profile,
+                _subtask_error_message(result, ui),
+            )
+            return
+        state = st.session_state.setdefault(
+            _subtask_proposals_key(profile),
+            {},
+        )
+        state[kanban_task_id] = result.proposals
+        errors_by_task = st.session_state.get(
+            _subtask_errors_key(profile),
+            {},
+        )
+        if isinstance(errors_by_task, dict):
+            errors_by_task.pop(kanban_task_id, None)
+        alignments_by_task = st.session_state.get(
+            _subtask_alignments_key(profile),
+            {},
+        )
+        if isinstance(alignments_by_task, dict):
+            alignments_by_task.pop(kanban_task_id, None)
+        return
+
+
+@st.fragment(run_every=1)
+def _poll_kanban_ai_jobs(profile: str) -> None:
+    """Fragment: collect finished background AI jobs and rerun the page."""
+    changed = _kanban_ai_jobs.collect_finished_jobs(
+        profile,
+        kanban_ai_suffix(profile),
+        lambda task_id, kind, snap: _collect_kanban_ai_result(
+            profile, task_id, kind, snap
+        ),
+    )
+    if changed:
+        st.rerun()
+
+
+def _agent_tasks_index(profile: str) -> dict[str, dict]:
+    """Load agent tasks once per render, keyed by id for badge joining."""
+    out: dict[str, dict] = {}
+    try:
+        doc = _load_agent_tasks(profile)
+    except Exception:
+        return out
+    for item in doc.get("tasks") or []:
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id") or "").strip()
+        if task_id:
+            out[task_id] = item
+    return out
+
+
 def _sections_payload(
     sections: dict[str, list[KanbanTask]],
+    agent_index: dict[str, dict] | None = None,
 ) -> dict[str, list[dict]]:
     """Serialize all board sections for the unified board component."""
     return {
         section: [
-            _task_payload(task)
+            _task_payload(task, agent_index)
             for task in sections.get(section, [])
             if task.id
         ]
@@ -684,6 +915,43 @@ def _board_labels(ui: dict[str, str]) -> dict[str, str]:
             "ai_gap_short": ui.get("kb_ai_gap_short", "Gap"),
             "ai_subtasks_short": ui.get("kb_ai_subtasks_short", "Sub"),
             "ai_subtasks": ui.get("kb_ai_subtasks", "Draft subtasks"),
+            "ai_pending": ui.get("kb_ai_pending", "AI working…"),
+            "agent_task_id": ui.get("kb_agent_task_id", "Agent task"),
+            "dispatch_agent": ui.get("kb_dispatch_agent", "Dispatch to agent"),
+            "dispatch_confirm": ui.get("kb_dispatch_confirm", "Dispatch"),
+            "dispatch_harness": ui.get("kb_dispatch_harness", "Harness"),
+            "dispatch_instruction": ui.get(
+                "kb_dispatch_instruction",
+                "Extra instruction (optional)",
+            ),
+            "dispatch_instruction_ph": ui.get(
+                "kb_dispatch_instruction_ph",
+                "e.g. focus on the riskiest part first",
+            ),
+            "dispatch_role": ui.get("kb_dispatch_role", "Role"),
+            **{
+                f"dispatch_role_{role}": ui.get(
+                    f"kb_dispatch_role_{role}",
+                    role.replace("_", " ").title(),
+                )
+                for role in AGENT_ROLES
+            },
+            **{
+                f"agent_status_{status}": ui.get(
+                    f"kb_agent_status_{status}",
+                    status.replace("_", " "),
+                )
+                for status in (
+                    "draft",
+                    "ready",
+                    "handed_off",
+                    "running",
+                    "candidate_ready",
+                    "applied",
+                    "failed",
+                    "cancelled",
+                )
+            },
             "alignment_other": ui.get("kb_alignment_other", "Other"),
             "alignment_other_hint": ui.get(
                 "kb_alignment_other_hint",
@@ -1734,21 +2002,45 @@ def _handle_board_event(
             return
         if section not in KANBAN_BOARD_SECTIONS:
             section = KANBAN_QUEUE
-        task = KanbanTask(title=title)
-        context = str(payload.get("context") or "").strip()
-        if context:
-            task = replace(task, context=context)
-        notes = payload.get("notes")
-        if notes is not None and str(notes).strip():
-            task = replace(task, details=split_kanban_details(notes))
-        if section == KANBAN_DONE:
-            task = replace(task, done=True)
-            if auto_dates:
-                task = replace(task, completed_on=date.today().isoformat())
-        if section == KANBAN_DOING and auto_dates:
-            task = replace(task, started_on=date.today().isoformat())
-        sections.setdefault(section, []).append(task)
+        intent = _parse_intent(title)
+        if intent.kind == "evidence.capture" and intent.title:
+            # Evidence capture stays on the Evidence Review page (single
+            # write channel); the board does not create a card for it.
+            st.info(
+                ui.get(
+                    "kb_quick_add_evidence_hint",
+                    "That looks like evidence — capture it on the Evidence "
+                    "Review page; no card was created.",
+                )
+            )
+            return
+        target_section, task, intent = _build_quick_add_task(
+            title,
+            section=section,
+            context=str(payload.get("context") or ""),
+            notes=payload.get("notes"),
+            auto_dates=auto_dates,
+        )
+        sections.setdefault(target_section, []).append(task)
         _auto_save(profile, sections)
+        if intent.kind == "kanban.add" and (
+            intent.due or intent.tags or intent.column != "Doing"
+        ):
+            extras: list[str] = []
+            if intent.due:
+                extras.append(f"due {intent.due}")
+            if intent.tags:
+                extras.append(" ".join(f"#{tag}" for tag in intent.tags))
+            st.toast(
+                ui.get(
+                    "kb_quick_add_parsed",
+                    "Added “{title}” to {section}{extras}",
+                ).format(
+                    title=task.title,
+                    section=kanban_section_label(target_section),
+                    extras=f" · {' · '.join(extras)}" if extras else "",
+                )
+            )
         st.rerun()
 
     if action == "edit_card":
@@ -1852,6 +2144,7 @@ def _handle_board_event(
         clear_web_cache()
         sections.clear()
         sections.update(updated)
+        _remember_kanban_base(profile, sections)
         st.rerun()
 
     if action == "crystallize_card":
@@ -1882,6 +2175,41 @@ def _handle_board_event(
         _auto_save(profile, sections)
         st.rerun()
 
+    if action == "dispatch_agent":
+        if found is None:
+            st.warning(ui["kb_drag_stale"])
+            return
+        section, idx, task = found
+        harness = str(payload.get("harness") or "codex").strip().lower()
+        role = str(payload.get("role") or "researcher").strip().lower()
+        instruction = str(payload.get("instruction") or "").strip()
+        item = _dispatch_agent_task_for_kanban(
+            profile,
+            task,
+            harness=harness,
+            role=role,
+            instruction=instruction,
+            section=section,
+        )
+        sections[section][idx] = replace(
+            task,
+            agent_task_id=str(item.get("id") or ""),
+        )
+        _auto_save(profile, sections)
+        pdir = profile_dir(profile)
+        refresh_file_snapshots(
+            [pdir / "agent-tasks.yaml", pdir / "agent-activity.yaml"]
+        )
+        stash_git_backup_results()
+        st.toast(
+            ui.get(
+                "kb_dispatch_sent",
+                "Dispatched — pick it up in {harness}.",
+            ).format(harness=harness)
+        )
+        st.rerun()
+        return
+
     if action in ("request_gap", "ai_gap_ingest"):
         if found is None:
             st.warning(ui["kb_drag_stale"])
@@ -1897,22 +2225,14 @@ def _handle_board_event(
             return
         if card_applied:
             _auto_save(profile, sections)
-        with st.spinner(ui.get("spinner_gap", "Running gap analysis...")):
-            result = analyze_kanban_task_gap(
-                profile,
-                sections,
-                task_id,
-                use_rule_match=True,
-                use_llm_router=(
-                    ai_backend == "codex"
-                    or (ai_backend == "llm" and llm_client.is_configured())
-                ),
-                ai_backend=ai_backend,
-                persist_router_keywords=False,
-                goal_context=current_goal_agent_context(profile),
-            )
-        state = st.session_state.setdefault(_gap_results_key(profile), {})
-        state[task_id] = result
+        _kanban_ai_jobs.start_gap_job(
+            profile,
+            kanban_ai_suffix(profile),
+            sections=sections,
+            kanban_task_id=task_id,
+            ai_backend=ai_backend,
+            goal_context=current_goal_agent_context(profile),
+        )
         st.rerun()
         return
 
@@ -1931,45 +2251,14 @@ def _handle_board_event(
             return
         if card_applied:
             _auto_save(profile, sections)
-        with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
-            alignments = generate_kanban_task_alignment_options(
-                sections,
-                task_id,
-                profile_name=profile,
-                record_activity=True,
-                ai_backend=ai_backend,
-                goal_context=current_goal_agent_context(profile),
-            )
-        if not alignments:
-            st.warning(
-                ui.get(
-                    "kb_no_alignment_options",
-                    "No task understanding options were generated.",
-                )
-            )
-            return
-        alignments_by_task = st.session_state.setdefault(
-            _subtask_alignments_key(profile),
-            {},
+        _kanban_ai_jobs.start_alignment_job(
+            profile,
+            kanban_ai_suffix(profile),
+            sections=sections,
+            kanban_task_id=task_id,
+            ai_backend=ai_backend,
+            goal_context=current_goal_agent_context(profile),
         )
-        alignments_by_task[task_id] = alignments
-        proposals_by_task = st.session_state.get(
-            _subtask_proposals_key(profile),
-            {},
-        )
-        errors_by_task = st.session_state.get(
-            _subtask_errors_key(profile),
-            {},
-        )
-        _discard_task_ai_state(
-            proposals_by_task,
-            None,
-            errors_by_task,
-            task_id,
-            scope="drafts",
-        )
-        if isinstance(errors_by_task, dict):
-            errors_by_task.pop(task_id, None)
         st.rerun()
         return
 
@@ -1986,60 +2275,31 @@ def _handle_board_event(
                 )
             )
             return
-        with st.spinner(ui.get("spinner_ai", "AI reasoning...")):
-            granularity = str(
-                payload.get("granularity")
-                or _kanban_subtask_granularity(profile)
-            ).strip()
-            if granularity not in {"milestone", "checklist", "implementation"}:
-                granularity = "milestone"
-            style_hint = _style_hint_from_alignment_payload(payload)
-            if not style_hint:
-                style_hint = _kanban_subtask_style_hint(profile)
-            _persist_kanban_subtask_preferences(
-                profile,
-                granularity=granularity,
-                style_hint=style_hint,
-            )
-            result = generate_kanban_subtask_proposals_detailed(
-                profile,
-                sections,
-                task_id,
-                use_rule_match=True,
-                use_llm_router=(
-                    ai_backend == "llm" and llm_client.is_configured()
-                ),
-                persist_router_keywords=False,
-                alignment_context=alignment_context,
-                granularity=granularity,
-                record_activity=ai_backend == "llm",
-                ai_backend=ai_backend,
-                goal_context=current_goal_agent_context(profile),
-                subtask_style_hint=style_hint,
-            )
-        if not result.proposals:
-            state = st.session_state.setdefault(_subtask_errors_key(profile), {})
-            state[task_id] = result
-            st.warning(_subtask_error_message(result, ui))
-            st.rerun()
-            return
-        state = st.session_state.setdefault(
-            _subtask_proposals_key(profile),
-            {},
+        granularity = str(
+            payload.get("granularity")
+            or _kanban_subtask_granularity(profile)
+        ).strip()
+        if granularity not in {"milestone", "checklist", "implementation"}:
+            granularity = "milestone"
+        style_hint = _style_hint_from_alignment_payload(payload)
+        if not style_hint:
+            style_hint = _kanban_subtask_style_hint(profile)
+        _persist_kanban_subtask_preferences(
+            profile,
+            granularity=granularity,
+            style_hint=style_hint,
         )
-        state[task_id] = result.proposals
-        errors_by_task = st.session_state.get(
-            _subtask_errors_key(profile),
-            {},
+        _kanban_ai_jobs.start_subtasks_job(
+            profile,
+            kanban_ai_suffix(profile),
+            sections=sections,
+            kanban_task_id=task_id,
+            ai_backend=ai_backend,
+            goal_context=current_goal_agent_context(profile),
+            alignment_context=alignment_context,
+            granularity=granularity,
+            style_hint=style_hint,
         )
-        if isinstance(errors_by_task, dict):
-            errors_by_task.pop(task_id, None)
-        alignments_by_task = st.session_state.get(
-            _subtask_alignments_key(profile),
-            {},
-        )
-        if isinstance(alignments_by_task, dict):
-            alignments_by_task.pop(task_id, None)
         st.rerun()
         return
 
@@ -2087,6 +2347,11 @@ def _handle_board_event(
         return
 
     if action == "discard_ai_generation":
+        _kanban_ai_jobs.cancel_tracked_job(
+            profile,
+            kanban_ai_suffix(profile),
+            task_id,
+        )
         proposals_by_task = st.session_state.get(
             _subtask_proposals_key(profile),
             {},
@@ -2179,6 +2444,7 @@ require_login()
 selected = select_profile()
 ui = kanban_ui()
 render_git_backup_notices()
+_render_kanban_merge_notices(selected)
 
 _pdir = profile_dir(selected)
 _kanban_path = _pdir / "kanban.md"
@@ -2191,6 +2457,7 @@ _agent_activity_path = _pdir / "agent-activity.yaml"
 _ai_runs_path = _pdir / "ai-runs.yaml"
 _goals_path = _pdir / "goals.yaml"
 _project_path = _pdir / "project-board.yaml"
+_agent_tasks_path = _pdir / "agent-tasks.yaml"
 for _path in (
     _kanban_path,
     _archive_path,
@@ -2202,6 +2469,7 @@ for _path in (
     _ai_runs_path,
     _goals_path,
     _project_path,
+    _agent_tasks_path,
 ):
     ensure_file_snapshot(_path)
 
@@ -2266,7 +2534,7 @@ total_tasks = sum(len(tasks) for tasks in sections.values())
 # -- Unified board -----------------------------------------------
 
 board_event = st_kanban_board(
-    sections=_sections_payload(sections),
+    sections=_sections_payload(sections, _agent_tasks_index(selected)),
     labels=_board_labels(ui),
     settings={
         "section_order": list(KANBAN_BOARD_SECTIONS),
@@ -2279,6 +2547,8 @@ board_event = st_kanban_board(
         "project_label_maps": _project_label_maps_payload(selected),
         "subtask_granularity": _kanban_subtask_granularity(selected),
         "subtask_style_hint": _kanban_subtask_style_hint(selected),
+        "agent_harnesses": list(AGENT_HARNESSES),
+        "agent_roles": list(AGENT_ROLES),
     },
     ai_state=_board_ai_state(selected, ui),
     key=f"kanban_board_{selected}",
@@ -2307,6 +2577,14 @@ else:
         ai_backend=ai_backend,
         ui=ui,
     )
+
+# Background AI jobs (gap / alignments / subtasks) are polled here; the
+# fragment mounts only while jobs are tracked and full-reruns once results
+# land so the board payload picks them up.
+if st.session_state.get(
+    _kanban_ai_jobs.ai_jobs_key(selected, kanban_ai_suffix(selected))
+):
+    _poll_kanban_ai_jobs(selected)
 
 st.divider()
 

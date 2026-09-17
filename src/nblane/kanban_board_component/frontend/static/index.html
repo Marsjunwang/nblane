@@ -185,6 +185,12 @@
     .kb-column.is-stage-doing .kb-stage-step { background: var(--accent); }
     .kb-head-meta { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .kb-pill.warn { border-color: #ead5ab; background: #fff7e8; color: var(--warn); }
+    .kb-pill.kb-pending { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; animation: kbPendingPulse 1.2s ease-in-out infinite; }
+    @keyframes kbPendingPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    .kb-pill.kb-agent-badge { border-color: #d8b4fe; background: #faf5ff; color: #7e22ce; }
+    .kb-pill.kb-agent-badge.is-clickable { cursor: pointer; text-decoration: underline; }
+    .kb-dispatch { border-top: 1px dashed var(--line); display: grid; gap: 6px; margin-top: 6px; padding-top: 6px; }
+    .kb-menu button[disabled] { opacity: .45; cursor: not-allowed; }
     .kb-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
     .kb-column-head strong { min-width: 0; overflow: hidden; font-size: .92rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
     .kb-count, .kb-pill {
@@ -568,6 +574,26 @@
       ai_gap_short: "Gap",
       ai_subtasks: "Draft subtasks",
       ai_subtasks_short: "Sub",
+      ai_pending: "AI working…",
+      agent_task_id: "Agent task",
+      agent_status_applied: "applied",
+      agent_status_cancelled: "cancelled",
+      agent_status_candidate_ready: "candidate ready",
+      agent_status_draft: "draft",
+      agent_status_failed: "failed",
+      agent_status_handed_off: "handed off",
+      agent_status_ready: "ready",
+      agent_status_running: "running",
+      dispatch_agent: "Dispatch to agent",
+      dispatch_confirm: "Dispatch",
+      dispatch_harness: "Harness",
+      dispatch_instruction: "Extra instruction (optional)",
+      dispatch_instruction_ph: "e.g. focus on the riskiest part first",
+      dispatch_role: "Role",
+      dispatch_role_remote_dev: "Remote dev",
+      dispatch_role_researcher: "Researcher",
+      dispatch_role_resume_strategist: "Resume strategist",
+      dispatch_role_reviewer: "Reviewer",
       auto_dates: "Auto dates",
       auto_dates_short: "Auto dates",
       auto_dates_help: "Auto-set started / completed dates on column move",
@@ -662,6 +688,7 @@
     let clickTimer = 0;
     let eventSeq = 0;
     let openMenuId = "";
+    let dispatchOpenId = "";
     let menuOutsideBound = false;
     let openMoreFieldsByTask = {};
     let viewOverride = {};
@@ -850,6 +877,10 @@
     function normalizeSubtaskError(taskId) {
       return asObj(asObj(aiState().subtask_errors_by_task)[taskId]);
     }
+    function normalizePending(taskId) {
+      const raw = asObj(aiState().pending_by_task)[taskId];
+      return typeof raw === "string" ? raw : text(asObj(raw).kind || "");
+    }
     function normalizeGap(taskId) {
       return asObj(asObj(aiState().gaps_by_task)[taskId]);
     }
@@ -885,6 +916,9 @@
 	        completed_on: text(obj.completed_on || obj.completedOn || ""),
 	        project_id: text(obj.project_id || obj.projectId || ""),
 	        milestone_id: text(obj.milestone_id || obj.milestoneId || ""),
+	        agent_task_id: text(obj.agent_task_id || obj.agentTaskId || ""),
+	        agent_status: text(obj.agent_status || obj.agentStatus || ""),
+	        agent_activity_id: text(obj.agent_activity_id || obj.agentActivityId || ""),
 	        notes: details,
         details: details ? details.split(/\n+/).map((x) => x.trim()).filter(Boolean) : [],
         crystallized: Boolean(obj.crystallized),
@@ -1162,10 +1196,13 @@
       const proposals = normalizeProposals(task.id);
       const alignments = normalizeAlignments(task.id);
       const error = normalizeSubtaskError(task.id);
+      const pending = normalizePending(task.id);
       if (alignments.length) statuses.push(label("alignment_status"));
       if (proposals.length) statuses.push(label("draft_status").replace("{count}", String(proposals.length)));
       if (Object.keys(error).length) statuses.push(label("ai_error_status"));
-      return statuses.length ? `<span class="kb-card-meta">${statuses.map((item) => `<span class="kb-pill">${esc(item)}</span>`).join("")}</span>` : "";
+      const pendingPill = pending ? `<span class="kb-pill kb-pending">${esc(label("ai_pending"))}</span>` : "";
+      const rest = statuses.map((item) => `<span class="kb-pill">${esc(item)}</span>`).join("");
+      return (pendingPill || rest) ? `<span class="kb-card-meta">${pendingPill}${rest}</span>` : "";
     }
     function aiPanelHtml(task, expanded) {
       if (!expanded) return aiStatusHtml(task);
@@ -1245,21 +1282,69 @@
         </div>
       `;
     }
-    function menuItem(action, fullKey, extraClass) {
+    function menuItem(action, fullKey, extraClass, disabled) {
       const full = label(fullKey || action);
-      return `<button type="button" class="${extraClass || ""}" data-action="${attr(action)}" aria-label="${attr(full)}">${esc(full)}</button>`;
+      const disabledAttr = disabled ? " disabled aria-disabled=\"true\"" : "";
+      return `<button type="button" class="${extraClass || ""}" data-action="${attr(action)}" aria-label="${attr(full)}"${disabledAttr}>${esc(full)}</button>`;
     }
     function cardMenuHtml(task) {
       if (task.id !== openMenuId || task.id === editingId) return "";
+      const aiDisabled = Boolean(normalizePending(task.id));
       const doneItems = task.section === "Done"
         ? `${menuItem("archive_done", "archive_done")}${task.crystallized ? "" : menuItem("crystallize", "crystallize")}`
         : "";
       return `
         <div class="kb-menu" role="menu">
-          ${menuItem("ai_gap", "ai_gap")}
-          ${menuItem("ai_subtasks", "ai_subtasks")}
+          ${menuItem("ai_gap", "ai_gap", "", aiDisabled)}
+          ${menuItem("ai_subtasks", "ai_subtasks", "", aiDisabled)}
+          ${menuItem("dispatch_agent", "dispatch_agent")}
           ${doneItems}
           ${menuItem("delete", "delete_task", "danger")}
+        </div>
+      `;
+    }
+    function agentBadgeHtml(task) {
+      const agentTaskId = text(task.agent_task_id || "");
+      if (!agentTaskId) return "";
+      const status = text(task.agent_status || "");
+      const statusLabel = status ? label(`agent_status_${status}`) : label("agent_task_id");
+      const title = `${label("agent_task_id")}: ${agentTaskId}`;
+      if (status === "candidate_ready" && text(task.agent_activity_id || "")) {
+        return `<button type="button" class="kb-pill kb-agent-badge is-clickable" data-action="open_agent_activity" data-activity-item-id="${attr(task.agent_activity_id)}" title="${attr(title)}" aria-label="${attr(title)}">${esc(statusLabel)}</button>`;
+      }
+      return `<span class="kb-pill kb-agent-badge" title="${attr(title)}">${esc(statusLabel)}</span>`;
+    }
+    function dispatchPanelHtml(task) {
+      if (task.id !== dispatchOpenId) return "";
+      const harnesses = asArr(settings().agent_harnesses).map(text).filter(Boolean);
+      const roles = asArr(settings().agent_roles).map(text).filter(Boolean);
+      const harnessOptions = (harnesses.length ? harnesses : ["codex"]);
+      const roleOptions = (roles.length ? roles : ["researcher"]);
+      return `
+        <div class="kb-dispatch" data-dispatch-panel="${attr(task.id)}">
+          <div class="kb-section-title">${esc(label("dispatch_agent"))}</div>
+          <div class="kb-grid-2">
+            <label class="kb-field">
+              <span>${esc(label("dispatch_harness"))}</span>
+              <select data-dispatch-harness aria-label="${attr(label("dispatch_harness"))}">
+                ${harnessOptions.map((item) => `<option value="${attr(item)}">${esc(item)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="kb-field">
+              <span>${esc(label("dispatch_role"))}</span>
+              <select data-dispatch-role aria-label="${attr(label("dispatch_role"))}">
+                ${roleOptions.map((item) => `<option value="${attr(item)}">${esc(label(`dispatch_role_${item}`))}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <label class="kb-field">
+            <span>${esc(label("dispatch_instruction"))}</span>
+            <input type="text" data-dispatch-instruction placeholder="${attr(label("dispatch_instruction_ph"))}" aria-label="${attr(label("dispatch_instruction"))}">
+          </label>
+          <div class="kb-actions">
+            <button type="button" class="kb-button primary" data-action="dispatch_confirm" aria-label="${attr(label("dispatch_confirm"))}">${esc(label("dispatch_confirm"))}</button>
+            <button type="button" class="kb-button" data-action="dispatch_cancel" aria-label="${attr(label("cancel"))}">${esc(label("cancel"))}</button>
+          </div>
         </div>
       `;
     }
@@ -1277,6 +1362,7 @@
         <div class="kb-read-extra">
           ${detailRows}
           ${aiPanelHtml(task, expanded)}
+          ${dispatchPanelHtml(task)}
           ${links}
         </div>
       `;
@@ -1324,6 +1410,11 @@
             <span>${esc(label("tags"))}</span>
             <input type="text" data-field="tags" value="${attr(task.tags)}" aria-label="${attr(label("tags"))}">
           </label>`,
+        agent_task_id: `
+          <label class="kb-field">
+            <span>${esc(label("agent_task_id"))}</span>
+            <input type="text" data-field="agent_task_id" value="${attr(text(task.agent_task_id || ""))}" aria-label="${attr(label("agent_task_id"))}">
+          </label>`,
         project: projectFields,
         dates: `
           <div class="kb-grid-2">
@@ -1361,7 +1452,7 @@
         "Doing": ["context", "blocked_by", "subtasks"],
         "Done": ["outcome", "dates", "tags"],
       };
-      const restOrder = ["context", "why", "blocked_by", "outcome", "tags", "project", "dates", "notes", "subtasks"];
+      const restOrder = ["context", "why", "blocked_by", "outcome", "tags", "agent_task_id", "project", "dates", "notes", "subtasks"];
       const primaryKeys = primaryByStage[task.section] || ["context", "tags"];
       const primaryHtml = primaryKeys.map((key) => parts[key] || "").join("");
       const restHtml = restOrder
@@ -1395,6 +1486,8 @@
       if (task.subtasks.length) meta.push(`<span class="kb-pill">${done}/${task.subtasks.length} ${esc(label("subtasks"))}</span>`);
       if (task.links.length) meta.push(`<span class="kb-pill">${task.links.length} ${esc(label("links"))}</span>`);
       if (task.crystallized) meta.push(`<span class="kb-pill">${esc(label("crystallized"))}</span>`);
+      const agentBadge = agentBadgeHtml(task);
+      if (agentBadge) meta.push(agentBadge);
       const selected = task.id === selectedId;
       const editing = selected && task.id === editingId;
       const compactTag = compact && !selected && !editing;
@@ -1493,6 +1586,7 @@
       if (!selectedId || !findTask(selectedId)) selectedId = board[0]?.tasks[0]?.id || "";
       if (editingId && !findTask(editingId)) editingId = "";
       if (openMenuId && (!findTask(openMenuId) || openMenuId === editingId)) openMenuId = "";
+      if (dispatchOpenId && !findTask(dispatchOpenId)) dispatchOpenId = "";
       root.innerHTML = `
         <main class="kb-shell">
           <div class="kb-topbar">
@@ -1859,6 +1953,23 @@
               emit("request_gap", withPendingEditCard(panel, { card_id: taskId }));
             } else if (action === "ai_subtasks") {
               emit("request_subtasks", withPendingEditCard(panel, { card_id: taskId }));
+            } else if (action === "dispatch_agent") {
+              dispatchOpenId = dispatchOpenId === taskId ? "" : taskId;
+              render();
+            } else if (action === "dispatch_confirm") {
+              const harness = text(panel.querySelector("[data-dispatch-harness]")?.value || "codex");
+              const role = text(panel.querySelector("[data-dispatch-role]")?.value || "researcher");
+              const instruction = text(panel.querySelector("[data-dispatch-instruction]")?.value || "").trim();
+              dispatchOpenId = "";
+              emit("dispatch_agent", { card_id: taskId, harness, role, instruction });
+            } else if (action === "dispatch_cancel") {
+              dispatchOpenId = "";
+              render();
+            } else if (action === "open_agent_activity") {
+              emit("open_activity_item", {
+                card_id: taskId,
+                activity_item_id: text(button.dataset.activityItemId || ""),
+              });
             } else if (action === "archive_done") {
               if (!window.confirm(label("archive_confirm"))) return;
               emit("archive_done_card", withPendingEditCard(panel, { card_id: taskId }));

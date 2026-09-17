@@ -539,6 +539,11 @@ def refresh_from_crystallized_tasks(
       Done work that was never crystallized can still become evidence.
     """
     from nblane.core.kanban_archive import _all_lookup_tasks, kanban_ref
+    from nblane.core.kanban_io import materialize_kanban_task_ids
+
+    # Generated task ids are random until written back to kanban.md; persist
+    # them first so proposal task_ids resolve against later parses.
+    materialize_kanban_task_ids(profile)
 
     if entries is None:
         from nblane.core.profile_io import load_evidence_pool_raw
