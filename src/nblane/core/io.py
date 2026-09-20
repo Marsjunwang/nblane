@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nblane.core import kanban_io, profile_io, schema_io, team_io
+from nblane.core.file_state import FileSnapshot
 from nblane.core.kanban_io import (
     KANBAN_ARCHIVE_FILENAME,
     KANBAN_DOING,
@@ -95,9 +96,16 @@ def load_evidence_pool_raw(name_or_dir: str | Path) -> dict | None:
     return _load_yaml_dict(path)
 
 
-def save_evidence_pool(name: str, data: dict) -> None:
+def save_evidence_pool(
+    name: str,
+    data: dict,
+    *,
+    expected_snapshot: "FileSnapshot | None" = None,
+) -> None:
     """Write evidence-pool.yaml with today's date updated."""
-    return profile_io.save_evidence_pool(name, data)
+    return profile_io.save_evidence_pool(
+        name, data, expected_snapshot=expected_snapshot
+    )
 
 
 def load_goal_book(name_or_dir: str | Path):
@@ -192,12 +200,16 @@ def render_kanban(
 def save_kanban(
     name: str,
     sections: dict[str, list[KanbanTask]],
+    *,
+    expected_snapshot: "FileSnapshot | None" = None,
 ) -> None:
     """Write kanban.md back from structured sections."""
     old = kanban_io.profile_dir
     kanban_io.profile_dir = profile_dir
     try:
-        return kanban_io.save_kanban(name, sections)
+        return kanban_io.save_kanban(
+            name, sections, expected_snapshot=expected_snapshot
+        )
     finally:
         kanban_io.profile_dir = old
 

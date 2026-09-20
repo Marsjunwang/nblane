@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import TypeVar
 import unicodedata
 
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.models import (
     EVIDENCE_POOL_SCHEMA_VERSION,
@@ -22,6 +27,8 @@ STATUSES = ("locked", "learning", "solid", "expert")
 EVIDENCE_POOL_FILENAME = "evidence-pool.yaml"
 SKILL_TREE_FILENAME = "skill-tree.yaml"
 GOALS_FILENAME = "goals.yaml"
+
+_T = TypeVar("_T")
 
 
 def validate_profile_name(name: str) -> str:
@@ -119,11 +126,10 @@ def load_skill_tree_raw(name_or_dir: str | Path) -> dict | None:
     return raw
 
 
-def save_skill_tree(name: str, data: dict) -> None:
-    """Write skill-tree.yaml with today's date updated."""
+def _skill_tree_text(name: str, data: dict) -> str:
+    """Serialize skill-tree.yaml content (header + YAML body)."""
     data = dict(data)
     data["updated"] = date.today().isoformat()
-    path = profile_dir(name) / SKILL_TREE_FILENAME
     header = (
         f"# Skill tree for {name}\n"
         "# Schema defined in schemas/ — "
@@ -135,11 +141,69 @@ def save_skill_tree(name: str, data: dict) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    atomic_write_text(path, header + body)
+    return header + body
+
+
+def save_skill_tree(
+    name: str,
+    data: dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> None:
+    """Write skill-tree.yaml with today's date updated.
+
+    When *expected_snapshot* is given, the file is re-checked against it
+    after the write lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
+    path = profile_dir(name) / SKILL_TREE_FILENAME
+    text = _skill_tree_text(name, data)
+    with locked_profile_write(path.parent, SKILL_TREE_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(
+                path, expected_snapshot, label=SKILL_TREE_FILENAME
+            )
+        atomic_write_text(path, text)
     git_backup.record_change(
         [path],
         action=f"update {name}/skill-tree.yaml",
     )
+
+
+def update_skill_tree(
+    name: str,
+    fn: Callable[[dict], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Load skill-tree.yaml, apply *fn*, and persist — under one lock.
+
+    Same contract as ``inbox.update_inbox``: the whole load → mutate →
+    write cycle holds the profile write lock. *fn* receives the raw
+    document dict and mutates it in place; its return value is passed
+    through. When *fn* leaves the document unchanged, no write or backup
+    happens. *fn* must not call ``save_skill_tree``/``update_skill_tree``
+    for the same profile (the lock is not reentrant for the same file).
+    """
+    path = profile_dir(name) / SKILL_TREE_FILENAME
+    with locked_profile_write(path.parent, SKILL_TREE_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(
+                path, expected_snapshot, label=SKILL_TREE_FILENAME
+            )
+        raw = load_skill_tree_raw(name) or {}
+        before = copy.deepcopy(raw)
+        result = fn(raw)
+        changed = raw != before
+        if changed:
+            atomic_write_text(path, _skill_tree_text(name, raw))
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {name}/skill-tree.yaml",
+        )
+    return result
 
 
 def load_evidence_pool(
@@ -164,15 +228,14 @@ def load_evidence_pool_raw(
     return _load_yaml_dict(path)
 
 
-def save_evidence_pool(name: str, data: dict) -> None:
-    """Write evidence-pool.yaml with today's date updated."""
+def _evidence_pool_text(name: str, data: dict) -> str:
+    """Serialize evidence-pool.yaml content (header + YAML body)."""
     data = dict(data)
     data["updated"] = date.today().isoformat()
     # Stamp v2 schema version on every write so refresh/compat checks have a
     # signal. Only upgrades the marker; never downgrades a newer pool.
     if not str(data.get("schema_version") or "").strip():
         data["schema_version"] = EVIDENCE_POOL_SCHEMA_VERSION
-    path = profile_dir(name) / EVIDENCE_POOL_FILENAME
     header = (
         f"# Evidence pool for {name}\n"
         "# Shared records; skill-tree nodes reference ids via "
@@ -184,11 +247,70 @@ def save_evidence_pool(name: str, data: dict) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    atomic_write_text(path, header + body)
+    return header + body
+
+
+def save_evidence_pool(
+    name: str,
+    data: dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> None:
+    """Write evidence-pool.yaml with today's date updated.
+
+    When *expected_snapshot* is given, the file is re-checked against it
+    after the write lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
+    path = profile_dir(name) / EVIDENCE_POOL_FILENAME
+    text = _evidence_pool_text(name, data)
+    with locked_profile_write(path.parent, EVIDENCE_POOL_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(
+                path, expected_snapshot, label=EVIDENCE_POOL_FILENAME
+            )
+        atomic_write_text(path, text)
     git_backup.record_change(
         [path],
         action=f"update {name}/evidence-pool.yaml",
     )
+
+
+def update_evidence_pool(
+    name: str,
+    fn: Callable[[dict], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Load evidence-pool.yaml, apply *fn*, and persist — under one lock.
+
+    Same contract as ``inbox.update_inbox``: the whole load → mutate →
+    write cycle holds the profile write lock. *fn* receives the raw
+    document dict and mutates it in place; its return value is passed
+    through. When *fn* leaves the document unchanged, no write or backup
+    happens. *fn* must not call ``save_evidence_pool``/
+    ``update_evidence_pool`` for the same profile (the lock is not
+    reentrant for the same file).
+    """
+    path = profile_dir(name) / EVIDENCE_POOL_FILENAME
+    with locked_profile_write(path.parent, EVIDENCE_POOL_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(
+                path, expected_snapshot, label=EVIDENCE_POOL_FILENAME
+            )
+        raw = load_evidence_pool_raw(name) or {}
+        before = copy.deepcopy(raw)
+        result = fn(raw)
+        changed = raw != before
+        if changed:
+            atomic_write_text(path, _evidence_pool_text(name, raw))
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {name}/evidence-pool.yaml",
+        )
+    return result
 
 
 def load_goal_book(name_or_dir: str | Path):

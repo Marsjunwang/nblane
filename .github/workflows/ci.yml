@@ -37,14 +37,16 @@ jobs:
           from nblane.core.profile_ingest import merge_ingest_patch;
           print('imports ok')"
 
-  # Freshness check for the bundled Streamlit component frontends: rebuild
-  # every src/nblane/*_component/frontend that has a build script and fail
-  # when the committed artifacts (frontend/static, or frontend/dist for
-  # goal_presence) no longer match the source. We rebuild + diff rather than
-  # compare git timestamps: timestamp checks false-positive on source edits
-  # that do not change the bundle (tests, comments), while a real build is
-  # the ground truth. Total cost is a few minutes on a runner (small Vite
-  # apps; the heaviest deps are three.js in home_dashboard).
+  # Freshness check for the bundled frontends: rebuild every
+  # src/nblane/*_component/frontend (Streamlit components) plus the SPA
+  # frontend src/nblane/web_ui/frontend, and fail when the committed
+  # artifacts (frontend/static, frontend/dist for goal_presence,
+  # web_ui/static for the SPA) no longer match the source. We rebuild +
+  # diff rather than compare git timestamps: timestamp checks
+  # false-positive on source edits that do not change the bundle (tests,
+  # comments), while a real build is the ground truth. Total cost is a
+  # few minutes on a runner (small Vite apps; the heaviest deps are
+  # three.js in home_dashboard).
   frontend-artifacts:
     runs-on: ubuntu-latest
     steps:
@@ -56,13 +58,15 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: src/nblane/*_component/frontend/package-lock.json
+          cache-dependency-path: |
+            src/nblane/*_component/frontend/package-lock.json
+            src/nblane/web_ui/frontend/package-lock.json
 
-      - name: Rebuild component frontends and verify artifacts are fresh
+      - name: Rebuild component and SPA frontends and verify artifacts are fresh
         run: |
           set -euo pipefail
           artifact_dirs=()
-          for frontend in src/nblane/*_component/frontend; do
+          for frontend in src/nblane/*_component/frontend src/nblane/web_ui/frontend; do
             [ -f "$frontend/package.json" ] || { echo "skip $frontend (no package.json)"; continue; }
             [ -d "$frontend/src" ] || { echo "skip $frontend (no src/)"; continue; }
             grep -q '"build"' "$frontend/package.json" || { echo "skip $frontend (no build script)"; continue; }
@@ -81,6 +85,9 @@ jobs:
             for out in static dist; do
               [ -d "$frontend/$out" ] && artifact_dirs+=("$frontend/$out")
             done
+            # The SPA builds into ../static (src/nblane/web_ui/static), the
+            # in-package dir served by nblane.web_api.spa.
+            [ -d "$frontend/../static" ] && artifact_dirs+=("$frontend/../static")
           done
           if [ ${#artifact_dirs[@]} -eq 0 ]; then
             echo "No component artifact dirs found; nothing to check."
@@ -88,11 +95,12 @@ jobs:
           fi
           stale="$(git status --porcelain -- "${artifact_dirs[@]}")"
           if [ -n "$stale" ]; then
-            echo "::error::Committed component build artifacts are stale:"
+            echo "::error::Committed frontend build artifacts are stale:"
             echo "$stale"
             echo
-            echo "Rebuild the affected component frontends and commit the output:"
+            echo "Rebuild the affected frontends and commit the output:"
             echo "  cd src/nblane/<name>_component/frontend && npm install && npm run build"
+            echo "  cd src/nblane/web_ui/frontend && npm install && npm run build"
             git diff -- "${artifact_dirs[@]}" | head -200 || true
             exit 1
           fi

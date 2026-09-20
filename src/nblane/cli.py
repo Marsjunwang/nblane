@@ -46,6 +46,18 @@ Commands:
     nblane codex cloud refresh <task_id> --profile name [--diff]
                                     Refresh Codex Cloud status / diff candidate
     nblane auth hash-password       Generate a password hash for Web auth
+    nblane openclaw doctor [--profile name]
+                                    Check OpenClaw host/gateway prerequisites
+    nblane openclaw sync [--profile name] [--check]
+                                    Render corpus, sync skills, report drift
+    nblane openclaw install [--profile name] [--dry-run|--apply]
+                                    One-command idempotent OpenClaw setup
+                                    (dry-run by default)
+    nblane openclaw automations sync <name> [--apply] [--prune]
+                                    Reconcile assistant/automations.yaml
+                                    (dry-run by default)
+    nblane notify <text> [--dry-run]
+                                    Push a message via the OpenClaw webhook
 
 Examples:
     nblane init alice
@@ -95,6 +107,13 @@ from nblane.commands.ingest import (
 from nblane.commands.integration import (
     cmd_crystallize,
     cmd_sync_cursor,
+)
+from nblane.commands.openclaw import (
+    cmd_automations_sync,
+    cmd_doctor as cmd_openclaw_doctor,
+    cmd_install as cmd_openclaw_install,
+    cmd_notify,
+    cmd_sync as cmd_openclaw_sync,
 )
 from nblane.commands.profile import (
     cmd_context,
@@ -904,6 +923,101 @@ def main() -> None:
         help="Preview imports without writing sources or connector state",
     )
 
+    p_openclaw = sub.add_parser(
+        "openclaw",
+        help="OpenClaw gateway doctor and automations-as-code",
+    )
+    openclaw_sub = p_openclaw.add_subparsers(
+        dest="openclaw_command",
+        required=True,
+    )
+    p_oc_doctor = openclaw_sub.add_parser(
+        "doctor",
+        help="Read-only OpenClaw host/gateway health checks",
+    )
+    p_oc_doctor.add_argument(
+        "--profile",
+        default=None,
+        help="Profile name; also reconciles its declared automations",
+    )
+    p_oc_daily = openclaw_sub.add_parser(
+        "sync",
+        help=(
+            "Render memory corpus, sync skills into the workspace, "
+            "and report automations drift (--check: report only)"
+        ),
+    )
+    p_oc_daily.add_argument(
+        "--profile",
+        default=None,
+        help="Profile name; defaults to the only existing profile",
+    )
+    p_oc_daily.add_argument(
+        "--check",
+        action="store_true",
+        help="Write nothing; exit 1 if corpus/skills/automations drifted",
+    )
+    p_oc_install = openclaw_sub.add_parser(
+        "install",
+        help=(
+            "One-command idempotent OpenClaw setup: skills+corpus, plugin, "
+            "config overlay with MCP injection, automations (dry-run default)"
+        ),
+    )
+    p_oc_install.add_argument(
+        "--profile",
+        default=None,
+        help="Profile name; defaults to the only existing profile",
+    )
+    oc_install_mode = p_oc_install.add_mutually_exclusive_group()
+    oc_install_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the full action plan and change nothing (default)",
+    )
+    oc_install_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute every step (default is dry-run)",
+    )
+    p_oc_automations = openclaw_sub.add_parser(
+        "automations",
+        help="Automations-as-code helpers",
+    )
+    oc_automations_sub = p_oc_automations.add_subparsers(
+        dest="openclaw_automations_command",
+        required=True,
+    )
+    p_oc_sync = oc_automations_sub.add_parser(
+        "sync",
+        help=(
+            "Reconcile declared automations with the gateway "
+            "(dry-run unless --apply)"
+        ),
+    )
+    p_oc_sync.add_argument("name", help="Profile name")
+    p_oc_sync.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute add/edit (default prints the plan only)",
+    )
+    p_oc_sync.add_argument(
+        "--prune",
+        action="store_true",
+        help="With --apply, also remove undeclared nblane:* jobs",
+    )
+
+    p_notify = sub.add_parser(
+        "notify",
+        help="Push a message to WeChat via the OpenClaw inbound webhook",
+    )
+    p_notify.add_argument("text", help="Message text to push")
+    p_notify.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the hook URL and payload without sending",
+    )
+
     p_auth = sub.add_parser(
         "auth",
         help="Authentication helpers for the Streamlit Web UI",
@@ -1176,6 +1290,28 @@ def main() -> None:
                     all_connectors=args.all_connectors,
                     dry_run=args.dry_run,
                 )
+    elif args.command == "openclaw":
+        if args.openclaw_command == "doctor":
+            cmd_openclaw_doctor(profile=args.profile)
+        elif args.openclaw_command == "sync":
+            cmd_openclaw_sync(
+                profile=args.profile,
+                check=args.check,
+            )
+        elif args.openclaw_command == "install":
+            cmd_openclaw_install(
+                profile=args.profile,
+                apply=args.apply,
+            )
+        elif args.openclaw_command == "automations":
+            if args.openclaw_automations_command == "sync":
+                cmd_automations_sync(
+                    args.name,
+                    apply=args.apply,
+                    prune=args.prune,
+                )
+    elif args.command == "notify":
+        cmd_notify(args.text, dry_run=args.dry_run)
     elif args.command == "auth":
         if args.auth_command == "hash-password":
             password = args.password

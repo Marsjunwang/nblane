@@ -1,0 +1,31 @@
+# OpenClaw 自动化即代码声明（automations-as-code）。
+# nblane 只管理 declarationKey 以 `nblane:` 开头的任务；系统任务与手工任务不触碰。
+# 对账同步：nblane openclaw automations sync <profile>
+#   默认 dry-run（只打印计划与命令）；--apply 执行 add/edit；
+#   --apply --prune 才会删除声明中已移除的 nblane: 任务。
+# `${VAR}` 从本机 .env / 环境注入，未设置即报错，取值永不入库。
+version: 1
+defaults:
+  tz: Asia/Shanghai
+  model: qwen/qwen3.7-flash
+  fallbacks: [rightcode/gpt-6-astra]
+  session: isolated
+  timeout_seconds: 300
+  deliver:
+    channel: openclaw-weixin
+    to: ${WEIXIN_OWNER_ID} # 微信 Owner 路由 ID，形态 <id>@im.wechat
+automations:
+  - key: nblane:daily-plan
+    name: 每日计划
+    cron: "30 8 * * *"
+    prompt: prompts/daily-plan.md
+  - key: nblane:daily-review
+    name: 每日复盘
+    cron: "30 21 * * *"
+    prompt: prompts/daily-review.md
+  - key: nblane:weekly-maintenance
+    name: 每周巩固
+    cron: "0 20 * * 0"
+    session: main # 覆盖 defaults：周维护需要主会话的记忆上下文
+    model: qwen/qwen3.8-flash # 主会话可能很长，3.8-flash 长上下文单价更稳
+    prompt: prompts/weekly-maintenance.md

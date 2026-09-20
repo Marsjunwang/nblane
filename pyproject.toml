@@ -80,6 +80,10 @@ include = ["nblane*", "schemas*"]
     "frontend/static/index.html",
     "frontend/static/assets/*",
 ]
+"nblane.web_ui" = [
+    "static/index.html",
+    "static/assets/*",
+]
 "nblane.project_board_component" = [
     "frontend/static/index.html",
 ]

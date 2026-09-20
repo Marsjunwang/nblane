@@ -14,6 +14,8 @@ import yaml
 from nblane.core import agent_activity, git_backup
 from nblane.core import llm as llm_client  # legacy patch point for tests/callers
 from nblane.core.evidence_pool_id import new_evidence_id
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.jsonutil import extract_json_object
 from nblane.core.paths import PROFILES_DIR, REPO_ROOT
@@ -595,8 +597,17 @@ def archive_research_source(
 def save_research_sources(
     name_or_dir: str | Path,
     data: ResearchSourceInbox | dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> None:
-    """Write ``research/sources.yaml`` with today's date updated."""
+    """Write ``research/sources.yaml`` with today's date updated.
+
+    The write is serialized via the sources.yaml sidecar lock. When
+    *expected_snapshot* is given, the file is re-checked against it after
+    the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
     path = _profile_file_path(name_or_dir)
     inbox = (
         data
@@ -617,7 +628,10 @@ def save_research_sources(
         default_flow_style=False,
         sort_keys=False,
     )
-    atomic_write_text(path, header + body)
+    with locked_profile_write(path.parent, path.name):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {path.parent.parent.name}/research/sources.yaml",

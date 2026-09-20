@@ -1,0 +1,20 @@
+{
+  "name": "openclaw-weixin-task-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Owner-only Weixin task controls and background progress mirroring.",
+  "peerDependencies": {
+    "openclaw": ">=2026.9.4"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

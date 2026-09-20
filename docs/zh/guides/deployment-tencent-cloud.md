@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-15
+last_verified: 2026-09-20
 source_of_truth: true
 ---
 
@@ -168,6 +168,7 @@ sudo systemctl restart nblane-reader
 
 - `8501`：Streamlit 主应用，负责 Dashboard、Evidence Review、Research、Output Studio、Blog 编辑等可写页面。
 - `8502`：FastAPI sidecar，负责 Reader、Paper Library standalone、Dashboard Canvas/Paper Library iframe 等长任务和只读/半只读前端。
+- `8504`：SPA 后端（`nblane.web_api`），`/api/v1/*` + SPA 静态产物；部署方式见下文「SPA 后端（8504，nblane.web_api）」。
 
 因此 Blog 侧边栏、Dashboard 添加目标、Evidence Review 保存等写入操作仍应发生在 `8501`
 主应用中；`8502` 只提供 sidecar 能力，不应作为这些页面的独立写入口。
@@ -282,6 +283,61 @@ Reader sidecar 是生产 PDF Reader 的唯一主路径；不要依赖旧的 Stre
 普通部署也不要开启 overlay 调试开关，只有排查 legacy PDF 贴图渲染时才临时设置
 `NBLANE_READER_DEBUG_OVERLAY=1`。
 
+## SPA 后端（8504，nblane.web_api）
+
+新版 SPA（`web_ui`）由独立 FastAPI 进程承载：同一进程服务 `/api/v1/*` JSON
+接口和 `src/nblane/web_ui/static/` 构建产物（客户端路由回退 `index.html`）。
+它是完整写路径——看板、Inbox、证据评审、周回顾、Studio 的全部 mutation 都走
+这里，生产必须和 8501 一样配置认证与 Git 备份变量。
+
+示例服务文件 `/etc/systemd/system/nblane-web-api.service`（沿用前两个 unit 的写法）：
+
+```ini
+[Unit]
+Description=nblane Web API (SPA backend)
+After=network.target
+
+[Service]
+Type=simple
+User=nblane
+WorkingDirectory=/srv/nblane-app
+Environment=NBLANE_ROOT=/srv/nblane-data
+Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
+Environment=UI_LANG=zh
+Environment=LLM_REPLY_LANG=zh
+Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
+Environment=NBLANE_DATA_GIT_AUTOPUSH=1
+Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+Environment=NBLANE_READER_API_BASE=0
+Environment=NBLANE_TRUST_PROXY_HEADERS=1
+EnvironmentFile=-/srv/nblane-data/.env
+# 登录限流是单进程内存实现，禁止多 worker。
+ExecStart=/srv/nblane-app/.venv/bin/uvicorn nblane.web_api:app --host 127.0.0.1 --port 8504 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+三点不能漏：
+
+- **Git 备份变量**：`NBLANE_DATA_GIT_AUTOCOMMIT=1` / `NBLANE_DATA_GIT_AUTOPUSH=1`
+  必须和 `nblane.service` 一样配置——SPA 的写操作直接改 `profiles/` 下的文件，
+  漏配后 SPA 保存不会产生备份提交。CW-2 变更窗口的备份检查需覆盖这第三个 unit。
+- **`--workers 1`**：登录限流（`LoginRateLimiter`）是单进程内存实现；多 worker
+  会把失败计数分散到不同进程，限流形同虚设。
+- **`NBLANE_TRUST_PROXY_HEADERS=1`**：见下文「HTTPS 反向代理」的限流说明；
+  不要改用 uvicorn `--proxy-headers`（应用自己读取 X-Forwarded-For）。
+
+启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now nblane-web-api
+sudo systemctl status nblane-web-api
+```
+
 如果 Paper Library 的 Codex 搜索需要走 `local_codex_readonly`，生产 systemd service
 必须能找到 Codex CLI。很多机器把 Codex 安装到 `~/.local/bin/codex`，但 systemd 默认
 `PATH` 通常不包含 `~/.local/bin`，会导致页面 trace 出现
@@ -357,18 +413,79 @@ FastAPI 侧的路由前缀会被剥掉，`/dashboard?profile=...` 会 404 或路
 404、发布不可达。
 
 Streamlit 只监听 `127.0.0.1:8501`，Reader API 只监听 `127.0.0.1:8502`，
-不要在腾讯云安全组开放 `8501` 或 `8502`。
+SPA 后端只监听 `127.0.0.1:8504`，不要在腾讯云安全组开放 `8501`、`8502` 或 `8504`。
+
+SPA 后端建议挂独立子域名（根路径与 Streamlit 主站点冲突，不宜同域按路径分流）。
+SPA 内嵌的 sidecar iframe（Paper Library / 3D dashboard）和 handoff 换票都走同源
+相对路径，所以子域名站点要复制主站点的全部 8502 `handle` 块，catch-all 指向 8504：
+
+```caddyfile
+spa.your-domain.com {
+    # 与主站点一致的 sidecar 分流（handle，不是 handle_path）。
+    handle /reader/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /paper-library* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /dashboard* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/dashboard/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/research/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /auth/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /blog-editor* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/blog/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    handle /api/site/* {
+        reverse_proxy 127.0.0.1:8502
+    }
+
+    # 其余全部（/api/v1/* + SPA 静态产物）走 8504。
+    reverse_proxy 127.0.0.1:8504
+}
+```
+
+SPA 的 `handoff_token` 由此与 sidecar 同源，设 cookie 无跨域问题；漏配
+`/auth/*` 分流时 iframe 引导返回 404/401，Paper Library 整片空白。
 
 HTTPS 生产环境把 `NBLANE_AUTH_COOKIE_SECURE=1` 写入 `/srv/nblane-data/.env`，
 登录 cookie 会带 `Secure` 标记、只经 HTTPS 传输；默认关闭，仅用于无 HTTPS 的
-本地调试。
+本地调试。该文件被三个 service 共享（`EnvironmentFile`），8504 同样生效。
 
-应用层不实现登录限流：在反向代理层兜底，例如给 Caddy 装 `rate_limit` 插件限制
-`/auth/*` 的尝试频率，或用 fail2ban 盯访问日志中的登录 401。
+8504 应用层已实现登录限流：同一「客户端 IP + 用户名」60 秒内失败 5 次即 429。
+反代拓扑下所有请求的对端地址都是 Caddy 的 `127.0.0.1`，必须给
+`nblane-web-api.service` 配置 `NBLANE_TRUST_PROXY_HEADERS=1`，应用才会取
+`X-Forwarded-For` 首跳（Caddy `reverse_proxy` 默认重写该头）作为客户端 IP。
+**仅当 8504 不直接可达（安全组只放 80/443）且反代会覆盖该头部时才能开启**；
+直连可达时开启等于允许客户端伪造限流身份、绕过限流。不开启时所有代理客户端
+共享一个 IP 桶，但用户名维度仍能防止单个账号失败把其他账号一起锁死。
+8501/8502 的登录面（Streamlit 登录、sidecar handoff）应用层没有限流，
+仍建议在反代层兜底，例如给 Caddy 装 `rate_limit` 插件限制 `/auth/*` 的尝试
+频率，或用 fail2ban 盯访问日志中的登录 401。
 
-注意：登录态 handoff token 与 reader token 以 URL query 传递（iframe 场景的现实
-约束，handoff token 有效期 120 秒），会进入 Caddy 访问日志和浏览器历史。确保
-访问日志权限受控、定期轮转，不要送进公网可达的日志聚合服务。
+注意：SPA 与 Streamlit 现在都通过隐藏表单 **POST** 向 sidecar 换取登录 cookie
+（handoff token 有效期 60 秒），但 sidecar 仍兼容 URL query 形式的 handoff，
+且 reader token 仍以 URL query 传递（iframe 场景的现实约束）——这些会进入
+Caddy 访问日志和浏览器历史。确保访问日志权限受控、定期轮转，不要送进公网可达的
+日志聚合服务。handoff 改为一次性 POST 换票是 sidecar 侧的后续项。
 
 ## Paper Reading PDF 后端
 

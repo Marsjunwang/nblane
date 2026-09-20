@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from nblane.core import git_backup
 from nblane.core.file_write import atomic_write_text
 from nblane.core.io import profile_dir
 
@@ -32,4 +33,8 @@ def write_method_draft(
         "automatically._\n\n"
     )
     atomic_write_text(path, header + body.strip() + "\n")
+    git_backup.record_change(
+        [path],
+        action=f"write method draft for {profile}",
+    )
     return path

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-09-15
+last_verified: 2026-09-20
 source_of_truth: true
 ---
 
@@ -44,20 +44,23 @@ Research 的 PDF Reader 和 Paper Library standalone 是 **Streamlit 主应用 +
 开发环境不要使用生产的 systemd service；用 tmux 跑独立进程即可。生产通常占用
 `8501/8502/8070`，所以开发分两种模式：
 
-- **普通本机开发**：没有生产服务同机运行时，可继续使用 `8502/8503`。
-- **与生产同机并行调试**：使用 `18502/18503` 和 `.dev-data/.dev-assets`，避免写入
+- **普通本机开发**：没有生产服务同机运行时，可继续使用 `8502/8503/8504`。
+- **与生产同机并行调试**：使用 `18502/18503/18504` 和 `.dev-data/.dev-assets`，避免写入
   `/srv/nblane-data`、`/srv/nblane-assets` 或抢占生产 `8502`。
+
+其中 `8504`（隔离模式 `18504`）是新版 SPA 后端（`nblane.web_api`，`/api/v1/*` + 构建后的
+`web_ui/static`）。不需要时可用 `--no-web-api` 关掉。
 
 推荐用脚本启动：
 
 ```bash
-# 普通本机开发：Reader API 8502 + Streamlit 8503。
+# 普通本机开发：Reader API 8502 + Streamlit 8503 + Web API (SPA) 8504。
 scripts/dev-web.sh
 
 # 调试短任务时可启用 uvicorn reload；跑 Codex 搜索、translation/extraction 等长任务前关掉 reload。
 scripts/dev-web.sh --reload
 
-# 与生产服务同机并行开发：Reader API 18502 + Streamlit 18503，数据写入 .dev-data/.dev-assets。
+# 与生产服务同机并行开发：Reader API 18502 + Streamlit 18503 + Web API (SPA) 18504，数据写入 .dev-data/.dev-assets。
 scripts/dev-web.sh --isolated
 
 # 同机并行开发 + reload。
@@ -67,9 +70,21 @@ scripts/dev-web.sh --isolated --reload
 脚本会创建/重启 tmux session：
 
 ```text
-普通本机开发：nblane-reader-api / nblane-streamlit-ui
-同机隔离开发：nblane-dev-reader-api / nblane-dev-streamlit-ui
+普通本机开发：nblane-reader-api / nblane-streamlit-ui / nblane-web-api
+同机隔离开发：nblane-dev-reader-api / nblane-dev-streamlit-ui / nblane-dev-web-api
 ```
+
+`nblane-web-api` 是新版 SPA 后端（`nblane.web_api:app`），同一进程服务 `/api/v1/*` 和构建产物
+`src/nblane/web_ui/static/`。前端未构建时启动脚本会给出提示但不失败：在
+`src/nblane/web_ui/frontend` 里 `npm run build`，或者用 `npm run dev` 起 vite（5173，
+把 `VITE_API_PROXY_TARGET` 指到 Web API 端口）。不需要该服务时加 `--no-web-api`。
+
+SPA 打包方式与 Streamlit 组件一致：`web_ui/static/` 的构建产物**提交进 git**，并在
+`pyproject.toml` 的 `[tool.setuptools.package-data]` 中声明（`nblane.web_ui`），因此
+`pip install -e .` 或 wheel 安装后无需 Node 即可服务 SPA。改动
+`src/nblane/web_ui/frontend` 后必须重新 `npm run build` 并把 `static/` 一并提交——CI 的
+`frontend-artifacts` job 会重建比对，产物过期即红。发布 wheel/sdist 前同样先构建前端，
+保证包内 `static/` 是最新的。
 
 查看状态和停止：
 
@@ -173,9 +188,11 @@ Paper Library 的 Codex 搜索和 Reader 长任务会在 sidecar 进程内保存
 ```bash
 tmux attach -t nblane-reader-api
 tmux attach -t nblane-streamlit-ui
+tmux attach -t nblane-web-api
 
 tmux attach -t nblane-dev-reader-api
 tmux attach -t nblane-dev-streamlit-ui
+tmux attach -t nblane-dev-web-api
 ```
 
 在 tmux 中按 `Ctrl-b` 然后按 `d` 可 detach，服务会继续运行。停止服务：
@@ -183,9 +200,11 @@ tmux attach -t nblane-dev-streamlit-ui
 ```bash
 tmux kill-session -t nblane-reader-api
 tmux kill-session -t nblane-streamlit-ui
+tmux kill-session -t nblane-web-api
 
 tmux kill-session -t nblane-dev-reader-api
 tmux kill-session -t nblane-dev-streamlit-ui
+tmux kill-session -t nblane-dev-web-api
 ```
 
 如果通过 SSH / IDE port forwarding 在浏览器访问，请同时转发 Streamlit 和 sidecar 两个端口：

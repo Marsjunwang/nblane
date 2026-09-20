@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-08
+last_verified: 2026-09-20
 source_of_truth: true
 ---
 
@@ -16,7 +16,7 @@ source_of_truth: true
 | 新用户 | [产品总览](product/overview.md) -> [安装与 LLM 配置](guides/setup.md) -> [Web 使用手册](guides/web-ui.md) -> [看板使用手册](guides/kanban.md) |
 | 产品 / 项目管理 | [核心闭环](product/core-loop.md) -> [路线图](product/roadmap.md) -> [当前状态](project/status.md) -> [里程碑](project/milestones.md) -> [问题与风险](project/issues.md) |
 | 开发者 | [架构总览](architecture/overview.md) -> [数据契约](architecture/data-contracts.md) -> [模块总览图](architecture/module-map.md) -> [CLI 参考](reference/cli.md) -> [MCP 参考](reference/mcp.md) |
-| Agent / 集成方 | [AI 架构](architecture/ai-architecture.md) -> [Agent Harness 集成](reference/agent-harness.md) -> [MCP 参考](reference/mcp.md) |
+| Agent / 集成方 | [AI 架构](architecture/ai-architecture.md) -> [Agent Harness 集成](reference/agent-harness.md) -> [MCP 参考](reference/mcp.md) -> [OpenClaw 深度融合](architecture/openclaw-deep-integration.md) |
 | 运维 / 发布 | [腾讯云部署](guides/deployment-tencent-cloud.md) -> [Mihomo 代理部署](guides/mihomo-deployment.md) -> [存储演进](architecture/storage.md) -> [公开站点](guides/public-site.md) |
 
 ## 文档地图
@@ -50,6 +50,9 @@ source_of_truth: true
 | [module-map.md](architecture/module-map.md) | 模块化对象关系和总览图 |
 | [ai-architecture.md](architecture/ai-architecture.md) | Direct API、AI Gateway、MCP、Codex/OpenCode、ACP 的分层 |
 | [storage.md](architecture/storage.md) | 文件优先、Git、媒体、数据库演进边界 |
+| [openclaw-deep-integration.md](architecture/openclaw-deep-integration.md) | OpenClaw × nblane 深度融合分层方案：优先级、双记忆模型、MCP 补全、入口统一、生产布局 |
+| [frontend-spa-migration.md](architecture/frontend-spa-migration.md) | 前端从 Streamlit 到 React SPA + FastAPI 的迁移蓝图（融合方案 L5 展开） |
+| [integration-audit-2026-09-20.md](architecture/integration-audit-2026-09-20.md) | 融合开发全面审查报告：分域问题清单（blocker/major/minor）、完成度评分、修复优先级 |
 
 ### Guides
 

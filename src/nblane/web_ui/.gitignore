@@ -1,0 +1,7 @@
+# Scoped to the SPA subproject (root .gitignore already ignores node_modules
+# globally; repeated here so this directory is self-contained).
+frontend/node_modules/
+
+# Vite build output (src/nblane/web_ui/static/) IS committed, like the
+# Streamlit component frontends, and shipped via pyproject package-data.
+# CI's frontend-artifacts job rebuilds it and fails on stale artifacts.

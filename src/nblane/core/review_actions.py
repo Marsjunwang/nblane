@@ -12,9 +12,18 @@ from typing import Any
 import yaml
 
 from nblane.core import agent_activity
+from nblane.core.file_state import FileConflictError, FileSnapshot
 from nblane.core.ingest_merge import merge_ingest_patch
-from nblane.core.kanban_io import KANBAN_DONE, KANBAN_QUEUE, parse_kanban, save_kanban
-from nblane.core.models import KanbanTask
+from nblane.core.kanban_io import (
+    KANBAN_DONE,
+    KANBAN_QUEUE,
+    KANBAN_SECTIONS,
+    apply_kanban_reorder,
+    find_kanban_card,
+    resolve_kanban_section,
+    update_kanban,
+)
+from nblane.core.models import EVIDENCE_TYPES, KanbanTask
 from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_io import (
     load_evidence_pool_raw,
@@ -156,19 +165,42 @@ def _preview_yaml(data: object) -> str:
 
 
 def review_evidence_patch(candidate: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """Build an ingest patch for one Review evidence candidate."""
+    """Build an ingest patch for one Review evidence candidate.
+
+    Required candidate fields: ``title`` (``summary`` falls back to it).
+    Optional fields honored when present: ``type`` (an evidence type),
+    ``date``, ``url``, ``task_id`` (adds a ``kanban:<id>`` source ref and
+    marks the Done task crystallized on apply), and ``skill_id`` (adds a
+    ``skill:<id>`` source ref recording the suggested skill link; pool
+    rows stay unlinked until a human links them in Evidence Review).
+    """
     title = _clean_text(candidate.get("title"))
     summary = _clean_text(candidate.get("summary")) or title
     task_id = _clean_text(candidate.get("task_id"))
+    evidence_type = _clean_text(candidate.get("type")) or "practice"
+    if evidence_type not in EVIDENCE_TYPES:
+        evidence_type = "practice"
     row: dict[str, Any] = {
-        "type": "practice",
+        "type": evidence_type,
         "title": title,
         "summary": summary,
         "review_status": "needs_review",
         "public_readiness": "private",
     }
+    date_text = _clean_text(candidate.get("date"))
+    if date_text:
+        row["date"] = date_text
+    url = _clean_text(candidate.get("url"))
+    if url:
+        row["url"] = url
+    source_refs: list[str] = []
     if task_id:
-        row["source_refs"] = [f"kanban:{task_id}"]
+        source_refs.append(f"kanban:{task_id}")
+    skill_id = _clean_text(candidate.get("skill_id"))
+    if skill_id:
+        source_refs.append(f"skill:{skill_id}")
+    if source_refs:
+        row["source_refs"] = source_refs
     return {"evidence_entries": [row], "node_updates": []}
 
 
@@ -270,9 +302,18 @@ def save_review_candidates_to_activity(
     end: str | date,
     candidate_type: str,
     candidates: list[dict[str, Any]],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> list[dict[str, Any]]:
-    """Persist selected Review candidates as pending Activity items."""
+    """Persist selected Review candidates as pending Activity items.
+
+    *expected_snapshot* (request-start fingerprint of agent-activity.yaml)
+    is checked inside the write lock on the first append; a mismatch raises
+    ``file_state.FileConflictError`` so the caller can answer 412 instead
+    of overwriting a concurrent queue edit.
+    """
     stored: list[dict[str, Any]] = []
+    snapshot = expected_snapshot
     for candidate in candidates:
         item = activity_item_from_review_candidate(
             profile,
@@ -281,7 +322,15 @@ def save_review_candidates_to_activity(
             candidate_type,
             candidate,
         )
-        stored.append(agent_activity.append_activity_item(profile, item))
+        stored.append(
+            agent_activity.append_activity_item(
+                profile, item, expected_snapshot=snapshot
+            )
+        )
+        # The first append consumed the request-start snapshot; later
+        # appends re-read under the lock and must not re-check it (the
+        # file legitimately changed — by this loop's own writes).
+        snapshot = None
     return stored
 
 
@@ -321,12 +370,23 @@ def apply_review_evidence_candidate(
     *,
     mark_crystallized: bool = True,
     activity_item_id: str = "",
+    activity_snapshot: FileSnapshot | None = None,
+    pool_snapshot: FileSnapshot | None = None,
+    kanban_snapshot: FileSnapshot | None = None,
 ) -> ReviewApplyResult:
-    """Apply one Review evidence candidate via ingest writeback."""
+    """Apply one Review evidence candidate via ingest writeback.
+
+    The optional snapshots are request-start fingerprints re-checked
+    inside each file's write lock; a mismatch raises
+    ``file_state.FileConflictError`` (never swallowed into a failed
+    item) so the caller can answer 412.
+    """
     item = activity_item_from_review_candidate(profile, start, end, "evidence", candidate)
     if activity_item_id:
         item["id"] = activity_item_id
-    agent_activity.append_activity_item(profile, item)
+    agent_activity.append_activity_item(
+        profile, item, expected_snapshot=activity_snapshot
+    )
     pdir = profile_dir(profile)
     pool_path = pdir / "evidence-pool.yaml"
     changed_paths = [pool_path]
@@ -356,7 +416,9 @@ def apply_review_evidence_candidate(
                 errors=list(merge.errors),
                 activity_item=stored,
             )
-        save_evidence_pool(profile, merge.merged_pool)
+        save_evidence_pool(
+            profile, merge.merged_pool, expected_snapshot=pool_snapshot
+        )
         errors, validation_warnings = validate_one(pdir, check_sync=False)
         warnings.extend(validation_warnings)
         if errors:
@@ -377,9 +439,15 @@ def apply_review_evidence_candidate(
         if mark_crystallized:
             task_id = _clean_text(candidate.get("task_id"))
             if task_id:
-                sections = parse_kanban(profile)
-                if _mark_done_crystallized(sections, {task_id}):
-                    save_kanban(profile, sections)
+
+                def _mark(sections: dict[str, list[KanbanTask]]) -> bool:
+                    if KANBAN_DONE not in sections:
+                        return False
+                    return _mark_done_crystallized(sections, {task_id})
+
+                if update_kanban(
+                    profile, _mark, expected_snapshot=kanban_snapshot
+                ):
                     changed_paths.append(pdir / "kanban.md")
         stored = agent_activity.update_activity_status(
             profile,
@@ -394,6 +462,8 @@ def apply_review_evidence_candidate(
             warnings=warnings,
             activity_item=stored,
         )
+    except FileConflictError:
+        raise
     except Exception as exc:
         stored = agent_activity.update_activity_status(
             profile,
@@ -411,19 +481,30 @@ def apply_review_next_action_candidate(
     candidate: dict[str, Any],
     *,
     activity_item_id: str = "",
+    activity_snapshot: FileSnapshot | None = None,
+    kanban_snapshot: FileSnapshot | None = None,
 ) -> ReviewApplyResult:
-    """Append one Review next action candidate to Kanban Queue."""
+    """Append one Review next action candidate to Kanban Queue.
+
+    The kanban append is a locked read-modify-write (``update_kanban``);
+    *kanban_snapshot* is re-checked inside that lock and a mismatch raises
+    ``file_state.FileConflictError`` so the caller can answer 412.
+    """
     item = activity_item_from_review_candidate(profile, start, end, "next_action", candidate)
     if activity_item_id:
         item["id"] = activity_item_id
-    agent_activity.append_activity_item(profile, item)
+    agent_activity.append_activity_item(
+        profile, item, expected_snapshot=activity_snapshot
+    )
     pdir = profile_dir(profile)
     path = pdir / "kanban.md"
     try:
-        sections = parse_kanban(profile)
         task = review_kanban_task(candidate)
-        sections.setdefault(KANBAN_QUEUE, []).append(task)
-        save_kanban(profile, sections)
+
+        def _append(sections: dict[str, list[KanbanTask]]) -> None:
+            sections.setdefault(KANBAN_QUEUE, []).append(task)
+
+        update_kanban(profile, _append, expected_snapshot=kanban_snapshot)
         stored = agent_activity.update_activity_status(
             profile,
             item["id"],
@@ -435,6 +516,8 @@ def apply_review_next_action_candidate(
             changed_paths=[path],
             activity_item=stored,
         )
+    except FileConflictError:
+        raise
     except Exception as exc:
         stored = agent_activity.update_activity_status(
             profile,
@@ -452,12 +535,15 @@ def apply_review_public_draft_candidate(
     candidate: dict[str, Any],
     *,
     activity_item_id: str = "",
+    activity_snapshot: FileSnapshot | None = None,
 ) -> ReviewApplyResult:
     """Create a draft blog post from one Review public candidate."""
     item = activity_item_from_review_candidate(profile, start, end, "public_draft", candidate)
     if activity_item_id:
         item["id"] = activity_item_id
-    agent_activity.append_activity_item(profile, item)
+    agent_activity.append_activity_item(
+        profile, item, expected_snapshot=activity_snapshot
+    )
     try:
         title = _clean_text(candidate.get("title")) or "Review public draft"
         summary = _clean_text(candidate.get("summary")) or _clean_text(candidate.get("source"))
@@ -487,6 +573,8 @@ def apply_review_public_draft_candidate(
             activity_item=stored,
             output_path=path,
         )
+    except FileConflictError:
+        raise
     except Exception as exc:
         stored = agent_activity.update_activity_status(
             profile,
@@ -497,8 +585,180 @@ def apply_review_public_draft_candidate(
         return ReviewApplyResult(ok=False, errors=[str(exc)], activity_item=stored)
 
 
-def apply_review_activity_item(profile: str, item_id: str) -> ReviewApplyResult:
-    """Apply a pending Review-origin Activity item."""
+KANBAN_MOVE_ACTIONS = ("move",)
+
+
+def activity_item_from_kanban_candidate(
+    profile: str,
+    candidate: dict[str, Any],
+    *,
+    activity_item_id: str = "",
+) -> dict[str, Any]:
+    """Build the Activity item for one kanban move candidate.
+
+    The item uses the Review source shape so it can be applied from the
+    existing Agent Activity UI; ``payload`` carries the self-describing
+    move request ``{action, card_ref, target_section, note}``.
+    """
+    card_ref = _clean_text(candidate.get("card_ref"))
+    action = _clean_text(candidate.get("action")) or "move"
+    target_section = _clean_text(candidate.get("target_section"))
+    today = date.today().isoformat()
+    item: dict[str, Any] = {
+        "kind": "candidate",
+        "candidate_type": "kanban_move",
+        "source_page": "Review",
+        "source_ref": f"review:{today}:{today}",
+        "target_owner": "kanban",
+        "status": "pending",
+        "title": (
+            f"Move kanban card: {card_ref}" if card_ref else "Kanban move"
+        ),
+        "summary": _clean_text(candidate.get("note")),
+        "refs": {"files": [_relative(profile_dir(profile) / "kanban.md")]},
+        "payload": copy.deepcopy(candidate),
+        "preview": _preview_yaml(
+            {
+                "action": action,
+                "card_ref": card_ref,
+                "target_section": target_section,
+            }
+        ),
+    }
+    if activity_item_id:
+        item["id"] = activity_item_id
+    return item
+
+
+def apply_review_kanban_candidate(
+    profile: str,
+    candidate: dict[str, Any],
+    *,
+    activity_item_id: str = "",
+    activity_snapshot: FileSnapshot | None = None,
+    kanban_snapshot: FileSnapshot | None = None,
+) -> ReviewApplyResult:
+    """Apply one kanban move candidate: relocate a card between sections.
+
+    The parse → reorder → save cycle runs inside the kanban.md write lock
+    (``update_kanban``), so a concurrent kanban write (MCP apply, board
+    edit) can no longer be silently overwritten after the Activity item
+    was marked ``applied``. Failures (unknown action/section, missing or
+    ambiguous card_ref) mark the Activity item ``failed`` with a clear
+    error instead of raising; a *kanban_snapshot* mismatch raises
+    ``file_state.FileConflictError`` so the caller can answer 412.
+    """
+    item = activity_item_from_kanban_candidate(
+        profile,
+        candidate,
+        activity_item_id=activity_item_id,
+    )
+    stored = agent_activity.append_activity_item(
+        profile, item, expected_snapshot=activity_snapshot
+    )
+    item_id = _clean_text(stored.get("id"))
+    path = profile_dir(profile) / "kanban.md"
+
+    def _fail(message: str) -> ReviewApplyResult:
+        failed = agent_activity.update_activity_status(
+            profile,
+            item_id,
+            "failed",
+            error=message,
+        )
+        return ReviewApplyResult(
+            ok=False,
+            errors=[message],
+            activity_item=failed,
+        )
+
+    try:
+        action = _clean_text(candidate.get("action")) or "move"
+        if action not in KANBAN_MOVE_ACTIONS:
+            return _fail(
+                f"unsupported kanban action {action!r} "
+                f"(expected one of: {', '.join(KANBAN_MOVE_ACTIONS)})"
+            )
+        card_ref = _clean_text(candidate.get("card_ref"))
+        if not card_ref:
+            return _fail("kanban move candidate is missing card_ref")
+        target = resolve_kanban_section(
+            candidate.get("target_section")
+        )
+        if target is None:
+            return _fail(
+                f"unknown kanban section "
+                f"{_clean_text(candidate.get('target_section'))!r} "
+                f"(expected one of: {', '.join(KANBAN_SECTIONS)})"
+            )
+
+        def _move(
+            sections: dict[str, list[KanbanTask]],
+        ) -> tuple[str, str]:
+            hit, _match_kind, match_error = find_kanban_card(
+                sections, card_ref
+            )
+            if hit is None:
+                return ("error", match_error)
+            from_section, _index, task = hit
+            if from_section == target:
+                return ("noop", task.title)
+            moved = apply_kanban_reorder(
+                sections,
+                [{"id": task.id, "to_section": target}],
+                auto_dates=True,
+            )
+            sections.clear()
+            sections.update(moved)
+            return ("moved", task.title)
+
+        outcome, title = update_kanban(
+            profile, _move, expected_snapshot=kanban_snapshot
+        )
+        if outcome == "error":
+            return _fail(title)
+        warnings: list[str] = []
+        changed: list[Path] = []
+        if outcome == "noop":
+            warnings.append(
+                f"card {title.strip()!r} is already in "
+                f"{target!r}; no move needed"
+            )
+        else:
+            changed = [path]
+        applied = agent_activity.update_activity_status(
+            profile,
+            item_id,
+            "applied",
+            warnings=warnings,
+            changed_paths=changed,
+        )
+        return ReviewApplyResult(
+            ok=True,
+            changed_paths=changed,
+            warnings=warnings,
+            activity_item=applied,
+        )
+    except FileConflictError:
+        raise
+    except Exception as exc:
+        return _fail(str(exc))
+
+
+def apply_review_activity_item(
+    profile: str,
+    item_id: str,
+    *,
+    activity_snapshot: FileSnapshot | None = None,
+    pool_snapshot: FileSnapshot | None = None,
+    kanban_snapshot: FileSnapshot | None = None,
+) -> ReviewApplyResult:
+    """Apply a pending Review-origin Activity item.
+
+    The optional snapshots are request-start fingerprints threaded into
+    the applier's first write per file; a mismatch raises
+    ``file_state.FileConflictError`` so the web layer can answer 412.
+    """
     activity = agent_activity.load_agent_activity(profile)
     item = next(
         (
@@ -525,6 +785,9 @@ def apply_review_activity_item(profile: str, item_id: str) -> ReviewApplyResult:
             parts[2],
             payload,
             activity_item_id=item_id,
+            activity_snapshot=activity_snapshot,
+            pool_snapshot=pool_snapshot,
+            kanban_snapshot=kanban_snapshot,
         )
     if candidate_type == "next_action":
         return apply_review_next_action_candidate(
@@ -533,6 +796,8 @@ def apply_review_activity_item(profile: str, item_id: str) -> ReviewApplyResult:
             parts[2],
             payload,
             activity_item_id=item_id,
+            activity_snapshot=activity_snapshot,
+            kanban_snapshot=kanban_snapshot,
         )
     if candidate_type == "public_draft":
         return apply_review_public_draft_candidate(
@@ -541,6 +806,15 @@ def apply_review_activity_item(profile: str, item_id: str) -> ReviewApplyResult:
             parts[2],
             payload,
             activity_item_id=item_id,
+            activity_snapshot=activity_snapshot,
+        )
+    if candidate_type == "kanban_move":
+        return apply_review_kanban_candidate(
+            profile,
+            payload,
+            activity_item_id=item_id,
+            activity_snapshot=activity_snapshot,
+            kanban_snapshot=kanban_snapshot,
         )
     raise ValueError(f"Unsupported Review candidate type: {candidate_type}")
 
@@ -595,10 +869,13 @@ def record_writeback_activity(
 
 
 __all__ = [
+    "KANBAN_MOVE_ACTIONS",
     "ReviewApplyResult",
+    "activity_item_from_kanban_candidate",
     "activity_item_from_review_candidate",
     "apply_review_activity_item",
     "apply_review_evidence_candidate",
+    "apply_review_kanban_candidate",
     "apply_review_next_action_candidate",
     "apply_review_public_draft_candidate",
     "record_writeback_activity",

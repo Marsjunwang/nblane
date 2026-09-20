@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-15
+last_verified: 2026-09-18
 source_of_truth: true
 ---
 
@@ -32,7 +32,8 @@ nblane 当前功能可用，但产品结构还没有完全收束。主要问题�
 | Output Studio / Public Build | 已实现 | profile/blog/resume/project output 生产与静态构建拆分 |
 | Public Site 旧页面 | 已删除 | 兼容跳转页已移除，由 Output Studio / Public Build 承接 |
 | Blog Editor | 已实现 | BlockNote、sidecar、AI patch、visual、Reviewer |
-| MCP Server | 初版已实现 | profile resources + write tools |
+| MCP Server | 已实现 | profile/goals/evidence/inbox/learning resources + growth/evidence/interaction/inbox/candidate write tools（带 ToolAnnotations + 结构化返回） |
+| OpenClaw 融合 | 仓库侧已实现 | 计划见 [openclaw-deep-integration](../architecture/openclaw-deep-integration.md)；插件入库、写入加固（file_lock）、MCP 补全、automations-as-code、`nblane openclaw doctor|sync|install|automations sync` CLI + 顶层 `nblane notify` 已落地；生产侧接通待人工窗口 |
 | Cursor Skill | 初版已实现 | `sync-cursor` 生成规则文件 |
 | Team View | 初版已实现 | team.yaml / product-pool.yaml 编辑 |
 | Activity / Learning / Inbox helpers | 部分实现 | core helper 和测试存在，UI 未完全统一 |

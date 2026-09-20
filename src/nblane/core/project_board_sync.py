@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable
 
+from nblane.core.file_state import FileSnapshot
 from nblane.core.io import (
     KANBAN_SECTIONS,
     KanbanTask,
@@ -128,13 +129,22 @@ def sync_project_case_workspace(
     profile: str,
     board: ProjectBoard,
     project_id: str,
+    *,
+    expected_snapshots: dict[str, "FileSnapshot | None"] | None = None,
 ) -> ProjectSyncResult:
     """Sync one project case into Kanban, evidence pool, and research sources.
 
     The project board is the source of truth for refs in this flow. Tasks that
     already belong to another project are not stolen; they are dropped from this
     project's task refs and reported as warnings.
+
+    *expected_snapshots* optionally carries request-start fingerprints keyed
+    ``board`` / ``kanban`` / ``pool`` / ``sources``; each is re-checked
+    inside that file's write lock and a mismatch raises
+    ``file_state.FileConflictError`` so the web layer can answer 412
+    instead of silently overwriting a concurrent edit.
     """
+    snaps = dict(expected_snapshots or {})
 
     result = ProjectSyncResult()
     case = _case_by_id(board, project_id)
@@ -224,16 +234,22 @@ def sync_project_case_workspace(
             source.id in desired_sources,
         )
 
-    save_project_board(profile, board)
+    save_project_board(
+        profile, board, expected_snapshot=snaps.get("board")
+    )
     result.changed_paths.append(pdir / "project-board.yaml")
     if kanban_changed:
-        save_kanban(profile, sections)
+        save_kanban(profile, sections, expected_snapshot=snaps.get("kanban"))
         result.changed_paths.append(pdir / "kanban.md")
     if not _same_pool_refs(pool_before, pool_raw):
-        save_evidence_pool(profile, pool_raw)
+        save_evidence_pool(
+            profile, pool_raw, expected_snapshot=snaps.get("pool")
+        )
         result.changed_paths.append(pdir / "evidence-pool.yaml")
     if sources_before != sources.to_dict():
-        save_research_sources(profile, sources)
+        save_research_sources(
+            profile, sources, expected_snapshot=snaps.get("sources")
+        )
         result.changed_paths.append(pdir / "research" / "sources.yaml")
 
     return result
@@ -242,8 +258,15 @@ def sync_project_case_workspace(
 def sync_project_board_from_kanban(
     profile: str,
     sections: dict[str, list[KanbanTask]],
+    *,
+    expected_snapshot: "FileSnapshot | None" = None,
 ) -> ProjectSyncResult:
-    """Treat Kanban task project metadata as source of truth for task refs."""
+    """Treat Kanban task project metadata as source of truth for task refs.
+
+    *expected_snapshot* is the request-start fingerprint of
+    project-board.yaml, re-checked inside the write lock; a mismatch
+    raises ``file_state.FileConflictError``.
+    """
 
     board = load_project_board(profile)
     project_task_refs: dict[str, list[str]] = {}
@@ -285,7 +308,7 @@ def sync_project_board_from_kanban(
                 )
 
     if changed:
-        save_project_board(profile, board)
+        save_project_board(profile, board, expected_snapshot=expected_snapshot)
         result.changed_paths.append(profile_dir(profile) / "project-board.yaml")
     return result
 

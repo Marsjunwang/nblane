@@ -93,6 +93,38 @@ class TestAgentActivity(unittest.TestCase):
         self.assertEqual(reopened["status"], "pending")
         self.assertEqual(reopened["payload"], {"keep": True})
 
+    def test_reappend_preserves_original_created(self) -> None:
+        """Re-applying an item id must not reset its ``created`` timestamp."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "alice"
+            profile.mkdir()
+            with patch("nblane.core.agent_activity.profile_dir", lambda _name: profile):
+                first = append_activity_item(
+                    "alice",
+                    {
+                        "id": "act:1",
+                        "title": "Candidate",
+                        "created": "2026-01-01T00:00:00+00:00",
+                    },
+                )
+                second = append_activity_item(
+                    "alice",
+                    {"id": "act:1", "title": "Candidate (applied again)"},
+                )
+                explicit = append_activity_item(
+                    "alice",
+                    {
+                        "id": "act:1",
+                        "title": "Candidate",
+                        "created": "2026-02-02T00:00:00+00:00",
+                    },
+                )
+
+        self.assertEqual(first["created"], "2026-01-01T00:00:00+00:00")
+        self.assertEqual(second["created"], "2026-01-01T00:00:00+00:00")
+        # An explicit incoming value still wins over the stored one.
+        self.assertEqual(explicit["created"], "2026-02-02T00:00:00+00:00")
+
     def test_summary_and_filters(self) -> None:
         """Activity page helpers count and filter common dimensions."""
         with tempfile.TemporaryDirectory() as tmp:

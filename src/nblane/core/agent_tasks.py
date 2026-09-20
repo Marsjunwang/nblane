@@ -7,15 +7,18 @@ import hashlib
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
 from nblane.core import git_backup
 from nblane.core.ai.prompts import role_prompt
+from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import list_profiles, profile_dir
 from nblane.core.yaml_io import _load_yaml_dict
+
+_T = TypeVar("_T")
 
 AGENT_TASKS_FILENAME = "agent-tasks.yaml"
 AGENT_TASKS_SCHEMA_VERSION = "1.0"
@@ -178,12 +181,10 @@ def load_agent_tasks(profile: str | Path) -> dict[str, Any]:
     return normalize_agent_tasks(raw, profile=profile_name)
 
 
-def save_agent_tasks(profile: str, tasks_doc: dict[str, Any]) -> Path:
-    """Persist a normalized agent task queue."""
-
+def _dump_agent_tasks(profile: str, tasks_doc: dict[str, Any]) -> str:
+    """Serialize a normalized agent task queue (header + YAML body)."""
     normalized = normalize_agent_tasks(tasks_doc, profile=profile)
     normalized["updated"] = _now()
-    path = _tasks_path(profile)
     body = yaml.dump(
         normalized,
         allow_unicode=True,
@@ -194,9 +195,50 @@ def save_agent_tasks(profile: str, tasks_doc: dict[str, Any]) -> Path:
         f"# Agent Tasks for {profile}\n"
         "# External Codex/OpenCode handoff records; outputs must remain candidates.\n\n"
     )
-    atomic_write_text(path, header + body)
+    return header + body
+
+
+def save_agent_tasks(profile: str, tasks_doc: dict[str, Any]) -> Path:
+    """Persist a normalized agent task queue."""
+
+    path = _tasks_path(profile)
+    text = _dump_agent_tasks(profile, tasks_doc)
+    with locked_profile_write(path.parent, AGENT_TASKS_FILENAME):
+        atomic_write_text(path, text)
     git_backup.record_change([path], action=f"update {profile}/agent-tasks.yaml")
     return path
+
+
+def update_agent_tasks(
+    profile: str | Path,
+    fn: Callable[[dict[str, Any]], _T],
+) -> _T:
+    """Load the task queue, apply *fn*, and persist — under one lock.
+
+    The whole load → mutate → write cycle holds the profile write lock
+    so concurrent writers (MCP server, UI, CLI) cannot lose each
+    other's tasks. *fn* receives the loaded document and mutates it in
+    place; its return value is passed through to the caller. When *fn*
+    leaves the document unchanged, no write or backup happens. *fn*
+    must not call ``save_agent_tasks``/``update_agent_tasks`` for the
+    same profile (the lock is not reentrant for the same file).
+    """
+
+    path = _tasks_path(profile)
+    profile_name = profile.name if isinstance(profile, Path) else str(profile)
+    with locked_profile_write(path.parent, AGENT_TASKS_FILENAME):
+        doc = load_agent_tasks(profile)
+        original = copy.deepcopy(doc)
+        result = fn(doc)
+        changed = doc != original
+        if changed:
+            atomic_write_text(path, _dump_agent_tasks(profile_name, doc))
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {profile_name}/agent-tasks.yaml",
+        )
+    return result
 
 
 def create_agent_task(
@@ -237,23 +279,24 @@ def create_agent_task(
     )
     if item is None:
         raise ValueError("Agent task must be a mapping")
-    doc = load_agent_tasks(profile)
-    tasks = list(doc.get("tasks") or [])
-    for index, existing in enumerate(tasks):
-        if _clean_text(existing.get("id")) != item["id"]:
-            continue
-        merged = copy.deepcopy(existing)
-        merged.update(item)
-        merged["created"] = existing.get("created") or item["created"]
-        merged["updated"] = current
-        tasks[index] = merged
+
+    def _upsert(doc: dict[str, Any]) -> dict[str, Any]:
+        tasks = list(doc.get("tasks") or [])
+        for index, existing in enumerate(tasks):
+            if _clean_text(existing.get("id")) != item["id"]:
+                continue
+            merged = copy.deepcopy(existing)
+            merged.update(item)
+            merged["created"] = existing.get("created") or item["created"]
+            merged["updated"] = current
+            tasks[index] = merged
+            doc["tasks"] = tasks
+            return merged
+        tasks.append(item)
         doc["tasks"] = tasks
-        save_agent_tasks(profile, doc)
-        return merged
-    tasks.append(item)
-    doc["tasks"] = tasks
-    save_agent_tasks(profile, doc)
-    return item
+        return item
+
+    return update_agent_tasks(profile, _upsert)
 
 
 def dispatch_agent_task_for_kanban(
@@ -379,20 +422,22 @@ def link_activity_item(
     """Attach an Activity item id to an agent task."""
 
     clean = _clean_text(task_id)
-    doc = load_agent_tasks(profile)
-    tasks = list(doc.get("tasks") or [])
     current = _now()
-    for index, task in enumerate(tasks):
-        if _clean_text(task.get("id")) != clean:
-            continue
-        updated = copy.deepcopy(task)
-        updated["activity_item_id"] = _clean_text(activity_item_id)
-        updated["updated"] = current
-        tasks[index] = updated
-        doc["tasks"] = tasks
-        save_agent_tasks(profile, doc)
-        return updated
-    return None
+
+    def _link(doc: dict[str, Any]) -> dict[str, Any] | None:
+        tasks = list(doc.get("tasks") or [])
+        for index, task in enumerate(tasks):
+            if _clean_text(task.get("id")) != clean:
+                continue
+            updated = copy.deepcopy(task)
+            updated["activity_item_id"] = _clean_text(activity_item_id)
+            updated["updated"] = current
+            tasks[index] = updated
+            doc["tasks"] = tasks
+            return updated
+        return None
+
+    return update_agent_tasks(profile, _link)
 
 
 def update_agent_task_status(
@@ -515,24 +560,26 @@ def _update_agent_task(
     clean = _clean_text(task_id)
     if not clean:
         return None
-    doc = load_agent_tasks(profile)
-    tasks = list(doc.get("tasks") or [])
-    current = _now()
-    for index, task in enumerate(tasks):
-        if _clean_text(task.get("id")) != clean:
-            continue
-        updated = copy.deepcopy(task)
-        mutator(updated, current)
-        normalized = normalize_agent_task(updated, now=current)
-        if normalized is None:
-            raise ValueError("Agent task must be a mapping")
-        normalized["created"] = task.get("created") or normalized["created"]
-        normalized["updated"] = current
-        tasks[index] = normalized
-        doc["tasks"] = tasks
-        save_agent_tasks(profile, doc)
-        return normalized
-    return None
+
+    def _apply(doc: dict[str, Any]) -> dict[str, Any] | None:
+        tasks = list(doc.get("tasks") or [])
+        current = _now()
+        for index, task in enumerate(tasks):
+            if _clean_text(task.get("id")) != clean:
+                continue
+            updated = copy.deepcopy(task)
+            mutator(updated, current)
+            normalized = normalize_agent_task(updated, now=current)
+            if normalized is None:
+                raise ValueError("Agent task must be a mapping")
+            normalized["created"] = task.get("created") or normalized["created"]
+            normalized["updated"] = current
+            tasks[index] = normalized
+            doc["tasks"] = tasks
+            return normalized
+        return None
+
+    return update_agent_tasks(profile, _apply)
 
 
 def _sync_activity_for_task(profile: str, task: dict[str, Any]) -> None:
@@ -765,4 +812,5 @@ __all__ = [
     "sync_agent_harness_snippet",
     "update_agent_task_remote",
     "update_agent_task_status",
+    "update_agent_tasks",
 ]

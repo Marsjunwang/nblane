@@ -5,11 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import TypeVar
+from collections.abc import Callable
 import re
 
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict
@@ -19,6 +23,8 @@ PROJECT_STATUSES = ("active", "paused", "completed", "archived")
 PROJECT_KINDS = ("internal", "research", "work", "side_project", "learning")
 PROJECT_VISIBILITIES = ("private", "public")
 MILESTONE_STATUSES = ("planned", "active", "completed", "archived")
+
+_T = TypeVar("_T")
 
 
 def profile_dir(name: str) -> Path:
@@ -449,10 +455,14 @@ def archive_project_case(board: ProjectBoard, case_id: str) -> ProjectCase:
     return update_project_case(board, case_id, status="archived")
 
 
-def save_project_board(name_or_dir: str | Path, data: ProjectBoard | dict) -> None:
-    """Write ``project-board.yaml`` with today's date updated."""
-    path = _profile_file_path(name_or_dir)
-    board = data if isinstance(data, ProjectBoard) else ProjectBoard.from_dict(data)
+def _write_project_board(path: Path, board: ProjectBoard) -> None:
+    """Serialize and atomically write ``project-board.yaml``.
+
+    The caller must hold the profile write lock for
+    ``PROJECT_BOARD_FILENAME`` (see ``locked_profile_write``);
+    ``save_project_board`` and ``update_project_board`` are the public
+    entry points that take it.
+    """
     board.profile = board.profile or path.parent.name
     board.updated = date.today().isoformat()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -467,10 +477,66 @@ def save_project_board(name_or_dir: str | Path, data: ProjectBoard | dict) -> No
         sort_keys=False,
     )
     atomic_write_text(path, header + body)
+
+
+def save_project_board(
+    name_or_dir: str | Path,
+    data: ProjectBoard | dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> None:
+    """Write ``project-board.yaml`` with today's date updated.
+
+    The write is serialized via the project-board.yaml sidecar lock. When
+    *expected_snapshot* is given, the file is re-checked against it after
+    the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
+    path = _profile_file_path(name_or_dir)
+    board = data if isinstance(data, ProjectBoard) else ProjectBoard.from_dict(data)
+    with locked_profile_write(path.parent, path.name):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        _write_project_board(path, board)
     git_backup.record_change(
         [path],
         action=f"update {path.parent.name}/project-board.yaml",
     )
+
+
+def update_project_board(
+    name_or_dir: str | Path,
+    fn: Callable[[ProjectBoard], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Load ``project-board.yaml``, apply *fn*, and persist — under one lock.
+
+    Same contract as ``inbox.update_inbox``: the whole load → mutate →
+    write cycle holds the project-board write lock. *fn* receives the
+    loaded ``ProjectBoard`` and mutates it in place; its return value is
+    passed through. When *fn* leaves the document unchanged, no write or
+    backup happens. *fn* must not call ``save_project_board``/
+    ``update_project_board`` for the same profile (the lock is not
+    reentrant for the same file).
+    """
+    path = _profile_file_path(name_or_dir)
+    with locked_profile_write(path.parent, path.name):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        board = load_project_board(name_or_dir)
+        before = board.to_dict()
+        result = fn(board)
+        changed = board.to_dict() != before
+        if changed:
+            _write_project_board(path, board)
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {path.parent.name}/project-board.yaml",
+        )
+    return result
 
 
 __all__ = [
@@ -487,5 +553,6 @@ __all__ = [
     "load_project_board",
     "load_project_board_raw",
     "save_project_board",
+    "update_project_board",
     "update_project_case",
 ]

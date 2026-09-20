@@ -10,8 +10,10 @@ reload="0"
 profile="${NBLANE_DEV_PROFILE:-dev}"
 reader_port="${NBLANE_DEV_READER_PORT:-}"
 streamlit_port="${NBLANE_DEV_STREAMLIT_PORT:-}"
+web_api_port="${NBLANE_DEV_WEB_API_PORT:-}"
 grobid_port="${NBLANE_DEV_GROBID_PORT:-18070}"
 use_grobid="0"
+use_web_api="1"
 runtime="${NBLANE_PAPER_LIBRARY_RUNTIME:-fastapi_iframe}"
 env_file="${NBLANE_DEV_ENV_FILE:-$repo_root/.env}"
 root_arg=""
@@ -21,7 +23,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/dev-web.sh [start|stop|status] [options]
 
-Starts the development Streamlit UI and FastAPI Reader sidecar in tmux.
+Starts the development Streamlit UI, FastAPI Reader sidecar, and the SPA
+backend (nblane.web_api) in tmux.
 
 Commands:
   start              Start or restart dev tmux sessions. This is the default.
@@ -30,11 +33,14 @@ Commands:
 
 Options:
   --isolated         Use isolated dev ports and data:
-                     18502 / 18503, .dev-data, .dev-assets.
+                     18502 / 18503 / 18504, .dev-data, .dev-assets.
   --reload           Start uvicorn with --reload --reload-dir src.
   --no-reload        Start uvicorn without reload. This is the default.
   --reader-port N    Reader sidecar port. Default: 8502, or 18502 with --isolated.
   --streamlit-port N Streamlit port. Default: 8503, or 18503 with --isolated.
+  --web-api-port N   SPA backend (nblane.web_api) port.
+                     Default: 8504, or 18504 with --isolated.
+  --no-web-api       Do not start the SPA backend service.
   --profile NAME     Profile to create when --isolated data is first prepared.
                      Default: dev.
   --root PATH        NBLANE_ROOT for this dev run.
@@ -50,6 +56,7 @@ Examples:
   scripts/dev-web.sh --reload
   scripts/dev-web.sh --isolated --reload
   scripts/dev-web.sh --isolated --grobid
+  scripts/dev-web.sh --no-web-api
 EOF
 }
 
@@ -78,6 +85,14 @@ while [[ $# -gt 0 ]]; do
     --streamlit-port)
       streamlit_port="${2:?missing streamlit port}"
       shift 2
+      ;;
+    --web-api-port)
+      web_api_port="${2:?missing web api port}"
+      shift 2
+      ;;
+    --no-web-api)
+      use_web_api="0"
+      shift
       ;;
     --profile)
       profile="${2:?missing profile name}"
@@ -135,6 +150,13 @@ if [[ -z "$streamlit_port" ]]; then
     streamlit_port="8503"
   fi
 fi
+if [[ -z "$web_api_port" ]]; then
+  if [[ "$mode" == "isolated" ]]; then
+    web_api_port="18504"
+  else
+    web_api_port="8504"
+  fi
+fi
 
 if [[ "$command" == "start" && -f "$env_file" ]]; then
   set -a
@@ -145,9 +167,11 @@ fi
 
 reader_session="nblane-reader-api"
 streamlit_session="nblane-streamlit-ui"
+web_api_session="nblane-web-api"
 if [[ "$mode" == "isolated" ]]; then
   reader_session="nblane-dev-reader-api"
   streamlit_session="nblane-dev-streamlit-ui"
+  web_api_session="nblane-dev-web-api"
 fi
 
 dev_root="${root_arg:-${NBLANE_DEV_ROOT:-$repo_root/.dev-data}}"
@@ -159,27 +183,53 @@ fi
 
 reader_base="http://127.0.0.1:${reader_port}"
 streamlit_base="http://127.0.0.1:${streamlit_port}"
+web_api_base="http://127.0.0.1:${web_api_port}"
+
+spa_static_index="$repo_root/src/nblane/web_ui/static/index.html"
+
+spa_build_hint() {
+  if [[ ! -f "$spa_static_index" ]]; then
+    echo "  hint: SPA static not built ($spa_static_index missing)."
+    echo "        Build it:  (cd src/nblane/web_ui/frontend && npm install && npm run build)"
+    echo "        Or dev it: npm run dev (vite on 5173, set VITE_API_PROXY_TARGET=${web_api_base})"
+  fi
+}
 
 stop_sessions() {
   tmux kill-session -t "$reader_session" 2>/dev/null || true
   tmux kill-session -t "$streamlit_session" 2>/dev/null || true
+  tmux kill-session -t "$web_api_session" 2>/dev/null || true
 }
 
 show_status() {
-  tmux ls 2>/dev/null | grep -E "^(${reader_session}|${streamlit_session}):" || true
+  tmux ls 2>/dev/null | grep -E "^(${reader_session}|${streamlit_session}|${web_api_session}):" || true
   echo
   echo "Streamlit:     ${streamlit_base}"
   echo "Reader API:    ${reader_base}"
   echo "Paper Library: ${reader_base}/paper-library?profile=${profile}"
+  if [[ "$use_web_api" == "1" ]]; then
+    echo "Web API (SPA): ${web_api_base}"
+  fi
   echo
   echo "Health checks:"
   echo "  curl -i ${streamlit_base}/_stcore/health"
   echo "  curl -i '${reader_base}/paper-library?profile=${profile}'"
+  if [[ "$use_web_api" == "1" ]]; then
+    echo "  curl -i ${web_api_base}/api/v1/health"
+    if command -v curl >/dev/null 2>&1; then
+      if web_api_body="$(curl -fsS --max-time 2 "${web_api_base}/api/v1/health" 2>/dev/null)"; then
+        echo "  Web API liveness: ok (${web_api_body})"
+      else
+        echo "  Web API liveness: unreachable at ${web_api_base}"
+      fi
+    fi
+    spa_build_hint
+  fi
 }
 
 if [[ "$command" == "stop" ]]; then
   stop_sessions
-  echo "Stopped ${reader_session} and ${streamlit_session}."
+  echo "Stopped ${reader_session}, ${streamlit_session} and ${web_api_session}."
   exit 0
 fi
 
@@ -218,8 +268,10 @@ else
 fi
 
 uvicorn_args="nblane.web_reader_api:app --host 127.0.0.1 --port ${reader_port}"
+web_api_uvicorn_args="nblane.web_api:app --host 127.0.0.1 --port ${web_api_port}"
 if [[ "$reload" == "1" ]]; then
   uvicorn_args="${uvicorn_args} --reload --reload-dir src"
+  web_api_uvicorn_args="${web_api_uvicorn_args} --reload --reload-dir src"
 fi
 
 grobid_env=""
@@ -287,11 +339,15 @@ wait_for_free_port() {
 
 stop_sessions
 
-for port in "$reader_port" "$streamlit_port"; do
+ports_to_check=("$reader_port" "$streamlit_port")
+if [[ "$use_web_api" == "1" ]]; then
+  ports_to_check+=("$web_api_port")
+fi
+for port in "${ports_to_check[@]}"; do
   if ! wait_for_free_port "$port"; then
     echo "Port ${port} is already in use:" >&2
     port_owner "$port" >&2
-    echo "Stop that process first, or pick another port via --reader-port/--streamlit-port." >&2
+    echo "Stop that process first, or pick another port via --reader-port/--streamlit-port/--web-api-port." >&2
     exit 1
   fi
 done
@@ -318,6 +374,15 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
    PYTHONPATH=src .venv/bin/streamlit run app.py \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
 
+if [[ "$use_web_api" == "1" ]]; then
+  tmux new-session -d -s "$web_api_session" -c "$repo_root" \
+    "${env_load} \
+     NBLANE_ROOT='$dev_root' \
+     NBLANE_ENV_FILE='$env_file' \
+     ${auth_env} ${lang_env} \
+     PYTHONPATH=src .venv/bin/uvicorn ${web_api_uvicorn_args}"
+fi
+
 if command -v curl >/dev/null 2>&1; then
   reader_health="${reader_base}/auth/session-ok"
   healthy="0"
@@ -337,11 +402,35 @@ else
   echo "curl not found; skipping Reader API health check at ${reader_base}/auth/session-ok." >&2
 fi
 
+if [[ "$use_web_api" == "1" ]]; then
+  if command -v curl >/dev/null 2>&1; then
+    web_api_health="${web_api_base}/api/v1/health"
+    web_api_healthy="0"
+    for ((attempt=0; attempt<20; attempt++)); do
+      if curl -fsS -o /dev/null --max-time 2 "$web_api_health" 2>/dev/null; then
+        web_api_healthy="1"
+        break
+      fi
+      sleep 0.5
+    done
+    if [[ "$web_api_healthy" != "1" ]]; then
+      echo "Web API (SPA backend) did not come up at ${web_api_health}." >&2
+      echo "Inspect logs: tmux capture-pane -pt ${web_api_session} -S -200" >&2
+    fi
+  else
+    echo "curl not found; skipping Web API health check at ${web_api_base}/api/v1/health." >&2
+  fi
+fi
+
 echo "Started ${mode} development Web UI."
 echo "  root:        ${dev_root}"
 echo "  assets:      ${asset_root}"
 echo "  streamlit:   ${streamlit_base}"
 echo "  reader API:  ${reader_base}"
+if [[ "$use_web_api" == "1" ]]; then
+  echo "  web API:     ${web_api_base} (SPA backend; serves web_ui/static when built)"
+  spa_build_hint
+fi
 if [[ "$reload" == "1" ]]; then
   echo "  uvicorn:     reload enabled for src/"
 else

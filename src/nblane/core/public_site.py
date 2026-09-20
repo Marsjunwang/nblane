@@ -28,6 +28,8 @@ from nblane.core.claims import (
     accepted_claim_index_for_profile,
     claim_index_for_profile,
 )
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
@@ -6864,35 +6866,54 @@ def save_blog_post(
     extract_inline_images: bool = True,
     blocks_json: list[dict] | None = None,
     action: str | None = None,
+    expected_snapshot: FileSnapshot | None = None,
+    expected_sidecar_snapshot: FileSnapshot | None = None,
 ) -> tuple[Path, list[Path]]:
-    """Save a blog post from structured metadata and Markdown body."""
+    """Save a blog post from structured metadata and Markdown body.
+
+    The write is serialized via the profile's blog sidecar lock. When
+    *expected_snapshot* (Markdown file) and/or *expected_sidecar_snapshot*
+    (BlockNote sidecar) are given, the files are re-checked against them
+    after the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent edit landing between
+    the caller's load and this save is never silently overwritten.
+    """
     route = _resolve_blog_route(name, slug)
     if is_blog_route_trashed(name, route):
         raise PublicSiteError(f"Blog post is in public library trash: {route}")
     path = _safe_blog_path(name, route)
     sidecar_path = _blog_sidecar_path_for_markdown(path)
-    if not path.exists() and not sidecar_path.exists():
-        raise PublicSiteError(f"Unknown blog post: {slug}")
-    changed: list[Path] = []
-    meta = _normalize_blog_meta(meta)
-    category_path = _blog_category_path_from_route(route)
-    if category_path and not meta.get("category_path"):
-        meta["category_path"] = category_path
-    if extract_inline_images:
-        body, changed = extract_blog_base64_images(
+    with locked_profile_write(_profile_path(name), "blog"):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        if expected_sidecar_snapshot is not None:
+            assert_unchanged(
+                sidecar_path,
+                expected_sidecar_snapshot,
+                label=sidecar_path.name,
+            )
+        if not path.exists() and not sidecar_path.exists():
+            raise PublicSiteError(f"Unknown blog post: {slug}")
+        changed: list[Path] = []
+        meta = _normalize_blog_meta(meta)
+        category_path = _blog_category_path_from_route(route)
+        if category_path and not meta.get("category_path"):
+            meta["category_path"] = category_path
+        if extract_inline_images:
+            body, changed = extract_blog_base64_images(
+                name,
+                route,
+                body,
+            )
+        _write_blog_post_file(
             name,
-            route,
+            path,
+            meta,
             body,
+            action=action or f"update {name}/blog/{path.name}",
+            changed_paths=changed,
+            blocks_json=blocks_json,
         )
-    _write_blog_post_file(
-        name,
-        path,
-        meta,
-        body,
-        action=action or f"update {name}/blog/{path.name}",
-        changed_paths=changed,
-        blocks_json=blocks_json,
-    )
     return path, changed
 
 
@@ -7310,22 +7331,43 @@ def publish_blog_text(
     body: str,
     *,
     blocks_json: list[dict] | None = None,
+    expected_snapshot: FileSnapshot | None = None,
+    expected_sidecar_snapshot: FileSnapshot | None = None,
 ) -> Path:
-    """Publish unsaved structured blog text after full validation."""
+    """Publish unsaved structured blog text after full validation.
+
+    Same concurrency contract as ``save_blog_post``: the publish write is
+    serialized via the profile's blog sidecar lock, and the optional
+    *expected_snapshot* / *expected_sidecar_snapshot* fingerprints are
+    re-checked inside that lock (``file_state.FileConflictError`` on
+    mismatch) so a concurrent edit is never silently overwritten.
+    """
     post = load_blog_post(name, slug)
     publish_meta = _normalize_blog_meta(meta)
     publish_meta["status"] = "published"
     candidate = _format_front_matter(publish_meta, body)
     result = validate_blog_text_for_publish(name, post.path, candidate)
     result.raise_for_errors()
-    _write_blog_post_file(
-        name,
-        post.path,
-        publish_meta,
-        body,
-        action=f"publish {name}/blog/{post.path.name}",
-        blocks_json=blocks_json if blocks_json is not None else post.blocks_json,
-    )
+    sidecar_path = _blog_sidecar_path_for_markdown(post.path)
+    with locked_profile_write(_profile_path(name), "blog"):
+        if expected_snapshot is not None:
+            assert_unchanged(
+                post.path, expected_snapshot, label=post.path.name
+            )
+        if expected_sidecar_snapshot is not None:
+            assert_unchanged(
+                sidecar_path,
+                expected_sidecar_snapshot,
+                label=sidecar_path.name,
+            )
+        _write_blog_post_file(
+            name,
+            post.path,
+            publish_meta,
+            body,
+            action=f"publish {name}/blog/{post.path.name}",
+            blocks_json=blocks_json if blocks_json is not None else post.blocks_json,
+        )
     return post.path
 
 

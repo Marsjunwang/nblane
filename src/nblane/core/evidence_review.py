@@ -944,6 +944,11 @@ def _review_reason(row: dict[str, Any]) -> str:
     return ", ".join(reasons)
 
 
+def review_reason_for_row(row: dict[str, Any]) -> str:
+    """Public wrapper over the review-reason rule (used by the web API)."""
+    return _review_reason(row)
+
+
 def _evidence_row_payload(
     row: dict[str, Any],
     usage: dict[str, list[dict[str, str]]],

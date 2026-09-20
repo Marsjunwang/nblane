@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from typing import TypeVar
 from uuid import uuid4
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.models import KanbanSubtask, KanbanTask
 from nblane.core.profile_io import profile_dir
@@ -32,6 +35,8 @@ KANBAN_BOARD_SECTIONS = (
     KANBAN_SOMEDAY,
 )
 KANBAN_ARCHIVE_FILENAME = "kanban-archive.md"
+
+_T = TypeVar("_T")
 _KANBAN_MULTILINE_META_FIELDS = frozenset(
     {"context", "why", "blocked_by", "outcome"}
 )
@@ -423,6 +428,64 @@ def apply_kanban_reorder(
     return out
 
 
+def resolve_kanban_section(raw: object) -> str | None:
+    """Map user/agent text to a canonical kanban section name, or None."""
+    clean = _clean_task_text(raw)
+    for section in KANBAN_SECTIONS:
+        if section == clean or section.casefold() == clean.casefold():
+            return section
+    return None
+
+
+def find_kanban_card(
+    sections: dict[str, list[KanbanTask]],
+    card_ref: str,
+) -> tuple[tuple[str, int, KanbanTask] | None, str, str]:
+    """Locate one card by exact title or unique substring of the title.
+
+    Returns ``((section, index, task), "", "")`` on a unique hit, otherwise
+    ``(None, kind, message)`` where *kind* is ``"ambiguous"`` when several
+    cards match or ``"not_found"`` when none do.
+    """
+    exact = [
+        (section, index, task)
+        for section, tasks in sections.items()
+        for index, task in enumerate(tasks)
+        if task.title.strip() == card_ref
+    ]
+    if len(exact) == 1:
+        return exact[0], "", ""
+    if len(exact) > 1:
+        hits = ", ".join(sorted({section for section, _, _ in exact}))
+        return (
+            None,
+            "ambiguous",
+            f"card_ref {card_ref!r} matches {len(exact)} cards exactly "
+            f"(sections: {hits}); use a more specific ref",
+        )
+    lowered = card_ref.casefold()
+    partial = [
+        (section, index, task)
+        for section, tasks in sections.items()
+        for index, task in enumerate(tasks)
+        if lowered in task.title.casefold()
+    ]
+    if len(partial) == 1:
+        return partial[0], "", ""
+    if not partial:
+        return None, "not_found", f"no kanban card matches card_ref {card_ref!r}"
+    titles = "; ".join(
+        f"{section}: {task.title.strip()}"
+        for section, _, task in partial[:5]
+    )
+    return (
+        None,
+        "ambiguous",
+        f"card_ref {card_ref!r} is ambiguous: matches {len(partial)} "
+        f"cards ({titles})",
+    )
+
+
 def kanban_order_signature(
     sections: dict[str, list[KanbanTask]],
     section_order: tuple[str, ...] = KANBAN_BOARD_SECTIONS,
@@ -781,15 +844,72 @@ def render_kanban(
 def save_kanban(
     name: str | Path,
     sections: dict[str, list[KanbanTask]],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> None:
-    """Write kanban.md back from structured sections."""
+    """Write kanban.md back from structured sections.
+
+    The write is serialized via the kanban.md sidecar lock; the UI's
+    3-way merge (kanban_merge) handles content conflicts, the lock
+    prevents torn or interleaved writes from concurrent processes.
+    When *expected_snapshot* is given, the file is re-checked against
+    it after the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing
+    between the caller's parse and this save is never silently
+    overwritten.
+    """
     profile_name = name.name if isinstance(name, Path) else name
     path = kanban_path(name)
-    atomic_write_text(path, render_kanban(profile_name, sections))
+    text = render_kanban(profile_name, sections)
+    with locked_profile_write(path.parent, "kanban.md"):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label="kanban.md")
+        atomic_write_text(path, text)
     git_backup.record_change(
         [path],
         action=f"update {profile_name}/kanban.md",
     )
+
+
+def update_kanban(
+    name_or_dir: str | Path,
+    fn: Callable[[dict[str, list[KanbanTask]]], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Parse kanban.md, apply *fn*, and persist — under one lock.
+
+    Same contract as ``inbox.update_inbox``: the whole parse → mutate →
+    write cycle holds the kanban.md write lock, so read-modify-write
+    flows (e.g. the Review kanban-move applier) cannot lose a concurrent
+    writer's change. *fn* receives the parsed sections and mutates them
+    in place; its return value is passed through. When *fn* leaves the
+    board unchanged, no write or backup happens. *fn* must not call
+    ``save_kanban``/``update_kanban``/``save_kanban_with_merge`` for the
+    same profile (the lock is not reentrant for the same file).
+    """
+    profile_name = (
+        name_or_dir.name if isinstance(name_or_dir, Path) else name_or_dir
+    )
+    path = kanban_path(name_or_dir)
+    with locked_profile_write(path.parent, "kanban.md"):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label="kanban.md")
+        sections = parse_kanban(name_or_dir)
+        before = {
+            section: [_copy_kanban_task(task) for task in tasks]
+            for section, tasks in sections.items()
+        }
+        result = fn(sections)
+        changed = sections != before
+        if changed:
+            atomic_write_text(path, render_kanban(profile_name, sections))
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {profile_name}/kanban.md",
+        )
+    return result
 
 
 def _render_kanban_archive_append(

@@ -21,13 +21,16 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
+from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_state import FileSnapshot, snapshot_matches
+from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import (
     _copy_kanban_task,
     ensure_kanban_task_ids,
     kanban_path,
     parse_kanban,
-    save_kanban,
+    render_kanban,
 )
 from nblane.core.models import KanbanTask
 
@@ -284,26 +287,37 @@ def save_kanban_with_merge(
     preserves both sides at the cost of resurrecting tasks the external
     writer deleted. The returned sections are the persisted state; callers
     should adopt them.
+
+    The snapshot re-check, the re-parse, and the write all happen inside
+    the kanban.md write lock, so a concurrent write landing between the
+    caller's request-start snapshot and the lock acquisition is merged
+    rather than silently overwritten (no TOCTOU window).
     """
     profile_name = profile.name if isinstance(profile, Path) else profile
     ensured = ensure_kanban_task_ids(sections, profile_name)
+    path = kanban_path(profile)
     merged = ensured
     merged_external = False
     dropped: list[KanbanChange] = []
-    if expected_snapshot is not None and not snapshot_matches(
-        kanban_path(profile),
-        expected_snapshot,
-    ):
-        merged_external = True
-        theirs = parse_kanban(profile)
-        base = (
-            base_sections
-            if base_sections is not None
-            else {section: [] for section in theirs}
-        )
-        changes = diff_kanban_sections(base, ensured)
-        merged, dropped = apply_kanban_changes(theirs, changes)
-    save_kanban(profile, merged)
+    with locked_profile_write(path.parent, "kanban.md"):
+        if expected_snapshot is not None and not snapshot_matches(
+            path,
+            expected_snapshot,
+        ):
+            merged_external = True
+            theirs = parse_kanban(profile)
+            base = (
+                base_sections
+                if base_sections is not None
+                else {section: [] for section in theirs}
+            )
+            changes = diff_kanban_sections(base, ensured)
+            merged, dropped = apply_kanban_changes(theirs, changes)
+        atomic_write_text(path, render_kanban(profile_name, merged))
+    git_backup.record_change(
+        [path],
+        action=f"update {profile_name}/kanban.md",
+    )
     return KanbanSaveResult(
         sections=merged,
         merged_external=merged_external,

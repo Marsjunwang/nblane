@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from nblane.core import git_backup
 from nblane.core.io import profile_dir
 
 
@@ -32,4 +33,8 @@ def append_interaction_record(
         f.write(
             json.dumps(record, ensure_ascii=False) + "\n"
         )
+    git_backup.record_change(
+        [path],
+        action=f"append interaction for {profile}",
+    )
     return path

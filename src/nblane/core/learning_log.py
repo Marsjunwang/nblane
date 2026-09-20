@@ -11,6 +11,8 @@ from typing import Any
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict
@@ -492,8 +494,17 @@ def load_learning_log_raw(name_or_dir: str | Path) -> dict | None:
 def save_learning_log(
     name_or_dir: str | Path,
     data: LearningLog | dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> None:
-    """Write ``learning-log.yaml`` with today's date updated."""
+    """Write ``learning-log.yaml`` with today's date updated.
+
+    The write is serialized via the learning-log.yaml sidecar lock. When
+    *expected_snapshot* is given, the file is re-checked against it after
+    the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
     path = _profile_file_path(name_or_dir, LEARNING_LOG_FILENAME)
     log = data if isinstance(data, LearningLog) else LearningLog.from_dict(data)
     log.profile = log.profile or path.parent.name
@@ -510,7 +521,12 @@ def save_learning_log(
         default_flow_style=False,
         sort_keys=False,
     )
-    atomic_write_text(path, header + body)
+    with locked_profile_write(path.parent, LEARNING_LOG_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(
+                path, expected_snapshot, label=LEARNING_LOG_FILENAME
+            )
+        atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {path.parent.name}/learning-log.yaml",
@@ -519,6 +535,8 @@ def save_learning_log(
 
 def add_learning_resource(
     name_or_dir: str | Path,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
     **kwargs: Any,
 ) -> LearningResource:
     """Append one resource to the learning log and persist the file."""
@@ -533,7 +551,7 @@ def add_learning_resource(
     if any(existing.id == resource.id for existing in log.resources):
         raise ValueError(f"Duplicate learning resource id: {resource.id}")
     log.resources.append(resource)
-    save_learning_log(name_or_dir, log)
+    save_learning_log(name_or_dir, log, expected_snapshot=expected_snapshot)
     return resource
 
 

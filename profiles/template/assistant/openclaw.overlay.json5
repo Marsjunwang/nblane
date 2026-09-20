@@ -1,0 +1,39 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "qwen/qwen3.8-flash",
+        "fallbacks": ["qwen/qwen3.7-flash", "rightcode/gpt-6-astra"]
+      },
+      "utilityModel": "qwen/qwen3.7-flash",
+      "imageModel": {
+        "primary": "qwen/qwen3-vl-flash",
+        "fallbacks": ["qwen/qwen3-vl-plus"]
+      },
+      "heartbeat": {
+        "every": "1h",
+        "model": "qwen/qwen3.7-flash",
+        "lightContext": true,
+        "isolatedSession": true,
+        "target": "openclaw-weixin",
+        "to": "${WEIXIN_OWNER_ID}",
+        "directPolicy": "allow",
+        "activeHours": {
+          "start": "08:00",
+          "end": "23:00",
+          "timezone": "Asia/Shanghai"
+        }
+      }
+    }
+  },
+  "memory": {
+    "search": {
+      "extraPaths": ["~/.openclaw/workspace/memory/nblane"]
+    }
+  },
+  "channels": {
+    "openclaw-weixin": {
+      "replyProgressMessages": true
+    }
+  }
+}

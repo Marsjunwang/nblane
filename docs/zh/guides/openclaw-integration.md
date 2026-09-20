@@ -1,8 +1,8 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-09-17
-source_of_truth: src/nblane/mcp_server.py、src/nblane/core/mcp_client_config.py、src/nblane/core/agent_tasks.py、scripts/openclaw/skills/
+last_verified: 2026-09-20
+source_of_truth: src/nblane/mcp_server.py、src/nblane/core/mcp_client_config.py、src/nblane/core/agent_tasks.py、src/nblane/core/openclaw_automations.py、src/nblane/core/openclaw_ops.py、src/nblane/core/openclaw_corpus.py、src/nblane/core/git_backup.py、src/nblane/core/notify.py、src/nblane/commands/openclaw.py、profiles/template/assistant/、scripts/openclaw/skills/、scripts/openclaw/plugins/weixin-task-bridge/、scripts/openclaw/install.sh
 ---
 
 # OpenClaw 接入指南
@@ -145,7 +145,7 @@ Claude Pro/Max 订阅 OAuth 接第三方工具违反 Anthropic 条款,不要用�
 
 在 A + B 的基础上额外需要:
 
-- 自定义插件源目录 `~/.openclaw/workspace/plugins/weixin-task-bridge/`(`package.json`、`openclaw.plugin.json`、`dist/index.js`)。该目录是 OpenClaw workspace 私有数据,**不在 nblane Git 里**,迁移要单独复制。
+- 自定义插件 `weixin-task-bridge`(`package.json`、`openclaw.plugin.json`、`dist/index.js`)。源码已随仓库提供于 `scripts/openclaw/plugins/weixin-task-bridge/`,由 `scripts/openclaw/install.sh` 同步 skills 并完成插件安装;`~/.openclaw/workspace/plugins/` 下的运行副本不随 Git 迁移。
 - 显式安装:`openclaw plugins install "$HOME/.openclaw/workspace/plugins/weixin-task-bridge" --force --accept-capabilities`。
 - Owner 已在 `commands.ownerAllowFrom` 中;命令只作用于当前微信会话可见任务。
 - `tools.message.crossContext` 允许跨渠道标记(本机前缀 `[后台任务]`)。
@@ -225,21 +225,32 @@ command -v codex kimi bwrap || true
 - 注意:Claude Pro/Max 订阅 OAuth 接第三方工具违反 Anthropic 服务条款,
   请勿使用。
 
-## 实际部署:模型路由(2026-09-17 实测)
+## 实际部署:模型路由(2026-09-19 实测)
 
-服务器(VM-0-5-ubuntu)上微信机器人当前的模型路由:**千问 Flash 为默认、
-GPT 中转站兜底**,两条路径均已实测可用:
+服务器(VM-0-5-ubuntu)上微信机器人当前的模型路由:**主对话仍用千问 3.8
+Flash,短辅助/心跳/每日隔离任务用更便宜的 3.7 Flash,GPT 中转站兜底**。
+3.7-flash / 3.8-flash 的图文能力和 `qwen3-vl-flash` 不在插件自带目录里,需要写进
+`models.providers.qwen.models`(与 `qwen3-vl-plus` 并列,`models.mode` 保持
+`merge`)。3.8-flash 必须标 `input: ["text","image"]`,否则微信入站图片会被当成
+纯文本跳过。
 
 ```bash
 openclaw config set agents.defaults.model.primary "qwen/qwen3.8-flash"
-openclaw config set agents.defaults.model.fallbacks '["rightcode/gpt-6-astra"]'
-openclaw config set agents.defaults.utilityModel "qwen/qwen3.8-flash"
+openclaw config set agents.defaults.model.fallbacks '["qwen/qwen3.7-flash","rightcode/gpt-6-astra"]'
+openclaw config set agents.defaults.utilityModel "qwen/qwen3.7-flash"
+openclaw config set agents.defaults.heartbeat.model "qwen/qwen3.7-flash"
+openclaw config set agents.defaults.compaction.model "qwen/qwen3.7-flash"
+openclaw config set agents.defaults.imageModel '{"primary":"qwen/qwen3-vl-flash","fallbacks":["qwen/qwen3-vl-plus"]}'
 systemctl --user restart openclaw-gateway    # 已有会话里 /new 生效
 ```
 
-- `rightcode/gpt-6-astra`:rightcode 中转站,OpenAI 兼容接口,普通 provider。
-- `qwen/qwen3.8-flash`:百炼 DashScope,OpenAI 兼容接口。
-- `utilityModel` 也固定为 Flash，避免标题、摘要等辅助调用继续使用 GPT。
+- `qwen/qwen3.8-flash`:百炼 DashScope,主对话、每周主会话维护,以及主会话里的日常识图。
+- `qwen/qwen3.7-flash`:同账号更便宜的上一代 Flash;用于 `utilityModel`
+  (标题/审批分类)、心跳、compaction、每日计划/复盘(isolated)。
+- `qwen/qwen3-vl-flash`:`imageModel` 兜底,只在当前会话模型被标成纯文本时看图。
+- `qwen/qwen3-vl-plus`:识图 fallback,难图/UI/长视频再上场。
+- `rightcode/gpt-6-astra`:rightcode 中转站,OpenAI 兼容接口,普通 provider,
+  只作最后兜底。
 - 会话级临时切换(微信里直接发):`/model rightcode/gpt-6-astra`、
   `/model qwen/qwen3.5-plus`、`/model default`;`/status` 查看当前模型。
 - 已有会话可能保留 session override，不会因修改全局默认值而自动切换。使用
@@ -347,9 +358,9 @@ updates = [
     {"path": "agents.defaults.model.primary", "value": "qwen/qwen3.8-flash"},
     {
         "path": "agents.defaults.model.fallbacks",
-        "value": ["rightcode/gpt-6-astra"],
+        "value": ["qwen/qwen3.7-flash", "rightcode/gpt-6-astra"],
     },
-    {"path": "agents.defaults.utilityModel", "value": "qwen/qwen3.8-flash"},
+    {"path": "agents.defaults.utilityModel", "value": "qwen/qwen3.7-flash"},
     {
         "path": "channels.openclaw-weixin.replyProgressMessages",
         "value": True,
@@ -373,7 +384,7 @@ updates = [
         "path": "agents.defaults.heartbeat",
         "value": {
             "every": "1h",
-            "model": "qwen/qwen3.8-flash",
+            "model": "qwen/qwen3.7-flash",
             "lightContext": True,
             "isolatedSession": True,
             "target": "openclaw-weixin",
@@ -452,9 +463,9 @@ workspace 的现有文件，不要覆盖其中其他约定：
 - Never leave long work running only as an untracked interactive chat turn.
 ```
 
-`MEMORY.md` 中也应记录已经验证的**事实**：主模型为 Flash、Fallback 为 GPT-6
-Astra、utility model 为 Flash，以及微信进度/Token/Owner 路由已启用。不要把
-Owner ID 或密钥写进长期记忆。
+`MEMORY.md` 中也应记录已经验证的**事实**：主模型为 3.8 Flash、utility/心跳/
+每日隔离任务为 3.7 Flash、Fallback 为 3.7 Flash 再 GPT-6 Astra，以及微信进
+度/Token/Owner 路由已启用。不要把 Owner ID 或密钥写进长期记忆。
 
 ### Weixin Task Bridge 插件
 
@@ -469,8 +480,9 @@ Owner ID 或密钥写进长期记忆。
 ~/.openclaw/extensions/weixin-task-bridge/   # openclaw plugins install 的安装副本
 ```
 
-源目录目前是 OpenClaw workspace 私有运行数据，**不随 nblane Git 仓库迁移**。
-迁移前要单独复制该目录；其中不应包含 Owner ID 或密钥。目标机器先审阅源码，
+插件源码已纳入 nblane Git（`scripts/openclaw/plugins/weixin-task-bridge/`），可由
+`scripts/openclaw/install.sh` 幂等安装；其中不含 Owner ID 或密钥。
+`~/.openclaw/workspace/plugins/` 下的副本仍是运行数据，不随仓库迁移。目标机器先审阅源码，
 再显式接受本地插件能力：
 
 ```bash
@@ -551,7 +563,7 @@ openclaw automations add \
   --declaration-key personal-assistant:daily-plan \
   --cron '30 8 * * *' --tz Asia/Shanghai --exact \
   --agent main --session isolated \
-  --model qwen/qwen3.8-flash --fallbacks rightcode/gpt-6-astra \
+  --model qwen/qwen3.7-flash --fallbacks rightcode/gpt-6-astra \
   --timeout-seconds 300 \
   --announce --best-effort-deliver \
   --channel openclaw-weixin --to "$WEIXIN_OWNER_ID" \
@@ -563,7 +575,7 @@ openclaw automations add \
   --declaration-key personal-assistant:daily-review \
   --cron '30 21 * * *' --tz Asia/Shanghai --exact \
   --agent main --session isolated \
-  --model qwen/qwen3.8-flash --fallbacks rightcode/gpt-6-astra \
+  --model qwen/qwen3.7-flash --fallbacks rightcode/gpt-6-astra \
   --timeout-seconds 300 \
   --announce --best-effort-deliver \
   --channel openclaw-weixin --to "$WEIXIN_OWNER_ID" \
@@ -955,7 +967,7 @@ Kimi 不额外添加 `--auto` / `-y`，也不沿用“这些参数必然与 `-p`
 
    ```bash
    openclaw mcp list            # 能看到 nblane
-   openclaw mcp tools nblane    # 能列出 submit_agent_task_candidate 等工具
+   openclaw mcp probe nblane    # 能列出 submit_agent_task_candidate 等工具
    ```
 
 4. 在 OpenClaw 里让 agent 先读 `profile://context`(完整 system prompt)
@@ -977,6 +989,313 @@ growth log、inline evidence、interaction 记录、方法草稿与审批队列,
 **不能**直接改技能树状态、不能发布公开内容。OpenClaw 本身权限很大,
 请只在本地运行,不要把 gateway 暴露到公网,`NBLANE_ROOT` 指向你的
 nblane 仓库即可。
+
+## 变更窗口：生产人工执行命令清单（2026-09-20）
+
+以下五项涉及**生产 OpenClaw Gateway（承载活的微信通道）**的变更，按
+[深度融合总体方案](../architecture/openclaw-deep-integration.md)的约定只能由人工
+在变更窗口执行，AI 一律不得代跑。对应进度表的 L0.2 / L0.4 / L2 生产切换 /
+L4 Step 1 / L6 SecretRef。
+
+总则（每项都适用）：
+
+- 所有 `openclaw config` 变更先 `--dry-run`，确认输出后再去掉该参数正式执行；
+  OpenClaw config 自带 `.bak` 环，回滚以它兜底。
+- 选微信低峰窗口；任何 `openclaw gateway restart` 都会造成秒级微信中断。
+- **永不**在自动化或本清单中调 `openclaw doctor --fix`（它会停/重启 Gateway）。
+- 下面命令里的只读项（`mcp list`、`automations list --all --json`、`curl /readyz`
+  等）可随时执行；标注「执行」的步骤才占用变更窗口。
+- 生产路径约定（L6 三树归一）：代码 `/srv/nblane-app/nblane`，数据
+  `/srv/nblane-data`，profile 名以实际为准（下文用 `王军` 示例）。
+
+### CW-1 L0.2 接通 nblane MCP（注册 nblane-mcp stdio server）
+
+前置检查（只读）：
+
+```bash
+cd /srv/nblane-app/nblane && git status -sb        # 确认生产代码版本
+ls -l /srv/nblane-app/nblane/.venv/bin/nblane-mcp  # entry point 必须存在
+systemctl --user is-active openclaw-gateway.service
+curl -fsS http://127.0.0.1:18789/readyz
+openclaw mcp list                                   # 当前应不含 nblane
+```
+
+执行：
+
+```bash
+cd /srv/nblane-app/nblane
+# 1. 生成并核对配置片段（command 必须是绝对路径，env 含 NBLANE_ROOT/NBLANE_PROFILE）
+.venv/bin/nblane sync-agent-harness --target openclaw --profile 王军
+#    command 形态取决于调用环境的 PATH：能找到 nblane-mcp 时输出其绝对路径，
+#    否则回退为 "<venv>/bin/python3 -m nblane.mcp_server"；两种都可用，
+#    关键是必须是生产机的绝对路径，NBLANE_ROOT 必须指向 /srv/nblane-data。
+# 2. 用 config patch 注入（JSON5 递归合并），先 dry-run：
+openclaw config patch --stdin --dry-run <<'JSON5'
+{ "mcp": { "servers": { "nblane": {
+  "command": "/srv/nblane-app/nblane/.venv/bin/nblane-mcp",
+  "env": { "NBLANE_ROOT": "/srv/nblane-data", "NBLANE_PROFILE": "王军" }
+} } } }
+JSON5
+# 3. dry-run 校验通过后，去掉 --dry-run 再执行同一补丁
+```
+
+验证（只读）：
+
+```bash
+openclaw mcp list                 # 应出现 nblane
+openclaw mcp probe nblane         # 应列出 submit_agent_task_candidate 等工具
+nblane openclaw doctor --profile 王军   # nblane_mcp_registered 应为 [OK]
+```
+
+注意：不要用 `openclaw mcp tools` 列工具——那是设置工具过滤器的命令
+（`core/mcp_client_config.py` 的 snippet 已修正为 `mcp probe`）。随后在会话里让
+agent 读 `profile://summary`，并在微信里问一个依赖 profile 数据的问题做端到端确认。
+
+回滚：
+
+```bash
+openclaw config unset mcp.servers.nblane
+```
+
+停机/风险：无 Gateway 重启，`config patch` 热合并；若 patch 后 `mcp list` 仍不可见，
+再做一次 `openclaw gateway restart`（秒级微信中断）。风险为 stdio 子进程拉起失败
+导致 agent 侧工具不可用，不影响 Gateway 本身。
+
+### CW-2 L0.4 备份调度（git 备份定时化）
+
+nblane 侧**不需要 cron/自动化**：每次写入已由
+`core/git_backup.py` 的 `record_change`（`NBLANE_DATA_GIT_AUTOCOMMIT=1` +
+`NBLANE_DATA_GIT_AUTOPUSH=1`）写时触发 commit+push。本项要做的是确认这条链路生效，
+并把 OpenClaw 侧的整目录备份定时化。
+
+前置检查（只读）：
+
+```bash
+git -C /srv/nblane-data remote -v                                  # 应有私有远端
+systemctl cat nblane nblane-reader | grep NBLANE_DATA_GIT          # 两个 unit 都应带 =1
+git -C /srv/nblane-data log --oneline -3                           # 近期应有 nblane: 提交
+openclaw automations list --all --json | grep -i backup            # 当前应无备份调度
+```
+
+执行：
+
+```bash
+# 1. 先手动验证一次完整备份能产出（归档落盘后移出 ~/.openclaw 到私有加密位置）
+openclaw backup create
+# 2. 开启 24h 调度（官方语义：重复执行是更新而非重复创建）
+openclaw backup enable --every 24h
+```
+
+验证（只读）：
+
+```bash
+openclaw automations list --all --json | grep -i backup   # 应出现备份调度
+nblane openclaw doctor --profile 王军                      # backup_schedule 应为 [OK]
+# nblane 侧：在 Web UI 做一次保存，随后：
+git -C /srv/nblane-data log --oneline -1                  # 应出现新 commit 且已 push
+```
+
+恢复演练（建议同窗口内做一次）：把备份 tar 解到临时目录 +
+`openclaw backup verify` + 对数据目录跑 `nblane validate`，全部通过才算闭环。
+
+回滚：备份调度本身无副作用、不产生数据风险，一般无需回滚；确需停用时以
+`openclaw backup --help` 列出的停用子命令为准（本仓库未实测停用命令名，不要臆造）。
+nblane 侧回滚为去掉 systemd unit 里两个 `NBLANE_DATA_GIT_*` 环境变量并重启服务。
+
+停机/风险：无停机。风险仅为 push 失败——表现为 Web UI warning，不回滚已保存文件
+（`core/git_backup.py` 语义），需人工处理远端。
+
+### CW-3 L2 生产自动化切换（automations-as-code 接管）
+
+目标：把 `profiles/王军/assistant/automations.yaml`（声明源）对账到生产 Gateway，
+替换掉 prompt 里写死绝对路径的旧自动化。纳管语义（`core/openclaw_automations.py`）：
+
+- nblane 只管理 `declarationKey` 以 `nblane:` 开头的任务；旧
+  `personal-assistant:*` 属外部 key，一律 `skip_foreign`，**sync 永远不会碰它**。
+- 模板声明的是新 `nblane:*` key，执行后与旧任务**并存**。二选一：
+  - 方案 A（推荐，灰度）：新 `nblane:*` 与旧任务并行一个周期，验证后在 OpenClaw
+    侧手工停用旧任务（`--prune` 不会删外部 key，删旧任务是独立的人工动作）。
+  - 方案 B（原地纳管）：在 `automations.yaml` 用旧 key 声明并加 `adopt: true`，
+    sync 以 edit 方式接管；这是逐条显式 opt-in，未标 adopt 的外部 key 会在加载时
+    报错而不是被静默接管。
+
+前置检查（只读；`${WEIXIN_OWNER_ID}` 未设置会导致声明加载报错，属预期保护）：
+
+```bash
+export WEIXIN_OWNER_ID='<WEIXIN_OWNER_ID>'   # 或确认已在 /srv/nblane-data 侧 .env
+cd /srv/nblane-app/nblane
+.venv/bin/nblane openclaw automations sync 王军        # 默认 dry-run，只打印计划
+openclaw automations list --all --json                 # 记录现有任务快照（回滚依据）
+```
+
+执行序列：
+
+```bash
+cd /srv/nblane-app/nblane
+# 1. 只读对账，三项（语料/技能/自动化）有漂移即非零退出
+.venv/bin/nblane openclaw sync --check
+# 2. 全量 dry-run：打印技能/语料差异、config patch（含 MCP 注入）全文、自动化计划
+.venv/bin/nblane openclaw install --dry-run
+#    ——人工逐项审阅输出。两个历史核对点已修复（2026-09-20），降级为常规确认：
+#    a) config patch 里不应出现未替换的 ${...} 字面量：install 的 overlay 步骤
+#       现在与 automations.yaml 加载器共用同一 ${VAR} 替换实现
+#       （core/openclaw_automations.py 的 substitute_env_text），未设置的
+#       变量会在 patch 前直接报错中止，不会把字面量写进配置；
+#    b) 模板 openclaw.overlay.json5 的键层级已对齐本指南实测的
+#       agents.defaults.* 路径（agents.defaults.model.primary、
+#       agents.defaults.heartbeat 等），dry-run 补丁应落在这些路径上；
+#       仍有单测（tests/test_openclaw_install.py）防止再次漂移。
+# 3. 确认后应用（幂等，可重跑）
+.venv/bin/nblane openclaw install --apply
+```
+
+或分步执行（等价）：
+
+```bash
+.venv/bin/nblane openclaw sync                          # 渲染语料+同步技能；自动化仍只出计划
+.venv/bin/nblane openclaw automations sync 王军 --apply  # 应用自动化 add/edit（不含删除）
+```
+
+验证（只读 + 一次实跑）：
+
+```bash
+.venv/bin/nblane openclaw doctor --profile 王军          # automations_in_sync 应一致
+openclaw automations list --all --json
+# 手动实跑一次每日计划确认真实投递（消耗 Token）：
+openclaw automations run <实际ID> --wait --expect-final --wait-timeout 8m --json
+```
+
+回滚：旧 `personal-assistant:*` 任务全程未被改动，即为天然回滚点——停用/删除新
+`nblane:*` 任务即可恢复原状。确需删除已下线的 `nblane:` 任务：先从声明文件移除，
+再 `nblane openclaw automations sync 王军 --apply --prune`（prune 只删 `nblane:`
+前缀及已 adopt 的 key）。config overlay 的回滚用 `openclaw config unset <键>` 或
+`.bak` 环。
+
+停机/风险：无 Gateway 重启；`install --apply` 内的插件安装
+（`openclaw plugins install --force`）与 `config patch` 均为热操作。主要风险是
+overlay 键值与生产 schema 不符——务必在第 2 步审阅 dry-run 打印的补丁全文。
+
+### CW-4 L4 Caddy `/openclaw` 反代（Control UI 子路径，新标签打开）
+
+背景：iframe 内嵌已被上游明确否决（issue #47565 closed as not-planned，
+`X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` 无配置开关），本方案是
+**同域子路径反代 + 新标签打开**，不剥离任何安全响应头。参照
+[腾讯云部署文档](deployment-tencent-cloud.md)的既有 Caddy 写法（`handle`，不用
+`handle_path`；WebSocket upgrade Caddy 自动处理）。
+
+前置检查（只读）：
+
+```bash
+ss -ltn | grep 18789                       # 应只有 127.0.0.1:18789
+curl -fsS http://127.0.0.1:18789/readyz
+sudo caddy validate --config /etc/caddy/Caddyfile   # 变更前基线必须已通过
+sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d)
+```
+
+执行：
+
+1. 编辑 `/etc/caddy/Caddyfile`，在兜底 `reverse_proxy 127.0.0.1:8501` 之前加：
+
+   ```caddyfile
+       handle /openclaw/* {
+           reverse_proxy 127.0.0.1:18789
+       }
+   ```
+
+2. 校验并生效：
+
+   ```bash
+   sudo caddy validate --config /etc/caddy/Caddyfile
+   ```
+
+3. Gateway 侧配置（走 `config patch`，先 dry-run）：
+
+   ```bash
+   openclaw config patch --stdin --dry-run <<'JSON5'
+   { "gateway": { "controlUi": { "basePath": "/openclaw" },
+                  "publicOrigin": "https://<域名>/openclaw" } }
+   JSON5
+   # dry-run 通过后去掉 --dry-run 再执行同一补丁
+   ```
+
+4. 生效：
+
+   ```bash
+   sudo systemctl reload caddy        # 优雅重载，无中断
+   openclaw gateway restart           # basePath 改动需重启 Gateway（秒级微信中断）
+   ```
+
+验证（只读）：
+
+```bash
+curl -sI https://<域名>/openclaw/     # 期望 200 text/html
+curl -fsS http://127.0.0.1:18789/readyz
+```
+
+随后桌面浏览器打开 `https://<域名>/openclaw/`，粘贴一次 token 完成 WS 握手登录，
+确认控制台可用后再用手机访问；nblane SPA `/assistant` 页的「打开控制台」按钮
+新标签指向同一地址。
+
+回滚：
+
+```bash
+# 1. 从 Caddyfile 删除 handle /openclaw/* 块（或恢复 Caddyfile.bak-<date>）
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# 2. 撤掉 Gateway 侧两个键并重启
+openclaw config unset gateway.controlUi.basePath
+openclaw config unset gateway.publicOrigin
+openclaw gateway restart
+```
+
+停机/风险：Caddy reload 无中断；一次 Gateway restart 有秒级微信中断。风险为
+basePath 配错导致 Control UI 静态资源 404——先桌面验证再上手机。
+
+### CW-5 L6 密钥 SecretRef 迁移（openclaw.json 明文 → SecretRef）
+
+现状（本指南「已知但未在本次修改的安全提示」已记录）：`openclaw.json` 中仍有明文
+Gateway token 与 rightcode API key；notify 链路的 `cron.webhookToken` 同样如此。
+nblane 侧 `NBLANE_OPENCLAW_HOOK_TOKEN` 只从 `/srv/nblane-data/.env` / 环境读取
+（`core/notify.py`，0600 权限），**不在**本次 SecretRef 范围内，但取值必须与
+迁移后的 Gateway 端保持一致。
+
+前置检查（只读）：
+
+```bash
+openclaw secrets audit --check    # 列出当前明文项，作为迁移清单
+openclaw config validate --json
+cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.pre-secretref
+```
+
+执行：
+
+```bash
+openclaw secrets configure    # 交互式配置 SecretRef provider（env provider 起步）
+openclaw secrets apply        # 把明文项替换为 SecretRef 引用
+openclaw gateway restart      # 秒级微信中断
+```
+
+验证（只读 + 一次真实推送）：
+
+```bash
+openclaw secrets audit --check    # 应无明文残留
+openclaw status --json
+/srv/nblane-app/nblane/.venv/bin/nblane notify --dry-run 'SecretRef 迁移验证'
+# dry-run 通过后发一条真实 notify，确认 webhook token 链路在迁移后仍通
+```
+
+回滚：
+
+```bash
+cp ~/.openclaw/openclaw.json.pre-secretref ~/.openclaw/openclaw.json
+openclaw gateway restart
+```
+
+迁移验证全部通过后再删除 `openclaw.json.pre-secretref`（或移入私有加密备份）；
+在此之前**不要删除任何可用认证**。
+
+停机/风险：一次 Gateway restart。主要风险是 SecretRef 引用写错导致 Gateway
+认证失败、微信通道断连——因此必须先 `audit --check` 摸清明文项、保留回滚副本、
+低峰执行。
 
 ## 相关文档
 

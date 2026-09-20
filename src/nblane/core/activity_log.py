@@ -11,6 +11,8 @@ from typing import Any, Mapping
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir
 
@@ -883,8 +885,17 @@ def load(path_or_dir: str | Path) -> ActivityLog:
 def save(
     path_or_dir: str | Path,
     data: ActivityLog | Mapping[str, Any],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> ActivityLog:
-    """Write an activity log with today's updated date."""
+    """Write an activity log with today's updated date.
+
+    The write is serialized via the activity-log.yaml sidecar lock. When
+    *expected_snapshot* is given, the file is re-checked against it after
+    the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
     path = _activity_log_path(path_or_dir)
     if path.exists():
         _load_activity_yaml(path)
@@ -907,7 +918,10 @@ def save(
         default_flow_style=False,
         sort_keys=False,
     )
-    atomic_write_text(path, header + body)
+    with locked_profile_write(path.parent, path.name):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        atomic_write_text(path, header + body)
     git_backup.record_change(
         [path],
         action=f"update {path.name}",
@@ -1055,6 +1069,7 @@ def add_habit(
     review_policy: str = "weekly_rollup",
     notes: str = "",
     on_duplicate: str = "reuse",
+    expected_snapshot: FileSnapshot | None = None,
 ) -> Habit:
     """Add one habit to the catalog, reusing existing titles by default."""
     clean_title = _clean_text(title)
@@ -1084,7 +1099,7 @@ def add_habit(
         notes=_clean_text(notes),
     )
     log.habits.append(habit)
-    save(name_or_dir, log)
+    save(name_or_dir, log, expected_snapshot=expected_snapshot)
     return habit
 
 

@@ -60,6 +60,72 @@ def build_mcp_server_entry(
     return entry
 
 
+def _first_doc_line(description: object) -> str:
+    """Return the first line of a description/docstring, or ``""``."""
+    text = str(description or "").strip()
+    if not text:
+        return ""
+    return text.splitlines()[0].strip()
+
+
+def _mcp_inventory() -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
+    """Introspect ``(resources, tools)`` from the live FastMCP registry.
+
+    Each entry is ``(uri_or_name, first_doc_line)``. Returns ``None`` when the
+    FastMCP SDK layout changes so the snippet degrades to a pointer at
+    ``nblane.mcp_server`` instead of crashing.
+    """
+    try:
+        from nblane.mcp_server import mcp
+
+        tool_manager = getattr(mcp, "_tool_manager", None)
+        resource_manager = getattr(mcp, "_resource_manager", None)
+        if tool_manager is None or resource_manager is None:
+            return None
+        tools = [
+            (str(tool.name), _first_doc_line(tool.description))
+            for tool in tool_manager.list_tools()
+        ]
+        resources = [
+            (str(res.uri), _first_doc_line(res.description))
+            for res in resource_manager.list_resources()
+        ]
+        for template in resource_manager.list_templates():
+            uri = getattr(template, "uri_template", None) or getattr(
+                template, "uriTemplate", None
+            )
+            if uri is None:
+                return None
+            resources.append((str(uri), _first_doc_line(template.description)))
+    except Exception:
+        return None
+    if not resources and not tools:
+        return None
+    return resources, tools
+
+
+def _inventory_lines() -> list[str]:
+    """Render the nblane-mcp resource/tool inventory for the snippet."""
+    inventory = _mcp_inventory()
+    if inventory is None:
+        return [
+            "- 资源与工具:无法自动内省,以 `src/nblane/mcp_server.py` 里的",
+            "  `@mcp.resource` / `@mcp.tool` 注册项为准。",
+        ]
+    resources, tools = inventory
+    lines = ["- 资源(自省自 `nblane.mcp_server`):"]
+    lines.extend(
+        f"  - `{uri}` — {desc}" if desc else f"  - `{uri}`"
+        for uri, desc in resources
+    )
+    lines.append("- 工具:")
+    lines.extend(
+        f"  - `{name}` — {desc}" if desc else f"  - `{name}`"
+        for name, desc in tools
+    )
+    return lines
+
+
 def build_openclaw_mcp_snippet(
     profile: str | None = None,
     *,
@@ -95,16 +161,12 @@ def build_openclaw_mcp_snippet(
         "",
         "```bash",
         "openclaw mcp list            # 应能看到 nblane",
-        "openclaw mcp tools nblane    # 应能列出 submit_agent_task_candidate 等工具",
+        "openclaw mcp probe nblane    # 应能列出 submit_agent_task_candidate 等工具",
         "```",
         "",
         "## 可用资源与工具(nblane-mcp)",
         "",
-        "- 资源:`profile://context`、`profile://summary`、`profile://kanban`、",
-        "  `profile://gap/{task}`、`agent://tasks`、`agent://task/{task_id}`",
-        "- 工具:`submit_agent_task_candidate`、`update_agent_task_status`、",
-        "  `append_growth_log`、`log_skill_evidence`、`log_interaction`、",
-        "  `suggest_skill_upgrade`、`crystallize_method_draft`",
+        *_inventory_lines(),
         "",
         "闭环约定:OpenClaw 是执行层,产出必须经 `submit_agent_task_candidate`",
         "进入 Agent Activity 审批队列,由人在 Web UI 处置——不要绕过审批直写。",

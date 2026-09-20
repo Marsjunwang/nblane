@@ -190,8 +190,15 @@ def mint_auth_session_token(user_id: str, ttl_seconds: int = 12 * 3600) -> str:
     return _signed_auth_payload(user_id, kind=AUTH_SESSION_KIND, ttl_seconds=ttl_seconds)
 
 
-def mint_auth_handoff_token(user_id: str, ttl_seconds: int = 120) -> str:
-    """Mint a short-lived token Streamlit can hand to the sidecar to set a cookie."""
+def mint_auth_handoff_token(user_id: str, ttl_seconds: int = 60) -> str:
+    """Mint a short-lived token the web frontends hand to the sidecar for a cookie.
+
+    The token is bearer-style and replayable within its TTL, so the lifetime
+    is kept short (default 60s — enough for the iframe bootstrap, too short
+    for comfortable reuse). The sidecar still accepts the token via URL query
+    (legacy path, lands in access logs); the one-time POST-only exchange is
+    tracked as sidecar-side follow-up work.
+    """
 
     return _signed_auth_payload(user_id, kind=AUTH_HANDOFF_KIND, ttl_seconds=ttl_seconds)
 
@@ -229,7 +236,7 @@ def verify_auth_session_token(
         exp = int(payload.get("exp") or 0)
     except (TypeError, ValueError):
         return None
-    if not user_id or not kind or exp < int(time.time()):
+    if not user_id or not kind or exp <= int(time.time()):
         return None
     if kind != str(expected_kind or "").strip():
         return None

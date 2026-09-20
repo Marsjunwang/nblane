@@ -5,6 +5,7 @@ from __future__ import annotations
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_write import atomic_write_text
 from nblane.core.paths import TEAMS_DIR
 
 
@@ -47,7 +48,7 @@ def save_team(team_id: str, data: dict) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    path.write_text(body, encoding="utf-8")
+    atomic_write_text(path, body)
     git_backup.record_change(
         [path],
         action=f"update team {team_id}/team.yaml",
@@ -64,7 +65,7 @@ def save_product_pool(team_id: str, data: dict) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    path.write_text(body, encoding="utf-8")
+    atomic_write_text(path, body)
     git_backup.record_change(
         [path],
         action=f"update team {team_id}/product-pool.yaml",

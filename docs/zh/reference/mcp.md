@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-09-18
 source_of_truth: true
 ---
 
@@ -17,8 +17,8 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 |------|------|
 | 传输 | **stdio**（由 Cursor 等客户端拉起子进程） |
 | MCP 原语 | **Resources（读）** + **Tools（写 / 建议）** |
-| 读 | `profile://summary`、`profile://kanban`、`profile://context`、`profile://gap/{task}` |
-| 写（Tools） | `append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`（仅文本建议）、`crystallize_method_draft` |
+| 读 | `profile://summary`、`profile://kanban`、`profile://context`、`profile://gap/{task}`、`profile://goals`、`profile://evidence`、`profile://inbox`、`profile://learning`、`agent://tasks`、`agent://task/{task_id}`、`agent://activity` |
+| 写（Tools） | **直写**：`capture_inbox`；**候选审批**：`submit_evidence_candidate`、`submit_kanban_candidate`、`submit_profile_model_candidate`、`submit_agent_task_candidate`；**只读自检**：`run_validate`、`run_sync_check`；**旧版字符串工具（兼容保留）**：`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`（仅文本建议）、`crystallize_method_draft`、`update_agent_task_status` |
 
 ### 已实现的具体功能（与 CLI / Web 的对应关系）
 
@@ -28,6 +28,18 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | 完整 system prompt | `profile://context` | 对齐 **`nblane context`**（含 kanban；模式由 `NBLANE_CONTEXT_MODE` 控制） |
 | 看板原文 | `profile://kanban` | 直接读 `kanban.md` |
 | **Gap 分析** | `profile://gap/{task}` | 对齐 **`nblane gap <profile> "<task>"`** 的**自然语言任务**路径：规则匹配开启；可选 LLM 路由由 `NBLANE_GAP_USE_LLM` 控制（见下） |
+| 目标摘要 | `profile://goals` | goals.yaml 状态计数 + primary/active 目标；North Star 沿用 `core/context.py` 的可见性脱敏（`private` 时正文完全不出现） |
+| 证据池摘要 | `profile://evidence` | 按 review_status 计数 + 最近 20 条（id/类型/标题/日期/状态） |
+| Inbox 未处置 | `profile://inbox` | 状态为 `inbox` / `captured` / `clarified` 的条目（id/类型/标签/创建时间） |
+| 学习摘要 | `profile://learning` | learning-log 状态计数 + 在读（reading）资源 + 最近条目 |
+| 待审批队列 | `agent://activity` | Agent Activity 状态/kind 计数 + 前 10 条 pending（id/kind/标题/创建时间） |
+
+### 结构化工具与审批分级（2026-09 新增）
+
+- 新工具（`capture_inbox`、`submit_*_candidate`、`run_validate`、`run_sync_check`）返回 **dict**，FastMCP 以 `structured_output=True` 暴露为 structuredContent + outputSchema，并带 `ToolAnnotations`（`readOnlyHint` / `destructiveHint` / `idempotentHint`）供客户端分级使用；旧版 `OK:`/`ERROR:` 字符串工具保持兼容（soft-deprecated，新集成请优先用新工具）。
+- 审批分级：只有「追加型、低解释成本」的 `capture_inbox` 直写 `inbox.yaml`（走 `core/inbox.update_inbox` 文件锁）；一切改变既有事实的操作走 `submit_*_candidate` → Agent Activity 人审。
+- `submit_evidence_candidate` / `submit_kanban_candidate` 以 `source_page="Review"` 候选入队，人在 Agent Activity 页用**既有 UI 直接 Apply**（`apply_review_activity_item` 分派；`kanban_move` 由 `core/review_actions.py` 的 `apply_review_kanban_candidate` 处置：按卡片标题精确或唯一子串匹配后移动列，找不到/歧义/未知列会把该条目标为 failed 并写明原因）。
+- `submit_profile_model_candidate` 只入队（payload 自描述：`field` / `proposed_value` / `rationale` / `target_file`），**无自动处置器**，由人手动改 `agent-profile.yaml`。
 
 ### Gap：能不能调用？与 CLI 的差异
 
@@ -40,7 +52,8 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 
 ### 未通过 MCP 暴露（请用 CLI 或 Web）
 
-- **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync`**、**`validate`**、看板**正文编辑** — 请用 **CLI** 或 **Streamlit**（见 [Web 使用手册](../guides/web-ui.md)）。
+- **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync` 写入**、看板**正文直接编辑** — 请用 **CLI** 或 **Streamlit**（见 [Web 使用手册](../guides/web-ui.md)）。
+- 其中：`validate` 与 sync **漂移检查**已通过只读工具 `run_validate` / `run_sync_check` 暴露；看板卡片移动可走 `submit_kanban_candidate` 审批流；新增证据可走 `submit_evidence_candidate` 审批流。
 - `nblane context --no-kanban`：MCP 的 `profile://context` **固定带 kanban**；若不要看板请用 CLI 或本地文件。
 
 ---
@@ -57,6 +70,11 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | `profile://gap/{task}` | **路径段 `task`** | 纯文本 | **必须**把自然语言任务放进 URI 的最后一级；**先做 URL 编码**（如空格→`%20`，中文通常 UTF-8 百分号编码）。服务端会对该段做 `urllib.parse.unquote` 后再分析。 |
 | `agent://tasks` | 无 | Markdown 文本 | 列出当前 profile 的 Codex/OpenCode handoff tasks。 |
 | `agent://task/{task_id}` | **路径段 `task_id`** | Markdown 文本 | 返回单个 agent task 的 handoff、输入 refs、预期产物和 review 规则。 |
+| `profile://goals` | 无 | Markdown 文本 | goals.yaml 摘要 + North Star（`North Star Visibility: private` 时脱敏；private 目标不出现）。 |
+| `profile://evidence` | 无 | Markdown 文本 | 证据池按 review_status 计数 + 最近 20 条；无文件时返回占位提示。 |
+| `profile://inbox` | 无 | Markdown 文本 | 未处置条目（`inbox`/`captured`/`clarified`）：id/类型/标签/创建时间。 |
+| `profile://learning` | 无 | Markdown 文本 | learning-log 状态计数 + 在读资源 + 最近 10 条。 |
+| `agent://activity` | 无 | Markdown 文本 | 待审批队列：状态/kind 计数 + 前 10 条 pending（id/kind/标题/创建时间）。 |
 
 **Agent task tools**
 
@@ -66,6 +84,19 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | `update_agent_task_status` | `task_id`, `status`, `error`, `warnings` | 更新 agent task 状态；`failed` 会同步到 Agent Activity 的 failed 状态。 |
 
 这些 agent tools 是 draft-first：不会直接改 evidence、resume、public site 或代码 patch，只更新 handoff / Activity 审阅元数据。
+
+**候选人审与自检工具（结构化返回，带 ToolAnnotations）**
+
+| Tool | 参数 | 行为 |
+|------|------|------|
+| `capture_inbox` | `title`, `raw_text`, `source`（默认 `openclaw`）, `tags`, `note` | **直写**：向 `inbox.yaml` 追加一条 `status=inbox`、`captured_by=source` 的条目（`update_inbox` 文件锁）。返回 `{ok, item_id, status, ...}`。 |
+| `submit_evidence_candidate` | `skill_id`, `title`, `evidence_type`, `date`, `url`, `summary` | 证据候选入 Agent Activity（`target_owner=evidence_pool`，pending）。人 Apply 后落入证据池，`skill_id` 记为 `skill:<id>` source ref 供后续挂接。 |
+| `submit_kanban_candidate` | `action`（目前仅 `move`）, `card_ref`, `target_section`, `note` | 看板移动候选入队（`target_owner=kanban`）。人 Apply 后按标题精确/唯一子串匹配移动卡片；`target_section` 限 Doing / Done / Queue / Someday / Maybe。 |
+| `submit_profile_model_candidate` | `field`, `proposed_value`, `rationale` | profile 模型候选入队（`target_owner=profile_context`），**无自动处置**，人手动改 `agent-profile.yaml`。 |
+| `run_validate` | 无 | 只读（`readOnlyHint`）：对当前 profile 跑 `validate_one`，返回 `{ok, errors, warnings, ...}`（列表各上限 50 条）。 |
+| `run_sync_check` | 无 | 只读（`readOnlyHint`）：返回 SKILL.md 漂移块名 `{ok, in_sync, drifted_blocks}`，不写文件。 |
+
+所有 `submit_*` 工具只入队不改事实；返回 dict 均含 `ok` 与 `item_id`（出错时 `ok=false` + `error`）。
 
 **Profile 如何选定（所有资源共用）**
 

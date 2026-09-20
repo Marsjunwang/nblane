@@ -1,0 +1,45 @@
+{
+  "id": "weixin-task-bridge",
+  "name": "Weixin Task Bridge",
+  "description": "Owner-only task controls and background progress mirroring for Weixin.",
+  "version": "0.1.0",
+  "activation": {
+    "onStartup": true,
+    "onCommands": [
+      "taskctl"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "channel": {
+        "type": "string",
+        "default": "openclaw-weixin"
+      },
+      "ownerId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "accountId": {
+        "type": "string"
+      },
+      "agentId": {
+        "type": "string",
+        "default": "main"
+      },
+      "longRunDelaySeconds": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 300,
+        "default": 30
+      },
+      "progressIntervalSeconds": {
+        "type": "integer",
+        "minimum": 30,
+        "maximum": 900,
+        "default": 60
+      }
+    }
+  }
+}

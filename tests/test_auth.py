@@ -15,9 +15,11 @@ from nblane.core.auth import (
     can_access_profile,
     hash_password,
     load_users,
+    mint_auth_session_token,
     mint_reader_token,
-    verify_reader_token,
+    verify_auth_session_token,
     verify_password,
+    verify_reader_token,
 )
 
 
@@ -122,6 +124,34 @@ class TestAuth(unittest.TestCase):
             payload, signature = token.split(".", 1)
 
             self.assertIsNone(verify_reader_token(f"{payload}x.{signature}"))
+
+    def test_session_token_expires_at_exp_boundary(self) -> None:
+        """A session token is invalid the moment ``exp`` is reached (``<=``)."""
+        import base64
+        import json as jsonlib
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"NBLANE_AUTH_SESSION_SECRET": "session-secret"},
+            clear=False,
+        ):
+            token = mint_auth_session_token("alice", ttl_seconds=60)
+            payload_b64 = token.split(".", 1)[0]
+            exp = jsonlib.loads(
+                base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
+            )["exp"]
+            with unittest.mock.patch(
+                "nblane.core.auth.time.time", return_value=exp - 1
+            ):
+                self.assertIsNotNone(verify_auth_session_token(token))
+            with unittest.mock.patch(
+                "nblane.core.auth.time.time", return_value=exp
+            ):
+                self.assertIsNone(verify_auth_session_token(token))
+            with unittest.mock.patch(
+                "nblane.core.auth.time.time", return_value=exp + 1
+            ):
+                self.assertIsNone(verify_auth_session_token(token))
 
     def test_profile_access_helper(self) -> None:
         """Admins can access all profiles; members only configured profiles."""

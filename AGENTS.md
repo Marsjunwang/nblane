@@ -56,7 +56,7 @@ Design principles that shape all changes:
 - `src/nblane/` — the Python package:
   - `cli.py` + `commands/` — CLI entry and subcommand implementations
     (`profile`, `evidence`, `ingest`, `public`, `team`, `agent`, `codex`,
-    `research`, `auth`, …).
+    `research`, `auth`, `openclaw`, …).
   - `core/` — all business logic, one module per domain concern:
     `profile_io.py` / `schema_io.py` / `kanban_io.py` / `team_io.py` (domain
     file I/O; `io.py` is a compatibility facade), `models.py` (dataclasses +
@@ -66,7 +66,7 @@ Design principles that shape all changes:
     ingest: parse → merge → preview → apply), `llm.py`, `public_site.py`,
     `research_workspace.py` + `research_papers/`, `ai/` (gateway, router,
     backends, structured output), `auth.py`, `file_state.py` (write-conflict
-    detection), `git_backup.py`.
+    detection), `file_lock.py` (advisory flock write locks), `git_backup.py`.
   - `mcp_server.py` — MCP resources/tools over stdio.
   - `web_*.py` — Streamlit helpers (shell, i18n, auth, cache, shared).
   - `*_component/` — Streamlit custom components with `frontend/` subprojects.
@@ -98,13 +98,17 @@ nblane init yourname
 nblane validate               # validate all profiles against schemas/
 nblane status                 # skill tree summary
 
-# Web dev (starts Reader API 8502 + Streamlit 8503 in tmux)
+# Web dev (starts Reader API 8502 + Streamlit 8503 + SPA backend 8504 in tmux)
 scripts/dev-web.sh            # start (default)
-scripts/dev-web.sh --isolated # ports 18502/18503, data in .dev-data/, no prod writes
+scripts/dev-web.sh --isolated # ports 18502/18503/18504, data in .dev-data/, no prod writes
 scripts/dev-web.sh status|stop
 
 # Component frontend rebuild (only for *_component/frontend changes)
 cd src/nblane/<name>_component/frontend && npm install && npm run build
+
+# SPA frontend rebuild (only for web_ui/frontend changes; output src/nblane/web_ui/static/
+# is committed + shipped via package-data, same convention as the components)
+cd src/nblane/web_ui/frontend && npm install && npm run build
 ```
 
 Environment variables that matter: `NBLANE_ROOT` (data root; defaults to repo

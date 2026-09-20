@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.yaml_io import _load_yaml_dict
+
+_T = TypeVar("_T")
 
 INBOX_FILENAME = "inbox.yaml"
 INBOX_STATUSES = (
@@ -530,9 +535,20 @@ def clarify_inbox_item(
     item_id: str,
     action: str | None = None,
     payload: dict[str, object] | None = None,
+    *,
+    expected_snapshots: dict[str, "FileSnapshot | None"] | None = None,
     **kwargs: object,
 ) -> InboxItem | dict[str, object]:
-    """Clarify an item in memory or dispatch a profile-scoped action."""
+    """Clarify an item in memory or dispatch a profile-scoped action.
+
+    *expected_snapshots* optionally carries request-start fingerprints for
+    the files the dispatch writes, keyed ``inbox`` / ``kanban`` /
+    ``learning_log`` / ``activity_log``: the kanban branch 3-way merges
+    when kanban.md changed (``save_kanban_with_merge``), the other writes
+    re-check their file inside the write lock and raise
+    ``file_state.FileConflictError`` on mismatch instead of silently
+    overwriting a concurrent edit.
+    """
     if isinstance(inbox_or_profile, Inbox):
         return _clarify_inbox_item_in_doc(
             inbox_or_profile,
@@ -553,10 +569,21 @@ def clarify_inbox_item(
     if target_action not in CLARIFY_ACTIONS:
         raise ValueError(f"Unsupported clarify action: {target_action}")
     data = dict(payload or {})
+    snaps = dict(expected_snapshots or {})
     inbox = load_inbox(inbox_or_profile) or Inbox(
         profile=_profile_name(inbox_or_profile)
     )
     item = _find_inbox_item(inbox, item_id)
+    # Best-effort early check so a stale caller exits before the dispatch
+    # writes side effects (kanban card, learning resource, habit); the
+    # authoritative re-check happens inside each save's write lock.
+    inbox_snapshot = snaps.get("inbox")
+    if inbox_snapshot is not None:
+        assert_unchanged(
+            _profile_file_path(inbox_or_profile, INBOX_FILENAME),
+            inbox_snapshot,
+            label=INBOX_FILENAME,
+        )
     result: dict[str, object] = {
         "action": target_action,
         "item_id": item.id,
@@ -570,7 +597,7 @@ def clarify_inbox_item(
             note=_clean_text(data.get("note")),
             metadata={"clarify_action": target_action},
         )
-        save_inbox(inbox_or_profile, inbox)
+        save_inbox(inbox_or_profile, inbox, expected_snapshot=inbox_snapshot)
         result["status"] = item.status
         return result
 
@@ -581,17 +608,31 @@ def clarify_inbox_item(
             note=_clean_text(data.get("note")),
             metadata={"clarify_action": target_action},
         )
-        save_inbox(inbox_or_profile, inbox)
+        save_inbox(inbox_or_profile, inbox, expected_snapshot=inbox_snapshot)
         result["status"] = item.status
         return result
 
     if target_action == "to_kanban_queue":
-        from nblane.core.io import KANBAN_QUEUE, parse_kanban, save_kanban
-        from nblane.core.kanban_io import ensure_kanban_task_ids
+        from nblane.core.kanban_io import (
+            KANBAN_QUEUE,
+            ensure_kanban_task_ids,
+            parse_kanban,
+        )
+        from nblane.core.kanban_merge import (
+            copy_kanban_sections,
+            save_kanban_with_merge,
+        )
         from nblane.core.models import KanbanTask
 
-        profile = _profile_name(inbox_or_profile)
-        sections = parse_kanban(profile)
+        # Resolve the profile dir through this module's path helpers so
+        # patched/custom profile roots are honored (the kanban modules
+        # accept a profile directory Path directly).
+        profile_path = _profile_file_path(
+            inbox_or_profile, "kanban.md"
+        ).parent
+        profile = profile_path.name
+        sections = parse_kanban(profile_path)
+        base = copy_kanban_sections(sections)
         sections.setdefault(KANBAN_QUEUE, []).append(
             KanbanTask(
                 title=_clean_text(data.get("title")) or item.title,
@@ -601,7 +642,12 @@ def clarify_inbox_item(
         )
         ensured = ensure_kanban_task_ids(sections, profile)
         task_id = ensured[KANBAN_QUEUE][-1].id
-        save_kanban(profile, ensured)
+        save_kanban_with_merge(
+            profile_path,
+            ensured,
+            base,
+            expected_snapshot=snaps.get("kanban"),
+        )
         result["target_id"] = task_id
 
     elif target_action == "to_learning_resource":
@@ -615,6 +661,7 @@ def clarify_inbox_item(
             tags=data.get("tags") or item.tags,
             summary=_clean_text(data.get("summary")) or item.raw_text,
             visibility=item.visibility,
+            expected_snapshot=snaps.get("learning_log"),
         )
         result["target_id"] = resource.id
 
@@ -629,6 +676,7 @@ def clarify_inbox_item(
             target=data.get("target"),
             tags=_clean_tags(data.get("tags") or item.tags),
             notes=_clean_text(data.get("notes") or data.get("note")),
+            expected_snapshot=snaps.get("activity_log"),
         )
         result["target_id"] = habit.id
 
@@ -652,18 +700,18 @@ def clarify_inbox_item(
         metadata=metadata,
         note=_clean_text(data.get("note")),
     )
-    save_inbox(inbox_or_profile, inbox)
+    save_inbox(inbox_or_profile, inbox, expected_snapshot=inbox_snapshot)
     result["status"] = item.status
     return result
 
 
-def save_inbox(
-    name_or_dir: str | Path,
-    data: Inbox | dict,
-) -> None:
-    """Write ``inbox.yaml`` with today's date updated."""
-    path = _profile_file_path(name_or_dir, INBOX_FILENAME)
-    inbox = data if isinstance(data, Inbox) else Inbox.from_dict(data)
+def _write_inbox(path: Path, inbox: Inbox) -> None:
+    """Serialize and atomically write ``inbox.yaml``.
+
+    The caller must hold the profile write lock for
+    ``INBOX_FILENAME`` (see ``locked_profile_write``); ``save_inbox``
+    and ``update_inbox`` are the public entry points that take it.
+    """
     inbox.profile = inbox.profile or path.parent.name
     inbox.updated = date.today().isoformat()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -679,10 +727,68 @@ def save_inbox(
         sort_keys=False,
     )
     atomic_write_text(path, header + body)
+
+
+def save_inbox(
+    name_or_dir: str | Path,
+    data: Inbox | dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> None:
+    """Write ``inbox.yaml`` with today's date updated.
+
+    When *expected_snapshot* is given, the file is re-checked against it
+    after the write lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` so a concurrent write landing between
+    the caller's read and this save is never silently overwritten.
+    """
+    path = _profile_file_path(name_or_dir, INBOX_FILENAME)
+    inbox = data if isinstance(data, Inbox) else Inbox.from_dict(data)
+    with locked_profile_write(path.parent, INBOX_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=INBOX_FILENAME)
+        _write_inbox(path, inbox)
     git_backup.record_change(
         [path],
         action=f"update {path.parent.name}/inbox.yaml",
     )
+
+
+def update_inbox(
+    name_or_dir: str | Path,
+    fn: Callable[[Inbox], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Load ``inbox.yaml``, apply *fn*, and persist — under one lock.
+
+    The whole load → mutate → write cycle holds the profile write
+    lock so concurrent writers (MCP server, UI, CLI) cannot lose each
+    other's updates. *fn* receives the loaded ``Inbox`` and mutates it
+    in place; its return value is passed through to the caller. When
+    *fn* leaves the document unchanged, no write or backup happens.
+    *fn* must not call ``save_inbox``/``update_inbox`` for the same
+    profile (the lock is not reentrant for the same file). When
+    *expected_snapshot* is given, the file is re-checked against it
+    right after the lock is acquired; a mismatch raises
+    ``file_state.FileConflictError`` before *fn* runs.
+    """
+    path = _profile_file_path(name_or_dir, INBOX_FILENAME)
+    with locked_profile_write(path.parent, INBOX_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=INBOX_FILENAME)
+        inbox = load_inbox(name_or_dir)
+        before = inbox.to_dict()
+        result = fn(inbox)
+        changed = inbox.to_dict() != before
+        if changed:
+            _write_inbox(path, inbox)
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {path.parent.name}/inbox.yaml",
+        )
+    return result
 
 
 def summarize_inbox(inbox_or_name: Inbox | str | Path) -> InboxSummary:
@@ -730,4 +836,5 @@ __all__ = [
     "load_inbox_raw",
     "save_inbox",
     "summarize_inbox",
+    "update_inbox",
 ]
