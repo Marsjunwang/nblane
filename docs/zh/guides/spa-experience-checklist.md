@@ -21,21 +21,26 @@ source_of_truth: src/nblane/web_api/、src/nblane/web_ui/frontend/、scripts/dev
 
 ## 0. 启动环境（5 分钟）
 
+> **本机（VM-0-5）注意**：默认模式的 8502 被**生产** Reader API 占用（不能杀），
+> 所以 `scripts/dev-web.sh` 默认模式在这台机器上起不来。**请用隔离模式**——
+> 端口 18502/18503/18504，数据在 `.dev-data/`（沙箱，随便折腾不污染真实数据）。
+
 ```bash
 cd /home/ubuntu/nblane
-scripts/dev-web.sh          # 启动三服务：Reader API 8502 + Streamlit 8503 + SPA 8504
-scripts/dev-web.sh status   # 确认三个 tmux session 都在
+scripts/dev-web.sh --isolated   # 启动三服务（若已在跑会提示；当前已经有一组在跑）
+scripts/dev-web.sh status       # 确认 nblane-dev-reader-api / nblane-dev-streamlit-ui / nblane-dev-web-api 都在
 ```
 
 | # | 检查 | 预期 | 结果 |
 |---|------|------|------|
-| 0.1 | 浏览器开 `http://127.0.0.1:8504/`（本地或 SSH 转发 8504） | 看到 SPA 登录页或档案列表（未开认证则直接进） | ☐ |
-| 0.2 | `curl -s http://127.0.0.1:8504/api/v1/health` | 返回 JSON `{"status":"ok"...}` | ☐ |
-| 0.3 | `curl -sI http://127.0.0.1:8504/p/alice/kanban` | 200 且返回 index.html（客户端路由回退） | ☐ |
-| 0.4 | 手机体验（可选）：SSH 转发 `ssh -L 8504:127.0.0.1:8504 服务器`，手机浏览器开电脑 IP:8504；或直接电脑开手机模拟器 | 页面可用、导航可点 | ☐ |
+| 0.1 | 浏览器开 `http://127.0.0.1:18504/`（本地或 SSH 转发 18504） | 看到 SPA 登录页或档案列表（未开认证则直接进） | ☐ |
+| 0.2 | `curl -s http://127.0.0.1:18504/api/v1/health` | 返回 JSON `{"ok":true,...}` | ☐ |
+| 0.3 | `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18504/p/dev/kanban` | 输出 `200`（客户端路由回退 index.html；注意用 GET 不要用 `-I`，HEAD 目前返回 405，已记入修复批次） | ☐ |
+| 0.4 | 手机体验（可选）：SSH 转发 `ssh -L 18504:127.0.0.1:18504 服务器`，手机浏览器开电脑 IP:18504 | 页面可用、导航可点 | ☐ |
 
-> 想用隔离数据玩（不碰真实 profiles）：`scripts/dev-web.sh --isolated`
-> （端口 18504，数据在 .dev-data/）。
+> 想体验真实 `王军` 数据：告诉我一声，我用备用端口起一组默认实例
+> （`scripts/dev-web.sh --reader-port 8512 --streamlit-port 8513 --web-api-port 8514`，
+> 绕开生产 8502）。**不要**直接 kill 8502 上的 uvicorn，那是生产服务。
 
 ---
 
@@ -43,7 +48,7 @@ scripts/dev-web.sh status   # 确认三个 tmux session 都在
 
 | # | 步骤 | 预期 | 结果 |
 |---|------|------|------|
-| 1.1 | 未登录直接访问 `http://127.0.0.1:8504/p/alice/kanban`（若启用了 NBLANE_AUTH_FILE） | 跳登录页；登录后**回到 kanban 页**而不是首页（修复 M-FE-3） | ☐ |
+| 1.1 | 未登录直接访问 `http://127.0.0.1:18504/p/dev/kanban`（若启用了 NBLANE_AUTH_FILE） | 跳登录页；登录后**回到 kanban 页**而不是首页（修复 M-FE-3） | ☐ |
 | 1.2 | 登录页输错密码 3 次 | 提示通用错误（不泄露用户是否存在）；连续错 5 次后该账号限流 60 秒 | ☐ |
 | 1.3 | 登录后左侧导航 16 项逐一点一遍 | 每页都能打开；当前页高亮正确（重点看「证据」vs「证据评审」不会同时亮） | ☐ |
 | 1.4 | 登出 | 回登录页；再访问内页被拦 | ☐ |
@@ -171,7 +176,7 @@ nblane sync-agent-harness --target openclaw --profile 王军   # 看 MCP 注册 
 |---|------|------|------|
 | 4.1 | 两标签开同一博客文章编辑，A 保存后 B 保存 | B 收到 412 冲突提示 + 刷新按钮，内容不丢（可恢复） | ☐ |
 | 4.2 | 两标签开证据评审，A 批量接受后 B 批量打标 | B 412 提示 | ☐ |
-| 4.3 | Streamlit 看板（8503）和 SPA 看板（8504）同时操作同一 profile | 不再互相静默覆盖（file_lock + 锁内快照复核） | ☐ |
+| 4.3 | Streamlit 看板（18503）和 SPA 看板（18504）同时操作同一 profile | 不再互相静默覆盖（file_lock + 锁内快照复核） | ☐ |
 
 ---
 
