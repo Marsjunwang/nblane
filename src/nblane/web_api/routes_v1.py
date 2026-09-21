@@ -29,26 +29,26 @@ inside the lock and 3-way merges instead of failing, reported via
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib.metadata
 import os
 import re
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
 from nblane.core import evidence_review as evidence_review_core
 from nblane.core import activity_log, home_dashboard, jd_match, learning_log, task_intake
 from nblane.core import auth as auth_core
-from nblane.core import profile_io, schema_io
-from nblane.core.ai.gateway import run_ai_action
+from nblane.core import profile_io, project_suggest, schema_io
 from nblane.core.claims import accepted_claims_for_profile
 from nblane.core.evidence_resolve import resolve_node_evidence_dict
 from nblane.core.experience import load_experience_book
@@ -70,6 +70,7 @@ from nblane.core import llm as llm_client
 from nblane.core.models import EVIDENCE_REVIEW_STATUSES, EvidenceRecord, KanbanTask
 from nblane.core.growth_review import build_weekly_review
 from nblane.core.public_curation import evidence_contexts
+from nblane.core.paths import REPO_ROOT
 from nblane.core.public_site import (
     BLOG_DIRNAME,
     BLOG_TAXONOMY_FILENAME,
@@ -82,6 +83,7 @@ from nblane.core.public_site import (
     PublicSiteError,
     blog_candidate_from_claims,
     blog_candidate_from_evidence,
+    build_public_site,
     create_blog_draft,
     draft_blog_from_claims,
     draft_blog_from_evidence,
@@ -94,10 +96,14 @@ from nblane.core.public_site import (
     markdown_contains_math,
     parse_blog_post,
     project_update_candidate_from_claims,
+    publish_blog_post,
     publish_blog_text,
+    render_public_site_pages,
+    render_public_site_preview,
     resume_bullet_candidates_from_claims,
     save_blog_post,
     validate_blog_text_for_publish,
+    validate_public_layer,
 )
 from nblane.core.project_board import (
     MILESTONE_STATUSES,
@@ -143,6 +149,7 @@ from nblane.core.review_actions import (
 )
 from nblane.core.status import count_nodes
 from nblane.core.sync import write_generated_blocks
+from nblane.web_api import jobs
 from nblane.web_api.auth import CurrentUser, require_user
 from nblane.web_api.schemas import (
     ActivityApplyResponse,
@@ -167,9 +174,7 @@ from nblane.web_api.schemas import (
     EvidenceSummary,
     GapAnalysisResponse,
     GapAnalyzeRequest,
-    GapClosureNodeModel,
     GapIntakeRequest,
-    GapTopMatchModel,
     GoalModel,
     GoalSummary,
     GoalsResponse,
@@ -194,6 +199,10 @@ from nblane.web_api.schemas import (
     InboxMutationResponse,
     InboxNoteRequest,
     InboxResponse,
+    JobCreateRequest,
+    JobCreateResponse,
+    JobModel,
+    JobStatusResponse,
     KanbanBoardResponse,
     KanbanCardCreateRequest,
     KanbanCardMoveRequest,
@@ -220,6 +229,16 @@ from nblane.web_api.schemas import (
     ProjectTaskCreateRequest,
     ProjectTaskModel,
     ProjectTaskMoveRequest,
+    PublicBuildArtifactModel,
+    PublicBuildDraftModel,
+    PublicBuildPreviewPageModel,
+    PublicBuildPreviewResponse,
+    PublicBuildPublishRequest,
+    PublicBuildRequest,
+    PublicBuildResponse,
+    PublicBuildResultResponse,
+    PublicBuildStateModel,
+    PublicBuildValidationModel,
     ResearchResponse,
     ResearchSourceItemModel,
     ResearchSummaryModel,
@@ -1066,6 +1085,7 @@ def _mutate_kanban_card_section(
     target: str,
     response: Response,
     if_match: str | None,
+    to_index: int | None = None,
 ) -> KanbanMutationResponse | JSONResponse:
     """Shared move/done mutation: relocate one card to *target*.
 
@@ -1073,6 +1093,10 @@ def _mutate_kanban_card_section(
     the Review kanban-move candidate). The move reuses
     ``apply_kanban_reorder(auto_dates=True)``, so landing in Done marks the
     card done with ``completed_on`` and leaving Done clears both.
+    ``to_index`` (0-based, post-removal) positions the card inside the
+    target column; ``None`` appends to the tail. Out-of-range values clamp
+    to the column head/tail (core reorder semantics, never a 422). A move
+    to the current section without ``to_index`` is an idempotent no-op.
     """
     pdir = _resolve_profile(name)
     etag = _kanban_etag(pdir)
@@ -1094,7 +1118,7 @@ def _mutate_kanban_card_section(
         raise ApiError(404, "kanban_card_not_found", match_error)
     from_section, _index, task = hit
     warnings: list[str] = []
-    if from_section == target:
+    if from_section == target and to_index is None:
         warnings.append(
             f"card {task.title.strip()!r} is already in {target!r}; "
             "no move needed"
@@ -1103,7 +1127,7 @@ def _mutate_kanban_card_section(
     else:
         moved = apply_kanban_reorder(
             sections,
-            [{"id": task.id, "to_section": target}],
+            [{"id": task.id, "to_section": target, "to_index": to_index}],
             auto_dates=True,
         )
     result = _save_kanban_mutation(pdir, moved, base, snapshot)
@@ -1132,11 +1156,19 @@ def move_profile_kanban_card(
     response: Response,
     if_match: str | None = Header(default=None),
 ) -> KanbanMutationResponse | JSONResponse:
-    """Move one card to ``target_section``. Honors ``If-Match`` (412)."""
+    """Move one card to ``target_section``. Honors ``If-Match`` (412).
+
+    ``to_index`` (optional, 0-based, post-removal) positions the card
+    inside the target column — including in-column reorders when
+    ``target_section`` is the card's current section. Omitting it appends
+    to the column tail; out-of-range values clamp (never a 422).
+    """
     target = resolve_kanban_section(body.target_section)
     if target is None:
         raise _unknown_kanban_section(body.target_section)
-    return _mutate_kanban_card_section(name, card_ref, target, response, if_match)
+    return _mutate_kanban_card_section(
+        name, card_ref, target, response, if_match, body.to_index
+    )
 
 
 @router.post(
@@ -2044,13 +2076,174 @@ def deprecate_profile_evidence_review(
     return EvidenceReviewMutationResponse(ok=True, changed=changed, missing=missing)
 
 
+JOB_RESPONSES = {
+    **ERROR_RESPONSES,
+    404: {
+        "model": ErrorResponse,
+        "description": "Job not found for this profile.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": "Unknown job kind or invalid job input.",
+    },
+}
+
+
+@router.post(
+    "/profiles/{name}/jobs",
+    response_model=JobCreateResponse,
+    status_code=202,
+    responses=JOB_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def create_profile_job(name: str, body: JobCreateRequest) -> JobCreateResponse:
+    """Create an async job for one profile (LLM long tasks).
+
+    Kinds are registered in ``nblane.web_api.jobs``: ``gap-analysis``
+    (also wired into ``POST .../gap/analyze`` with ``use_llm=true``),
+    ``studio-jd-match`` and ``project-suggest-refs`` (the SPA's async
+    paths for the sync studio/jd-match and suggest-refs endpoints, which
+    stay unchanged for backward compatibility). The job runs on a daemon
+    thread inside this single-worker process, tracked by the in-memory
+    registry (same design as the reader sidecar's paper-library search
+    jobs): poll ``GET .../jobs/{job_id}`` or subscribe to
+    ``GET .../jobs/{job_id}/stream`` (SSE) for progress and the result.
+    """
+    pdir = _resolve_profile(name)
+    try:
+        snapshot = jobs.create_job(pdir.name, body.kind, body.input)
+    except jobs.UnknownJobKindError as exc:
+        raise ApiError(422, "unknown_job_kind", str(exc)) from exc
+    except jobs.JobInputError as exc:
+        raise ApiError(422, exc.code, exc.message) from exc
+    return JobCreateResponse(job_id=snapshot["job_id"], job=JobModel(**snapshot))
+
+
+def _resolve_profile_job(name: str, job_id: str) -> tuple[str, dict[str, Any]]:
+    """Resolve ``(profile_name, job bundle)`` or 404.
+
+    Unknown ids and jobs owned by a *different* profile answer the same
+    404 so job ids cannot be probed across profiles.
+    """
+    pdir = _resolve_profile(name)
+    bundle = jobs.read_job(job_id)
+    if bundle is None or bundle["snapshot"].get("profile") != pdir.name:
+        raise ApiError(
+            404,
+            "job_not_found",
+            f"Unknown job for profile {pdir.name}: {job_id}",
+        )
+    return pdir.name, bundle
+
+
+@router.get(
+    "/profiles/{name}/jobs/{job_id}",
+    response_model=JobStatusResponse,
+    responses=JOB_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_job(name: str, job_id: str) -> JobStatusResponse:
+    """Poll one job's status; the result payload appears once done."""
+    _, bundle = _resolve_profile_job(name, job_id)
+    return JobStatusResponse(
+        job=JobModel(**bundle["snapshot"]),
+        result=bundle["result"],
+    )
+
+
+@router.get(
+    "/profiles/{name}/jobs/{job_id}/stream",
+    responses=JOB_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+async def stream_profile_job(
+    request: Request, name: str, job_id: str
+) -> StreamingResponse:
+    """SSE stream of one job's progress (reader-sidecar wire design).
+
+    Frames: ``job`` (initial snapshot, replay-safe for late subscribers),
+    ``progress`` (one per logged phase event; phases are kind-specific —
+    gap-analysis: starting/routing/merging, studio-jd-match:
+    analyzing/generating, project-suggest-refs: collecting/suggesting),
+    then a terminal ``done`` (carries the result payload) or ``error``
+    (carries the structured ``{code, message}``). Terminal frames are
+    re-derivable on reconnect — a late subscriber still receives the full
+    event log plus the outcome.
+    """
+    profile_name, _ = _resolve_profile_job(name, job_id)
+
+    async def event_generator():
+        last_seq = 0
+        sent_initial = False
+        while True:
+            bundle = jobs.read_job(job_id)
+            if bundle is None or bundle["snapshot"].get("profile") != profile_name:
+                yield jobs.sse_event(
+                    "error",
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "job_not_found",
+                            "message": "Job not found.",
+                        },
+                    },
+                )
+                break
+            snapshot = bundle["snapshot"]
+            if not sent_initial:
+                yield jobs.sse_event("job", {"ok": True, "job": snapshot})
+                sent_initial = True
+            for event in bundle["events"]:
+                if not isinstance(event, dict):
+                    continue
+                seq = int(event.get("seq") or 0)
+                if seq <= last_seq:
+                    continue
+                yield jobs.sse_event(
+                    "progress", {"ok": True, "job": snapshot, "event": event}
+                )
+                last_seq = seq
+            status = str(snapshot.get("status") or "")
+            if status == "done":
+                yield jobs.sse_event(
+                    "done",
+                    {"ok": True, "job": snapshot, "result": bundle["result"]},
+                )
+                break
+            if status == "failed":
+                yield jobs.sse_event(
+                    "error",
+                    {"ok": False, "job": snapshot, "error": snapshot.get("error")},
+                )
+                break
+            if await request.is_disconnected():
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 GAP_RESPONSES = {
     **ERROR_RESPONSES,
+    202: {
+        "model": JobCreateResponse,
+        "description": (
+            "use_llm=true: the deep analysis runs as an async "
+            "gap-analysis job; poll or stream the returned job_id."
+        ),
+    },
     422: {
         "model": ErrorResponse,
         "description": (
-            "Empty/unmatched task, missing skill tree or schema, or "
-            "use_llm requested before the async-jobs slice."
+            "Empty/unmatched task, missing skill tree or schema."
         ),
     },
 }
@@ -2062,22 +2255,35 @@ GAP_RESPONSES = {
     responses=GAP_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def analyze_profile_gap(name: str, body: GapAnalyzeRequest) -> GapAnalysisResponse:
-    """Synchronous, rule-only gap analysis for a free-text task description.
+def analyze_profile_gap(
+    name: str, body: GapAnalyzeRequest
+) -> GapAnalysisResponse | JSONResponse:
+    """Gap analysis for a free-text task description.
 
-    Wraps ``core.gap.analyze`` with rule matching only. ``use_llm=true``
-    answers 422: the LLM router performs a live blocking provider call and
-    persists learned keywords, which belongs to the async-jobs slice.
-    Analysis errors (no matching nodes, missing skill tree/schema) also
-    surface as 422 with the core error message.
+    ``use_llm=false`` (default) wraps ``core.gap.analyze`` with rule
+    matching only and answers 200 synchronously. ``use_llm=true`` runs the
+    same analysis plus the LLM router (a live blocking provider call that
+    also persists learned keywords under ``schemas/.learned/``), so it is
+    dispatched as an async ``gap-analysis`` job answering 202 — subscribe
+    to the job's SSE stream for 路由中/合并中/完成 phases and the final
+    ``GapAnalysisResponse`` payload (``analysis_mode == "rule+llm"``; when
+    the LLM router fails but rule roots suffice, the job still completes
+    with ``llm_router_error`` set). Analysis errors (no matching nodes,
+    missing skill tree/schema) surface as 422 sync, or as a failed job
+    with the same error code async.
     """
     pdir = _resolve_profile(name)
     if body.use_llm:
-        raise ApiError(
-            422,
-            "gap_llm_not_supported",
-            "LLM gap analysis requires the async-jobs slice (not implemented).",
+        try:
+            snapshot = jobs.create_job(
+                pdir.name, jobs.KIND_GAP_ANALYSIS, {"task": body.task}
+            )
+        except jobs.JobInputError as exc:
+            raise ApiError(422, exc.code, exc.message) from exc
+        payload = JobCreateResponse(
+            job_id=snapshot["job_id"], job=JobModel(**snapshot)
         )
+        return JSONResponse(status_code=202, content=payload.model_dump(mode="json"))
     result = gap.analyze(pdir.name, body.task)
     if result.error:
         raise ApiError(
@@ -2085,23 +2291,8 @@ def analyze_profile_gap(name: str, body: GapAnalyzeRequest) -> GapAnalysisRespon
             result.error_key or "gap_analysis_failed",
             result.error,
         )
-    closure = [GapClosureNodeModel(**node) for node in result.closure]
-    coverage = (
-        round(1 - len(result.gaps) / len(closure), 4) if closure else 0.0
-    )
     return GapAnalysisResponse(
-        profile=pdir.name,
-        task=result.task,
-        top_matches=[GapTopMatchModel(**m) for m in result.top_matches],
-        closure=closure,
-        gaps=list(result.gaps),
-        strong=list(result.strong),
-        can_solve=result.can_solve,
-        coverage=coverage,
-        next_steps=list(result.next_steps),
-        roots_from_rule=list(result.roots_from_rule),
-        roots_from_llm=list(result.roots_from_llm),
-        learned_merged=result.learned_merged,
+        **jobs.build_gap_analysis_payload(pdir.name, result, analysis_mode="rule")
     )
 
 
@@ -2663,34 +2854,6 @@ def _project_case_model(
     )
 
 
-def _goal_ref_options(pdir: Path) -> dict[str, str]:
-    book = load_goal_book(pdir)
-    return {
-        goal.id: f"{goal.title or goal.label or goal.id} · {goal.status}"
-        for goal in book.goals
-        if goal.id
-    }
-
-
-def _task_ref_options(pdir: Path, case_id: str = "") -> dict[str, str]:
-    """Task id -> label; tasks owned by another project are excluded.
-
-    Used by the suggest-refs candidates where only claimable tasks make
-    sense. The board GET uses ``_task_ref_option_rows`` instead, which keeps
-    every task and exposes the owner for client-side filtering.
-    """
-    out: dict[str, str] = {}
-    for section, tasks in parse_kanban(pdir).items():
-        for task in tasks:
-            if not task.id:
-                continue
-            owner = task.project_id
-            if owner and owner != case_id:
-                continue
-            out[task.id] = f"[{section}] {task.title} · {task.id}"
-    return out
-
-
 def _task_ref_option_rows(pdir: Path) -> list[ProjectRefOptionModel]:
     """All kanban tasks as option rows carrying the current owner project."""
     rows: list[ProjectRefOptionModel] = []
@@ -2708,30 +2871,6 @@ def _task_ref_option_rows(pdir: Path) -> list[ProjectRefOptionModel]:
     return rows
 
 
-def _evidence_ref_options(pdir: Path) -> dict[str, str]:
-    raw = profile_io.load_evidence_pool_raw(pdir) or {}
-    out: dict[str, str] = {}
-    for row in raw.get("evidence_entries") or []:
-        if not isinstance(row, dict):
-            continue
-        eid = str(row.get("id", "") or "").strip()
-        if not eid:
-            continue
-        title = str(row.get("title", "") or eid)
-        status = str(row.get("review_status", "") or "")
-        out[eid] = f"{title} · {status}" if status else title
-    return out
-
-
-def _source_ref_options(pdir: Path) -> dict[str, str]:
-    inbox_sources = load_research_sources(pdir)
-    return {
-        source.id: f"{source.title or source.id} · {source.status}"
-        for source in inbox_sources.sources
-        if source.id
-    }
-
-
 def _experience_ref_options(pdir: Path) -> dict[str, str]:
     book = load_experience_book(pdir)
     return {
@@ -2742,18 +2881,6 @@ def _experience_ref_options(pdir: Path) -> dict[str, str]:
         for case in book.experience_cases
         if case.id
     }
-
-
-def _output_ref_options(pdir: Path) -> dict[str, str]:
-    raw = _load_yaml_dict(pdir / "outputs.yaml") or {}
-    out: dict[str, str] = {}
-    for item in raw.get("outputs") or []:
-        if not isinstance(item, dict):
-            continue
-        oid = str(item.get("id", "") or "").strip()
-        if oid:
-            out[oid] = str(item.get("title", "") or oid)
-    return out
 
 
 def _option_rows(options: dict[str, str]) -> list[ProjectRefOptionModel]:
@@ -2940,12 +3067,12 @@ def get_profile_project_board(name: str, response: Response) -> ProjectBoardResp
             for case in board.project_cases
         ],
         options=ProjectBoardOptionsModel(
-            goals=_option_rows(_goal_ref_options(pdir)),
+            goals=_option_rows(project_suggest.goal_ref_options(pdir)),
             tasks=_task_ref_option_rows(pdir),
-            evidence=_option_rows(_evidence_ref_options(pdir)),
-            sources=_option_rows(_source_ref_options(pdir)),
+            evidence=_option_rows(project_suggest.evidence_ref_options(pdir)),
+            sources=_option_rows(project_suggest.source_ref_options(pdir)),
             experiences=_option_rows(_experience_ref_options(pdir)),
-            outputs=_option_rows(_output_ref_options(pdir)),
+            outputs=_option_rows(project_suggest.output_ref_options(pdir)),
         ),
     )
 
@@ -3378,15 +3505,6 @@ def move_profile_project_task(
     )
 
 
-PROJECT_SUGGEST_REF_FIELDS = (
-    "goal_refs",
-    "task_refs",
-    "evidence_refs",
-    "source_refs",
-    "output_refs",
-)
-
-
 @router.post(
     "/profiles/{name}/project-board/cases/{case_id}/suggest-refs",
     response_model=ProjectSuggestRefsResponse,
@@ -3405,66 +3523,25 @@ def suggest_profile_project_refs(
     for confirm-not-fill review — nothing is persisted by this endpoint.
     When no LLM backend is configured or the run fails, answers 422
     (``project_suggest_refs_failed``) so the SPA can show a degradation card.
+
+    Kept as the synchronous contract for backward compatibility; the SPA
+    now dispatches this LLM long task as an async ``project-suggest-refs``
+    job (``POST /profiles/{name}/jobs``, progress over SSE) instead. Both
+    paths share ``core.project_suggest.suggest_case_refs``.
     """
     pdir = _resolve_profile(name)
     board = load_project_board(pdir)
     case = _find_project_case(board, case_id)
-    option_maps: dict[str, dict[str, str]] = {
-        "goal_refs": _goal_ref_options(pdir),
-        "task_refs": _task_ref_options(pdir, case.id),
-        "evidence_refs": _evidence_ref_options(pdir),
-        "source_refs": _source_ref_options(pdir),
-        "output_refs": _output_ref_options(pdir),
-    }
-    payload = {
-        "reply_language": llm_client.reply_language(),
-        "project": {
-            "id": case.id,
-            "title": case.title,
-            "status": case.status,
-            "kind": case.kind,
-            "summary": case.summary,
-            "notes": case.notes,
-        },
-        "current_refs": {
-            field: list(getattr(case, field)) for field in PROJECT_SUGGEST_REF_FIELDS
-        },
-        "candidates": {
-            field: [
-                {"id": ref, "label": label}
-                for ref, label in list(options.items())[:80]
-            ]
-            for field, options in option_maps.items()
-        },
-    }
-    result = run_ai_action(
-        "project.suggest_refs",
-        payload,
-        profile=pdir.name,
-        context_refs=[case.id],
-        require_review=True,
-    )
-    if not result.ok:
-        raise ApiError(
-            422,
-            "project_suggest_refs_failed",
-            result.error or result.content or "AI ref suggestion failed.",
-        )
-    data = result.structured if isinstance(result.structured, dict) else {}
-    suggestions = {
-        field: [
-            ref
-            for ref in clean_ref_list(data.get(field))
-            if ref in option_maps.get(field, {})
-        ]
-        for field in PROJECT_SUGGEST_REF_FIELDS
-    }
+    try:
+        result = project_suggest.suggest_case_refs(pdir, case)
+    except project_suggest.SuggestRefsError as exc:
+        raise ApiError(422, exc.code, exc.message) from exc
     return ProjectSuggestRefsResponse(
         ok=True,
         backend=result.backend,
-        suggestions=suggestions,
-        rationale=str(data.get("rationale") or "").strip(),
-        warnings=clean_ref_list(data.get("warnings")) + list(result.warnings),
+        suggestions=result.suggestions,
+        rationale=result.rationale,
+        warnings=result.warnings,
     )
 
 
@@ -4185,6 +4262,11 @@ def analyze_profile_studio_jd_match(
     analysis — same degradation contract as the other LLM slices. A failed
     provider call (core returns an error string, never raises) answers 422
     ``studio_jd_match_failed``. Nothing is persisted.
+
+    Kept as the synchronous contract for backward compatibility; the SPA
+    now dispatches this LLM long task as an async ``studio-jd-match`` job
+    (``POST /profiles/{name}/jobs``, 分析中/生成中 phases over SSE) instead,
+    with the same error codes surfaced as the job's structured error.
     """
     pdir = _resolve_profile(name)
     if not llm_client.is_configured():
@@ -4207,6 +4289,394 @@ def analyze_profile_studio_jd_match(
     if analysis.startswith(("LLM error:", "AI features")):
         raise ApiError(422, "studio_jd_match_failed", analysis)
     return StudioJdMatchResponse(ok=True, analysis=analysis)
+
+
+# --- Public Build (M5): validate / build / publish the static public site -----
+
+# Cap on the flat artifact listing in the overview; totals stay accurate.
+_PUBLIC_BUILD_ARTIFACT_LIMIT = 300
+
+PUBLIC_BUILD_MUTATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    404: {
+        "model": ErrorResponse,
+        "description": "Profile, build artifact, or preview page not found.",
+    },
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match the public-layer files.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Public layer not initialized, validation/visibility gate "
+            "failed, invalid base URL, no drafts selected, or a draft "
+            "failed publish-readiness validation."
+        ),
+    },
+}
+
+
+def _public_build_output_dir(name: str) -> Path:
+    """Server-pinned static-site output directory.
+
+    Same default as ``core.public_site.build_public_site`` (``dist/public/
+    <name>`` under the data root — the sandbox root on the isolated dev
+    stack). Pinned server-side: unlike the Streamlit form, the API does not
+    accept a free-form output path.
+    """
+    return (REPO_ROOT / "dist" / "public" / name).resolve()
+
+
+def _public_build_initialized(pdir: Path) -> bool:
+    """Same four-file public-layer gate as the Streamlit page / studio."""
+    return all(
+        (pdir / filename).exists()
+        for filename in (
+            PUBLIC_PROFILE_FILENAME,
+            RESUME_SOURCE_FILENAME,
+            PROJECTS_FILENAME,
+            OUTPUTS_FILENAME,
+        )
+    )
+
+
+def _public_build_state(output_dir: Path) -> PublicBuildStateModel:
+    """Derive the build-state card from the output directory itself.
+
+    No build log is kept anywhere (Streamlit parity): the newest artifact
+    mtime stands in for the last build time, and the flat listing (capped
+    at ``_PUBLIC_BUILD_ARTIFACT_LIMIT``) feeds the artifact links.
+    """
+    state = PublicBuildStateModel(output_dir=str(output_dir))
+    if not output_dir.is_dir():
+        return state
+    newest = 0.0
+    artifacts: list[PublicBuildArtifactModel] = []
+    for path in sorted(output_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        state.total_files += 1
+        state.total_bytes += stat.st_size
+        newest = max(newest, stat.st_mtime)
+        if len(artifacts) < _PUBLIC_BUILD_ARTIFACT_LIMIT:
+            artifacts.append(
+                PublicBuildArtifactModel(
+                    path=path.relative_to(output_dir).as_posix(),
+                    size=stat.st_size,
+                    modified=datetime.fromtimestamp(stat.st_mtime).isoformat(
+                        timespec="seconds"
+                    ),
+                )
+            )
+    state.exists = state.total_files > 0
+    state.artifacts_truncated = state.total_files > len(artifacts)
+    state.artifacts = artifacts
+    if newest:
+        state.built_at = datetime.fromtimestamp(newest).isoformat(timespec="seconds")
+    return state
+
+
+@router.get(
+    "/profiles/{name}/public-build",
+    response_model=PublicBuildResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_public_build(name: str, response: Response) -> PublicBuildResponse:
+    """Public Build overview: init gate, validation, drafts, output state.
+
+    Read-only aggregation of the Streamlit page's status surface: the
+    four-file public-layer gate, the ``validate_public_layer`` outcome
+    (errors block a build), the unpublished blog drafts offered by the
+    publish-and-build section, and the observed output-directory state.
+    Carries the public-layer ETag (same fingerprint as the studio) for
+    ``If-Match`` on the build mutations.
+    """
+    pdir = _resolve_profile(name)
+    initialized = _public_build_initialized(pdir)
+    validation: PublicBuildValidationModel | None = None
+    drafts: list[PublicBuildDraftModel] = []
+    if initialized:
+        result = validate_public_layer(pdir.name, include_drafts=False)
+        validation = PublicBuildValidationModel(
+            ok=result.ok,
+            errors=list(result.errors),
+            warnings=list(result.warnings),
+        )
+        drafts = [
+            PublicBuildDraftModel(slug=post.slug, title=post.title, date=post.date)
+            for post in load_blog_posts(pdir.name, include_drafts=True)
+            if post.status == "draft"
+        ]
+    response.headers["ETag"] = _studio_etag(pdir)
+    return PublicBuildResponse(
+        profile=pdir.name,
+        initialized=initialized,
+        validation=validation,
+        drafts=drafts,
+        build=_public_build_state(_public_build_output_dir(pdir.name)),
+    )
+
+
+def _run_public_build(
+    pdir: Path,
+    body: PublicBuildRequest,
+    *,
+    published: list[str],
+) -> PublicBuildResultResponse | JSONResponse:
+    """Shared synchronous build step for build / publish-and-build.
+
+    The core builder is deterministic file rendering (no LLM, no network),
+    so it runs inline like the Streamlit button. Validation and visibility
+    failures surface as 422 ``public_build_blocked`` with the core message
+    and write nothing (the core validates before touching the output dir).
+    """
+    try:
+        result = build_public_site(
+            pdir.name,
+            out_dir=_public_build_output_dir(pdir.name),
+            include_drafts=body.include_drafts,
+            base_url=body.base_url,
+        )
+    except PublicSiteError as exc:
+        return _studio_error(
+            422, "public_build_blocked", str(exc), _studio_etag(pdir)
+        )
+    return PublicBuildResultResponse(
+        output_dir=str(result.output_dir),
+        page_count=len(result.pages),
+        pages=[
+            page.relative_to(result.output_dir).as_posix() for page in result.pages
+        ],
+        published=published,
+    )
+
+
+@router.post(
+    "/profiles/{name}/public-build/build",
+    response_model=PublicBuildResultResponse,
+    responses=PUBLIC_BUILD_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def build_profile_public_site(
+    name: str,
+    body: PublicBuildRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> PublicBuildResultResponse | JSONResponse:
+    """Build the static public site into the server-pinned output dir.
+
+    Thin wrapper over ``core.public_site.build_public_site``: the core
+    validates first (errors → 422 ``public_build_blocked``) and requires
+    ``visibility: public`` unless ``include_drafts`` is set (preview mode).
+    Honors ``If-Match`` against the public-layer ETag (412 on mismatch).
+    """
+    pdir = _resolve_profile(name)
+    etag = _studio_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _studio_error(
+            412,
+            "etag_mismatch",
+            "Public layer files changed since they were loaded; "
+            "reload before building.",
+            etag,
+        )
+    if not _public_build_initialized(pdir):
+        raise ApiError(
+            422,
+            "public_layer_not_initialized",
+            "Initialize the public layer first (POST /studio/init).",
+        )
+    result = _run_public_build(pdir, body, published=[])
+    if isinstance(result, PublicBuildResultResponse):
+        response.headers["ETag"] = _studio_etag(pdir)
+    return result
+
+
+@router.post(
+    "/profiles/{name}/public-build/publish-and-build",
+    response_model=PublicBuildResultResponse,
+    responses=PUBLIC_BUILD_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def publish_and_build_profile_public_site(
+    name: str,
+    body: PublicBuildPublishRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> PublicBuildResultResponse | JSONResponse:
+    """Publish the selected blog drafts, then build the static site.
+
+    Mirrors the Streamlit "发布草稿并构建" section: each slug goes through
+    ``publish_blog_post`` (full publish-readiness gate); the first failure
+    answers 422 ``public_publish_failed`` naming the slug, earlier slugs
+    stay published, and nothing is built. Honors ``If-Match`` against the
+    public-layer ETag (412 on mismatch) — publishing flips blog statuses.
+    """
+    pdir = _resolve_profile(name)
+    etag = _studio_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _studio_error(
+            412,
+            "etag_mismatch",
+            "Public layer files changed since they were loaded; "
+            "reload before publishing.",
+            etag,
+        )
+    if not _public_build_initialized(pdir):
+        raise ApiError(
+            422,
+            "public_layer_not_initialized",
+            "Initialize the public layer first (POST /studio/init).",
+        )
+    slugs = [slug.strip() for slug in body.slugs if slug.strip()]
+    if not slugs:
+        raise ApiError(
+            422,
+            "invalid_public_publish",
+            "Select at least one draft to publish.",
+        )
+    published: list[str] = []
+    for slug in slugs:
+        try:
+            publish_blog_post(pdir.name, slug)
+        except PublicSiteError as exc:
+            return _studio_error(
+                422,
+                "public_publish_failed",
+                f"Failed to publish {slug}: {exc}",
+                _studio_etag(pdir),
+            )
+        published.append(slug)
+    result = _run_public_build(pdir, body, published=published)
+    if isinstance(result, PublicBuildResultResponse):
+        response.headers["ETag"] = _studio_etag(pdir)
+    return result
+
+
+@router.get(
+    "/profiles/{name}/public-build/artifacts/{path:path}",
+    responses={
+        **ERROR_RESPONSES,
+        404: {
+            "model": ErrorResponse,
+            "description": "Profile not found, or artifact missing/escapes the output dir.",
+        },
+    },
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_public_build_artifact(name: str, path: str) -> FileResponse:
+    """Serve one file from the build output directory (preview/download).
+
+    Path-traversal guarded: anything resolving outside the pinned output
+    directory answers 404, same as a missing file. Auth follows the same
+    profile scope as every other route — a preview build may contain
+    drafts/private content, so artifacts are not public here.
+    """
+    pdir = _resolve_profile(name)
+    output_dir = _public_build_output_dir(pdir.name)
+    target = (output_dir / path).resolve()
+    try:
+        target.relative_to(output_dir)
+    except ValueError as exc:
+        raise ApiError(
+            404, "public_build_artifact_not_found", f"Unknown artifact: {path}"
+        ) from exc
+    if not target.is_file():
+        raise ApiError(
+            404, "public_build_artifact_not_found", f"Unknown artifact: {path}"
+        )
+    return FileResponse(target)
+
+
+@router.get(
+    "/profiles/{name}/public-build/preview",
+    response_model=PublicBuildPreviewResponse,
+    responses={
+        **ERROR_RESPONSES,
+        422: {
+            "model": ErrorResponse,
+            "description": "Public layer not initialized.",
+        },
+    },
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_public_build_preview(
+    name: str, include_drafts: bool = Query(default=True)
+) -> PublicBuildPreviewResponse:
+    """List the renderable site pages for the in-memory preview picker.
+
+    Warnings mirror ``render_public_site_preview``: validation warnings
+    plus each validation error prefixed ``preview validation:`` (the
+    preview renders even when a production build would be blocked). The
+    per-page HTML comes from ``GET .../preview/page?path=<rel>``.
+    """
+    pdir = _resolve_profile(name)
+    if not _public_build_initialized(pdir):
+        raise ApiError(
+            422,
+            "public_layer_not_initialized",
+            "Initialize the public layer first (POST /studio/init).",
+        )
+    rendered = render_public_site_pages(pdir.name, include_drafts=include_drafts)
+    validation = validate_public_layer(pdir.name, include_drafts=include_drafts)
+    warnings = list(validation.warnings)
+    warnings.extend(f"preview validation: {error}" for error in validation.errors)
+    return PublicBuildPreviewResponse(
+        include_drafts=include_drafts,
+        pages=[
+            PublicBuildPreviewPageModel(
+                path=rel, title=rendered.page_titles.get(rel, rel)
+            )
+            for rel in rendered.pages
+        ],
+        warnings=warnings,
+    )
+
+
+@router.get(
+    "/profiles/{name}/public-build/preview/page",
+    responses={
+        **ERROR_RESPONSES,
+        404: {
+            "model": ErrorResponse,
+            "description": "Profile or preview page not found.",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "Public layer not initialized.",
+        },
+    },
+    dependencies=PROFILE_DEPENDENCY,
+    response_class=HTMLResponse,
+)
+def get_profile_public_build_preview_page(
+    name: str,
+    path: str = Query(default="index.html"),
+    include_drafts: bool = Query(default=True),
+) -> HTMLResponse:
+    """Render one preview page as self-contained HTML (inline CSS/media).
+
+    Same payload the Streamlit page iframes via ``components.html``: CSS
+    and local media are inlined as data URIs, so the page renders stand-
+    alone in the SPA iframe. Unknown page paths answer 404.
+    """
+    pdir = _resolve_profile(name)
+    if not _public_build_initialized(pdir):
+        raise ApiError(
+            422,
+            "public_layer_not_initialized",
+            "Initialize the public layer first (POST /studio/init).",
+        )
+    preview = render_public_site_preview(pdir.name, include_drafts=include_drafts)
+    html = preview.pages.get(path)
+    if html is None:
+        raise ApiError(
+            404, "public_preview_page_not_found", f"Unknown preview page: {path}"
+        )
+    return HTMLResponse(content=html)
 
 
 # --- Home + Research (M4): overview reads and sidecar cohesion ----------------
@@ -4255,13 +4725,16 @@ def _sidecar_info(name: str, user: CurrentUser) -> SidecarInfoModel:
         except auth_core.AuthConfigError:
             handoff = ""
     query = urlencode({"profile": name})
+    # compact=1: the embedded dashboard drops its permanent inspector rail in
+    # favour of an on-demand drawer (implemented in the home_dashboard
+    # component), so the 3D galaxy keeps the full iframe width at hero sizes.
     return SidecarInfoModel(
         base=base,
         configured=configured,
         auth_enabled=auth_on,
         handoff_token=handoff,
         paper_library_url=f"{base}/paper-library?{query}",
-        dashboard_url=f"{base}/dashboard?{query}&embed=1",
+        dashboard_url=f"{base}/dashboard?{query}&embed=1&view=3d&compact=1",
     )
 
 

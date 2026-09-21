@@ -6,51 +6,105 @@ import {
   Card,
   Center,
   Group,
-  List,
   Loader,
   Progress,
-  RingProgress,
-  SimpleGrid,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
-import { IconExternalLink, IconPlayerPlay } from '@tabler/icons-react';
-import { useState } from 'react';
+import { IconExternalLink, IconRefresh } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useHome } from '../api/hooks';
-import type { SidecarInfo } from '../api/types';
 import { SidecarFrame } from '../components/SidecarFrame';
 
-const SKILL_STATUS_COLORS: Record<string, string> = {
-  expert: 'green',
-  solid: 'teal',
-  learning: 'yellow',
-  locked: 'gray',
-};
+type SidecarStatus = 'pending' | 'up' | 'down';
 
-const QUICK_LINKS = [
-  { label: '看板', path: 'kanban' },
-  { label: '技能树', path: 'skill-tree' },
-  { label: '目标', path: 'goals' },
-  { label: '证据评审', path: 'evidence-review' },
-  { label: '周回顾', path: 'review' },
-  { label: '研究台', path: 'research' },
-  { label: '输出工作室', path: 'studio' },
-];
+// Probe the sidecar before embedding: an opaque no-cors fetch resolves when
+// the origin answers (any status) and rejects when the connection is
+// refused — the case that used to leave a browser "refused to connect" page
+// inside the iframe. Same-origin ('' base, production single-port proxy) is
+// trusted without probing.
+function useSidecarStatus(base: string | undefined): {
+  status: SidecarStatus;
+  retry: () => void;
+} {
+  const [nonce, setNonce] = useState(0);
+  const [status, setStatus] = useState<SidecarStatus>('pending');
 
-function sidecarOriginLabel(sidecar: SidecarInfo): string {
-  if (!sidecar.base) {
-    return '同源';
-  }
-  return sidecar.configured ? `已配置 · ${sidecar.base}` : `默认 · ${sidecar.base}`;
+  useEffect(() => {
+    if (!base) {
+      setStatus('up');
+      return;
+    }
+    let cancelled = false;
+    setStatus('pending');
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 4000);
+    fetch(`${base}/auth/session-ok`, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(() => {
+        if (!cancelled) {
+          setStatus('up');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus('down');
+        }
+      })
+      .finally(() => window.clearTimeout(timer));
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [base, nonce]);
+
+  return { status, retry: () => setNonce((value) => value + 1) };
+}
+
+// Metric chip floating over the galaxy; clicking dives into the owning page.
+function MetricChip({
+  to,
+  label,
+  testId,
+}: {
+  to: string;
+  label: string;
+  testId: string;
+}) {
+  return (
+    <Button
+      component={Link}
+      to={to}
+      size="compact-sm"
+      variant="default"
+      data-testid={testId}
+      style={{ backdropFilter: 'blur(8px)', opacity: 0.92 }}
+    >
+      {label}
+    </Button>
+  );
 }
 
 export function HomePage() {
   const { name = '' } = useParams();
   const home = useHome(name);
-  const [dashboardEmbedded, setDashboardEmbedded] = useState(false);
+  const sidecarBase = home.data?.sidecar?.base;
+  const sidecarPort = (() => {
+    if (!sidecarBase) return '';
+    try {
+      return new URL(sidecarBase).port || '443';
+    } catch {
+      return '';
+    }
+  })();
+  const { status: sidecarStatus, retry: retrySidecar } = useSidecarStatus(sidecarBase);
 
   if (home.isPending) {
     return (
@@ -71,323 +125,236 @@ export function HomePage() {
   const skills = data.skills;
   const kanban = data.kanban;
   const evidence = data.evidence;
+  const activity = data.agent_activity;
   const sidecar = data.sidecar;
-  const skillCounts = skills?.counts ?? {};
-  const skillTotal = skills?.total ?? 0;
   const northStar = data.north_star;
   const primaryGoal = data.primary_goal;
+  const doing = (kanban?.doing ?? []).slice(0, 3);
+  const profilePath = (path: string) => `/p/${encodeURIComponent(name)}/${path}`;
+  const litPercent = Math.round((skills?.lit_rate ?? 0) * 100);
+  const todoEmpty =
+    (activity?.pending_total ?? 0) === 0 &&
+    (evidence?.needs_review_count ?? 0) === 0 &&
+    doing.length === 0;
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between" align="flex-start">
-        <div>
-          <Title order={2}>{data.profile} · 首页</Title>
-          {northStar?.is_set ? (
-            <Text c="dimmed" size="sm" mt={4}>
-              北极星:{northStar.brief || northStar.full}
-            </Text>
-          ) : (
-            <Text c="dimmed" size="sm" mt={4}>
-              尚未设置北极星。
-            </Text>
-          )}
-        </div>
-        <Group gap="xs">
-          {QUICK_LINKS.map((link) => (
-            <Button
-              key={link.path}
-              component={Link}
-              to={`/p/${encodeURIComponent(name)}/${link.path}`}
-              variant="default"
-              size="compact-sm"
-            >
-              {link.label}
-            </Button>
-          ))}
-        </Group>
-      </Group>
+    <Stack gap="xl" py="md">
+      <Stack gap={4}>
+        <Title order={2}>{data.profile} · 首页</Title>
+        {northStar?.is_set ? (
+          <Text c="dimmed">{northStar.brief || northStar.full}</Text>
+        ) : (
+          <Text c="dimmed">尚未设置北极星。</Text>
+        )}
+      </Stack>
 
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-        <Card withBorder radius="md" padding="lg" data-testid="home-goal-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor component={Link} to={`/p/${encodeURIComponent(name)}/goals`} fw={600}>
-              当前目标
-            </Anchor>
-            <Badge variant="light" color="brand">
-              活跃 {data.goal_counts?.active ?? 0} / 共 {data.goal_counts?.total ?? 0}
-            </Badge>
-          </Group>
-          {primaryGoal ? (
-            <Stack gap="xs">
-              <Text fw={500}>{primaryGoal.title}</Text>
-              {primaryGoal.target && (
-                <Text size="sm" c="dimmed">
-                  目标日期:{primaryGoal.target}
-                </Text>
-              )}
-              {primaryGoal.progress !== null && primaryGoal.progress !== undefined ? (
-                <Progress
-                  value={Math.round(primaryGoal.progress * 100)}
-                  aria-label="目标进度"
-                />
-              ) : (
-                <Text size="sm" c="dimmed">
-                  暂无关联项目,进度待项目推进后自动推导。
-                </Text>
-              )}
-              <Group gap="xs">
-                <Badge variant="outline" color="gray">
-                  项目 {primaryGoal.project_count}
-                </Badge>
-                {primaryGoal.stalled && (
-                  <Badge variant="light" color="orange">
-                    超过 30 天无任务活动
-                  </Badge>
-                )}
-              </Group>
-            </Stack>
-          ) : (
-            <Text c="dimmed" size="sm">
-              暂无主目标。
-            </Text>
-          )}
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-skills-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor
-              component={Link}
-              to={`/p/${encodeURIComponent(name)}/skill-tree`}
-              fw={600}
-            >
-              技能树
-            </Anchor>
-            {(skills?.evidence_risk_count ?? 0) > 0 && (
-              <Badge variant="light" color="red">
-                证据风险 {skills?.evidence_risk_count}
-              </Badge>
+      <Card withBorder radius="lg" padding="xl" data-testid="home-focus-card">
+        {primaryGoal ? (
+          <Stack gap="sm">
+            <Group justify="space-between" align="flex-start">
+              <Text fw={600} size="lg">
+                {primaryGoal.title}
+              </Text>
+              <Anchor component={Link} to={profilePath('goals')} size="sm">
+                全部目标
+              </Anchor>
+            </Group>
+            {primaryGoal.target && (
+              <Text size="sm" c="dimmed">
+                目标日期:{primaryGoal.target}
+              </Text>
             )}
-          </Group>
-          {skills?.has_tree ? (
-            <Group wrap="nowrap">
-              <RingProgress
-                size={96}
-                thickness={10}
-                label={
-                  <Text ta="center" size="xs" fw={600}>
-                    {Math.round((skills.lit_rate ?? 0) * 100)}%
-                  </Text>
-                }
-                sections={Object.entries(skillCounts)
-                  .filter(([, count]) => count > 0)
-                  .map(([status, count]) => ({
-                    value: skillTotal ? (count / skillTotal) * 100 : 0,
-                    color: SKILL_STATUS_COLORS[status] ?? 'gray',
-                    tooltip: `${status}: ${count}`,
-                  }))}
+            {primaryGoal.progress !== null && primaryGoal.progress !== undefined ? (
+              <Progress
+                value={Math.round(primaryGoal.progress * 100)}
+                aria-label="目标进度"
+                size="lg"
+                radius="xl"
               />
-              <Stack gap={4}>
-                <Text size="sm">
-                  点亮 {skills.lit} / {skillTotal}
-                </Text>
-                {Object.entries(skillCounts).map(([status, count]) => (
-                  <Badge key={status} variant="light" color={SKILL_STATUS_COLORS[status] ?? 'gray'}>
-                    {status}: {count}
-                  </Badge>
-                ))}
-              </Stack>
-            </Group>
-          ) : (
-            <Text c="dimmed" size="sm">
-              尚未建立技能树。
-            </Text>
-          )}
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-kanban-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor component={Link} to={`/p/${encodeURIComponent(name)}/kanban`} fw={600}>
-              看板
-            </Anchor>
+            ) : (
+              <Text size="sm" c="dimmed">
+                暂无关联项目,进度待项目推进后自动推导。
+              </Text>
+            )}
             <Group gap="xs">
-              {Object.entries(kanban?.counts ?? {}).map(([section, count]) => (
-                <Badge key={section} variant="light" color="gray">
-                  {section}: {count}
+              <Badge variant="light" color="gray">
+                项目 {primaryGoal.project_count}
+              </Badge>
+              {primaryGoal.stalled && (
+                <Badge variant="light" color="orange">
+                  超过 30 天无任务活动
                 </Badge>
-              ))}
+              )}
             </Group>
-          </Group>
-          {(kanban?.doing ?? []).length > 0 ? (
-            <List size="sm" spacing={4}>
-              {(kanban?.doing ?? []).map((task) => (
-                <List.Item key={task.id || task.title}>
-                  {task.title}
-                  {task.started_on && (
-                    <Text span size="xs" c="dimmed">
-                      {' '}
-                      · {task.started_on}
-                    </Text>
-                  )}
-                </List.Item>
-              ))}
-            </List>
-          ) : (
-            <Text c="dimmed" size="sm">
-              Doing 列为空。
-            </Text>
-          )}
-          {(kanban?.done_uncrystallized_count ?? 0) > 0 && (
-            <Text size="xs" c="dimmed" mt="xs">
-              {kanban?.done_uncrystallized_count} 张已完成卡片待结晶。
-            </Text>
-          )}
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-evidence-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor
-              component={Link}
-              to={`/p/${encodeURIComponent(name)}/evidence-review`}
-              fw={600}
-            >
-              证据待办
+          </Stack>
+        ) : (
+          <Group justify="space-between">
+            <Text c="dimmed">暂无主目标。</Text>
+            <Anchor component={Link} to={profilePath('goals')} size="sm">
+              去目标页设置
             </Anchor>
-            <Badge variant="light" color="gray">
-              共 {evidence?.total_entries ?? 0}
-            </Badge>
           </Group>
-          <Group gap="xs">
-            <Badge variant="light" color="yellow">
-              待评审 {evidence?.needs_review_count ?? 0}
-            </Badge>
-            <Badge variant="light" color="gray">
-              未挂链 {evidence?.unlinked_count ?? 0}
-            </Badge>
-            <Badge variant="light" color="red">
-              状态风险 {evidence?.status_risk_count ?? 0}
-            </Badge>
-            <Badge variant="light" color="orange">
-              待结晶 {evidence?.done_uncrystallized_count ?? 0}
-            </Badge>
-          </Group>
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-research-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor component={Link} to={`/p/${encodeURIComponent(name)}/research`} fw={600}>
-              研究
-            </Anchor>
-            <Badge variant="light" color="gray">
-              共 {data.sources?.total ?? 0}
-            </Badge>
-          </Group>
-          <Text size="sm">进行中来源 {data.sources?.active_total ?? 0}</Text>
-          {(data.sources?.active_titles ?? []).length > 0 && (
-            <Text size="xs" c="dimmed" mt={4} lineClamp={2}>
-              {(data.sources?.active_titles ?? []).join(' · ')}
-            </Text>
-          )}
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-activity-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor component={Link} to={`/p/${encodeURIComponent(name)}/activity`} fw={600}>
-              代理活动
-            </Anchor>
-            <Badge variant="light" color="gray">
-              共 {data.agent_activity?.total ?? 0}
-            </Badge>
-          </Group>
-          <Text size="sm">待审批 {data.agent_activity?.pending_total ?? 0}</Text>
-          {(data.agent_activity?.pending_titles ?? []).map((title) => (
-            <Text key={title} size="xs" c="dimmed" lineClamp={1}>
-              {title}
-            </Text>
-          ))}
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-projects-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor
-              component={Link}
-              to={`/p/${encodeURIComponent(name)}/project-board`}
-              fw={600}
-            >
-              项目
-            </Anchor>
-            <Badge variant="light" color="gray">
-              共 {data.projects?.total ?? 0}
-            </Badge>
-          </Group>
-          <Group gap="xs">
-            {Object.entries(data.projects?.status_counts ?? {}).map(([status, count]) => (
-              <Badge key={status} variant="light" color="gray">
-                {status}: {count}
-              </Badge>
-            ))}
-          </Group>
-        </Card>
-
-        <Card withBorder radius="md" padding="lg" data-testid="home-health-card">
-          <Group justify="space-between" mb="xs">
-            <Anchor component={Link} to={`/p/${encodeURIComponent(name)}/health`} fw={600}>
-              健康
-            </Anchor>
-            <Badge variant="light" color={data.health?.context_ready ? 'green' : 'yellow'}>
-              {data.health?.context_ready ? '上下文可发布' : '上下文暂不可发布'}
-            </Badge>
-          </Group>
-          <Group gap="xs">
-            {Object.entries(data.health?.counts ?? {}).map(([severity, count]) => (
-              <Badge key={severity} variant="light" color="gray">
-                {severity}: {count}
-              </Badge>
-            ))}
-          </Group>
-        </Card>
-      </SimpleGrid>
+        )}
+      </Card>
 
       {sidecar && (
-        <Card withBorder radius="md" padding="lg" data-testid="home-dashboard-card">
-          <Group justify="space-between" mb="xs">
-            <div>
-              <Text fw={600}>3D 成长仪表盘</Text>
-              <Text size="xs" c="dimmed">
-                由 Reader API sidecar 承载({sidecarOriginLabel(sidecar)})
-              </Text>
-            </div>
-            <Group gap="xs">
-              <Button
-                component="a"
-                href={sidecar.dashboard_url}
-                target="_blank"
-                rel="noreferrer"
-                variant="default"
-                size="compact-sm"
-                leftSection={<IconExternalLink size={14} />}
-              >
-                新标签打开
-              </Button>
-              <Button
-                variant="light"
-                size="compact-sm"
-                leftSection={<IconPlayerPlay size={14} />}
-                onClick={() => setDashboardEmbedded((value) => !value)}
-              >
-                {dashboardEmbedded ? '收起嵌入' : '嵌入显示'}
-              </Button>
-            </Group>
+        <Card
+          withBorder
+          radius="lg"
+          padding="lg"
+          data-testid="home-galaxy-hero"
+        >
+          <Group justify="space-between" mb="sm">
+            <Text fw={600}>成长星系</Text>
+            <Button
+              component="a"
+              href={sidecar.dashboard_url}
+              target="_blank"
+              rel="noreferrer"
+              variant="subtle"
+              size="compact-sm"
+              leftSection={<IconExternalLink size={14} />}
+            >
+              新标签打开
+            </Button>
           </Group>
-          {dashboardEmbedded && (
-            <SidecarFrame
-              title="3D 成长仪表盘"
-              url={sidecar.dashboard_url}
-              base={sidecar.base}
-              handoffToken={sidecar.handoff_token}
-            />
+          {sidecarStatus === 'pending' && (
+            <Center py="xl" data-testid="home-galaxy-probing">
+              <Loader size="sm" />
+            </Center>
+          )}
+          {sidecarStatus === 'up' && (
+            <div style={{ position: 'relative' }}>
+              <SidecarFrame
+                title="3D 成长仪表盘"
+                url={sidecar.dashboard_url}
+                base={sidecar.base}
+                handoffToken={sidecar.handoff_token}
+                // Viewport-relative with a floor/ceiling: the embedded
+                // dashboard canvas needs ~600-900px to show the galaxy
+                // without an internal scrollbar at laptop (800px-tall)
+                // through large-monitor (1440px-tall) viewport heights.
+                height="clamp(640px, calc(100vh - 180px), 900px)"
+              />
+              <Group
+                gap="xs"
+                style={{ position: 'absolute', top: 4, left: 4 }}
+                data-testid="home-galaxy-metrics"
+              >
+                {skills?.has_tree && (
+                  <MetricChip
+                    to={profilePath('skill-tree')}
+                    label={`技能点亮 ${skills.lit}/${skills.total} · ${litPercent}%`}
+                    testId="home-metric-skills"
+                  />
+                )}
+                {(kanban?.doing_total ?? 0) > 0 && (
+                  <MetricChip
+                    to={profilePath('kanban')}
+                    label={`进行中 ${kanban?.doing_total}`}
+                    testId="home-metric-kanban"
+                  />
+                )}
+              </Group>
+            </div>
+          )}
+          {sidecarStatus === 'down' && (
+            <Stack gap="md" py="lg" data-testid="home-galaxy-fallback">
+              <Group justify="space-around" wrap="wrap">
+                {skills?.has_tree && (
+                  <Stack gap={2} align="center">
+                    <Text fw={700} size="xl">
+                      {litPercent}%
+                    </Text>
+                    <Text size="sm" c="dimmed">
+                      技能点亮 {skills.lit}/{skills.total}
+                    </Text>
+                  </Stack>
+                )}
+                <Stack gap={2} align="center">
+                  <Text fw={700} size="xl">
+                    {kanban?.doing_total ?? 0}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    进行中任务
+                  </Text>
+                </Stack>
+                <Stack gap={2} align="center">
+                  <Text fw={700} size="xl">
+                    {evidence?.needs_review_count ?? 0}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    待评审证据
+                  </Text>
+                </Stack>
+              </Group>
+              <Group justify="center" gap="sm">
+                <Text size="sm" c="dimmed">
+                  3D 仪表盘服务暂时不可达,以上为静态指标。
+                </Text>
+                <Button
+                  variant="light"
+                  size="compact-sm"
+                  leftSection={<IconRefresh size={14} />}
+                  onClick={retrySidecar}
+                >
+                  重试
+                </Button>
+              </Group>
+              <Text size="xs" c="dimmed" ta="center" data-testid="sidecar-down-hint">
+                仪表盘由浏览器直连 {sidecarBase || 'sidecar'} ——若你通过 SSH 远程访问,请确认同时转发了该端口(如
+                ssh -L {sidecarPort}:127.0.0.1:{sidecarPort} &lt;服务器&gt;);若服务未启动,先运行 scripts/dev-web.sh。
+              </Text>
+            </Stack>
           )}
         </Card>
       )}
+
+      <Card withBorder radius="lg" padding="lg" data-testid="home-today-band">
+        <Group justify="space-between" align="center" wrap="wrap" gap="md">
+          <Text fw={600}>今日待办</Text>
+          {todoEmpty ? (
+            <Text size="sm" c="dimmed">
+              没有待办,去 inbox 记一条灵感吧。
+            </Text>
+          ) : (
+            <Group gap="lg" wrap="wrap">
+              {(activity?.pending_total ?? 0) > 0 && (
+                <Anchor
+                  component={Link}
+                  to={profilePath('activity')}
+                  size="sm"
+                  data-testid="home-todo-approvals"
+                >
+                  待审批 {activity?.pending_total}
+                </Anchor>
+              )}
+              {(evidence?.needs_review_count ?? 0) > 0 && (
+                <Anchor
+                  component={Link}
+                  to={profilePath('evidence-review')}
+                  size="sm"
+                  data-testid="home-todo-review"
+                >
+                  待评审 {evidence?.needs_review_count}
+                </Anchor>
+              )}
+              {doing.map((task) => (
+                <Anchor
+                  key={task.id || task.title}
+                  component={Link}
+                  to={profilePath('kanban')}
+                  size="sm"
+                  c="dimmed"
+                  data-testid="home-todo-doing"
+                >
+                  {task.title}
+                </Anchor>
+              ))}
+            </Group>
+          )}
+        </Group>
+      </Card>
     </Stack>
   );
 }

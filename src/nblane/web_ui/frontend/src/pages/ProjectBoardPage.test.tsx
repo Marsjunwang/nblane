@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -106,6 +106,64 @@ function boardResponse(body: unknown = BOARD): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+const SUGGEST_CREATED_JOB = {
+  ok: true,
+  job_id: 'job-sug123',
+  job: {
+    job_id: 'job-sug123',
+    profile: 'alice',
+    kind: 'project-suggest-refs',
+    status: 'queued',
+    phase: 'queued',
+    message: 'Queued AI ref suggestion.',
+    created_at: 1,
+    started_at: 0,
+    finished_at: 0,
+    elapsed_ms: 0,
+    error: null,
+  },
+};
+
+type Listener = (event: Event) => void;
+
+/** Minimal EventSource stand-in for jsdom (which has no EventSource). */
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+
+  readonly url: string;
+  closed = false;
+  private listeners = new Map<string, Listener[]>();
+
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: Listener) {
+    const arr = this.listeners.get(type) ?? [];
+    arr.push(listener);
+    this.listeners.set(type, arr);
+  }
+
+  removeEventListener() {}
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type: string, data: unknown) {
+    const event = new MessageEvent(type, { data: JSON.stringify(data) });
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+beforeEach(() => {
+  MockEventSource.instances = [];
+  vi.stubGlobal('EventSource', MockEventSource);
 });
 
 function renderPage() {
@@ -363,23 +421,11 @@ describe('ProjectBoardPage', () => {
     );
   });
 
-  it('shows AI suggestions and merges them into the form on confirm', async () => {
+  it('runs AI suggest-refs as a job: progress, then suggestions merged on confirm', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes('/suggest-refs')) {
-        return jsonResponse(200, {
-          ok: true,
-          backend: 'fake',
-          suggestions: {
-            goal_refs: [],
-            task_refs: ['task-free'],
-            evidence_refs: [],
-            source_refs: [],
-            output_refs: [],
-          },
-          rationale: 'closest matches',
-          warnings: [],
-        });
+      if (url.endsWith('/profiles/alice/jobs')) {
+        return jsonResponse(202, SUGGEST_CREATED_JOB);
       }
       if (url.includes('/save')) {
         const body = JSON.parse(String(init?.body));
@@ -396,9 +442,65 @@ describe('ProjectBoardPage', () => {
     renderPage();
     const detail = await selectRobotArm();
     fireEvent.click(within(detail).getByTestId('suggest-refs-button'));
+
+    // Job created through the generic endpoint; queued progress card shows.
+    expect(await within(detail).findByTestId('suggest-progress')).toBeInTheDocument();
+    expect(within(detail).getByText('排队中')).toBeInTheDocument();
+    expect(within(detail).getByTestId('suggest-refs-button')).toBeDisabled();
+    const createCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith('/profiles/alice/jobs'),
+    );
+    expect(
+      JSON.parse(String((createCall?.[1] as RequestInit | undefined)?.body)),
+    ).toEqual({ kind: 'project-suggest-refs', input: { case_id: 'project:robot-arm' } });
+    expect(MockEventSource.instances).toHaveLength(1);
+    const source = MockEventSource.instances[0];
+    expect(source.url).toBe('/api/v1/profiles/alice/jobs/job-sug123/stream');
+
+    act(() => {
+      source.emit('progress', {
+        ok: true,
+        job: { ...SUGGEST_CREATED_JOB.job, status: 'running', phase: 'collecting' },
+        event: { seq: 1, phase: 'collecting', message: '收集目标/任务/证据/资料/输出候选。' },
+      });
+    });
+    expect(await within(detail).findByText('收集候选')).toBeInTheDocument();
+
+    act(() => {
+      source.emit('progress', {
+        ok: true,
+        job: { ...SUGGEST_CREATED_JOB.job, status: 'running', phase: 'suggesting' },
+        event: { seq: 2, phase: 'suggesting', message: 'AI 正在生成引用建议。' },
+      });
+    });
+    expect(await within(detail).findByText('生成建议')).toBeInTheDocument();
+
+    act(() => {
+      source.emit('done', {
+        ok: true,
+        job: { ...SUGGEST_CREATED_JOB.job, status: 'done', phase: 'done' },
+        result: {
+          ok: true,
+          backend: 'fake',
+          suggestions: {
+            goal_refs: [],
+            task_refs: ['task-free'],
+            evidence_refs: [],
+            source_refs: [],
+            output_refs: [],
+          },
+          rationale: 'closest matches',
+          warnings: [],
+        },
+      });
+    });
+
+    // Suggestions replace progress; confirm-not-fill merge is unchanged.
     const result = await within(detail).findByTestId('suggest-result');
     expect(result).toHaveTextContent('共 1 条建议');
     expect(result).toHaveTextContent('任务: task-free');
+    expect(within(detail).queryByTestId('suggest-progress')).not.toBeInTheDocument();
+    expect(source.closed).toBe(true);
     fireEvent.click(within(result).getByRole('button', { name: '合并到表单' }));
     expect(within(detail).queryByTestId('suggest-result')).not.toBeInTheDocument();
     fireEvent.click(within(detail).getByRole('button', { name: '保存项目' }));
@@ -407,14 +509,11 @@ describe('ProjectBoardPage', () => {
     );
   });
 
-  it('shows a degradation card when AI suggest-refs answers 422', async () => {
+  it('shows a degradation card when the suggest-refs job fails structured', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/suggest-refs')) {
-        return jsonResponse(422, {
-          code: 'project_suggest_refs_failed',
-          message: 'routing_error: no backend available',
-        });
+      if (url.endsWith('/profiles/alice/jobs')) {
+        return jsonResponse(202, SUGGEST_CREATED_JOB);
       }
       if (url.includes('/profiles/alice/project-board')) {
         return boardResponse();
@@ -426,9 +525,58 @@ describe('ProjectBoardPage', () => {
     renderPage();
     const detail = await selectRobotArm();
     fireEvent.click(within(detail).getByTestId('suggest-refs-button'));
+
+    expect(await within(detail).findByTestId('suggest-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+    act(() => {
+      source.emit('error', {
+        ok: false,
+        job: { ...SUGGEST_CREATED_JOB.job, status: 'failed', phase: 'failed' },
+        error: {
+          code: 'project_suggest_refs_failed',
+          message: 'routing_error: no backend available',
+        },
+      });
+    });
+
     const error = await within(detail).findByTestId('suggest-error');
     expect(error).toHaveTextContent('AI 建议不可用');
     expect(error).toHaveTextContent('no backend available');
+    expect(within(detail).queryByTestId('suggest-progress')).not.toBeInTheDocument();
+    expect(source.closed).toBe(true);
+  });
+
+  it('shows a red failure alert for non-degradation suggest-refs job errors', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/profiles/alice/jobs')) {
+        return jsonResponse(202, SUGGEST_CREATED_JOB);
+      }
+      if (url.includes('/profiles/alice/project-board')) {
+        return boardResponse();
+      }
+      return jsonResponse(404, { code: 'not_found', message: 'not found' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    const detail = await selectRobotArm();
+    fireEvent.click(within(detail).getByTestId('suggest-refs-button'));
+
+    expect(await within(detail).findByTestId('suggest-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+    act(() => {
+      source.emit('error', {
+        ok: false,
+        job: { ...SUGGEST_CREATED_JOB.job, status: 'failed', phase: 'failed' },
+        error: { code: 'project_case_not_found', message: 'Unknown project case: x' },
+      });
+    });
+
+    const alert = await within(detail).findByTestId('suggest-failed');
+    expect(alert).toHaveTextContent('AI 建议失败');
+    expect(alert).toHaveTextContent('Unknown project case');
+    expect(within(detail).queryByTestId('suggest-error')).not.toBeInTheDocument();
   });
 
   it('shows an error alert when the board fails to load', async () => {

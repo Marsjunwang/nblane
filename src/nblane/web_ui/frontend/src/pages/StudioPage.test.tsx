@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -74,8 +74,66 @@ interface MockOptions {
   checkResponse?: Response;
   previewResponse?: Response;
   draftResponse?: Response;
-  jdResponse?: Response;
+  jobCreateResponse?: Response;
 }
+
+const JD_CREATED_JOB = {
+  ok: true,
+  job_id: 'job-jd123',
+  job: {
+    job_id: 'job-jd123',
+    profile: 'alice',
+    kind: 'studio-jd-match',
+    status: 'queued',
+    phase: 'queued',
+    message: 'Queued JD match analysis.',
+    created_at: 1,
+    started_at: 0,
+    finished_at: 0,
+    elapsed_ms: 0,
+    error: null,
+  },
+};
+
+type Listener = (event: Event) => void;
+
+/** Minimal EventSource stand-in for jsdom (which has no EventSource). */
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+
+  readonly url: string;
+  closed = false;
+  private listeners = new Map<string, Listener[]>();
+
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: Listener) {
+    const arr = this.listeners.get(type) ?? [];
+    arr.push(listener);
+    this.listeners.set(type, arr);
+  }
+
+  removeEventListener() {}
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type: string, data: unknown) {
+    const event = new MessageEvent(type, { data: JSON.stringify(data) });
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+beforeEach(() => {
+  MockEventSource.instances = [];
+  vi.stubGlobal('EventSource', MockEventSource);
+});
 
 function mockApi(options: MockOptions = {}) {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -135,14 +193,8 @@ function mockApi(options: MockOptions = {}) {
         })
       );
     }
-    if (url.endsWith('/studio/jd-match')) {
-      return (
-        options.jdResponse ??
-        jsonResponse(422, {
-          code: 'studio_jd_match_unavailable',
-          message: 'JD match analysis requires a configured LLM backend',
-        })
-      );
+    if (url.endsWith('/profiles/alice/jobs') && method === 'POST') {
+      return options.jobCreateResponse ?? jsonResponse(202, JD_CREATED_JOB);
     }
     return jsonResponse(404, { code: 'not_found', message: `no mock for ${method} ${url}` });
   });
@@ -275,7 +327,65 @@ describe('StudioPage', () => {
     expect(created).toHaveTextContent('2026-09-20-claim');
   });
 
-  it('shows the LLM degradation card when JD match is unavailable', async () => {
+  it('runs the JD match as a job: progress phases, then the analysis card', async () => {
+    const { calls } = mockApi();
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'JD 匹配' }));
+    const resumeInput = await screen.findByLabelText('简历内容');
+    const jdInput = screen.getByLabelText(/目标 JD/);
+    fireEvent.change(resumeInput, { target: { value: '# Resume' } });
+    fireEvent.change(jdInput, { target: { value: 'Robotics engineer' } });
+    fireEvent.click(screen.getByRole('button', { name: '分析 JD 匹配' }));
+
+    // Job created through the generic endpoint; queued progress card shows.
+    expect(await screen.findByTestId('jd-progress')).toBeInTheDocument();
+    expect(screen.getByText('排队中')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '分析 JD 匹配' })).toBeDisabled();
+    const createCall = calls.find((c) => c.url.endsWith('/profiles/alice/jobs'));
+    expect(JSON.parse(String(createCall?.init?.body))).toEqual({
+      kind: 'studio-jd-match',
+      input: { resume_md: '# Resume', jd_text: 'Robotics engineer' },
+    });
+    expect(MockEventSource.instances).toHaveLength(1);
+    const source = MockEventSource.instances[0];
+    expect(source.url).toBe('/api/v1/profiles/alice/jobs/job-jd123/stream');
+
+    act(() => {
+      source.emit('progress', {
+        ok: true,
+        job: { ...JD_CREATED_JOB.job, status: 'running', phase: 'analyzing' },
+        event: { seq: 1, phase: 'analyzing', message: '分析中:汇总档案证据与简历上下文。' },
+      });
+    });
+    expect(await screen.findByText('分析中')).toBeInTheDocument();
+
+    act(() => {
+      source.emit('progress', {
+        ok: true,
+        job: { ...JD_CREATED_JOB.job, status: 'running', phase: 'generating' },
+        event: { seq: 2, phase: 'generating', message: '生成中:LLM 正在撰写匹配分析。' },
+      });
+    });
+    expect(await screen.findByText('生成中')).toBeInTheDocument();
+
+    act(() => {
+      source.emit('done', {
+        ok: true,
+        job: { ...JD_CREATED_JOB.job, status: 'done', phase: 'done' },
+        result: { ok: true, analysis: '## 匹配分析\n\n✅ 符合' },
+      });
+    });
+
+    // Result replaces progress; the analysis card renders the markdown.
+    const card = await screen.findByTestId('jd-analysis');
+    expect(card).toHaveTextContent('## 匹配分析');
+    expect(screen.queryByTestId('jd-progress')).not.toBeInTheDocument();
+    expect(source.closed).toBe(true);
+    expect(screen.getByRole('button', { name: '分析 JD 匹配' })).toBeEnabled();
+  });
+
+  it('shows the LLM degradation card when the JD match job is unavailable', async () => {
     mockApi();
     renderPage();
 
@@ -286,9 +396,69 @@ describe('StudioPage', () => {
     fireEvent.change(jdInput, { target: { value: 'Robotics engineer' } });
     fireEvent.click(screen.getByRole('button', { name: '分析 JD 匹配' }));
 
+    expect(await screen.findByTestId('jd-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+    act(() => {
+      source.emit('error', {
+        ok: false,
+        job: { ...JD_CREATED_JOB.job, status: 'failed', phase: 'failed' },
+        error: {
+          code: 'studio_jd_match_unavailable',
+          message: 'JD match analysis requires a configured LLM backend',
+        },
+      });
+    });
+
     const degraded = await screen.findByTestId('jd-degraded');
     expect(degraded).toHaveTextContent('AI 分析不可用');
     expect(degraded).toHaveTextContent('其余功能不受影响');
+    expect(screen.queryByTestId('jd-progress')).not.toBeInTheDocument();
+    expect(source.closed).toBe(true);
+  });
+
+  it('shows a failure alert when the JD match job fails', async () => {
+    mockApi();
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'JD 匹配' }));
+    fireEvent.change(await screen.findByLabelText('简历内容'), { target: { value: '# R' } });
+    fireEvent.change(screen.getByLabelText(/目标 JD/), { target: { value: 'JD' } });
+    fireEvent.click(screen.getByRole('button', { name: '分析 JD 匹配' }));
+
+    expect(await screen.findByTestId('jd-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+    act(() => {
+      source.emit('error', {
+        ok: false,
+        job: { ...JD_CREATED_JOB.job, status: 'failed', phase: 'failed' },
+        error: { code: 'studio_jd_match_failed', message: 'LLM error: provider timeout' },
+      });
+    });
+
+    const alert = await screen.findByTestId('jd-error');
+    expect(alert).toHaveTextContent('分析失败');
+    expect(alert).toHaveTextContent('LLM error: provider timeout');
+    expect(screen.queryByTestId('jd-degraded')).not.toBeInTheDocument();
+  });
+
+  it('shows a creation error when the JD match job cannot be created', async () => {
+    mockApi({
+      jobCreateResponse: jsonResponse(422, {
+        code: 'invalid_jd_match_request',
+        message: 'Both resume_md and jd_text are required.',
+      }),
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'JD 匹配' }));
+    fireEvent.change(await screen.findByLabelText('简历内容'), { target: { value: '# R' } });
+    fireEvent.change(screen.getByLabelText(/目标 JD/), { target: { value: 'JD' } });
+    fireEvent.click(screen.getByRole('button', { name: '分析 JD 匹配' }));
+
+    const alert = await screen.findByTestId('jd-create-error');
+    expect(alert).toHaveTextContent('创建分析任务失败');
+    expect(alert).toHaveTextContent('Both resume_md and jd_text are required.');
+    expect(MockEventSource.instances).toHaveLength(0);
   });
 
   it('keeps an unsaved editor draft when a studio mutation refetches the post', async () => {

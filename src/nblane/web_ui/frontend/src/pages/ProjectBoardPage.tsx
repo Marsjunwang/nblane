@@ -9,6 +9,7 @@ import {
   Loader,
   MultiSelect,
   NativeSelect,
+  Progress,
   Select,
   Stack,
   Table,
@@ -28,20 +29,20 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { ApiError } from '../api/client';
 import { MutationErrorAlert } from '../components/ConflictAlert';
 import {
   useAddProjectMilestone,
   useAddProjectTask,
   useArchiveProjectCase,
+  useCreateJob,
   useCreateProjectCase,
   useDeleteProjectMilestone,
   useMoveProjectTask,
   useProjectBoard,
   useSaveProjectCase,
   useSaveProjectMilestone,
-  useSuggestProjectRefs,
 } from '../api/hooks';
+import { streamJob } from '../api/jobs';
 import type {
   ProjectBoard,
   ProjectCase,
@@ -153,6 +154,25 @@ const SUGGEST_FIELD_LABELS: Record<string, string> = {
   source_refs: '资料',
   output_refs: '输出',
 };
+
+/** Backend suggest-refs job phases -> Chinese label + coarse progress percentage. */
+const SUGGEST_PHASES: Record<string, { label: string; pct: number }> = {
+  queued: { label: '排队中', pct: 10 },
+  starting: { label: '启动中', pct: 20 },
+  collecting: { label: '收集候选', pct: 45 },
+  suggesting: { label: '生成建议', pct: 80 },
+  done: { label: '完成', pct: 100 },
+};
+
+function suggestPhase(phase: string): { label: string; pct: number } {
+  return SUGGEST_PHASES[phase] ?? { label: phase || '进行中', pct: 40 };
+}
+
+interface SuggestJobProgress {
+  jobId: string;
+  phase: string;
+  message: string;
+}
 
 /** Refetch the project board after a 412 conflict. */
 function useRefreshBoard() {
@@ -296,10 +316,15 @@ function BasicsTab({
   const [draft, setDraft] = useState<CaseDraft>(() => draftFromCase(projectCase));
   const [dirty, setDirty] = useState(false);
   const [suggestions, setSuggestions] = useState<ProjectSuggestRefsResponse | null>(null);
+  const [suggestJob, setSuggestJob] = useState<SuggestJobProgress | null>(null);
+  const [suggestError, setSuggestError] = useState<{ code: string; message: string } | null>(
+    null,
+  );
   const save = useSaveProjectCase(name);
   const archive = useArchiveProjectCase(name);
-  const suggest = useSuggestProjectRefs(name);
+  const createJob = useCreateJob(name);
   const refreshBoard = useRefreshBoard();
+  const stopStreamRef = useRef<(() => void) | null>(null);
 
   // CaseDetail is keyed by case id only, so board-level refetches re-render
   // this tab instead of remounting it. Follow server-side changes only while
@@ -312,6 +337,21 @@ function BasicsTab({
     }
   }, [projectCase, dirty]);
 
+  const stopStream = () => {
+    stopStreamRef.current?.();
+    stopStreamRef.current = null;
+  };
+
+  // Cancel the SSE subscription on unmount and whenever the profile or case
+  // changes; a stale stream must never write another case's state.
+  useEffect(() => {
+    setSuggestJob(null);
+    setSuggestions(null);
+    setSuggestError(null);
+    return stopStream;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, projectCase.id]);
+
   const set = <K extends keyof CaseDraft>(field: K, value: CaseDraft[K]) => {
     setDirty(true);
     setDraft((prev) => ({ ...prev, [field]: value }));
@@ -323,11 +363,56 @@ function BasicsTab({
       { onSuccess: () => setDirty(false) },
     );
 
-  const runSuggest = () =>
-    suggest.mutate(
-      { caseId: projectCase.id },
-      { onSuccess: (result) => setSuggestions(result) },
+  const runSuggest = () => {
+    stopStream();
+    setSuggestJob(null);
+    setSuggestions(null);
+    setSuggestError(null);
+    createJob.mutate(
+      { kind: 'project-suggest-refs', input: { case_id: projectCase.id } },
+      {
+        onSuccess: (created) => {
+          const jobId = created.job_id;
+          setSuggestJob({ jobId, phase: created.job.phase || 'queued', message: '' });
+          stopStreamRef.current = streamJob(name, jobId, {
+            onProgress: (frame) => {
+              setSuggestJob((prev) =>
+                prev && prev.jobId === jobId
+                  ? {
+                      jobId,
+                      phase: frame.event?.phase || frame.job?.phase || prev.phase,
+                      message: frame.event?.message || prev.message,
+                    }
+                  : prev,
+              );
+            },
+            onDone: (frame) => {
+              stopStream();
+              setSuggestJob(null);
+              if (frame.result) {
+                setSuggestions(frame.result as unknown as ProjectSuggestRefsResponse);
+              } else {
+                setSuggestError({
+                  code: 'empty_result',
+                  message: '任务完成但未返回结果,请重试。',
+                });
+              }
+            },
+            onError: (frame) => {
+              stopStream();
+              setSuggestJob(null);
+              setSuggestError(
+                frame?.error ?? {
+                  code: 'stream_error',
+                  message: '进度流中断,请稍后重试。',
+                },
+              );
+            },
+          });
+        },
+      },
     );
+  };
 
   const mergeSuggestions = () => {
     if (!suggestions) {
@@ -351,13 +436,10 @@ function BasicsTab({
     setSuggestions(null);
   };
 
-  const suggestError =
-    suggest.isError && suggest.error instanceof ApiError && suggest.error.status === 422
-      ? suggest.error
-      : null;
   const suggestionCount = suggestions
     ? Object.values(suggestions.suggestions ?? {}).reduce((sum, list) => sum + list.length, 0)
     : 0;
+  const suggestUnavailable = suggestError?.code === 'project_suggest_refs_failed';
 
   return (
     <Stack gap="sm">
@@ -466,7 +548,8 @@ function BasicsTab({
           variant="default"
           leftSection={<IconBulb size={14} />}
           onClick={runSuggest}
-          loading={suggest.isPending}
+          loading={createJob.isPending}
+          disabled={Boolean(suggestJob)}
           data-testid="suggest-refs-button"
         >
           AI 建议引用
@@ -484,14 +567,41 @@ function BasicsTab({
         )}
       </Group>
 
-      {suggestError && (
+      {createJob.isError && (
+        <Alert color="red" title="创建建议任务失败" data-testid="suggest-create-error">
+          {createJob.error.message}
+        </Alert>
+      )}
+      {suggestJob && (
+        <Card withBorder radius="md" padding="sm" data-testid="suggest-progress">
+          <Group justify="space-between" align="center">
+            <Text fw={500} size="sm">
+              AI 建议引用进行中
+            </Text>
+            <Badge color="violet" variant="light">
+              {suggestPhase(suggestJob.phase).label}
+            </Badge>
+          </Group>
+          <Progress
+            value={suggestPhase(suggestJob.phase).pct}
+            color="violet"
+            animated
+            mt="xs"
+            aria-label="AI 建议进度"
+          />
+          <Text size="xs" c="dimmed" mt="xs">
+            {suggestJob.message || 'AI 正在分析项目与候选引用,通常需要十几秒。'}
+          </Text>
+        </Card>
+      )}
+      {suggestUnavailable && suggestError && (
         <Alert color="yellow" title="AI 建议不可用" data-testid="suggest-error">
           {suggestError.message}。配置 LLM 后重试;其余功能不受影响。
         </Alert>
       )}
-      {suggest.isError && !suggestError && (
-        <Alert color="red" title="AI 建议失败">
-          {suggest.error.message}
+      {suggestError && !suggestUnavailable && (
+        <Alert color="red" title="AI 建议失败" data-testid="suggest-failed">
+          {suggestError.message}
         </Alert>
       )}
       {suggestions && (

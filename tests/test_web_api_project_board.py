@@ -662,7 +662,7 @@ class TestProjectSuggestRefs(ProjectBoardTestBase):
             _template_profile(root)
             client = self._client(root)
             with patch(
-                "nblane.web_api.routes_v1.run_ai_action", return_value=result
+                "nblane.core.project_suggest.run_ai_action", return_value=result
             ):
                 response = client.post(
                     "/api/v1/profiles/alice/project-board/cases/project:robot-arm"
@@ -693,7 +693,7 @@ class TestProjectSuggestRefs(ProjectBoardTestBase):
             _template_profile(root)
             client = self._client(root)
             with patch(
-                "nblane.web_api.routes_v1.run_ai_action", return_value=result
+                "nblane.core.project_suggest.run_ai_action", return_value=result
             ):
                 response = client.post(
                     "/api/v1/profiles/alice/project-board/cases/project:robot-arm"

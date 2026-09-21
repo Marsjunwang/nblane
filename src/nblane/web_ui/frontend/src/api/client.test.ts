@@ -108,6 +108,26 @@ describe('api client', () => {
     expect(queryClient.getQueryState(['auth', 'me'])?.status).not.toBe('success');
   });
 
+  it('keeps Content-Type: application/json when init carries extra headers (If-Match)', async () => {
+    // Regression: spreading `init` after `headers` used to drop Content-Type
+    // whenever a mutation passed ifMatch(etag); fetch then defaulted the
+    // string body to text/plain and FastAPI 422'd every write.
+    const fetchMock = vi.fn(async () => jsonResponse(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiPost<{ ok: boolean }>('/profiles/dev/kanban/cards', { title: 'x' }, {
+      headers: ifMatch('W/"abc"'),
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/profiles/dev/kanban/cards',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'If-Match': 'W/"abc"' },
+        body: JSON.stringify({ title: 'x' }),
+      }),
+    );
+  });
+
   it('ifMatch omits the header for an empty ETag and sets it otherwise', () => {
     expect(ifMatch('')).toEqual({});
     expect(ifMatch('W/"abc"')).toEqual({ 'If-Match': 'W/"abc"' });

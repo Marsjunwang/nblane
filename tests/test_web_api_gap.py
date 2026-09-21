@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +13,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from nblane.core import auth as auth_core
+from nblane.core.gap_llm_router import RouterOutcome
 from nblane.web_api import app, create_app
 
 PASSWORD = "correct horse battery staple"
@@ -192,19 +194,46 @@ class TestGapAnalyze(GapTestBase):
         self.assertEqual(whitespace.status_code, 422)
         self.assertEqual(whitespace.json()["code"], "empty_task")
 
-    def test_analyze_use_llm_422(self) -> None:
+    def test_analyze_use_llm_creates_job_202(self) -> None:
+        """use_llm=true dispatches an async gap-analysis job (202).
+
+        The full job lifecycle (progress events, LLM degradation, learned
+        keywords) is covered in tests/test_web_api_jobs.py. The router is
+        patched here too so the test never depends on LLM configuration.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             root = base / "profiles"
             _write_profile(root, tree=SKILL_TREE)
             schemas = _write_schemas(base)
             client = self._client(root, schemas)
+            router = patch(
+                "nblane.core.gap_llm_router.route_task_to_nodes",
+                return_value=RouterOutcome(ok=True, node_ids=[], keywords={}),
+            )
+            self.addCleanup(router.stop)
+            router.start()
             response = client.post(
                 "/api/v1/profiles/alice/gap/analyze",
                 json={"task": "grasp manipulation", "use_llm": True},
             )
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["code"], "gap_llm_not_supported")
+            self.assertEqual(response.status_code, 202)
+            payload = response.json()
+            job_id = payload["job_id"]
+            # Let the worker reach a final state before tmp teardown.
+            deadline = time.monotonic() + 10
+            status = ""
+            while status not in {"done", "failed"}:
+                self.assertLess(time.monotonic(), deadline)
+                status = client.get(
+                    f"/api/v1/profiles/alice/jobs/{job_id}"
+                ).json()["job"]["status"]
+                time.sleep(0.05)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["job_id"], payload["job"]["job_id"])
+        self.assertEqual(payload["job"]["kind"], "gap-analysis")
+        self.assertEqual(payload["job"]["profile"], "alice")
+        self.assertEqual(status, "done")
 
     def test_analyze_unmatched_task_422(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

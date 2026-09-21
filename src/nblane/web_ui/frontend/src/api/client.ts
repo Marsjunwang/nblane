@@ -8,6 +8,11 @@ import type { QueryClient } from '@tanstack/react-query';
 
 const API_BASE = '/api/v1';
 
+/** Base path of the JSON API (same origin). Used by the SSE job stream. */
+export function apiBase(): string {
+  return API_BASE;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -82,9 +87,9 @@ async function requestWithHeaders<T>(
   init?: RequestInit,
 ): Promise<{ data: T; headers: Headers }> {
   const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
   });
   if (!res.ok) {
     if (res.status === 401) {

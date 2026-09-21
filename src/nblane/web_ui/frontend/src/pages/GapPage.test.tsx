@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -30,7 +30,91 @@ const RESULT = {
   roots_from_rule: ['manipulation'],
   roots_from_llm: [],
   learned_merged: false,
+  analysis_mode: 'rule',
+  llm_router_error: null,
 };
+
+const LLM_RESULT = {
+  ...RESULT,
+  top_matches: [
+    { id: 'manipulation', label: 'Manipulation', score: 3, source: 'rule' },
+    { id: 'navigation', label: 'Navigation', score: 0, source: 'llm' },
+  ],
+  closure: [
+    ...RESULT.closure,
+    { id: 'navigation', label: 'Navigation', status: 'locked', is_gap: true, evidence_count: 0 },
+  ],
+  gaps: ['manipulation', 'grasp_planning', 'navigation'],
+  coverage: 1 / 4,
+  roots_from_llm: ['navigation'],
+  learned_merged: true,
+  analysis_mode: 'rule+llm',
+  llm_router_error: null,
+};
+
+const CREATED_JOB = {
+  ok: true,
+  job_id: 'job-abc123',
+  job: {
+    job_id: 'job-abc123',
+    profile: 'alice',
+    kind: 'gap-analysis',
+    status: 'queued',
+    phase: 'queued',
+    message: 'Queued gap deep analysis.',
+    created_at: 1,
+    started_at: 0,
+    finished_at: 0,
+    elapsed_ms: 0,
+    error: null,
+  },
+};
+
+type Listener = (event: Event) => void;
+
+/** Minimal EventSource stand-in for jsdom (which has no EventSource). */
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+
+  readonly url: string;
+  closed = false;
+  private listeners = new Map<string, Listener[]>();
+
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: Listener) {
+    const arr = this.listeners.get(type) ?? [];
+    arr.push(listener);
+    this.listeners.set(type, arr);
+  }
+
+  removeEventListener() {}
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type: string, data: unknown) {
+    const event = new MessageEvent(type, { data: JSON.stringify(data) });
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+
+  emitTransportError() {
+    for (const listener of this.listeners.get('error') ?? []) {
+      listener(new Event('error'));
+    }
+  }
+}
+
+beforeEach(() => {
+  MockEventSource.instances = [];
+  vi.stubGlobal('EventSource', MockEventSource);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -43,6 +127,13 @@ function renderPage() {
     </Routes>,
     '/p/alice/gap',
   );
+}
+
+function fillAndStartDeep() {
+  fireEvent.change(screen.getByLabelText('任务描述'), {
+    target: { value: '用机械臂完成抓取任务' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '深度分析(LLM)' }));
 }
 
 describe('GapPage', () => {
@@ -86,8 +177,9 @@ describe('GapPage', () => {
     expect(screen.getByText('建议行动')).toBeInTheDocument();
     expect(screen.getByText(/Advance 'manipulation'/)).toBeInTheDocument();
 
-    // LLM hint card.
-    expect(screen.getByText(/LLM 深度分析需要后续异步任务支持/)).toBeInTheDocument();
+    // Rule results point at the deep-analysis button (no LLM badge yet).
+    expect(screen.getByText(/以上为规则匹配结果/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '深度分析(LLM)' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -100,6 +192,18 @@ describe('GapPage', () => {
 
     expect(await screen.findByText('请先描述要分析的任务。')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('validates an empty task for the deep analysis without posting', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '深度分析(LLM)' }));
+
+    expect(await screen.findByText('请先描述要分析的任务。')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
   });
 
   it('shows an error alert when the analysis request fails', async () => {
@@ -159,5 +263,168 @@ describe('GapPage', () => {
 
     expect(await screen.findByText('已创建')).toBeInTheDocument();
     expect(screen.getByText('学习任务已加入看板 Queue。')).toBeInTheDocument();
+  });
+});
+
+describe('GapPage deep analysis (LLM job + SSE)', () => {
+  function stubJobCreation() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/profiles/alice/gap/analyze')) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          task: '用机械臂完成抓取任务',
+          use_llm: true,
+        });
+        return jsonResponse(202, CREATED_JOB);
+      }
+      return jsonResponse(404, { code: 'not_found', message: 'not found' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('creates a job, streams progress phases, and renders the LLM result', async () => {
+    stubJobCreation();
+    renderPage();
+    fillAndStartDeep();
+
+    // Progress card appears with the queued phase; the stream opened.
+    expect(await screen.findByTestId('gap-deep-progress')).toBeInTheDocument();
+    expect(screen.getByText('排队中')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '深度分析(LLM)' })).toBeDisabled();
+    expect(MockEventSource.instances).toHaveLength(1);
+    const source = MockEventSource.instances[0];
+    expect(source.url).toBe('/api/v1/profiles/alice/jobs/job-abc123/stream');
+
+    act(() => {
+      source.emit('progress', {
+        ok: true,
+        job: { ...CREATED_JOB.job, status: 'running', phase: 'routing' },
+        event: { seq: 1, phase: 'routing', message: 'LLM is routing the task.' },
+      });
+    });
+    expect(await screen.findByText('路由中')).toBeInTheDocument();
+
+    act(() => {
+      source.emit('progress', {
+        ok: true,
+        job: { ...CREATED_JOB.job, status: 'running', phase: 'merging' },
+        event: { seq: 2, phase: 'merging', message: 'Merging matches.' },
+      });
+    });
+    expect(await screen.findByText('合并中')).toBeInTheDocument();
+
+    act(() => {
+      source.emit('done', {
+        ok: true,
+        job: { ...CREATED_JOB.job, status: 'done', phase: 'done' },
+        result: LLM_RESULT,
+      });
+    });
+
+    // Result replaces progress; LLM origin is annotated on the same layout.
+    expect(await screen.findByText('LLM 深度分析')).toBeInTheDocument();
+    expect(screen.queryByTestId('gap-deep-progress')).not.toBeInTheDocument();
+    expect(source.closed).toBe(true);
+    const origins = screen.getByTestId('gap-root-origins');
+    expect(origins).toHaveTextContent('根因来源:规则 1 项(manipulation) · LLM 1 项(navigation)');
+    expect(origins).toHaveTextContent('LLM 关键词已并入学习库');
+    const gapSection = screen.getByTestId('gap-missing-section');
+    expect(gapSection).toHaveTextContent('能力差距 (3)');
+    expect(gapSection).toHaveTextContent('Navigation');
+    // The rule-only hint alert is gone for deep results.
+    expect(screen.queryByText(/以上为规则匹配结果/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '深度分析(LLM)' })).toBeEnabled();
+  });
+
+  it('renders the degraded alert when the LLM router failed', async () => {
+    stubJobCreation();
+    renderPage();
+    fillAndStartDeep();
+    expect(await screen.findByTestId('gap-deep-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+
+    act(() => {
+      source.emit('done', {
+        ok: true,
+        job: { ...CREATED_JOB.job, status: 'done', phase: 'done' },
+        result: {
+          ...LLM_RESULT,
+          roots_from_llm: [],
+          learned_merged: false,
+          llm_router_error: 'LLM not configured',
+        },
+      });
+    });
+
+    const degraded = await screen.findByTestId('gap-llm-degraded');
+    expect(degraded).toHaveTextContent('LLM 不可用,已回退为规则分析');
+    expect(degraded).toHaveTextContent('LLM not configured');
+    // The rule-rooted result still renders.
+    expect(screen.getByTestId('gap-missing-section')).toBeInTheDocument();
+  });
+
+  it('shows a failure alert when the job fails', async () => {
+    stubJobCreation();
+    renderPage();
+    fillAndStartDeep();
+    expect(await screen.findByTestId('gap-deep-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+
+    act(() => {
+      source.emit('error', {
+        ok: false,
+        job: { ...CREATED_JOB.job, status: 'failed', phase: 'failed' },
+        error: { code: 'no_roots', message: 'No skill nodes matched.' },
+      });
+    });
+
+    const alert = await screen.findByTestId('gap-deep-error');
+    expect(alert).toHaveTextContent('No skill nodes matched.');
+    expect(screen.queryByTestId('gap-deep-progress')).not.toBeInTheDocument();
+    expect(source.closed).toBe(true);
+  });
+
+  it('shows a stream-failure alert on transport errors', async () => {
+    stubJobCreation();
+    renderPage();
+    fillAndStartDeep();
+    expect(await screen.findByTestId('gap-deep-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+
+    act(() => {
+      source.emitTransportError();
+    });
+
+    const alert = await screen.findByTestId('gap-deep-error');
+    expect(alert).toHaveTextContent('进度流中断');
+    expect(source.closed).toBe(true);
+  });
+
+  it('shows a creation error when the job cannot be created', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(422, { code: 'empty_task', message: 'Empty task text.' }),
+      ),
+    );
+    renderPage();
+    fillAndStartDeep();
+
+    expect(await screen.findByText('创建深度分析任务失败')).toBeInTheDocument();
+    expect(screen.getByText('Empty task text.')).toBeInTheDocument();
+    expect(MockEventSource.instances).toHaveLength(0);
+  });
+
+  it('unsubscribes the SSE stream on unmount', async () => {
+    stubJobCreation();
+    const view = renderPage();
+    fillAndStartDeep();
+    expect(await screen.findByTestId('gap-deep-progress')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+    expect(source.closed).toBe(false);
+
+    view.unmount();
+    expect(source.closed).toBe(true);
   });
 });

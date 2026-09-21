@@ -2,13 +2,22 @@ import { test, expect } from "@playwright/test";
 
 test.setTimeout(90000);
 
+// Streamlit WebGL galaxy walkthrough (software GL on this headless
+// 2-CPU/3.75GB sandbox). At the tail of a full-suite run the initial
+// networkidle navigation can outrun the default 30s navigation budget under
+// accumulated session load (it passes standalone in ~17s, and after small
+// subsets). The goto below gets a wider 45s budget and one scoped retry
+// re-runs the test on an idle machine with a fresh page; do not widen this
+// into suite-wide retries.
+test.describe.configure({ retries: 1 });
+
 test("dashboard fix plan: scroll to 3D galaxy + verify", async ({ page }) => {
   page.on("console", (msg) => {
     if (msg.type() === "error") {
       console.log("[browser-error]", msg.text());
     }
   });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await page.goto("/", { waitUntil: "networkidle", timeout: 45_000 });
   await page.waitForTimeout(2500);
 
   const sel = page.locator('[data-testid="stSidebar"] [data-baseweb="select"]').first();

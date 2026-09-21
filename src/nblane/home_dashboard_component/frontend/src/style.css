@@ -878,6 +878,24 @@ button {
   box-shadow: none;
 }
 
+/* Compact embed (?compact=1, used by the SPA home galaxy hero): the inspector
+   renders as an on-demand drawer instead of a permanent right rail, the
+   attention strip (redundant with the host page's own metric chips) is
+   hidden, and the 3D canvas height floor relaxes so hero-sized iframes do
+   not scroll internally. */
+.hd-shell-compact .hd-canvas-workbench-embed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hd-shell-compact .hd-attention-strip {
+  display: none;
+}
+
+.hd-shell-compact .hd-explore-canvas {
+  height: clamp(480px, 72vh, 820px);
+  min-height: 480px;
+}
+
 .hd-canvas-embed {
   display: grid;
   gap: 12px;

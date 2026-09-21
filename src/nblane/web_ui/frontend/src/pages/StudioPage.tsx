@@ -7,6 +7,7 @@ import {
   Group,
   Loader,
   MultiSelect,
+  Progress,
   Radio,
   Select,
   Stack,
@@ -28,20 +29,20 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { ApiError } from '../api/client';
 import { MutationErrorAlert } from '../components/ConflictAlert';
 import {
   useCheckStudioPost,
+  useCreateJob,
   useCreateStudioDraft,
   useCreateStudioPost,
   useInitStudio,
-  useJdMatch,
   usePreviewStudioCandidate,
   usePublishStudioPost,
   useSaveStudioPost,
   useStudio,
   useStudioPost,
 } from '../api/hooks';
+import { streamJob } from '../api/jobs';
 import type {
   StudioCandidateResponse,
   StudioPost,
@@ -621,22 +622,112 @@ function GenerateTab({ studio, etag }: { studio: StudioResponse; etag: string })
   );
 }
 
+/** Backend jd-match job phases -> Chinese label + coarse progress percentage. */
+const JD_PHASES: Record<string, { label: string; pct: number }> = {
+  queued: { label: '排队中', pct: 10 },
+  starting: { label: '启动中', pct: 20 },
+  analyzing: { label: '分析中', pct: 55 },
+  generating: { label: '生成中', pct: 85 },
+  done: { label: '完成', pct: 100 },
+};
+
+function jdPhase(phase: string): { label: string; pct: number } {
+  return JD_PHASES[phase] ?? { label: phase || '进行中', pct: 40 };
+}
+
+interface JdJobProgress {
+  jobId: string;
+  phase: string;
+  message: string;
+}
+
 function JdMatchTab() {
   const { name = '' } = useParams();
   const [resumeMd, setResumeMd] = useState('');
   const [jdText, setJdText] = useState('');
-  const jdMatch = useJdMatch(name);
+  const createJob = useCreateJob(name);
+  const [jdJob, setJdJob] = useState<JdJobProgress | null>(null);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [jdError, setJdError] = useState<{ code: string; message: string } | null>(null);
+  const stopStreamRef = useRef<(() => void) | null>(null);
 
-  const unavailable =
-    jdMatch.isError &&
-    jdMatch.error instanceof ApiError &&
-    jdMatch.error.status === 422 &&
-    jdMatch.error.code === 'studio_jd_match_unavailable';
+  const stopStream = () => {
+    stopStreamRef.current?.();
+    stopStreamRef.current = null;
+  };
+
+  // Cancel the SSE subscription on unmount and whenever the profile route
+  // changes; a stale stream must never write another profile's state.
+  useEffect(() => {
+    setJdJob(null);
+    setAnalysis(null);
+    setJdError(null);
+    return stopStream;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
+
+  const startAnalysis = () => {
+    stopStream();
+    setJdJob(null);
+    setAnalysis(null);
+    setJdError(null);
+    createJob.mutate(
+      {
+        kind: 'studio-jd-match',
+        input: { resume_md: resumeMd.trim(), jd_text: jdText.trim() },
+      },
+      {
+        onSuccess: (created) => {
+          const jobId = created.job_id;
+          setJdJob({ jobId, phase: created.job.phase || 'queued', message: '' });
+          stopStreamRef.current = streamJob(name, jobId, {
+            onProgress: (frame) => {
+              setJdJob((prev) =>
+                prev && prev.jobId === jobId
+                  ? {
+                      jobId,
+                      phase: frame.event?.phase || frame.job?.phase || prev.phase,
+                      message: frame.event?.message || prev.message,
+                    }
+                  : prev,
+              );
+            },
+            onDone: (frame) => {
+              stopStream();
+              setJdJob(null);
+              const result = frame.result as { analysis?: string } | null | undefined;
+              if (result?.analysis) {
+                setAnalysis(result.analysis);
+              } else {
+                setJdError({
+                  code: 'empty_result',
+                  message: '任务完成但未返回结果,请重试。',
+                });
+              }
+            },
+            onError: (frame) => {
+              stopStream();
+              setJdJob(null);
+              setJdError(
+                frame?.error ?? {
+                  code: 'stream_error',
+                  message: '进度流中断,请稍后重试。',
+                },
+              );
+            },
+          });
+        },
+      },
+    );
+  };
+
+  const unavailable = jdError?.code === 'studio_jd_match_unavailable';
 
   return (
     <Stack gap="md">
       <Text size="sm" c="dimmed">
-        粘贴目标 JD 与现有简历,生成证据支撑的匹配分析。
+        粘贴目标 JD 与现有简历,生成证据支撑的匹配分析。分析是 LLM
+        长任务(约 1 分钟),进度实时显示,可留在本页等待。
       </Text>
       <Textarea
         label="简历内容"
@@ -654,27 +745,52 @@ function JdMatchTab() {
       />
       <Group>
         <Button
-          onClick={() => jdMatch.mutate({ resume_md: resumeMd, jd_text: jdText })}
-          loading={jdMatch.isPending}
-          disabled={!resumeMd.trim() || !jdText.trim()}
+          onClick={startAnalysis}
+          loading={createJob.isPending}
+          disabled={!resumeMd.trim() || !jdText.trim() || Boolean(jdJob)}
         >
           分析 JD 匹配
         </Button>
       </Group>
-      {unavailable && (
+      {createJob.isError && (
+        <Alert color="red" title="创建分析任务失败" data-testid="jd-create-error">
+          {createJob.error.message}
+        </Alert>
+      )}
+      {jdJob && (
+        <Card withBorder radius="md" data-testid="jd-progress">
+          <Group justify="space-between" align="center">
+            <Text fw={500}>JD 匹配分析进行中</Text>
+            <Badge color="violet" variant="light">
+              {jdPhase(jdJob.phase).label}
+            </Badge>
+          </Group>
+          <Progress
+            value={jdPhase(jdJob.phase).pct}
+            color="violet"
+            animated
+            mt="sm"
+            aria-label="JD 匹配进度"
+          />
+          <Text size="sm" c="dimmed" mt="xs">
+            {jdJob.message || 'LLM 正在对照 JD 与简历/证据逐条分析,请稍候。'}
+          </Text>
+        </Card>
+      )}
+      {unavailable && jdError && (
         <Alert color="yellow" title="AI 分析不可用" data-testid="jd-degraded">
-          {jdMatch.error.message}。配置 LLM 后重试;其余功能不受影响。
+          {jdError.message}。配置 LLM 后重试;其余功能不受影响。
         </Alert>
       )}
-      {jdMatch.isError && !unavailable && (
-        <Alert color="red" title="分析失败">
-          {jdMatch.error.message}
+      {jdError && !unavailable && (
+        <Alert color="red" title="分析失败" data-testid="jd-error">
+          {jdError.message}
         </Alert>
       )}
-      {jdMatch.isSuccess && jdMatch.data && (
+      {analysis && (
         <Card withBorder radius="md" data-testid="jd-analysis">
           <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-            {jdMatch.data.analysis}
+            {analysis}
           </Text>
         </Card>
       )}

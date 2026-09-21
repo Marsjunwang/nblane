@@ -213,20 +213,20 @@ export function InboxPage() {
 
       <Card withBorder radius="md" padding="md">
         <form onSubmit={handleCapture}>
-          <Group align="flex-end" wrap="nowrap">
+          <Group align="flex-end">
             <TextInput
               label="随手记"
               placeholder="微信随手记: 一句话就行…"
               value={title}
               onChange={(event) => setTitle(event.currentTarget.value)}
-              style={{ flex: 1 }}
+              style={{ flex: '1 1 160px' }}
             />
             <TextInput
               label="标签(可选)"
               placeholder="逗号分隔"
               value={tags}
               onChange={(event) => setTags(event.currentTarget.value)}
-              w={220}
+              style={{ flex: '1 1 140px', maxWidth: 220 }}
             />
             <Button type="submit" loading={capture.isPending} disabled={!title.trim()}>
               记录

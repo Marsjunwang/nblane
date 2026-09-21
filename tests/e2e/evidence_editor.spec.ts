@@ -5,6 +5,16 @@ import { expect, test } from "@playwright/test";
 // the toolbar + list, and a row can be opened in the detail pane.
 // The page URL resolves against the configured use.baseURL.
 
+// Every test here drives the same Streamlit page + React component iframe,
+// which is load-sensitive in two ways on this 2-CPU/3.75GB sandbox at the
+// tail of a full-suite run: the cold mount can outrun the locator budgets,
+// and a late Streamlit rerun can detach the iframe mid-test (observed:
+// `.ee-list` exceeding the 8s default budget; `locator.click: Frame was
+// detached` on the batch-select toggle). Each test passes standalone, and
+// after small subsets. One scoped retry re-runs on an idle machine with a
+// fresh page; do not widen this into suite-wide retries.
+test.describe.configure({ retries: 1 });
+
 async function ensureDevProfile(page) {
   // Streamlit hydrates the sidebar asynchronously; wait for it.
   await page.waitForSelector('[data-testid="stSidebar"]', { timeout: 20_000 });
@@ -82,7 +92,10 @@ test("evidence editor renders in the React component iframe", async ({ page }, t
 
   // Toolbar actions are visible.
   await expect(frame.locator(".ee-toolbar")).toBeVisible({ timeout: 10_000 });
-  await expect(frame.locator(".ee-list")).toBeVisible();
+  // The list renders right after the toolbar; under full-suite tail load its
+  // data fetch can exceed the 8s default expect budget — give it the same
+  // headroom as the frame poll above.
+  await expect(frame.locator(".ee-list")).toBeVisible({ timeout: 20_000 });
 
   // There should be at least one evidence row in the list (dev pool is seeded).
   await expect(frame.locator(".ee-li").first()).toBeVisible({ timeout: 10_000 });

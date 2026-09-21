@@ -29,6 +29,23 @@ import {
   useApplyActivity,
   useDismissActivity,
 } from '../api/hooks';
+import type { ActivityItem } from '../api/types';
+
+/** Owners whose pending Review candidates can be applied from Activity.
+ * Mirrors _can_apply_here in pages/9_Agent_Activity.py (Streamlit). */
+const APPLIABLE_OWNERS = new Set(['evidence_pool', 'kanban', 'public_site']);
+
+/** The backend only applies Review-origin items; anything else 409s, so the
+ * button is hidden (with an explanation) instead of offering a dead action. */
+export function canApplyActivityItem(
+  item: Pick<ActivityItem, 'status' | 'source_page' | 'target_owner'>,
+): boolean {
+  return (
+    item.status === 'pending' &&
+    item.source_page === 'Review' &&
+    APPLIABLE_OWNERS.has(item.target_owner)
+  );
+}
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待审批',
@@ -351,10 +368,18 @@ export function ActivityPage() {
                 >
                   驳回
                 </Button>
-                <Button onClick={handleApply} loading={apply.isPending}>
-                  应用
-                </Button>
+                {canApplyActivityItem(item) && (
+                  <Button onClick={handleApply} loading={apply.isPending}>
+                    应用
+                  </Button>
+                )}
               </Group>
+            )}
+            {item.status === 'pending' && !canApplyActivityItem(item) && (
+              <Text size="sm" c="dimmed" ta="right">
+                这里只能应用 pending 的 Review 候选;该条目来自 {item.source_page || '未知来源'}
+                ,请在对应页面处理。
+              </Text>
             )}
           </Stack>
         ) : null}

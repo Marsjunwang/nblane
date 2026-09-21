@@ -16,6 +16,7 @@ use_grobid="0"
 use_web_api="1"
 runtime="${NBLANE_PAPER_LIBRARY_RUNTIME:-fastapi_iframe}"
 env_file="${NBLANE_DEV_ENV_FILE:-$repo_root/.env}"
+auth_file="${NBLANE_DEV_AUTH_FILE:-}"
 root_arg=""
 asset_root_arg=""
 
@@ -50,6 +51,11 @@ Options:
   --grobid           Point dev extraction at http://127.0.0.1:<grobid-port>.
   --grobid-port N    Host port for a dev GROBID container. Default: 18070.
   --env-file PATH    Source this shell-style env file before starting.
+  --auth-file PATH   Enable app-level auth on the SPA backend (web-api)
+                     session with this users.yaml (NBLANE_AUTH_FILE).
+                     Default: NBLANE_DEV_AUTH_FILE, or auto-detected
+                     .dev-data/auth/users.yaml in --isolated mode.
+                     The Reader/Streamlit sessions stay auth-less.
 
 Examples:
   scripts/dev-web.sh
@@ -120,6 +126,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --env-file)
       env_file="${2:?missing env file}"
+      shift 2
+      ;;
+    --auth-file)
+      auth_file="${2:?missing auth file path}"
       shift 2
       ;;
     -h|--help)
@@ -281,9 +291,41 @@ else
   grobid_env="NBLANE_RESEARCH_PDF_BACKEND=pymupdf"
 fi
 
+# Auth in dev is a SPA-backend (web-api) concern: the Reader/Streamlit
+# sessions stay auth-less so their pages and e2e specs keep working, and
+# isolated mode pins NBLANE_AUTH_FILE empty for them so a production value
+# from the env file cannot leak into the sandbox. The web-api session gets
+# the auth file from --auth-file / NBLANE_DEV_AUTH_FILE, or auto-detects
+# <dev-root>/auth/users.yaml in isolated mode.
 auth_env=""
-if [[ "$mode" == "isolated" && "${NBLANE_DEV_AUTH_FILE:-}" == "" ]]; then
+if [[ "$mode" == "isolated" ]]; then
   auth_env="NBLANE_AUTH_FILE="
+fi
+
+web_api_auth_env="$auth_env"
+web_api_auth_env_file=""
+if [[ "$mode" == "isolated" && -z "$auth_file" && -f "$dev_root/auth/users.yaml" ]]; then
+  auth_file="$dev_root/auth/users.yaml"
+fi
+if [[ -n "$auth_file" ]]; then
+  if [[ ! -f "$auth_file" ]]; then
+    echo "Auth file not found: $auth_file" >&2
+    exit 1
+  fi
+  auth_file="$(cd "$(dirname "$auth_file")" && pwd)/$(basename "$auth_file")"
+  web_api_auth_env="NBLANE_AUTH_FILE='$auth_file'"
+  # core/auth requires NBLANE_READER_TOKEN_SECRET once auth is on (it keys the
+  # HMAC session tokens the web-api mints at login). Keep it out of `ps` the
+  # same way as the LLM keys: a 0600 env file the web-api session sources.
+  web_api_auth_env_file="$(dirname "$auth_file")/dev-auth.env"
+  if [[ ! -f "$web_api_auth_env_file" ]]; then
+    (
+      umask 077
+      printf 'NBLANE_READER_TOKEN_SECRET=%s\n' \
+        "$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+        > "$web_api_auth_env_file"
+    )
+  fi
 fi
 
 lang_env=""
@@ -301,6 +343,10 @@ fi
 env_load=""
 if [[ -f "$env_file" ]]; then
   env_load="set -a; . '$env_file'; set +a;"
+fi
+web_api_env_load="$env_load"
+if [[ -n "$web_api_auth_env_file" ]]; then
+  web_api_env_load="${web_api_env_load} set -a; . '$web_api_auth_env_file'; set +a;"
 fi
 
 port_in_use() {
@@ -376,10 +422,11 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
 
 if [[ "$use_web_api" == "1" ]]; then
   tmux new-session -d -s "$web_api_session" -c "$repo_root" \
-    "${env_load} \
+    "${web_api_env_load} \
      NBLANE_ROOT='$dev_root' \
      NBLANE_ENV_FILE='$env_file' \
-     ${auth_env} ${lang_env} \
+     NBLANE_READER_API_BASE='$reader_base' \
+     ${web_api_auth_env} ${lang_env} \
      PYTHONPATH=src .venv/bin/uvicorn ${web_api_uvicorn_args}"
 fi
 
@@ -429,6 +476,11 @@ echo "  streamlit:   ${streamlit_base}"
 echo "  reader API:  ${reader_base}"
 if [[ "$use_web_api" == "1" ]]; then
   echo "  web API:     ${web_api_base} (SPA backend; serves web_ui/static when built)"
+  if [[ -n "$auth_file" ]]; then
+    echo "  web API auth: ON (${auth_file})"
+  else
+    echo "  web API auth: off"
+  fi
   spa_build_hint
 fi
 if [[ "$reload" == "1" ]]; then

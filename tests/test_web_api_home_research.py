@@ -291,7 +291,7 @@ class TestHomeEndpoint(_HomeResearchBase):
         self.assertEqual(sidecar["handoff_token"], "")
         self.assertEqual(
             sidecar["dashboard_url"],
-            "http://127.0.0.1:8502/dashboard?profile=alice&embed=1",
+            "http://127.0.0.1:8502/dashboard?profile=alice&embed=1&view=3d&compact=1",
         )
 
     def test_home_sidecar_same_origin_sentinel(self) -> None:
@@ -304,7 +304,7 @@ class TestHomeEndpoint(_HomeResearchBase):
         self.assertEqual(sidecar["base"], "")
         self.assertTrue(sidecar["configured"])
         self.assertEqual(
-            sidecar["dashboard_url"], "/dashboard?profile=alice&embed=1"
+            sidecar["dashboard_url"], "/dashboard?profile=alice&embed=1&view=3d&compact=1"
         )
         self.assertEqual(
             sidecar["paper_library_url"], "/paper-library?profile=alice"
@@ -377,7 +377,7 @@ class TestResearchEndpoint(_HomeResearchBase):
         )
         self.assertEqual(
             sidecar["dashboard_url"],
-            "http://127.0.0.1:8502/dashboard?profile=alice&embed=1",
+            "http://127.0.0.1:8502/dashboard?profile=alice&embed=1&view=3d&compact=1",
         )
 
     def test_research_empty_profile_returns_zeroed_summary(self) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import heapq
 import re
+from collections.abc import Callable
 
 from nblane.core import learned_keywords as lk_store
 from nblane.core.evidence_resolve import resolved_evidence_count
@@ -324,10 +325,14 @@ def analyze(
     source_label: str = "",
     context_refs: dict[str, list[str]] | None = None,
     goal_context_used: bool = False,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> GapResult:
     """Run gap analysis: optional rule overlap + optional LLM routing.
 
     When *explicit_node* is set, automatic matching is skipped.
+    *progress_callback* receives coarse stage names (``"routing"`` before the
+    LLM router call, ``"merging"`` before the requires-closure build) so
+    async job wrappers can stream truthful phase updates.
     """
     p_dir = PROFILES_DIR / profile_name
     tree = load_skill_tree_raw(p_dir)
@@ -364,6 +369,7 @@ def analyze(
     roots_from_rule: list[str] = []
     roots_from_llm: list[str] = []
     learned_merged = False
+    llm_router_error: str | None = None
 
     if explicit_node:
         if explicit_node not in index:
@@ -419,6 +425,8 @@ def analyze(
 
         roots_llm: list[str] = []
         if use_llm_router:
+            if progress_callback is not None:
+                progress_callback("routing")
             if str(router_backend or "").strip().casefold() == "codex":
                 from nblane.core.gap_llm_router import (
                     route_task_to_nodes_codex,
@@ -459,6 +467,10 @@ def analyze(
                     if expanded:
                         lk_store.merge(str(schema_name), expanded)
                         learned_merged = True
+            else:
+                llm_router_error = (
+                    outcome.error or "LLM routing failed."
+                )
 
         roots = _merge_root_ids(roots_llm, roots_rule)
         roots_from_rule = list(roots_rule)
@@ -471,6 +483,7 @@ def analyze(
                     "matching, or pick a node manually."
                 ),
                 error_key="no_roots",
+                llm_router_error=llm_router_error,
                 **provenance,
             )
 
@@ -478,6 +491,8 @@ def analyze(
             ranked, roots_llm, index
         )
 
+    if progress_callback is not None:
+        progress_callback("merging")
     closure_ids = requires_closure(roots, index)
 
     closure: list[dict] = []
@@ -517,6 +532,7 @@ def analyze(
         roots_from_rule=roots_from_rule,
         roots_from_llm=roots_from_llm,
         learned_merged=learned_merged,
+        llm_router_error=llm_router_error,
         **provenance,
     )
 

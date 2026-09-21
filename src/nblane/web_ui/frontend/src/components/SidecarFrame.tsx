@@ -25,7 +25,8 @@ interface SidecarFrameProps {
   base: string;
   /** Short-lived handoff token; empty when the sidecar needs no session. */
   handoffToken?: string;
-  height?: number;
+  /** Fixed pixel height, or any CSS height (e.g. a viewport-relative clamp). */
+  height?: number | string;
 }
 
 export function SidecarFrame({

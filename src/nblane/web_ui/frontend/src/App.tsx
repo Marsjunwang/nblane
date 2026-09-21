@@ -16,6 +16,7 @@ import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { ProjectBoardPage } from './pages/ProjectBoardPage';
+import { PublicBuildPage } from './pages/PublicBuildPage';
 import { ResearchPage } from './pages/ResearchPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { SkillTreePage } from './pages/SkillTreePage';
@@ -48,6 +49,7 @@ export function App() {
           <Route path="/p/:name/review" element={<ReviewPage />} />
           <Route path="/p/:name/project-board" element={<ProjectBoardPage />} />
           <Route path="/p/:name/studio" element={<StudioPage />} />
+          <Route path="/p/:name/public-build" element={<PublicBuildPage />} />
           <Route path="/p/:name/research" element={<ResearchPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />

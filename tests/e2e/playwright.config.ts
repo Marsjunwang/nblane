@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 import fs from "node:fs";
 import { DEFAULT_STREAMLIT_BASE_URL } from "./helpers";
+import { SPA_ADMIN_STORAGE_STATE } from "./spa_auth_shared";
 
 const systemChromium =
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ||
@@ -29,4 +30,29 @@ export default defineConfig({
     trace: "retain-on-failure",
     viewport: { width: 1440, height: 1000 },
   },
+  projects: [
+    {
+      // Logs into the SPA backend (18504) once and bakes the admin session
+      // cookie into tests/e2e/.auth/; a no-op empty bake when auth is off.
+      name: "spa-auth-setup",
+      testMatch: /spa_auth\.setup\.ts/,
+    },
+    {
+      name: "chromium",
+      testIgnore: [/spa_auth\.setup\.ts/, /spa_auth\.spec\.ts/],
+      dependencies: ["spa-auth-setup"],
+      use: {
+        // The SPA backend may run with NBLANE_AUTH_FILE (isolated stack does
+        // since 2026-09-21): pre-existing specs get the baked admin session.
+        // Harmless on auth-less Streamlit/sidecar origins — they ignore the
+        // cookie.
+        storageState: SPA_ADMIN_STORAGE_STATE,
+      },
+    },
+    {
+      // The login journey itself runs with fresh, session-less contexts.
+      name: "spa-auth",
+      testMatch: /spa_auth\.spec\.ts/,
+    },
+  ],
 });

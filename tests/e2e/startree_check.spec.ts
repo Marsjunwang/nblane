@@ -3,6 +3,14 @@ import { expect, test } from "@playwright/test";
 // Star-tree hero on the Streamlit home dashboard; the URL resolves against
 // the configured use.baseURL.
 
+// The 3D hero mounts a three.js WebGLRenderer (software GL on this headless
+// 2-CPU/3.75GB sandbox). At the tail of a full-suite run — after ~50 specs of
+// Streamlit sessions — the canvas can take far longer than the 25s locator
+// budget to appear (it passes standalone in ~36s, and after small subsets).
+// One scoped retry re-runs the test on an idle machine with a fresh page;
+// do not widen this into suite-wide retries.
+test.describe.configure({ retries: 1 });
+
 // The isolated instance's default profile may have an empty graph (no 3D
 // canvas in the hero); the seeded `dev` profile carries a full skill tree.
 async function ensureDevProfile(page) {

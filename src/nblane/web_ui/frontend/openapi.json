@@ -1073,8 +1073,13 @@
     "type": "object"
    },
    "GapAnalysisResponse": {
-    "description": "Faithful projection of ``core.models.GapResult`` (rule-only slice).\n\n``coverage`` is a derived convenience: share of closure nodes that are\nnot gaps (0.0 when the closure is empty), so the SPA can render a\ncoverage indicator without re-deriving it.",
+    "description": "Faithful projection of ``core.models.GapResult``.\n\n``coverage`` is a derived convenience: share of closure nodes that are\nnot gaps (0.0 when the closure is empty), so the SPA can render a\ncoverage indicator without re-deriving it. ``analysis_mode`` records\nwhich matchers ran (``rule`` for the sync endpoint, ``rule+llm`` for the\nasync deep-analysis job); ``llm_router_error`` carries the degradation\nreason when the LLM router failed but rule roots still produced an\nanalysis (``null`` when no LLM path ran or it succeeded).",
     "properties": {
+     "analysis_mode": {
+      "default": "rule",
+      "title": "Analysis Mode",
+      "type": "string"
+     },
      "can_solve": {
       "default": false,
       "title": "Can Solve",
@@ -1103,6 +1108,17 @@
       "default": false,
       "title": "Learned Merged",
       "type": "boolean"
+     },
+     "llm_router_error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Llm Router Error"
      },
      "next_steps": {
       "items": {
@@ -1156,7 +1172,7 @@
     "type": "object"
    },
    "GapAnalyzeRequest": {
-    "description": "Body for the gap-analysis mutation.\n\n``use_llm=True`` is reserved for the async-jobs slice; the sync slice is\nrule-matching only and answers 422 when it is set.",
+    "description": "Body for the gap-analysis mutation.\n\n``use_llm=False`` runs the synchronous rule-only analysis (200).\n``use_llm=True`` creates an async ``gap-analysis`` job (202, see\n``JobCreateResponse``); poll ``GET .../jobs/{job_id}`` or subscribe to\n``GET .../jobs/{job_id}/stream`` for progress and the final result.",
     "properties": {
      "task": {
       "maxLength": 2000,
@@ -2215,6 +2231,168 @@
     "title": "InboxResponse",
     "type": "object"
    },
+   "JobCreateRequest": {
+    "description": "Generic async-job creation body (dispatched by ``kind``).\n\n``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``\n(1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,\njd_text}`` (both non-blank, ≤ 50000 chars each) and\n``project-suggest-refs`` takes ``{case_id: str}`` (non-blank).\nValidation failures answer 422 with the kind's error code\n(``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /\n``invalid_job_input``).",
+    "properties": {
+     "input": {
+      "additionalProperties": true,
+      "title": "Input",
+      "type": "object"
+     },
+     "kind": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Kind",
+      "type": "string"
+     }
+    },
+    "required": [
+     "kind"
+    ],
+    "title": "JobCreateRequest",
+    "type": "object"
+   },
+   "JobCreateResponse": {
+    "description": "202 answer of the job-creation endpoints.",
+    "properties": {
+     "job": {
+      "$ref": "#/components/schemas/JobModel"
+     },
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "job_id",
+     "job"
+    ],
+    "title": "JobCreateResponse",
+    "type": "object"
+   },
+   "JobErrorModel": {
+    "description": "Structured terminal failure of an async job.",
+    "properties": {
+     "code": {
+      "title": "Code",
+      "type": "string"
+     },
+     "message": {
+      "title": "Message",
+      "type": "string"
+     }
+    },
+    "required": [
+     "code",
+     "message"
+    ],
+    "title": "JobErrorModel",
+    "type": "object"
+   },
+   "JobModel": {
+    "description": "Public snapshot of one async job (no result payload, no event log).\n\nStatuses follow ``queued`` -> ``running`` -> ``done`` | ``failed``;\n``phase`` is the kind-specific coarse stage (gap-analysis: queued /\nstarting / routing / merging / done / failed; studio-jd-match:\nanalyzing / generating; project-suggest-refs: collecting / suggesting).",
+    "properties": {
+     "created_at": {
+      "default": 0.0,
+      "title": "Created At",
+      "type": "number"
+     },
+     "elapsed_ms": {
+      "default": 0,
+      "title": "Elapsed Ms",
+      "type": "integer"
+     },
+     "error": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/JobErrorModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "finished_at": {
+      "default": 0.0,
+      "title": "Finished At",
+      "type": "number"
+     },
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+     },
+     "phase": {
+      "default": "",
+      "title": "Phase",
+      "type": "string"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "started_at": {
+      "default": 0.0,
+      "title": "Started At",
+      "type": "number"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "job_id",
+     "profile",
+     "kind",
+     "status"
+    ],
+    "title": "JobModel",
+    "type": "object"
+   },
+   "JobStatusResponse": {
+    "description": "Current job snapshot plus the result payload once done.",
+    "properties": {
+     "job": {
+      "$ref": "#/components/schemas/JobModel"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "result": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Result"
+     }
+    },
+    "required": [
+     "job"
+    ],
+    "title": "JobStatusResponse",
+    "type": "object"
+   },
    "KanbanBoardResponse": {
     "description": "Parsed kanban board structure (no markdown body).",
     "properties": {
@@ -2275,11 +2453,22 @@
     "type": "object"
    },
    "KanbanCardMoveRequest": {
-    "description": "Move body for POST .../kanban/cards/{card_ref}/move.",
+    "description": "Move body for POST .../kanban/cards/{card_ref}/move.\n\n``to_index`` is the 0-based insertion index inside the target column\n(post-removal, matching ``apply_kanban_reorder``); when omitted the\ncard is appended to the column tail. Out-of-range values clamp like\nthe core reorder: negative to the column head, beyond-end to the tail.",
     "properties": {
      "target_section": {
       "title": "Target Section",
       "type": "string"
+     },
+     "to_index": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "To Index"
      }
     },
     "required": [
@@ -3507,6 +3696,297 @@
      "target_section"
     ],
     "title": "ProjectTaskMoveRequest",
+    "type": "object"
+   },
+   "PublicBuildArtifactModel": {
+    "description": "One file under the build output directory (relative path + stat).",
+    "properties": {
+     "modified": {
+      "default": "",
+      "title": "Modified",
+      "type": "string"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "size": {
+      "default": 0,
+      "title": "Size",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "PublicBuildArtifactModel",
+    "type": "object"
+   },
+   "PublicBuildDraftModel": {
+    "description": "One unpublished blog draft offered by the publish-and-build section.",
+    "properties": {
+     "date": {
+      "default": "",
+      "title": "Date",
+      "type": "string"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug"
+    ],
+    "title": "PublicBuildDraftModel",
+    "type": "object"
+   },
+   "PublicBuildPreviewPageModel": {
+    "description": "One renderable site page in the in-memory preview.",
+    "properties": {
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "PublicBuildPreviewPageModel",
+    "type": "object"
+   },
+   "PublicBuildPreviewResponse": {
+    "description": "In-memory site preview page list (HTML served per page).",
+    "properties": {
+     "include_drafts": {
+      "default": true,
+      "title": "Include Drafts",
+      "type": "boolean"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "pages": {
+      "items": {
+       "$ref": "#/components/schemas/PublicBuildPreviewPageModel"
+      },
+      "title": "Pages",
+      "type": "array"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "PublicBuildPreviewResponse",
+    "type": "object"
+   },
+   "PublicBuildPublishRequest": {
+    "description": "Body for publish-and-build: draft slugs to publish, then build.",
+    "properties": {
+     "base_url": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Base Url",
+      "type": "string"
+     },
+     "include_drafts": {
+      "default": false,
+      "title": "Include Drafts",
+      "type": "boolean"
+     },
+     "slugs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Slugs",
+      "type": "array"
+     }
+    },
+    "title": "PublicBuildPublishRequest",
+    "type": "object"
+   },
+   "PublicBuildRequest": {
+    "description": "Body for the static-site build (synchronous, no LLM).\n\n``base_url`` is the production site URL (optional sub-path) used for\ncanonical/sitemap links, mirroring the Streamlit form. The output\ndirectory is pinned server-side (``dist/public/<name>`` under the data\nroot) — the Streamlit page's free-form output path is not exposed for\npath safety.",
+    "properties": {
+     "base_url": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Base Url",
+      "type": "string"
+     },
+     "include_drafts": {
+      "default": false,
+      "title": "Include Drafts",
+      "type": "boolean"
+     }
+    },
+    "title": "PublicBuildRequest",
+    "type": "object"
+   },
+   "PublicBuildResponse": {
+    "description": "Public Build overview: init gate, validation, drafts, output state.\n\n``validation``/``drafts`` are null/empty until the profile's public\nlayer is initialized (POST ``/studio/init`` creates it).",
+    "properties": {
+     "build": {
+      "$ref": "#/components/schemas/PublicBuildStateModel"
+     },
+     "drafts": {
+      "items": {
+       "$ref": "#/components/schemas/PublicBuildDraftModel"
+      },
+      "title": "Drafts",
+      "type": "array"
+     },
+     "initialized": {
+      "default": false,
+      "title": "Initialized",
+      "type": "boolean"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "validation": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/PublicBuildValidationModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "profile",
+     "build"
+    ],
+    "title": "PublicBuildResponse",
+    "type": "object"
+   },
+   "PublicBuildResultResponse": {
+    "description": "Result of one build / publish-and-build run.",
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "output_dir": {
+      "title": "Output Dir",
+      "type": "string"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     },
+     "pages": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Pages",
+      "type": "array"
+     },
+     "published": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Published",
+      "type": "array"
+     }
+    },
+    "required": [
+     "output_dir"
+    ],
+    "title": "PublicBuildResultResponse",
+    "type": "object"
+   },
+   "PublicBuildStateModel": {
+    "description": "Observed state of the static-site output directory.\n\nDerived from the directory itself (no separate build log): ``exists``\nreports whether a build has ever landed, ``built_at`` is the newest\nartifact mtime, and ``artifacts`` is the capped flat listing.",
+    "properties": {
+     "artifacts": {
+      "items": {
+       "$ref": "#/components/schemas/PublicBuildArtifactModel"
+      },
+      "title": "Artifacts",
+      "type": "array"
+     },
+     "artifacts_truncated": {
+      "default": false,
+      "title": "Artifacts Truncated",
+      "type": "boolean"
+     },
+     "built_at": {
+      "default": "",
+      "title": "Built At",
+      "type": "string"
+     },
+     "exists": {
+      "default": false,
+      "title": "Exists",
+      "type": "boolean"
+     },
+     "output_dir": {
+      "title": "Output Dir",
+      "type": "string"
+     },
+     "total_bytes": {
+      "default": 0,
+      "title": "Total Bytes",
+      "type": "integer"
+     },
+     "total_files": {
+      "default": 0,
+      "title": "Total Files",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "output_dir"
+    ],
+    "title": "PublicBuildStateModel",
+    "type": "object"
+   },
+   "PublicBuildValidationModel": {
+    "description": "Public-layer validation outcome (mirrors core PublicValidationResult).",
+    "properties": {
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Errors",
+      "type": "array"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "PublicBuildValidationModel",
     "type": "object"
    },
    "ResearchResponse": {
@@ -5967,7 +6447,7 @@
   },
   "/api/v1/profiles/{name}/gap/analyze": {
    "post": {
-    "description": "Synchronous, rule-only gap analysis for a free-text task description.\n\nWraps ``core.gap.analyze`` with rule matching only. ``use_llm=true``\nanswers 422: the LLM router performs a live blocking provider call and\npersists learned keywords, which belongs to the async-jobs slice.\nAnalysis errors (no matching nodes, missing skill tree/schema) also\nsurface as 422 with the core error message.",
+    "description": "Gap analysis for a free-text task description.\n\n``use_llm=false`` (default) wraps ``core.gap.analyze`` with rule\nmatching only and answers 200 synchronously. ``use_llm=true`` runs the\nsame analysis plus the LLM router (a live blocking provider call that\nalso persists learned keywords under ``schemas/.learned/``), so it is\ndispatched as an async ``gap-analysis`` job answering 202 — subscribe\nto the job's SSE stream for 路由中/合并中/完成 phases and the final\n``GapAnalysisResponse`` payload (``analysis_mode == \"rule+llm\"``; when\nthe LLM router fails but rule roots suffice, the job still completes\nwith ``llm_router_error`` set). Analysis errors (no matching nodes,\nmissing skill tree/schema) surface as 422 sync, or as a failed job\nwith the same error code async.",
     "operationId": "analyze_profile_gap_api_v1_profiles__name__gap_analyze_post",
     "parameters": [
      {
@@ -6000,6 +6480,16 @@
        }
       },
       "description": "Successful Response"
+     },
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "use_llm=true: the deep analysis runs as an async gap-analysis job; poll or stream the returned job_id."
      },
      "400": {
       "content": {
@@ -6039,7 +6529,7 @@
         }
        }
       },
-      "description": "Empty/unmatched task, missing skill tree or schema, or use_llm requested before the async-jobs slice."
+      "description": "Empty/unmatched task, missing skill tree or schema."
      }
     },
     "summary": "Analyze Profile Gap"
@@ -6081,6 +6571,16 @@
       },
       "description": "Successful Response"
      },
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "use_llm=true: the deep analysis runs as an async gap-analysis job; poll or stream the returned job_id."
+     },
      "400": {
       "content": {
        "application/json": {
@@ -6119,7 +6619,7 @@
         }
        }
       },
-      "description": "Empty/unmatched task, missing skill tree or schema, or use_llm requested before the async-jobs slice."
+      "description": "Empty/unmatched task, missing skill tree or schema."
      }
     },
     "summary": "Intake Profile Gap"
@@ -6878,6 +7378,242 @@
     "summary": "Discard Profile Inbox Item"
    }
   },
+  "/api/v1/profiles/{name}/jobs": {
+   "post": {
+    "description": "Create an async job for one profile (LLM long tasks).\n\nKinds are registered in ``nblane.web_api.jobs``: ``gap-analysis``\n(also wired into ``POST .../gap/analyze`` with ``use_llm=true``),\n``studio-jd-match`` and ``project-suggest-refs`` (the SPA's async\npaths for the sync studio/jd-match and suggest-refs endpoints, which\nstay unchanged for backward compatibility). The job runs on a daemon\nthread inside this single-worker process, tracked by the in-memory\nregistry (same design as the reader sidecar's paper-library search\njobs): poll ``GET .../jobs/{job_id}`` or subscribe to\n``GET .../jobs/{job_id}/stream`` (SSE) for progress and the result.",
+    "operationId": "create_profile_job_api_v1_profiles__name__jobs_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/JobCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Job not found for this profile."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown job kind or invalid job input."
+     }
+    },
+    "summary": "Create Profile Job"
+   }
+  },
+  "/api/v1/profiles/{name}/jobs/{job_id}": {
+   "get": {
+    "description": "Poll one job's status; the result payload appears once done.",
+    "operationId": "get_profile_job_api_v1_profiles__name__jobs__job_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "job_id",
+      "required": true,
+      "schema": {
+       "title": "Job Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Job not found for this profile."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown job kind or invalid job input."
+     }
+    },
+    "summary": "Get Profile Job"
+   }
+  },
+  "/api/v1/profiles/{name}/jobs/{job_id}/stream": {
+   "get": {
+    "description": "SSE stream of one job's progress (reader-sidecar wire design).\n\nFrames: ``job`` (initial snapshot, replay-safe for late subscribers),\n``progress`` (one per logged phase event; phases are kind-specific —\ngap-analysis: starting/routing/merging, studio-jd-match:\nanalyzing/generating, project-suggest-refs: collecting/suggesting),\nthen a terminal ``done`` (carries the result payload) or ``error``\n(carries the structured ``{code, message}``). Terminal frames are\nre-derivable on reconnect — a late subscriber still receives the full\nevent log plus the outcome.",
+    "operationId": "stream_profile_job_api_v1_profiles__name__jobs__job_id__stream_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "job_id",
+      "required": true,
+      "schema": {
+       "title": "Job Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Job not found for this profile."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown job kind or invalid job input."
+     }
+    },
+    "summary": "Stream Profile Job"
+   }
+  },
   "/api/v1/profiles/{name}/kanban": {
    "get": {
     "description": "Parsed kanban board (sections + card fields; no markdown body).\n\nThe response carries the kanban.md ETag (see module docstring) for use\nas ``If-Match`` on the card mutations.",
@@ -7161,7 +7897,7 @@
   },
   "/api/v1/profiles/{name}/kanban/cards/{card_ref}/move": {
    "post": {
-    "description": "Move one card to ``target_section``. Honors ``If-Match`` (412).",
+    "description": "Move one card to ``target_section``. Honors ``If-Match`` (412).\n\n``to_index`` (optional, 0-based, post-removal) positions the card\ninside the target column — including in-column reorders when\n``target_section`` is the card's current section. Omitting it appends\nto the column tail; out-of-range values clamp (never a 422).",
     "operationId": "move_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__move_post",
     "parameters": [
      {
@@ -8025,7 +8761,7 @@
   },
   "/api/v1/profiles/{name}/project-board/cases/{case_id}/suggest-refs": {
    "post": {
-    "description": "AI-suggest goal/task/evidence/source/output refs for one case.\n\nRuns the ``project.suggest_refs`` AI action through the gateway\n(``require_review=True``, so the run is recorded to Agent Activity).\nSuggestions are validated against the current option rows and returned\nfor confirm-not-fill review — nothing is persisted by this endpoint.\nWhen no LLM backend is configured or the run fails, answers 422\n(``project_suggest_refs_failed``) so the SPA can show a degradation card.",
+    "description": "AI-suggest goal/task/evidence/source/output refs for one case.\n\nRuns the ``project.suggest_refs`` AI action through the gateway\n(``require_review=True``, so the run is recorded to Agent Activity).\nSuggestions are validated against the current option rows and returned\nfor confirm-not-fill review — nothing is persisted by this endpoint.\nWhen no LLM backend is configured or the run fails, answers 422\n(``project_suggest_refs_failed``) so the SPA can show a degradation card.\n\nKept as the synchronous contract for backward compatibility; the SPA\nnow dispatches this LLM long task as an async ``project-suggest-refs``\njob (``POST /profiles/{name}/jobs``, progress over SSE) instead. Both\npaths share ``core.project_suggest.suggest_case_refs``.",
     "operationId": "suggest_profile_project_refs_api_v1_profiles__name__project_board_cases__case_id__suggest_refs_post",
     "parameters": [
      {
@@ -8340,6 +9076,535 @@
      }
     },
     "summary": "Move Profile Project Task"
+   }
+  },
+  "/api/v1/profiles/{name}/public-build": {
+   "get": {
+    "description": "Public Build overview: init gate, validation, drafts, output state.\n\nRead-only aggregation of the Streamlit page's status surface: the\nfour-file public-layer gate, the ``validate_public_layer`` outcome\n(errors block a build), the unpublished blog drafts offered by the\npublish-and-build section, and the observed output-directory state.\nCarries the public-layer ETag (same fingerprint as the studio) for\n``If-Match`` on the build mutations.",
+    "operationId": "get_profile_public_build_api_v1_profiles__name__public_build_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicBuildResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Public Build"
+   }
+  },
+  "/api/v1/profiles/{name}/public-build/artifacts/{path}": {
+   "get": {
+    "description": "Serve one file from the build output directory (preview/download).\n\nPath-traversal guarded: anything resolving outside the pinned output\ndirectory answers 404, same as a missing file. Auth follows the same\nprofile scope as every other route — a preview build may contain\ndrafts/private content, so artifacts are not public here.",
+    "operationId": "get_profile_public_build_artifact_api_v1_profiles__name__public_build_artifacts__path__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "path",
+      "required": true,
+      "schema": {
+       "title": "Path",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found, or artifact missing/escapes the output dir."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Public Build Artifact"
+   }
+  },
+  "/api/v1/profiles/{name}/public-build/build": {
+   "post": {
+    "description": "Build the static public site into the server-pinned output dir.\n\nThin wrapper over ``core.public_site.build_public_site``: the core\nvalidates first (errors → 422 ``public_build_blocked``) and requires\n``visibility: public`` unless ``include_drafts`` is set (preview mode).\nHonors ``If-Match`` against the public-layer ETag (412 on mismatch).",
+    "operationId": "build_profile_public_site_api_v1_profiles__name__public_build_build_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PublicBuildRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicBuildResultResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile, build artifact, or preview page not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the public-layer files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation."
+     }
+    },
+    "summary": "Build Profile Public Site"
+   }
+  },
+  "/api/v1/profiles/{name}/public-build/preview": {
+   "get": {
+    "description": "List the renderable site pages for the in-memory preview picker.\n\nWarnings mirror ``render_public_site_preview``: validation warnings\nplus each validation error prefixed ``preview validation:`` (the\npreview renders even when a production build would be blocked). The\nper-page HTML comes from ``GET .../preview/page?path=<rel>``.",
+    "operationId": "get_profile_public_build_preview_api_v1_profiles__name__public_build_preview_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_drafts",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Include Drafts",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicBuildPreviewResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized."
+     }
+    },
+    "summary": "Get Profile Public Build Preview"
+   }
+  },
+  "/api/v1/profiles/{name}/public-build/preview/page": {
+   "get": {
+    "description": "Render one preview page as self-contained HTML (inline CSS/media).\n\nSame payload the Streamlit page iframes via ``components.html``: CSS\nand local media are inlined as data URIs, so the page renders stand-\nalone in the SPA iframe. Unknown page paths answer 404.",
+    "operationId": "get_profile_public_build_preview_page_api_v1_profiles__name__public_build_preview_page_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "path",
+      "required": false,
+      "schema": {
+       "default": "index.html",
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_drafts",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Include Drafts",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "text/html": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "text/html": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "text/html": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "text/html": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or preview page not found."
+     },
+     "422": {
+      "content": {
+       "text/html": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized."
+     }
+    },
+    "summary": "Get Profile Public Build Preview Page"
+   }
+  },
+  "/api/v1/profiles/{name}/public-build/publish-and-build": {
+   "post": {
+    "description": "Publish the selected blog drafts, then build the static site.\n\nMirrors the Streamlit \"发布草稿并构建\" section: each slug goes through\n``publish_blog_post`` (full publish-readiness gate); the first failure\nanswers 422 ``public_publish_failed`` naming the slug, earlier slugs\nstay published, and nothing is built. Honors ``If-Match`` against the\npublic-layer ETag (412 on mismatch) — publishing flips blog statuses.",
+    "operationId": "publish_and_build_profile_public_site_api_v1_profiles__name__public_build_publish_and_build_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PublicBuildPublishRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicBuildResultResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile, build artifact, or preview page not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the public-layer files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation."
+     }
+    },
+    "summary": "Publish And Build Profile Public Site"
    }
   },
   "/api/v1/profiles/{name}/research": {
@@ -9680,7 +10945,7 @@
   },
   "/api/v1/profiles/{name}/studio/jd-match": {
    "post": {
-    "description": "JD match analysis for one resume text (LLM-backed, synchronous).\n\nAnswers 422 (``studio_jd_match_unavailable``) when no LLM backend is\nconfigured, so the SPA can show a degradation card instead of the\nanalysis — same degradation contract as the other LLM slices. A failed\nprovider call (core returns an error string, never raises) answers 422\n``studio_jd_match_failed``. Nothing is persisted.",
+    "description": "JD match analysis for one resume text (LLM-backed, synchronous).\n\nAnswers 422 (``studio_jd_match_unavailable``) when no LLM backend is\nconfigured, so the SPA can show a degradation card instead of the\nanalysis — same degradation contract as the other LLM slices. A failed\nprovider call (core returns an error string, never raises) answers 422\n``studio_jd_match_failed``. Nothing is persisted.\n\nKept as the synchronous contract for backward compatibility; the SPA\nnow dispatches this LLM long task as an async ``studio-jd-match`` job\n(``POST /profiles/{name}/jobs``, 分析中/生成中 phases over SSE) instead,\nwith the same error codes surfaced as the job's structured error.",
     "operationId": "analyze_profile_studio_jd_match_api_v1_profiles__name__studio_jd_match_post",
     "parameters": [
      {

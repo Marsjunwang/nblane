@@ -245,9 +245,16 @@ class KanbanCardCreateRequest(BaseModel):
 
 
 class KanbanCardMoveRequest(BaseModel):
-    """Move body for POST .../kanban/cards/{card_ref}/move."""
+    """Move body for POST .../kanban/cards/{card_ref}/move.
+
+    ``to_index`` is the 0-based insertion index inside the target column
+    (post-removal, matching ``apply_kanban_reorder``); when omitted the
+    card is appended to the column tail. Out-of-range values clamp like
+    the core reorder: negative to the column head, beyond-end to the tail.
+    """
 
     target_section: str
+    to_index: int | None = None
 
 
 class KanbanMutationResponse(BaseModel):
@@ -473,8 +480,10 @@ class EvidenceEntryDetailModel(EvidenceEntryModel):
 class GapAnalyzeRequest(BaseModel):
     """Body for the gap-analysis mutation.
 
-    ``use_llm=True`` is reserved for the async-jobs slice; the sync slice is
-    rule-matching only and answers 422 when it is set.
+    ``use_llm=False`` runs the synchronous rule-only analysis (200).
+    ``use_llm=True`` creates an async ``gap-analysis`` job (202, see
+    ``JobCreateResponse``); poll ``GET .../jobs/{job_id}`` or subscribe to
+    ``GET .../jobs/{job_id}/stream`` for progress and the final result.
     """
 
     task: str = Field(min_length=1, max_length=2000)
@@ -505,11 +514,15 @@ class GapClosureNodeModel(BaseModel):
 
 
 class GapAnalysisResponse(BaseModel):
-    """Faithful projection of ``core.models.GapResult`` (rule-only slice).
+    """Faithful projection of ``core.models.GapResult``.
 
     ``coverage`` is a derived convenience: share of closure nodes that are
     not gaps (0.0 when the closure is empty), so the SPA can render a
-    coverage indicator without re-deriving it.
+    coverage indicator without re-deriving it. ``analysis_mode`` records
+    which matchers ran (``rule`` for the sync endpoint, ``rule+llm`` for the
+    async deep-analysis job); ``llm_router_error`` carries the degradation
+    reason when the LLM router failed but rule roots still produced an
+    analysis (``null`` when no LLM path ran or it succeeded).
     """
 
     profile: str
@@ -524,6 +537,69 @@ class GapAnalysisResponse(BaseModel):
     roots_from_rule: list[str] = Field(default_factory=list)
     roots_from_llm: list[str] = Field(default_factory=list)
     learned_merged: bool = False
+    analysis_mode: str = "rule"
+    llm_router_error: str | None = None
+
+
+class JobErrorModel(BaseModel):
+    """Structured terminal failure of an async job."""
+
+    code: str
+    message: str
+
+
+class JobModel(BaseModel):
+    """Public snapshot of one async job (no result payload, no event log).
+
+    Statuses follow ``queued`` -> ``running`` -> ``done`` | ``failed``;
+    ``phase`` is the kind-specific coarse stage (gap-analysis: queued /
+    starting / routing / merging / done / failed; studio-jd-match:
+    analyzing / generating; project-suggest-refs: collecting / suggesting).
+    """
+
+    job_id: str
+    profile: str
+    kind: str
+    status: str
+    phase: str = ""
+    message: str = ""
+    created_at: float = 0.0
+    started_at: float = 0.0
+    finished_at: float = 0.0
+    elapsed_ms: int = 0
+    error: JobErrorModel | None = None
+
+
+class JobCreateRequest(BaseModel):
+    """Generic async-job creation body (dispatched by ``kind``).
+
+    ``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``
+    (1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,
+    jd_text}`` (both non-blank, ≤ 50000 chars each) and
+    ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank).
+    Validation failures answer 422 with the kind's error code
+    (``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /
+    ``invalid_job_input``).
+    """
+
+    kind: str = Field(min_length=1, max_length=64)
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobCreateResponse(BaseModel):
+    """202 answer of the job-creation endpoints."""
+
+    ok: bool = True
+    job_id: str
+    job: JobModel
+
+
+class JobStatusResponse(BaseModel):
+    """Current job snapshot plus the result payload once done."""
+
+    ok: bool = True
+    job: JobModel
+    result: dict[str, Any] | None = None
 
 
 class GapIntakeRequest(BaseModel):
@@ -1109,6 +1185,110 @@ class StudioJdMatchResponse(BaseModel):
 
     ok: bool = True
     analysis: str
+
+
+# --- Public Build (M5): validate / build / publish-and-build the static site --
+
+
+class PublicBuildValidationModel(BaseModel):
+    """Public-layer validation outcome (mirrors core PublicValidationResult)."""
+
+    ok: bool = True
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PublicBuildDraftModel(BaseModel):
+    """One unpublished blog draft offered by the publish-and-build section."""
+
+    slug: str
+    title: str = ""
+    date: str = ""
+
+
+class PublicBuildArtifactModel(BaseModel):
+    """One file under the build output directory (relative path + stat)."""
+
+    path: str
+    size: int = 0
+    modified: str = ""
+
+
+class PublicBuildStateModel(BaseModel):
+    """Observed state of the static-site output directory.
+
+    Derived from the directory itself (no separate build log): ``exists``
+    reports whether a build has ever landed, ``built_at`` is the newest
+    artifact mtime, and ``artifacts`` is the capped flat listing.
+    """
+
+    output_dir: str
+    exists: bool = False
+    built_at: str = ""
+    total_files: int = 0
+    total_bytes: int = 0
+    artifacts_truncated: bool = False
+    artifacts: list[PublicBuildArtifactModel] = Field(default_factory=list)
+
+
+class PublicBuildResponse(BaseModel):
+    """Public Build overview: init gate, validation, drafts, output state.
+
+    ``validation``/``drafts`` are null/empty until the profile's public
+    layer is initialized (POST ``/studio/init`` creates it).
+    """
+
+    profile: str
+    initialized: bool = False
+    validation: PublicBuildValidationModel | None = None
+    drafts: list[PublicBuildDraftModel] = Field(default_factory=list)
+    build: PublicBuildStateModel
+
+
+class PublicBuildRequest(BaseModel):
+    """Body for the static-site build (synchronous, no LLM).
+
+    ``base_url`` is the production site URL (optional sub-path) used for
+    canonical/sitemap links, mirroring the Streamlit form. The output
+    directory is pinned server-side (``dist/public/<name>`` under the data
+    root) — the Streamlit page's free-form output path is not exposed for
+    path safety.
+    """
+
+    include_drafts: bool = False
+    base_url: str = Field(default="", max_length=500)
+
+
+class PublicBuildPublishRequest(PublicBuildRequest):
+    """Body for publish-and-build: draft slugs to publish, then build."""
+
+    slugs: list[str] = Field(default_factory=list)
+
+
+class PublicBuildResultResponse(BaseModel):
+    """Result of one build / publish-and-build run."""
+
+    ok: bool = True
+    output_dir: str
+    page_count: int = 0
+    pages: list[str] = Field(default_factory=list)
+    published: list[str] = Field(default_factory=list)
+
+
+class PublicBuildPreviewPageModel(BaseModel):
+    """One renderable site page in the in-memory preview."""
+
+    path: str
+    title: str = ""
+
+
+class PublicBuildPreviewResponse(BaseModel):
+    """In-memory site preview page list (HTML served per page)."""
+
+    ok: bool = True
+    include_drafts: bool = True
+    pages: list[PublicBuildPreviewPageModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 # --- Sidecar info shared by Home / Research (M4) -----------------------------

@@ -468,6 +468,7 @@ class GapResult:
     roots_from_rule: list[str] = field(default_factory=list)
     roots_from_llm: list[str] = field(default_factory=list)
     learned_merged: bool = False
+    llm_router_error: str | None = None
     source_kind: str = ""
     source_id: str = ""
     source_label: str = ""

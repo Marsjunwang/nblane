@@ -123,7 +123,7 @@ export type EvidenceReviewDeprecateRequest = Schemas['EvidenceReviewDeprecateReq
 /** EvidenceReviewMutationResponse from web_api/schemas.py. */
 export type EvidenceReviewMutationResponse = Schemas['EvidenceReviewMutationResponse'];
 
-/** GapAnalyzeRequest from web_api/schemas.py (rule-only sync slice). */
+/** GapAnalyzeRequest from web_api/schemas.py (sync rule / async LLM dispatch). */
 export type GapAnalyzeRequest = Schemas['GapAnalyzeRequest'];
 
 /** GapTopMatchModel from web_api/schemas.py. */
@@ -134,6 +134,37 @@ export type GapClosureNode = Schemas['GapClosureNodeModel'];
 
 /** GapAnalysisResponse from web_api/schemas.py (GapResult projection). */
 export type GapAnalysisResult = Schemas['GapAnalysisResponse'];
+
+/** JobModel from web_api/schemas.py (async-job snapshot). */
+export type JobModel = Schemas['JobModel'];
+
+/** JobCreateRequest from web_api/schemas.py (kind + validated input). */
+export type JobCreateRequest = Schemas['JobCreateRequest'];
+
+/** JobCreateResponse from web_api/schemas.py (202 of the job endpoints). */
+export type JobCreateResponse = Schemas['JobCreateResponse'];
+
+/** JobStatusResponse from web_api/schemas.py (poll: snapshot + result). */
+export type JobStatusResponse = Schemas['JobStatusResponse'];
+
+/** One progress event replayed over the job SSE stream (seq-ordered). */
+export interface JobProgressEvent {
+  event?: string;
+  phase?: string;
+  message?: string;
+  seq?: number;
+  created_at?: number;
+  elapsed_ms?: number;
+}
+
+/** SSE frame payloads of GET .../jobs/{id}/stream (web_api/jobs.py). */
+export interface JobStreamFrame {
+  ok: boolean;
+  job?: JobModel;
+  event?: JobProgressEvent;
+  result?: Record<string, unknown> | null;
+  error?: { code: string; message: string } | null;
+}
 
 /** GapIntakeRequest from web_api/schemas.py. */
 export type GapIntakeRequest = Schemas['GapIntakeRequest'];
@@ -261,6 +292,36 @@ export type StudioJdMatchRequest = Schemas['StudioJdMatchRequest'];
 /** StudioJdMatchResponse from web_api/schemas.py. */
 export type StudioJdMatchResponse = Schemas['StudioJdMatchResponse'];
 
+/** PublicBuildValidationModel from web_api/schemas.py (public-layer check). */
+export type PublicBuildValidation = Schemas['PublicBuildValidationModel'];
+
+/** PublicBuildDraftModel from web_api/schemas.py (unpublished draft row). */
+export type PublicBuildDraft = Schemas['PublicBuildDraftModel'];
+
+/** PublicBuildArtifactModel from web_api/schemas.py (output file row). */
+export type PublicBuildArtifact = Schemas['PublicBuildArtifactModel'];
+
+/** PublicBuildStateModel from web_api/schemas.py (output-dir state). */
+export type PublicBuildState = Schemas['PublicBuildStateModel'];
+
+/** PublicBuildResponse from web_api/schemas.py (public-build overview). */
+export type PublicBuildResponse = Schemas['PublicBuildResponse'];
+
+/** PublicBuildRequest from web_api/schemas.py (build body). */
+export type PublicBuildRequest = Schemas['PublicBuildRequest'];
+
+/** PublicBuildPublishRequest from web_api/schemas.py (publish+build body). */
+export type PublicBuildPublishRequest = Schemas['PublicBuildPublishRequest'];
+
+/** PublicBuildResultResponse from web_api/schemas.py (one build run). */
+export type PublicBuildResultResponse = Schemas['PublicBuildResultResponse'];
+
+/** PublicBuildPreviewPageModel from web_api/schemas.py (preview picker row). */
+export type PublicBuildPreviewPage = Schemas['PublicBuildPreviewPageModel'];
+
+/** PublicBuildPreviewResponse from web_api/schemas.py (preview page list). */
+export type PublicBuildPreviewResponse = Schemas['PublicBuildPreviewResponse'];
+
 /** SidecarInfoModel from web_api/schemas.py (Reader API sidecar coordinates). */
 export type SidecarInfo = Schemas['SidecarInfoModel'];
 
@@ -327,6 +388,12 @@ export interface StudioResult {
 /** Blog detail GET result: the post plus its per-post ETag (W/"<sha256>"). */
 export interface StudioPostResult {
   post: StudioPostDetail;
+  etag: string;
+}
+
+/** Public-build GET result: the payload plus the public-layer ETag. */
+export interface PublicBuildResult {
+  data: PublicBuildResponse;
   etag: string;
 }
 

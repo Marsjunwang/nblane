@@ -5,6 +5,14 @@ import { readerBaseURL } from "./helpers";
 const baseUrl = readerBaseURL();
 const profileName = process.env.NBLANE_DASHBOARD_E2E_PROFILE || "template";
 
+// three.js WebGLRenderer on software GL (headless 2-CPU/3.75GB sandbox). At
+// the tail of a full-suite run the accumulated load of ~50 preceding specs
+// can stretch canvas mount / pixel readback past the locator budgets (the
+// test passes standalone, and after small subsets). One scoped retry re-runs
+// it on an idle machine with a fresh page; do not widen this into suite-wide
+// retries.
+test.describe.configure({ retries: 1 });
+
 function dashboardUrl(pathname = "/dashboard", params: Record<string, string> = {}): string {
   const url = new URL(pathname, baseUrl);
   url.searchParams.set("profile", profileName);

@@ -13,6 +13,7 @@ import {
   IconLayoutKanban,
   IconLogout,
   IconRobot,
+  IconRocket,
   IconTarget,
   IconTimeline,
   IconUser,
@@ -34,11 +35,19 @@ const NAV_ITEMS = [
   { label: '周回顾', path: 'review', icon: IconCalendarWeek },
   { label: '项目看板', path: 'project-board', icon: IconTimeline },
   { label: '输出工作室', path: 'studio', icon: IconWriting },
+  { label: '公开构建', path: 'public-build', icon: IconRocket },
   { label: '研究台', path: 'research', icon: IconBook2 },
   { label: '收件箱', path: 'inbox', icon: IconInbox },
   { label: '代理活动', path: 'activity', icon: IconRobot },
   { label: '健康', path: 'health', icon: IconHeartbeat },
 ];
+
+// Wide-viewport policy: every page's main column is centered and capped so
+// tables/cards/forms do not stretch into unreadably long rows on 1920+
+// monitors. The kanban board is the one page that genuinely uses the full
+// width (its columns tile horizontally), so it opts out.
+const CONTENT_MAX_WIDTH = 1400;
+const FULL_BLEED_SEGMENTS = ['/kanban'];
 
 export function AppLayout() {
   const me = useMe();
@@ -49,6 +58,7 @@ export function AppLayout() {
   const profileMatch = useMatch('/p/:name/*');
   const currentProfile = profileMatch?.params.name ?? '';
   const authEnabled = me.data?.auth_enabled ?? false;
+  const fullBleed = FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
 
   return (
     <AppShell
@@ -143,7 +153,17 @@ export function AppLayout() {
         </AppShell.Navbar>
       )}
       <AppShell.Main>
-        <Outlet />
+        <div
+          data-testid="page-container"
+          data-layout={fullBleed ? 'wide' : 'capped'}
+          style={
+            fullBleed
+              ? undefined
+              : { maxWidth: CONTENT_MAX_WIDTH, marginInline: 'auto', width: '100%' }
+          }
+        >
+          <Outlet />
+        </div>
       </AppShell.Main>
     </AppShell>
   );

@@ -16,6 +16,10 @@ node_modules/
 .dev-data/
 .dev-assets/
 test-results/
+# Playwright storageState baked by tests/e2e/spa_auth.setup.ts (session cookies)
+tests/e2e/.auth/
+# Layout audit screenshots/metrics (tests/e2e/audit_layout.mjs output)
+tests/e2e/audit-out/
 tmux-*.log
 !src/nblane/goal_presence_component/frontend/dist/
 !src/nblane/goal_presence_component/frontend/dist/**

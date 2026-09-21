@@ -385,6 +385,125 @@ class TestKanbanMutations(unittest.TestCase):
             )
         self.assertEqual(moved.status_code, 200)
 
+    def test_move_within_column_to_index(self) -> None:
+        """In-column reorder: post-removal insertion index lands the card."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "卡片 A")
+            _add_card(client, "卡片 B")
+            _add_card(client, "卡片 C")
+
+            moved = client.post(
+                "/api/v1/profiles/alice/kanban/cards/卡片 A/move",
+                json={"target_section": "Queue", "to_index": 2},
+            )
+            sections = parse_kanban(profile)
+
+        self.assertEqual(moved.status_code, 200)
+        body = moved.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["section"], "Queue")
+        self.assertEqual(body["warnings"], [])
+        self.assertEqual(
+            [task.title for task in sections["Queue"]],
+            ["卡片 B", "卡片 C", "卡片 A"],
+        )
+
+    def test_move_same_section_without_index_warns_noop(self) -> None:
+        """Same-column move without to_index keeps the idempotent warning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "卡片 A")
+            _add_card(client, "卡片 B")
+
+            moved = client.post(
+                "/api/v1/profiles/alice/kanban/cards/卡片 A/move",
+                json={"target_section": "Queue"},
+            )
+            sections = parse_kanban(profile)
+
+        self.assertEqual(moved.status_code, 200)
+        self.assertTrue(moved.json()["warnings"])
+        self.assertEqual(
+            [task.title for task in sections["Queue"]],
+            ["卡片 A", "卡片 B"],
+        )
+
+    def test_move_cross_column_with_to_index(self) -> None:
+        """Cross-column move inserts at the requested position, not the tail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "进行中 1", section="Doing")
+            _add_card(client, "进行中 2", section="Doing")
+            _add_card(client, "排队卡")
+
+            moved = client.post(
+                "/api/v1/profiles/alice/kanban/cards/排队卡/move",
+                json={"target_section": "Doing", "to_index": 1},
+            )
+            sections = parse_kanban(profile)
+
+        self.assertEqual(moved.status_code, 200)
+        self.assertEqual(moved.json()["section"], "Doing")
+        self.assertEqual(
+            [task.title for task in sections["Doing"]],
+            ["进行中 1", "排队卡", "进行中 2"],
+        )
+
+    def test_move_default_appends_to_tail(self) -> None:
+        """Omitting to_index keeps the legacy append-to-tail behavior."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "进行中 1", section="Doing")
+            _add_card(client, "进行中 2", section="Doing")
+            _add_card(client, "排队卡")
+
+            moved = client.post(
+                "/api/v1/profiles/alice/kanban/cards/排队卡/move",
+                json={"target_section": "Doing"},
+            )
+            sections = parse_kanban(profile)
+
+        self.assertEqual(moved.status_code, 200)
+        self.assertEqual(
+            [task.title for task in sections["Doing"]],
+            ["进行中 1", "进行中 2", "排队卡"],
+        )
+
+    def test_move_to_index_out_of_range_clamps(self) -> None:
+        """Core reorder semantics: negative clamps to head, overflow to tail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "卡片 A")
+            _add_card(client, "卡片 B")
+            _add_card(client, "卡片 C")
+
+            to_head = client.post(
+                "/api/v1/profiles/alice/kanban/cards/卡片 C/move",
+                json={"target_section": "Queue", "to_index": -3},
+            )
+            head_titles = _section_titles(profile, "Queue")
+            to_tail = client.post(
+                "/api/v1/profiles/alice/kanban/cards/卡片 C/move",
+                json={"target_section": "Queue", "to_index": 999},
+            )
+            tail_titles = _section_titles(profile, "Queue")
+
+        self.assertEqual(to_head.status_code, 200)
+        self.assertEqual(to_tail.status_code, 200)
+        self.assertEqual(head_titles, ["卡片 C", "卡片 A", "卡片 B"])
+        self.assertEqual(tail_titles, ["卡片 A", "卡片 B", "卡片 C"])
+
 
 class TestKanbanMutationAuth(unittest.TestCase):
     """401/403 rules for the kanban mutations under auth-on."""

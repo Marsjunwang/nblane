@@ -349,13 +349,19 @@ export interface paths {
         put?: never;
         /**
          * Analyze Profile Gap
-         * @description Synchronous, rule-only gap analysis for a free-text task description.
+         * @description Gap analysis for a free-text task description.
          *
-         *     Wraps ``core.gap.analyze`` with rule matching only. ``use_llm=true``
-         *     answers 422: the LLM router performs a live blocking provider call and
-         *     persists learned keywords, which belongs to the async-jobs slice.
-         *     Analysis errors (no matching nodes, missing skill tree/schema) also
-         *     surface as 422 with the core error message.
+         *     ``use_llm=false`` (default) wraps ``core.gap.analyze`` with rule
+         *     matching only and answers 200 synchronously. ``use_llm=true`` runs the
+         *     same analysis plus the LLM router (a live blocking provider call that
+         *     also persists learned keywords under ``schemas/.learned/``), so it is
+         *     dispatched as an async ``gap-analysis`` job answering 202 — subscribe
+         *     to the job's SSE stream for 路由中/合并中/完成 phases and the final
+         *     ``GapAnalysisResponse`` payload (``analysis_mode == "rule+llm"``; when
+         *     the LLM router fails but rule roots suffice, the job still completes
+         *     with ``llm_router_error`` set). Analysis errors (no matching nodes,
+         *     missing skill tree/schema) surface as 422 sync, or as a failed job
+         *     with the same error code async.
          */
         post: operations["analyze_profile_gap_api_v1_profiles__name__gap_analyze_post"];
         delete?: never;
@@ -568,6 +574,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Profile Job
+         * @description Create an async job for one profile (LLM long tasks).
+         *
+         *     Kinds are registered in ``nblane.web_api.jobs``: ``gap-analysis``
+         *     (also wired into ``POST .../gap/analyze`` with ``use_llm=true``),
+         *     ``studio-jd-match`` and ``project-suggest-refs`` (the SPA's async
+         *     paths for the sync studio/jd-match and suggest-refs endpoints, which
+         *     stay unchanged for backward compatibility). The job runs on a daemon
+         *     thread inside this single-worker process, tracked by the in-memory
+         *     registry (same design as the reader sidecar's paper-library search
+         *     jobs): poll ``GET .../jobs/{job_id}`` or subscribe to
+         *     ``GET .../jobs/{job_id}/stream`` (SSE) for progress and the result.
+         */
+        post: operations["create_profile_job_api_v1_profiles__name__jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Job
+         * @description Poll one job's status; the result payload appears once done.
+         */
+        get: operations["get_profile_job_api_v1_profiles__name__jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/jobs/{job_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Profile Job
+         * @description SSE stream of one job's progress (reader-sidecar wire design).
+         *
+         *     Frames: ``job`` (initial snapshot, replay-safe for late subscribers),
+         *     ``progress`` (one per logged phase event; phases are kind-specific —
+         *     gap-analysis: starting/routing/merging, studio-jd-match:
+         *     analyzing/generating, project-suggest-refs: collecting/suggesting),
+         *     then a terminal ``done`` (carries the result payload) or ``error``
+         *     (carries the structured ``{code, message}``). Terminal frames are
+         *     re-derivable on reconnect — a late subscriber still receives the full
+         *     event log plus the outcome.
+         */
+        get: operations["stream_profile_job_api_v1_profiles__name__jobs__job_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/kanban": {
         parameters: {
             query?: never;
@@ -653,6 +738,11 @@ export interface paths {
         /**
          * Move Profile Kanban Card
          * @description Move one card to ``target_section``. Honors ``If-Match`` (412).
+         *
+         *     ``to_index`` (optional, 0-based, post-removal) positions the card
+         *     inside the target column — including in-column reorders when
+         *     ``target_section`` is the card's current section. Omitting it appends
+         *     to the column tail; out-of-range values clamp (never a 422).
          */
         post: operations["move_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__move_post"];
         delete?: never;
@@ -838,6 +928,11 @@ export interface paths {
          *     for confirm-not-fill review — nothing is persisted by this endpoint.
          *     When no LLM backend is configured or the run fails, answers 422
          *     (``project_suggest_refs_failed``) so the SPA can show a degradation card.
+         *
+         *     Kept as the synchronous contract for backward compatibility; the SPA
+         *     now dispatches this LLM long task as an async ``project-suggest-refs``
+         *     job (``POST /profiles/{name}/jobs``, progress over SSE) instead. Both
+         *     paths share ``core.project_suggest.suggest_case_refs``.
          */
         post: operations["suggest_profile_project_refs_api_v1_profiles__name__project_board_cases__case_id__suggest_refs_post"];
         delete?: never;
@@ -892,6 +987,158 @@ export interface paths {
          *     (412 on mismatch); unknown task id answers 404.
          */
         post: operations["move_profile_project_task_api_v1_profiles__name__project_board_tasks__task_id__move_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Public Build
+         * @description Public Build overview: init gate, validation, drafts, output state.
+         *
+         *     Read-only aggregation of the Streamlit page's status surface: the
+         *     four-file public-layer gate, the ``validate_public_layer`` outcome
+         *     (errors block a build), the unpublished blog drafts offered by the
+         *     publish-and-build section, and the observed output-directory state.
+         *     Carries the public-layer ETag (same fingerprint as the studio) for
+         *     ``If-Match`` on the build mutations.
+         */
+        get: operations["get_profile_public_build_api_v1_profiles__name__public_build_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-build/artifacts/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Public Build Artifact
+         * @description Serve one file from the build output directory (preview/download).
+         *
+         *     Path-traversal guarded: anything resolving outside the pinned output
+         *     directory answers 404, same as a missing file. Auth follows the same
+         *     profile scope as every other route — a preview build may contain
+         *     drafts/private content, so artifacts are not public here.
+         */
+        get: operations["get_profile_public_build_artifact_api_v1_profiles__name__public_build_artifacts__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-build/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build Profile Public Site
+         * @description Build the static public site into the server-pinned output dir.
+         *
+         *     Thin wrapper over ``core.public_site.build_public_site``: the core
+         *     validates first (errors → 422 ``public_build_blocked``) and requires
+         *     ``visibility: public`` unless ``include_drafts`` is set (preview mode).
+         *     Honors ``If-Match`` against the public-layer ETag (412 on mismatch).
+         */
+        post: operations["build_profile_public_site_api_v1_profiles__name__public_build_build_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-build/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Public Build Preview
+         * @description List the renderable site pages for the in-memory preview picker.
+         *
+         *     Warnings mirror ``render_public_site_preview``: validation warnings
+         *     plus each validation error prefixed ``preview validation:`` (the
+         *     preview renders even when a production build would be blocked). The
+         *     per-page HTML comes from ``GET .../preview/page?path=<rel>``.
+         */
+        get: operations["get_profile_public_build_preview_api_v1_profiles__name__public_build_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-build/preview/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Public Build Preview Page
+         * @description Render one preview page as self-contained HTML (inline CSS/media).
+         *
+         *     Same payload the Streamlit page iframes via ``components.html``: CSS
+         *     and local media are inlined as data URIs, so the page renders stand-
+         *     alone in the SPA iframe. Unknown page paths answer 404.
+         */
+        get: operations["get_profile_public_build_preview_page_api_v1_profiles__name__public_build_preview_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-build/publish-and-build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish And Build Profile Public Site
+         * @description Publish the selected blog drafts, then build the static site.
+         *
+         *     Mirrors the Streamlit "发布草稿并构建" section: each slug goes through
+         *     ``publish_blog_post`` (full publish-readiness gate); the first failure
+         *     answers 422 ``public_publish_failed`` naming the slug, earlier slugs
+         *     stay published, and nothing is built. Honors ``If-Match`` against the
+         *     public-layer ETag (412 on mismatch) — publishing flips blog statuses.
+         */
+        post: operations["publish_and_build_profile_public_site_api_v1_profiles__name__public_build_publish_and_build_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1271,6 +1518,11 @@ export interface paths {
          *     analysis — same degradation contract as the other LLM slices. A failed
          *     provider call (core returns an error string, never raises) answers 422
          *     ``studio_jd_match_failed``. Nothing is persisted.
+         *
+         *     Kept as the synchronous contract for backward compatibility; the SPA
+         *     now dispatches this LLM long task as an async ``studio-jd-match`` job
+         *     (``POST /profiles/{name}/jobs``, 分析中/生成中 phases over SSE) instead,
+         *     with the same error codes surfaced as the job's structured error.
          */
         post: operations["analyze_profile_studio_jd_match_api_v1_profiles__name__studio_jd_match_post"];
         delete?: never;
@@ -2093,13 +2345,22 @@ export interface components {
         };
         /**
          * GapAnalysisResponse
-         * @description Faithful projection of ``core.models.GapResult`` (rule-only slice).
+         * @description Faithful projection of ``core.models.GapResult``.
          *
          *     ``coverage`` is a derived convenience: share of closure nodes that are
          *     not gaps (0.0 when the closure is empty), so the SPA can render a
-         *     coverage indicator without re-deriving it.
+         *     coverage indicator without re-deriving it. ``analysis_mode`` records
+         *     which matchers ran (``rule`` for the sync endpoint, ``rule+llm`` for the
+         *     async deep-analysis job); ``llm_router_error`` carries the degradation
+         *     reason when the LLM router failed but rule roots still produced an
+         *     analysis (``null`` when no LLM path ran or it succeeded).
          */
         GapAnalysisResponse: {
+            /**
+             * Analysis Mode
+             * @default rule
+             */
+            analysis_mode: string;
             /**
              * Can Solve
              * @default false
@@ -2119,6 +2380,8 @@ export interface components {
              * @default false
              */
             learned_merged: boolean;
+            /** Llm Router Error */
+            llm_router_error?: string | null;
             /** Next Steps */
             next_steps?: string[];
             /** Profile */
@@ -2141,8 +2404,10 @@ export interface components {
          * GapAnalyzeRequest
          * @description Body for the gap-analysis mutation.
          *
-         *     ``use_llm=True`` is reserved for the async-jobs slice; the sync slice is
-         *     rule-matching only and answers 422 when it is set.
+         *     ``use_llm=False`` runs the synchronous rule-only analysis (200).
+         *     ``use_llm=True`` creates an async ``gap-analysis`` job (202, see
+         *     ``JobCreateResponse``); poll ``GET .../jobs/{job_id}`` or subscribe to
+         *     ``GET .../jobs/{job_id}/stream`` for progress and the final result.
          */
         GapAnalyzeRequest: {
             /** Task */
@@ -2906,6 +3171,116 @@ export interface components {
             total: number;
         };
         /**
+         * JobCreateRequest
+         * @description Generic async-job creation body (dispatched by ``kind``).
+         *
+         *     ``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``
+         *     (1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,
+         *     jd_text}`` (both non-blank, ≤ 50000 chars each) and
+         *     ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank).
+         *     Validation failures answer 422 with the kind's error code
+         *     (``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /
+         *     ``invalid_job_input``).
+         */
+        JobCreateRequest: {
+            /** Input */
+            input?: {
+                [key: string]: unknown;
+            };
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * JobCreateResponse
+         * @description 202 answer of the job-creation endpoints.
+         */
+        JobCreateResponse: {
+            job: components["schemas"]["JobModel"];
+            /** Job Id */
+            job_id: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /**
+         * JobErrorModel
+         * @description Structured terminal failure of an async job.
+         */
+        JobErrorModel: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * JobModel
+         * @description Public snapshot of one async job (no result payload, no event log).
+         *
+         *     Statuses follow ``queued`` -> ``running`` -> ``done`` | ``failed``;
+         *     ``phase`` is the kind-specific coarse stage (gap-analysis: queued /
+         *     starting / routing / merging / done / failed; studio-jd-match:
+         *     analyzing / generating; project-suggest-refs: collecting / suggesting).
+         */
+        JobModel: {
+            /**
+             * Created At
+             * @default 0
+             */
+            created_at: number;
+            /**
+             * Elapsed Ms
+             * @default 0
+             */
+            elapsed_ms: number;
+            error?: components["schemas"]["JobErrorModel"] | null;
+            /**
+             * Finished At
+             * @default 0
+             */
+            finished_at: number;
+            /** Job Id */
+            job_id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /** Profile */
+            profile: string;
+            /**
+             * Started At
+             * @default 0
+             */
+            started_at: number;
+            /** Status */
+            status: string;
+        };
+        /**
+         * JobStatusResponse
+         * @description Current job snapshot plus the result payload once done.
+         */
+        JobStatusResponse: {
+            job: components["schemas"]["JobModel"];
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Result */
+            result?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
          * KanbanBoardResponse
          * @description Parsed kanban board structure (no markdown body).
          */
@@ -2943,10 +3318,17 @@ export interface components {
         /**
          * KanbanCardMoveRequest
          * @description Move body for POST .../kanban/cards/{card_ref}/move.
+         *
+         *     ``to_index`` is the 0-based insertion index inside the target column
+         *     (post-removal, matching ``apply_kanban_reorder``); when omitted the
+         *     card is appended to the column tail. Out-of-range values clamp like
+         *     the core reorder: negative to the column head, beyond-end to the tail.
          */
         KanbanCardMoveRequest: {
             /** Target Section */
             target_section: string;
+            /** To Index */
+            to_index?: number | null;
         };
         /**
          * KanbanMutationResponse
@@ -3615,6 +3997,211 @@ export interface components {
         ProjectTaskMoveRequest: {
             /** Target Section */
             target_section: string;
+        };
+        /**
+         * PublicBuildArtifactModel
+         * @description One file under the build output directory (relative path + stat).
+         */
+        PublicBuildArtifactModel: {
+            /**
+             * Modified
+             * @default
+             */
+            modified: string;
+            /** Path */
+            path: string;
+            /**
+             * Size
+             * @default 0
+             */
+            size: number;
+        };
+        /**
+         * PublicBuildDraftModel
+         * @description One unpublished blog draft offered by the publish-and-build section.
+         */
+        PublicBuildDraftModel: {
+            /**
+             * Date
+             * @default
+             */
+            date: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
+         * PublicBuildPreviewPageModel
+         * @description One renderable site page in the in-memory preview.
+         */
+        PublicBuildPreviewPageModel: {
+            /** Path */
+            path: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
+         * PublicBuildPreviewResponse
+         * @description In-memory site preview page list (HTML served per page).
+         */
+        PublicBuildPreviewResponse: {
+            /**
+             * Include Drafts
+             * @default true
+             */
+            include_drafts: boolean;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Pages */
+            pages?: components["schemas"]["PublicBuildPreviewPageModel"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * PublicBuildPublishRequest
+         * @description Body for publish-and-build: draft slugs to publish, then build.
+         */
+        PublicBuildPublishRequest: {
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Include Drafts
+             * @default false
+             */
+            include_drafts: boolean;
+            /** Slugs */
+            slugs?: string[];
+        };
+        /**
+         * PublicBuildRequest
+         * @description Body for the static-site build (synchronous, no LLM).
+         *
+         *     ``base_url`` is the production site URL (optional sub-path) used for
+         *     canonical/sitemap links, mirroring the Streamlit form. The output
+         *     directory is pinned server-side (``dist/public/<name>`` under the data
+         *     root) — the Streamlit page's free-form output path is not exposed for
+         *     path safety.
+         */
+        PublicBuildRequest: {
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Include Drafts
+             * @default false
+             */
+            include_drafts: boolean;
+        };
+        /**
+         * PublicBuildResponse
+         * @description Public Build overview: init gate, validation, drafts, output state.
+         *
+         *     ``validation``/``drafts`` are null/empty until the profile's public
+         *     layer is initialized (POST ``/studio/init`` creates it).
+         */
+        PublicBuildResponse: {
+            build: components["schemas"]["PublicBuildStateModel"];
+            /** Drafts */
+            drafts?: components["schemas"]["PublicBuildDraftModel"][];
+            /**
+             * Initialized
+             * @default false
+             */
+            initialized: boolean;
+            /** Profile */
+            profile: string;
+            validation?: components["schemas"]["PublicBuildValidationModel"] | null;
+        };
+        /**
+         * PublicBuildResultResponse
+         * @description Result of one build / publish-and-build run.
+         */
+        PublicBuildResultResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Output Dir */
+            output_dir: string;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+            /** Pages */
+            pages?: string[];
+            /** Published */
+            published?: string[];
+        };
+        /**
+         * PublicBuildStateModel
+         * @description Observed state of the static-site output directory.
+         *
+         *     Derived from the directory itself (no separate build log): ``exists``
+         *     reports whether a build has ever landed, ``built_at`` is the newest
+         *     artifact mtime, and ``artifacts`` is the capped flat listing.
+         */
+        PublicBuildStateModel: {
+            /** Artifacts */
+            artifacts?: components["schemas"]["PublicBuildArtifactModel"][];
+            /**
+             * Artifacts Truncated
+             * @default false
+             */
+            artifacts_truncated: boolean;
+            /**
+             * Built At
+             * @default
+             */
+            built_at: string;
+            /**
+             * Exists
+             * @default false
+             */
+            exists: boolean;
+            /** Output Dir */
+            output_dir: string;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Total Files
+             * @default 0
+             */
+            total_files: number;
+        };
+        /**
+         * PublicBuildValidationModel
+         * @description Public-layer validation outcome (mirrors core PublicValidationResult).
+         */
+        PublicBuildValidationModel: {
+            /** Errors */
+            errors?: string[];
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * ResearchResponse
@@ -5248,6 +5835,15 @@ export interface operations {
                     "application/json": components["schemas"]["GapAnalysisResponse"];
                 };
             };
+            /** @description use_llm=true: the deep analysis runs as an async gap-analysis job; poll or stream the returned job_id. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
             /** @description Invalid profile name. */
             400: {
                 headers: {
@@ -5275,7 +5871,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Empty/unmatched task, missing skill tree or schema, or use_llm requested before the async-jobs slice. */
+            /** @description Empty/unmatched task, missing skill tree or schema. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5310,6 +5906,15 @@ export interface operations {
                     "application/json": components["schemas"]["KanbanMutationResponse"];
                 };
             };
+            /** @description use_llm=true: the deep analysis runs as an async gap-analysis job; poll or stream the returned job_id. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
             /** @description Invalid profile name. */
             400: {
                 headers: {
@@ -5337,7 +5942,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Empty/unmatched task, missing skill tree or schema, or use_llm requested before the async-jobs slice. */
+            /** @description Empty/unmatched task, missing skill tree or schema. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5867,6 +6472,186 @@ export interface operations {
                 };
             };
             /** @description Blank title or unsupported clarify action. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_profile_job_api_v1_profiles__name__jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Job not found for this profile. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown job kind or invalid job input. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_job_api_v1_profiles__name__jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Job not found for this profile. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown job kind or invalid job input. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stream_profile_job_api_v1_profiles__name__jobs__job_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Job not found for this profile. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown job kind or invalid job input. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6853,6 +7638,390 @@ export interface operations {
                 };
             };
             /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_public_build_api_v1_profiles__name__public_build_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBuildResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_public_build_artifact_api_v1_profiles__name__public_build_artifacts__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found, or artifact missing/escapes the output dir. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    build_profile_public_site_api_v1_profiles__name__public_build_build_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicBuildRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBuildResultResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile, build artifact, or preview page not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the public-layer files. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_public_build_preview_api_v1_profiles__name__public_build_preview_get: {
+        parameters: {
+            query?: {
+                include_drafts?: boolean;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBuildPreviewResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_public_build_preview_page_api_v1_profiles__name__public_build_preview_page_get: {
+        parameters: {
+            query?: {
+                path?: string;
+                include_drafts?: boolean;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or preview page not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    publish_and_build_profile_public_site_api_v1_profiles__name__public_build_publish_and_build_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicBuildPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBuildResultResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile, build artifact, or preview page not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the public-layer files. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation. */
             422: {
                 headers: {
                     [name: string]: unknown;

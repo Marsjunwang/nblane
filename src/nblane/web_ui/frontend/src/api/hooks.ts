@@ -29,6 +29,8 @@ import type {
   InboxListResult,
   InboxMutationResponse,
   InboxResponse,
+  JobCreateRequest,
+  JobCreateResponse,
   KanbanBoard,
   KanbanBoardResult,
   KanbanCardCreateRequest,
@@ -42,8 +44,13 @@ import type {
   ProjectCaseUpdateRequest,
   ProjectMilestoneAddRequest,
   ProjectMilestoneUpdateRequest,
-  ProjectSuggestRefsResponse,
   ProjectTaskCreateRequest,
+  PublicBuildPreviewResponse,
+  PublicBuildPublishRequest,
+  PublicBuildRequest,
+  PublicBuildResponse,
+  PublicBuildResult,
+  PublicBuildResultResponse,
   ResearchResponse,
   ReviewApplyRequest,
   ReviewApplyResponse,
@@ -55,8 +62,6 @@ import type {
   StudioCandidateResponse,
   StudioDraftResponse,
   StudioInitResponse,
-  StudioJdMatchRequest,
-  StudioJdMatchResponse,
   StudioPostCreateRequest,
   StudioPostDetail,
   StudioPostMutationResponse,
@@ -169,15 +174,18 @@ export function useMoveKanbanCard(profile: string) {
     mutationFn: ({
       cardRef,
       targetSection,
+      toIndex,
       etag,
     }: {
       cardRef: string;
       targetSection: string;
+      /** 0-based post-removal index in the target column; omitted = tail. */
+      toIndex?: number;
       etag: string;
     }) =>
       apiPost<KanbanMutationResponse>(
         `${kanbanBase(profile)}/cards/${encodeURIComponent(cardRef)}/move`,
-        { target_section: targetSection },
+        { target_section: targetSection, ...(toIndex === undefined ? {} : { to_index: toIndex }) },
         { headers: ifMatch(etag) },
       ),
     onSuccess: invalidate,
@@ -469,6 +477,31 @@ export function useGapAnalyze(profile: string) {
   });
 }
 
+/**
+ * Deep (LLM) gap analysis: the same endpoint with `use_llm: true` answers
+ * 202 with a job handle; the page then subscribes to the job's SSE stream
+ * (see api/jobs.ts) for progress phases and the final GapAnalysisResult.
+ */
+export function useGapDeepAnalyze(profile: string) {
+  return useMutation({
+    mutationFn: (body: GapAnalyzeRequest) =>
+      apiPost<JobCreateResponse>(`${gapBase(profile)}/analyze`, body),
+  });
+}
+
+/**
+ * Generic async-job creation (LLM long tasks: `studio-jd-match`,
+ * `project-suggest-refs`, ...). Answers 202 with a job handle; the page
+ * then subscribes to the job's SSE stream (see api/jobs.ts) for progress
+ * phases and the kind-specific result payload.
+ */
+export function useCreateJob(profile: string) {
+  return useMutation({
+    mutationFn: (body: JobCreateRequest) =>
+      apiPost<JobCreateResponse>(`/profiles/${encodeURIComponent(profile)}/jobs`, body),
+  });
+}
+
 export function useGapIntake(profile: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -717,17 +750,6 @@ export function useMoveProjectTask(profile: string) {
   });
 }
 
-/** AI suggest-refs (confirm-not-fill): nothing is persisted server-side. */
-export function useSuggestProjectRefs(profile: string) {
-  return useMutation({
-    mutationFn: ({ caseId }: { caseId: string }) =>
-      apiPost<ProjectSuggestRefsResponse>(
-        `${projectBoardBase(profile)}/cases/${encodeURIComponent(caseId)}/suggest-refs`,
-        undefined,
-      ),
-  });
-}
-
 function studioBase(profile: string): string {
   return `/profiles/${encodeURIComponent(profile)}/studio`;
 }
@@ -863,12 +885,89 @@ export function useCreateStudioDraft(profile: string) {
   });
 }
 
-/** JD match analysis (LLM-backed; 422 degradation when unconfigured). */
-export function useJdMatch(profile: string) {
-  return useMutation({
-    mutationFn: (body: StudioJdMatchRequest) =>
-      apiPost<StudioJdMatchResponse>(`${studioBase(profile)}/jd-match`, body),
+function publicBuildBase(profile: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/public-build`;
+}
+
+/** Public-build overview fetch that captures the public-layer ETag. */
+export function usePublicBuild(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'public-build'],
+    queryFn: async (): Promise<PublicBuildResult> => {
+      const { data, headers } = await apiGetWithHeaders<PublicBuildResponse>(
+        publicBuildBase(profile),
+      );
+      return { data, etag: headers.get('ETag') ?? '' };
+    },
+    enabled: profile.length > 0,
   });
+}
+
+/** Preview page list for the in-memory site preview picker. */
+export function usePublicBuildPreview(profile: string, includeDrafts: boolean) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'public-build', 'preview', includeDrafts],
+    queryFn: () => {
+      const params = new URLSearchParams({ include_drafts: includeDrafts ? '1' : '0' });
+      return apiGet<PublicBuildPreviewResponse>(`${publicBuildBase(profile)}/preview?${params}`);
+    },
+    enabled: profile.length > 0,
+  });
+}
+
+function useInvalidatePublicBuild(profile: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-build'] });
+    // Publishing drafts also changes the studio blog list.
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'studio'] });
+  };
+}
+
+/** Build the static site (synchronous; server-pinned output dir). */
+export function useBuildPublicSite(profile: string) {
+  const invalidate = useInvalidatePublicBuild(profile);
+  return useMutation({
+    mutationFn: ({ body, etag }: { body: PublicBuildRequest; etag: string }) =>
+      apiPost<PublicBuildResultResponse>(`${publicBuildBase(profile)}/build`, body, {
+        headers: ifMatch(etag),
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Publish the selected drafts, then build the static site. */
+export function usePublishAndBuildPublicSite(profile: string) {
+  const invalidate = useInvalidatePublicBuild(profile);
+  return useMutation({
+    mutationFn: ({ body, etag }: { body: PublicBuildPublishRequest; etag: string }) =>
+      apiPost<PublicBuildResultResponse>(
+        `${publicBuildBase(profile)}/publish-and-build`,
+        body,
+        { headers: ifMatch(etag) },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/** Same-origin URL of one built artifact (anchor href / iframe src). */
+export function publicBuildArtifactUrl(profile: string, path: string): string {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  // Same API_BASE as client.ts ('/api/v1'), which is not exported.
+  return `/api/v1${publicBuildBase(profile)}/artifacts/${encoded}`;
+}
+
+/** Same-origin URL of one self-contained preview page (iframe src). */
+export function publicBuildPreviewPageUrl(
+  profile: string,
+  path: string,
+  includeDrafts: boolean,
+): string {
+  const params = new URLSearchParams({
+    path,
+    include_drafts: includeDrafts ? '1' : '0',
+  });
+  return `/api/v1${publicBuildBase(profile)}/preview/page?${params}`;
 }
 
 /** Home dashboard overview (M4): aggregated profile snapshot, read-only. */

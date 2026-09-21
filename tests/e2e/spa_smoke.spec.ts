@@ -85,9 +85,9 @@ test.describe("SPA smoke (web_api on " + SPA_BASE_URL + ")", () => {
 
     await page.goto(spaURL("/"));
 
-    // Auth-off guard: NBLANE_AUTH_FILE is unset on the isolated stack, so
-    // /auth/me answers a synthetic admin and RequireAuth must NOT bounce the
-    // browser to /login.
+    // Session guard: with a valid session (the baked admin storageState from
+    // spa_auth.setup — the isolated stack enables auth — or the synthetic
+    // admin on auth-less stacks) RequireAuth must NOT bounce to /login.
     await expect(page.getByRole("heading", { name: "档案列表" })).toBeVisible();
     expect(page.url()).not.toContain("/login");
 

@@ -123,6 +123,13 @@ API key、token、cookie、authorization 不会写入 profile 文件。未配置
 /dashboard?profile=<profile>&view=3d&node=<node_id>
 ```
 
+嵌入形态（`&embed=1`，SPA 首页星系 hero 与 Streamlit 健康检查使用）额外支持
+`&compact=1`：紧凑模式把检查器从常驻右栏改为点选节点才弹出的抽屉（星系吃满
+嵌入宽）、隐藏与宿主页指标重复的 Attention 条、3D 画布高度下限 560→480，
+适配 hero 尺寸的 iframe；不带 compact 的 embed、standalone 全屏页与 Streamlit
+组件内嵌行为不变。SPA 后端 `GET /home` / `GET /research` 返回的
+`sidecar.dashboard_url` 已统一带 `embed=1&view=3d&compact=1`。
+
 生产环境下 Caddy 把 `/dashboard*` 反代到 8502，浏览器可以直接访问
 `https://<domain>/dashboard?profile=<profile>`；本地直连时映射为
 `http://127.0.0.1:8502/dashboard?profile=<profile>`。

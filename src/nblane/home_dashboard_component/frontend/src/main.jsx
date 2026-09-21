@@ -340,6 +340,14 @@ function initialDashboardNodeId() {
   return urlSearchParam("node");
 }
 
+// ?compact=1 (embed only): hero-sized iframes (the SPA home galaxy) get the
+// inspector as an on-demand drawer instead of a permanent right rail, so the
+// 3D canvas keeps the full embed width. Off by default; the plain embed and
+// the Streamlit/standalone modes are unchanged.
+function initialDashboardCompact() {
+  return ["1", "true", "yes"].includes(urlSearchParam("compact").toLowerCase());
+}
+
 function dashboardNodeUrl(url, nodeId, view = "3d") {
   const cleanUrl = cleanText(url);
   const cleanNode = cleanText(nodeId);
@@ -5167,6 +5175,7 @@ function Dashboard({ args }) {
   const canvasEmbed = useMemo(() => (!args.standalone ? dashboardCanvasEmbed(payload) : null), [args.standalone, payload]);
   const readOnlyCanvas = Boolean(args.standalone);
   const useDailyGraphHero = !args.standalone && !args.embed;
+  const compactEmbed = useMemo(() => args.embed && initialDashboardCompact(), [args.embed]);
 
   useLayoutEffect(() => {
     window.setTimeout(() => setFrameHeight(), 0);
@@ -5196,13 +5205,14 @@ function Dashboard({ args }) {
     }
     const requestedAvailable =
       !deepLinkConsumedRef.current && requestedNodeId && availableIds.has(requestedNodeId);
-    // The fullscreen standalone page keeps the inspector drawer closed by
-    // default (the galaxy fills the viewport) rather than auto-selecting a
-    // "preferred" node on load — a deep-linked ?node= is the one case that
-    // should still populate the selection so the drawer opens on it, but only
-    // on first load: once the graph nodes exist we mark the deep link consumed
-    // so closing the drawer (selectedNodeId="") is not undone on the next run.
-    const nextPreferred = fullBleedStandalone ? null : preferredNode(payload);
+    // The fullscreen standalone page and the compact embed keep the inspector
+    // drawer closed by default (the galaxy fills the frame) rather than
+    // auto-selecting a "preferred" node on load — a deep-linked ?node= is the
+    // one case that should still populate the selection so the drawer opens on
+    // it, but only on first load: once the graph nodes exist we mark the deep
+    // link consumed so closing the drawer (selectedNodeId="") is not undone on
+    // the next run.
+    const nextPreferred = fullBleedStandalone || compactEmbed ? null : preferredNode(payload);
     const nextId = availableIds.has(selectedNodeId)
       ? selectedNodeId
       : requestedAvailable
@@ -5215,7 +5225,7 @@ function Dashboard({ args }) {
       setSelectedNodeId(nextId);
     }
     window.setTimeout(() => setFrameHeight(), 0);
-  }, [payload, requestedNodeId, selectedNodeId, fullBleedStandalone]);
+  }, [payload, requestedNodeId, selectedNodeId, fullBleedStandalone, compactEmbed]);
 
   function emit(event) {
     if (args.standalone) {
@@ -5400,8 +5410,38 @@ function Dashboard({ args }) {
   }
 
   return (
-    <main className={args.embed ? "hd-shell hd-shell-embed" : "hd-shell"}>
+    <main className={args.embed ? `hd-shell hd-shell-embed${compactEmbed ? " hd-shell-compact" : ""}` : "hd-shell"}>
       {args.embed ? (
+        compactEmbed ? (
+          <>
+            <div className="hd-canvas-workbench hd-canvas-workbench-embed">
+              <ContextCanvas
+                payload={payload}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={handleSelectNode}
+                onEmit={emit}
+                onCreateGoal={() => setGoalEditor({ mode: "create" })}
+                viewMode={viewMode}
+                setViewMode={setViewMode}
+                readOnly={readOnlyCanvas}
+              />
+            </div>
+            <HdDrawer
+              open={Boolean(selectedNodeId)}
+              onClose={() => handleSelectNode("")}
+              title={label(payload.ui, "dashboard_graph_title", "Context Canvas")}
+            >
+              <InspectorPanel
+                payload={payload}
+                selectedNodeId={selectedNodeId}
+                goalEditor={goalEditor}
+                setGoalEditor={setGoalEditor}
+                onEmit={emit}
+                readOnly={readOnlyCanvas}
+              />
+            </HdDrawer>
+          </>
+        ) : (
         <div className="hd-canvas-workbench hd-canvas-workbench-embed">
           <ContextCanvas
             payload={payload}
@@ -5422,6 +5462,7 @@ function Dashboard({ args }) {
             readOnly={readOnlyCanvas}
           />
         </div>
+        )
       ) : (
         <>
       <ContextHeader

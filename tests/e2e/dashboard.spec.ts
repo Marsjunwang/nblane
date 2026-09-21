@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+// WebGL hero on the Streamlit home dashboard (software GL on this headless
+// 2-CPU/3.75GB sandbox). At the tail of a full-suite run — after dozens of
+// specs holding Streamlit sessions — session startup + canvas mount can outrun
+// the locator budgets (it passes standalone, and after small subsets). One
+// scoped retry re-runs the test on an idle machine with a fresh page; do not
+// widen this into suite-wide retries.
+test.describe.configure({ retries: 1 });
+
 // Targets the Streamlit home dashboard; the URL resolves against the
 // configured use.baseURL (see playwright.config.ts).
 async function openStreamlitDashboard(page) {
@@ -88,7 +96,11 @@ async function homeDashboardFrame(page) {
 }
 
 test("Home dashboard exposes top-right guide, AI settings, optional fullscreen galaxy link, and scales", async ({ page }, testInfo) => {
-  test.setTimeout(180_000);
+  // This walkthrough (profile switch, goal editor, 3 viewport resizes, 3
+  // fullPage screenshots on software GL) intrinsically takes ~2.5-3 min on
+  // this box — the old 180s budget left ~15% headroom idle and none under
+  // full-suite load (observed: both attempts died late-stage at 180s).
+  test.setTimeout(300_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openStreamlitDashboard(page);
   await ensureDevProfile(page);

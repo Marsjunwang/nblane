@@ -9,10 +9,10 @@ import { ActivityPage } from './ActivityPage';
 const ITEM = {
   id: 'item-1',
   kind: 'candidate',
-  candidate_type: 'skill',
-  source_page: 'review',
-  source_ref: 'ev-1',
-  target_owner: 'alice',
+  candidate_type: 'evidence',
+  source_page: 'Review',
+  source_ref: 'review:2026-09-14:2026-09-20',
+  target_owner: 'evidence_pool',
   status: 'pending',
   title: '新增技能: 机械臂标定',
   summary: '从评审中提炼的候选技能。',
@@ -24,6 +24,18 @@ const ITEM = {
   created: '2026-09-18T10:00:00',
   updated: '2026-09-18T10:00:00',
   applied_at: '',
+};
+
+/** Pending but not Review-origin: Apply must not be offered (backend 409s). */
+const NON_REVIEW_ITEM = {
+  ...ITEM,
+  id: 'item-2',
+  kind: 'candidate',
+  candidate_type: 'research_paper_deep_read_codex',
+  source_page: 'AI Gateway',
+  source_ref: 'airun_123',
+  target_owner: 'research',
+  title: 'AI 网关候选: 论文深读',
 };
 
 const LIST = {
@@ -203,6 +215,34 @@ describe('ActivityPage', () => {
       ([input, init]) => String(input).endsWith('/apply') && init?.method === 'POST',
     );
     expect(applyCalls.length).toBe(1);
+  });
+
+  it('hides Apply for pending non-Review items and explains why (P0-2)', async () => {
+    const list = {
+      ...LIST,
+      items: [NON_REVIEW_ITEM],
+      summary: { status: { pending: 1 }, kind: { candidate: 1 } },
+    };
+    const fetchMock = stubFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'GET' && url.includes('/activity/item-2')) {
+        return detailResponse(NON_REVIEW_ITEM, ETAG);
+      }
+      return jsonResponse(200, list);
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByText('AI 网关候选: 论文深读'));
+    // 驳回 stays available; 应用 is not offered for non-Review origins.
+    expect(await screen.findByRole('button', { name: '驳回' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '应用' })).not.toBeInTheDocument();
+    expect(screen.getByText(/只能应用 pending 的 Review 候选/)).toBeInTheDocument();
+    // No apply request can be issued through the UI.
+    expect(
+      fetchMock.mock.calls.filter(
+        ([input, init]) => String(input).endsWith('/apply') && init?.method === 'POST',
+      ),
+    ).toHaveLength(0);
   });
 
   it('dismisses via the modal, sending If-Match and the note', async () => {
