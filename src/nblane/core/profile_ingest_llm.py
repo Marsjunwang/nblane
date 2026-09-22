@@ -685,8 +685,13 @@ def ingest_kanban_done_json(
     done_tasks: list[KanbanTask],
     goal_context: str = "",
     ai_backend: str = "llm",
+    timeout_seconds: float | None = None,
 ) -> tuple[dict | None, str | None]:
-    """Produce ingest JSON from Done-column tasks."""
+    """Produce ingest JSON from Done tasks.
+
+    *timeout_seconds* overrides the default LLM timeout (used by the
+    crystallize job, where a wizard is blocking on the reply).
+    """
     if not done_tasks:
         return None, "no Done tasks selected"
     use_codex = _use_codex_backend(ai_backend)
@@ -727,7 +732,7 @@ def ingest_kanban_done_json(
         system,
         user,
         temperature=0.2,
-        timeout=_kanban_done_llm_timeout_seconds(),
+        timeout=timeout_seconds or _kanban_done_llm_timeout_seconds(),
         max_tokens=_kanban_done_llm_max_tokens(len(done_tasks)),
     )
     if reply.startswith("LLM error:") or reply.startswith(

@@ -441,6 +441,20 @@ class GoalsResponse(BaseModel):
     goals: list[GoalModel] = Field(default_factory=list)
 
 
+class ProvenanceRefModel(BaseModel):
+    """One kanban provenance ref with its resolution state.
+
+    Dead refs (task archived or deleted) report ``status="archived"`` so the
+    UI renders a tombstone instead of a hard error (design: kanban_refs stay
+    a provenance chain, never a 404).
+    """
+
+    ref: str
+    task_id: str = ""
+    title: str = ""
+    status: str = "archived"  # "linked" | "archived"
+
+
 class EvidenceEntryModel(BaseModel):
     """One evidence-pool entry, list view."""
 
@@ -475,6 +489,8 @@ class EvidenceEntryDetailModel(EvidenceEntryModel):
     source_content_hash: str = ""
     deprecated: bool = False
     replaced_by: str = ""
+    skill_refs: list[str] = Field(default_factory=list)
+    kanban_ref_details: list[ProvenanceRefModel] = Field(default_factory=list)
 
 
 class GapAnalyzeRequest(BaseModel):
@@ -706,6 +722,209 @@ class EvidenceReviewMutationResponse(BaseModel):
     changed: int = 0
     missing: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class EvidenceEditRequest(BaseModel):
+    """Body for the single-entry edit mutation.
+
+    ``fields`` maps field name -> new value. Allowed keys: the review
+    whitelist (``review_status``/``strength``/``confidence``/
+    ``public_readiness``, domain-validated, "" clears) plus the text fields
+    ``title``/``summary``/``date``/``url`` and ``type`` (domain-validated).
+    Unknown keys answer 422; provenance fields (``origin*``, refs,
+    ``original_content``) are not editable here — the original snapshot is
+    immutable once crystallized.
+    """
+
+    fields: dict[str, str] = Field(min_length=1)
+
+
+class EvidenceEntryActionRequest(BaseModel):
+    """Body for the single-entry review action.
+
+    ``action``: ``accept`` (mark reviewed, optionally grading in the same
+    call), ``reject`` (deprecate; the row is kept for provenance) or
+    ``restore`` (un-deprecate). Grade fields are only applied on ``accept``
+    and must be in their domain ("" clears).
+    """
+
+    action: str = Field(min_length=1, max_length=16)
+    strength: str = ""
+    confidence: str = ""
+    public_readiness: str = ""
+
+
+class EvidenceSkillLinksRequest(BaseModel):
+    """Body for the skill link/unlink mutation (chip-save semantics).
+
+    ``skill_ids`` is the full desired set of skill nodes citing this
+    evidence row: ids not currently linked are added, currently-linked ids
+    missing from the list are removed (core
+    ``set_evidence_skill_refs``). The write lands only on the skill nodes'
+    ``evidence_refs`` — the single write side; the reverse direction is
+    computed on read.
+    """
+
+    skill_ids: list[str] = Field(default_factory=list)
+
+
+class EvidenceSkillLinksResponse(BaseModel):
+    """Result of the skill link/unlink mutation."""
+
+    ok: bool = True
+    entry_id: str
+    skill_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class EvidenceSkillSuggestionModel(BaseModel):
+    """One suggested skill node for an evidence row."""
+
+    id: str
+    label: str = ""
+    category: str = ""
+    level: int = 0
+    score: float = 0.0
+    source: str = "rule"
+
+
+class EvidenceSkillSuggestionsResponse(BaseModel):
+    """Ranked skill-link suggestions for one evidence entry.
+
+    ``backend`` records which tier produced the ranking: ``embedding``
+    (LLM_EMBEDDING_MODEL configured), ``llm`` (chat ranking fallback) or
+    ``rule`` (deterministic keyword overlap; always available).
+    """
+
+    profile: str
+    entry_id: str
+    backend: str = "rule"
+    suggestions: list[EvidenceSkillSuggestionModel] = Field(default_factory=list)
+
+
+class EvidenceStageRiskModel(BaseModel):
+    """One 待补强 row: a solid/expert skill whose evidence is missing/weak."""
+
+    skill_id: str
+    label: str = ""
+    status: str = ""
+    risk_level: str = ""
+    risk_reason: str = ""
+    required_strength: str = ""
+    highest_strength: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class EvidenceStagesResponse(BaseModel):
+    """Five-stage pipeline counters for the single Evidence page.
+
+    Stages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 已入座 (reviewed
+    and linked to at least one skill) -> 已废弃; 待补强 (risks) hangs off
+    已入座. Counts are queue-wide (unfiltered).
+    """
+
+    profile: str
+    pending_crystallize_count: int = 0
+    needs_review_count: int = 0
+    seated_count: int = 0
+    strengthen_count: int = 0
+    deprecated_count: int = 0
+    risks: list[EvidenceStageRiskModel] = Field(default_factory=list)
+
+
+class CrystallizeCandidateModel(BaseModel):
+    """One uncrystallized Done task (结晶向导 step 1 option).
+
+    ``context``/``why``/``outcome`` feed the candidate inscription card;
+    ``snapshot`` is the full原文 block (``render_kanban_task_source``) that
+    crystallization would embed into the evidence row — the card shows it
+    as a preview so the human sees exactly what gets snapshotted.
+    """
+
+    id: str
+    title: str = ""
+    completed_on: str = ""
+    project_id: str = ""
+    tags: str = ""
+    context: str = ""
+    why: str = ""
+    outcome: str = ""
+    snapshot: str = ""
+    blockers: list[str] = Field(default_factory=list)
+
+
+class CrystallizeCandidatesResponse(BaseModel):
+    """Uncrystallized Done tasks plus their crystallization blockers."""
+
+    profile: str
+    items: list[CrystallizeCandidateModel] = Field(default_factory=list)
+
+
+class CrystallizeDraftRequest(BaseModel):
+    """Body for the crystallize-draft endpoint.
+
+    Rule mode (``use_llm=false``, default) answers 200 with a deterministic
+    one-row-per-task draft. ``use_llm=true`` creates an async
+    ``evidence-crystallize`` job (202) whose result carries the same
+    ``CrystallizeDraftResponse`` payload shape.
+    """
+
+    task_ids: list[str] = Field(default_factory=list)
+    titles: list[str] = Field(default_factory=list)
+    use_llm: bool = False
+
+
+class CrystallizeTaskModel(BaseModel):
+    """Resolved source task echo in a crystallize draft."""
+
+    id: str = ""
+    title: str = ""
+    kanban_ref: str = ""
+    project_id: str = ""
+    completed_on: str = ""
+
+
+class CrystallizeDraftResponse(BaseModel):
+    """Crystallize draft: an ingest patch plus the resolved source tasks.
+
+    ``patch`` is an ingest-patch dict (``evidence_entries`` /
+    ``node_updates``) the client edits (grading, deselecting rows) and posts
+    back to ``.../crystallize/apply``. ``backend`` is ``rule`` or ``llm``.
+    """
+
+    ok: bool = True
+    profile: str
+    backend: str = "rule"
+    patch: dict[str, Any] = Field(default_factory=dict)
+    tasks: list[CrystallizeTaskModel] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+
+
+class CrystallizeApplyRequest(BaseModel):
+    """Body for the crystallize-apply endpoint.
+
+    ``patch`` is the (possibly human-edited) draft from the draft endpoint;
+    ``include_evidence`` / ``include_nodes`` are the wizard's per-row
+    checkboxes (null = keep all). On success the source tasks are marked
+    ``crystallized`` in kanban.md.
+    """
+
+    patch: dict[str, Any] = Field(default_factory=dict)
+    task_ids: list[str] = Field(default_factory=list)
+    titles: list[str] = Field(default_factory=list)
+    include_evidence: list[bool] | None = None
+    include_nodes: list[bool] | None = None
+    allow_status_change: bool = False
+
+
+class CrystallizeApplyResponse(BaseModel):
+    """Result of the crystallize apply."""
+
+    ok: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    new_evidence_ids: list[str] = Field(default_factory=list)
+    crystallized_count: int = 0
 
 
 class ReviewCandidateModel(BaseModel):

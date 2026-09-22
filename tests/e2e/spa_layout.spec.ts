@@ -78,10 +78,10 @@ for (const viewport of VIEWPORTS) {
   test.describe(`SPA 桌面布局 ${viewport.name}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test("证据评审页: 内容限宽居中且无横向溢出", async ({ page }) => {
+    test("证据页(含旧评审页重定向): 内容限宽居中且无横向溢出", async ({ page }) => {
       await page.goto(spa("evidence-review"));
-      const emptyState = page.getByText("当前过滤条件下没有待处理的证据。");
-      await expect(page.locator("table").first().or(emptyState)).toBeVisible();
+      // Redirects into the single Evidence page (五阶段工序).
+      await expect(page.getByTestId("stage-nav")).toBeVisible();
 
       const container = page.getByTestId("page-container");
       await expect(container).toHaveAttribute("data-layout", "capped");

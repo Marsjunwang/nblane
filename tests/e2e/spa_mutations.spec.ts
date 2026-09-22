@@ -151,7 +151,7 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
     await expect(column("Queue").getByText(title)).toHaveCount(0);
   });
 
-  test("evidence review: bulk accept removes the row from the needs_review queue", async ({
+  test("evidence review: accept removes the row from the needs_review queue", async ({
     page,
   }) => {
     // Self-seeded (see seedNeedsReviewEvidence): the sandbox pool of
@@ -160,17 +160,18 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
     const title = `e2e-bulk-${Date.now()}`;
     await seedNeedsReviewEvidence(page, title);
 
+    // Phase 1: /evidence-review redirects into the single Evidence page.
     await page.goto(spa("evidence-review"));
-    const row = page.locator('[data-testid^="review-row-"]').filter({ hasText: title });
+    const row = page.locator('[data-testid^="evidence-row-"]').filter({ hasText: title });
     await expect(row).toBeVisible();
     const testId = (await row.getAttribute("data-testid")) ?? "";
 
-    await row.getByRole("checkbox").click();
-    await expectJsonMutation(page, "/evidence-review/bulk", () =>
-      page.getByRole("button", { name: /^接受/ }).click(),
+    await row.click();
+    await expectJsonMutation(page, "/review", () =>
+      page.getByTestId("evidence-accept").click(),
     );
 
-    // Accepted rows leave the needs_review filter after the list refetch.
+    // Accepted rows leave the needs_review stage after the list refetch.
     await expect(page.locator(`[data-testid="${testId}"]`)).toHaveCount(0);
   });
 

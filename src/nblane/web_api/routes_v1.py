@@ -53,7 +53,7 @@ from nblane.core.claims import accepted_claims_for_profile
 from nblane.core.evidence_resolve import resolve_node_evidence_dict
 from nblane.core.experience import load_experience_book
 from nblane.core.goals import load_goal_book
-from nblane.core.kanban_archive import _archive_tasks
+from nblane.core.kanban_archive import _archive_tasks, find_kanban_tasks_by_ref
 from nblane.core.kanban_io import (
     KANBAN_DOING,
     KANBAN_DONE,
@@ -67,7 +67,17 @@ from nblane.core.kanban_io import (
 )
 from nblane.core.kanban_merge import copy_kanban_sections, save_kanban_with_merge
 from nblane.core import llm as llm_client
-from nblane.core.models import EVIDENCE_REVIEW_STATUSES, EvidenceRecord, KanbanTask
+from nblane.core import crystallize as crystallize_core
+from nblane.core.ai import skill_suggest
+from nblane.core.models import (
+    EVIDENCE_CONFIDENCES,
+    EVIDENCE_PUBLIC_READINESS,
+    EVIDENCE_REVIEW_STATUSES,
+    EVIDENCE_STRENGTHS,
+    EVIDENCE_TYPES,
+    EvidenceRecord,
+    KanbanTask,
+)
 from nblane.core.growth_review import build_weekly_review
 from nblane.core.public_curation import evidence_contexts
 from nblane.core.paths import REPO_ROOT
@@ -164,6 +174,8 @@ from nblane.web_api.schemas import (
     ErrorResponse,
     EvidenceEntryDetailModel,
     EvidenceEntryModel,
+    EvidenceEditRequest,
+    EvidenceEntryActionRequest,
     EvidenceListResponse,
     EvidenceReviewBulkRequest,
     EvidenceReviewDeprecateRequest,
@@ -171,6 +183,20 @@ from nblane.web_api.schemas import (
     EvidenceReviewListResponse,
     EvidenceReviewMutationResponse,
     EvidenceReviewSummaryModel,
+    EvidenceSkillLinksRequest,
+    EvidenceSkillLinksResponse,
+    EvidenceSkillSuggestionModel,
+    EvidenceSkillSuggestionsResponse,
+    EvidenceStageRiskModel,
+    EvidenceStagesResponse,
+    CrystallizeApplyRequest,
+    CrystallizeApplyResponse,
+    CrystallizeCandidatesResponse,
+    CrystallizeCandidateModel,
+    CrystallizeDraftRequest,
+    CrystallizeDraftResponse,
+    CrystallizeTaskModel,
+    ProvenanceRefModel,
     EvidenceSummary,
     GapAnalysisResponse,
     GapAnalyzeRequest,
@@ -457,7 +483,7 @@ def get_profile_summary(name: str) -> ProfileDetailSummary:
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def get_profile_skill_tree(name: str) -> SkillTreeResponse:
+def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
     """Full skill tree: status counters plus the nested node tree.
 
     The profile overlay (``skill-tree.yaml``) is a flat list of
@@ -529,6 +555,7 @@ def get_profile_skill_tree(name: str) -> SkillTreeResponse:
         if nid not in placed:
             nodes.append(build(nid, frozenset({nid})))
 
+    response.headers["ETag"] = _skill_tree_etag(pdir)
     return SkillTreeResponse(
         profile=pdir.name,
         schema_name=schema_name,
@@ -1643,9 +1670,51 @@ def _evidence_item(record: EvidenceRecord) -> EvidenceEntryModel:
     )
 
 
-def _evidence_detail(record: EvidenceRecord) -> EvidenceEntryDetailModel:
-    """Full detail projection of one pool record."""
+def _evidence_detail(
+    record: EvidenceRecord, pdir: Path | None = None
+) -> EvidenceEntryDetailModel:
+    """Full detail projection of one pool record.
+
+    With *pdir* the projection also carries the reverse skill links
+    (``skill_refs`` via ``evidence_usage_index``) and the resolved kanban
+    provenance chain (``kanban_ref_details``; unresolvable refs are
+    ``status="archived"`` tombstones, never errors).
+    """
     item = _evidence_item(record)
+    skill_refs: list[str] = []
+    kanban_details: list[ProvenanceRefModel] = []
+    if pdir is not None:
+        usage = evidence_review_core.evidence_usage_index(pdir)
+        skill_refs = [entry["id"] for entry in usage.get(record.id, [])]
+        refs = [ref for ref in record.kanban_refs if str(ref).strip()]
+        if refs:
+            found: dict[str, str] = {}
+            try:
+                for task in find_kanban_tasks_by_ref(pdir, refs):
+                    tid = str(getattr(task, "id", "") or "").strip()
+                    if tid:
+                        found[tid] = str(getattr(task, "title", "") or "")
+            except Exception:  # noqa: BLE001 - provenance is best-effort
+                found = {}
+            from nblane.core.kanban_archive import kanban_ref_id
+
+            for ref in refs:
+                tid = kanban_ref_id(str(ref))
+                if tid and tid in found:
+                    kanban_details.append(
+                        ProvenanceRefModel(
+                            ref=str(ref),
+                            task_id=tid,
+                            title=found[tid],
+                            status="linked",
+                        )
+                    )
+                else:
+                    kanban_details.append(
+                        ProvenanceRefModel(
+                            ref=str(ref), task_id=tid, status="archived"
+                        )
+                    )
     return EvidenceEntryDetailModel(
         **item.model_dump(),
         strength=record.strength,
@@ -1666,6 +1735,8 @@ def _evidence_detail(record: EvidenceRecord) -> EvidenceEntryDetailModel:
         source_content_hash=record.source_content_hash,
         deprecated=record.deprecated,
         replaced_by=record.replaced_by,
+        skill_refs=skill_refs,
+        kanban_ref_details=kanban_details,
     )
 
 
@@ -1739,7 +1810,7 @@ def get_profile_evidence_entry(name: str, entry_id: str) -> EvidenceEntryDetailM
             "evidence_not_found",
             f"Unknown evidence entry: {entry_id}",
         )
-    return _evidence_detail(record)
+    return _evidence_detail(record, pdir)
 
 
 # --- Evidence Review (M3): triage queue + bulk accept/reject/tag ------------
@@ -1922,8 +1993,7 @@ def _mutate_evidence_pool(
         return _evidence_review_error(
             412,
             "etag_mismatch",
-            "evidence-pool.yaml changed since it was loaded; "
-            "reload before mutating.",
+            "证据池已被其他改动更新,正在为你刷新;请重试。",
             etag,
         )
     outcome: dict[str, Any] = {"changed": 0, "missing": []}
@@ -1955,8 +2025,7 @@ def _mutate_evidence_pool(
         return _evidence_review_error(
             412,
             "etag_mismatch",
-            "evidence-pool.yaml changed while mutating; "
-            "reload before retrying.",
+            "证据池在写入期间被其他改动更新,请重试。",
             _evidence_pool_etag(pdir),
         )
     if outcome["changed"] and (pdir / "SKILL.md").exists():
@@ -2074,6 +2143,519 @@ def deprecate_profile_evidence_review(
     pdir, changed, missing = outcome
     response.headers["ETag"] = _evidence_pool_etag(pdir)
     return EvidenceReviewMutationResponse(ok=True, changed=changed, missing=missing)
+
+
+# --- Evidence single-entry mutations + crystallize (Phase 1 single page) ----
+
+# Fields the single-entry editor may touch: the review whitelist plus plain
+# text fields. Provenance (origin*, refs, original_content) is immutable —
+# the crystallize snapshot is the audit trail.
+_EVIDENCE_TEXT_EDITABLE_FIELDS = ("title", "summary", "date", "url")
+_EVIDENCE_ENUM_EDITABLE_FIELDS: dict[str, tuple[str, ...]] = {
+    **evidence_review_core.POOL_EDITABLE_FIELDS,
+    "type": tuple(sorted(EVIDENCE_TYPES)),
+}
+
+
+@router.post(
+    "/profiles/{name}/evidence/{entry_id}/edit",
+    response_model=EvidenceReviewMutationResponse,
+    responses=EVIDENCE_REVIEW_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def edit_profile_evidence_entry(
+    name: str,
+    entry_id: str,
+    body: EvidenceEditRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> EvidenceReviewMutationResponse | JSONResponse:
+    """Edit whitelist fields on one pool row.
+
+    Text fields (``title``/``summary``/``date``/``url``) take any string
+    ("" clears all but ``title``); enum fields (``type`` plus the review
+    whitelist) must be in their domain ("" clears). Honors ``If-Match``
+    (412 on mismatch, fresh ETag in the header).
+    """
+    eid = entry_id.strip()
+    cleaned: dict[str, str] = {}
+    for field, raw_value in body.fields.items():
+        field = field.strip()
+        value = str(raw_value or "").strip()
+        if field in _EVIDENCE_TEXT_EDITABLE_FIELDS:
+            if field == "title" and not value:
+                raise ApiError(422, "invalid_edit_value", "title cannot be empty.")
+            cleaned[field] = value
+            continue
+        allowed = _EVIDENCE_ENUM_EDITABLE_FIELDS.get(field)
+        if allowed is None:
+            raise ApiError(
+                422,
+                "invalid_edit_field",
+                f"Field {field!r} is not editable (expected one of: "
+                f"{', '.join(sorted([*_EVIDENCE_ENUM_EDITABLE_FIELDS, *_EVIDENCE_TEXT_EDITABLE_FIELDS]))}).",
+            )
+        if value and value not in allowed:
+            raise ApiError(
+                422,
+                "invalid_edit_value",
+                f"Value {value!r} is not valid for {field} "
+                f"(expected one of: {', '.join(allowed)}, or empty to clear).",
+            )
+        cleaned[field] = value
+
+    def _apply(entries: list[dict[str, Any]]) -> tuple[int, list[str]]:
+        for row in entries:
+            if str(row.get("id", "") or "").strip() != eid:
+                continue
+            for field, value in cleaned.items():
+                if value:
+                    row[field] = value
+                else:
+                    row.pop(field, None)
+            return 1, []
+        return 0, [eid]
+
+    outcome = _mutate_evidence_pool(name, if_match, _apply)
+    if isinstance(outcome, JSONResponse):
+        return outcome
+    pdir, changed, missing = outcome
+    if missing:
+        raise ApiError(
+            404, "evidence_not_found", f"Unknown evidence entry: {eid}"
+        )
+    response.headers["ETag"] = _evidence_pool_etag(pdir)
+    return EvidenceReviewMutationResponse(ok=True, changed=changed, missing=[])
+
+
+@router.post(
+    "/profiles/{name}/evidence/{entry_id}/review",
+    response_model=EvidenceReviewMutationResponse,
+    responses=EVIDENCE_REVIEW_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def review_profile_evidence_entry(
+    name: str,
+    entry_id: str,
+    body: EvidenceEntryActionRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> EvidenceReviewMutationResponse | JSONResponse:
+    """Single-entry review action: accept / reject (deprecate) / restore.
+
+    ``accept`` sets ``review_status=reviewed`` and applies the optional
+    grade fields in the same locked write; ``reject`` sets
+    ``deprecated: true`` (kept for provenance); ``restore`` clears it.
+    Honors ``If-Match`` (412 on mismatch).
+    """
+    eid = entry_id.strip()
+    action = body.action.strip().lower()
+    if action not in ("accept", "reject", "restore"):
+        raise ApiError(
+            422,
+            "invalid_review_action",
+            f"Unknown action {body.action!r} (expected accept|reject|restore).",
+        )
+    grades: dict[str, str] = {}
+    if action == "accept":
+        for field, allowed in evidence_review_core.POOL_EDITABLE_FIELDS.items():
+            if field == "review_status":
+                continue
+            value = str(getattr(body, field, "") or "").strip()
+            if value and value not in allowed:
+                raise ApiError(
+                    422,
+                    "invalid_review_value",
+                    f"Value {value!r} is not valid for {field} "
+                    f"(expected one of: {', '.join(allowed)}, or empty to clear).",
+                )
+            if value:
+                grades[field] = value
+
+    def _apply(entries: list[dict[str, Any]]) -> tuple[int, list[str]]:
+        for row in entries:
+            if str(row.get("id", "") or "").strip() != eid:
+                continue
+            if action == "accept":
+                row["review_status"] = "reviewed"
+                for field, value in grades.items():
+                    row[field] = value
+                # 置信度按 origin 自动推导(评审只评「分量」);已有值保留。
+                if not str(row.get("confidence", "") or "").strip():
+                    derived = evidence_review_core.confidence_for_origin(
+                        row.get("origin")
+                    )
+                    if derived:
+                        row["confidence"] = derived
+            elif action == "reject":
+                if bool(row.get("deprecated", False)):
+                    return 0, []
+                row["deprecated"] = True
+            else:  # restore
+                if not bool(row.get("deprecated", False)):
+                    return 0, []
+                row.pop("deprecated", None)
+            return 1, []
+        return 0, [eid]
+
+    outcome = _mutate_evidence_pool(name, if_match, _apply)
+    if isinstance(outcome, JSONResponse):
+        return outcome
+    pdir, changed, missing = outcome
+    if missing:
+        raise ApiError(
+            404, "evidence_not_found", f"Unknown evidence entry: {eid}"
+        )
+    response.headers["ETag"] = _evidence_pool_etag(pdir)
+    return EvidenceReviewMutationResponse(ok=True, changed=changed, missing=[])
+
+
+def _skill_tree_etag(pdir: Path) -> str:
+    """Weak ETag for skill-tree.yaml (same contract as the pool ETag)."""
+    snapshot = file_state.snapshot_file(pdir / profile_io.SKILL_TREE_FILENAME)
+    return f'W/"{snapshot.sha256 or "empty"}"'
+
+
+@router.post(
+    "/profiles/{name}/evidence/{entry_id}/skill-links",
+    response_model=EvidenceSkillLinksResponse,
+    responses=EVIDENCE_REVIEW_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def set_profile_evidence_skill_links(
+    name: str,
+    entry_id: str,
+    body: EvidenceSkillLinksRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> EvidenceSkillLinksResponse | JSONResponse:
+    """Reconcile the skill nodes citing one evidence row (link/unlink).
+
+    Chip-save semantics: ``skill_ids`` is the desired final set (core
+    ``set_evidence_skill_refs`` adds missing / removes absent, creates
+    unknown nodes as ``learning``). The write lands on skill-tree.yaml only
+    — the pool never stores the reverse direction. ``If-Match`` carries the
+    skill-tree.yaml ETag from the stages/tree reads (412 on mismatch).
+    """
+    pdir = _resolve_profile(name)
+    eid = entry_id.strip()
+    raw_pool = profile_io.load_evidence_pool_raw(pdir) or {}
+    pool_ids = {
+        str(row.get("id", "") or "").strip()
+        for row in (raw_pool.get("evidence_entries") or [])
+        if isinstance(row, dict)
+    }
+    if eid not in pool_ids:
+        raise ApiError(
+            404, "evidence_not_found", f"Unknown evidence entry: {eid}"
+        )
+    etag = _skill_tree_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _evidence_review_error(
+            412,
+            "etag_mismatch",
+            "技能树已被其他改动更新,正在为你刷新;请重试。",
+            etag,
+        )
+    skill_ids = [str(item).strip() for item in body.skill_ids if str(item).strip()]
+
+    def _apply(raw: dict[str, Any]) -> None:
+        nodes = [
+            node
+            for node in (raw.get("nodes") or [])
+            if isinstance(node, dict)
+        ]
+        raw["nodes"] = evidence_review_core.set_evidence_skill_refs(
+            nodes, eid, skill_ids
+        )
+        raw["profile"] = pdir.name
+
+    try:
+        profile_io.update_skill_tree(
+            pdir.name,
+            _apply,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / profile_io.SKILL_TREE_FILENAME
+            ),
+        )
+    except file_state.FileConflictError:
+        return _evidence_review_error(
+            412,
+            "etag_mismatch",
+            "技能树在写入期间被其他改动更新,请重试。",
+            _skill_tree_etag(pdir),
+        )
+    if (pdir / "SKILL.md").exists():
+        write_generated_blocks(pdir)
+    response.headers["ETag"] = _skill_tree_etag(pdir)
+    return EvidenceSkillLinksResponse(ok=True, entry_id=eid, skill_ids=skill_ids)
+
+
+@router.get(
+    "/profiles/{name}/evidence/{entry_id}/skill-suggestions",
+    response_model=EvidenceSkillSuggestionsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_evidence_skill_suggestions(
+    name: str,
+    entry_id: str,
+    top_n: int = Query(5, ge=1, le=20),
+) -> EvidenceSkillSuggestionsResponse:
+    """Ranked skill-link suggestions for one pool row.
+
+    Tiered backend (``backend`` field): ``embedding`` when
+    ``LLM_EMBEDDING_MODEL`` is configured (skill label/category embeddings
+    cached under the profile's ``.cache/``), else a single LLM ranking call,
+    else the deterministic rule matcher. Already-linked nodes are excluded.
+    """
+    pdir = _resolve_profile(name)
+    raw = profile_io.load_evidence_pool_raw(pdir) or {}
+    row = next(
+        (
+            item
+            for item in (raw.get("evidence_entries") or [])
+            if isinstance(item, dict)
+            and str(item.get("id", "") or "").strip() == entry_id.strip()
+        ),
+        None,
+    )
+    if row is None:
+        raise ApiError(
+            404,
+            "evidence_not_found",
+            f"Unknown evidence entry: {entry_id}",
+        )
+    result = skill_suggest.suggest_skills_for_evidence(pdir, row, top_n=top_n)
+    return EvidenceSkillSuggestionsResponse(
+        profile=pdir.name,
+        entry_id=entry_id.strip(),
+        backend=str(result.get("backend") or "none"),
+        suggestions=[
+            EvidenceSkillSuggestionModel(**item)
+            for item in result.get("suggestions") or []
+        ],
+    )
+
+
+@router.get(
+    "/profiles/{name}/evidence-stages",
+    response_model=EvidenceStagesResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_evidence_stages(name: str) -> EvidenceStagesResponse:
+    """Five-stage pipeline counters for the single Evidence page.
+
+    待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet
+    reviewed; 已入座 = reviewed rows linked to at least one skill node;
+    待补强 = solid/expert skills with missing/weak evidence
+    (``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated
+    rows. Counts are queue-wide (unfiltered).
+    """
+    pdir = _resolve_profile(name)
+    raw = profile_io.load_evidence_pool_raw(pdir) or {}
+    rows = [
+        row
+        for row in (raw.get("evidence_entries") or [])
+        if isinstance(row, dict) and str(row.get("id", "") or "").strip()
+    ]
+    usage = evidence_review_core.evidence_usage_index(pdir)
+    active = [row for row in rows if not row.get("deprecated")]
+    needs_review = sum(
+        1
+        for row in active
+        if evidence_review_core.normalize_review_status(row.get("review_status"))
+        != "reviewed"
+    )
+    seated = sum(
+        1
+        for row in active
+        if evidence_review_core.normalize_review_status(row.get("review_status"))
+        == "reviewed"
+        and usage.get(str(row.get("id", "") or "").strip())
+    )
+    sections = parse_kanban(pdir)
+    pending_crystallize = sum(
+        1
+        for task in (sections.get(KANBAN_DONE) or [])
+        if not getattr(task, "crystallized", False)
+    )
+    risks = [
+        EvidenceStageRiskModel(
+            skill_id=str(item.get("id", "") or ""),
+            label=str(item.get("label", "") or ""),
+            status=str(item.get("status", "") or ""),
+            risk_level=str(item.get("risk_level", "") or ""),
+            risk_reason=str(item.get("risk_reason", "") or ""),
+            required_strength=str(item.get("required_strength", "") or ""),
+            highest_strength=str(item.get("highest_strength", "") or ""),
+            evidence_refs=[
+                str(ref) for ref in (item.get("active_evidence_refs") or [])
+            ],
+        )
+        for item in evidence_review_core.evidence_status_risks(pdir)
+    ]
+    return EvidenceStagesResponse(
+        profile=pdir.name,
+        pending_crystallize_count=pending_crystallize,
+        needs_review_count=needs_review,
+        seated_count=seated,
+        strengthen_count=len(risks),
+        deprecated_count=len(rows) - len(active),
+        risks=risks,
+    )
+
+
+@router.get(
+    "/profiles/{name}/crystallize/candidates",
+    response_model=CrystallizeCandidatesResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_crystallize_candidates(name: str) -> CrystallizeCandidatesResponse:
+    """Uncrystallized Done tasks plus advisory blockers (wizard step 1).
+
+    Task ids are materialized to kanban.md first so refs captured during
+    crystallization resolve against later parses.
+    """
+    from nblane.core.kanban_io import materialize_kanban_task_ids
+
+    pdir = _resolve_profile(name)
+    materialize_kanban_task_ids(pdir)
+    sections = parse_kanban(pdir)
+    project_index = evidence_review_core.internal_project_goal_index(pdir)
+    items = []
+    for task in sections.get(KANBAN_DONE) or []:
+        if getattr(task, "crystallized", False):
+            continue
+        items.append(
+            CrystallizeCandidateModel(
+                id=str(getattr(task, "id", "") or ""),
+                title=str(getattr(task, "title", "") or ""),
+                completed_on=str(getattr(task, "completed_on", "") or ""),
+                project_id=str(getattr(task, "project_id", "") or ""),
+                tags=str(getattr(task, "tags", "") or ""),
+                context=str(getattr(task, "context", "") or ""),
+                why=str(getattr(task, "why", "") or ""),
+                outcome=str(getattr(task, "outcome", "") or ""),
+                snapshot=crystallize_core.task_snapshot(task)["original_content"],
+                blockers=evidence_review_core.done_task_evidence_blockers(
+                    task, project_index
+                ),
+            )
+        )
+    return CrystallizeCandidatesResponse(profile=pdir.name, items=items)
+
+
+@router.post(
+    "/profiles/{name}/crystallize/draft",
+    response_model=CrystallizeDraftResponse,
+    responses={**ERROR_RESPONSES, 202: {"model": JobCreateResponse}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def draft_profile_crystallize(
+    name: str, body: CrystallizeDraftRequest
+) -> CrystallizeDraftResponse | JSONResponse:
+    """Draft evidence from selected Done tasks (wizard step 2).
+
+    Rule mode (default) answers 200 with a deterministic one-row-per-task
+    draft — each row already carries the task原文 snapshot in
+    ``original_content`` + hash. ``use_llm=true`` creates an async
+    ``evidence-crystallize`` job (202; poll/stream ``.../jobs/{job_id}``)
+    whose result carries the same payload shape with ``backend="llm"``.
+    """
+    from nblane.core.kanban_io import materialize_kanban_task_ids
+
+    pdir = _resolve_profile(name)
+    if body.use_llm:
+        try:
+            snapshot = jobs.create_job(
+                pdir.name,
+                jobs.KIND_EVIDENCE_CRYSTALLIZE,
+                {"task_ids": body.task_ids, "titles": body.titles},
+            )
+        except jobs.JobInputError as exc:
+            raise ApiError(422, exc.code, exc.message) from exc
+        payload = JobCreateResponse(
+            job_id=snapshot["job_id"], job=JobModel(**snapshot)
+        )
+        return JSONResponse(
+            status_code=202, content=payload.model_dump(mode="json")
+        )
+    materialize_kanban_task_ids(pdir)
+    tasks, missing = crystallize_core.resolve_done_tasks(
+        pdir, body.task_ids, body.titles
+    )
+    if not tasks:
+        raise ApiError(
+            422,
+            "empty_selection",
+            "None of the selected Done tasks could be resolved.",
+        )
+    patch = crystallize_core.rule_crystallize_patch(tasks)
+    return CrystallizeDraftResponse(
+        profile=pdir.name,
+        backend="rule",
+        patch=patch,
+        tasks=[
+            CrystallizeTaskModel(
+                id=str(getattr(task, "id", "") or ""),
+                title=str(getattr(task, "title", "") or ""),
+                kanban_ref=(
+                    f"kanban:{getattr(task, 'id', '')}"
+                    if getattr(task, "id", "")
+                    else ""
+                ),
+                project_id=str(getattr(task, "project_id", "") or ""),
+                completed_on=str(getattr(task, "completed_on", "") or ""),
+            )
+            for task in tasks
+        ],
+        missing=missing,
+    )
+
+
+@router.post(
+    "/profiles/{name}/crystallize/apply",
+    response_model=CrystallizeApplyResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def apply_profile_crystallize(
+    name: str, body: CrystallizeApplyRequest
+) -> CrystallizeApplyResponse:
+    """Apply a confirmed crystallize draft (wizard step 3).
+
+    Unlike the pool-field mutations this flow is merge-based: the draft is
+    re-merged against the *current* pool/tree at apply time
+    (``run_ingest_patch`` with validate + SKILL.md sync + rollback), so no
+    If-Match precondition is needed — concurrent pool writes merge instead
+    of clobbering. Only on success are the source Done tasks marked
+    ``crystallized``.
+    """
+    pdir = _resolve_profile(name)
+    result = crystallize_core.apply_crystallization(
+        pdir.name,
+        body.patch,
+        task_ids=body.task_ids,
+        titles=body.titles,
+        include_evidence=body.include_evidence,
+        include_nodes=body.include_nodes,
+        allow_status_change=body.allow_status_change,
+    )
+    if not result["ok"]:
+        raise ApiError(
+            422,
+            "crystallize_apply_failed",
+            "; ".join(result["errors"]) or "Crystallize apply failed.",
+        )
+    return CrystallizeApplyResponse(
+        ok=True,
+        warnings=result["warnings"],
+        new_evidence_ids=result["new_evidence_ids"],
+        crystallized_count=result["crystallized_count"],
+    )
 
 
 JOB_RESPONSES = {

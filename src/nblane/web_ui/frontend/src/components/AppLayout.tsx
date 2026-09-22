@@ -6,7 +6,7 @@ import {
   IconBook2,
   IconCalendarWeek,
   IconCertificate,
-  IconClipboardCheck,
+  
   IconHeartbeat,
   IconHome,
   IconInbox,
@@ -30,7 +30,6 @@ const NAV_ITEMS = [
   { label: '技能树', path: 'skill-tree', icon: IconBinaryTree2 },
   { label: '目标', path: 'goals', icon: IconTarget },
   { label: '证据', path: 'evidence', icon: IconCertificate },
-  { label: '证据评审', path: 'evidence-review', icon: IconClipboardCheck },
   { label: '差距分析', path: 'gap', icon: IconZoomQuestion },
   { label: '周回顾', path: 'review', icon: IconCalendarWeek },
   { label: '项目看板', path: 'project-board', icon: IconTimeline },

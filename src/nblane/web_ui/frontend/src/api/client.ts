@@ -120,3 +120,16 @@ export function apiPost<T>(path: string, body?: unknown, init?: RequestInit): Pr
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+/** POST that also exposes response headers (fresh ETag after a mutation). */
+export function apiPostWithHeaders<T>(
+  path: string,
+  body?: unknown,
+  init?: RequestInit,
+): Promise<{ data: T; headers: Headers }> {
+  return requestWithHeaders<T>(path, {
+    ...init,
+    method: 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}

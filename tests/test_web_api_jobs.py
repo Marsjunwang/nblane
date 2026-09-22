@@ -997,5 +997,84 @@ class TestNewKindsScope(JobsTestBase):
         self.assertEqual(suggest.status_code, 401)
 
 
+class TestCrystallizeJobKind(unittest.TestCase):
+    """evidence-crystallize: kind timeout, friendly errors, LLM cap."""
+
+    def test_kind_timeout_overrides_global(self) -> None:
+        spec = jobs_module._KINDS[jobs_module.KIND_EVIDENCE_CRYSTALLIZE]
+        self.assertEqual(spec.timeout_seconds, 120.0)
+        job = {"kind": jobs_module.KIND_EVIDENCE_CRYSTALLIZE}
+        self.assertEqual(jobs_module._job_timeout(job), 120.0)
+        # Unknown / unset kinds keep the global default.
+        self.assertEqual(
+            jobs_module._job_timeout({"kind": "nope"}),
+            float(jobs_module._JOB_TIMEOUT_SECONDS),
+        )
+
+    def test_friendly_error_mapping(self) -> None:
+        friendly = jobs_module._crystallize_friendly_error
+        self.assertIn("未配置 LLM", friendly("AI features not configured"))
+        self.assertIn("超时", friendly("LLM error: request timed out"))
+        self.assertIn("无法解析", friendly("Could not parse ingest JSON from LLM."))
+        self.assertIn("boom", friendly("LLM error: boom"))
+        self.assertIn("规则草稿", friendly("LLM error: boom"))
+
+    def test_runner_fails_fast_without_llm(self) -> None:
+        """No LLM key -> structured failure with the degrade hint, no hang."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_profile(root)
+            with patch("nblane.web_api.jobs.llm_client.is_configured", lambda: False), patch(
+                "nblane.core.profile_io.PROFILES_DIR", root
+            ), patch("nblane.core.io.PROFILES_DIR", root):
+                try:
+                    jobs_module._run_evidence_crystallize(
+                        "alice", {"task_ids": ["x"], "titles": []}, lambda **kw: None
+                    )
+                    self.fail("expected JobFailedError")
+                except jobs_module.JobFailedError as exc:
+                    self.assertEqual(exc.code, "crystallize_unavailable")
+                    self.assertIn("规则草稿", exc.message)
+
+    def test_runner_passes_90s_timeout_to_llm(self) -> None:
+        """The wizard path caps the LLM call at 90s (not the 180s default)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            from nblane.core.kanban_io import render_kanban
+            from nblane.core.models import KanbanTask
+
+            (profile / "kanban.md").write_text(
+                render_kanban(
+                    "alice",
+                    {
+                        "Done": [
+                            KanbanTask(
+                                title="t", id="taskA", done=True,
+                                completed_on="2026-01-02",
+                            )
+                        ]
+                    },
+                ),
+                encoding="utf-8",
+            )
+            captured: dict[str, object] = {}
+
+            def fake_ingest(profile_name, tasks, **kwargs):
+                captured.update(kwargs)
+                return {"evidence_entries": [], "node_updates": []}, None
+
+            with patch("nblane.web_api.jobs.llm_client.is_configured", lambda: True), patch(
+                "nblane.core.profile_io.PROFILES_DIR", root
+            ), patch("nblane.core.io.PROFILES_DIR", root), patch(
+                "nblane.core.profile_ingest_llm.ingest_kanban_done_json", fake_ingest
+            ):
+                result = jobs_module._run_evidence_crystallize(
+                    "alice", {"task_ids": ["taskA"], "titles": []}, lambda **kw: None
+                )
+            self.assertEqual(captured.get("timeout_seconds"), 90.0)
+            self.assertEqual(result["backend"], "llm")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -226,6 +226,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/crystallize/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Profile Crystallize
+         * @description Apply a confirmed crystallize draft (wizard step 3).
+         *
+         *     Unlike the pool-field mutations this flow is merge-based: the draft is
+         *     re-merged against the *current* pool/tree at apply time
+         *     (``run_ingest_patch`` with validate + SKILL.md sync + rollback), so no
+         *     If-Match precondition is needed — concurrent pool writes merge instead
+         *     of clobbering. Only on success are the source Done tasks marked
+         *     ``crystallized``.
+         */
+        post: operations["apply_profile_crystallize_api_v1_profiles__name__crystallize_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/crystallize/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Crystallize Candidates
+         * @description Uncrystallized Done tasks plus advisory blockers (wizard step 1).
+         *
+         *     Task ids are materialized to kanban.md first so refs captured during
+         *     crystallization resolve against later parses.
+         */
+        get: operations["get_profile_crystallize_candidates_api_v1_profiles__name__crystallize_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/crystallize/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft Profile Crystallize
+         * @description Draft evidence from selected Done tasks (wizard step 2).
+         *
+         *     Rule mode (default) answers 200 with a deterministic one-row-per-task
+         *     draft — each row already carries the task原文 snapshot in
+         *     ``original_content`` + hash. ``use_llm=true`` creates an async
+         *     ``evidence-crystallize`` job (202; poll/stream ``.../jobs/{job_id}``)
+         *     whose result carries the same payload shape with ``backend="llm"``.
+         */
+        post: operations["draft_profile_crystallize_api_v1_profiles__name__crystallize_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/evidence": {
         parameters: {
             query?: never;
@@ -318,6 +394,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/evidence-stages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Evidence Stages
+         * @description Five-stage pipeline counters for the single Evidence page.
+         *
+         *     待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet
+         *     reviewed; 已入座 = reviewed rows linked to at least one skill node;
+         *     待补强 = solid/expert skills with missing/weak evidence
+         *     (``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated
+         *     rows. Counts are queue-wide (unfiltered).
+         */
+        get: operations["get_profile_evidence_stages_api_v1_profiles__name__evidence_stages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/evidence/{entry_id}": {
         parameters: {
             query?: never;
@@ -330,6 +432,107 @@ export interface paths {
          * @description Full detail for one evidence-pool entry; 404 when the id is unknown.
          */
         get: operations["get_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/evidence/{entry_id}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Profile Evidence Entry
+         * @description Edit whitelist fields on one pool row.
+         *
+         *     Text fields (``title``/``summary``/``date``/``url``) take any string
+         *     ("" clears all but ``title``); enum fields (``type`` plus the review
+         *     whitelist) must be in their domain ("" clears). Honors ``If-Match``
+         *     (412 on mismatch, fresh ETag in the header).
+         */
+        post: operations["edit_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/evidence/{entry_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Profile Evidence Entry
+         * @description Single-entry review action: accept / reject (deprecate) / restore.
+         *
+         *     ``accept`` sets ``review_status=reviewed`` and applies the optional
+         *     grade fields in the same locked write; ``reject`` sets
+         *     ``deprecated: true`` (kept for provenance); ``restore`` clears it.
+         *     Honors ``If-Match`` (412 on mismatch).
+         */
+        post: operations["review_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/evidence/{entry_id}/skill-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Profile Evidence Skill Links
+         * @description Reconcile the skill nodes citing one evidence row (link/unlink).
+         *
+         *     Chip-save semantics: ``skill_ids`` is the desired final set (core
+         *     ``set_evidence_skill_refs`` adds missing / removes absent, creates
+         *     unknown nodes as ``learning``). The write lands on skill-tree.yaml only
+         *     — the pool never stores the reverse direction. ``If-Match`` carries the
+         *     skill-tree.yaml ETag from the stages/tree reads (412 on mismatch).
+         */
+        post: operations["set_profile_evidence_skill_links_api_v1_profiles__name__evidence__entry_id__skill_links_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/evidence/{entry_id}/skill-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Evidence Skill Suggestions
+         * @description Ranked skill-link suggestions for one pool row.
+         *
+         *     Tiered backend (``backend`` field): ``embedding`` when
+         *     ``LLM_EMBEDDING_MODEL`` is configured (skill label/category embeddings
+         *     cached under the profile's ``.cache/``), else a single LLM ranking call,
+         *     else the deterministic rule matcher. Already-linked nodes are excluded.
+         */
+        get: operations["get_profile_evidence_skill_suggestions_api_v1_profiles__name__evidence__entry_id__skill_suggestions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1924,6 +2127,199 @@ export interface components {
             version?: string | null;
         };
         /**
+         * CrystallizeApplyRequest
+         * @description Body for the crystallize-apply endpoint.
+         *
+         *     ``patch`` is the (possibly human-edited) draft from the draft endpoint;
+         *     ``include_evidence`` / ``include_nodes`` are the wizard's per-row
+         *     checkboxes (null = keep all). On success the source tasks are marked
+         *     ``crystallized`` in kanban.md.
+         */
+        CrystallizeApplyRequest: {
+            /**
+             * Allow Status Change
+             * @default false
+             */
+            allow_status_change: boolean;
+            /** Include Evidence */
+            include_evidence?: boolean[] | null;
+            /** Include Nodes */
+            include_nodes?: boolean[] | null;
+            /** Patch */
+            patch?: {
+                [key: string]: unknown;
+            };
+            /** Task Ids */
+            task_ids?: string[];
+            /** Titles */
+            titles?: string[];
+        };
+        /**
+         * CrystallizeApplyResponse
+         * @description Result of the crystallize apply.
+         */
+        CrystallizeApplyResponse: {
+            /**
+             * Crystallized Count
+             * @default 0
+             */
+            crystallized_count: number;
+            /** Errors */
+            errors?: string[];
+            /** New Evidence Ids */
+            new_evidence_ids?: string[];
+            /** Ok */
+            ok: boolean;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * CrystallizeCandidateModel
+         * @description One uncrystallized Done task (结晶向导 step 1 option).
+         *
+         *     ``context``/``why``/``outcome`` feed the candidate inscription card;
+         *     ``snapshot`` is the full原文 block (``render_kanban_task_source``) that
+         *     crystallization would embed into the evidence row — the card shows it
+         *     as a preview so the human sees exactly what gets snapshotted.
+         */
+        CrystallizeCandidateModel: {
+            /** Blockers */
+            blockers?: string[];
+            /**
+             * Completed On
+             * @default
+             */
+            completed_on: string;
+            /**
+             * Context
+             * @default
+             */
+            context: string;
+            /** Id */
+            id: string;
+            /**
+             * Outcome
+             * @default
+             */
+            outcome: string;
+            /**
+             * Project Id
+             * @default
+             */
+            project_id: string;
+            /**
+             * Snapshot
+             * @default
+             */
+            snapshot: string;
+            /**
+             * Tags
+             * @default
+             */
+            tags: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Why
+             * @default
+             */
+            why: string;
+        };
+        /**
+         * CrystallizeCandidatesResponse
+         * @description Uncrystallized Done tasks plus their crystallization blockers.
+         */
+        CrystallizeCandidatesResponse: {
+            /** Items */
+            items?: components["schemas"]["CrystallizeCandidateModel"][];
+            /** Profile */
+            profile: string;
+        };
+        /**
+         * CrystallizeDraftRequest
+         * @description Body for the crystallize-draft endpoint.
+         *
+         *     Rule mode (``use_llm=false``, default) answers 200 with a deterministic
+         *     one-row-per-task draft. ``use_llm=true`` creates an async
+         *     ``evidence-crystallize`` job (202) whose result carries the same
+         *     ``CrystallizeDraftResponse`` payload shape.
+         */
+        CrystallizeDraftRequest: {
+            /** Task Ids */
+            task_ids?: string[];
+            /** Titles */
+            titles?: string[];
+            /**
+             * Use Llm
+             * @default false
+             */
+            use_llm: boolean;
+        };
+        /**
+         * CrystallizeDraftResponse
+         * @description Crystallize draft: an ingest patch plus the resolved source tasks.
+         *
+         *     ``patch`` is an ingest-patch dict (``evidence_entries`` /
+         *     ``node_updates``) the client edits (grading, deselecting rows) and posts
+         *     back to ``.../crystallize/apply``. ``backend`` is ``rule`` or ``llm``.
+         */
+        CrystallizeDraftResponse: {
+            /**
+             * Backend
+             * @default rule
+             */
+            backend: string;
+            /** Missing */
+            missing?: string[];
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Patch */
+            patch?: {
+                [key: string]: unknown;
+            };
+            /** Profile */
+            profile: string;
+            /** Tasks */
+            tasks?: components["schemas"]["CrystallizeTaskModel"][];
+        };
+        /**
+         * CrystallizeTaskModel
+         * @description Resolved source task echo in a crystallize draft.
+         */
+        CrystallizeTaskModel: {
+            /**
+             * Completed On
+             * @default
+             */
+            completed_on: string;
+            /**
+             * Id
+             * @default
+             */
+            id: string;
+            /**
+             * Kanban Ref
+             * @default
+             */
+            kanban_ref: string;
+            /**
+             * Project Id
+             * @default
+             */
+            project_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
          * CurrentUser
          * @description The authenticated principal for one request.
          */
@@ -1953,6 +2349,52 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * EvidenceEditRequest
+         * @description Body for the single-entry edit mutation.
+         *
+         *     ``fields`` maps field name -> new value. Allowed keys: the review
+         *     whitelist (``review_status``/``strength``/``confidence``/
+         *     ``public_readiness``, domain-validated, "" clears) plus the text fields
+         *     ``title``/``summary``/``date``/``url`` and ``type`` (domain-validated).
+         *     Unknown keys answer 422; provenance fields (``origin*``, refs,
+         *     ``original_content``) are not editable here — the original snapshot is
+         *     immutable once crystallized.
+         */
+        EvidenceEditRequest: {
+            /** Fields */
+            fields: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * EvidenceEntryActionRequest
+         * @description Body for the single-entry review action.
+         *
+         *     ``action``: ``accept`` (mark reviewed, optionally grading in the same
+         *     call), ``reject`` (deprecate; the row is kept for provenance) or
+         *     ``restore`` (un-deprecate). Grade fields are only applied on ``accept``
+         *     and must be in their domain ("" clears).
+         */
+        EvidenceEntryActionRequest: {
+            /** Action */
+            action: string;
+            /**
+             * Confidence
+             * @default
+             */
+            confidence: string;
+            /**
+             * Public Readiness
+             * @default
+             */
+            public_readiness: string;
+            /**
+             * Strength
+             * @default
+             */
+            strength: string;
         };
         /**
          * EvidenceEntryDetailModel
@@ -1988,6 +2430,8 @@ export interface components {
             formatted_content: string;
             /** Id */
             id: string;
+            /** Kanban Ref Details */
+            kanban_ref_details?: components["schemas"]["ProvenanceRefModel"][];
             /** Kanban Refs */
             kanban_refs?: string[];
             /**
@@ -2042,6 +2486,8 @@ export interface components {
              * @default needs_review
              */
             review_status: string;
+            /** Skill Refs */
+            skill_refs?: string[];
             /**
              * Source Content Hash
              * @default
@@ -2326,6 +2772,171 @@ export interface components {
              * @default 0
              */
             unlinked_count: number;
+        };
+        /**
+         * EvidenceSkillLinksRequest
+         * @description Body for the skill link/unlink mutation (chip-save semantics).
+         *
+         *     ``skill_ids`` is the full desired set of skill nodes citing this
+         *     evidence row: ids not currently linked are added, currently-linked ids
+         *     missing from the list are removed (core
+         *     ``set_evidence_skill_refs``). The write lands only on the skill nodes'
+         *     ``evidence_refs`` — the single write side; the reverse direction is
+         *     computed on read.
+         */
+        EvidenceSkillLinksRequest: {
+            /** Skill Ids */
+            skill_ids?: string[];
+        };
+        /**
+         * EvidenceSkillLinksResponse
+         * @description Result of the skill link/unlink mutation.
+         */
+        EvidenceSkillLinksResponse: {
+            /** Entry Id */
+            entry_id: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Skill Ids */
+            skill_ids?: string[];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * EvidenceSkillSuggestionModel
+         * @description One suggested skill node for an evidence row.
+         */
+        EvidenceSkillSuggestionModel: {
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /** Id */
+            id: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Level
+             * @default 0
+             */
+            level: number;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+            /**
+             * Source
+             * @default rule
+             */
+            source: string;
+        };
+        /**
+         * EvidenceSkillSuggestionsResponse
+         * @description Ranked skill-link suggestions for one evidence entry.
+         *
+         *     ``backend`` records which tier produced the ranking: ``embedding``
+         *     (LLM_EMBEDDING_MODEL configured), ``llm`` (chat ranking fallback) or
+         *     ``rule`` (deterministic keyword overlap; always available).
+         */
+        EvidenceSkillSuggestionsResponse: {
+            /**
+             * Backend
+             * @default rule
+             */
+            backend: string;
+            /** Entry Id */
+            entry_id: string;
+            /** Profile */
+            profile: string;
+            /** Suggestions */
+            suggestions?: components["schemas"]["EvidenceSkillSuggestionModel"][];
+        };
+        /**
+         * EvidenceStageRiskModel
+         * @description One 待补强 row: a solid/expert skill whose evidence is missing/weak.
+         */
+        EvidenceStageRiskModel: {
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /**
+             * Highest Strength
+             * @default
+             */
+            highest_strength: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Required Strength
+             * @default
+             */
+            required_strength: string;
+            /**
+             * Risk Level
+             * @default
+             */
+            risk_level: string;
+            /**
+             * Risk Reason
+             * @default
+             */
+            risk_reason: string;
+            /** Skill Id */
+            skill_id: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /**
+         * EvidenceStagesResponse
+         * @description Five-stage pipeline counters for the single Evidence page.
+         *
+         *     Stages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 已入座 (reviewed
+         *     and linked to at least one skill) -> 已废弃; 待补强 (risks) hangs off
+         *     已入座. Counts are queue-wide (unfiltered).
+         */
+        EvidenceStagesResponse: {
+            /**
+             * Deprecated Count
+             * @default 0
+             */
+            deprecated_count: number;
+            /**
+             * Needs Review Count
+             * @default 0
+             */
+            needs_review_count: number;
+            /**
+             * Pending Crystallize Count
+             * @default 0
+             */
+            pending_crystallize_count: number;
+            /** Profile */
+            profile: string;
+            /** Risks */
+            risks?: components["schemas"]["EvidenceStageRiskModel"][];
+            /**
+             * Seated Count
+             * @default 0
+             */
+            seated_count: number;
+            /**
+             * Strengthen Count
+             * @default 0
+             */
+            strengthen_count: number;
         };
         /**
          * EvidenceSummary
@@ -3999,6 +4610,33 @@ export interface components {
             target_section: string;
         };
         /**
+         * ProvenanceRefModel
+         * @description One kanban provenance ref with its resolution state.
+         *
+         *     Dead refs (task archived or deleted) report ``status="archived"`` so the
+         *     UI renders a tombstone instead of a hard error (design: kanban_refs stay
+         *     a provenance chain, never a 404).
+         */
+        ProvenanceRefModel: {
+            /** Ref */
+            ref: string;
+            /**
+             * Status
+             * @default archived
+             */
+            status: string;
+            /**
+             * Task Id
+             * @default
+             */
+            task_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
          * PublicBuildArtifactModel
          * @description One file under the build output directory (relative path + stat).
          */
@@ -5478,6 +6116,197 @@ export interface operations {
             };
         };
     };
+    apply_profile_crystallize_api_v1_profiles__name__crystallize_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrystallizeApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrystallizeApplyResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_crystallize_candidates_api_v1_profiles__name__crystallize_candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrystallizeCandidatesResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_profile_crystallize_api_v1_profiles__name__crystallize_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrystallizeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrystallizeDraftResponse"];
+                };
+            };
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_profile_evidence_api_v1_profiles__name__evidence_get: {
         parameters: {
             query?: {
@@ -5752,6 +6581,64 @@ export interface operations {
             };
         };
     };
+    get_profile_evidence_stages_api_v1_profiles__name__evidence_stages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceStagesResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__get: {
         parameters: {
             query?: never;
@@ -5771,6 +6658,289 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceEntryDetailModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__edit_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the current pool file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown bulk field or out-of-domain bulk value. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    review_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceEntryActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the current pool file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown bulk field or out-of-domain bulk value. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_profile_evidence_skill_links_api_v1_profiles__name__evidence__entry_id__skill_links_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceSkillLinksRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSkillLinksResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the current pool file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown bulk field or out-of-domain bulk value. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_evidence_skill_suggestions_api_v1_profiles__name__evidence__entry_id__skill_suggestions_get: {
+        parameters: {
+            query?: {
+                top_n?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSkillSuggestionsResponse"];
                 };
             };
             /** @description Invalid profile name. */

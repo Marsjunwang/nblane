@@ -20,8 +20,9 @@ Contract:
   appends a progress event and updates the job's phase/message.
 
 Registered kinds: ``gap-analysis`` (Gap deep analysis with the LLM
-router), ``studio-jd-match`` (Output Studio JD match analysis) and
-``project-suggest-refs`` (Project Board AI ref suggestion). Records are
+router), ``studio-jd-match`` (Output Studio JD match analysis),
+``project-suggest-refs`` (Project Board AI ref suggestion) and
+``evidence-crystallize`` (LLM Done-task -> evidence draft). Records are
 process-local by design (single worker); results live only in memory and
 are pruned after ``_JOB_TTL_SECONDS``.
 """
@@ -46,6 +47,7 @@ from nblane.core.project_board import load_project_board
 KIND_GAP_ANALYSIS = "gap-analysis"
 KIND_STUDIO_JD_MATCH = "studio-jd-match"
 KIND_PROJECT_SUGGEST_REFS = "project-suggest-refs"
+KIND_EVIDENCE_CRYSTALLIZE = "evidence-crystallize"
 
 FINAL_STATUSES = ("done", "failed")
 
@@ -84,12 +86,19 @@ class JobFailedError(RuntimeError):
 
 @dataclass
 class JobKind:
-    """One registered async-job kind."""
+    """One registered async-job kind.
+
+    ``timeout_seconds`` overrides the global watchdog for kinds whose work
+    is known to be short (e.g. a single LLM call the user is waiting on in
+    a wizard); 0/None falls back to ``_JOB_TIMEOUT_SECONDS``.
+    """
 
     name: str
     validate: Callable[[dict[str, Any]], dict[str, Any]]
     run: Callable[[str, dict[str, Any], Callable[..., None]], Any]
     queued_message: str = "Queued job."
+    timeout_seconds: float = 0.0
+    timeout_message: str = ""
 
 
 _KINDS: dict[str, JobKind] = {}
@@ -324,16 +333,26 @@ def _prune_jobs() -> None:
             _JOBS.pop(job_id, None)
 
 
+def _job_timeout(job: dict[str, Any]) -> float:
+    """Effective timeout for a job: kind override, else the global default."""
+    spec = _KINDS.get(str(job.get("kind") or ""))
+    if spec and spec.timeout_seconds and spec.timeout_seconds > 0:
+        return float(spec.timeout_seconds)
+    return float(_JOB_TIMEOUT_SECONDS)
+
+
 def _mark_timeout_locked(job_id: str, now: float) -> None:
     """Mark a stale running job failed; caller must hold ``_LOCK``."""
     job = _JOBS.get(job_id)
     if not job or job.get("status") != "running":
         return
     started = float(job.get("started_at") or 0.0)
-    if not started or now - started <= _JOB_TIMEOUT_SECONDS:
+    timeout = _job_timeout(job)
+    if not started or now - started <= timeout:
         return
-    message = (
-        f"Job timed out after {_JOB_TIMEOUT_SECONDS} seconds. "
+    spec = _KINDS.get(str(job.get("kind") or ""))
+    message = (spec.timeout_message if spec and spec.timeout_message else "") or (
+        f"Job timed out after {int(timeout)} seconds. "
         "Retry or check the LLM provider connection."
     )
     job["status"] = "failed"
@@ -545,4 +564,110 @@ _KINDS[KIND_PROJECT_SUGGEST_REFS] = JobKind(
     validate=_validate_suggest_refs_input,
     run=_run_project_suggest_refs,
     queued_message="Queued AI ref suggestion.",
+)
+
+
+def _validate_crystallize_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    raw_ids = job_input.get("task_ids")
+    task_ids = [
+        _clean(item) for item in (raw_ids if isinstance(raw_ids, list) else [])
+    ]
+    task_ids = [item for item in task_ids if item]
+    raw_titles = job_input.get("titles")
+    titles = [
+        _clean(item) for item in (raw_titles if isinstance(raw_titles, list) else [])
+    ]
+    titles = [item for item in titles if item]
+    if not task_ids and not titles:
+        raise JobInputError(
+            "empty_selection", "At least one Done task id is required."
+        )
+    return {"task_ids": task_ids, "titles": titles}
+
+
+_CRYSTALLIZE_LLM_TIMEOUT_SECONDS = 90.0
+_CRYSTALLIZE_JOB_TIMEOUT_SECONDS = 120.0
+
+
+def _crystallize_friendly_error(err: str) -> str:
+    """Map raw LLM failure strings to actionable Chinese copy."""
+    text = _clean(err)
+    lowered = text.lower()
+    if "not configured" in lowered or "ai features" in lowered:
+        return "未配置 LLM(请在设置页填 LLM_API_KEY);可改用规则草稿。"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "AI 生成超时(90 秒);可重试,或改用规则草稿。"
+    if "could not parse" in lowered:
+        return "AI 返回的内容无法解析为草稿;可重试,或改用规则草稿。"
+    if text.startswith("LLM error:"):
+        return f"AI 调用失败:{text.removeprefix('LLM error:').strip()};可改用规则草稿。"
+    return f"AI 草稿失败:{text or '未知原因'};可改用规则草稿。"
+
+
+def _run_evidence_crystallize(
+    profile: str,
+    job_input: dict[str, Any],
+    report: Callable[..., None],
+) -> dict[str, Any]:
+    """LLM crystallize draft; result mirrors ``CrystallizeDraftResponse``."""
+    from nblane.core import crystallize as crystallize_core
+    from nblane.core.kanban_io import materialize_kanban_task_ids
+    from nblane.core.profile_ingest_llm import ingest_kanban_done_json
+
+    if not llm_client.is_configured():
+        raise JobFailedError(
+            "crystallize_unavailable",
+            "未配置 LLM(请在设置页填 LLM_API_KEY);可改用规则草稿,立等可取。",
+        )
+    report(phase="resolving", message="解析 Done 任务。")
+    pdir = profile_io.profile_dir(profile)
+    # Ids are random until persisted; materialize so refs resolve later.
+    materialize_kanban_task_ids(pdir)
+    tasks, missing = crystallize_core.resolve_done_tasks(
+        pdir, job_input["task_ids"], job_input["titles"]
+    )
+    if not tasks:
+        raise JobFailedError(
+            "empty_selection",
+            "所选 Done 任务都找不到了(可能已归档);请刷新后重选。",
+        )
+    report(phase="drafting", message="AI 正在生成证据草稿(最长约 90 秒)。")
+    patch, err = ingest_kanban_done_json(
+        profile, tasks, timeout_seconds=_CRYSTALLIZE_LLM_TIMEOUT_SECONDS
+    )
+    if err is not None or patch is None:
+        raise JobFailedError(
+            "crystallize_draft_failed",
+            _crystallize_friendly_error(err or ""),
+        )
+    snapshots = [crystallize_core.task_snapshot(task) for task in tasks]
+    patch = crystallize_core.attach_task_snapshots(patch, snapshots)
+    return {
+        "ok": True,
+        "profile": profile,
+        "backend": "llm",
+        "patch": patch,
+        "tasks": [
+            {
+                "id": snap["task_id"],
+                "title": snap["title"],
+                "kanban_ref": snap["kanban_ref"],
+                "project_id": snap["project_id"],
+                "completed_on": snap["completed_on"],
+            }
+            for snap in snapshots
+        ],
+        "missing": list(missing),
+    }
+
+
+_KINDS[KIND_EVIDENCE_CRYSTALLIZE] = JobKind(
+    name=KIND_EVIDENCE_CRYSTALLIZE,
+    validate=_validate_crystallize_input,
+    run=_run_evidence_crystallize,
+    queued_message="Queued evidence crystallize draft.",
+    timeout_seconds=_CRYSTALLIZE_JOB_TIMEOUT_SECONDS,
+    timeout_message=(
+        "AI 草稿超时(120 秒未完成);请重试,或改用规则草稿(立等可取)。"
+    ),
 )

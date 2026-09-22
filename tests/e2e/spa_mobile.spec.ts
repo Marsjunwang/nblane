@@ -10,9 +10,10 @@ import type { APIRequestContext, Page } from "@playwright/test";
  * Coverage:
  *  a) navigation: hamburger open/close, every menu entry clickable, 看板
  *     navigates and collapses the drawer;
- *  b) the five wide-table pages (证据评审/周回顾/项目看板/研究台/证据): tables
- *     stay inside their Table.ScrollContainer (horizontal scroll works) and
- *     the document never overflows horizontally;
+ *  b) the wide-content pages (周回顾/项目看板/研究台 keep wide tables; 证据 is
+ *     now the Phase 1 single page with the five-stage nav): tables stay
+ *     inside their Table.ScrollContainer and the document never overflows
+ *     horizontally;
  *  c) kanban touch drag: a real CDP touch gesture (press-and-hold past the
  *     dnd-kit TouchSensor 250ms delay, then drag) moves a card Queue→Doing,
  *     plus the「…」移动到… menu fallback over tap;
@@ -149,15 +150,14 @@ test.describe("SPA mobile 375px — 导航", () => {
     await burger.tap();
     await expectNavbarCollapsed(page);
 
-    // Click through every drawer entry: 15 profile pages + 档案列表, plus the
-    // header 助手 entry (17 clickable entries total on mobile).
+    // Click through every drawer entry: 14 profile pages + 档案列表, plus the
+    // header 助手 entry (16 clickable entries total on mobile).
     const drawerItems: { label: string; url: string }[] = [
       { label: "首页", url: spa("home") },
       { label: "看板", url: spa("kanban") },
       { label: "技能树", url: spa("skill-tree") },
       { label: "目标", url: spa("goals") },
       { label: "证据", url: spa("evidence") },
-      { label: "证据评审", url: spa("evidence-review") },
       { label: "差距分析", url: spa("gap") },
       { label: "周回顾", url: spa("review") },
       { label: "项目看板", url: spa("project-board") },
@@ -180,7 +180,7 @@ test.describe("SPA mobile 375px — 导航", () => {
       await expectNavbarCollapsed(page);
     }
 
-    // The header 助手 entry stays reachable on mobile (17th entry).
+    // The header 助手 entry stays reachable on mobile (16th entry).
     await page.getByRole("link", { name: "助手" }).click();
     await expect(page).toHaveURL(`${SPA_BASE_URL}/assistant`);
 
@@ -202,29 +202,19 @@ test.describe("SPA mobile 375px — 导航", () => {
 });
 
 test.describe("SPA mobile 375px — 宽表格五页", () => {
-  test("证据页: 表格容器横向滚动且文档不溢出", async ({ page }) => {
+  test("证据页(单页五阶段): 阶段导航可见且文档不溢出", async ({ page }) => {
     await page.goto(spa("evidence"));
-    await expect(page.locator("table").first()).toBeVisible();
-    await expectTablesScrollable(page);
+    // Phase 1 single page: card list + stage nav instead of a wide table.
+    await expect(page.getByTestId("stage-nav")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 
-  test("证据评审页: 表格容器横向滚动且文档不溢出", async ({ page }) => {
+  test("证据评审旧路由: 重定向进证据单页且文档不溢出", async ({ page }) => {
     await page.goto(spa("evidence-review"));
-    // The review queue is a consumable; when empty the page shows an empty
-    // state instead of the table — both shapes must not break the layout.
-    // Wait for the query to settle (either shape) before branching.
-    const emptyState = page.getByText("当前过滤条件下没有待处理的证据。");
-    await expect(page.locator("table").first().or(emptyState)).toBeVisible();
-    if ((await page.locator("table").count()) > 0) {
-      await expectTablesScrollable(page);
-    } else {
-      await expect(emptyState).toBeVisible();
-      test.info().annotations.push({
-        type: "note",
-        description: "evidence-review queue empty in sandbox; asserted empty-state branch",
-      });
-    }
+    // /evidence-review redirects to /evidence?stage=review; the queue may be
+    // empty (consumable) — the stage nav renders either way.
+    await expect(page.getByTestId("stage-nav")).toBeVisible();
+    await expect(page).toHaveURL(/\/evidence\?stage=review/);
     await expectNoHorizontalOverflow(page);
   });
 

@@ -123,6 +123,51 @@ export type EvidenceReviewDeprecateRequest = Schemas['EvidenceReviewDeprecateReq
 /** EvidenceReviewMutationResponse from web_api/schemas.py. */
 export type EvidenceReviewMutationResponse = Schemas['EvidenceReviewMutationResponse'];
 
+/** EvidenceEditRequest from web_api/schemas.py (whitelist field edit). */
+export type EvidenceEditRequest = Schemas['EvidenceEditRequest'];
+
+/** EvidenceEntryActionRequest from web_api/schemas.py (accept/reject/restore). */
+export type EvidenceEntryActionRequest = Schemas['EvidenceEntryActionRequest'];
+
+/** EvidenceSkillLinksRequest from web_api/schemas.py (chip-save link set). */
+export type EvidenceSkillLinksRequest = Schemas['EvidenceSkillLinksRequest'];
+
+/** EvidenceSkillLinksResponse from web_api/schemas.py. */
+export type EvidenceSkillLinksResponse = Schemas['EvidenceSkillLinksResponse'];
+
+/** EvidenceSkillSuggestionModel from web_api/schemas.py. */
+export type EvidenceSkillSuggestion = Schemas['EvidenceSkillSuggestionModel'];
+
+/** EvidenceSkillSuggestionsResponse from web_api/schemas.py. */
+export type EvidenceSkillSuggestionsResponse = Schemas['EvidenceSkillSuggestionsResponse'];
+
+/** EvidenceStageRiskModel from web_api/schemas.py (待补强 row). */
+export type EvidenceStageRisk = Schemas['EvidenceStageRiskModel'];
+
+/** EvidenceStagesResponse from web_api/schemas.py (five-stage counters). */
+export type EvidenceStagesResponse = Schemas['EvidenceStagesResponse'];
+
+/** ProvenanceRefModel from web_api/schemas.py (kanban ref + tombstone). */
+export type ProvenanceRef = Schemas['ProvenanceRefModel'];
+
+/** CrystallizeCandidateModel from web_api/schemas.py (wizard step 1 row). */
+export type CrystallizeCandidate = Schemas['CrystallizeCandidateModel'];
+
+/** CrystallizeCandidatesResponse from web_api/schemas.py. */
+export type CrystallizeCandidatesResponse = Schemas['CrystallizeCandidatesResponse'];
+
+/** CrystallizeDraftRequest from web_api/schemas.py. */
+export type CrystallizeDraftRequest = Schemas['CrystallizeDraftRequest'];
+
+/** CrystallizeDraftResponse from web_api/schemas.py (rule 200 / job result). */
+export type CrystallizeDraftResponse = Schemas['CrystallizeDraftResponse'];
+
+/** CrystallizeApplyRequest from web_api/schemas.py. */
+export type CrystallizeApplyRequest = Schemas['CrystallizeApplyRequest'];
+
+/** CrystallizeApplyResponse from web_api/schemas.py. */
+export type CrystallizeApplyResponse = Schemas['CrystallizeApplyResponse'];
+
 /** GapAnalyzeRequest from web_api/schemas.py (sync rule / async LLM dispatch). */
 export type GapAnalyzeRequest = Schemas['GapAnalyzeRequest'];
 

@@ -4,8 +4,7 @@ import { RequireAuth } from './auth/RequireAuth';
 import { AppLayout } from './components/AppLayout';
 import { ActivityPage } from './pages/ActivityPage';
 import { AssistantPage } from './pages/AssistantPage';
-import { EvidencePage } from './pages/EvidencePage';
-import { EvidenceReviewPage } from './pages/EvidenceReviewPage';
+import { EvidencePage, EvidenceReviewRedirect } from './pages/EvidencePage';
 import { GapPage } from './pages/GapPage';
 import { GoalsPage } from './pages/GoalsPage';
 import { HealthPage } from './pages/HealthPage';
@@ -44,7 +43,8 @@ export function App() {
           <Route path="/p/:name/skill-tree" element={<SkillTreePage />} />
           <Route path="/p/:name/goals" element={<GoalsPage />} />
           <Route path="/p/:name/evidence" element={<EvidencePage />} />
-          <Route path="/p/:name/evidence-review" element={<EvidenceReviewPage />} />
+          {/* Legacy route: the review queue merged into the Evidence page. */}
+          <Route path="/p/:name/evidence-review" element={<EvidenceReviewRedirect />} />
           <Route path="/p/:name/gap" element={<GapPage />} />
           <Route path="/p/:name/review" element={<ReviewPage />} />
           <Route path="/p/:name/project-board" element={<ProjectBoardPage />} />

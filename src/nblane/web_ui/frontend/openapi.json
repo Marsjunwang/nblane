@@ -525,6 +525,288 @@
     "title": "AssistantStatusResponse",
     "type": "object"
    },
+   "CrystallizeApplyRequest": {
+    "description": "Body for the crystallize-apply endpoint.\n\n``patch`` is the (possibly human-edited) draft from the draft endpoint;\n``include_evidence`` / ``include_nodes`` are the wizard's per-row\ncheckboxes (null = keep all). On success the source tasks are marked\n``crystallized`` in kanban.md.",
+    "properties": {
+     "allow_status_change": {
+      "default": false,
+      "title": "Allow Status Change",
+      "type": "boolean"
+     },
+     "include_evidence": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "boolean"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Include Evidence"
+     },
+     "include_nodes": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "boolean"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Include Nodes"
+     },
+     "patch": {
+      "additionalProperties": true,
+      "title": "Patch",
+      "type": "object"
+     },
+     "task_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Task Ids",
+      "type": "array"
+     },
+     "titles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Titles",
+      "type": "array"
+     }
+    },
+    "title": "CrystallizeApplyRequest",
+    "type": "object"
+   },
+   "CrystallizeApplyResponse": {
+    "description": "Result of the crystallize apply.",
+    "properties": {
+     "crystallized_count": {
+      "default": 0,
+      "title": "Crystallized Count",
+      "type": "integer"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Errors",
+      "type": "array"
+     },
+     "new_evidence_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "New Evidence Ids",
+      "type": "array"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "required": [
+     "ok"
+    ],
+    "title": "CrystallizeApplyResponse",
+    "type": "object"
+   },
+   "CrystallizeCandidateModel": {
+    "description": "One uncrystallized Done task (结晶向导 step 1 option).\n\n``context``/``why``/``outcome`` feed the candidate inscription card;\n``snapshot`` is the full原文 block (``render_kanban_task_source``) that\ncrystallization would embed into the evidence row — the card shows it\nas a preview so the human sees exactly what gets snapshotted.",
+    "properties": {
+     "blockers": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Blockers",
+      "type": "array"
+     },
+     "completed_on": {
+      "default": "",
+      "title": "Completed On",
+      "type": "string"
+     },
+     "context": {
+      "default": "",
+      "title": "Context",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "outcome": {
+      "default": "",
+      "title": "Outcome",
+      "type": "string"
+     },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
+     "snapshot": {
+      "default": "",
+      "title": "Snapshot",
+      "type": "string"
+     },
+     "tags": {
+      "default": "",
+      "title": "Tags",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "why": {
+      "default": "",
+      "title": "Why",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "CrystallizeCandidateModel",
+    "type": "object"
+   },
+   "CrystallizeCandidatesResponse": {
+    "description": "Uncrystallized Done tasks plus their crystallization blockers.",
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/CrystallizeCandidateModel"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "CrystallizeCandidatesResponse",
+    "type": "object"
+   },
+   "CrystallizeDraftRequest": {
+    "description": "Body for the crystallize-draft endpoint.\n\nRule mode (``use_llm=false``, default) answers 200 with a deterministic\none-row-per-task draft. ``use_llm=true`` creates an async\n``evidence-crystallize`` job (202) whose result carries the same\n``CrystallizeDraftResponse`` payload shape.",
+    "properties": {
+     "task_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Task Ids",
+      "type": "array"
+     },
+     "titles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Titles",
+      "type": "array"
+     },
+     "use_llm": {
+      "default": false,
+      "title": "Use Llm",
+      "type": "boolean"
+     }
+    },
+    "title": "CrystallizeDraftRequest",
+    "type": "object"
+   },
+   "CrystallizeDraftResponse": {
+    "description": "Crystallize draft: an ingest patch plus the resolved source tasks.\n\n``patch`` is an ingest-patch dict (``evidence_entries`` /\n``node_updates``) the client edits (grading, deselecting rows) and posts\nback to ``.../crystallize/apply``. ``backend`` is ``rule`` or ``llm``.",
+    "properties": {
+     "backend": {
+      "default": "rule",
+      "title": "Backend",
+      "type": "string"
+     },
+     "missing": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Missing",
+      "type": "array"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "patch": {
+      "additionalProperties": true,
+      "title": "Patch",
+      "type": "object"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "tasks": {
+      "items": {
+       "$ref": "#/components/schemas/CrystallizeTaskModel"
+      },
+      "title": "Tasks",
+      "type": "array"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "CrystallizeDraftResponse",
+    "type": "object"
+   },
+   "CrystallizeTaskModel": {
+    "description": "Resolved source task echo in a crystallize draft.",
+    "properties": {
+     "completed_on": {
+      "default": "",
+      "title": "Completed On",
+      "type": "string"
+     },
+     "id": {
+      "default": "",
+      "title": "Id",
+      "type": "string"
+     },
+     "kanban_ref": {
+      "default": "",
+      "title": "Kanban Ref",
+      "type": "string"
+     },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "CrystallizeTaskModel",
+    "type": "object"
+   },
    "CurrentUser": {
     "description": "The authenticated principal for one request.",
     "properties": {
@@ -587,6 +869,55 @@
     "title": "ErrorResponse",
     "type": "object"
    },
+   "EvidenceEditRequest": {
+    "description": "Body for the single-entry edit mutation.\n\n``fields`` maps field name -> new value. Allowed keys: the review\nwhitelist (``review_status``/``strength``/``confidence``/\n``public_readiness``, domain-validated, \"\" clears) plus the text fields\n``title``/``summary``/``date``/``url`` and ``type`` (domain-validated).\nUnknown keys answer 422; provenance fields (``origin*``, refs,\n``original_content``) are not editable here — the original snapshot is\nimmutable once crystallized.",
+    "properties": {
+     "fields": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "minProperties": 1,
+      "title": "Fields",
+      "type": "object"
+     }
+    },
+    "required": [
+     "fields"
+    ],
+    "title": "EvidenceEditRequest",
+    "type": "object"
+   },
+   "EvidenceEntryActionRequest": {
+    "description": "Body for the single-entry review action.\n\n``action``: ``accept`` (mark reviewed, optionally grading in the same\ncall), ``reject`` (deprecate; the row is kept for provenance) or\n``restore`` (un-deprecate). Grade fields are only applied on ``accept``\nand must be in their domain (\"\" clears).",
+    "properties": {
+     "action": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Action",
+      "type": "string"
+     },
+     "confidence": {
+      "default": "",
+      "title": "Confidence",
+      "type": "string"
+     },
+     "public_readiness": {
+      "default": "",
+      "title": "Public Readiness",
+      "type": "string"
+     },
+     "strength": {
+      "default": "",
+      "title": "Strength",
+      "type": "string"
+     }
+    },
+    "required": [
+     "action"
+    ],
+    "title": "EvidenceEntryActionRequest",
+    "type": "object"
+   },
    "EvidenceEntryDetailModel": {
     "description": "One evidence-pool entry, full detail view.",
     "properties": {
@@ -625,6 +956,13 @@
      "id": {
       "title": "Id",
       "type": "string"
+     },
+     "kanban_ref_details": {
+      "items": {
+       "$ref": "#/components/schemas/ProvenanceRefModel"
+      },
+      "title": "Kanban Ref Details",
+      "type": "array"
      },
      "kanban_refs": {
       "items": {
@@ -689,6 +1027,13 @@
       "default": "needs_review",
       "title": "Review Status",
       "type": "string"
+     },
+     "skill_refs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Skill Refs",
+      "type": "array"
      },
      "source_content_hash": {
       "default": "",
@@ -1053,6 +1398,220 @@
      }
     },
     "title": "EvidenceReviewSummaryModel",
+    "type": "object"
+   },
+   "EvidenceSkillLinksRequest": {
+    "description": "Body for the skill link/unlink mutation (chip-save semantics).\n\n``skill_ids`` is the full desired set of skill nodes citing this\nevidence row: ids not currently linked are added, currently-linked ids\nmissing from the list are removed (core\n``set_evidence_skill_refs``). The write lands only on the skill nodes'\n``evidence_refs`` — the single write side; the reverse direction is\ncomputed on read.",
+    "properties": {
+     "skill_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Skill Ids",
+      "type": "array"
+     }
+    },
+    "title": "EvidenceSkillLinksRequest",
+    "type": "object"
+   },
+   "EvidenceSkillLinksResponse": {
+    "description": "Result of the skill link/unlink mutation.",
+    "properties": {
+     "entry_id": {
+      "title": "Entry Id",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "skill_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Skill Ids",
+      "type": "array"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "required": [
+     "entry_id"
+    ],
+    "title": "EvidenceSkillLinksResponse",
+    "type": "object"
+   },
+   "EvidenceSkillSuggestionModel": {
+    "description": "One suggested skill node for an evidence row.",
+    "properties": {
+     "category": {
+      "default": "",
+      "title": "Category",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "label": {
+      "default": "",
+      "title": "Label",
+      "type": "string"
+     },
+     "level": {
+      "default": 0,
+      "title": "Level",
+      "type": "integer"
+     },
+     "score": {
+      "default": 0.0,
+      "title": "Score",
+      "type": "number"
+     },
+     "source": {
+      "default": "rule",
+      "title": "Source",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "EvidenceSkillSuggestionModel",
+    "type": "object"
+   },
+   "EvidenceSkillSuggestionsResponse": {
+    "description": "Ranked skill-link suggestions for one evidence entry.\n\n``backend`` records which tier produced the ranking: ``embedding``\n(LLM_EMBEDDING_MODEL configured), ``llm`` (chat ranking fallback) or\n``rule`` (deterministic keyword overlap; always available).",
+    "properties": {
+     "backend": {
+      "default": "rule",
+      "title": "Backend",
+      "type": "string"
+     },
+     "entry_id": {
+      "title": "Entry Id",
+      "type": "string"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "suggestions": {
+      "items": {
+       "$ref": "#/components/schemas/EvidenceSkillSuggestionModel"
+      },
+      "title": "Suggestions",
+      "type": "array"
+     }
+    },
+    "required": [
+     "profile",
+     "entry_id"
+    ],
+    "title": "EvidenceSkillSuggestionsResponse",
+    "type": "object"
+   },
+   "EvidenceStageRiskModel": {
+    "description": "One 待补强 row: a solid/expert skill whose evidence is missing/weak.",
+    "properties": {
+     "evidence_refs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+     },
+     "highest_strength": {
+      "default": "",
+      "title": "Highest Strength",
+      "type": "string"
+     },
+     "label": {
+      "default": "",
+      "title": "Label",
+      "type": "string"
+     },
+     "required_strength": {
+      "default": "",
+      "title": "Required Strength",
+      "type": "string"
+     },
+     "risk_level": {
+      "default": "",
+      "title": "Risk Level",
+      "type": "string"
+     },
+     "risk_reason": {
+      "default": "",
+      "title": "Risk Reason",
+      "type": "string"
+     },
+     "skill_id": {
+      "title": "Skill Id",
+      "type": "string"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "skill_id"
+    ],
+    "title": "EvidenceStageRiskModel",
+    "type": "object"
+   },
+   "EvidenceStagesResponse": {
+    "description": "Five-stage pipeline counters for the single Evidence page.\n\nStages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 已入座 (reviewed\nand linked to at least one skill) -> 已废弃; 待补强 (risks) hangs off\n已入座. Counts are queue-wide (unfiltered).",
+    "properties": {
+     "deprecated_count": {
+      "default": 0,
+      "title": "Deprecated Count",
+      "type": "integer"
+     },
+     "needs_review_count": {
+      "default": 0,
+      "title": "Needs Review Count",
+      "type": "integer"
+     },
+     "pending_crystallize_count": {
+      "default": 0,
+      "title": "Pending Crystallize Count",
+      "type": "integer"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "risks": {
+      "items": {
+       "$ref": "#/components/schemas/EvidenceStageRiskModel"
+      },
+      "title": "Risks",
+      "type": "array"
+     },
+     "seated_count": {
+      "default": 0,
+      "title": "Seated Count",
+      "type": "integer"
+     },
+     "strengthen_count": {
+      "default": 0,
+      "title": "Strengthen Count",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "EvidenceStagesResponse",
     "type": "object"
    },
    "EvidenceSummary": {
@@ -3698,6 +4257,35 @@
     "title": "ProjectTaskMoveRequest",
     "type": "object"
    },
+   "ProvenanceRefModel": {
+    "description": "One kanban provenance ref with its resolution state.\n\nDead refs (task archived or deleted) report ``status=\"archived\"`` so the\nUI renders a tombstone instead of a hard error (design: kanban_refs stay\na provenance chain, never a 404).",
+    "properties": {
+     "ref": {
+      "title": "Ref",
+      "type": "string"
+     },
+     "status": {
+      "default": "archived",
+      "title": "Status",
+      "type": "string"
+     },
+     "task_id": {
+      "default": "",
+      "title": "Task Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "ref"
+    ],
+    "title": "ProvenanceRefModel",
+    "type": "object"
+   },
    "PublicBuildArtifactModel": {
     "description": "One file under the build output directory (relative path + stat).",
     "properties": {
@@ -5942,6 +6530,246 @@
     "summary": "Get Profile Agent Tasks"
    }
   },
+  "/api/v1/profiles/{name}/crystallize/apply": {
+   "post": {
+    "description": "Apply a confirmed crystallize draft (wizard step 3).\n\nUnlike the pool-field mutations this flow is merge-based: the draft is\nre-merged against the *current* pool/tree at apply time\n(``run_ingest_patch`` with validate + SKILL.md sync + rollback), so no\nIf-Match precondition is needed — concurrent pool writes merge instead\nof clobbering. Only on success are the source Done tasks marked\n``crystallized``.",
+    "operationId": "apply_profile_crystallize_api_v1_profiles__name__crystallize_apply_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CrystallizeApplyRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CrystallizeApplyResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Apply Profile Crystallize"
+   }
+  },
+  "/api/v1/profiles/{name}/crystallize/candidates": {
+   "get": {
+    "description": "Uncrystallized Done tasks plus advisory blockers (wizard step 1).\n\nTask ids are materialized to kanban.md first so refs captured during\ncrystallization resolve against later parses.",
+    "operationId": "get_profile_crystallize_candidates_api_v1_profiles__name__crystallize_candidates_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CrystallizeCandidatesResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Crystallize Candidates"
+   }
+  },
+  "/api/v1/profiles/{name}/crystallize/draft": {
+   "post": {
+    "description": "Draft evidence from selected Done tasks (wizard step 2).\n\nRule mode (default) answers 200 with a deterministic one-row-per-task\ndraft — each row already carries the task原文 snapshot in\n``original_content`` + hash. ``use_llm=true`` creates an async\n``evidence-crystallize`` job (202; poll/stream ``.../jobs/{job_id}``)\nwhose result carries the same payload shape with ``backend=\"llm\"``.",
+    "operationId": "draft_profile_crystallize_api_v1_profiles__name__crystallize_draft_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CrystallizeDraftRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CrystallizeDraftResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "Accepted"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Draft Profile Crystallize"
+   }
+  },
   "/api/v1/profiles/{name}/evidence": {
    "get": {
     "description": "Filtered evidence-pool entries (read-only list for the SPA).",
@@ -6366,6 +7194,76 @@
     "summary": "Deprecate Profile Evidence Review"
    }
   },
+  "/api/v1/profiles/{name}/evidence-stages": {
+   "get": {
+    "description": "Five-stage pipeline counters for the single Evidence page.\n\n待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet\nreviewed; 已入座 = reviewed rows linked to at least one skill node;\n待补强 = solid/expert skills with missing/weak evidence\n(``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated\nrows. Counts are queue-wide (unfiltered).",
+    "operationId": "get_profile_evidence_stages_api_v1_profiles__name__evidence_stages_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EvidenceStagesResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Evidence Stages"
+   }
+  },
   "/api/v1/profiles/{name}/evidence/{entry_id}": {
    "get": {
     "description": "Full detail for one evidence-pool entry; 404 when the id is unknown.",
@@ -6443,6 +7341,442 @@
      }
     },
     "summary": "Get Profile Evidence Entry"
+   }
+  },
+  "/api/v1/profiles/{name}/evidence/{entry_id}/edit": {
+   "post": {
+    "description": "Edit whitelist fields on one pool row.\n\nText fields (``title``/``summary``/``date``/``url``) take any string\n(\"\" clears all but ``title``); enum fields (``type`` plus the review\nwhitelist) must be in their domain (\"\" clears). Honors ``If-Match``\n(412 on mismatch, fresh ETag in the header).",
+    "operationId": "edit_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__edit_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "entry_id",
+      "required": true,
+      "schema": {
+       "title": "Entry Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EvidenceEditRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EvidenceReviewMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current pool file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown bulk field or out-of-domain bulk value."
+     }
+    },
+    "summary": "Edit Profile Evidence Entry"
+   }
+  },
+  "/api/v1/profiles/{name}/evidence/{entry_id}/review": {
+   "post": {
+    "description": "Single-entry review action: accept / reject (deprecate) / restore.\n\n``accept`` sets ``review_status=reviewed`` and applies the optional\ngrade fields in the same locked write; ``reject`` sets\n``deprecated: true`` (kept for provenance); ``restore`` clears it.\nHonors ``If-Match`` (412 on mismatch).",
+    "operationId": "review_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__review_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "entry_id",
+      "required": true,
+      "schema": {
+       "title": "Entry Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EvidenceEntryActionRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EvidenceReviewMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current pool file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown bulk field or out-of-domain bulk value."
+     }
+    },
+    "summary": "Review Profile Evidence Entry"
+   }
+  },
+  "/api/v1/profiles/{name}/evidence/{entry_id}/skill-links": {
+   "post": {
+    "description": "Reconcile the skill nodes citing one evidence row (link/unlink).\n\nChip-save semantics: ``skill_ids`` is the desired final set (core\n``set_evidence_skill_refs`` adds missing / removes absent, creates\nunknown nodes as ``learning``). The write lands on skill-tree.yaml only\n— the pool never stores the reverse direction. ``If-Match`` carries the\nskill-tree.yaml ETag from the stages/tree reads (412 on mismatch).",
+    "operationId": "set_profile_evidence_skill_links_api_v1_profiles__name__evidence__entry_id__skill_links_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "entry_id",
+      "required": true,
+      "schema": {
+       "title": "Entry Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EvidenceSkillLinksRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EvidenceSkillLinksResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current pool file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown bulk field or out-of-domain bulk value."
+     }
+    },
+    "summary": "Set Profile Evidence Skill Links"
+   }
+  },
+  "/api/v1/profiles/{name}/evidence/{entry_id}/skill-suggestions": {
+   "get": {
+    "description": "Ranked skill-link suggestions for one pool row.\n\nTiered backend (``backend`` field): ``embedding`` when\n``LLM_EMBEDDING_MODEL`` is configured (skill label/category embeddings\ncached under the profile's ``.cache/``), else a single LLM ranking call,\nelse the deterministic rule matcher. Already-linked nodes are excluded.",
+    "operationId": "get_profile_evidence_skill_suggestions_api_v1_profiles__name__evidence__entry_id__skill_suggestions_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "entry_id",
+      "required": true,
+      "schema": {
+       "title": "Entry Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "top_n",
+      "required": false,
+      "schema": {
+       "default": 5,
+       "maximum": 20,
+       "minimum": 1,
+       "title": "Top N",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EvidenceSkillSuggestionsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Evidence Skill Suggestions"
    }
   },
   "/api/v1/profiles/{name}/gap/analyze": {

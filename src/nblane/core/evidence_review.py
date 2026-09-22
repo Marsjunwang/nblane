@@ -457,22 +457,18 @@ def done_task_evidence_blockers(
     blockers: list[str] = []
     task_id = str(getattr(task, "id", "") or "").strip()
     if not task_id:
-        blockers.append("Task has no stable id; evidence requires a source id.")
+        blockers.append("任务缺少稳定 id,无法作为证据来源。")
     if not str(getattr(task, "completed_on", "") or "").strip():
-        blockers.append("Task has no completed_on; evidence requires a date.")
+        blockers.append("任务缺少完成日期(completed_on),证据需要日期。")
     project_id = str(getattr(task, "project_id", "") or "").strip()
     if not project_id:
-        blockers.append("Task has no project_id; link it to a project first.")
+        blockers.append("任务未关联项目;先去项目看板把它挂到项目。")
     elif project_id not in project_index:
-        blockers.append(
-            f"Project {project_id} does not exist in project-board.yaml."
-        )
+        blockers.append(f"项目 {project_id} 不在 project-board.yaml 里。")
     elif not project_index[project_id].get("has_goal"):
-        blockers.append(
-            f"Project {project_id} has no goal_refs; link project to a goal first."
-        )
+        blockers.append(f"项目 {project_id} 还没关联目标(goal_refs)。")
     if not resolvable:
-        blockers.append("Task cannot be resolved from kanban.md or kanban-archive.md.")
+        blockers.append("任务在 kanban.md / kanban-archive.md 里都找不到了。")
     return blockers
 
 
@@ -736,7 +732,7 @@ def _risk_for_status(
         return (
             "missing_evidence",
             required,
-            f"{status} requires evidence, but none is linked.",
+            f"{status} 技能还没有关联任何证据。",
         )
     required_rank = evidence_strength_rank(required)
     if highest_rank < required_rank:
@@ -744,11 +740,26 @@ def _risk_for_status(
             "insufficient_strength",
             required,
             (
-                f"{status} requires {required}+ evidence; "
-                f"highest is {highest_strength}."
+                f"{status} 技能需要{required}及以上分量的证据;"
+                f"当前最高为 {highest_strength or '未评级'}。"
             ),
         )
     return "", required, ""
+
+
+# Confidence auto-derivation by provenance (评审收敛单维度「分量」后,置信度
+# 不再手评): paper/官方来源 → high,practice/自述 → medium,其余 → low。
+_CONFIDENCE_BY_ORIGIN: dict[str, str] = {
+    "paper": "high",
+    "research_source": "high",
+    "kanban_task": "medium",
+    "manual_daily": "medium",
+}
+
+
+def confidence_for_origin(origin: object) -> str:
+    """Derive evidence confidence from its origin; '' when unknown origin."""
+    return _CONFIDENCE_BY_ORIGIN.get(str(origin or "").strip(), "low")
 
 
 def skill_evidence_summaries(profile: str | Path) -> list[dict[str, object]]:

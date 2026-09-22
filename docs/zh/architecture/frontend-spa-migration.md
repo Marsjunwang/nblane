@@ -13,6 +13,25 @@ source_of_truth: app.py、pages/、src/nblane/web_*.py、src/nblane/web_reader_a
 
 ## 实施进度（2026-09-20）
 
+> **2026-09-22 · Phase 1 证据域单页化**：证据池页与证据评审页合并为单页
+> 「证据」（`/p/:name/evidence`，旧 `/evidence-review` 重定向到
+> `?stage=review`），左栏五阶段工序（待结晶/待评审/已入座/待补强/已废弃，
+> 数字常驻）+ 中栏列表 + 右栏铭文详情卡（共享组件 `InscriptionCard`，设计
+> token 深底/细金边/文楷标题/明体正文在 `frontend/src/theme.ts`）。新 API：
+> `POST /evidence/{id}/edit`（白名单字段）、`POST /evidence/{id}/review`
+> （accept/reject/restore 单条评审）、`POST /evidence/{id}/skill-links`
+> （技能关联 chip-save，写 skill-tree.yaml evidence_refs 单侧）、
+> `GET /evidence/{id}/skill-suggestions`（embedding→LLM→rule 三级建议，
+> 见 `core/ai/skill_suggest.py`，`LLM_EMBEDDING_MODEL` 可选嵌入端点）、
+> `GET /evidence-stages`（五阶段计数+待补强风险）、结晶向导
+> `GET /crystallize/candidates` + `POST /crystallize/draft`（规则版同步 200，
+> `use_llm=true` 走 jobs/SSE 的 `evidence-crystallize` job）+
+> `POST /crystallize/apply`（merge 重算免 If-Match）。结晶状态机收口进
+> `core/crystallize.py`（原 pages/2 与 pages/3 双写实现的核心版：结晶即
+> 快照 original_content+hash，kanban_refs 留作溯源链、死链墓碑「已归档」）。
+> 快速评审键盘模式 j/k/a/s/1/2/3。设计定案见
+> `docs/zh/dev/phase1-evidence-page-design.md`。
+
 | 里程碑 | 状态 | 说明 |
 |--------|------|------|
 | M0 spike | ✅ 已完成 | `src/nblane/web_api/`（create_app、4 个只读端点、OpenAPI 契约测试） |

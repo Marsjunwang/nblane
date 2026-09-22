@@ -1,8 +1,9 @@
 // TanStack Query hooks over the API client.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 
-import { apiGet, apiGetWithHeaders, apiPost, ifMatch } from './client';
+import { ApiError, apiGet, apiGetWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -12,12 +13,22 @@ import type {
   AssistantStatus,
   CurrentUser,
   EvidenceEntryDetail,
+  EvidenceEditRequest,
+  EvidenceEntryActionRequest,
   EvidenceListResponse,
   EvidenceReviewBulkRequest,
   EvidenceReviewDeprecateRequest,
   EvidenceReviewListResponse,
   EvidenceReviewListResult,
   EvidenceReviewMutationResponse,
+  EvidenceSkillLinksResponse,
+  EvidenceSkillSuggestionsResponse,
+  EvidenceStagesResponse,
+  CrystallizeApplyRequest,
+  CrystallizeApplyResponse,
+  CrystallizeCandidatesResponse,
+  CrystallizeDraftRequest,
+  CrystallizeDraftResponse,
   GapAnalysisResult,
   GapAnalyzeRequest,
   GapIntakeRequest,
@@ -132,6 +143,40 @@ export function useSkillTree(profile: string) {
     queryKey: ['profiles', profile, 'skill-tree'],
     queryFn: () =>
       apiGet<SkillTreeResponse>(`/profiles/${encodeURIComponent(profile)}/skill-tree`),
+    enabled: profile.length > 0,
+  });
+}
+
+export interface FlatSkillNode {
+  id: string;
+  title: string;
+  status: string;
+}
+
+export interface SkillTreeFlatResult {
+  nodes: FlatSkillNode[];
+  /** skill-tree.yaml ETag for If-Match on the skill-links mutation. */
+  etag: string;
+}
+
+/** Skill tree as a flat node list plus the tree-file ETag. */
+export function useSkillTreeFlat(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'skill-tree', 'flat'],
+    queryFn: async (): Promise<SkillTreeFlatResult> => {
+      const { data, headers } = await apiGetWithHeaders<SkillTreeResponse>(
+        `/profiles/${encodeURIComponent(profile)}/skill-tree`,
+      );
+      const flat: FlatSkillNode[] = [];
+      const walk = (nodes: SkillTreeResponse['nodes'] | undefined) => {
+        for (const node of nodes ?? []) {
+          flat.push({ id: node.id, title: node.title, status: node.status });
+          walk(node.children ?? []);
+        }
+      };
+      walk(data.nodes ?? []);
+      return { nodes: flat, etag: headers.get('ETag') ?? '' };
+    },
     enabled: profile.length > 0,
   });
 }
@@ -436,34 +481,266 @@ function useInvalidateEvidenceReview(profile: string) {
   return () => {
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-review'] });
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence'] });
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-stages'] });
   };
+}
+
+/**
+ * ETag mutation helper: POST with If-Match; on 412 (someone else — or our
+ * own previous mutation whose fresh ETag had not landed yet — changed the
+ * file) refetch the current ETag and retry exactly once. The fresh ETag
+ * from the success response is returned so callers can write it back into
+ * the query cache, keeping consecutive mutations reload-free.
+ */
+async function postEtagMutation<T>(
+  path: string,
+  body: unknown,
+  etag: string,
+  refreshEtag: () => Promise<string>,
+): Promise<{ data: T; etag: string }> {
+  try {
+    const res = await apiPostWithHeaders<T>(path, body, { headers: ifMatch(etag) });
+    return { data: res.data, etag: res.headers.get('ETag') ?? etag };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 412) {
+      throw error;
+    }
+    const fresh = await refreshEtag();
+    const res = await apiPostWithHeaders<T>(path, body, { headers: ifMatch(fresh) });
+    return { data: res.data, etag: res.headers.get('ETag') ?? fresh };
+  }
+}
+
+/** Refresh the evidence-pool ETag straight from the server (post-412). */
+async function refreshPoolEtag(profile: string): Promise<string> {
+  const { headers } = await apiGetWithHeaders<EvidenceReviewListResponse>(
+    `${evidenceReviewBase(profile)}?status=all&limit=1`,
+  );
+  return headers.get('ETag') ?? '';
+}
+
+/** Refresh the skill-tree ETag straight from the server (post-412). */
+async function refreshTreeEtag(profile: string): Promise<string> {
+  const { headers } = await apiGetWithHeaders<SkillTreeResponse>(
+    `/profiles/${encodeURIComponent(profile)}/skill-tree`,
+  );
+  return headers.get('ETag') ?? '';
+}
+
+/** Write the post-mutation pool ETag into every cached review-list variant. */
+function writePoolEtag(queryClient: QueryClient, profile: string, etag: string) {
+  if (!etag) return;
+  queryClient.setQueriesData(
+    { queryKey: ['profiles', profile, 'evidence-review'] },
+    (old: EvidenceReviewListResult | undefined) => (old ? { ...old, etag } : old),
+  );
+}
+
+/** Write the post-mutation tree ETag into the cached flat skill tree. */
+function writeTreeEtag(queryClient: QueryClient, profile: string, etag: string) {
+  if (!etag) return;
+  queryClient.setQueryData(
+    ['profiles', profile, 'skill-tree', 'flat'],
+    (old: SkillTreeFlatResult | undefined) => (old ? { ...old, etag } : old),
+  );
 }
 
 /** Bulk accept/tag: set one pool-editable field on the selected rows. */
 export function useEvidenceReviewBulk(profile: string) {
   const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ body, etag }: { body: EvidenceReviewBulkRequest; etag: string }) =>
-      apiPost<EvidenceReviewMutationResponse>(`${evidenceReviewBase(profile)}/bulk`, body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: invalidate,
+      postEtagMutation<EvidenceReviewMutationResponse>(
+        `${evidenceReviewBase(profile)}/bulk`,
+        body,
+        etag,
+        () => refreshPoolEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writePoolEtag(queryClient, profile, etag);
+      invalidate();
+    },
   });
 }
 
 /** Reject (deprecate) or restore the selected rows. */
 export function useEvidenceReviewDeprecate(profile: string) {
   const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ body, etag }: { body: EvidenceReviewDeprecateRequest; etag: string }) =>
-      apiPost<EvidenceReviewMutationResponse>(
+      postEtagMutation<EvidenceReviewMutationResponse>(
         `${evidenceReviewBase(profile)}/deprecate`,
         body,
-        { headers: ifMatch(etag) },
+        etag,
+        () => refreshPoolEtag(profile),
       ),
-    onSuccess: invalidate,
+    onSuccess: ({ etag }) => {
+      writePoolEtag(queryClient, profile, etag);
+      invalidate();
+    },
   });
 }
+
+// --- Phase 1 single Evidence page -------------------------------------------
+
+/** Five-stage pipeline counters (待结晶/待评审/已入座/待补强/已废弃). */
+export function useEvidenceStages(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'evidence-stages'],
+    queryFn: () =>
+      apiGet<EvidenceStagesResponse>(
+        `/profiles/${encodeURIComponent(profile)}/evidence-stages`,
+      ),
+    enabled: profile.length > 0,
+  });
+}
+
+/** Edit whitelist fields on one evidence entry (If-Match = pool ETag). */
+export function useEditEvidenceEntry(profile: string) {
+  const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      entryId,
+      body,
+      etag,
+    }: {
+      entryId: string;
+      body: EvidenceEditRequest;
+      etag: string;
+    }) =>
+      postEtagMutation<EvidenceReviewMutationResponse>(
+        `${evidenceBase(profile)}/${encodeURIComponent(entryId)}/edit`,
+        body,
+        etag,
+        () => refreshPoolEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writePoolEtag(queryClient, profile, etag);
+      invalidate();
+    },
+  });
+}
+
+/** Single-entry review action: accept (with grades) / reject / restore. */
+export function useReviewEvidenceEntry(profile: string) {
+  const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      entryId,
+      body,
+      etag,
+    }: {
+      entryId: string;
+      body: EvidenceEntryActionRequest;
+      etag: string;
+    }) =>
+      postEtagMutation<EvidenceReviewMutationResponse>(
+        `${evidenceBase(profile)}/${encodeURIComponent(entryId)}/review`,
+        body,
+        etag,
+        () => refreshPoolEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writePoolEtag(queryClient, profile, etag);
+      invalidate();
+    },
+  });
+}
+
+/** Reconcile the skill nodes citing one entry (chip-save semantics). */
+export function useSetEvidenceSkillLinks(profile: string) {
+  const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      entryId,
+      skillIds,
+      etag,
+    }: {
+      entryId: string;
+      skillIds: string[];
+      etag: string;
+    }) =>
+      postEtagMutation<EvidenceSkillLinksResponse>(
+        `${evidenceBase(profile)}/${encodeURIComponent(entryId)}/skill-links`,
+        { skill_ids: skillIds },
+        etag,
+        () => refreshTreeEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writeTreeEtag(queryClient, profile, etag);
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'skill-tree'] });
+    },
+  });
+}
+
+/** Tiered skill-link suggestions (embedding -> llm -> rule) for one entry. */
+export function useEvidenceSkillSuggestions(profile: string, entryId: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'evidence', 'skill-suggestions', entryId],
+    queryFn: () =>
+      apiGet<EvidenceSkillSuggestionsResponse>(
+        `${evidenceBase(profile)}/${encodeURIComponent(entryId)}/skill-suggestions`,
+      ),
+    enabled: profile.length > 0 && entryId.length > 0,
+  });
+}
+
+/** Uncrystallized Done tasks with advisory blockers (wizard step 1). */
+export function useCrystallizeCandidates(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'crystallize-candidates'],
+    queryFn: () =>
+      apiGet<CrystallizeCandidatesResponse>(
+        `/profiles/${encodeURIComponent(profile)}/crystallize/candidates`,
+      ),
+    enabled: profile.length > 0,
+  });
+}
+
+/**
+ * Crystallize draft: rule mode answers 200 with the draft; `use_llm: true`
+ * answers 202 with a job handle (subscribe via streamJob for the same
+ * CrystallizeDraftResponse payload in the job result).
+ */
+export function useCrystallizeDraft(profile: string) {
+  return useMutation({
+    mutationFn: (body: CrystallizeDraftRequest) =>
+      apiPost<CrystallizeDraftResponse | JobCreateResponse>(
+        `/profiles/${encodeURIComponent(profile)}/crystallize/draft`,
+        body,
+      ),
+  });
+}
+
+/** Apply a confirmed crystallize draft; marks the source tasks crystallized. */
+export function useCrystallizeApply(profile: string) {
+  const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CrystallizeApplyRequest) =>
+      apiPost<CrystallizeApplyResponse>(
+        `/profiles/${encodeURIComponent(profile)}/crystallize/apply`,
+        body,
+      ),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+      queryClient.invalidateQueries({
+        queryKey: ['profiles', profile, 'crystallize-candidates'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['profiles', profile, 'evidence-stages'],
+      });
+    },
+  });
+}
+
 
 function gapBase(profile: string): string {
   return `/profiles/${encodeURIComponent(profile)}/gap`;
