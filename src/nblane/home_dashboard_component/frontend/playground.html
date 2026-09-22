@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>成长星图 · playground</title>
+  </head>
+  <body>
+    <div id="bg-stone"></div>
+    <div id="bg-deep"></div>
+    <div id="bg-dusk"></div>
+    <div id="layout">
+      <header id="mount-top">
+        <img id="cartouche" class="title-asset" alt="成长图" />
+        <div id="cartouche-v1" class="title-asset">成长天文图</div>
+      </header>
+      <div id="heart">
+        <canvas id="scene"></canvas>
+        <div id="vignette"></div>
+        <div id="tooltip"></div>
+        <aside id="detail"><h3></h3><dl></dl><div class="hint">点击空白处或 Esc 关闭</div></aside>
+        <div id="panel">
+          <div class="row"><label>morph</label><input id="ui-morph" type="range" min="0" max="100" value="0" /></div>
+          <div class="row"><label>暗星密度</label><input id="ui-density" type="range" min="0" max="100" value="100" /></div>
+          <div class="row"><label>bloom</label><input id="ui-bloom" type="range" min="0" max="200" value="100" /></div>
+          <div class="row"><label>次第①起</label><input id="ui-w1" type="range" min="0" max="60" value="0" /></div>
+          <div class="row"><label>次第②起</label><input id="ui-w2" type="range" min="0" max="60" value="30" /></div>
+          <div class="row"><label>次第③起</label><input id="ui-w3" type="range" min="0" max="60" value="60" /></div>
+          <div class="row"><label>暮色帧位</label><input id="ui-duskpos" type="range" min="20" max="70" value="45" /></div>
+          <div class="row"><label>暮色力</label><input id="ui-duskamt" type="range" min="0" max="150" value="100" /></div>
+        </div>
+        <button id="toggle" type="button">入境 →</button>
+      </div>
+      <footer id="mount-bottom">
+        <div id="briefing">「昨夜，三条新证据划过你的星空。」</div>
+      </footer>
+    </div>
+    <script type="module" src="/playground/main.js"></script>
+  </body>
+</html>

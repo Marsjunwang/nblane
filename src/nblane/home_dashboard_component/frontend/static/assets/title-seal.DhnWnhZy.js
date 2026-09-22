@@ -1,0 +1,1 @@
+import"./modulepreload-polyfill-B5Qt9EMX.js";/* empty css                   */const r=Array.from(document.images);Promise.all(r.map(e=>e.complete?1:new Promise(o=>{e.onload=o,e.onerror=o}))).then(()=>{requestAnimationFrame(()=>{window.__ready=!0})});

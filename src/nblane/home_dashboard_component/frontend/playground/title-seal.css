@@ -1,0 +1,83 @@
+@font-face {
+  font-family: 'LXGW WenKai Subset';
+  src: url('./assets/fonts/LXGWWenKai-subset.ttf') format('truetype');
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #1d3450;
+}
+
+#page {
+  width: 1600px;
+  height: 1000px;
+  box-sizing: border-box;
+  padding: 56px 90px 36px;
+  background:
+    radial-gradient(1200px 500px at 30% 20%, rgba(70, 98, 132, 0.14), transparent 70%),
+    radial-gradient(900px 600px at 75% 85%, rgba(12, 24, 40, 0.22), transparent 70%),
+    linear-gradient(180deg, #25405e 0%, #203a56 55%, #1d3450 100%);
+  color: #e8e2d2;
+  font-family: 'LXGW WenKai Subset', serif;
+}
+
+header {
+  text-align: center;
+  border-bottom: 1px solid rgba(232, 226, 210, 0.25);
+  padding-bottom: 24px;
+}
+header h1 {
+  font-size: 28px;
+  font-weight: normal;
+  letter-spacing: 8px;
+  margin: 0 0 10px;
+}
+header .meta {
+  font-size: 14px;
+  color: rgba(196, 202, 214, 0.5);
+  letter-spacing: 3px;
+  margin: 0;
+}
+
+.variants {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 34px;
+  padding-top: 42px;
+}
+body[data-v='v2'] .variants { gap: 18px; padding-top: 26px; }
+figure {
+  margin: 0;
+  text-align: center;
+}
+figure img {
+  display: block;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.25));
+}
+body[data-v='v2'] figure figcaption {
+  margin-top: 7px;
+}
+figure figcaption {
+  margin-top: 14px;
+  font-size: 15px;
+  letter-spacing: 4px;
+  color: rgba(196, 202, 214, 0.6);
+}
+figure.seal img {
+  width: 200px;
+  height: 200px;
+}
+
+footer {
+  text-align: center;
+  padding-top: 30px;
+}
+footer p {
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: rgba(159, 174, 191, 0.5);
+}
+
+body[data-v="v2"] #page { height: 800px; }

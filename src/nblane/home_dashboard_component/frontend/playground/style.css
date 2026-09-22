@@ -1,0 +1,265 @@
+@font-face {
+  font-family: 'Noto Serif SC Subset';
+  src: url('./assets/NotoSerifSC-subset.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'LXGW WenKai Subset';
+  src: url('./assets/fonts/LXGWWenKai-subset.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'I.Ming Subset';
+  src: url('./assets/fonts/IMing-subset.ttf') format('truetype');
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #1d3450;
+}
+
+/* baked stone / slate / dusk textures live in the DOM compositor */
+#bg-stone, #bg-deep, #bg-dusk {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+}
+#bg-deep, #bg-dusk {
+  opacity: 0;
+}
+
+/* 装裱式三带: 裱绫(顶) / 画心 / 裱绫(底) */
+#layout {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  z-index: 1;
+}
+
+#mount-top {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(10px, 2.4dvh, 24px) 0 clamp(6px, 1.2dvh, 12px);
+}
+
+#cartouche {
+  width: clamp(170px, 21vw, 300px);
+  display: block;
+  pointer-events: none;
+}
+
+#cartouche-v1 {
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: clamp(20px, 2.6dvh + 12px, 34px);
+  line-height: 1.2;
+  letter-spacing: clamp(4px, 1.2dvh, 12px);
+  padding: 8px 22px 8px 30px;
+  color: #e8e2d2;
+  border: 1.5px solid rgba(232, 226, 210, 0.7);
+  outline: 1px solid rgba(232, 226, 210, 0.4);
+  outline-offset: 5px;
+  pointer-events: none;
+}
+
+#heart {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+  display: block;
+  touch-action: none;
+}
+
+#vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.55;
+  background: radial-gradient(ellipse at center, rgba(3, 6, 14, 0) 42%, rgba(3, 6, 14, 0.85) 140%);
+}
+
+#mount-bottom {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(8px, 1.6dvh, 14px) 16px calc(clamp(8px, 1.6dvh, 14px) + env(safe-area-inset-bottom, 0px));
+}
+
+#briefing {
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: clamp(13px, 1.8dvh, 18px);
+  color: rgba(196, 202, 214, 0.55);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#toggle {
+  position: absolute;
+  right: 20px;
+  bottom: 16px;
+  z-index: 3;
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: 15px;
+  color: #e8e2d2;
+  background: rgba(20, 34, 54, 0.55);
+  border: 1px solid rgba(232, 226, 210, 0.4);
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+#tooltip {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  background: rgba(16, 26, 42, 0.82);
+  border: 1px solid rgba(220, 174, 85, 0.45);
+  padding: 8px 13px;
+  max-width: 300px;
+  z-index: 10;
+}
+
+#tooltip .tt-title {
+  font-size: 15px;
+  color: #f5ead2;
+  letter-spacing: 1px;
+  margin-bottom: 3px;
+}
+
+#tooltip .tt-info {
+  font-size: 12px;
+  color: rgba(196, 202, 214, 0.75);
+  letter-spacing: 0.5px;
+}
+
+/* 铭文详情卡: desktop slides from the right, mobile rises as a bottom sheet */
+#detail {
+  position: fixed;
+  right: 24px;
+  top: 50%;
+  width: 300px;
+  max-height: 76dvh;
+  overflow: hidden;
+  transform: translate(130%, -50%);
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.25, 1);
+  background: rgba(14, 24, 40, 0.88);
+  border: 1px solid rgba(220, 174, 85, 0.5);
+  padding: 20px 22px;
+  font-family: 'I.Ming Subset', 'Noto Serif CJK SC', serif;
+  z-index: 11;
+  pointer-events: auto;
+}
+
+#detail.open {
+  transform: translate(0, -50%);
+}
+
+#detail h3 {
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 20px;
+  font-weight: normal;
+  color: #f0cd7f;
+  letter-spacing: 4px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid rgba(220, 174, 85, 0.3);
+  padding-bottom: 10px;
+}
+
+#detail dl {
+  margin: 0;
+}
+
+#detail dt {
+  font-size: 12px;
+  color: rgba(220, 174, 85, 0.65);
+  letter-spacing: 2px;
+  margin-top: 12px;
+}
+
+#detail dd {
+  font-size: 14px;
+  color: rgba(245, 234, 210, 0.92);
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+#detail .hint {
+  margin-top: 16px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(159, 174, 191, 0.5);
+  font-family: 'LXGW WenKai Subset', serif;
+}
+
+#panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 3;
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: 13px;
+  color: rgba(232, 226, 210, 0.85);
+  background: rgba(16, 26, 42, 0.6);
+  border: 1px solid rgba(232, 226, 210, 0.25);
+  padding: 12px 14px;
+  min-width: 210px;
+}
+
+#panel .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+#panel label {
+  width: 64px;
+  flex: none;
+}
+
+#panel input[type='range'] {
+  flex: 1;
+  accent-color: #dcae55;
+}
+
+/* 矮屏笔记本: 收紧裱边 */
+@media (max-height: 850px) {
+  #panel { transform: scale(0.9); transform-origin: top right; }
+}
+
+/* 手机竖屏 = 立轴: 小匾在上, 图内切于宽, 详情卡底部升起 */
+@media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
+  #cartouche { width: clamp(140px, 44vw, 210px); }
+  #toggle { right: 12px; bottom: 12px; font-size: 13px; padding: 6px 12px; }
+  #panel { display: none; }
+  #detail {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 40dvh;
+    overflow-y: auto;
+    transform: translateY(112%);
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  #detail.open { transform: translateY(0); }
+  #detail h3 { font-size: 17px; margin-bottom: 10px; padding-bottom: 8px; }
+}

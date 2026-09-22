@@ -10,10 +10,14 @@
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "@xyflow/react": "^12.10.2",
+    "culori": "^4.0.2",
+    "gsap": "^3.15.0",
+    "postprocessing": "^6.39.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-force-graph-3d": "^1.29.1",
     "three": "^0.184.0",
+    "troika-three-text": "^0.52.5",
     "vite": "^6.3.0"
   }
 }

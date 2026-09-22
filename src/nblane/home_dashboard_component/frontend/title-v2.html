@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>「成长图」三字匾 v2 · 变体对比</title>
+  </head>
+  <body data-v="v2">
+    <div id="page">
+      <header>
+        <h1>「成长图」三字匾 v2 · 变体对比</h1>
+        <p class="meta">右起读 · 图作篆意囗 · 成长压扁近隶 · 大块斑蚀</p>
+      </header>
+      <div class="variants">
+        <figure>
+          <img src="./playground/assets/title-v2-a.svg" alt="variant a" />
+          <figcaption>(a) 细框 · 仅细斑 · 无大剥落</figcaption>
+        </figure>
+        <figure>
+          <img src="./playground/assets/title-v2-b.svg" alt="variant b" />
+          <figcaption>(b) 粗框 · 一处大斑蚀（蚀「长」· 拟原匾「文」）</figcaption>
+        </figure>
+        <figure>
+          <img src="./playground/assets/title-v2-c.svg" alt="variant c" />
+          <figcaption>(c) 中框 · 两处中斑蚀 · 无细斑</figcaption>
+        </figure>
+      </div>
+      <footer><p>对照原匾：天文图.png · 白文阴刻 · 暖米白 · 靛蓝石底</p></footer>
+    </div>
+    <script type="module">
+      import './playground/title-seal.css';
+      const imgs = Array.from(document.images);
+      Promise.all(imgs.map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; })))).then(() => {
+        requestAnimationFrame(() => { window.__ready = true; });
+      });
+    </script>
+  </body>
+</html>

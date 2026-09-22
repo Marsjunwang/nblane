@@ -35,3 +35,10 @@ schemas/.learned/
 
 # mihomo proxy config (local network tooling, may contain subscription tokens)
 /config.yaml
+
+# Playground snapshot is generated from a real (private) profile — regenerate locally
+src/nblane/home_dashboard_component/frontend/playground/data/snapshot.json
+
+# Full CJK fonts are subsetting source material (download from GitHub releases); only subsets ship
+src/nblane/home_dashboard_component/frontend/playground/assets/fonts/I.Ming-*.ttf
+src/nblane/home_dashboard_component/frontend/playground/assets/fonts/LXGWWenKai-Regular.ttf

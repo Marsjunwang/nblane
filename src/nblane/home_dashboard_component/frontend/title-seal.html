@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>篆意手刻标题 · 变体对比</title>
+  </head>
+  <body>
+    <div id="page">
+      <header>
+        <h1>「成长天文图」标题资产 · 变体对比</h1>
+        <p class="meta">字形烘焙为路径 · feTurbulence + feDisplacementMap 刀刻崩边</p>
+      </header>
+      <div class="variants">
+        <figure>
+          <img src="./playground/assets/title-seal-a.svg" alt="variant a" />
+          <figcaption>(a) 横匾阴刻 · 细崩边 · 霞鹜文楷</figcaption>
+        </figure>
+        <figure>
+          <img src="./playground/assets/title-seal-b.svg" alt="variant b" />
+          <figcaption>(b) 横匾阴刻 · 重磨损 · 霞鹜文楷</figcaption>
+        </figure>
+        <figure class="seal">
+          <img src="./playground/assets/title-seal-c.svg" alt="variant c" />
+          <figcaption>(c) 方形朱文印章式 · 一点明体</figcaption>
+        </figure>
+      </div>
+      <footer><p>白文阴刻 · 暖米白 / 朱红 · 靛蓝石底</p></footer>
+    </div>
+    <script type="module">
+      import './playground/title-seal.css';
+      const imgs = Array.from(document.images);
+      Promise.all(imgs.map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; })))).then(() => {
+        requestAnimationFrame(() => { window.__ready = true; });
+      });
+    </script>
+  </body>
+</html>

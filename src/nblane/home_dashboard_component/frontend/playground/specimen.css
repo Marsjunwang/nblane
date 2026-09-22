@@ -1,0 +1,119 @@
+@font-face {
+  font-family: 'LXGW WenKai Subset';
+  src: url('./assets/fonts/LXGWWenKai-subset.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'I.Ming Subset';
+  src: url('./assets/fonts/IMing-subset.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'IM Fell English';
+  src: url('./assets/fonts/IMFellEnglish-Regular.ttf') format('truetype');
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #1d3450;
+}
+
+#page {
+  width: 1600px;
+  height: 1400px;
+  box-sizing: border-box;
+  padding: 64px 90px 48px;
+  background:
+    radial-gradient(1200px 500px at 30% 20%, rgba(70, 98, 132, 0.14), transparent 70%),
+    radial-gradient(900px 600px at 75% 85%, rgba(12, 24, 40, 0.22), transparent 70%),
+    linear-gradient(180deg, #25405e 0%, #203a56 55%, #1d3450 100%);
+  color: #e8e2d2;
+  font-family: 'LXGW WenKai Subset', serif;
+}
+
+header {
+  text-align: center;
+  border-bottom: 1px solid rgba(232, 226, 210, 0.25);
+  padding-bottom: 30px;
+  margin-bottom: 22px;
+}
+header h1 {
+  font-size: 30px;
+  font-weight: normal;
+  letter-spacing: 10px;
+  margin: 0 0 10px;
+}
+header .meta {
+  font-size: 14px;
+  color: rgba(196, 202, 214, 0.5);
+  letter-spacing: 3px;
+  margin: 0;
+}
+
+.group {
+  padding: 44px 0 30px;
+  border-bottom: 1px solid rgba(232, 226, 210, 0.18);
+}
+.group h2 {
+  font-size: 19px;
+  font-weight: normal;
+  letter-spacing: 6px;
+  color: #dcae55;
+  margin: 0 0 30px;
+  border-left: 3px solid #dcae55;
+  padding-left: 12px;
+}
+.group h2 span {
+  font-size: 13px;
+  color: rgba(196, 202, 214, 0.45);
+  letter-spacing: 2px;
+  margin-left: 10px;
+}
+.group[data-font='iming'] {
+  font-family: 'I.Ming Subset', serif;
+}
+
+.sample {
+  margin: 24px 0;
+  position: relative;
+  padding-left: 150px;
+}
+.sample::before {
+  content: attr(data-cap);
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: rgba(159, 174, 191, 0.55);
+  font-family: 'LXGW WenKai Subset', serif;
+}
+.sample.title { font-size: 56px; letter-spacing: 22px; }
+.sample.cats { font-size: 26px; letter-spacing: 4px; color: rgba(232, 226, 210, 0.88); }
+.sample.north { font-size: 24px; letter-spacing: 2px; }
+.sample.goals { font-size: 20px; color: #eed696; letter-spacing: 1px; }
+.sample.brief { font-size: 18px; color: rgba(196, 202, 214, 0.6); }
+.sample.latin { font-size: 20px; }
+.sample.latin em {
+  font-style: normal;
+  font-size: 13px;
+  color: rgba(159, 174, 191, 0.55);
+  margin-left: 14px;
+}
+.sample.latin.fell {
+  font-family: 'IM Fell English', 'LXGW WenKai Subset', serif;
+}
+.group[data-font='iming'] .sample.latin.fell {
+  font-family: 'IM Fell English', 'I.Ming Subset', serif;
+}
+.sample.small { font-size: 11px; letter-spacing: 0.5px; color: rgba(232, 226, 210, 0.75); }
+
+footer {
+  text-align: center;
+  padding-top: 34px;
+}
+footer p {
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: rgba(159, 174, 191, 0.5);
+}
