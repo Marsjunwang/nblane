@@ -46,12 +46,15 @@ class SkillTreeNodeModel(BaseModel):
     ``title`` comes from the domain schema ``label`` (node id as fallback);
     ``children`` are derived from schema ``requires`` edges restricted to
     the profile overlay; ``evidence_count`` counts resolved evidence (pool
-    refs plus inline rows, deprecated/missing refs excluded).
+    refs plus inline rows, deprecated/missing refs excluded). ``category``
+    is the schema grouping (empty for nodes unknown to the schema) — the
+    home starmap uses it to size its sector band.
     """
 
     id: str
     title: str = ""
     status: str = "locked"
+    category: str = ""
     evidence_count: int = 0
     children: list[SkillTreeNodeModel] = Field(default_factory=list)
 
@@ -211,6 +214,8 @@ class KanbanTaskModel(BaseModel):
     outcome: str = ""
     started_on: str | None = None
     completed_on: str | None = None
+    planned_start: str | None = None
+    planned_end: str | None = None
     crystallized: bool = False
     project_id: str = ""
     milestone_id: str = ""
@@ -242,6 +247,37 @@ class KanbanCardCreateRequest(BaseModel):
     section: str = "Queue"
     context: str = ""
     tags: list[str] = Field(default_factory=list)
+    planned_start: str = ""
+    planned_end: str = ""
+
+
+class KanbanCardScheduleRequest(BaseModel):
+    """Schedule body for POST .../kanban/cards/{card_ref}/schedule.
+
+    ``None`` keeps the current value, ``""`` clears it, an ISO ``YYYY-MM-DD``
+    date sets it. When both dates end up set, start must not be after end.
+    """
+
+    planned_start: str | None = None
+    planned_end: str | None = None
+
+
+class KanbanCardPatchRequest(BaseModel):
+    """Edit body for PATCH .../kanban/cards/{card_ref}.
+
+    ``None`` keeps the current value; ``""`` clears text fields
+    (``context``/``why``/``project_id``/``milestone_id``); ``tags``
+    replaces the whole tag list when given. ``title`` must not be blank
+    when given. Section moves (incl. Someday, which is a section, not a
+    flag) stay on the move endpoint.
+    """
+
+    title: str | None = Field(default=None, max_length=200)
+    context: str | None = Field(default=None, max_length=4000)
+    why: str | None = Field(default=None, max_length=4000)
+    project_id: str | None = Field(default=None, max_length=200)
+    milestone_id: str | None = Field(default=None, max_length=200)
+    tags: list[str] | None = None
 
 
 class KanbanCardMoveRequest(BaseModel):
@@ -1089,6 +1125,7 @@ class ProjectCaseModel(BaseModel):
     milestones: list[ProjectMilestoneModel] = Field(default_factory=list)
     tasks: list[ProjectTaskModel] = Field(default_factory=list)
     derived_time_range: str = ""
+    habit_id: str = ""
 
 
 class ProjectBoardSummaryModel(BaseModel):
@@ -1141,6 +1178,378 @@ class ProjectBoardResponse(BaseModel):
     options: ProjectBoardOptionsModel = Field(default_factory=ProjectBoardOptionsModel)
 
 
+# --- Projects Board (Phase 2 unified /projects page aggregation) ----------
+
+
+class ProjectsBoardTaskModel(BaseModel):
+    """One kanban task flattened for a projects-board lane."""
+
+    id: str = ""
+    title: str = ""
+    section: str = ""
+    column: str = "queue"
+    done: bool = False
+    context: str = ""
+    why: str = ""
+    started_on: str | None = None
+    completed_on: str | None = None
+    planned_start: str | None = None
+    planned_end: str | None = None
+    project_id: str = ""
+    milestone_id: str = ""
+    tags: str = ""
+
+
+class ProjectsBoardMilestoneModel(BaseModel):
+    """One milestone with task completion progress.
+
+    The data model has no dedicated "completed milestone" workflow; real
+    profiles keep ``planned`` even for past dates, so overdue-vs-done is a
+    display concern derived from ``date`` and ``status``.
+    """
+
+    id: str = ""
+    title: str = ""
+    status: str = "planned"
+    target: str = ""
+    date: str = ""
+    done_count: int = 0
+    total_count: int = 0
+
+
+class ProjectsBoardProjectModel(BaseModel):
+    """One project swimlane: case facts plus owned kanban tasks.
+
+    ``queue``/``doing`` hold the live task cards; ``someday`` is a badge
+    list (not a column); Done tasks are folded into ``done_count``, which
+    includes tasks archived to kanban-archive.md (``archived_done_count``
+    breaks out the archived share). ``column_counts`` keys are
+    queue/doing/someday/done. ``habit_id`` links to a ``habits`` entry: the
+    case's explicit ``habit_id`` field wins, otherwise the habit<->project
+    name heuristic applies.
+    """
+
+    id: str
+    title: str = ""
+    status: str = "active"
+    kind: str = "internal"
+    visibility: str = "private"
+    summary: str = ""
+    time_range: str = ""
+    goal_refs: list[str] = Field(default_factory=list)
+    milestones: list[ProjectsBoardMilestoneModel] = Field(default_factory=list)
+    queue: list[ProjectsBoardTaskModel] = Field(default_factory=list)
+    doing: list[ProjectsBoardTaskModel] = Field(default_factory=list)
+    someday: list[ProjectsBoardTaskModel] = Field(default_factory=list)
+    column_counts: dict[str, int] = Field(default_factory=dict)
+    done_count: int = 0
+    archived_done_count: int = 0
+    last_activity: str = ""
+    habit_id: str = ""
+
+
+class ProjectsBoardGoalModel(BaseModel):
+    """One goal grouping row with its projects (first-goal grouping)."""
+
+    id: str
+    title: str = ""
+    status: str = ""
+    summary: str = ""
+    target: str = ""
+    projects: list[ProjectsBoardProjectModel] = Field(default_factory=list)
+
+
+class ProjectsBoardHabitDayModel(BaseModel):
+    """One day of the current ISO week check-in strip."""
+
+    date: str
+    done: bool = False
+    future: bool = False
+
+
+class ProjectsBoardHabitModel(BaseModel):
+    """Habit check-in aggregation for continuous (habit) lanes.
+
+    ``week`` is the current ISO week (Monday..Sunday); ``streak`` counts
+    consecutive checked days ending today (0 when today has no check-in
+    yet); ``total_checkins`` counts distinct checked days overall.
+    ``project_id`` links to a project lane when the name heuristic matches.
+    """
+
+    id: str
+    title: str = ""
+    kind: str = ""
+    cadence: str = ""
+    week: list[ProjectsBoardHabitDayModel] = Field(default_factory=list)
+    streak: int = 0
+    total_checkins: int = 0
+    last_checkin: str = ""
+    project_id: str = ""
+
+
+class ProjectsBoardResponse(BaseModel):
+    """Aggregated /projects payload: goal-grouped lanes, tasks, habits.
+
+    Full data, no display caps (caps are a frontend concern). Projects
+    appear under the first of their ``goal_refs`` that names a known goal;
+    projects without a known goal land in ``ungrouped_projects``; live
+    kanban tasks owned by no project land in ``unassigned_tasks``.
+    """
+
+    profile: str
+    today: str = ""
+    north_star: str = ""
+    goals: list[ProjectsBoardGoalModel] = Field(default_factory=list)
+    ungrouped_projects: list[ProjectsBoardProjectModel] = Field(
+        default_factory=list
+    )
+    unassigned_tasks: list[ProjectsBoardTaskModel] = Field(default_factory=list)
+    habits: list[ProjectsBoardHabitModel] = Field(default_factory=list)
+    stats: dict[str, int] = Field(default_factory=dict)
+
+
+# --- Starmap (Phase 3): one-shot home-scene snapshot -------------------------
+
+
+class StarmapCategoryModel(BaseModel):
+    """One skill category (starmap sector band) with status counters.
+
+    ``name`` is the server-provided zh display name (category id as fallback
+    for ids outside the known table).
+    """
+
+    id: str
+    name: str = ""
+    count: int = 0
+    lit_count: int = 0
+    learning_count: int = 0
+
+
+class StarmapSkillModel(BaseModel):
+    """One skill-tree node for the starmap (三态: locked/learning/lit).
+
+    Unlike the /skill-tree overlay view, this projection includes every
+    schema node — locked schema nodes (the 未解锁空圈 underlay) ride with
+    ``status="locked"`` even when the profile overlay never mentions them.
+    """
+
+    id: str
+    label: str = ""
+    category: str = "misc"
+    status: str = "locked"
+    lit: bool = False
+
+
+class StarmapGoalModel(BaseModel):
+    """One active stage goal (starmap goal star)."""
+
+    id: str
+    title: str = ""
+    status: str = "active"
+    summary: str = ""
+    start: str = ""
+    target: str = ""
+
+
+class StarmapProjectModel(BaseModel):
+    """One project case (starmap planet) with progress and goal grouping."""
+
+    id: str
+    title: str = ""
+    status: str = "active"
+    kind: str = "internal"
+    goal_ids: list[str] = Field(default_factory=list)
+    progress: float | None = None
+    task_count: int = 0
+    time_range: str = ""
+
+
+class StarmapEvidenceModel(BaseModel):
+    """One non-deprecated evidence entry (guest star / seated star / dust).
+
+    ``flying`` marks guest stars (客星): entries inside the 30-day window
+    plus the newest-4 density floor. ``project_refs`` place seated stars by
+    their project planet when present (skill-sector fallback otherwise).
+    """
+
+    id: str
+    type: str = "practice"
+    title: str = ""
+    date: str = ""
+    strength: str = "unrated"
+    review_status: str = "needs_review"
+    summary: str = ""
+    skill_ids: list[str] = Field(default_factory=list)
+    project_refs: list[str] = Field(default_factory=list)
+    flying: bool = False
+
+
+class StarmapCountsModel(BaseModel):
+    """Briefing counters for the starmap chrome."""
+
+    evidence: int = 0
+    evidence_needs_review: int = 0
+    evidence_flying: int = 0
+    projects_active: int = 0
+    skills_lit: int = 0
+
+
+class StarmapResponse(BaseModel):
+    """One-shot growth-starmap snapshot for the SPA home scene.
+
+    Aggregates SKILL.md (North Star), goals.yaml (active goals),
+    skill-tree.yaml + the domain schema (locked schema nodes included),
+    the projects-board aggregation (goal grouping + progress), and the
+    evidence pool (30-day guest window + newest-4 floor). Built by
+    ``core.starmap_snapshot.build_starmap_snapshot``; the response carries
+    a weak ETag over the source files (same pattern as /projects-board).
+    """
+
+    profile: str
+    generated_on: str = ""
+    schema_name: str = ""
+    north_star: str = ""
+    goals: list[StarmapGoalModel] = Field(default_factory=list)
+    categories: list[StarmapCategoryModel] = Field(default_factory=list)
+    skills: list[StarmapSkillModel] = Field(default_factory=list)
+    projects: list[StarmapProjectModel] = Field(default_factory=list)
+    evidence: list[StarmapEvidenceModel] = Field(default_factory=list)
+    counts: StarmapCountsModel = Field(default_factory=StarmapCountsModel)
+
+
+class CheckinCreateRequest(BaseModel):
+    """Body for POST .../checkins (append one habit check-in).
+
+    ``habit`` accepts a habit id or title (resolved like the core helpers);
+    ``project_id`` is an alternative entry point that resolves through the
+    habit<->project link. ``date`` defaults to today; ``count`` must be
+    greater than zero.
+    """
+
+    habit: str = ""
+    project_id: str = ""
+    date: str = ""
+    summary: str = ""
+    note: str = ""
+    count: float = 1.0
+    unit: str = ""
+    tags: list[str] = Field(default_factory=list)
+    related_kanban: list[str] = Field(default_factory=list)
+    workout_type: str = ""
+    duration_min: float = 0.0
+    intensity: str = ""
+
+
+class CheckinModel(BaseModel):
+    """One stored activity-log check-in (mirrors core Checkin)."""
+
+    id: str = ""
+    date: str = ""
+    habit_id: str = ""
+    habits: list[str] = Field(default_factory=list)
+    summary: str = ""
+    notes: str = ""
+    count: float = 1.0
+    unit: str = ""
+    workout_type: str = ""
+    duration_min: float = 0.0
+    intensity: str = ""
+    tags: list[str] = Field(default_factory=list)
+    links: list[str] = Field(default_factory=list)
+    related_learning: list[str] = Field(default_factory=list)
+    related_kanban: list[str] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class CheckinMutationResponse(BaseModel):
+    """Result of the check-in append mutation."""
+
+    ok: bool
+    checkin: CheckinModel
+
+
+# --- Habit-plan templates (Phase 2 click-to-instantiate plans) -------------
+
+
+class PlanTemplateHabitModel(BaseModel):
+    """The habit a plan template suggests (created when missing)."""
+
+    title: str = ""
+    kind: str = "health"
+    cadence: str = "daily"
+    target_count: float = 1.0
+    target_unit: str = ""
+
+
+class PlanTemplateMilestoneModel(BaseModel):
+    """One template milestone hint, dated as start + offset_days."""
+
+    title: str
+    offset_days: int = 0
+
+
+class PlanTemplateModel(BaseModel):
+    """One habit-plan template (built-in or inline)."""
+
+    id: str
+    title: str = ""
+    summary: str = ""
+    duration_days: int = 30
+    habit: PlanTemplateHabitModel = Field(default_factory=PlanTemplateHabitModel)
+    milestones: list[PlanTemplateMilestoneModel] = Field(default_factory=list)
+    builtin: bool = False
+
+
+class PlanTemplateUsageModel(BaseModel):
+    """One remembered template instantiation (profile history row)."""
+
+    template_id: str
+    title: str = ""
+    used_at: str = ""
+    project_id: str = ""
+    habit_id: str = ""
+
+
+class PlanTemplateListResponse(BaseModel):
+    """Built-in templates plus the profile's usage history.
+
+    Profile-scoped (not global) because the history half only exists per
+    profile; history is de-duplicated by template id, most recent first.
+    """
+
+    profile: str
+    builtin: list[PlanTemplateModel] = Field(default_factory=list)
+    history: list[PlanTemplateUsageModel] = Field(default_factory=list)
+
+
+class PlanTemplateInstantiateRequest(BaseModel):
+    """Body for POST .../plan-templates/instantiate.
+
+    ``template_id`` names a built-in (or previously used) template;
+    ``template`` carries an inline template object instead (same shape as
+    ``PlanTemplateModel``). ``title``/``start``/``habit_id`` override the
+    template's plan title, start date (ISO, default today), and habit link.
+    """
+
+    template_id: str = ""
+    template: dict[str, Any] | None = None
+    title: str = Field(default="", max_length=200)
+    start: str = ""
+    habit_id: str = Field(default="", max_length=200)
+    goal_refs: list[str] = Field(default_factory=list)
+
+
+class PlanTemplateInstantiateResponse(BaseModel):
+    """Result of instantiating one habit-plan template."""
+
+    ok: bool
+    case: ProjectCaseModel
+    template_id: str = ""
+    habit_id: str = ""
+    created_habit: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ProjectCaseCreateRequest(BaseModel):
     """Body for creating one project case (only ``title`` is required)."""
 
@@ -1152,6 +1561,7 @@ class ProjectCaseCreateRequest(BaseModel):
     summary: str = Field(default="", max_length=4000)
     goal_refs: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
+    habit_id: str = Field(default="", max_length=200)
 
 
 class ProjectCaseUpdateRequest(BaseModel):
@@ -1164,6 +1574,7 @@ class ProjectCaseUpdateRequest(BaseModel):
     time_range: str | None = Field(default=None, max_length=100)
     summary: str | None = Field(default=None, max_length=4000)
     notes: str | None = Field(default=None, max_length=8000)
+    habit_id: str | None = Field(default=None, max_length=200)
     goal_refs: list[str] | None = None
     task_refs: list[str] | None = None
     evidence_refs: list[str] | None = None

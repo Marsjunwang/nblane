@@ -38,6 +38,7 @@ include = ["nblane*", "schemas*"]
 [tool.setuptools.package-data]
 "nblane.core" = [
     "data/*.csv",
+    "data/*.yaml",
 ]
 "nblane.public_blog_editor_component" = [
     "frontend/static/index.html",

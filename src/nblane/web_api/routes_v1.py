@@ -48,13 +48,15 @@ from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
 from nblane.core import evidence_review as evidence_review_core
 from nblane.core import activity_log, home_dashboard, jd_match, learning_log, task_intake
 from nblane.core import auth as auth_core
-from nblane.core import profile_io, project_suggest, schema_io
+from nblane.core import plan_templates, profile_io, project_suggest, projects_board, schema_io
+from nblane.core import starmap_snapshot as starmap_snapshot_core
 from nblane.core.claims import accepted_claims_for_profile
 from nblane.core.evidence_resolve import resolve_node_evidence_dict
 from nblane.core.experience import load_experience_book
 from nblane.core.goals import load_goal_book
 from nblane.core.kanban_archive import _archive_tasks, find_kanban_tasks_by_ref
 from nblane.core.kanban_io import (
+    KANBAN_ARCHIVE_FILENAME,
     KANBAN_DOING,
     KANBAN_DONE,
     KANBAN_SECTIONS,
@@ -80,7 +82,7 @@ from nblane.core.models import (
 )
 from nblane.core.growth_review import build_weekly_review
 from nblane.core.public_curation import evidence_contexts
-from nblane.core.paths import REPO_ROOT
+from nblane.core.paths import REPO_ROOT, SCHEMAS_DIR
 from nblane.core.public_site import (
     BLOG_DIRNAME,
     BLOG_TAXONOMY_FILENAME,
@@ -125,6 +127,7 @@ from nblane.core.project_board import (
     ProjectMilestone,
     add_project_case,
     load_project_board,
+    update_project_board,
     update_project_case,
 )
 from nblane.core.project_board_events import (
@@ -171,6 +174,9 @@ from nblane.web_api.schemas import (
     ActivitySummaryModel,
     AgentTaskListResponse,
     AgentTaskModel,
+    CheckinCreateRequest,
+    CheckinModel,
+    CheckinMutationResponse,
     ErrorResponse,
     EvidenceEntryDetailModel,
     EvidenceEntryModel,
@@ -232,12 +238,21 @@ from nblane.web_api.schemas import (
     KanbanBoardResponse,
     KanbanCardCreateRequest,
     KanbanCardMoveRequest,
+    KanbanCardPatchRequest,
+    KanbanCardScheduleRequest,
     KanbanMutationResponse,
     KanbanSectionModel,
     KanbanSubtaskModel,
     KanbanSummary,
     KanbanTaskModel,
     NorthStarModel,
+    PlanTemplateHabitModel,
+    PlanTemplateInstantiateRequest,
+    PlanTemplateInstantiateResponse,
+    PlanTemplateListResponse,
+    PlanTemplateMilestoneModel,
+    PlanTemplateModel,
+    PlanTemplateUsageModel,
     ProfileDetailSummary,
     ProfileSummary,
     ProjectBoardOptionsModel,
@@ -255,6 +270,13 @@ from nblane.web_api.schemas import (
     ProjectTaskCreateRequest,
     ProjectTaskModel,
     ProjectTaskMoveRequest,
+    ProjectsBoardGoalModel,
+    ProjectsBoardHabitDayModel,
+    ProjectsBoardHabitModel,
+    ProjectsBoardMilestoneModel,
+    ProjectsBoardProjectModel,
+    ProjectsBoardResponse,
+    ProjectsBoardTaskModel,
     PublicBuildArtifactModel,
     PublicBuildDraftModel,
     PublicBuildPreviewPageModel,
@@ -280,6 +302,13 @@ from nblane.web_api.schemas import (
     SkillTreeNodeModel,
     SkillTreeResponse,
     SkillTreeSummary,
+    StarmapCategoryModel,
+    StarmapCountsModel,
+    StarmapEvidenceModel,
+    StarmapGoalModel,
+    StarmapProjectModel,
+    StarmapResponse,
+    StarmapSkillModel,
     StudioCandidateRequest,
     StudioCandidateResponse,
     StudioDraftResponse,
@@ -536,6 +565,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
             id=nid,
             title=title,
             status=str(node.get("status") or "locked"),
+            category=str(meta.category if meta else ""),
             evidence_count=len(resolve_node_evidence_dict(node, pool)),
             children=[
                 build(kid, ancestors | {kid})
@@ -906,6 +936,8 @@ def _kanban_task_model(task: KanbanTask) -> KanbanTaskModel:
         outcome=task.outcome,
         started_on=task.started_on,
         completed_on=task.completed_on,
+        planned_start=task.planned_start,
+        planned_end=task.planned_end,
         crystallized=task.crystallized,
         project_id=task.project_id,
         milestone_id=task.milestone_id,
@@ -987,6 +1019,32 @@ def _unknown_kanban_section(raw: str) -> ApiError:
         f"Unknown kanban section {raw.strip()!r} "
         f"(expected one of: {', '.join(KANBAN_SECTIONS)}).",
     )
+
+
+def _validate_planned_date(value: str, field: str) -> str:
+    """Return a clean ISO date or raise ApiError(422) for bad input."""
+    clean = value.strip()
+    if not clean:
+        return ""
+    try:
+        return date.fromisoformat(clean).isoformat()
+    except ValueError:
+        raise ApiError(
+            422,
+            "invalid_planned_date",
+            f"Field {field} must be an ISO date (YYYY-MM-DD), got "
+            f"{value!r}.",
+        ) from None
+
+
+def _check_planned_range(start: str, end: str) -> None:
+    """422 when both planned dates are set and start is after end."""
+    if start and end and start > end:
+        raise ApiError(
+            422,
+            "invalid_planned_range",
+            f"planned_start {start} is after planned_end {end}.",
+        )
 
 
 def _merge_notices(result) -> list[str]:
@@ -1085,7 +1143,16 @@ def add_profile_kanban_card(
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     tags = ", ".join(tag.strip() for tag in body.tags if tag.strip())
-    task = KanbanTask(title=title, context=body.context.strip(), tags=tags)
+    planned_start = _validate_planned_date(body.planned_start, "planned_start")
+    planned_end = _validate_planned_date(body.planned_end, "planned_end")
+    _check_planned_range(planned_start, planned_end)
+    task = KanbanTask(
+        title=title,
+        context=body.context.strip(),
+        tags=tags,
+        planned_start=planned_start or None,
+        planned_end=planned_end or None,
+    )
     today = date.today().isoformat()
     if target == KANBAN_DONE:
         task = replace(task, done=True, completed_on=today)
@@ -1218,6 +1285,176 @@ def done_profile_kanban_card(
     """
     return _mutate_kanban_card_section(
         name, card_ref, KANBAN_DONE, response, if_match
+    )
+
+
+@router.post(
+    "/profiles/{name}/kanban/cards/{card_ref}/schedule",
+    response_model=KanbanMutationResponse,
+    responses=KANBAN_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def schedule_profile_kanban_card(
+    name: str,
+    card_ref: str,
+    body: KanbanCardScheduleRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> KanbanMutationResponse | JSONResponse:
+    """Set or clear one card's planned date range (timeline drag-to-reschedule).
+
+    ``planned_start`` / ``planned_end`` accept an ISO ``YYYY-MM-DD`` date to
+    set, ``""`` to clear, or are omitted (``null``) to keep the current
+    value; both set means start must not be after end (422 otherwise). The
+    fields persist as kanban.md metadata bullets, orthogonal to the
+    column-date idiom (``started_on`` / ``completed_on``). ``card_ref``
+    follows the move/done semantics: exact card title or unique title
+    substring (not the task id). Honors
+    ``If-Match`` (412 on mismatch); a concurrent write between parse and
+    save is 3-way merged.
+    """
+    pdir = _resolve_profile(name)
+    etag = _kanban_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "kanban.md changed since it was loaded; reload before mutating.",
+            etag,
+        )
+    updates: dict[str, str | None] = {}
+    for field_name in ("planned_start", "planned_end"):
+        raw = getattr(body, field_name)
+        if raw is None:
+            continue
+        updates[field_name] = _validate_planned_date(raw, field_name) or None
+    if not updates:
+        raise ApiError(
+            422,
+            "invalid_kanban_schedule",
+            "At least one of planned_start / planned_end is required "
+            "(use an empty string to clear).",
+        )
+    snapshot = file_state.snapshot_file(kanban_path(pdir))
+    sections = parse_kanban(pdir)
+    base = copy_kanban_sections(sections)
+    ref = card_ref.strip()
+    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    if hit is None:
+        if match_kind == "ambiguous":
+            raise ApiError(422, "kanban_card_ambiguous", match_error)
+        raise ApiError(404, "kanban_card_not_found", match_error)
+    from_section, _index, task = hit
+    scheduled = replace(task, **updates)
+    _check_planned_range(
+        scheduled.planned_start or "", scheduled.planned_end or ""
+    )
+    sections[from_section][_index] = scheduled
+    result = _save_kanban_mutation(pdir, sections, base, snapshot)
+    section, stored = _find_card_by_id(result.sections, task.id)
+    response.headers["ETag"] = _kanban_etag(pdir)
+    return KanbanMutationResponse(
+        ok=True,
+        card=_kanban_task_model(stored),
+        section=section,
+        merged_external=result.merged_external,
+        merge_notices=_merge_notices(result),
+    )
+
+
+@router.patch(
+    "/profiles/{name}/kanban/cards/{card_ref}",
+    response_model=KanbanMutationResponse,
+    responses=KANBAN_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_kanban_card(
+    name: str,
+    card_ref: str,
+    body: KanbanCardPatchRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> KanbanMutationResponse | JSONResponse:
+    """Edit one card's fields (lane assignment, title, context, why, tags).
+
+    ``None`` fields keep the current value; ``""`` clears
+    ``context``/``why``/``project_id``/``milestone_id`` (``project_id``
+    clearing unassigns the card from its lane); ``tags`` replaces the
+    whole tag list when given. ``title`` must not be blank when given.
+    Section moves stay on the move endpoint — Someday is a section, not a
+    flag. When ``project_id`` changed, project-board.yaml task refs are
+    re-synced from kanban metadata (task side is authoritative), same as
+    the project-task move endpoint. ``card_ref`` follows the move/done
+    semantics (exact title or unique substring). Honors ``If-Match``
+    (412 on mismatch); a concurrent kanban write is 3-way merged.
+    """
+    pdir = _resolve_profile(name)
+    etag = _kanban_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "kanban.md changed since it was loaded; reload before mutating.",
+            etag,
+        )
+    updates: dict[str, Any] = {}
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise ApiError(
+                422, "invalid_kanban_card", "Card title must not be blank."
+            )
+        updates["title"] = title
+    for field_name in ("context", "why", "project_id", "milestone_id"):
+        value = getattr(body, field_name)
+        if value is not None:
+            updates[field_name] = value.strip()
+    if body.tags is not None:
+        updates["tags"] = ", ".join(
+            tag.strip() for tag in body.tags if tag.strip()
+        )
+    if not updates:
+        raise ApiError(
+            422,
+            "invalid_kanban_patch",
+            "At least one editable field is required.",
+        )
+    board_snapshot = file_state.snapshot_file(pdir / "project-board.yaml")
+    snapshot = file_state.snapshot_file(kanban_path(pdir))
+    sections = parse_kanban(pdir)
+    base = copy_kanban_sections(sections)
+    ref = card_ref.strip()
+    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    if hit is None:
+        if match_kind == "ambiguous":
+            raise ApiError(422, "kanban_card_ambiguous", match_error)
+        raise ApiError(404, "kanban_card_not_found", match_error)
+    from_section, _index, task = hit
+    sections[from_section][_index] = replace(task, **updates)
+    result = _save_kanban_mutation(pdir, sections, base, snapshot)
+    section, stored = _find_card_by_id(result.sections, task.id)
+    if "project_id" in updates:
+        try:
+            sync_project_board_from_kanban(
+                pdir.name,
+                parse_kanban(pdir),
+                expected_snapshot=board_snapshot,
+            )
+        except file_state.FileConflictError:
+            return _kanban_error(
+                412,
+                "etag_mismatch",
+                "project-board.yaml changed while syncing lane assignment; "
+                "reload before retrying.",
+                _kanban_etag(pdir),
+            )
+    response.headers["ETag"] = _kanban_etag(pdir)
+    return KanbanMutationResponse(
+        ok=True,
+        card=_kanban_task_model(stored),
+        section=section,
+        merged_external=result.merged_external,
+        merge_notices=_merge_notices(result),
     )
 
 
@@ -3433,6 +3670,7 @@ def _project_case_model(
         milestones=milestones,
         tasks=_case_task_models(case, live, archived),
         derived_time_range=timeline_date_range(timeline_rows),
+        habit_id=case.habit_id,
     )
 
 
@@ -3699,6 +3937,7 @@ def create_profile_project_case(
             summary=body.summary,
             goal_refs=body.goal_refs,
             evidence_refs=body.evidence_refs,
+            habit_id=body.habit_id,
         )
     except ValueError as exc:
         raise ApiError(422, "invalid_project_case", str(exc)) from exc
@@ -3746,7 +3985,7 @@ def save_profile_project_case(
         value = _require_board_choice(getattr(body, field), allowed, field)
         if value is not None:
             fields[field] = value
-    for field in ("time_range", "summary", "notes"):
+    for field in ("time_range", "summary", "notes", "habit_id"):
         value = getattr(body, field)
         if value is not None:
             fields[field] = value
@@ -4124,6 +4363,629 @@ def suggest_profile_project_refs(
         suggestions=result.suggestions,
         rationale=result.rationale,
         warnings=result.warnings,
+    )
+
+
+# --- Projects Board (Phase 2): unified /projects aggregation + check-ins -----
+
+
+def _projects_board_etag(pdir: Path) -> str:
+    """Weak ETag over the projects-board source files (sha256 fingerprint).
+
+    Covers every file the aggregation reads: SKILL.md (North Star),
+    goals.yaml, project-board.yaml, kanban.md, kanban-archive.md, and
+    activity-log.yaml. Weak (``W/``) because the hash identifies the source
+    file versions, not the JSON response bytes.
+    """
+    fingerprints = []
+    for relative in (
+        "SKILL.md",
+        "goals.yaml",
+        "project-board.yaml",
+        kanban_path(pdir).name,
+        KANBAN_ARCHIVE_FILENAME,
+        activity_log.ACTIVITY_LOG_FILENAME,
+    ):
+        snapshot = file_state.snapshot_file(pdir / relative)
+        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
+    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
+    return f'W/"{digest}"'
+
+
+def _projects_board_project_model(
+    project: projects_board.BoardProject,
+) -> ProjectsBoardProjectModel:
+    """Convert one core board project to the API model."""
+    return ProjectsBoardProjectModel(
+        id=project.id,
+        title=project.title,
+        status=project.status,
+        kind=project.kind,
+        visibility=project.visibility,
+        summary=project.summary,
+        time_range=project.time_range,
+        goal_refs=list(project.goal_refs),
+        milestones=[
+            ProjectsBoardMilestoneModel(**vars(milestone))
+            for milestone in project.milestones
+        ],
+        queue=[ProjectsBoardTaskModel(**vars(task)) for task in project.queue],
+        doing=[ProjectsBoardTaskModel(**vars(task)) for task in project.doing],
+        someday=[
+            ProjectsBoardTaskModel(**vars(task)) for task in project.someday
+        ],
+        column_counts=dict(project.column_counts),
+        done_count=project.done_count,
+        archived_done_count=project.archived_done_count,
+        last_activity=project.last_activity,
+        habit_id=project.habit_id,
+    )
+
+
+@router.get(
+    "/profiles/{name}/projects-board",
+    response_model=ProjectsBoardResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_projects_board(name: str, response: Response) -> ProjectsBoardResponse:
+    """Aggregated projects board for the unified /projects SPA page.
+
+    One shot for both views (kanban swimlanes + timeline): goals with their
+    projects (a project groups under the first of its ``goal_refs`` naming a
+    known goal; the rest land in ``ungrouped_projects``), per-project
+    milestones with progress, Done counts that include kanban-archive.md,
+    live tasks grouped by column (``someday`` as a badge list, not a
+    column), an ``unassigned_tasks`` lane for tasks owned by no project, and
+    habit check-in strips (current ISO week dots + streak ending today +
+    total). Full data, no display caps. The response carries the
+    board-source ETag (see module docstring pattern) for use as ``If-Match``
+    on the kanban/check-in mutations.
+    """
+    pdir = _resolve_profile(name)
+    board = projects_board.build_projects_board(pdir)
+    identity = parse_identity_fields(profile_io.load_skill_md(pdir.name))
+    north_star = str(identity.get("North Star", "") or "").strip()
+    response.headers["ETag"] = _projects_board_etag(pdir)
+    return ProjectsBoardResponse(
+        profile=board.profile,
+        today=board.today,
+        north_star=north_star,
+        goals=[
+            ProjectsBoardGoalModel(
+                id=goal.id,
+                title=goal.title,
+                status=goal.status,
+                summary=goal.summary,
+                target=goal.target,
+                projects=[
+                    _projects_board_project_model(project)
+                    for project in goal.projects
+                ],
+            )
+            for goal in board.goals
+        ],
+        ungrouped_projects=[
+            _projects_board_project_model(project)
+            for project in board.ungrouped_projects
+        ],
+        unassigned_tasks=[
+            ProjectsBoardTaskModel(**vars(task))
+            for task in board.unassigned_tasks
+        ],
+        habits=[
+            ProjectsBoardHabitModel(
+                id=habit.id,
+                title=habit.title,
+                kind=habit.kind,
+                cadence=habit.cadence,
+                week=[
+                    ProjectsBoardHabitDayModel(**vars(day))
+                    for day in habit.week
+                ],
+                streak=habit.streak,
+                total_checkins=habit.total_checkins,
+                last_checkin=habit.last_checkin,
+                project_id=habit.project_id,
+            )
+            for habit in board.habits
+        ],
+        stats=dict(board.stats),
+    )
+
+
+# --- Starmap (Phase 3): one-shot home-scene snapshot -------------------------
+
+
+def _starmap_etag(pdir: Path) -> str:
+    """Weak ETag over the starmap source files (sha256 fingerprint).
+
+    Covers every file the aggregation reads: SKILL.md (North Star),
+    goals.yaml, skill-tree.yaml (+ the domain schema it references),
+    project-board.yaml, kanban.md, kanban-archive.md, activity-log.yaml
+    (board done-counts/progress), and evidence-pool.yaml. Weak (``W/``)
+    because the hash identifies the source file versions, not the JSON
+    response bytes.
+    """
+    fingerprints = []
+    relatives = [
+        "SKILL.md",
+        "goals.yaml",
+        profile_io.SKILL_TREE_FILENAME,
+        "project-board.yaml",
+        kanban_path(pdir).name,
+        KANBAN_ARCHIVE_FILENAME,
+        activity_log.ACTIVITY_LOG_FILENAME,
+        profile_io.EVIDENCE_POOL_FILENAME,
+    ]
+    raw_tree = profile_io.load_skill_tree_raw(pdir) or {}
+    schema_name = str(raw_tree.get("schema") or "")
+    schema_path = SCHEMAS_DIR / f"{schema_name}.yaml" if schema_name else None
+    for relative in relatives:
+        snapshot = file_state.snapshot_file(pdir / relative)
+        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
+    if schema_path is not None:
+        snapshot = file_state.snapshot_file(schema_path)
+        fingerprints.append(f"schema:{snapshot.sha256 or 'empty'}")
+    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
+    return f'W/"{digest}"'
+
+
+@router.get(
+    "/profiles/{name}/starmap",
+    response_model=StarmapResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_starmap(name: str, response: Response) -> StarmapResponse:
+    """One-shot growth-starmap snapshot for the SPA home scene (read-only).
+
+    Everything the scene needs in a single call: the North Star, active
+    goals, the skill field WITH locked schema nodes (三态
+    locked/learning/lit) plus zh category display names, projects with
+    progress and goal grouping, and the evidence pool with guest/seated
+    split (30-day window + newest-4 density floor), strength, summary, and
+    ``project_refs``. The response carries the starmap-source ETag (same
+    weak-ETag pattern as /projects-board) for client-side staleness checks.
+    """
+    pdir = _resolve_profile(name)
+    payload = starmap_snapshot_core.build_starmap_snapshot(pdir)
+    response.headers["ETag"] = _starmap_etag(pdir)
+    return StarmapResponse(
+        profile=payload["profile"],
+        generated_on=payload["generated_on"],
+        schema_name=payload["schema_name"],
+        north_star=payload["north_star"],
+        goals=[StarmapGoalModel(**goal) for goal in payload["goals"]],
+        categories=[
+            StarmapCategoryModel(**category)
+            for category in payload["categories"]
+        ],
+        skills=[StarmapSkillModel(**skill) for skill in payload["skills"]],
+        projects=[
+            StarmapProjectModel(**project) for project in payload["projects"]
+        ],
+        evidence=[
+            StarmapEvidenceModel(**entry) for entry in payload["evidence"]
+        ],
+        counts=StarmapCountsModel(**payload["counts"]),
+    )
+
+
+def _activity_log_etag(pdir: Path) -> str:
+    """Weak ETag for the profile's activity-log.yaml (sha256 fingerprint)."""
+    snapshot = file_state.snapshot_file(
+        pdir / activity_log.ACTIVITY_LOG_FILENAME
+    )
+    return f'W/"{snapshot.sha256 or "empty"}"'
+CHECKIN_MUTATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match the activity log file.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Missing/unknown habit, unlinked project, invalid date, or "
+            "non-positive count."
+        ),
+    },
+}
+
+
+def _resolve_checkin_habit(pdir: Path, body: CheckinCreateRequest) -> str:
+    """Resolve the target habit id from the request's habit/project ref."""
+    habit_ref = body.habit.strip()
+    if habit_ref:
+        return habit_ref
+    project_id = body.project_id.strip()
+    if not project_id:
+        raise ApiError(
+            422,
+            "checkin_habit_required",
+            "A habit (id or title) or a habit-linked project_id is required.",
+        )
+    board = load_project_board(pdir)
+    case = board.by_id().get(project_id)
+    if case is None:
+        raise ApiError(
+            422,
+            "checkin_project_not_found",
+            f"Unknown project case: {project_id}",
+        )
+    explicit = str(getattr(case, "habit_id", "") or "").strip()
+    if explicit:
+        return explicit
+    log = activity_log.load(pdir)
+    for habit in log.habits:
+        if projects_board.link_habit_to_project(habit.id, habit.title, case):
+            return habit.id
+    raise ApiError(
+        422,
+        "checkin_project_unlinked",
+        f"Project {project_id} is not linked to any habit "
+        "(habit id/title must match the project title or id tail); "
+        "pass an explicit habit instead.",
+    )
+
+
+@router.post(
+    "/profiles/{name}/checkins",
+    response_model=CheckinMutationResponse,
+    status_code=201,
+    responses=CHECKIN_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def add_profile_checkin(
+    name: str,
+    body: CheckinCreateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> CheckinMutationResponse | JSONResponse:
+    """Append one habit check-in to the activity log (agent-facing hook).
+
+    ``habit`` accepts a habit id or title (core resolution); ``project_id``
+    is an alternative that resolves through the habit<->project name link.
+    ``date`` defaults to today and must be an ISO date when given. The write
+    goes through ``core.activity_log.add_activity_checkin`` under the
+    activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
+    ETag in the header).
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before checking in.",
+            etag,
+        )
+    habit_ref = _resolve_checkin_habit(pdir, body)
+    when = body.date.strip()
+    if when:
+        try:
+            when = date.fromisoformat(when).isoformat()
+        except ValueError:
+            raise ApiError(
+                422,
+                "invalid_checkin_date",
+                f"date must be an ISO date (YYYY-MM-DD), got {body.date!r}.",
+            ) from None
+    try:
+        entry = activity_log.add_activity_checkin(
+            pdir,
+            habit_ref,
+            when=when or None,
+            count=body.count,
+            unit=body.unit.strip(),
+            summary=body.summary.strip(),
+            note=body.note.strip(),
+            tags=body.tags,
+            related_kanban=body.related_kanban,
+            workout_type=body.workout_type.strip(),
+            duration_min=body.duration_min,
+            intensity=body.intensity.strip(),
+            expected_snapshot=file_state.snapshot_file(
+                pdir / activity_log.ACTIVITY_LOG_FILENAME
+            ),
+        )
+    except ValueError as exc:
+        raise ApiError(422, "invalid_checkin", str(exc)) from exc
+    except file_state.FileConflictError:
+        # A concurrent write landed between the If-Match check and the
+        # in-lock snapshot re-check (TOCTOU closure).
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed while checking in; "
+            "reload before retrying.",
+            _activity_log_etag(pdir),
+        )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    return CheckinMutationResponse(
+        ok=True, checkin=CheckinModel(**entry.to_dict())
+    )
+
+
+# --- Habit-plan templates (Phase 2): click-to-instantiate plans -------------
+
+
+def _plan_templates_etag(pdir: Path) -> str:
+    """Weak ETag over the plan-template mutation's source files.
+
+    Covers plan-templates.yaml (usage history), project-board.yaml, and
+    activity-log.yaml — the three files instantiate writes. Weak (``W/``)
+    because the hash identifies the source file versions, not the JSON
+    response bytes.
+    """
+    fingerprints = []
+    for relative in (
+        plan_templates.PLAN_TEMPLATES_FILENAME,
+        "project-board.yaml",
+        activity_log.ACTIVITY_LOG_FILENAME,
+    ):
+        snapshot = file_state.snapshot_file(pdir / relative)
+        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
+    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
+    return f'W/"{digest}"'
+
+
+def _plan_templates_error(
+    status_code: int,
+    code: str,
+    message: str,
+    etag: str,
+) -> JSONResponse:
+    """4xx body plus a fresh plan-templates ETag header."""
+    body = ErrorResponse(code=code, message=message)
+    return JSONResponse(
+        status_code=status_code,
+        content=body.model_dump(),
+        headers={"ETag": etag},
+    )
+
+
+def _plan_template_model(
+    template: plan_templates.PlanTemplate,
+) -> PlanTemplateModel:
+    """Convert one core plan template to the API model."""
+    return PlanTemplateModel(
+        id=template.id,
+        title=template.title,
+        summary=template.summary,
+        duration_days=template.duration_days,
+        habit=PlanTemplateHabitModel(
+            title=template.habit_title,
+            kind=template.habit_kind,
+            cadence=template.cadence,
+            target_count=template.target.count,
+            target_unit=template.target.unit,
+        ),
+        milestones=[
+            PlanTemplateMilestoneModel(
+                title=milestone.title, offset_days=milestone.offset_days
+            )
+            for milestone in template.milestones
+        ],
+        builtin=template.builtin,
+    )
+
+
+@router.get(
+    "/profiles/{name}/plan-templates",
+    response_model=PlanTemplateListResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_plan_templates(
+    name: str, response: Response
+) -> PlanTemplateListResponse:
+    """Built-in habit-plan templates plus the profile's usage history.
+
+    Profile-scoped (rather than a global ``/plan-templates``) because the
+    history half only exists per profile; history comes from the profile's
+    plan-templates.yaml, de-duplicated by template id, most recent first.
+    The response carries the plan-templates ETag for use as ``If-Match`` on
+    instantiate.
+    """
+    pdir = _resolve_profile(name)
+    response.headers["ETag"] = _plan_templates_etag(pdir)
+    return PlanTemplateListResponse(
+        profile=pdir.name,
+        builtin=[
+            _plan_template_model(template)
+            for template in plan_templates.load_builtin_templates()
+        ],
+        history=[
+            PlanTemplateUsageModel(
+                template_id=str(entry.get("template_id") or ""),
+                title=str(entry.get("title") or ""),
+                used_at=str(entry.get("used_at") or ""),
+                project_id=str(entry.get("project_id") or ""),
+                habit_id=str(entry.get("habit_id") or ""),
+            )
+            for entry in plan_templates.load_plan_history(pdir)
+        ],
+    )
+
+
+PLAN_TEMPLATE_MUTATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match the plan source files.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Unknown template id, missing template, invalid start date, "
+            "or duplicate/invalid project case."
+        ),
+    },
+}
+
+
+def _resolve_plan_template(
+    body: PlanTemplateInstantiateRequest,
+) -> plan_templates.PlanTemplate:
+    """Resolve the request's template (built-in by id, or inline)."""
+    if body.template is not None:
+        template = plan_templates.PlanTemplate.from_dict(body.template)
+        if not template.title:
+            raise ApiError(
+                422,
+                "invalid_plan_template",
+                "An inline template needs at least a title.",
+            )
+        return template
+    template_id = body.template_id.strip()
+    if not template_id:
+        raise ApiError(
+            422,
+            "plan_template_required",
+            "A template_id (built-in) or an inline template is required.",
+        )
+    template = plan_templates.builtin_template_index().get(template_id)
+    if template is None:
+        raise ApiError(
+            422,
+            "unknown_plan_template",
+            f"Unknown built-in plan template: {template_id} "
+            "(pass an inline template object for custom plans).",
+        )
+    return template
+
+
+@router.post(
+    "/profiles/{name}/plan-templates/instantiate",
+    response_model=PlanTemplateInstantiateResponse,
+    status_code=201,
+    responses=PLAN_TEMPLATE_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def instantiate_profile_plan_template(
+    name: str,
+    body: PlanTemplateInstantiateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> PlanTemplateInstantiateResponse | JSONResponse:
+    """Instantiate one habit-plan template into a project case + habit.
+
+    Creates a ``kind=habit-plan`` case in project-board.yaml (time_range
+    from ``start`` + ``duration_days``, milestone dates from the template's
+    offsets, explicit ``habit_id`` link), ensures the suggested habit
+    exists in activity-log.yaml (created when missing, reused by
+    id/title otherwise), and remembers the usage in the profile's
+    plan-templates.yaml. The projects-board aggregation renders the new
+    case as a habit lane immediately. Honors ``If-Match`` (412 on
+    mismatch, fresh ETag in the header); each file write re-checks its
+    request-start snapshot inside its write lock.
+    """
+    pdir = _resolve_profile(name)
+    etag = _plan_templates_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _plan_templates_error(
+            412,
+            "etag_mismatch",
+            "Plan source files changed since they were loaded; "
+            "reload before instantiating.",
+            etag,
+        )
+    template = _resolve_plan_template(body)
+    start_text = body.start.strip()
+    if start_text:
+        try:
+            start = date.fromisoformat(start_text)
+        except ValueError:
+            raise ApiError(
+                422,
+                "invalid_plan_start",
+                f"start must be an ISO date (YYYY-MM-DD), got "
+                f"{body.start!r}.",
+            ) from None
+    else:
+        start = date.today()
+    snapshots = {
+        "board": file_state.snapshot_file(pdir / "project-board.yaml"),
+        "activity_log": file_state.snapshot_file(
+            pdir / activity_log.ACTIVITY_LOG_FILENAME
+        ),
+        "history": file_state.snapshot_file(
+            pdir / plan_templates.PLAN_TEMPLATES_FILENAME
+        ),
+    }
+    try:
+        # Habit first: explicit override wins, else the template's title;
+        # an existing habit (id or title) is reused, otherwise created.
+        log = activity_log.load(pdir)
+        habit_ref = body.habit_id.strip() or template.habit_title
+        resolved = activity_log.resolve_habit_id(log, habit_ref)
+        created_habit = resolved is None
+        habit = activity_log.add_habit(
+            pdir,
+            habit_ref,
+            kind=template.habit_kind,
+            cadence=template.cadence,
+            target=template.target,
+            expected_snapshot=snapshots["activity_log"],
+        )
+        case_fields = plan_templates.plan_case_fields(
+            template, title=body.title, start=start
+        )
+
+        def _add_case(board: ProjectBoard) -> ProjectCase:
+            return add_project_case(
+                board,
+                case_fields["title"],
+                kind=case_fields["kind"],
+                time_range=case_fields["time_range"],
+                summary=case_fields["summary"],
+                goal_refs=body.goal_refs,
+                milestones=case_fields["milestones"],
+                habit_id=habit.id,
+            )
+
+        case = update_project_board(
+            pdir, _add_case, expected_snapshot=snapshots["board"]
+        )
+        template_id = template.id or f"inline:{case.id}"
+        plan_templates.record_plan_usage(
+            pdir,
+            {
+                "template_id": template_id,
+                "title": case.title,
+                "project_id": case.id,
+                "habit_id": habit.id,
+            },
+            expected_snapshot=snapshots["history"],
+        )
+    except ValueError as exc:
+        raise ApiError(422, "invalid_plan_instantiate", str(exc)) from exc
+    except file_state.FileConflictError:
+        # A concurrent write landed between the If-Match check and one of
+        # the in-lock snapshot re-checks (TOCTOU closure).
+        return _plan_templates_error(
+            412,
+            "etag_mismatch",
+            "Plan source files changed while instantiating; "
+            "reload before retrying.",
+            _plan_templates_etag(pdir),
+        )
+    fresh_case = _project_case_model(
+        case,
+        _task_section_index(pdir),
+        _live_section_tasks(pdir),
+        _archive_tasks(pdir),
+    )
+    response.headers["ETag"] = _plan_templates_etag(pdir)
+    return PlanTemplateInstantiateResponse(
+        ok=True,
+        case=fresh_case,
+        template_id=template_id,
+        habit_id=habit.id,
+        created_habit=created_habit,
     )
 
 

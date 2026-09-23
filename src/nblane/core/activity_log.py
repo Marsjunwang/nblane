@@ -1120,8 +1120,14 @@ def add_activity_checkin(
     duration_min: float = 0.0,
     intensity: str = "",
     metrics: Mapping[str, object] | None = None,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> Checkin:
-    """Compatibility wrapper for a one-habit check-in."""
+    """Compatibility wrapper for a one-habit check-in.
+
+    When *expected_snapshot* is given, ``save`` re-checks it inside the
+    activity-log write lock and raises ``file_state.FileConflictError`` on
+    mismatch instead of silently overwriting a concurrent edit.
+    """
     log = load(name_or_dir)
     resolved_id = resolve_habit_id(log, habit_id)
     if resolved_id is None:
@@ -1172,6 +1178,7 @@ def add_activity_checkin(
             weekly_summaries=log.weekly_summaries,
             warnings=log.warnings,
         ),
+        expected_snapshot=expected_snapshot,
     )
     return entry
 

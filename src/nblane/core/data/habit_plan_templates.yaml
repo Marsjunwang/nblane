@@ -1,0 +1,57 @@
+# Built-in habit-plan templates for the /projects board.
+# Shipped as package data (nblane.core/data/); loaded by core/plan_templates.py.
+# A template instantiates into a kind=habit-plan project case plus (when
+# missing) a habit in activity-log.yaml. Milestone dates are start + offset_days.
+templates:
+- id: plan:fat-loss-30
+  title: 30天减脂计划
+  summary: 30 天减脂:每天一次运动打卡并记录体重,每周复盘一次趋势。
+  duration_days: 30
+  habit:
+    title: 减脂打卡
+    kind: health
+    cadence: daily
+    target:
+      count: 1
+      unit: session
+  milestones:
+  - title: 第 1 周复盘
+    offset_days: 6
+  - title: 半程复盘
+    offset_days: 14
+  - title: 30 天总结
+    offset_days: 29
+- id: plan:rehab-30
+  title: 30天康复训练
+  summary: 30 天康复:每天完成规定康复动作,疼痛/状态记录进打卡备注。
+  duration_days: 30
+  habit:
+    title: 康复训练
+    kind: health
+    cadence: daily
+    target:
+      count: 1
+      unit: session
+  milestones:
+  - title: 第 1 周评估
+    offset_days: 6
+  - title: 半程评估
+    offset_days: 14
+  - title: 30 天复评
+    offset_days: 29
+- id: plan:learning-21
+  title: 21天学习打卡
+  summary: 21 天养成一个学习习惯:每天至少一个学习 session,打卡写一句收获。
+  duration_days: 21
+  habit:
+    title: 学习打卡
+    kind: learning
+    cadence: daily
+    target:
+      count: 1
+      unit: session
+  milestones:
+  - title: 第 1 周复盘
+    offset_days: 6
+  - title: 21 天总结
+    offset_days: 20

@@ -525,6 +525,192 @@
     "title": "AssistantStatusResponse",
     "type": "object"
    },
+   "CheckinCreateRequest": {
+    "description": "Body for POST .../checkins (append one habit check-in).\n\n``habit`` accepts a habit id or title (resolved like the core helpers);\n``project_id`` is an alternative entry point that resolves through the\nhabit<->project link. ``date`` defaults to today; ``count`` must be\ngreater than zero.",
+    "properties": {
+     "count": {
+      "default": 1.0,
+      "title": "Count",
+      "type": "number"
+     },
+     "date": {
+      "default": "",
+      "title": "Date",
+      "type": "string"
+     },
+     "duration_min": {
+      "default": 0.0,
+      "title": "Duration Min",
+      "type": "number"
+     },
+     "habit": {
+      "default": "",
+      "title": "Habit",
+      "type": "string"
+     },
+     "intensity": {
+      "default": "",
+      "title": "Intensity",
+      "type": "string"
+     },
+     "note": {
+      "default": "",
+      "title": "Note",
+      "type": "string"
+     },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
+     "related_kanban": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Related Kanban",
+      "type": "array"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "unit": {
+      "default": "",
+      "title": "Unit",
+      "type": "string"
+     },
+     "workout_type": {
+      "default": "",
+      "title": "Workout Type",
+      "type": "string"
+     }
+    },
+    "title": "CheckinCreateRequest",
+    "type": "object"
+   },
+   "CheckinModel": {
+    "description": "One stored activity-log check-in (mirrors core Checkin).",
+    "properties": {
+     "count": {
+      "default": 1.0,
+      "title": "Count",
+      "type": "number"
+     },
+     "date": {
+      "default": "",
+      "title": "Date",
+      "type": "string"
+     },
+     "duration_min": {
+      "default": 0.0,
+      "title": "Duration Min",
+      "type": "number"
+     },
+     "habit_id": {
+      "default": "",
+      "title": "Habit Id",
+      "type": "string"
+     },
+     "habits": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Habits",
+      "type": "array"
+     },
+     "id": {
+      "default": "",
+      "title": "Id",
+      "type": "string"
+     },
+     "intensity": {
+      "default": "",
+      "title": "Intensity",
+      "type": "string"
+     },
+     "links": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Links",
+      "type": "array"
+     },
+     "metrics": {
+      "additionalProperties": true,
+      "title": "Metrics",
+      "type": "object"
+     },
+     "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+     },
+     "related_kanban": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Related Kanban",
+      "type": "array"
+     },
+     "related_learning": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Related Learning",
+      "type": "array"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "unit": {
+      "default": "",
+      "title": "Unit",
+      "type": "string"
+     },
+     "workout_type": {
+      "default": "",
+      "title": "Workout Type",
+      "type": "string"
+     }
+    },
+    "title": "CheckinModel",
+    "type": "object"
+   },
+   "CheckinMutationResponse": {
+    "description": "Result of the check-in append mutation.",
+    "properties": {
+     "checkin": {
+      "$ref": "#/components/schemas/CheckinModel"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "ok",
+     "checkin"
+    ],
+    "title": "CheckinMutationResponse",
+    "type": "object"
+   },
    "CrystallizeApplyRequest": {
     "description": "Body for the crystallize-apply endpoint.\n\n``patch`` is the (possibly human-edited) draft from the draft endpoint;\n``include_evidence`` / ``include_nodes`` are the wizard's per-row\ncheckboxes (null = keep all). On success the source tasks are marked\n``crystallized`` in kanban.md.",
     "properties": {
@@ -2986,6 +3172,16 @@
       "title": "Context",
       "type": "string"
      },
+     "planned_end": {
+      "default": "",
+      "title": "Planned End",
+      "type": "string"
+     },
+     "planned_start": {
+      "default": "",
+      "title": "Planned Start",
+      "type": "string"
+     },
      "section": {
       "default": "Queue",
       "title": "Section",
@@ -3034,6 +3230,116 @@
      "target_section"
     ],
     "title": "KanbanCardMoveRequest",
+    "type": "object"
+   },
+   "KanbanCardPatchRequest": {
+    "description": "Edit body for PATCH .../kanban/cards/{card_ref}.\n\n``None`` keeps the current value; ``\"\"`` clears text fields\n(``context``/``why``/``project_id``/``milestone_id``); ``tags``\nreplaces the whole tag list when given. ``title`` must not be blank\nwhen given. Section moves (incl. Someday, which is a section, not a\nflag) stay on the move endpoint.",
+    "properties": {
+     "context": {
+      "anyOf": [
+       {
+        "maxLength": 4000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Context"
+     },
+     "milestone_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Milestone Id"
+     },
+     "project_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Project Id"
+     },
+     "tags": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tags"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "why": {
+      "anyOf": [
+       {
+        "maxLength": 4000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Why"
+     }
+    },
+    "title": "KanbanCardPatchRequest",
+    "type": "object"
+   },
+   "KanbanCardScheduleRequest": {
+    "description": "Schedule body for POST .../kanban/cards/{card_ref}/schedule.\n\n``None`` keeps the current value, ``\"\"`` clears it, an ISO ``YYYY-MM-DD``\ndate sets it. When both dates end up set, start must not be after end.",
+    "properties": {
+     "planned_end": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Planned End"
+     },
+     "planned_start": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Planned Start"
+     }
+    },
+    "title": "KanbanCardScheduleRequest",
     "type": "object"
    },
    "KanbanMutationResponse": {
@@ -3198,6 +3504,28 @@
       "title": "Outcome",
       "type": "string"
      },
+     "planned_end": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Planned End"
+     },
+     "planned_start": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Planned Start"
+     },
      "project_id": {
       "default": "",
       "title": "Project Id",
@@ -3298,6 +3626,251 @@
      }
     },
     "title": "OkResponse",
+    "type": "object"
+   },
+   "PlanTemplateHabitModel": {
+    "description": "The habit a plan template suggests (created when missing).",
+    "properties": {
+     "cadence": {
+      "default": "daily",
+      "title": "Cadence",
+      "type": "string"
+     },
+     "kind": {
+      "default": "health",
+      "title": "Kind",
+      "type": "string"
+     },
+     "target_count": {
+      "default": 1.0,
+      "title": "Target Count",
+      "type": "number"
+     },
+     "target_unit": {
+      "default": "",
+      "title": "Target Unit",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "PlanTemplateHabitModel",
+    "type": "object"
+   },
+   "PlanTemplateInstantiateRequest": {
+    "description": "Body for POST .../plan-templates/instantiate.\n\n``template_id`` names a built-in (or previously used) template;\n``template`` carries an inline template object instead (same shape as\n``PlanTemplateModel``). ``title``/``start``/``habit_id`` override the\ntemplate's plan title, start date (ISO, default today), and habit link.",
+    "properties": {
+     "goal_refs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Goal Refs",
+      "type": "array"
+     },
+     "habit_id": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Habit Id",
+      "type": "string"
+     },
+     "start": {
+      "default": "",
+      "title": "Start",
+      "type": "string"
+     },
+     "template": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Template"
+     },
+     "template_id": {
+      "default": "",
+      "title": "Template Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "PlanTemplateInstantiateRequest",
+    "type": "object"
+   },
+   "PlanTemplateInstantiateResponse": {
+    "description": "Result of instantiating one habit-plan template.",
+    "properties": {
+     "case": {
+      "$ref": "#/components/schemas/ProjectCaseModel"
+     },
+     "created_habit": {
+      "default": false,
+      "title": "Created Habit",
+      "type": "boolean"
+     },
+     "habit_id": {
+      "default": "",
+      "title": "Habit Id",
+      "type": "string"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "template_id": {
+      "default": "",
+      "title": "Template Id",
+      "type": "string"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "required": [
+     "ok",
+     "case"
+    ],
+    "title": "PlanTemplateInstantiateResponse",
+    "type": "object"
+   },
+   "PlanTemplateListResponse": {
+    "description": "Built-in templates plus the profile's usage history.\n\nProfile-scoped (not global) because the history half only exists per\nprofile; history is de-duplicated by template id, most recent first.",
+    "properties": {
+     "builtin": {
+      "items": {
+       "$ref": "#/components/schemas/PlanTemplateModel"
+      },
+      "title": "Builtin",
+      "type": "array"
+     },
+     "history": {
+      "items": {
+       "$ref": "#/components/schemas/PlanTemplateUsageModel"
+      },
+      "title": "History",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "PlanTemplateListResponse",
+    "type": "object"
+   },
+   "PlanTemplateMilestoneModel": {
+    "description": "One template milestone hint, dated as start + offset_days.",
+    "properties": {
+     "offset_days": {
+      "default": 0,
+      "title": "Offset Days",
+      "type": "integer"
+     },
+     "title": {
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title"
+    ],
+    "title": "PlanTemplateMilestoneModel",
+    "type": "object"
+   },
+   "PlanTemplateModel": {
+    "description": "One habit-plan template (built-in or inline).",
+    "properties": {
+     "builtin": {
+      "default": false,
+      "title": "Builtin",
+      "type": "boolean"
+     },
+     "duration_days": {
+      "default": 30,
+      "title": "Duration Days",
+      "type": "integer"
+     },
+     "habit": {
+      "$ref": "#/components/schemas/PlanTemplateHabitModel"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "milestones": {
+      "items": {
+       "$ref": "#/components/schemas/PlanTemplateMilestoneModel"
+      },
+      "title": "Milestones",
+      "type": "array"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "PlanTemplateModel",
+    "type": "object"
+   },
+   "PlanTemplateUsageModel": {
+    "description": "One remembered template instantiation (profile history row).",
+    "properties": {
+     "habit_id": {
+      "default": "",
+      "title": "Habit Id",
+      "type": "string"
+     },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
+     "template_id": {
+      "title": "Template Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "used_at": {
+      "default": "",
+      "title": "Used At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "template_id"
+    ],
+    "title": "PlanTemplateUsageModel",
     "type": "object"
    },
    "ProfileDetailSummary": {
@@ -3494,6 +4067,12 @@
       "title": "Goal Refs",
       "type": "array"
      },
+     "habit_id": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Habit Id",
+      "type": "string"
+     },
      "id": {
       "default": "",
       "maxLength": 200,
@@ -3562,6 +4141,11 @@
       },
       "title": "Goal Refs",
       "type": "array"
+     },
+     "habit_id": {
+      "default": "",
+      "title": "Habit Id",
+      "type": "string"
      },
      "id": {
       "title": "Id",
@@ -3713,6 +4297,18 @@
        }
       ],
       "title": "Goal Refs"
+     },
+     "habit_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Habit Id"
      },
      "kind": {
       "anyOf": [
@@ -4255,6 +4851,435 @@
      "target_section"
     ],
     "title": "ProjectTaskMoveRequest",
+    "type": "object"
+   },
+   "ProjectsBoardGoalModel": {
+    "description": "One goal grouping row with its projects (first-goal grouping).",
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "projects": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardProjectModel"
+      },
+      "title": "Projects",
+      "type": "array"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "target": {
+      "default": "",
+      "title": "Target",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ProjectsBoardGoalModel",
+    "type": "object"
+   },
+   "ProjectsBoardHabitDayModel": {
+    "description": "One day of the current ISO week check-in strip.",
+    "properties": {
+     "date": {
+      "title": "Date",
+      "type": "string"
+     },
+     "done": {
+      "default": false,
+      "title": "Done",
+      "type": "boolean"
+     },
+     "future": {
+      "default": false,
+      "title": "Future",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "date"
+    ],
+    "title": "ProjectsBoardHabitDayModel",
+    "type": "object"
+   },
+   "ProjectsBoardHabitModel": {
+    "description": "Habit check-in aggregation for continuous (habit) lanes.\n\n``week`` is the current ISO week (Monday..Sunday); ``streak`` counts\nconsecutive checked days ending today (0 when today has no check-in\nyet); ``total_checkins`` counts distinct checked days overall.\n``project_id`` links to a project lane when the name heuristic matches.",
+    "properties": {
+     "cadence": {
+      "default": "",
+      "title": "Cadence",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "default": "",
+      "title": "Kind",
+      "type": "string"
+     },
+     "last_checkin": {
+      "default": "",
+      "title": "Last Checkin",
+      "type": "string"
+     },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
+     "streak": {
+      "default": 0,
+      "title": "Streak",
+      "type": "integer"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "total_checkins": {
+      "default": 0,
+      "title": "Total Checkins",
+      "type": "integer"
+     },
+     "week": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardHabitDayModel"
+      },
+      "title": "Week",
+      "type": "array"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ProjectsBoardHabitModel",
+    "type": "object"
+   },
+   "ProjectsBoardMilestoneModel": {
+    "description": "One milestone with task completion progress.\n\nThe data model has no dedicated \"completed milestone\" workflow; real\nprofiles keep ``planned`` even for past dates, so overdue-vs-done is a\ndisplay concern derived from ``date`` and ``status``.",
+    "properties": {
+     "date": {
+      "default": "",
+      "title": "Date",
+      "type": "string"
+     },
+     "done_count": {
+      "default": 0,
+      "title": "Done Count",
+      "type": "integer"
+     },
+     "id": {
+      "default": "",
+      "title": "Id",
+      "type": "string"
+     },
+     "status": {
+      "default": "planned",
+      "title": "Status",
+      "type": "string"
+     },
+     "target": {
+      "default": "",
+      "title": "Target",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "total_count": {
+      "default": 0,
+      "title": "Total Count",
+      "type": "integer"
+     }
+    },
+    "title": "ProjectsBoardMilestoneModel",
+    "type": "object"
+   },
+   "ProjectsBoardProjectModel": {
+    "description": "One project swimlane: case facts plus owned kanban tasks.\n\n``queue``/``doing`` hold the live task cards; ``someday`` is a badge\nlist (not a column); Done tasks are folded into ``done_count``, which\nincludes tasks archived to kanban-archive.md (``archived_done_count``\nbreaks out the archived share). ``column_counts`` keys are\nqueue/doing/someday/done. ``habit_id`` links to a ``habits`` entry: the\ncase's explicit ``habit_id`` field wins, otherwise the habit<->project\nname heuristic applies.",
+    "properties": {
+     "archived_done_count": {
+      "default": 0,
+      "title": "Archived Done Count",
+      "type": "integer"
+     },
+     "column_counts": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Column Counts",
+      "type": "object"
+     },
+     "doing": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardTaskModel"
+      },
+      "title": "Doing",
+      "type": "array"
+     },
+     "done_count": {
+      "default": 0,
+      "title": "Done Count",
+      "type": "integer"
+     },
+     "goal_refs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Goal Refs",
+      "type": "array"
+     },
+     "habit_id": {
+      "default": "",
+      "title": "Habit Id",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "default": "internal",
+      "title": "Kind",
+      "type": "string"
+     },
+     "last_activity": {
+      "default": "",
+      "title": "Last Activity",
+      "type": "string"
+     },
+     "milestones": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardMilestoneModel"
+      },
+      "title": "Milestones",
+      "type": "array"
+     },
+     "queue": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardTaskModel"
+      },
+      "title": "Queue",
+      "type": "array"
+     },
+     "someday": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardTaskModel"
+      },
+      "title": "Someday",
+      "type": "array"
+     },
+     "status": {
+      "default": "active",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "time_range": {
+      "default": "",
+      "title": "Time Range",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "visibility": {
+      "default": "private",
+      "title": "Visibility",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ProjectsBoardProjectModel",
+    "type": "object"
+   },
+   "ProjectsBoardResponse": {
+    "description": "Aggregated /projects payload: goal-grouped lanes, tasks, habits.\n\nFull data, no display caps (caps are a frontend concern). Projects\nappear under the first of their ``goal_refs`` that names a known goal;\nprojects without a known goal land in ``ungrouped_projects``; live\nkanban tasks owned by no project land in ``unassigned_tasks``.",
+    "properties": {
+     "goals": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardGoalModel"
+      },
+      "title": "Goals",
+      "type": "array"
+     },
+     "habits": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardHabitModel"
+      },
+      "title": "Habits",
+      "type": "array"
+     },
+     "north_star": {
+      "default": "",
+      "title": "North Star",
+      "type": "string"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "stats": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Stats",
+      "type": "object"
+     },
+     "today": {
+      "default": "",
+      "title": "Today",
+      "type": "string"
+     },
+     "unassigned_tasks": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardTaskModel"
+      },
+      "title": "Unassigned Tasks",
+      "type": "array"
+     },
+     "ungrouped_projects": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardProjectModel"
+      },
+      "title": "Ungrouped Projects",
+      "type": "array"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ProjectsBoardResponse",
+    "type": "object"
+   },
+   "ProjectsBoardTaskModel": {
+    "description": "One kanban task flattened for a projects-board lane.",
+    "properties": {
+     "column": {
+      "default": "queue",
+      "title": "Column",
+      "type": "string"
+     },
+     "completed_on": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Completed On"
+     },
+     "context": {
+      "default": "",
+      "title": "Context",
+      "type": "string"
+     },
+     "done": {
+      "default": false,
+      "title": "Done",
+      "type": "boolean"
+     },
+     "id": {
+      "default": "",
+      "title": "Id",
+      "type": "string"
+     },
+     "milestone_id": {
+      "default": "",
+      "title": "Milestone Id",
+      "type": "string"
+     },
+     "planned_end": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Planned End"
+     },
+     "planned_start": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Planned Start"
+     },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
+     "section": {
+      "default": "",
+      "title": "Section",
+      "type": "string"
+     },
+     "started_on": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started On"
+     },
+     "tags": {
+      "default": "",
+      "title": "Tags",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "why": {
+      "default": "",
+      "title": "Why",
+      "type": "string"
+     }
+    },
+    "title": "ProjectsBoardTaskModel",
     "type": "object"
    },
    "ProvenanceRefModel": {
@@ -5061,8 +6086,13 @@
     "type": "object"
    },
    "SkillTreeNodeModel": {
-    "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded).",
+    "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded). ``category``\nis the schema grouping (empty for nodes unknown to the schema) — the\nhome starmap uses it to size its sector band.",
     "properties": {
+     "category": {
+      "default": "",
+      "title": "Category",
+      "type": "string"
+     },
      "children": {
       "items": {
        "$ref": "#/components/schemas/SkillTreeNodeModel"
@@ -5161,6 +6191,332 @@
      }
     },
     "title": "SkillTreeSummary",
+    "type": "object"
+   },
+   "StarmapCategoryModel": {
+    "description": "One skill category (starmap sector band) with status counters.\n\n``name`` is the server-provided zh display name (category id as fallback\nfor ids outside the known table).",
+    "properties": {
+     "count": {
+      "default": 0,
+      "title": "Count",
+      "type": "integer"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "learning_count": {
+      "default": 0,
+      "title": "Learning Count",
+      "type": "integer"
+     },
+     "lit_count": {
+      "default": 0,
+      "title": "Lit Count",
+      "type": "integer"
+     },
+     "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "StarmapCategoryModel",
+    "type": "object"
+   },
+   "StarmapCountsModel": {
+    "description": "Briefing counters for the starmap chrome.",
+    "properties": {
+     "evidence": {
+      "default": 0,
+      "title": "Evidence",
+      "type": "integer"
+     },
+     "evidence_flying": {
+      "default": 0,
+      "title": "Evidence Flying",
+      "type": "integer"
+     },
+     "evidence_needs_review": {
+      "default": 0,
+      "title": "Evidence Needs Review",
+      "type": "integer"
+     },
+     "projects_active": {
+      "default": 0,
+      "title": "Projects Active",
+      "type": "integer"
+     },
+     "skills_lit": {
+      "default": 0,
+      "title": "Skills Lit",
+      "type": "integer"
+     }
+    },
+    "title": "StarmapCountsModel",
+    "type": "object"
+   },
+   "StarmapEvidenceModel": {
+    "description": "One non-deprecated evidence entry (guest star / seated star / dust).\n\n``flying`` marks guest stars (客星): entries inside the 30-day window\nplus the newest-4 density floor. ``project_refs`` place seated stars by\ntheir project planet when present (skill-sector fallback otherwise).",
+    "properties": {
+     "date": {
+      "default": "",
+      "title": "Date",
+      "type": "string"
+     },
+     "flying": {
+      "default": false,
+      "title": "Flying",
+      "type": "boolean"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "project_refs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Project Refs",
+      "type": "array"
+     },
+     "review_status": {
+      "default": "needs_review",
+      "title": "Review Status",
+      "type": "string"
+     },
+     "skill_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Skill Ids",
+      "type": "array"
+     },
+     "strength": {
+      "default": "unrated",
+      "title": "Strength",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "type": {
+      "default": "practice",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "StarmapEvidenceModel",
+    "type": "object"
+   },
+   "StarmapGoalModel": {
+    "description": "One active stage goal (starmap goal star).",
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "start": {
+      "default": "",
+      "title": "Start",
+      "type": "string"
+     },
+     "status": {
+      "default": "active",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "target": {
+      "default": "",
+      "title": "Target",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "StarmapGoalModel",
+    "type": "object"
+   },
+   "StarmapProjectModel": {
+    "description": "One project case (starmap planet) with progress and goal grouping.",
+    "properties": {
+     "goal_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Goal Ids",
+      "type": "array"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "default": "internal",
+      "title": "Kind",
+      "type": "string"
+     },
+     "progress": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Progress"
+     },
+     "status": {
+      "default": "active",
+      "title": "Status",
+      "type": "string"
+     },
+     "task_count": {
+      "default": 0,
+      "title": "Task Count",
+      "type": "integer"
+     },
+     "time_range": {
+      "default": "",
+      "title": "Time Range",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "StarmapProjectModel",
+    "type": "object"
+   },
+   "StarmapResponse": {
+    "description": "One-shot growth-starmap snapshot for the SPA home scene.\n\nAggregates SKILL.md (North Star), goals.yaml (active goals),\nskill-tree.yaml + the domain schema (locked schema nodes included),\nthe projects-board aggregation (goal grouping + progress), and the\nevidence pool (30-day guest window + newest-4 floor). Built by\n``core.starmap_snapshot.build_starmap_snapshot``; the response carries\na weak ETag over the source files (same pattern as /projects-board).",
+    "properties": {
+     "categories": {
+      "items": {
+       "$ref": "#/components/schemas/StarmapCategoryModel"
+      },
+      "title": "Categories",
+      "type": "array"
+     },
+     "counts": {
+      "$ref": "#/components/schemas/StarmapCountsModel"
+     },
+     "evidence": {
+      "items": {
+       "$ref": "#/components/schemas/StarmapEvidenceModel"
+      },
+      "title": "Evidence",
+      "type": "array"
+     },
+     "generated_on": {
+      "default": "",
+      "title": "Generated On",
+      "type": "string"
+     },
+     "goals": {
+      "items": {
+       "$ref": "#/components/schemas/StarmapGoalModel"
+      },
+      "title": "Goals",
+      "type": "array"
+     },
+     "north_star": {
+      "default": "",
+      "title": "North Star",
+      "type": "string"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "projects": {
+      "items": {
+       "$ref": "#/components/schemas/StarmapProjectModel"
+      },
+      "title": "Projects",
+      "type": "array"
+     },
+     "schema_name": {
+      "default": "",
+      "title": "Schema Name",
+      "type": "string"
+     },
+     "skills": {
+      "items": {
+       "$ref": "#/components/schemas/StarmapSkillModel"
+      },
+      "title": "Skills",
+      "type": "array"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "StarmapResponse",
+    "type": "object"
+   },
+   "StarmapSkillModel": {
+    "description": "One skill-tree node for the starmap (三态: locked/learning/lit).\n\nUnlike the /skill-tree overlay view, this projection includes every\nschema node — locked schema nodes (the 未解锁空圈 underlay) ride with\n``status=\"locked\"`` even when the profile overlay never mentions them.",
+    "properties": {
+     "category": {
+      "default": "misc",
+      "title": "Category",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "label": {
+      "default": "",
+      "title": "Label",
+      "type": "string"
+     },
+     "lit": {
+      "default": false,
+      "title": "Lit",
+      "type": "boolean"
+     },
+     "status": {
+      "default": "locked",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "StarmapSkillModel",
     "type": "object"
    },
    "StudioCandidateRequest": {
@@ -5885,6 +7241,28 @@
     ],
     "title": "ValidationError",
     "type": "object"
+   },
+   "WorkshopStatusResponse": {
+    "description": "GET /api/v1/system/workshop payload.",
+    "properties": {
+     "checked_at": {
+      "default": "",
+      "title": "Checked At",
+      "type": "string"
+     },
+     "reachable": {
+      "default": false,
+      "title": "Reachable",
+      "type": "boolean"
+     },
+     "url": {
+      "default": "/terminal/",
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "title": "WorkshopStatusResponse",
+    "type": "object"
    }
   }
  },
@@ -6528,6 +7906,112 @@
      }
     },
     "summary": "Get Profile Agent Tasks"
+   }
+  },
+  "/api/v1/profiles/{name}/checkins": {
+   "post": {
+    "description": "Append one habit check-in to the activity log (agent-facing hook).\n\n``habit`` accepts a habit id or title (core resolution); ``project_id``\nis an alternative that resolves through the habit<->project name link.\n``date`` defaults to today and must be an ISO date when given. The write\ngoes through ``core.activity_log.add_activity_checkin`` under the\nactivity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh\nETag in the header).",
+    "operationId": "add_profile_checkin_api_v1_profiles__name__checkins_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CheckinCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CheckinMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the activity log file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Missing/unknown habit, unlinked project, invalid date, or non-positive count."
+     }
+    },
+    "summary": "Add Profile Checkin"
    }
   },
   "/api/v1/profiles/{name}/crystallize/apply": {
@@ -9124,6 +10608,121 @@
     "summary": "Add Profile Kanban Card"
    }
   },
+  "/api/v1/profiles/{name}/kanban/cards/{card_ref}": {
+   "patch": {
+    "description": "Edit one card's fields (lane assignment, title, context, why, tags).\n\n``None`` fields keep the current value; ``\"\"`` clears\n``context``/``why``/``project_id``/``milestone_id`` (``project_id``\nclearing unassigns the card from its lane); ``tags`` replaces the\nwhole tag list when given. ``title`` must not be blank when given.\nSection moves stay on the move endpoint — Someday is a section, not a\nflag. When ``project_id`` changed, project-board.yaml task refs are\nre-synced from kanban metadata (task side is authoritative), same as\nthe project-task move endpoint. ``card_ref`` follows the move/done\nsemantics (exact title or unique substring). Honors ``If-Match``\n(412 on mismatch); a concurrent kanban write is 3-way merged.",
+    "operationId": "patch_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "card_ref",
+      "required": true,
+      "schema": {
+       "title": "Card Ref",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/KanbanCardPatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/KanbanMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or kanban card not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current kanban file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, unknown section, or ambiguous card_ref."
+     }
+    },
+    "summary": "Patch Profile Kanban Card"
+   }
+  },
   "/api/v1/profiles/{name}/kanban/cards/{card_ref}/done": {
    "post": {
     "description": "Mark one card done by moving it to Done (done flag + completed_on).\n\nThe Done transition is the board's column-move idiom\n(``apply_kanban_reorder`` with ``auto_dates``), so a card already in\nDone answers 200 with an \"already there\" warning. Honors ``If-Match``.",
@@ -9342,6 +10941,297 @@
      }
     },
     "summary": "Move Profile Kanban Card"
+   }
+  },
+  "/api/v1/profiles/{name}/kanban/cards/{card_ref}/schedule": {
+   "post": {
+    "description": "Set or clear one card's planned date range (timeline drag-to-reschedule).\n\n``planned_start`` / ``planned_end`` accept an ISO ``YYYY-MM-DD`` date to\nset, ``\"\"`` to clear, or are omitted (``null``) to keep the current\nvalue; both set means start must not be after end (422 otherwise). The\nfields persist as kanban.md metadata bullets, orthogonal to the\ncolumn-date idiom (``started_on`` / ``completed_on``). ``card_ref``\nfollows the move/done semantics: exact card title or unique title\nsubstring (not the task id). Honors\n``If-Match`` (412 on mismatch); a concurrent write between parse and\nsave is 3-way merged.",
+    "operationId": "schedule_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__schedule_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "card_ref",
+      "required": true,
+      "schema": {
+       "title": "Card Ref",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/KanbanCardScheduleRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/KanbanMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or kanban card not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current kanban file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, unknown section, or ambiguous card_ref."
+     }
+    },
+    "summary": "Schedule Profile Kanban Card"
+   }
+  },
+  "/api/v1/profiles/{name}/plan-templates": {
+   "get": {
+    "description": "Built-in habit-plan templates plus the profile's usage history.\n\nProfile-scoped (rather than a global ``/plan-templates``) because the\nhistory half only exists per profile; history comes from the profile's\nplan-templates.yaml, de-duplicated by template id, most recent first.\nThe response carries the plan-templates ETag for use as ``If-Match`` on\ninstantiate.",
+    "operationId": "get_profile_plan_templates_api_v1_profiles__name__plan_templates_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PlanTemplateListResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Plan Templates"
+   }
+  },
+  "/api/v1/profiles/{name}/plan-templates/instantiate": {
+   "post": {
+    "description": "Instantiate one habit-plan template into a project case + habit.\n\nCreates a ``kind=habit-plan`` case in project-board.yaml (time_range\nfrom ``start`` + ``duration_days``, milestone dates from the template's\noffsets, explicit ``habit_id`` link), ensures the suggested habit\nexists in activity-log.yaml (created when missing, reused by\nid/title otherwise), and remembers the usage in the profile's\nplan-templates.yaml. The projects-board aggregation renders the new\ncase as a habit lane immediately. Honors ``If-Match`` (412 on\nmismatch, fresh ETag in the header); each file write re-checks its\nrequest-start snapshot inside its write lock.",
+    "operationId": "instantiate_profile_plan_template_api_v1_profiles__name__plan_templates_instantiate_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PlanTemplateInstantiateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PlanTemplateInstantiateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the plan source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unknown template id, missing template, invalid start date, or duplicate/invalid project case."
+     }
+    },
+    "summary": "Instantiate Profile Plan Template"
    }
   },
   "/api/v1/profiles/{name}/project-board": {
@@ -10412,6 +12302,76 @@
     "summary": "Move Profile Project Task"
    }
   },
+  "/api/v1/profiles/{name}/projects-board": {
+   "get": {
+    "description": "Aggregated projects board for the unified /projects SPA page.\n\nOne shot for both views (kanban swimlanes + timeline): goals with their\nprojects (a project groups under the first of its ``goal_refs`` naming a\nknown goal; the rest land in ``ungrouped_projects``), per-project\nmilestones with progress, Done counts that include kanban-archive.md,\nlive tasks grouped by column (``someday`` as a badge list, not a\ncolumn), an ``unassigned_tasks`` lane for tasks owned by no project, and\nhabit check-in strips (current ISO week dots + streak ending today +\ntotal). Full data, no display caps. The response carries the\nboard-source ETag (see module docstring pattern) for use as ``If-Match``\non the kanban/check-in mutations.",
+    "operationId": "get_profile_projects_board_api_v1_profiles__name__projects_board_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProjectsBoardResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Projects Board"
+   }
+  },
   "/api/v1/profiles/{name}/public-build": {
    "get": {
     "description": "Public Build overview: init gate, validation, drafts, output state.\n\nRead-only aggregation of the Streamlit page's status surface: the\nfour-file public-layer gate, the ``validate_public_layer`` outcome\n(errors block a build), the unpublished blog drafts offered by the\npublish-and-build section, and the observed output-directory state.\nCarries the public-layer ETag (same fingerprint as the studio) for\n``If-Match`` on the build mutations.",
@@ -11385,6 +13345,76 @@
      }
     },
     "summary": "Get Profile Skill Tree"
+   }
+  },
+  "/api/v1/profiles/{name}/starmap": {
+   "get": {
+    "description": "One-shot growth-starmap snapshot for the SPA home scene (read-only).\n\nEverything the scene needs in a single call: the North Star, active\ngoals, the skill field WITH locked schema nodes (三态\nlocked/learning/lit) plus zh category display names, projects with\nprogress and goal grouping, and the evidence pool with guest/seated\nsplit (30-day window + newest-4 density floor), strength, summary, and\n``project_refs``. The response carries the starmap-source ETag (same\nweak-ETag pattern as /projects-board) for client-side staleness checks.",
+    "operationId": "get_profile_starmap_api_v1_profiles__name__starmap_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StarmapResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Starmap"
    }
   },
   "/api/v1/profiles/{name}/studio": {
@@ -12454,6 +14484,25 @@
      }
     },
     "summary": "Get Assistant Status"
+   }
+  },
+  "/api/v1/system/workshop": {
+   "get": {
+    "description": "Workshop terminal config + liveness (cached 60s in app.state).",
+    "operationId": "get_workshop_status_api_v1_system_workshop_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Get Workshop Status"
    }
   }
  }

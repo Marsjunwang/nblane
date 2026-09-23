@@ -61,6 +61,8 @@ def _normalize_kanban_meta_key(raw_key: str) -> str | None:
         return "agent_task_id"
     if k in ("context", "why", "outcome", "started_on", "completed_on"):
         return k
+    if k in ("planned_start", "planned_end"):
+        return k
     if k == "tags":
         return "tags"
     if k in ("blocked_by", "blockedby"):
@@ -96,6 +98,10 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
         task.started_on = val
     elif field == "completed_on" and isinstance(val, str) and val:
         task.completed_on = val
+    elif field == "planned_start" and isinstance(val, str) and val:
+        task.planned_start = val
+    elif field == "planned_end" and isinstance(val, str) and val:
+        task.planned_end = val
     elif field == "crystallized" and isinstance(val, bool):
         task.crystallized = val
     elif field == "project_id" and isinstance(val, str):
@@ -779,6 +785,10 @@ def _render_kanban_task_lines(
         meta_pairs.append(("started_on", task.started_on.strip()))
     if task.completed_on:
         meta_pairs.append(("completed_on", task.completed_on.strip()))
+    if task.planned_start:
+        meta_pairs.append(("planned_start", task.planned_start.strip()))
+    if task.planned_end:
+        meta_pairs.append(("planned_end", task.planned_end.strip()))
     if task.crystallized:
         meta_pairs.append(("crystallized", "true"))
     if task.project_id.strip():

@@ -443,6 +443,8 @@ class KanbanTask:
     outcome: str = ""
     started_on: str | None = None
     completed_on: str | None = None
+    planned_start: str | None = None
+    planned_end: str | None = None
     crystallized: bool = False
     project_id: str = ""
     milestone_id: str = ""

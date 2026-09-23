@@ -28,6 +28,7 @@ from nblane.web_api.routes_v1 import (
     validation_error_handler,
 )
 from nblane.web_api.spa import mount_spa
+from nblane.web_api.workshop import router as workshop_router
 
 
 def create_app(
@@ -45,6 +46,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(router)
     app.include_router(assistant_router)
+    app.include_router(workshop_router)
     # Mounted last so API routes win over the SPA catch-all fallback.
     mount_spa(app, static_dir=spa_static_dir)
     return app

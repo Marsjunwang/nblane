@@ -21,7 +21,7 @@ SCHEMA = {
     "schema_version": "1.0",
     "domain": "Test Domain",
     "nodes": [
-        {"id": "root_a", "label": "Root A", "level": 1},
+        {"id": "root_a", "label": "Root A", "level": 1, "category": "foundations"},
         {"id": "child_a1", "label": "Child A1", "level": 2, "requires": ["root_a"]},
         {"id": "child_a2", "label": "Child A2", "level": 2, "requires": ["root_a"]},
         {
@@ -156,6 +156,9 @@ class TestSkillTreeRead(unittest.TestCase):
         root_a = roots[0]
         self.assertEqual(root_a["title"], "Root A")
         self.assertEqual(root_a["status"], "solid")
+        # Schema grouping flows through; off-schema nodes answer "".
+        self.assertEqual(root_a["category"], "foundations")
+        self.assertEqual(roots[2]["category"], "")
         # ev_missing is not in the pool and ev_deprecated is deprecated:
         # only ev_one resolves.
         self.assertEqual(root_a["evidence_count"], 1)

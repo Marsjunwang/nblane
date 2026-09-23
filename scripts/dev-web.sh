@@ -421,11 +421,16 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
 
 if [[ "$use_web_api" == "1" ]]; then
+  # Workshop iframe URL: /terminal/ only exists behind the production Caddy
+  # proxy; locally there is no proxy, so default to the ttyd port directly.
+  # Evaluated in the tmux shell AFTER the env file is sourced, so an explicit
+  # NBLANE_WORKSHOP_URL there still wins.
   tmux new-session -d -s "$web_api_session" -c "$repo_root" \
     "${web_api_env_load} \
      NBLANE_ROOT='$dev_root' \
      NBLANE_ENV_FILE='$env_file' \
      NBLANE_READER_API_BASE='$reader_base' \
+     NBLANE_WORKSHOP_URL=\"\${NBLANE_WORKSHOP_URL:-http://127.0.0.1:7668/}\" \
      ${web_api_auth_env} ${lang_env} \
      PYTHONPATH=src .venv/bin/uvicorn ${web_api_uvicorn_args}"
 fi

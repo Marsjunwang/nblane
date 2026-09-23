@@ -20,7 +20,7 @@ from nblane.core.yaml_io import _load_yaml_dict
 
 PROJECT_BOARD_FILENAME = "project-board.yaml"
 PROJECT_STATUSES = ("active", "paused", "completed", "archived")
-PROJECT_KINDS = ("internal", "research", "work", "side_project", "learning")
+PROJECT_KINDS = ("internal", "research", "work", "side_project", "learning", "habit-plan")
 PROJECT_VISIBILITIES = ("private", "public")
 MILESTONE_STATUSES = ("planned", "active", "completed", "archived")
 
@@ -194,6 +194,7 @@ class ProjectCase:
     milestones: list[ProjectMilestone] = field(default_factory=list)
     visibility: str = "private"
     notes: str = ""
+    habit_id: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProjectCase":
@@ -226,6 +227,7 @@ class ProjectCase:
                 "private",
             ),
             notes=_clean_text(data.get("notes")),
+            habit_id=_clean_text(data.get("habit_id")),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -241,6 +243,7 @@ class ProjectCase:
             "time_range",
             "summary",
             "notes",
+            "habit_id",
         ):
             value = getattr(self, key)
             if value:
@@ -364,6 +367,7 @@ def add_project_case(
     milestones: object = None,
     visibility: str = "private",
     notes: str = "",
+    habit_id: str = "",
 ) -> ProjectCase:
     """Add one project case to an in-memory board."""
     clean_title = _clean_text(title)
@@ -397,6 +401,7 @@ def add_project_case(
         ],
         visibility=_clean_choice(visibility, PROJECT_VISIBILITIES, "private"),
         notes=_clean_text(notes),
+        habit_id=_clean_text(habit_id),
     )
     board.project_cases.append(case)
     return case
@@ -424,7 +429,7 @@ def update_project_case(
             PROJECT_VISIBILITIES,
             case.visibility,
         )
-    for key in ("time_range", "summary", "notes"):
+    for key in ("time_range", "summary", "notes", "habit_id"):
         if key in fields:
             setattr(case, key, _clean_text(fields[key]))
     for key in (

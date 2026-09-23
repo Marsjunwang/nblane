@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-13
+last_verified: 2026-09-23
 source_of_truth: true
 ---
 
@@ -26,6 +26,7 @@ source_of_truth: true
 | `evidence-pool.yaml` | 稳定 evidence id、摘要和 accepted claim bridge | 共享证据目录；P2 claim 桥接事实源 |
 | `kanban.md` | 当前任务、Done、Queue、Someday | 当前执行事实源 |
 | `kanban-archive.md` | 从 Done 归档出去的历史任务 | 历史备份，不参与默认上下文 |
+| `plan-templates.yaml` | 习惯计划模板使用历史(按 template_id 去重) | 计划模板历史事实源 |
 | `agent-profile.yaml` | Agent 对用户的结构化 prior | Agent prior 事实源 |
 | `activity-log.yaml` | habit、checkin、weekly summary | 活动记录事实源 |
 | `learning-log.yaml` | paper/article/book/repo/course 等资源 | 学习资源事实源 |
@@ -131,6 +132,18 @@ kanban Done task
 
 - 未被采纳的 evidence 不能产生悬空 node ref。
 - `crystallized: true` 只表示 Done 任务已被处理，不等于公开发布。
+
+### Kanban 任务元数据字段
+
+任务以 Markdown checkbox + 缩进 `key: value` 子弹存储于 `kanban.md`，唯一合法写路径是
+`core/kanban_io.py`。除 `id/context/why/blocked by/outcome/tags/subtasks` 外，日期类字段：
+
+- `started_on` / `completed_on`：列移动习语自动维护（进 Doing 记 started_on，进 Done 记
+  completed_on，离开 Done 清除）。
+- `planned_start` / `planned_end`（2026-09-23 新增，可选）：**计划排期**，供 /projects 时间轴
+  视图的拖拽改期；与列日期正交，不随列移动自动改写。写入经
+  `POST /api/v1/profiles/{name}/kanban/cards/{card_ref}/schedule`（ISO `YYYY-MM-DD`，
+  空串清除，两者皆设时 start ≤ end），随 kanban.md 正常 round-trip。
 
 ### Public Surface
 
@@ -254,6 +267,25 @@ project-board.yaml
 - 不替代 public `projects.yaml`。
 - `KanbanTask.project_id` 引用内部 project。
 - Workspace Index 负责发现断链。
+- 里程碑 `status` 域为 `planned/active/completed/archived`，但真实数据目前全部停留在
+  `planned`——没有「完成里程碑」的写路径；/projects 板的「过期 planned = 空心菱形」是
+  展示层推导，不回写状态。
+- /projects 聚合(`GET /api/v1/profiles/{name}/projects-board`，逻辑在
+  `core/projects_board.py`)的泳道 Done 计数 = kanban.md Done + `kanban-archive.md`
+  归档任务（按 `project_id`/`task_refs` 归属，任务侧为准）；`someday` 是徽章不是列；
+  无 `project_id` 的任务进「未归属」泳道。
+- 习惯打卡聚合(activity-log.yaml checkins)的 streak 口径：以今日结尾的连续打卡天数，
+  今日未打卡则 streak = 0（与 Phase 2 概念稿 build_data.py 一致）。
+- habit ↔ project 链接:**优先** project-board.yaml case 的显式 `habit_id` 字段
+  (2026-09-23 新增,可选,case save/create API 可读写,空串清除);未设置时回落到
+  「habit id/标题 归一化后等于 project 标题或 id 尾段」启发式。链接不上时 habit 仍以
+  顶层 `habits[]` 输出,前端可自行配对。
+- `kind` 域新增 `habit-plan`(2026-09-23):由习惯计划模板实例化产生(见下)。
+- 习惯计划模板:内置模板随包发布(`core/data/habit_plan_templates.yaml`,
+  `core/plan_templates.py` 加载);`POST .../plan-templates/instantiate` 实例化为
+  `kind=habit-plan` 的 case(time_range = start + duration_days,里程碑日期 =
+  start + offset_days,显式 habit_id 链接),缺 habit 时在 activity-log.yaml 创建,
+  并写入 profile 的 `plan-templates.yaml` 使用历史(按 template_id 去重,最新在前)。
 
 ### Research Workspace（已落地 P4 v1）
 

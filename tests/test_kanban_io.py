@@ -97,6 +97,51 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertTrue(t.subtasks[1].done)
         self.assertEqual(t.details, ["free note"])
 
+    def test_planned_dates_roundtrip(self) -> None:
+        """planned_start/planned_end metadata survives parse/render."""
+        sections = {
+            KANBAN_DOING: [
+                KanbanTask(
+                    title="Scheduled",
+                    id="sched-1",
+                    started_on="2026-09-01",
+                    planned_start="2026-10-01",
+                    planned_end="2026-10-15",
+                )
+            ],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [],
+            KANBAN_SOMEDAY: [],
+        }
+        text = render_kanban("u1", sections)
+        self.assertIn("  - planned_start: 2026-10-01", text)
+        self.assertIn("  - planned_end: 2026-10-15", text)
+        back = parse_kanban_text(text, "u1")
+        task = back[KANBAN_DOING][0]
+        self.assertEqual(task.planned_start, "2026-10-01")
+        self.assertEqual(task.planned_end, "2026-10-15")
+
+        md = """# p · Kanban
+
+---
+
+## Queue
+
+- [ ] Manual
+  - id: m-1
+  - planned_start: 2026-11-01
+
+---
+"""
+        manual = parse_kanban_text(md, "p")[KANBAN_QUEUE][0]
+        self.assertEqual(manual.planned_start, "2026-11-01")
+        self.assertIsNone(manual.planned_end)
+        # Tasks without planned dates render no planned bullets.
+        plain = render_kanban(
+            "u1", {KANBAN_QUEUE: [KanbanTask(title="Plain", id="p-1")]}
+        )
+        self.assertNotIn("planned_", plain)
+
     def test_multiline_meta_roundtrip(self) -> None:
         """Literal blocks preserve multi-line task metadata."""
         sections = {
