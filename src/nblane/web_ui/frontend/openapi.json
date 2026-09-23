@@ -711,6 +711,61 @@
     "title": "CheckinMutationResponse",
     "type": "object"
    },
+   "ChronicleEntryModel": {
+    "description": "One append-only chronicle entry (date, kind, ref, note).",
+    "properties": {
+     "date": {
+      "title": "Date",
+      "type": "string"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "note": {
+      "default": "",
+      "title": "Note",
+      "type": "string"
+     },
+     "ref": {
+      "default": "",
+      "title": "Ref",
+      "type": "string"
+     }
+    },
+    "required": [
+     "date",
+     "kind"
+    ],
+    "title": "ChronicleEntryModel",
+    "type": "object"
+   },
+   "ChronicleResponse": {
+    "description": "Chronicle entries, newest first, capped by the ``limit`` query.",
+    "properties": {
+     "entries": {
+      "items": {
+       "$ref": "#/components/schemas/ChronicleEntryModel"
+      },
+      "title": "Entries",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "total": {
+      "default": 0,
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ChronicleResponse",
+    "type": "object"
+   },
    "CrystallizeApplyRequest": {
     "description": "Body for the crystallize-apply endpoint.\n\n``patch`` is the (possibly human-edited) draft from the draft endpoint;\n``include_evidence`` / ``include_nodes`` are the wizard's per-row\ncheckboxes (null = keep all). On success the source tasks are marked\n``crystallized`` in kanban.md.",
     "properties": {
@@ -2040,6 +2095,40 @@
     "title": "GapTopMatchModel",
     "type": "object"
    },
+   "GoalCreateRequest": {
+    "description": "Body for POST .../goals (only ``title`` is required).\n\n``start``/``target`` must be ISO dates (YYYY-MM-DD) when given; an\nempty ``start`` defaults to today server-side (立项日). ``status``\naccepts ``active``/``paused``/``completed`` (default ``active``).",
+    "properties": {
+     "start": {
+      "default": "",
+      "title": "Start",
+      "type": "string"
+     },
+     "status": {
+      "default": "active",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "target": {
+      "default": "",
+      "title": "Target",
+      "type": "string"
+     },
+     "title": {
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title"
+    ],
+    "title": "GoalCreateRequest",
+    "type": "object"
+   },
    "GoalModel": {
     "description": "One goal in full owner-facing detail (no agent redaction).",
     "properties": {
@@ -2156,6 +2245,98 @@
      "id"
     ],
     "title": "GoalModel",
+    "type": "object"
+   },
+   "GoalMutationResponse": {
+    "description": "Result of one goal create/patch mutation.\n\n``changed_keys`` lists the fields whose values actually changed (empty\nfor a no-op patch, which also skips the chronicle entry).",
+    "properties": {
+     "changed": {
+      "default": false,
+      "title": "Changed",
+      "type": "boolean"
+     },
+     "changed_keys": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Changed Keys",
+      "type": "array"
+     },
+     "goal": {
+      "$ref": "#/components/schemas/GoalModel"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "goal"
+    ],
+    "title": "GoalMutationResponse",
+    "type": "object"
+   },
+   "GoalPatchRequest": {
+    "description": "Body for PATCH .../goals/{goal_id}; at least one field is required.",
+    "properties": {
+     "start": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Start"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "summary": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Summary"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     }
+    },
+    "title": "GoalPatchRequest",
     "type": "object"
    },
    "GoalSkillLinkModel": {
@@ -3590,7 +3771,7 @@
     "type": "object"
    },
    "NorthStarModel": {
-    "description": "Owner-facing North Star from SKILL.md identity (no redaction here).\n\nThis API serves the authenticated owner's UI, so ``full``/``brief`` are\nreturned verbatim; ``visibility`` is informational for the UI badge.",
+    "description": "Owner-facing North Star from SKILL.md identity (no redaction here).\n\nThis API serves the authenticated owner's UI, so ``full``/``brief`` are\nreturned verbatim; ``visibility`` is the binary public-output flag\n(``public``/``private``; legacy ``discreet``/``hidden``/``visible`` map\non read) and is informational for the UI badge.",
     "properties": {
      "brief": {
       "default": "",
@@ -3608,12 +3789,79 @@
       "type": "boolean"
      },
      "visibility": {
-      "default": "discreet",
+      "default": "private",
       "title": "Visibility",
       "type": "string"
      }
     },
     "title": "NorthStarModel",
+    "type": "object"
+   },
+   "NorthStarMutationResponse": {
+    "description": "Result of the surgical North Star rewrite.",
+    "properties": {
+     "changed": {
+      "default": false,
+      "title": "Changed",
+      "type": "boolean"
+     },
+     "changed_keys": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Changed Keys",
+      "type": "array"
+     },
+     "north_star": {
+      "$ref": "#/components/schemas/NorthStarModel"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "title": "NorthStarMutationResponse",
+    "type": "object"
+   },
+   "NorthStarPatchRequest": {
+    "description": "Body for PATCH .../north-star; at least one field is required.\n\n``visibility`` accepts only the canonical binary values\n(``public``/``private``).",
+    "properties": {
+     "brief": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Brief"
+     },
+     "full": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Full"
+     },
+     "visibility": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Visibility"
+     }
+    },
+    "title": "NorthStarPatchRequest",
     "type": "object"
    },
    "OkResponse": {
@@ -4111,6 +4359,53 @@
      "title"
     ],
     "title": "ProjectCaseCreateRequest",
+    "type": "object"
+   },
+   "ProjectCaseDeleteRequest": {
+    "description": "Body for the user-decided project case delete.\n\n``confirm_title`` must equal the case title exactly (422\n``project_delete_confirm_mismatch`` otherwise) — the type-the-name\nconfirmation. ``record_chronicle`` opts into a ``project.deleted``\nchronicle entry (default off: household deletes stay out of the\nnarrative).",
+    "properties": {
+     "confirm_title": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Confirm Title",
+      "type": "string"
+     },
+     "record_chronicle": {
+      "default": false,
+      "title": "Record Chronicle",
+      "type": "boolean"
+     }
+    },
+    "title": "ProjectCaseDeleteRequest",
+    "type": "object"
+   },
+   "ProjectCaseDeleteResponse": {
+    "description": "Result of one project case delete.\n\n``tasks_unassigned`` counts live kanban.md tasks whose ``project_id``\nwas cleared back to unassigned; ``evidence_refs_kept`` counts\nevidence-pool entries still referencing the deleted case (tombstone\nmechanism handles their display).",
+    "properties": {
+     "deleted_id": {
+      "title": "Deleted Id",
+      "type": "string"
+     },
+     "evidence_refs_kept": {
+      "default": 0,
+      "title": "Evidence Refs Kept",
+      "type": "integer"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "tasks_unassigned": {
+      "default": 0,
+      "title": "Tasks Unassigned",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "deleted_id"
+    ],
+    "title": "ProjectCaseDeleteResponse",
     "type": "object"
    },
    "ProjectCaseModel": {
@@ -4919,7 +5214,7 @@
     "type": "object"
    },
    "ProjectsBoardHabitModel": {
-    "description": "Habit check-in aggregation for continuous (habit) lanes.\n\n``week`` is the current ISO week (Monday..Sunday); ``streak`` counts\nconsecutive checked days ending today (0 when today has no check-in\nyet); ``total_checkins`` counts distinct checked days overall.\n``project_id`` links to a project lane when the name heuristic matches.",
+    "description": "Habit check-in aggregation for continuous (habit) lanes.\n\n``week`` is the current ISO week (Monday..Sunday); ``streak`` counts\nconsecutive checked days ending today (0 when today has no check-in\nyet); ``total_checkins`` counts distinct checked days overall.\n``recent_days`` is the heatmap source: checked days within the trailing\n90-day window ending today (oldest first, same-day rows summed into\n``count``). ``project_id`` links to a project lane when the name\nheuristic matches.",
     "properties": {
      "cadence": {
       "default": "",
@@ -4944,6 +5239,13 @@
       "default": "",
       "title": "Project Id",
       "type": "string"
+     },
+     "recent_days": {
+      "items": {
+       "$ref": "#/components/schemas/ProjectsBoardHabitRecentDayModel"
+      },
+      "title": "Recent Days",
+      "type": "array"
      },
      "streak": {
       "default": 0,
@@ -4972,6 +5274,25 @@
      "id"
     ],
     "title": "ProjectsBoardHabitModel",
+    "type": "object"
+   },
+   "ProjectsBoardHabitRecentDayModel": {
+    "description": "One checked day in the trailing 90-day heatmap window.",
+    "properties": {
+     "count": {
+      "default": 1.0,
+      "title": "Count",
+      "type": "number"
+     },
+     "date": {
+      "title": "Date",
+      "type": "string"
+     }
+    },
+    "required": [
+     "date"
+    ],
+    "title": "ProjectsBoardHabitRecentDayModel",
     "type": "object"
    },
    "ProjectsBoardMilestoneModel": {
@@ -5017,7 +5338,7 @@
     "type": "object"
    },
    "ProjectsBoardProjectModel": {
-    "description": "One project swimlane: case facts plus owned kanban tasks.\n\n``queue``/``doing`` hold the live task cards; ``someday`` is a badge\nlist (not a column); Done tasks are folded into ``done_count``, which\nincludes tasks archived to kanban-archive.md (``archived_done_count``\nbreaks out the archived share). ``column_counts`` keys are\nqueue/doing/someday/done. ``habit_id`` links to a ``habits`` entry: the\ncase's explicit ``habit_id`` field wins, otherwise the habit<->project\nname heuristic applies.",
+    "description": "One project swimlane: case facts plus owned kanban tasks.\n\n``queue``/``doing`` hold the live task cards; ``someday`` is a badge\nlist (not a column); Done tasks are folded into ``done_count``, which\nincludes tasks archived to kanban-archive.md (``archived_done_count``\nbreaks out the archived share). ``column_counts`` keys are\nqueue/doing/someday/done; together with ``evidence_ref_count`` they\npower the delete dialog's consequence preview (\"N tasks back to\nunassigned · M evidence refs kept\"). ``habit_id`` links to a ``habits``\nentry: the case's explicit ``habit_id`` field wins, otherwise the\nhabit<->project name heuristic applies.",
     "properties": {
      "archived_done_count": {
       "default": 0,
@@ -5041,6 +5362,11 @@
      "done_count": {
       "default": 0,
       "title": "Done Count",
+      "type": "integer"
+     },
+     "evidence_ref_count": {
+      "default": 0,
+      "title": "Evidence Ref Count",
       "type": "integer"
      },
      "goal_refs": {
@@ -8014,6 +8340,88 @@
     "summary": "Add Profile Checkin"
    }
   },
+  "/api/v1/profiles/{name}/chronicle": {
+   "get": {
+    "description": "Chronicle entries, newest first (home briefing line / 拓片 / openclaw).\n\nRead-only; carries a weak ETag of chronicle.yaml so consumers can poll\nfor new entries cheaply.",
+    "operationId": "get_profile_chronicle_api_v1_profiles__name__chronicle_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChronicleResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Chronicle"
+   }
+  },
   "/api/v1/profiles/{name}/crystallize/apply": {
    "post": {
     "description": "Apply a confirmed crystallize draft (wizard step 3).\n\nUnlike the pool-field mutations this flow is merge-based: the draft is\nre-merged against the *current* pool/tree at apply time\n(``run_ingest_patch`` with validate + SKILL.md sync + rollback), so no\nIf-Match precondition is needed — concurrent pool writes merge instead\nof clobbering. Only on success are the source Done tasks marked\n``crystallized``.",
@@ -9511,6 +9919,225 @@
      }
     },
     "summary": "Get Profile Goals"
+   },
+   "post": {
+    "description": "Create one goal in goals.yaml and append ``goal.added`` to chronicle.\n\nThe id is a deterministic slug from the title (``goal-<slug>``).\nHonors ``If-Match`` against the goals.yaml ETag (412 on mismatch).",
+    "operationId": "create_profile_goal_api_v1_profiles__name__goals_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GoalCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GoalMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match goals.yaml."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, non-ISO target date, or unknown status."
+     }
+    },
+    "summary": "Create Profile Goal"
+   }
+  },
+  "/api/v1/profiles/{name}/goals/{goal_id}": {
+   "patch": {
+    "description": "Edit a goal's title/summary/start/target/status in goals.yaml.\n\nChronicle entries fire only for meaningful changes: ``goal.renamed``\nwhen the title changed and ``goal.completed`` when the status moved to\n``completed`` — a no-op patch writes nothing and logs nothing. Honors\n``If-Match`` against the goals.yaml ETag (412 on mismatch).",
+    "operationId": "patch_profile_goal_api_v1_profiles__name__goals__goal_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "goal_id",
+      "required": true,
+      "schema": {
+       "title": "Goal Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GoalPatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GoalMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or goal not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match goals.yaml."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, non-ISO target date, or unknown status."
+     }
+    },
+    "summary": "Patch Profile Goal"
    }
   },
   "/api/v1/profiles/{name}/health": {
@@ -11058,6 +11685,112 @@
     "summary": "Schedule Profile Kanban Card"
    }
   },
+  "/api/v1/profiles/{name}/north-star": {
+   "patch": {
+    "description": "Surgically rewrite the North Star in SKILL.md's Identity section.\n\nOnly the ``- **North Star**`` / ``- **North Star Brief**`` /\n``- **North Star Visibility**`` bullet lines are touched; generated\nblocks and every other byte of the living document stay identical\n(core.north_star.update_north_star). ``visibility`` is binary going\nforward (``public``/``private``) and gates only public artifacts.\nHonors ``If-Match`` against the SKILL.md ETag (412 on mismatch). A\nno-op patch writes nothing and logs no chronicle entry; a real rewrite\nof the full text appends ``north_star.rewritten``.",
+    "operationId": "patch_profile_north_star_api_v1_profiles__name__north_star_patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/NorthStarPatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/NorthStarMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match SKILL.md."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No field provided, or visibility is not public/private."
+     }
+    },
+    "summary": "Patch Profile North Star"
+   }
+  },
   "/api/v1/profiles/{name}/plan-templates": {
    "get": {
     "description": "Built-in habit-plan templates plus the profile's usage history.\n\nProfile-scoped (rather than a global ``/plan-templates``) because the\nhistory half only exists per profile; history comes from the profile's\nplan-templates.yaml, de-duplicated by template id, most recent first.\nThe response carries the plan-templates ETag for use as ``If-Match`` on\ninstantiate.",
@@ -11404,10 +12137,125 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Create Profile Project Case"
+   }
+  },
+  "/api/v1/profiles/{name}/project-board/cases/{case_id}": {
+   "delete": {
+    "description": "Delete one project case for good (user-decided, type-the-name confirm).\n\n``confirm_title`` must equal the case title exactly, else 422\n``project_delete_confirm_mismatch``. Consequences, in write order:\n\n1. Live kanban.md tasks owned via ``project_id`` are cleared back to\n   unassigned (their ``milestone_id`` is cleared too when it named one\n   of the case's milestones); kanban-archive.md history is untouched.\n2. The case is removed from project-board.yaml.\n3. Evidence-pool ``project_refs`` are NOT touched — the tombstone\n   mechanism handles display of references to the deleted case.\n\nWith ``record_chronicle`` (default off) a ``project.deleted`` entry is\nappended to chronicle.yaml with the case title as the note. Both file\nwrites re-check their request-start snapshots inside the write locks;\na mismatch answers 412 with a fresh board ETag (which covers\nkanban.md + project-board.yaml). Honors ``If-Match`` (412 on stale).",
+    "operationId": "delete_profile_project_case_api_v1_profiles__name__project_board_cases__case_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "case_id",
+      "required": true,
+      "schema": {
+       "title": "Case Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProjectCaseDeleteRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProjectCaseDeleteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile, project case, or milestone not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the board source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
+     }
+    },
+    "summary": "Delete Profile Project Case"
    }
   },
   "/api/v1/profiles/{name}/project-board/cases/{case_id}/archive": {
@@ -11509,7 +12357,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Archive Profile Project Case"
@@ -11624,7 +12472,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Add Profile Project Milestone"
@@ -11738,7 +12586,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Delete Profile Project Milestone"
@@ -11862,7 +12710,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Save Profile Project Milestone"
@@ -11977,7 +12825,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Save Profile Project Case"
@@ -12066,7 +12914,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Suggest Profile Project Refs"
@@ -12181,7 +13029,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Add Profile Project Task"
@@ -12296,7 +13144,7 @@
         }
        }
       },
-      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable."
+      "description": "Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable."
      }
     },
     "summary": "Move Profile Project Task"
@@ -12304,7 +13152,7 @@
   },
   "/api/v1/profiles/{name}/projects-board": {
    "get": {
-    "description": "Aggregated projects board for the unified /projects SPA page.\n\nOne shot for both views (kanban swimlanes + timeline): goals with their\nprojects (a project groups under the first of its ``goal_refs`` naming a\nknown goal; the rest land in ``ungrouped_projects``), per-project\nmilestones with progress, Done counts that include kanban-archive.md,\nlive tasks grouped by column (``someday`` as a badge list, not a\ncolumn), an ``unassigned_tasks`` lane for tasks owned by no project, and\nhabit check-in strips (current ISO week dots + streak ending today +\ntotal). Full data, no display caps. The response carries the\nboard-source ETag (see module docstring pattern) for use as ``If-Match``\non the kanban/check-in mutations.",
+    "description": "Aggregated projects board for the unified /projects SPA page.\n\nOne shot for both views (kanban swimlanes + timeline): goals with their\nprojects (a project groups under the first of its ``goal_refs`` naming a\nknown goal; the rest land in ``ungrouped_projects``), per-project\nmilestones with progress, Done counts that include kanban-archive.md,\nlive tasks grouped by column (``someday`` as a badge list, not a\ncolumn), an ``unassigned_tasks`` lane for tasks owned by no project, and\nhabit check-in strips (current ISO week dots + streak ending today +\ntotal + ``recent_days`` heatmap window over the trailing 90 days). Full data, no display caps. The response carries the\nboard-source ETag (see module docstring pattern) for use as ``If-Match``\non the kanban/check-in mutations.",
     "operationId": "get_profile_projects_board_api_v1_profiles__name__projects_board_get",
     "parameters": [
      {

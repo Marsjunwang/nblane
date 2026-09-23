@@ -70,7 +70,7 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | `profile://gap/{task}` | **路径段 `task`** | 纯文本 | **必须**把自然语言任务放进 URI 的最后一级；**先做 URL 编码**（如空格→`%20`，中文通常 UTF-8 百分号编码）。服务端会对该段做 `urllib.parse.unquote` 后再分析。 |
 | `agent://tasks` | 无 | Markdown 文本 | 列出当前 profile 的 Codex/OpenCode handoff tasks。 |
 | `agent://task/{task_id}` | **路径段 `task_id`** | Markdown 文本 | 返回单个 agent task 的 handoff、输入 refs、预期产物和 review 规则。 |
-| `profile://goals` | 无 | Markdown 文本 | goals.yaml 摘要 + North Star（`North Star Visibility: private` 时脱敏；private 目标不出现）。 |
+| `profile://goals` | 无 | Markdown 文本 | goals.yaml 摘要 + North Star 全文（2026-09-23 起可见性为二元，只门控公开产物，agent 始终可见；private 目标不出现）。 |
 | `profile://evidence` | 无 | Markdown 文本 | 证据池按 review_status 计数 + 最近 20 条；无文件时返回占位提示。 |
 | `profile://inbox` | 无 | Markdown 文本 | 未处置条目（`inbox`/`captured`/`clarified`）：id/类型/标签/创建时间。 |
 | `profile://learning` | 无 | Markdown 文本 | learning-log 状态计数 + 在读资源 + 最近 10 条。 |

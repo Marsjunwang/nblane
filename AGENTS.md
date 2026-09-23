@@ -143,6 +143,21 @@ npm run test:e2e
   `python -m nblane.cli validate`, `status`, and an import smoke of
   `nblane.kanban_ui` + `nblane.core.profile_ingest`. Keep all four green.
 
+## Design workflow (binding for all agents, 2026-09-23)
+
+- **New directions need approval first**: pitch with a one-paragraph
+  description + reference position/links before any prototype; prototype only
+  after the owner approves the direction.
+- **Motion is judged in motion**: anything animated (transitions, particles,
+  living scenes) must be prototyped as an interactive/live demo (precedent:
+  the starmap playground) — never evaluated from static screenshots.
+- **Increments go straight to the real thing**: changes to existing,
+  already-live designs (labels, naming layers, removals) skip mockups — align
+  on position/effect in words first, then implement on the isolated stack
+  (18504) for hands-on review.
+- New designs build on the production texture/quality as baseline; mockups
+  validate composition and concepts, they do not redefine strokes.
+
 ## Code style guidelines
 
 - Python ≥ 3.11, `from __future__ import annotations` at the top of modules,

@@ -6,9 +6,11 @@ are rendered into a derived Markdown corpus that OpenClaw's memory search can
 index via ``memory.search.extraPaths``. The corpus is read-only output —
 it is never a source of truth and is never recorded in ``git_backup``.
 
-North Star / goal privacy matches the agent-context contract used by
-``core/context.py`` and the ``profile://goals`` MCP resource: private North
-Stars and private goals never reach the rendered corpus.
+Goal privacy matches the agent-context contract used by
+``core/context.py`` and the ``profile://goals`` MCP resource: private goals
+never reach the rendered corpus. The North Star is always rendered in full —
+its binary visibility gates only public artifacts, never agent/local context
+(``docs/zh/dev/home-editing-starmap-design.md`` §1).
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ from nblane.core.io import (
     profile_dir,
 )
 from nblane.core.profile_context import (
-    normalize_north_star_visibility,
     north_star_context_from_identity,
     parse_identity_fields,
 )
@@ -143,15 +144,10 @@ def _render_goals_body(profile_name: str, pdir: Path) -> str:
         identity = parse_identity_fields(
             skill_md.read_text(encoding="utf-8")
         )
-    visibility = normalize_north_star_visibility(
-        identity.get("North Star Visibility")
-    )
     north_star = north_star_context_from_identity(identity, for_agent=True)
     lines.append("## North Star")
     if north_star:
         lines.append(north_star)
-    elif visibility == "private":
-        lines.append("(redacted: North Star Visibility is private)")
     else:
         lines.append("(not set)")
     lines.append("")

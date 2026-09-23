@@ -14,13 +14,23 @@ IDENTITY_FIELDS: tuple[str, ...] = (
     "North Star Visibility",
 )
 
+# Binary going forward (docs/zh/dev/home-editing-starmap-design.md §1):
+# ``public`` = may appear in public artifacts (public build/拓片/share);
+# ``private`` = local only. Legacy values map on read: ``visible`` ->
+# ``public``, ``discreet``/``hidden`` -> ``private``. Visibility never gates
+# local or agent context — openclaw and local surfaces always see the full
+# text; it only marks eligibility for public output.
 NORTH_STAR_VISIBILITIES: tuple[str, ...] = (
-    "visible",
-    "discreet",
-    "hidden",
+    "public",
     "private",
 )
-DEFAULT_NORTH_STAR_VISIBILITY = "discreet"
+DEFAULT_NORTH_STAR_VISIBILITY = "private"
+
+_LEGACY_NORTH_STAR_VISIBILITY = {
+    "visible": "public",
+    "discreet": "private",
+    "hidden": "private",
+}
 
 LONG_NARRATIVE_SECTIONS: tuple[str, ...] = (
     "Research Fingerprint",
@@ -45,7 +55,7 @@ GENERATED_BLOCKS: tuple[str, ...] = (
 
 _HEADING_RE = re.compile(r"^#{1,3}\s")
 _IDENTITY_BULLET_RE = re.compile(
-    r"^(?P<prefix>\s*-\s+\*\*(?P<label>[^*]+)\*\*:\s*)"
+    r"^(?P<prefix>\s*-\s+\*\*(?P<label>[^*]+)\*\*:[ \t]*)"
     r"(?P<value>.*?)(?P<newline>\r?\n?)$"
 )
 _GENERATED_BLOCK_RE = re.compile(
@@ -102,10 +112,14 @@ def section_body(text: str, title: str) -> str:
 
 
 def normalize_north_star_visibility(value: object) -> str:
-    """Normalize the Identity North Star display preference."""
+    """Normalize the Identity North Star visibility to ``public``/``private``.
+
+    Legacy four-tier values fold into the binary contract: ``visible`` ->
+    ``public``; ``discreet``/``hidden`` (and anything unknown or empty) ->
+    ``private``.
+    """
     raw = str(value or "").strip().lower()
-    if raw == "public":
-        raw = "visible"
+    raw = _LEGACY_NORTH_STAR_VISIBILITY.get(raw, raw)
     return (
         raw
         if raw in NORTH_STAR_VISIBILITIES
@@ -113,20 +127,17 @@ def normalize_north_star_visibility(value: object) -> str:
     )
 
 
-def _compact_text(value: object, max_chars: int = 120) -> str:
-    """Return a single-line display summary without writing it back."""
-    text = " ".join(str(value or "").split())
-    if len(text) <= max_chars:
-        return text
-    return text[: max(0, max_chars - 3)].rstrip() + "..."
-
-
 def north_star_payload_from_identity(
     identity: dict[str, str],
     *,
     ui: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    """Return a privacy-aware North Star payload for UI read models."""
+    """Return the North Star payload for owner-facing UI read models.
+
+    Visibility is binary and informational here (public-output eligibility);
+    owner/local surfaces always see the full text, so ``locked`` stays False
+    and ``display_text`` carries the full text or brief.
+    """
     full = str(identity.get("North Star", "") or "").strip()
     brief = str(identity.get("North Star Brief", "") or "").strip()
     visibility = normalize_north_star_visibility(
@@ -139,22 +150,16 @@ def north_star_payload_from_identity(
             return fallback
         return str(ui.get(key, fallback) or fallback)
 
-    if not is_set:
-        display = text("north_star_empty", "No North Star set")
-    elif visibility == "visible":
+    if is_set:
         display = full or brief
-    elif visibility == "discreet":
-        display = brief or _compact_text(full)
-    elif visibility == "hidden":
-        display = text("north_star_hidden_display", "North Star set")
     else:
-        display = ""
+        display = text("north_star_empty", "No North Star set")
 
     return {
         "visibility": visibility,
         "display_text": display,
         "is_set": is_set,
-        "locked": visibility == "private",
+        "locked": False,
         "has_brief": bool(brief),
     }
 
@@ -164,21 +169,14 @@ def north_star_context_from_identity(
     *,
     for_agent: bool = False,
 ) -> str:
-    """Return North Star text allowed for matching or agent prompts."""
+    """Return North Star text for matching, agent prompts, and local UI.
+
+    Visibility no longer redacts these contexts (binary contract: it gates
+    only public artifacts); *for_agent* is kept for call-site compatibility.
+    """
     full = str(identity.get("North Star", "") or "").strip()
     brief = str(identity.get("North Star Brief", "") or "").strip()
-    visibility = normalize_north_star_visibility(
-        identity.get("North Star Visibility")
-    )
-    if visibility == "private":
-        return ""
-    if for_agent:
-        return full or brief
-    if visibility == "visible":
-        return full or brief
-    if visibility == "discreet":
-        return brief or _compact_text(full)
-    return ""
+    return full or brief
 
 
 def replace_section_body(text: str, title: str, body: str) -> str:

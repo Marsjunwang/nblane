@@ -49,7 +49,7 @@ class TestProfileContextEditor(unittest.TestCase):
         )
         self.assertEqual(
             next_parsed["North Star Visibility"],
-            "discreet",
+            "private",
         )
 
     def test_north_star_brief_and_visibility_round_trip(self) -> None:
@@ -69,18 +69,22 @@ class TestProfileContextEditor(unittest.TestCase):
             identity["North Star Brief"],
             "Useful robot learning systems.",
         )
+        # Stored verbatim; the binary contract maps legacy ``hidden`` on read.
         self.assertEqual(identity["North Star Visibility"], "hidden")
         payload = north_star_payload_from_identity(identity)
         self.assertTrue(payload["is_set"])
-        self.assertEqual(payload["visibility"], "hidden")
-        self.assertEqual(payload["display_text"], "North Star set")
+        self.assertEqual(payload["visibility"], "private")
+        self.assertEqual(
+            payload["display_text"],
+            "Build useful real-world robot learning systems.",
+        )
         self.assertEqual(
             north_star_context_from_identity(identity, for_agent=True),
             "Build useful real-world robot learning systems.",
         )
 
-    def test_private_north_star_redacts_payload_and_agent_context(self) -> None:
-        """Private North Star does not expose its text to payload/context."""
+    def test_private_north_star_stays_visible_to_owner_and_agent(self) -> None:
+        """Binary visibility gates public output only, never local/agent."""
         identity = {
             "North Star": "Sensitive five-year direction",
             "North Star Brief": "Safe brief",
@@ -89,12 +93,16 @@ class TestProfileContextEditor(unittest.TestCase):
         payload = north_star_payload_from_identity(identity)
 
         self.assertTrue(payload["is_set"])
-        self.assertTrue(payload["locked"])
-        self.assertEqual(payload["display_text"], "")
-        self.assertEqual(north_star_context_from_identity(identity), "")
+        self.assertFalse(payload["locked"])
+        self.assertEqual(payload["visibility"], "private")
+        self.assertEqual(payload["display_text"], "Sensitive five-year direction")
+        self.assertEqual(
+            north_star_context_from_identity(identity),
+            "Sensitive five-year direction",
+        )
         self.assertEqual(
             north_star_context_from_identity(identity, for_agent=True),
-            "",
+            "Sensitive five-year direction",
         )
 
     def test_narrative_save_preserves_generated_blocks(self) -> None:

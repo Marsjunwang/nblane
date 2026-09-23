@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -9,6 +10,8 @@ from pathlib import Path
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.profile_io import safe_profile_dir
@@ -370,24 +373,56 @@ def load_goal_book_raw(name_or_dir: str | Path) -> dict:
     return load_goal_book(name_or_dir).to_dict()
 
 
-def save_goal_book(name: str, data: dict | GoalBook) -> None:
-    """Persist goals.yaml with today's updated date."""
+def save_goal_book(
+    name_or_dir: str | Path,
+    data: dict | GoalBook,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> None:
+    """Persist goals.yaml with today's updated date.
+
+    The write is serialized via the goals.yaml sidecar lock. When
+    *expected_snapshot* is given, the file is re-checked against it after
+    the lock is acquired; a mismatch raises ``file_state.FileConflictError``
+    so a concurrent write landing between the caller's read and this save is
+    never silently overwritten.
+    """
     book = data if isinstance(data, GoalBook) else GoalBook.from_dict(data)
+    pdir = _profile_path(name_or_dir)
     if not book.profile:
-        book.profile = name
+        book.profile = pdir.name
     book.updated = date.today().isoformat()
-    path = safe_profile_dir(name, PROFILES_DIR) / GOALS_FILENAME
+    path = pdir / GOALS_FILENAME
     body = yaml.dump(
         book.to_dict(),
         allow_unicode=True,
         default_flow_style=False,
         sort_keys=False,
     )
-    atomic_write_text(path, body)
+    with locked_profile_write(pdir, GOALS_FILENAME):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=GOALS_FILENAME)
+        atomic_write_text(path, body)
     git_backup.record_change(
         [path],
-        action=f"update {name}/goals.yaml",
+        action=f"update {pdir.name}/goals.yaml",
     )
+
+
+_GOAL_ID_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def next_goal_id(book: GoalBook, title: str) -> str:
+    """Build a deterministic unique goal id from a title slug."""
+    slug = _GOAL_ID_SLUG_RE.sub("-", title.lower()).strip("-")
+    base = f"goal-{slug}" if slug else "goal"
+    used = {goal.id for goal in book.goals if goal.id}
+    if base not in used:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in used:
+        suffix += 1
+    return f"{base}-{suffix}"
 
 
 def current_goal(name_or_dir: str | Path) -> Goal | None:

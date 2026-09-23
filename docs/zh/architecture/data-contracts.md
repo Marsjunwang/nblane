@@ -29,6 +29,8 @@ source_of_truth: true
 | `plan-templates.yaml` | 习惯计划模板使用历史(按 template_id 去重) | 计划模板历史事实源 |
 | `agent-profile.yaml` | Agent 对用户的结构化 prior | Agent prior 事实源 |
 | `activity-log.yaml` | habit、checkin、weekly summary | 活动记录事实源 |
+| `goals.yaml` | 阶段目标(title/status/target/summary/skill_links) | 目标事实源 |
+| `chronicle.yaml` | append-only 叙事级事件 `{date, kind, ref, note}` | 大事记事实源;只由写端点追加,人不手改 |
 | `learning-log.yaml` | paper/article/book/repo/course 等资源 | 学习资源事实源 |
 | `inbox.yaml` | 捕获、澄清、归档的输入项 | 捕获入口事实源 |
 | `public-profile.yaml` | 公开姓名、简介、联系方式 | 公开 profile 事实源 |
@@ -38,6 +40,42 @@ source_of_truth: true
 | `public-library.yaml` | Public Site 后台文件树 | 编辑器组织层 |
 | `blog/*.md` | 公开博客 Markdown | 博客正文和 front matter |
 | `blog/*.blocknote.json` | BlockNote sidecar | 编辑器块状态，保存时可重建 Markdown |
+
+## 北极星可见性(二元)与 SKILL.md 外科写入
+
+自 2026-09-23(首页星图编辑设计 §1/§9)起,`SKILL.md` Identity 区的
+`North Star Visibility` 是**二元**字段:
+
+- 取值只有 `public` / `private`;读取侧
+  `profile_context.normalize_north_star_visibility` 把旧四档映射进来:
+  `visible` → `public`,`discreet` / `hidden` / 空 / 未知 → `private`。
+- 语义:**只门控公开产物**(公开构建/拓片/分享)。本地 UI 与 agent
+  上下文(openclaw、MCP、系统提示)永远看到全文——agent 看不到真实
+  北极星就不可能给出真实计划。
+- 写入只写 canonical 新值(`public`/`private`);`brief`
+  保留为展示简称,不是隐私机制。
+
+写入不变量(`core/north_star.py::update_north_star`):
+
+- **外科手术式**:只改 `## Identity` 里 `- **North Star**` /
+  `- **North Star Brief**` / `- **North Star Visibility**` 三行,
+  文件其余部分逐字节不动,`sync.py` 生成块不受影响。
+- 写路径持有 `SKILL.md` sidecar flock(与 sync.py / growth_log.py 同锁),
+  支持 `expected_snapshot` 锁内复核,冲突抛 `FileConflictError`(API 412)。
+- 值未变 = 完全 no-op:不写文件、不记 git backup、不追加 chronicle。
+  visibility 按归一化后的二元值比较(存着旧 `discreet`、请求
+  `private` 视为无变化)。
+
+## 大事记 chronicle.yaml
+
+append-only;每条 `{date, kind, ref, note}`。`core/chronicle.py` 的
+`append_chronicle` 在锁内 reload → append → atomic write(追加天然可
+合并),`expected_snapshot` 冲突时路由层用新快照重试一次。当前 kind:
+`north_star.rewritten`、`goal.added`、`goal.completed`、`goal.renamed`、
+`project.deleted`(2026-09-23 起,仅在删除项目时显式勾选「记入大事记」
+才落笔,默认不记);只在变化真实发生时落笔(重命名只在 title 变了时记,
+no-op 保存不记)。
+消费者:首页简报行、拓片年度叙事、openclaw 复盘素材。
 
 ## 更新顺序
 
@@ -286,6 +324,24 @@ project-board.yaml
   `kind=habit-plan` 的 case(time_range = start + duration_days,里程碑日期 =
   start + offset_days,显式 habit_id 链接),缺 habit 时在 activity-log.yaml 创建,
   并写入 profile 的 `plan-templates.yaml` 使用历史(按 template_id 去重,最新在前)。
+- 项目删除(2026-09-23,`DELETE .../project-board/cases/{case_id}`,
+  phase2-projects-hci.md 裁决 3):
+  - 请求体 `confirm_title` 必须与 case 标题逐字一致,否则 422
+    `project_delete_confirm_mismatch`;`record_chronicle` 默认 false,
+    为 true 时追加 `project.deleted`(note = 项目标题)。
+  - 写入顺序 kanban.md → project-board.yaml(→ chronicle.yaml),两文件都在各自
+    写锁内复核请求起始快照,冲突 412;走 `kanban_io.update_kanban` /
+    `project_board.update_project_board`,不裸改文件。
+  - 存活 kanban 任务的 `project_id` 清空回「未归属」;指向被删 case 里程碑的
+    `milestone_id` 一并清空;`kanban-archive.md` 历史不动。
+  - evidence-pool 的 `project_refs` **不清理**——墓碑机制负责展示;响应里的
+    `evidence_refs_kept` 是池内仍引用该 case 的条目数,`tasks_unassigned`
+    是被清空的存活任务数。删除前的后果预告由 projects-board 聚合自带数据
+    支撑(每项目 `column_counts` + `evidence_ref_count`),无需独立预览端点。
+- 习惯热力图(2026-09-23):projects-board 聚合的 `habits[]` 新增
+  `recent_days`——近 90 天(今日含当日,窗口 = today-89..today)有打卡的
+  `{date, count}` 列表,同日多行打卡 count 求和、按日期升序;`week` /
+  `streak` / `total_checkins` 口径不变(total 仍数全历史去重天数)。
 
 ### Research Workspace（已落地 P4 v1）
 

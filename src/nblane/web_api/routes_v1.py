@@ -45,6 +45,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
+from nblane.core import chronicle as chronicle_core
+from nblane.core import north_star as north_star_core
 from nblane.core import evidence_review as evidence_review_core
 from nblane.core import activity_log, home_dashboard, jd_match, learning_log, task_intake
 from nblane.core import auth as auth_core
@@ -53,7 +55,12 @@ from nblane.core import starmap_snapshot as starmap_snapshot_core
 from nblane.core.claims import accepted_claims_for_profile
 from nblane.core.evidence_resolve import resolve_node_evidence_dict
 from nblane.core.experience import load_experience_book
-from nblane.core.goals import load_goal_book
+from nblane.core.goals import (
+    Goal,
+    load_goal_book,
+    next_goal_id,
+    save_goal_book,
+)
 from nblane.core.kanban_archive import _archive_tasks, find_kanban_tasks_by_ref
 from nblane.core.kanban_io import (
     KANBAN_ARCHIVE_FILENAME,
@@ -66,6 +73,7 @@ from nblane.core.kanban_io import (
     kanban_path,
     parse_kanban,
     resolve_kanban_section,
+    update_kanban,
 )
 from nblane.core.kanban_merge import copy_kanban_sections, save_kanban_with_merge
 from nblane.core import llm as llm_client
@@ -177,6 +185,8 @@ from nblane.web_api.schemas import (
     CheckinCreateRequest,
     CheckinModel,
     CheckinMutationResponse,
+    ChronicleEntryModel,
+    ChronicleResponse,
     ErrorResponse,
     EvidenceEntryDetailModel,
     EvidenceEntryModel,
@@ -208,6 +218,9 @@ from nblane.web_api.schemas import (
     GapAnalyzeRequest,
     GapIntakeRequest,
     GoalModel,
+    GoalCreateRequest,
+    GoalMutationResponse,
+    GoalPatchRequest,
     GoalSummary,
     GoalsResponse,
     HealthIssueModel,
@@ -246,6 +259,8 @@ from nblane.web_api.schemas import (
     KanbanSummary,
     KanbanTaskModel,
     NorthStarModel,
+    NorthStarMutationResponse,
+    NorthStarPatchRequest,
     PlanTemplateHabitModel,
     PlanTemplateInstantiateRequest,
     PlanTemplateInstantiateResponse,
@@ -259,6 +274,8 @@ from nblane.web_api.schemas import (
     ProjectBoardResponse,
     ProjectBoardSummaryModel,
     ProjectCaseCreateRequest,
+    ProjectCaseDeleteRequest,
+    ProjectCaseDeleteResponse,
     ProjectCaseModel,
     ProjectCaseMutationResponse,
     ProjectCaseUpdateRequest,
@@ -273,6 +290,7 @@ from nblane.web_api.schemas import (
     ProjectsBoardGoalModel,
     ProjectsBoardHabitDayModel,
     ProjectsBoardHabitModel,
+    ProjectsBoardHabitRecentDayModel,
     ProjectsBoardMilestoneModel,
     ProjectsBoardProjectModel,
     ProjectsBoardResponse,
@@ -1869,9 +1887,80 @@ def get_profile_goals(name: str) -> GoalsResponse:
     pdir = _resolve_profile(name)
     book = load_goal_book(pdir)
     identity = parse_identity_fields(profile_io.load_skill_md(pdir.name))
+    north_star = _north_star_from_identity(identity)
+    return GoalsResponse(
+        profile=pdir.name,
+        current_goal_id=book.current_goal_id,
+        north_star=north_star,
+        goals=[GoalModel(**goal.to_dict()) for goal in book.goals],
+    )
+
+
+# --- Home starmap editing (design: docs/zh/dev/home-editing-starmap-design.md
+# §8/§9): surgical North Star rewrite, goals CRUD, and the append-only
+# chronicle. All mutations follow the ETag/If-Match + 412 + in-lock snapshot
+# discipline and append chronicle entries only for real changes.
+
+
+def _skill_md_etag(pdir: Path) -> str:
+    """Weak ETag for the profile's SKILL.md (sha256 fingerprint)."""
+    snapshot = file_state.snapshot_file(pdir / "SKILL.md")
+    return f'W/"{snapshot.sha256 or "empty"}"'
+
+
+def _goals_etag(pdir: Path) -> str:
+    """Weak ETag for the profile's goals.yaml (sha256 fingerprint)."""
+    snapshot = file_state.snapshot_file(pdir / "goals.yaml")
+    return f'W/"{snapshot.sha256 or "empty"}"'
+
+
+def _chronicle_etag(pdir: Path) -> str:
+    """Weak ETag for the profile's chronicle.yaml (sha256 fingerprint)."""
+    snapshot = file_state.snapshot_file(
+        pdir / chronicle_core.CHRONICLE_FILENAME
+    )
+    return f'W/"{snapshot.sha256 or "empty"}"'
+
+
+def _append_chronicle_entry(
+    pdir: Path,
+    kind: str,
+    *,
+    ref: str = "",
+    note: str = "",
+    snapshot: file_state.FileSnapshot | None = None,
+) -> None:
+    """Append one chronicle entry, tolerating a concurrent append once.
+
+    chronicle.yaml is append-only and ``append_chronicle`` reloads inside
+    the lock, so a snapshot conflict can only mean another writer appended
+    meanwhile — the retry with a fresh snapshot is a safe locked merge.
+    """
+    try:
+        chronicle_core.append_chronicle(
+            pdir,
+            kind,
+            ref=ref,
+            note=note,
+            expected_snapshot=snapshot,
+        )
+    except file_state.FileConflictError:
+        chronicle_core.append_chronicle(
+            pdir,
+            kind,
+            ref=ref,
+            note=note,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / chronicle_core.CHRONICLE_FILENAME
+            ),
+        )
+
+
+def _north_star_from_identity(identity: dict[str, str]) -> NorthStarModel:
+    """Owner-facing North Star model from parsed identity fields."""
     full = str(identity.get("North Star", "") or "").strip()
     brief = str(identity.get("North Star Brief", "") or "").strip()
-    north_star = NorthStarModel(
+    return NorthStarModel(
         visibility=normalize_north_star_visibility(
             identity.get("North Star Visibility")
         ),
@@ -1879,11 +1968,400 @@ def get_profile_goals(name: str) -> GoalsResponse:
         full=full,
         brief=brief,
     )
-    return GoalsResponse(
+
+
+NORTH_STAR_MUTATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match SKILL.md.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "No field provided, or visibility is not public/private."
+        ),
+    },
+}
+
+
+@router.patch(
+    "/profiles/{name}/north-star",
+    response_model=NorthStarMutationResponse,
+    responses=NORTH_STAR_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_north_star(
+    name: str,
+    body: NorthStarPatchRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> NorthStarMutationResponse | JSONResponse:
+    """Surgically rewrite the North Star in SKILL.md's Identity section.
+
+    Only the ``- **North Star**`` / ``- **North Star Brief**`` /
+    ``- **North Star Visibility**`` bullet lines are touched; generated
+    blocks and every other byte of the living document stay identical
+    (core.north_star.update_north_star). ``visibility`` is binary going
+    forward (``public``/``private``) and gates only public artifacts.
+    Honors ``If-Match`` against the SKILL.md ETag (412 on mismatch). A
+    no-op patch writes nothing and logs no chronicle entry; a real rewrite
+    of the full text appends ``north_star.rewritten``.
+    """
+    pdir = _resolve_profile(name)
+    etag = _skill_md_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "SKILL.md changed since it was loaded; reload before editing.",
+            etag,
+        )
+    if (
+        body.full is None
+        and body.brief is None
+        and body.visibility is None
+    ):
+        raise ApiError(
+            422,
+            "north_star_field_required",
+            "Provide at least one of full, brief, or visibility.",
+        )
+    visibility = body.visibility
+    if visibility is not None:
+        clean_visibility = visibility.strip().lower()
+        if clean_visibility not in ("public", "private"):
+            raise ApiError(
+                422,
+                "invalid_north_star_visibility",
+                f"visibility must be 'public' or 'private', got "
+                f"{visibility!r}.",
+            )
+        visibility = clean_visibility
+    try:
+        outcome = north_star_core.update_north_star(
+            pdir,
+            full=body.full,
+            brief=body.brief,
+            visibility=visibility,
+            expected_snapshot=file_state.snapshot_file(pdir / "SKILL.md"),
+        )
+    except FileNotFoundError:
+        raise ApiError(
+            404,
+            "skill_md_not_found",
+            f"Profile {pdir.name} has no SKILL.md to edit.",
+        ) from None
+    except file_state.FileConflictError:
+        # A concurrent write landed between the If-Match check and the
+        # in-lock snapshot re-check (TOCTOU closure).
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "SKILL.md changed while saving; reload before retrying.",
+            _skill_md_etag(pdir),
+        )
+    if "full" in outcome.changed_keys:
+        note = outcome.identity.get("North Star Brief", "").strip()
+        if not note:
+            note = outcome.identity.get("North Star", "").strip()[:80]
+        _append_chronicle_entry(
+            pdir,
+            "north_star.rewritten",
+            note=note,
+            snapshot=file_state.snapshot_file(
+                pdir / chronicle_core.CHRONICLE_FILENAME
+            ),
+        )
+    response.headers["ETag"] = _skill_md_etag(pdir)
+    return NorthStarMutationResponse(
+        ok=True,
+        changed=outcome.changed,
+        changed_keys=outcome.changed_keys,
+        north_star=_north_star_from_identity(outcome.identity),
+    )
+
+
+GOAL_MUTATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match goals.yaml.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Blank title, non-ISO target date, or unknown status."
+        ),
+    },
+}
+
+GOAL_EDIT_STATUSES = ("active", "paused", "completed")
+
+
+def _validate_goal_status(value: str) -> str:
+    """422 unless *value* is an editable goal status."""
+    clean = value.strip().lower()
+    if clean not in GOAL_EDIT_STATUSES:
+        raise ApiError(
+            422,
+            "invalid_goal_status",
+            f"status must be one of {', '.join(GOAL_EDIT_STATUSES)}, "
+            f"got {value!r}.",
+        )
+    return clean
+
+
+def _validate_goal_target(value: str) -> str:
+    """422 unless *value* is empty or an ISO date (YYYY-MM-DD)."""
+    return _validate_goal_date(value, field="target")
+
+
+def _validate_goal_start(value: str) -> str:
+    """422 unless *value* is empty or an ISO date (YYYY-MM-DD)."""
+    return _validate_goal_date(value, field="start")
+
+
+def _validate_goal_date(value: str, *, field: str) -> str:
+    """422 unless *value* is empty or an ISO date (YYYY-MM-DD)."""
+    clean = value.strip()
+    if not clean:
+        return ""
+    try:
+        return date.fromisoformat(clean).isoformat()
+    except ValueError:
+        raise ApiError(
+            422,
+            f"invalid_goal_{field}",
+            f"{field} must be an ISO date (YYYY-MM-DD), got {value!r}.",
+        ) from None
+
+
+@router.post(
+    "/profiles/{name}/goals",
+    response_model=GoalMutationResponse,
+    status_code=201,
+    responses=GOAL_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def create_profile_goal(
+    name: str,
+    body: GoalCreateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> GoalMutationResponse | JSONResponse:
+    """Create one goal in goals.yaml and append ``goal.added`` to chronicle.
+
+    The id is a deterministic slug from the title (``goal-<slug>``).
+    Honors ``If-Match`` against the goals.yaml ETag (412 on mismatch).
+    """
+    pdir = _resolve_profile(name)
+    etag = _goals_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "goals.yaml changed since it was loaded; reload before adding.",
+            etag,
+        )
+    title = body.title.strip()
+    if not title:
+        raise ApiError(422, "invalid_goal_title", "title must not be blank.")
+    status = _validate_goal_status(body.status)
+    # 立项日 (design home-starmap-enhancements §3): auto-stamp today when the
+    # caller leaves start empty; history with empty start is not backfilled.
+    start = _validate_goal_start(body.start) or date.today().isoformat()
+    target = _validate_goal_target(body.target)
+    book = load_goal_book(pdir)
+    goal = Goal(
+        id=next_goal_id(book, title),
+        title=title,
+        status=status,
+        start=start,
+        target=target,
+        summary=body.summary.strip(),
+    )
+    book.goals.append(goal)
+    try:
+        save_goal_book(
+            pdir,
+            book,
+            expected_snapshot=file_state.snapshot_file(pdir / "goals.yaml"),
+        )
+    except file_state.FileConflictError:
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "goals.yaml changed while saving; reload before retrying.",
+            _goals_etag(pdir),
+        )
+    _append_chronicle_entry(
+        pdir,
+        "goal.added",
+        ref=goal.id,
+        note=goal.title,
+        snapshot=file_state.snapshot_file(
+            pdir / chronicle_core.CHRONICLE_FILENAME
+        ),
+    )
+    response.headers["ETag"] = _goals_etag(pdir)
+    return GoalMutationResponse(
+        ok=True,
+        changed=True,
+        changed_keys=["id", "title", "status", "start", "target", "summary"],
+        goal=GoalModel(**goal.to_dict()),
+    )
+
+
+@router.patch(
+    "/profiles/{name}/goals/{goal_id}",
+    response_model=GoalMutationResponse,
+    responses={
+        **GOAL_MUTATION_RESPONSES,
+        404: {
+            "model": ErrorResponse,
+            "description": "Profile or goal not found.",
+        },
+    },
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_goal(
+    name: str,
+    goal_id: str,
+    body: GoalPatchRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> GoalMutationResponse | JSONResponse:
+    """Edit a goal's title/summary/start/target/status in goals.yaml.
+
+    Chronicle entries fire only for meaningful changes: ``goal.renamed``
+    when the title changed and ``goal.completed`` when the status moved to
+    ``completed`` — a no-op patch writes nothing and logs nothing. Honors
+    ``If-Match`` against the goals.yaml ETag (412 on mismatch).
+    """
+    pdir = _resolve_profile(name)
+    etag = _goals_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "goals.yaml changed since it was loaded; reload before editing.",
+            etag,
+        )
+    if (
+        body.title is None
+        and body.summary is None
+        and body.start is None
+        and body.target is None
+        and body.status is None
+    ):
+        raise ApiError(
+            422,
+            "goal_field_required",
+            "Provide at least one of title, summary, start, target, or status.",
+        )
+    book = load_goal_book(pdir)
+    goal = book.by_id().get(goal_id.strip())
+    if goal is None:
+        raise ApiError(
+            404, "goal_not_found", f"Unknown goal: {goal_id.strip()}"
+        )
+
+    updates: dict[str, str] = {}
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise ApiError(
+                422, "invalid_goal_title", "title must not be blank."
+            )
+        updates["title"] = title
+    if body.summary is not None:
+        updates["summary"] = body.summary.strip()
+    if body.start is not None:
+        updates["start"] = _validate_goal_start(body.start)
+    if body.target is not None:
+        updates["target"] = _validate_goal_target(body.target)
+    if body.status is not None:
+        updates["status"] = _validate_goal_status(body.status)
+
+    old_status = goal.status
+    old_title = goal.title
+    changed_keys = [
+        key for key, value in updates.items()
+        if str(getattr(goal, key)) != value
+    ]
+    if changed_keys:
+        for key, value in updates.items():
+            setattr(goal, key, value)
+        try:
+            save_goal_book(
+                pdir,
+                book,
+                expected_snapshot=file_state.snapshot_file(
+                    pdir / "goals.yaml"
+                ),
+            )
+        except file_state.FileConflictError:
+            return _kanban_error(
+                412,
+                "etag_mismatch",
+                "goals.yaml changed while saving; reload before retrying.",
+                _goals_etag(pdir),
+            )
+        chronicle_snapshot = file_state.snapshot_file(
+            pdir / chronicle_core.CHRONICLE_FILENAME
+        )
+        if "title" in changed_keys:
+            _append_chronicle_entry(
+                pdir,
+                "goal.renamed",
+                ref=goal.id,
+                note=goal.title,
+                snapshot=chronicle_snapshot,
+            )
+        if "status" in changed_keys and goal.status == "completed":
+            _append_chronicle_entry(
+                pdir,
+                "goal.completed",
+                ref=goal.id,
+                note=goal.title,
+                snapshot=chronicle_snapshot,
+            )
+    response.headers["ETag"] = _goals_etag(pdir)
+    return GoalMutationResponse(
+        ok=True,
+        changed=bool(changed_keys),
+        changed_keys=changed_keys,
+        goal=GoalModel(**goal.to_dict()),
+    )
+
+
+@router.get(
+    "/profiles/{name}/chronicle",
+    response_model=ChronicleResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_chronicle(
+    name: str,
+    response: Response,
+    limit: int = Query(50, ge=1, le=500),
+) -> ChronicleResponse:
+    """Chronicle entries, newest first (home briefing line / 拓片 / openclaw).
+
+    Read-only; carries a weak ETag of chronicle.yaml so consumers can poll
+    for new entries cheaply.
+    """
+    pdir = _resolve_profile(name)
+    entries = chronicle_core.load_chronicle(pdir)
+    response.headers["ETag"] = _chronicle_etag(pdir)
+    return ChronicleResponse(
         profile=pdir.name,
-        current_goal_id=book.current_goal_id,
-        north_star=north_star,
-        goals=[GoalModel(**goal.to_dict()) for goal in book.goals],
+        total=len(entries),
+        entries=[
+            ChronicleEntryModel(**entry.to_dict())
+            for entry in reversed(entries[-limit:])
+        ],
     )
 
 
@@ -3764,7 +4242,8 @@ PROJECT_BOARD_MUTATION_RESPONSES = {
         "model": ErrorResponse,
         "description": (
             "Blank title, out-of-domain status/kind/visibility, duplicate id, "
-            "unknown section, or AI suggest-refs unavailable."
+            "unknown section, delete confirmation title mismatch, or AI "
+            "suggest-refs unavailable."
         ),
     },
 }
@@ -4027,6 +4506,110 @@ def archive_profile_project_case(
     _find_project_case(board, case_id)
     update_project_case(board, case_id, status="archived")
     return _synced_case_response(pdir, board, case_id, response, snapshots)
+
+
+@router.delete(
+    "/profiles/{name}/project-board/cases/{case_id}",
+    response_model=ProjectCaseDeleteResponse,
+    responses=PROJECT_BOARD_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_project_case(
+    name: str,
+    case_id: str,
+    body: ProjectCaseDeleteRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> ProjectCaseDeleteResponse | JSONResponse:
+    """Delete one project case for good (user-decided, type-the-name confirm).
+
+    ``confirm_title`` must equal the case title exactly, else 422
+    ``project_delete_confirm_mismatch``. Consequences, in write order:
+
+    1. Live kanban.md tasks owned via ``project_id`` are cleared back to
+       unassigned (their ``milestone_id`` is cleared too when it named one
+       of the case's milestones); kanban-archive.md history is untouched.
+    2. The case is removed from project-board.yaml.
+    3. Evidence-pool ``project_refs`` are NOT touched — the tombstone
+       mechanism handles display of references to the deleted case.
+
+    With ``record_chronicle`` (default off) a ``project.deleted`` entry is
+    appended to chronicle.yaml with the case title as the note. Both file
+    writes re-check their request-start snapshots inside the write locks;
+    a mismatch answers 412 with a fresh board ETag (which covers
+    kanban.md + project-board.yaml). Honors ``If-Match`` (412 on stale).
+    """
+    checked = _check_board_mutation(name, if_match)
+    if isinstance(checked, JSONResponse):
+        return checked
+    pdir, _board, snapshots = checked
+    case = _find_project_case(_board, case_id)
+    if body.confirm_title.strip() != case.title:
+        raise ApiError(
+            422,
+            "project_delete_confirm_mismatch",
+            "Confirmation title does not match the project case title; "
+            f"type {case.title!r} exactly to delete.",
+        )
+    milestone_ids = {
+        milestone.id for milestone in case.milestones if milestone.id
+    }
+    raw_pool = profile_io.load_evidence_pool_raw(pdir) or {}
+    evidence_refs_kept = sum(
+        1
+        for row in raw_pool.get("evidence_entries") or []
+        if isinstance(row, dict) and case.id in (row.get("project_refs") or [])
+    )
+
+    def _unassign(sections: dict[str, list[KanbanTask]]) -> int:
+        cleared = 0
+        for tasks in sections.values():
+            for task in tasks:
+                if task.project_id != case.id:
+                    continue
+                task.project_id = ""
+                if task.milestone_id in milestone_ids:
+                    task.milestone_id = ""
+                cleared += 1
+        return cleared
+
+    def _remove(board: ProjectBoard) -> None:
+        board.project_cases = [
+            item for item in board.project_cases if item.id != case.id
+        ]
+
+    try:
+        tasks_unassigned = update_kanban(
+            pdir, _unassign, expected_snapshot=snapshots["kanban"]
+        )
+        update_project_board(
+            pdir, _remove, expected_snapshot=snapshots["board"]
+        )
+    except file_state.FileConflictError:
+        return _project_board_error(
+            412,
+            "etag_mismatch",
+            "Project board source files changed while deleting; "
+            "reload before retrying.",
+            _project_board_etag(pdir),
+        )
+    if body.record_chronicle:
+        _append_chronicle_entry(
+            pdir,
+            "project.deleted",
+            ref=case.id,
+            note=case.title,
+            snapshot=file_state.snapshot_file(
+                pdir / chronicle_core.CHRONICLE_FILENAME
+            ),
+        )
+    response.headers["ETag"] = _project_board_etag(pdir)
+    return ProjectCaseDeleteResponse(
+        ok=True,
+        deleted_id=case.id,
+        tasks_unassigned=tasks_unassigned,
+        evidence_refs_kept=evidence_refs_kept,
+    )
 
 
 def _find_milestone(case: ProjectCase, milestone_id: str) -> ProjectMilestone:
@@ -4417,6 +5000,7 @@ def _projects_board_project_model(
         column_counts=dict(project.column_counts),
         done_count=project.done_count,
         archived_done_count=project.archived_done_count,
+        evidence_ref_count=project.evidence_ref_count,
         last_activity=project.last_activity,
         habit_id=project.habit_id,
     )
@@ -4438,7 +5022,7 @@ def get_profile_projects_board(name: str, response: Response) -> ProjectsBoardRe
     live tasks grouped by column (``someday`` as a badge list, not a
     column), an ``unassigned_tasks`` lane for tasks owned by no project, and
     habit check-in strips (current ISO week dots + streak ending today +
-    total). Full data, no display caps. The response carries the
+    total + ``recent_days`` heatmap window over the trailing 90 days). Full data, no display caps. The response carries the
     board-source ETag (see module docstring pattern) for use as ``If-Match``
     on the kanban/check-in mutations.
     """
@@ -4487,6 +5071,10 @@ def get_profile_projects_board(name: str, response: Response) -> ProjectsBoardRe
                 total_checkins=habit.total_checkins,
                 last_checkin=habit.last_checkin,
                 project_id=habit.project_id,
+                recent_days=[
+                    ProjectsBoardHabitRecentDayModel(**vars(day))
+                    for day in habit.recent_days
+                ],
             )
             for habit in board.habits
         ],
@@ -6185,16 +6773,7 @@ def _sidecar_info(name: str, user: CurrentUser) -> SidecarInfoModel:
 def _north_star_model(pdir: Path) -> NorthStarModel:
     """Owner-facing North Star (same projection as the goals endpoint)."""
     identity = parse_identity_fields(profile_io.load_skill_md(pdir.name))
-    full = str(identity.get("North Star", "") or "").strip()
-    brief = str(identity.get("North Star Brief", "") or "").strip()
-    return NorthStarModel(
-        visibility=normalize_north_star_visibility(
-            identity.get("North Star Visibility")
-        ),
-        is_set=bool(full or brief),
-        full=full,
-        brief=brief,
-    )
+    return _north_star_from_identity(identity)
 
 
 @router.get(

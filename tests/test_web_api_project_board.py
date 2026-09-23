@@ -2,11 +2,13 @@
 
 Covers the board read (cases with milestones/owned tasks/derived range,
 summary counters, ref options, ETag header), case create/save/archive with
-workspace sync into kanban + evidence pool, milestone add/save/delete,
-project-linked kanban task add/move with board re-sync, the AI suggest-refs
-endpoint (422 degradation without an LLM backend, mocked success), and the
-weak-ETag ``If-Match`` 412 contract. 401/403 auth rules mirror the other
-web_api suites.
+workspace sync into kanban + evidence pool, the user-decided case delete
+(type-the-name confirm, tasks back to unassigned, evidence refs kept,
+optional chronicle entry), milestone add/save/delete, project-linked kanban
+task add/move with board re-sync, the AI suggest-refs endpoint (422
+degradation without an LLM backend, mocked success), and the weak-ETag
+``If-Match`` 412 contract. 401/403 auth rules mirror the other web_api
+suites.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from nblane.core import auth as auth_core
+from nblane.core import chronicle as chronicle_core
 from nblane.core.ai.actions import AIActionResult
 from nblane.core.paths import REPO_ROOT
 from nblane.web_api import app, create_app
@@ -460,6 +463,158 @@ class TestProjectCaseMutations(ProjectBoardTestBase):
         self.assertEqual(stale.json()["code"], "etag_mismatch")
         # The 412 carries a fresh ETag so the client can reload and retry.
         self.assertEqual(stale.headers["ETag"], first.headers["ETag"])
+
+
+class TestProjectCaseDelete(ProjectBoardTestBase):
+    """DELETE /project-board/cases/{case_id}: user-decided project deletion."""
+
+    DELETE_URL = "/api/v1/profiles/alice/project-board/cases/project:robot-arm"
+
+    def _delete(
+        self, client: TestClient, body: dict | None = None, **kwargs: object
+    ):
+        return client.request(
+            "DELETE",
+            self.DELETE_URL,
+            json={"confirm_title": "Robot Arm", **(body or {})},
+            **kwargs,
+        )
+
+    def test_delete_happy_path_default_no_chronicle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            response = self._delete(client)
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(response.headers["ETag"].startswith('W/"'))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["deleted_id"], "project:robot-arm")
+            # task-owned (Doing) + task-done (Done) lose their project_id.
+            self.assertEqual(payload["tasks_unassigned"], 2)
+            # ev-1 keeps its project_refs entry (tombstone display).
+            self.assertEqual(payload["evidence_refs_kept"], 1)
+
+            board = _board_yaml(profile)
+            self.assertEqual(
+                [case["id"] for case in board["project_cases"]],
+                ["project:old"],
+            )
+            kanban = _kanban_text(profile)
+            self.assertNotIn("project:robot-arm", kanban)
+            # The deleted case's milestone ref is cleared with the owner.
+            self.assertNotIn("milestone:mvp", kanban)
+            # Evidence pool is untouched: ev-1 still references the case.
+            pool = yaml.safe_load(
+                (profile / "evidence-pool.yaml").read_text(encoding="utf-8")
+            )
+            ev1 = next(
+                row for row in pool["evidence_entries"] if row["id"] == "ev-1"
+            )
+            self.assertEqual(ev1["project_refs"], ["project:robot-arm"])
+            # record_chronicle defaults off: no chronicle file is created.
+            self.assertFalse((profile / "chronicle.yaml").exists())
+
+    def test_delete_with_record_chronicle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            response = self._delete(client, {"record_chronicle": True})
+            self.assertEqual(response.status_code, 200)
+            entries = chronicle_core.load_chronicle(profile)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].kind, "project.deleted")
+        self.assertEqual(entries[0].ref, "project:robot-arm")
+        self.assertEqual(entries[0].note, "Robot Arm")
+
+    def test_delete_confirm_mismatch_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            before_board = _board_yaml(profile)
+            before_kanban = _kanban_text(profile)
+            response = self._delete(client, {"confirm_title": "robot arm"})
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["code"], "project_delete_confirm_mismatch"
+            )
+            # Nothing was written.
+            self.assertEqual(_board_yaml(profile), before_board)
+            self.assertEqual(_kanban_text(profile), before_kanban)
+
+    def test_delete_unknown_case_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            response = client.request(
+                "DELETE",
+                "/api/v1/profiles/alice/project-board/cases/project:ghost",
+                json={"confirm_title": "Ghost"},
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "project_case_not_found")
+
+    def test_delete_unknown_profile_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            response = client.request(
+                "DELETE",
+                "/api/v1/profiles/nobody/project-board/cases/project:robot-arm",
+                json={"confirm_title": "Robot Arm"},
+            )
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_stale_if_match_412(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            etag = client.get("/api/v1/profiles/alice/project-board").headers[
+                "ETag"
+            ]
+            first = client.post(
+                "/api/v1/profiles/alice/project-board/cases/project:robot-arm/save",
+                json={"summary": "first write wins"},
+                headers={"If-Match": etag},
+            )
+            stale = self._delete(client, headers={"If-Match": etag})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(stale.status_code, 412)
+        self.assertEqual(stale.json()["code"], "etag_mismatch")
+
+    def test_delete_unauthenticated_401(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            users_file = _write_users_file(root / "users.yaml")
+            env = {
+                "NBLANE_AUTH_FILE": str(users_file),
+                "NBLANE_AUTH_SESSION_SECRET": TEST_SESSION_SECRET,
+            }
+            patcher = patch.dict(os.environ, env)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+            for target in (
+                "nblane.core.profile_io.PROFILES_DIR",
+                "nblane.core.io.PROFILES_DIR",
+                "nblane.core.project_board.PROFILES_DIR",
+                "nblane.core.research_sources.PROFILES_DIR",
+            ):
+                patcher = patch(target, root)
+                self.addCleanup(patcher.stop)
+                patcher.start()
+            response = TestClient(create_app()).request(
+                "DELETE",
+                self.DELETE_URL,
+                json={"confirm_title": "Robot Arm"},
+            )
+        self.assertEqual(response.status_code, 401)
 
 
 class TestProjectMilestoneMutations(ProjectBoardTestBase):

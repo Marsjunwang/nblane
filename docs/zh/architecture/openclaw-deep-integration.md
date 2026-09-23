@@ -214,7 +214,7 @@ context|gap/{task}`、`agent://tasks|task/{task_id}`；工具 `append_growth_log
 
 | URI | 内容 | 数据来源 |
 |-----|------|----------|
-| `profile://goals` | goals.yaml 摘要（North Star 可见性规则沿用 `core/context.py:278` 的脱敏逻辑） | `core/goals.py` |
+| `profile://goals` | goals.yaml 摘要 + North Star 全文（2026-09-23 起二元可见性,只门控公开产物,agent 上下文不再脱敏;private 目标仍不出现) | `core/goals.py` |
 | `profile://evidence` | 证据池摘要（count by status + 最近 N 条） | `core/profile_io.load_evidence_pool` |
 | `profile://inbox` | inbox.yaml 未处置条目 | `core/inbox.load_inbox:310` |
 | `profile://learning` | learning-log 摘要 | `core/learning_log.py` |
@@ -290,7 +290,8 @@ OpenClaw 的混合检索（BM25+向量），正是跨 agent 共享语料的文�
    `~/.openclaw/workspace/memory/nblane/`：
    - `skill-tree.md`（`skill-tree.yaml` 渲染，复用 `core/sync.py:182`
      `build_generated_blocks` 的渲染器抽取复用）
-   - `goals.md`（脱敏规则同 `core/context.py:278`）
+   - `goals.md`(private 目标不出现;North Star 全文——二元可见性只门控
+     公开产物,见 home-editing-starmap-design.md §1)
    - `kanban.md`（直接复制，本来就是 Markdown）
    - `profile-summary.md`（`mcp_server.build_summary_text:96` 复用）
    每个文件头部加 frontmatter 式注释：`source: nblane / generated:
@@ -342,8 +343,8 @@ Blinko 双层笔记模式（§8.5）：闪记（闪念）→ 周回顾时晋升�
 
 ### 4.4 测试与验收
 
-- `tests/test_openclaw_corpus.py`：渲染输出的快照测试 + 脱敏测试
-  （North Star private 不外泄）。
+- `tests/test_openclaw_corpus.py`：渲染输出的快照测试 + 隐私测试
+  （private 目标不外泄;North Star 对 agent 永远可见）。
 - 端到端：手动跑一次 daily-review 自动化（`openclaw automations run <id>
   --wait`），断言 SKILL.md Growth Log 增行、OpenClaw daily memory 也写。
 - 漂移报告：人为在 MEMORY.md 写一条与 skill-tree 矛盾的事实，跑

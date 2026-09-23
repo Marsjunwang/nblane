@@ -401,10 +401,12 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertFalse(payload["goal"]["locked"])
         self.assertEqual(payload["goal"]["projection"]["visibility"], "discreet")
         self.assertEqual(payload["goal"]["editor"]["title"], "Robotics demo")
-        self.assertEqual(payload["north_star"]["visibility"], "discreet")
+        # Binary contract: legacy ``discreet`` maps to ``private`` on read;
+        # owner-facing payloads still carry the full text.
+        self.assertEqual(payload["north_star"]["visibility"], "private")
         self.assertEqual(
             payload["north_star"]["display_text"],
-            "Reliable robot learning systems.",
+            "Build reliable robot learning systems.",
         )
         self.assertEqual(payload["goal_counts"]["active"], 2)
         self.assertEqual(payload["sources"]["active_total"], 1)
@@ -514,7 +516,7 @@ class TestHomeDashboard(unittest.TestCase):
         )
         self.assertIn(("project:nblane", "source:inbox", "contains"), graph_edges)
         graph_text = yaml.dump(payload["graph"], allow_unicode=True)
-        self.assertIn("Reliable robot learning systems.", graph_text)
+        self.assertIn("Build reliable robot learning systems.", graph_text)
         self.assertIn("ROS 2 Basics", graph_text)
         # Owner-facing dashboard graph: a private project now shows its real title
         # (privacy is carried by the node's `locked` flag, not by masking the name).
@@ -554,8 +556,8 @@ class TestHomeDashboard(unittest.TestCase):
         graph_text = yaml.dump(payload["graph"], allow_unicode=True)
         self.assertNotIn("Sensitive title", graph_text)
 
-    def test_dashboard_payload_redacts_private_north_star(self) -> None:
-        """Private North Star text does not enter the React payload graph."""
+    def test_dashboard_payload_shows_private_north_star_to_owner(self) -> None:
+        """Binary visibility is informational; the owner payload keeps text."""
         with tempfile.TemporaryDirectory() as tmp_s:
             profile = self._profile(Path(tmp_s))
             skill_path = profile / "SKILL.md"
@@ -568,10 +570,12 @@ class TestHomeDashboard(unittest.TestCase):
             )
             payload = dashboard_payload(profile)
 
-        self.assertTrue(payload["north_star"]["locked"])
-        self.assertEqual(payload["north_star"]["display_text"], "")
-        dump = yaml.dump(payload, allow_unicode=True)
-        self.assertNotIn("Build reliable robot learning systems", dump)
+        self.assertFalse(payload["north_star"]["locked"])
+        self.assertEqual(payload["north_star"]["visibility"], "private")
+        self.assertEqual(
+            payload["north_star"]["display_text"],
+            "Build reliable robot learning systems.",
+        )
 
     def test_dashboard_payload_empty_profile_defaults(self) -> None:
         """Empty profiles still provide renderable fallback payload fields."""

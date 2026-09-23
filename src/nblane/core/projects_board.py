@@ -98,6 +98,7 @@ class BoardProject:
     column_counts: dict[str, int] = field(default_factory=dict)
     done_count: int = 0
     archived_done_count: int = 0
+    evidence_ref_count: int = 0
     last_activity: str = ""
     habit_id: str = ""
 
@@ -124,8 +125,21 @@ class BoardHabitDay:
 
 
 @dataclass
+class BoardHabitRecentDay:
+    """One checked day in the heatmap window (date + summed check-in count)."""
+
+    date: str
+    count: float = 1.0
+
+
+@dataclass
 class BoardHabit:
-    """Habit check-in aggregation for continuous (habit) lanes."""
+    """Habit check-in aggregation for continuous (habit) lanes.
+
+    ``recent_days`` powers the GitHub-style heatmap: checked days within the
+    trailing ``RECENT_DAYS_WINDOW``-day window ending today, oldest first,
+    with same-day check-in rows summed into one count.
+    """
 
     id: str
     title: str = ""
@@ -136,6 +150,7 @@ class BoardHabit:
     total_checkins: int = 0
     last_checkin: str = ""
     project_id: str = ""
+    recent_days: list[BoardHabitRecentDay] = field(default_factory=list)
 
 
 @dataclass
@@ -249,6 +264,7 @@ def _build_project(
         summary=case.summary,
         time_range=case.time_range,
         goal_refs=list(case.goal_refs),
+        evidence_ref_count=len([ref for ref in case.evidence_refs if str(ref).strip()]),
     )
     last_activity = ""
     for milestone in case.milestones:
@@ -302,29 +318,39 @@ def _build_project(
     return project
 
 
-def _habit_checkin_dates(log: activity_log.ActivityLog, habit_id: str) -> set[str]:
-    """All ISO dates with a check-in for one habit."""
-    dates: set[str] = set()
+def _habit_checkin_day_counts(
+    log: activity_log.ActivityLog, habit_id: str
+) -> dict[str, float]:
+    """ISO date -> summed check-in count for one habit (days deduped)."""
+    counts: dict[str, float] = {}
     for checkin in log.checkins:
         if habit_id not in checkin.habits and checkin.habit_id != habit_id:
             continue
         text = activity_log._coerce_date_text(checkin.date)
         if text:
-            dates.add(text)
-    return dates
+            counts[text] = counts.get(text, 0.0) + checkin.count
+    return counts
+
+
+# Trailing window (days, today inclusive) for the habit heatmap rows.
+RECENT_DAYS_WINDOW = 90
 
 
 def _build_habit(
     habit: activity_log.Habit,
-    dates: set[str],
+    day_counts: dict[str, float],
     today: date,
 ) -> BoardHabit:
-    """Week dots + streak + totals for one habit (build_data semantics).
+    """Week dots + streak + totals + heatmap window for one habit.
 
     The week strip is the current ISO week (Monday..Sunday). The streak
     counts consecutive checked days ending *today* — a day without a
     check-in today means streak 0, matching the approved mockup.
+    ``recent_days`` covers the trailing RECENT_DAYS_WINDOW days ending
+    today (sorted ascending); ``total_checkins``/``last_checkin`` still
+    reflect the whole history.
     """
+    dates = set(day_counts)
     week_start = today - timedelta(days=today.weekday())
     week = [
         BoardHabitDay(
@@ -339,6 +365,12 @@ def _build_habit(
     while cursor.isoformat() in dates:
         streak += 1
         cursor -= timedelta(days=1)
+    window_start = (today - timedelta(days=RECENT_DAYS_WINDOW - 1)).isoformat()
+    recent_days = [
+        BoardHabitRecentDay(date=day, count=day_counts[day])
+        for day in sorted(day_counts)
+        if window_start <= day <= today.isoformat()
+    ]
     return BoardHabit(
         id=habit.id,
         title=habit.title,
@@ -348,6 +380,7 @@ def _build_habit(
         streak=streak,
         total_checkins=len(dates),
         last_checkin=max(dates) if dates else "",
+        recent_days=recent_days,
     )
 
 
@@ -386,7 +419,7 @@ def build_projects_board(
     habits: list[BoardHabit] = []
     habit_rows: dict[str, BoardHabit] = {}
     for habit in log.habits:
-        row = _build_habit(habit, _habit_checkin_dates(log, habit.id), today)
+        row = _build_habit(habit, _habit_checkin_day_counts(log, habit.id), today)
         habits.append(row)
         habit_rows[habit.id] = row
 

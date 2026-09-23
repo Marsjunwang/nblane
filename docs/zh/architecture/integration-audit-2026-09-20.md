@@ -1064,8 +1064,11 @@ frontend vitest 130 passed（agent-60 12:23 实测），无回归（本批产品
   →预览 iframe 真实 HTML；private 关草稿 422 可见性门禁）；
   `spa_mobile.spec.ts` 抽屉逐项列表补「公开构建」（15+2=17 项）。
 - **回归**：pytest 1563 passed（+23）、vitest 130 passed（+8）、`tsc`+`vite
-  build` 干净并同步 `web_ui/static/`、`npm run test:e2e` 退出码 0（见本条目
-  提交时工作区；未恶化既有 flaky）。文档：迁移方案进度表 M3–M5 行移除
+  build` 干净并同步 `web_ui/static/`、`npm run test:e2e` **退出码 0**
+  （86 passed + 1 flaky[startree 既有 retry 即过] + 5 skipped，16.8 分钟；
+  当日本机 cron 负载风暴持续数小时、三轮风暴轮按七·十二约定作废——失败点
+  全部落在既有负载敏感 spec 且逐轮漂移，本切片 spec 风暴中仍 3× 全绿——
+  最终在负载 < 4 的平静窗口复跑通过）。文档：迁移方案进度表 M3–M5 行移除
   Public Build；体验官手册 §2.11 新增走查、§1.4/§5.1 导航计数 16→17、
   页数 16→17（§7 已知不足本无 Public Build 项，无需移除）。
 

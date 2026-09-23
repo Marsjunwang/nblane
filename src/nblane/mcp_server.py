@@ -71,7 +71,6 @@ from nblane.core.learning_log import load_learning_log, summarize_learning_log
 from nblane.core.models import EVIDENCE_TYPES
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.profile_context import (
-    normalize_north_star_visibility,
     north_star_context_from_identity,
     parse_identity_fields,
 )
@@ -287,7 +286,7 @@ _LEARNING_RECENT_LIMIT = 10
 
 
 def build_goals_text(profile_name: str) -> str:
-    """Goals summary with the same privacy redaction as agent context."""
+    """Goals summary with the same privacy contract as agent context."""
     pdir = profile_dir(profile_name)
     lines: list[str] = [f"# Goals: {profile_name}", ""]
 
@@ -297,15 +296,10 @@ def build_goals_text(profile_name: str) -> str:
         identity = parse_identity_fields(
             skill_md.read_text(encoding="utf-8")
         )
-    visibility = normalize_north_star_visibility(
-        identity.get("North Star Visibility")
-    )
     north_star = north_star_context_from_identity(identity, for_agent=True)
     lines.append("## North Star")
     if north_star:
         lines.append(north_star)
-    elif visibility == "private":
-        lines.append("(redacted: North Star Visibility is private)")
     else:
         lines.append("(not set)")
     lines.append("")

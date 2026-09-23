@@ -199,9 +199,10 @@ class TestRenderProfileCorpus(unittest.TestCase):
 
 
 class TestCorpusPrivacy(unittest.TestCase):
-    """Private North Star and private goals never reach the corpus."""
+    """Private goals never reach the corpus; the North Star always does."""
 
-    def test_private_north_star_is_redacted_in_goals_md(self) -> None:
+    def test_private_north_star_is_rendered_in_goals_md(self) -> None:
+        """Binary visibility gates public artifacts only; openclaw sees all."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = _make_profile(root, north_star_visibility="private")
@@ -213,10 +214,7 @@ class TestCorpusPrivacy(unittest.TestCase):
                 render_profile_corpus("alice", out_dir, today=date(2026, 9, 18))
 
             goals_text = (out_dir / "goals.md").read_text(encoding="utf-8")
-            self.assertNotIn("secret robotics overlord", goals_text)
-            self.assertIn(
-                "(redacted: North Star Visibility is private)", goals_text
-            )
+            self.assertIn("secret robotics overlord", goals_text)
             self.assertIn("Ship manipulation demo", goals_text)
             # Private goals are hidden from agent context as well.
             self.assertNotIn("Secret side quest", goals_text)

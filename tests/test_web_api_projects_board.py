@@ -2,11 +2,12 @@
 
 Covers the aggregated GET (goal grouping, per-column tasks with someday as
 a badge list, Done counts including kanban-archive.md, milestone progress,
-the unassigned lane, habit week dots/streak/totals, ETag header), the
-kanban card schedule mutation (planned_start/planned_end set/clear,
-validation, If-Match 412), and the check-in append mutation (habit or
-project ref, default date, validation, If-Match 412). All profiles are
-built under tmp_path; real profiles/ is never touched.
+the unassigned lane, habit week dots/streak/totals plus the 90-day
+``recent_days`` heatmap window, the delete-preview ``evidence_ref_count``,
+ETag header), the kanban card schedule mutation (planned_start/planned_end
+set/clear, validation, If-Match 412), and the check-in append mutation
+(habit or project ref, default date, validation, If-Match 412). All
+profiles are built under tmp_path; real profiles/ is never touched.
 """
 
 from __future__ import annotations
@@ -113,6 +114,7 @@ PROJECT_BOARD_FIXTURE = {
             "summary": "Build the arm",
             "time_range": "2026-09-01/2026-12-31",
             "goal_refs": ["goal-1"],
+            "evidence_refs": ["ev-1", "ev-2"],
             "milestones": [
                 {
                     "id": "milestone:mvp",
@@ -303,6 +305,8 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
             {"queue": 1, "doing": 0, "someday": 1, "done": 3},
         )
         self.assertEqual(arm["last_activity"], "2026-09-18")
+        # Delete-preview counter: the case's declared evidence refs.
+        self.assertEqual(arm["evidence_ref_count"], 2)
         # Milestone progress resolves refs against live Done AND the archive.
         milestone = arm["milestones"][0]
         self.assertEqual(milestone["status"], "planned")
@@ -353,6 +357,15 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         # Totals count distinct checked days (3), not rows (4).
         self.assertEqual(exercise["total_checkins"], 3)
         self.assertEqual(exercise["last_checkin"], TODAY.isoformat())
+        # Heatmap window: checked days ascending, same-day rows summed.
+        self.assertEqual(
+            exercise["recent_days"],
+            [
+                {"date": FIVE_DAYS_AGO.isoformat(), "count": 1.0},
+                {"date": YESTERDAY.isoformat(), "count": 2.0},
+                {"date": TODAY.isoformat(), "count": 1.0},
+            ],
+        )
         # habit<->project name link (habit id == project title, normalized).
         self.assertEqual(exercise["project_id"], "project:exercise")
 
@@ -361,6 +374,10 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         self.assertEqual(reading["streak"], 0)
         self.assertEqual(reading["total_checkins"], 1)
         self.assertEqual(reading["last_checkin"], TEN_DAYS_AGO.isoformat())
+        self.assertEqual(
+            reading["recent_days"],
+            [{"date": TEN_DAYS_AGO.isoformat(), "count": 1.0}],
+        )
         self.assertEqual(reading["project_id"], "")
 
         goals = {goal["id"]: goal for goal in payload["goals"]}
@@ -368,6 +385,36 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         self.assertEqual(exercise_project["habit_id"], "exercise")
         self.assertEqual(
             exercise_project["last_activity"], TODAY.isoformat()
+        )
+
+    def test_habit_recent_days_90_day_window(self) -> None:
+        """recent_days keeps the trailing 90 days (today inclusive)."""
+        in_window = TODAY - timedelta(days=89)
+        out_window = TODAY - timedelta(days=90)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            log_path = profile / "activity-log.yaml"
+            raw = yaml.safe_load(log_path.read_text(encoding="utf-8"))
+            raw["checkins"] = [
+                {"date": in_window.isoformat(), "habit_id": "exercise"},
+                {"date": out_window.isoformat(), "habit_id": "exercise"},
+                {"date": (TODAY + timedelta(days=1)).isoformat(),
+                 "habit_id": "exercise"},
+            ]
+            log_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+            payload = self._get(self._client(root))
+        exercise = next(h for h in payload["habits"] if h["id"] == "exercise")
+        # 89 days ago is in, 90 days ago and future days are out; the
+        # history-wide totals still count every distinct checked day.
+        self.assertEqual(
+            exercise["recent_days"],
+            [{"date": in_window.isoformat(), "count": 1.0}],
+        )
+        self.assertEqual(exercise["total_checkins"], 3)
+        self.assertEqual(
+            exercise["last_checkin"],
+            (TODAY + timedelta(days=1)).isoformat(),
         )
 
     def test_etag_changes_with_sources(self) -> None:

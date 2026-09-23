@@ -327,11 +327,16 @@ def load_goal_book_raw(name_or_dir: str | Path) -> dict:
     return _load_goal_book_raw(name_or_dir)
 
 
-def save_goal_book(name: str, data: dict) -> None:
+def save_goal_book(
+    name_or_dir: str | Path,
+    data: dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> None:
     """Write goals.yaml with today's date updated."""
     from nblane.core.goals import save_goal_book as _save_goal_book
 
-    _save_goal_book(name, data)
+    _save_goal_book(name_or_dir, data, expected_snapshot=expected_snapshot)
 
 
 def load_skill_md(name: str) -> str:

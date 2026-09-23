@@ -16,10 +16,8 @@ from nblane.core.io import (
 from nblane.core.models import Evidence
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.profile_context import (
-    normalize_north_star_visibility,
     north_star_context_from_identity,
     parse_identity_fields,
-    update_identity_fields,
 )
 from nblane.core.profile_io import safe_profile_dir
 
@@ -277,19 +275,14 @@ def build_system_prompt(
 
 
 def _profile_text_for_agent_context(profile_text: str) -> str:
-    """Redact Identity fields that are explicitly private for agent context."""
-    identity = parse_identity_fields(profile_text)
-    if normalize_north_star_visibility(
-        identity.get("North Star Visibility")
-    ) != "private":
-        return profile_text
-    return update_identity_fields(
-        profile_text,
-        {
-            "North Star": "",
-            "North Star Brief": "",
-        },
-    )
+    """Return SKILL.md verbatim for agent context.
+
+    North Star visibility is binary and gates only public artifacts
+    (docs/zh/dev/home-editing-starmap-design.md §1): agents always see the
+    full text — an agent that cannot see the real North Star cannot produce
+    a real plan.
+    """
+    return profile_text
 
 
 def _stage_goal_context(profile_dir: Path, profile_text: str) -> str:

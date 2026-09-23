@@ -202,8 +202,13 @@ goals:
         self.assertNotIn("Sensitive focus", prompt)
         self.assertNotIn("Sensitive notes", prompt)
 
-    def test_private_north_star_is_redacted_from_context(self) -> None:
-        """North Star Visibility private redacts SKILL.md and goal section."""
+    def test_private_north_star_still_enters_agent_context(self) -> None:
+        """Binary North Star visibility gates public output, never agents.
+
+        Per docs/zh/dev/home-editing-starmap-design.md §1, openclaw and local
+        agent context always see the full text — an agent that cannot see the
+        real North Star cannot produce a real plan.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = root / "alice"
@@ -220,8 +225,8 @@ goals:
             with patch("nblane.core.context.PROFILES_DIR", root):
                 prompt = generate("alice")
 
-        self.assertNotIn("Sensitive long-term direction", prompt)
-        self.assertNotIn("Sensitive brief", prompt)
+        self.assertIn("Sensitive long-term direction", prompt)
+        self.assertIn("Sensitive brief", prompt)
         self.assertIn("- **North Star Visibility**: private", prompt)
 
     def test_active_goals_and_confirmed_skill_links_enter_context(self) -> None:

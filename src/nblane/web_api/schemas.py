@@ -459,13 +459,36 @@ class NorthStarModel(BaseModel):
     """Owner-facing North Star from SKILL.md identity (no redaction here).
 
     This API serves the authenticated owner's UI, so ``full``/``brief`` are
-    returned verbatim; ``visibility`` is informational for the UI badge.
+    returned verbatim; ``visibility`` is the binary public-output flag
+    (``public``/``private``; legacy ``discreet``/``hidden``/``visible`` map
+    on read) and is informational for the UI badge.
     """
 
-    visibility: str = "discreet"
+    visibility: str = "private"
     is_set: bool = False
     full: str = ""
     brief: str = ""
+
+
+class NorthStarPatchRequest(BaseModel):
+    """Body for PATCH .../north-star; at least one field is required.
+
+    ``visibility`` accepts only the canonical binary values
+    (``public``/``private``).
+    """
+
+    full: str | None = None
+    brief: str | None = None
+    visibility: str | None = None
+
+
+class NorthStarMutationResponse(BaseModel):
+    """Result of the surgical North Star rewrite."""
+
+    ok: bool = True
+    changed: bool = False
+    changed_keys: list[str] = Field(default_factory=list)
+    north_star: NorthStarModel = Field(default_factory=NorthStarModel)
 
 
 class GoalsResponse(BaseModel):
@@ -475,6 +498,61 @@ class GoalsResponse(BaseModel):
     current_goal_id: str = ""
     north_star: NorthStarModel = Field(default_factory=NorthStarModel)
     goals: list[GoalModel] = Field(default_factory=list)
+
+
+class GoalCreateRequest(BaseModel):
+    """Body for POST .../goals (only ``title`` is required).
+
+    ``start``/``target`` must be ISO dates (YYYY-MM-DD) when given; an
+    empty ``start`` defaults to today server-side (立项日). ``status``
+    accepts ``active``/``paused``/``completed`` (default ``active``).
+    """
+
+    title: str
+    summary: str = ""
+    start: str = ""
+    target: str = ""
+    status: str = "active"
+
+
+class GoalPatchRequest(BaseModel):
+    """Body for PATCH .../goals/{goal_id}; at least one field is required."""
+
+    title: str | None = None
+    summary: str | None = None
+    start: str | None = None
+    target: str | None = None
+    status: str | None = None
+
+
+class GoalMutationResponse(BaseModel):
+    """Result of one goal create/patch mutation.
+
+    ``changed_keys`` lists the fields whose values actually changed (empty
+    for a no-op patch, which also skips the chronicle entry).
+    """
+
+    ok: bool = True
+    changed: bool = False
+    changed_keys: list[str] = Field(default_factory=list)
+    goal: GoalModel
+
+
+class ChronicleEntryModel(BaseModel):
+    """One append-only chronicle entry (date, kind, ref, note)."""
+
+    date: str
+    kind: str
+    ref: str = ""
+    note: str = ""
+
+
+class ChronicleResponse(BaseModel):
+    """Chronicle entries, newest first, capped by the ``limit`` query."""
+
+    profile: str
+    total: int = 0
+    entries: list[ChronicleEntryModel] = Field(default_factory=list)
 
 
 class ProvenanceRefModel(BaseModel):
@@ -1224,9 +1302,11 @@ class ProjectsBoardProjectModel(BaseModel):
     list (not a column); Done tasks are folded into ``done_count``, which
     includes tasks archived to kanban-archive.md (``archived_done_count``
     breaks out the archived share). ``column_counts`` keys are
-    queue/doing/someday/done. ``habit_id`` links to a ``habits`` entry: the
-    case's explicit ``habit_id`` field wins, otherwise the habit<->project
-    name heuristic applies.
+    queue/doing/someday/done; together with ``evidence_ref_count`` they
+    power the delete dialog's consequence preview ("N tasks back to
+    unassigned · M evidence refs kept"). ``habit_id`` links to a ``habits``
+    entry: the case's explicit ``habit_id`` field wins, otherwise the
+    habit<->project name heuristic applies.
     """
 
     id: str
@@ -1244,6 +1324,7 @@ class ProjectsBoardProjectModel(BaseModel):
     column_counts: dict[str, int] = Field(default_factory=dict)
     done_count: int = 0
     archived_done_count: int = 0
+    evidence_ref_count: int = 0
     last_activity: str = ""
     habit_id: str = ""
 
@@ -1267,13 +1348,23 @@ class ProjectsBoardHabitDayModel(BaseModel):
     future: bool = False
 
 
+class ProjectsBoardHabitRecentDayModel(BaseModel):
+    """One checked day in the trailing 90-day heatmap window."""
+
+    date: str
+    count: float = 1.0
+
+
 class ProjectsBoardHabitModel(BaseModel):
     """Habit check-in aggregation for continuous (habit) lanes.
 
     ``week`` is the current ISO week (Monday..Sunday); ``streak`` counts
     consecutive checked days ending today (0 when today has no check-in
     yet); ``total_checkins`` counts distinct checked days overall.
-    ``project_id`` links to a project lane when the name heuristic matches.
+    ``recent_days`` is the heatmap source: checked days within the trailing
+    90-day window ending today (oldest first, same-day rows summed into
+    ``count``). ``project_id`` links to a project lane when the name
+    heuristic matches.
     """
 
     id: str
@@ -1285,6 +1376,9 @@ class ProjectsBoardHabitModel(BaseModel):
     total_checkins: int = 0
     last_checkin: str = ""
     project_id: str = ""
+    recent_days: list[ProjectsBoardHabitRecentDayModel] = Field(
+        default_factory=list
+    )
 
 
 class ProjectsBoardResponse(BaseModel):
@@ -1589,6 +1683,35 @@ class ProjectCaseMutationResponse(BaseModel):
     ok: bool = True
     case: ProjectCaseModel
     warnings: list[str] = Field(default_factory=list)
+
+
+class ProjectCaseDeleteRequest(BaseModel):
+    """Body for the user-decided project case delete.
+
+    ``confirm_title`` must equal the case title exactly (422
+    ``project_delete_confirm_mismatch`` otherwise) — the type-the-name
+    confirmation. ``record_chronicle`` opts into a ``project.deleted``
+    chronicle entry (default off: household deletes stay out of the
+    narrative).
+    """
+
+    confirm_title: str = Field(default="", max_length=200)
+    record_chronicle: bool = False
+
+
+class ProjectCaseDeleteResponse(BaseModel):
+    """Result of one project case delete.
+
+    ``tasks_unassigned`` counts live kanban.md tasks whose ``project_id``
+    was cleared back to unassigned; ``evidence_refs_kept`` counts
+    evidence-pool entries still referencing the deleted case (tombstone
+    mechanism handles their display).
+    """
+
+    ok: bool = True
+    deleted_id: str
+    tasks_unassigned: int = 0
+    evidence_refs_kept: int = 0
 
 
 class ProjectMilestoneAddRequest(BaseModel):

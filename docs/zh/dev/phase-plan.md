@@ -102,6 +102,16 @@ Phase 1 建成通用件:mutation API 样板、embedding 建议能力(core/ai/)�
   spa_smoke/auth/layout/mutations/pages/mobile/llm_jobs 至 /projects,新增
   spa_projects.spec.ts(泳道 DnD/?task= 深链/排期/打卡/重定向)。
 
+### 项目页 HCI 宪法包(2026-09-23 落地,docs/zh/dev/phase2-projects-hci.md)
+
+- 五项裁决全部前端落地:归档带就地展开(月白 40% 只读 + 恢复)、日课栏
+  (一个习惯全站一行 + habit-plan 进度弧 + 90 天热力图补卡)、Queue 列顶常驻
+  行内快添、时间轴历史层(kanban Done → 月白刻痕条,默认近 6 月视窗 + 脏日期
+  钳制 + 最近半年/全部缩放)、抽屉删除三件套(后果预告 + 逐字确认 + 大事记默认不勾)。
+- 首页左下「日课印」:`日课 锻炼○ 学习●` 印章,点名即打卡,悬停本周七点。
+- 细节与取舍见 phase2-projects-hci.md「实施状态(前端)」;e2e
+  `tests/e2e/spa_projects_hci.spec.ts`(隔离栈 + 王军真实数据,截图 /tmp/hci-shots/)。
+
 ## Phase 3 进展
 
 ### home 星图进 SPA(2026-09-23 kickoff 落地)
@@ -147,6 +157,97 @@ Phase 1 建成通用件:mutation API 样板、embedding 建议能力(core/ai/)�
   layout,新增 project_refs 入座);e2e `spa_home.spec.ts` 简报计数改对拍
   /starmap counts。
 
+### 首页星图编辑前端(2026-09-23,设计 home-editing-starmap-design.md)
+
+- 铭文卡重刻:帝星卡(全文/简称/可公开开关)+ 恒星卡(标题/摘要/目标日期/状态)
+  卡内编辑态(`starmap/InscriptionCard.tsx`),保存走 PATCH north-star /
+  goals 新端点,成功后「落印」印章微动画;失效重取 ['profiles',name,'starmap'
+  /'goals'/'chronicle'],星图原位刷新。
+- 虚位空星:北极星未设时图心渲染空圈+缓慢微弱脉冲,点击直接进编辑态;
+  无目标时 R_GOAL 环留五个淡空圈虚位。空态判定以 GET /goals 的
+  NorthStarModel 为准(`useStarmapEditingData` 合并聚合快照+目标书)。
+- 刻痕星:completed 目标钉上转盘(CARVED_ANGLES 专座,随盘转),灭金光,
+  月白 30%,标签转暗;暂停目标降为 55% 亮度。
+- 星表面板:角落淡金「+」印章按钮唤出(斑蚀质感),帝星/进行中/暂停/已镌刻
+  分节,行点击 → `scene.focusStar(id)` 定位开卡;「新增目标」行内嵌创建表单。
+  focusStar 契约:冻结旋转(伸手即停)、境态先 morph 回图态、拖拽/滚轮即时
+  接管(用户手势永远赢);超出 5 座上限的目标卡照开但不定位(catalog 兜底)。
+- 联动卡:恒星卡跳项目泳道、行星卡跳 /projects、客星卡改跳 /evidence、
+  星官卡补入座证据名录(只读,编辑留在技能树页)。
+- GoalsPage 删除:nav 移除「目标」,/p/:name/goals → /home 保留 query 重定向。
+- 简报行:追加大事记风味(本月新立目标 N / 新镌 M 星 / 北极星已重刻),
+  取自 GET /chronicle?limit=40,基底简报保持主位。
+- 场景点击守卫:React 同步重渲导致的事件目标节点脱离 DOM 时,window 级
+  click 监听按 UI 点击处理(isConnected 检查)——否则重刻按钮会误触
+  closeDetail。
+- 测试:vitest starmap/briefing 新增 12 例(mergeGoalBook、刻痕星落位、
+  chronicle 简报);e2e 新增 `spa_home_editing.spec.ts`(重刻 round-trip、
+  星表定位、创建+镌刻、/goals 重定向、境态定位回归、移动底栏、虚位空星
+  开通编辑态);spa_home/spa_mobile 同步更新。
+
+### 星表交互 + 目标起始日期(2026-09-23,设计 home-starmap-enhancements-design.md §2/§3)
+
+- **Esc = 一键回纯图,无分层**:StarmapView window keydown 兜底,任意态
+  (星表/卡/重刻/组合)一次 Esc 全收;进首页永远纯图。
+- **星表常驻**:行点击不再收回面板,右侧铭文卡实时更新;↑/↓(j/k)环绕移动
+  高亮行,Enter 开卡;图上点星 → 星表行高亮 + 滚动到位(双向同步)。
+- **快捷键提示**:行悬停才显 kbd;星表首次打开 2.4s 渐隐引导条(每会话一次)。
+- **起始日期**:POST /goals 缺省 `start` 自动刻今日(显式 ISO 保留);PATCH
+  接受 `start`(校验同 target,空串清除);重刻编辑态新增「起始日期」输入;
+  历史空值不补刻(卡上仍显 —)。openapi.json/schema.d.ts 已重生成。
+- 测试:pytest +2(test_web_api_home_editing);vitest +9(StarCatalog.test.tsx);
+  e2e 新增 `spa_home_catalog_ux.spec.ts` 5 例(隔离栈 + 王军,截图
+  /tmp/catalog-ux-shots/);spa_home_editing 同步去掉"行点击后重开星表"的旧断言。
+- 已知后端缺口(前端已绕开/待修):/starmap 聚合仍只回 active goals 且
+  north_star 为裸字符串(前端用 /goals 合并补齐);PATCH /north-star 对
+  **空值铭文行**的改写会损坏 SKILL.md(_IDENTITY_BULLET_RE 的 `:\s*`
+  贪婪吞掉空行尾换行,值落到裸行,解析仍为空,重复写继续追加)——虚位
+  初立流程被此前端无关 bug 阻塞,e2e 中标 fixme。
+
+### 星图增量:境态调参 + 图态命名层(2026-09-23 晚,设计 home-starmap-enhancements-design.md 实现状态节)
+
+- **境态(deepspace)**:星等分层(逐云 deep 倍增器,北极星>目标>行星>客星>
+  尘埃;底星幂律伪星等 ~5% 亮)、离散四档色温(蓝白/月白/暖金/淡橙,aColor
+  按 ch2 渐变,图态色不动)、尘埃带弥散长河(径向渐变 sprite 垫层,密度随
+  真实证据数)、背景视差-lite(底星 bgLayer 反旋,境态 0.3×/图态不动)、
+  全面减速(目标 150s+/行星 100s+/客星 26s+ 周期,漂移 7→4;1h/圈不变,
+  闪烁未动)。
+- **图态命名层**:北斗七座位赐名(天枢…摇光,虚位=「名·虚位」空心,**不画
+  连线、不动星位**);星官扇区=外环带竖刻古名 + 扇区内 asterisms.json 真实
+  连线形(空圈蚀刻兜底,**形旁无字**);北极星图面只刻「北极星」;**显真**
+  全局开关(真名泥金为主+古名月白注,localStorage `nblane.starmap.reveal`
+  记忆,scene.setReveal 就地换层)。帝星→北极星重命名同步收尾(星表/重刻卡
+  /详情行/fallback)。
+- 偏差:翼/房/箕/轸/轩辕/虚 六官真形不在 asterisms.json(22 官),形状暂用
+  模板,环带古名正确;补数据后 `SECTOR_ASTERISM` 一处即接上。
+- 测试:vitest starmap +7(座位/映射/蚀刻/幂律/色板),全套 209 绿;tsc+build
+  绿;pytest 1694 绿(零 .py 改动);隔离栈 18504 截图+境态帧序列
+  /tmp/starmap-incr-shots/;checkpoint /tmp/starmap-incr-progress.log。
+
+### 星图增量二轮(2026-09-23 深夜,王军裁定)
+
+- **显真替换制**(废止主从反转):图上默认只有古名、显真只有真名,双名小注
+  全撤(双名只留星表/铭文卡);外环带默认=星官名、显真=域名。
+- **圆圈常显**:hover-only 提案被否(图面会秃),虚位/轨道/客星环维持常显。
+- **星官名随形外移**:古名留在扇区内图形外缘之外,环带同款月白弱色小字
+  (肌理级);显真态不显示。
+- **形状筛选**:角宿(一线)/心宿(近共线)剔除,基础→华盖、研究→文昌;图形
+  降透明度收紧尺寸(肌理层);vitest linearity 守卫(PCA 比 ≥0.18)。
+- **印章家族成套**:显真方印(白文/朱文)+ 境/图竖印翻字,与星表「+」、
+  日课印统一斑蚀篆刻语言(同纹理/边框/内双圈/悬停晕光,44px 模数);卜印
+  未实现,归入同族待做。
+- 测试:vitest 210 绿;tsc+build 绿;pytest 1694 绿;截图 r2-* 同目录。
+
+
+
+## Backlog(已讨论,暂不开发)
+
+- **用户初始化链路优化**(2026-09-23 王军提出):现状是"简历 → LLM 解析 →
+  robotics-engineer schema 骨架",非工程领域用户(如教师)不成立。方向:领域
+  schema 模板库(工程师/教师/研究者/创作者)+ AI 按简历定制 skill-tree 草案与
+  北极星候选 + 预览确认页;终点是"初始化仪式"——确认后首页星图当场亮起,用户
+  点帝星亲手改定(接「重刻铭文」)。openclaw 可作对话式访谈入口(微信问答聊出
+  北极星)。等工具层/IA 重设计后再排期。
 
 ## 已知风险登记
 

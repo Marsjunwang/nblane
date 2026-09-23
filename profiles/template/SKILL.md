@@ -14,7 +14,7 @@
 - **Current Role**: {e.g. PhD student / Engineer at ...}
 - **North Star**: {One sentence. What does "大佬" look like for you in 5 years?}
 - **North Star Brief**: {Safe short version for the daily dashboard}
-- **North Star Visibility**: discreet
+- **North Star Visibility**: private
 
 ---
 

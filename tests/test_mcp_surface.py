@@ -48,8 +48,9 @@ class TestMcpProfileResources(unittest.TestCase):
             patch.object(mcp_server, "profile_dir", lambda _name: profile),
         )
 
-    def test_goals_resource_redacts_private_content(self) -> None:
-        """Private North Star and private goals never reach the MCP output."""
+    def test_goals_resource_redacts_private_goals_only(self) -> None:
+        """Private goals are hidden; the North Star always renders (binary
+        visibility gates public artifacts only, never agent context)."""
         from nblane import mcp_server
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,9 +102,9 @@ class TestMcpProfileResources(unittest.TestCase):
         self.assertIn("# Goals: alice", text)
         self.assertIn("- active: 2", text)
         self.assertIn("Ship VLA demo", text)
-        self.assertIn("redacted", text)
-        self.assertNotIn("Secret Mars plan", text)
-        self.assertNotIn("Mars brief", text)
+        # North Star Visibility gates public artifacts only; agents see full.
+        self.assertIn("Secret Mars plan", text)
+        # Private goals stay hidden from agent context.
         self.assertNotIn("Secret goal", text)
 
     def test_goals_resource_shows_visible_north_star_and_primary(self) -> None:
