@@ -5,7 +5,7 @@
  * the shape and normalizes the wire response (generated OpenAPI types mark
  * most fields optional). Pure functions — vitest-covered. */
 
-import type { StarmapResponse } from '../api/types';
+import type { GoalsResponse, StarmapResponse } from '../api/types';
 
 export interface SnapshotCategory {
   id: string;
@@ -30,6 +30,17 @@ export interface SnapshotGoal {
   summary: string;
   start: string;
   target: string;
+}
+
+/** Owner-facing North Star detail (from GET /goals' NorthStarModel). The
+ * /starmap aggregation carries only the display string, so the editing UI
+ * merges the goal book over the snapshot (mergeGoalBook). */
+export interface SnapshotNorthStar {
+  is_set: boolean;
+  full: string;
+  brief: string;
+  /** Binary public-output flag: 'public' | 'private' (legacy values map server-side). */
+  visibility: string;
 }
 
 export interface SnapshotProject {
@@ -58,6 +69,7 @@ export interface SnapshotEvidence {
 
 export interface StarmapSnapshot {
   north_star: string;
+  north: SnapshotNorthStar;
   goals: SnapshotGoal[];
   categories: SnapshotCategory[];
   skills: SnapshotSkill[];
@@ -77,8 +89,17 @@ export interface StarmapSnapshot {
  * semantics (locked schema nodes, guest window/floor, zh category names)
  * live server-side; this is a structural projection only. */
 export function normalizeStarmapResponse(data: StarmapResponse): StarmapSnapshot {
+  const northText = data.north_star ?? '';
   return {
-    north_star: data.north_star ?? '',
+    north_star: northText,
+    // The aggregation has no is_set/brief/visibility; derive is_set from the
+    // text until mergeGoalBook overlays the authoritative NorthStarModel.
+    north: {
+      is_set: northText.trim().length > 0,
+      full: northText,
+      brief: '',
+      visibility: 'private',
+    },
     goals: (data.goals ?? []).map((g) => ({
       id: g.id,
       title: g.title || g.id,
@@ -131,4 +152,65 @@ export function normalizeStarmapResponse(data: StarmapResponse): StarmapSnapshot
       skills_lit: data.counts?.skills_lit ?? 0,
     },
   };
+}
+
+/**
+ * Merge the goal book (GET /goals: full detail, ALL statuses) over the
+ * starmap aggregation (active goals only, bare north-star string). The
+ * scene needs paused/completed goals for the 星表 catalog and the 刻痕星
+ * (completed goals pinned on the disc, design §4), and the inscription edit
+ * form needs the authoritative NorthStarModel (is_set/brief/visibility).
+ *
+ * Active goals keep the aggregation's order (stable star positions); paused
+ * and completed goals append in book order. A goal missing from the
+ * aggregation (race with a fresh create) still appears via the book.
+ */
+export function mergeGoalBook(
+  snapshot: StarmapSnapshot,
+  book: GoalsResponse | undefined,
+): StarmapSnapshot {
+  if (!book) return snapshot;
+  const north = book.north_star;
+  const mergedNorth: SnapshotNorthStar = north
+    ? {
+        is_set: north.is_set ?? snapshot.north.is_set,
+        full: north.full ?? '',
+        brief: north.brief ?? '',
+        visibility: north.visibility || 'private',
+      }
+    : snapshot.north;
+  const seen = new Set(snapshot.goals.map((g) => g.id));
+  const extra: SnapshotGoal[] = (book.goals ?? [])
+    .filter((g) => !seen.has(g.id))
+    .map((g) => ({
+      id: g.id,
+      title: g.title || g.id,
+      status: g.status || 'active',
+      summary: g.summary ?? '',
+      start: g.start ?? '',
+      target: g.target ?? '',
+    }));
+  return {
+    ...snapshot,
+    north: mergedNorth,
+    north_star: mergedNorth.is_set
+      ? mergedNorth.full || mergedNorth.brief || snapshot.north_star
+      : '',
+    goals: [...snapshot.goals, ...extra],
+  };
+}
+
+export function goalStatusLabel(status: string): string {
+  return status === 'completed' ? '已镌刻' : status === 'paused' ? '已暂停' : '进行中';
+}
+
+/** Inscription-card rows for a goal star (mirrors the scene's detailRows;
+ * used for catalog-driven selections of goals beyond the disc's seat cap). */
+export function goalRows(g: SnapshotGoal): [string, string][] {
+  return [
+    ['状态', goalStatusLabel(g.status)],
+    ['起始', g.start || '—'],
+    ['目标', g.target || '—'],
+    ['铭文', g.summary || '—'],
+  ];
 }

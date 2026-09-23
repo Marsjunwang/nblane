@@ -33,9 +33,10 @@ import { IconEdit } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError } from '../../api/client';
-import { useMoveKanbanCard } from '../../api/hooks';
+import { useAddKanbanCard, useAddProjectTask, useMoveKanbanCard } from '../../api/hooks';
 import type { KanbanSection, ProjectsBoardProject, ProjectsBoardTask } from '../../api/types';
 import { LaneColumn, laneColumnDroppableId } from './LaneColumn';
+import { QuickAddInput } from './QuickAddInput';
 import { SortableTaskCard, TaskCardBody } from './TaskCard';
 import { KIND_LABELS, PROJECT_STATUS_LABELS } from './lanes';
 import { boardPalette } from './palette';
@@ -179,6 +180,7 @@ export function TaskLaneDnd({
   selectedTaskId,
   onSelectTask,
   onRefresh,
+  quickAdd,
 }: {
   profile: string;
   laneId: string;
@@ -191,6 +193,8 @@ export function TaskLaneDnd({
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onRefresh: () => void;
+  /** Inline「＋ 快速添加」for the Queue column top (裁决4). */
+  quickAdd?: { pending: boolean; onSubmit: (title: string) => void };
 }) {
   const moveCard = useMoveKanbanCard(profile);
   const serverColumns = useMemo<LaneColumns>(() => ({ queue, doing }), [queue, doing]);
@@ -397,6 +401,15 @@ export function TaskLaneDnd({
               title={column === 'queue' ? 'Queue' : 'Doing'}
               tasks={activeColumns[column]}
               highlighted={overColumn === column && findColumn(serverColumns, activeId ?? '') !== column}
+              quickAdd={
+                column === 'queue' && quickAdd ? (
+                  <QuickAddInput
+                    laneId={laneId}
+                    pending={quickAdd.pending}
+                    onSubmit={quickAdd.onSubmit}
+                  />
+                ) : undefined
+              }
             >
               {activeColumns[column].map((task) => (
                 <SortableTaskCard
@@ -435,6 +448,7 @@ export function ProjectLane({
   project,
   kanbanEtag,
   kanbanSections,
+  projectBoardEtag,
   selectedTaskId,
   onSelectTask,
   onEditProject,
@@ -444,6 +458,8 @@ export function ProjectLane({
   project: ProjectsBoardProject;
   kanbanEtag: string;
   kanbanSections: KanbanSection[] | undefined;
+  /** project-board.yaml ETag for the quick-add case-task endpoint. */
+  projectBoardEtag: string;
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onEditProject: (projectId: string) => void;
@@ -452,6 +468,23 @@ export function ProjectLane({
   const milestones = project.milestones ?? [];
   const milestoneDone = milestones.reduce((sum, m) => sum + (m.done_count ?? 0), 0);
   const milestoneTotal = milestones.reduce((sum, m) => sum + (m.total_count ?? 0), 0);
+  const addTask = useAddProjectTask(profile);
+  const quickAdd = {
+    pending: addTask.isPending,
+    onSubmit: (title: string) =>
+      addTask.mutate(
+        {
+          caseId: project.id,
+          body: { title, section: 'Queue', milestone_id: '', context: '', date: '' },
+          etag: projectBoardEtag,
+        },
+        {
+          onSuccess: () =>
+            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` }),
+          onError: (error) => handleLaneMutationError(error, '添加失败', onRefresh),
+        },
+      ),
+  };
   return (
     <Stack
       gap="sm"
@@ -520,6 +553,7 @@ export function ProjectLane({
         selectedTaskId={selectedTaskId}
         onSelectTask={onSelectTask}
         onRefresh={onRefresh}
+        quickAdd={quickAdd}
       />
     </Stack>
   );
@@ -543,6 +577,19 @@ export function UnassignedLane({
   onSelectTask: (taskId: string) => void;
   onRefresh: () => void;
 }) {
+  const addCard = useAddKanbanCard(profile);
+  const quickAdd = {
+    pending: addCard.isPending,
+    onSubmit: (title: string) =>
+      addCard.mutate(
+        { body: { title, section: 'Queue', context: '' }, etag: kanbanEtag },
+        {
+          onSuccess: () =>
+            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` }),
+          onError: (error) => handleLaneMutationError(error, '添加失败', onRefresh),
+        },
+      ),
+  };
   return (
     <Stack
       gap="sm"
@@ -573,6 +620,7 @@ export function UnassignedLane({
         selectedTaskId={selectedTaskId}
         onSelectTask={onSelectTask}
         onRefresh={onRefresh}
+        quickAdd={quickAdd}
       />
     </Stack>
   );

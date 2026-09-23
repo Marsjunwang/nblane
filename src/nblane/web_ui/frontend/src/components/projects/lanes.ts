@@ -6,6 +6,7 @@
 // every project by its `kind` (KIND_LABELS).
 
 import type {
+  ProjectsBoardHabit,
   ProjectsBoardProject,
   ProjectsBoardResponse,
   ProjectsBoardTask,
@@ -18,10 +19,14 @@ export const KIND_LABELS: Record<string, string> = {
   side_project: '副业',
   learning: '学习',
   habit: '习惯',
+  'habit-plan': '习惯计划',
 };
 
 /** Stable bucket order for the 按活动 grouping. */
-const KIND_ORDER = ['internal', 'research', 'work', 'side_project', 'learning', 'habit'];
+const KIND_ORDER = ['internal', 'research', 'work', 'side_project', 'learning', 'habit', 'habit-plan'];
+
+/** Kinds whose project lives in the 日课栏 band instead of a swimlane. */
+export const HABIT_PLAN_KINDS = new Set(['habit', 'habit-plan']);
 
 export const PROJECT_STATUS_LABELS: Record<string, string> = {
   active: '进行中',
@@ -31,6 +36,44 @@ export const PROJECT_STATUS_LABELS: Record<string, string> = {
 };
 
 export type ProjectsGroupBy = 'goal' | 'activity';
+
+/**
+ * One 日课栏 row: a habit plus its linked project case (habit-plan) when the
+ * link resolves. Link resolution: `habit.project_id` first (the habit-side
+ * pointer), then `project.habit_id` (the plan-side pointer).
+ */
+export interface HabitRow {
+  habit: ProjectsBoardHabit;
+  project: ProjectsBoardProject | null;
+}
+
+/** Dedupe key set: habit-plan project ids that live ONLY in the 日课栏. */
+export function collectHabitPlanIds(board: ProjectsBoardResponse): Set<string> {
+  const ids = new Set<string>();
+  const projects = collectProjects(board);
+  for (const habit of board.habits ?? []) {
+    const linked =
+      (habit.project_id ? projects.find((p) => p.id === habit.project_id) : undefined) ??
+      projects.find((p) => p.habit_id && p.habit_id === habit.id);
+    // habit-plan kinds = 日课栏 rows: the lane is the band row, not a swimlane.
+    if (linked && HABIT_PLAN_KINDS.has(linked.kind ?? '')) {
+      ids.add(linked.id);
+    }
+  }
+  return ids;
+}
+
+/** One row per habit (全站一行,杜绝分身), linked project resolved for the arc. */
+export function collectHabitRows(board: ProjectsBoardResponse): HabitRow[] {
+  const projects = collectProjects(board);
+  return (board.habits ?? []).map((habit) => ({
+    habit,
+    project:
+      (habit.project_id ? projects.find((p) => p.id === habit.project_id) : undefined) ??
+      projects.find((p) => p.habit_id && p.habit_id === habit.id) ??
+      null,
+  }));
+}
 
 export interface LaneGroup {
   /** Goal id, kind key, or the '__ungrouped__' sentinel. */
@@ -63,10 +106,15 @@ export function buildLaneGroups(
   board: ProjectsBoardResponse,
   groupBy: ProjectsGroupBy,
 ): LaneGroup[] {
+  // 日课栏 owns habit-plan projects (kind 'habit' with a resolved habit link):
+  // they render exactly once as band rows, never as Queue/Doing swimlanes.
+  const habitPlanIds = collectHabitPlanIds(board);
+  const laneable = (project: ProjectsBoardProject) =>
+    !isArchivedProject(project) && !habitPlanIds.has(project.id);
   if (groupBy === 'activity') {
     const buckets = new Map<string, ProjectsBoardProject[]>();
     for (const project of collectProjects(board)) {
-      if (isArchivedProject(project)) {
+      if (!laneable(project)) {
         continue;
       }
       const key = project.kind || 'internal';
@@ -93,12 +141,10 @@ export function buildLaneGroups(
       title: `目标 · ${goal.title || goal.id}`,
       meta: goal.summary ?? '',
       target: goal.target ?? '',
-      projects: (goal.projects ?? []).filter((project) => !isArchivedProject(project)),
+      projects: (goal.projects ?? []).filter(laneable),
     }))
     .filter((group) => group.projects.length > 0);
-  const ungrouped = (board.ungrouped_projects ?? []).filter(
-    (project) => !isArchivedProject(project),
-  );
+  const ungrouped = (board.ungrouped_projects ?? []).filter(laneable);
   if (ungrouped.length > 0) {
     groups.push({
       id: '__ungrouped__',

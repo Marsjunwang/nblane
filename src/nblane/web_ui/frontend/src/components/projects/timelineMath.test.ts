@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ProjectsBoardResponse } from '../../api/types';
 import {
+  clampRangeToScale,
   computeScale,
   dateToX,
   daysBetween,
   formatDate,
+  historyBarRange,
   monthTicks,
   parseDate,
   projectRange,
@@ -192,6 +194,7 @@ describe('timelineMath computeScale', () => {
             column_counts: {},
             done_count: 0,
             archived_done_count: 0,
+            evidence_ref_count: 0,
             last_activity: '',
             habit_id: '',
           },
@@ -204,21 +207,85 @@ describe('timelineMath computeScale', () => {
     stats: {},
   };
 
-  it('covers project ranges, task bars, milestones and today with padding', () => {
+  it('recent zoom (default) windows to the trailing 6 months', () => {
     const scale = computeScale(board, 14);
     expect(scale.dayWidth).toBe(14);
-    // Min: the project's 2026-02-23 range start (earlier than today - 7d).
-    expect(scale.start).toBe('2026-02-23');
-    // Max: today + 14d (nothing extends past it).
+    // Default window: trailing 6 months from 2026-09-23, padded 7d left.
+    expect(scale.start).toBe('2026-03-16');
+    // In-window items still extend the right edge (task 2026-09-10 → today+14d wins).
     expect(scale.end).toBe('2026-10-07');
   });
 
-  it('pads around today when the board is empty', () => {
-    const scale = computeScale(
-      { ...board, goals: [], today: '2026-09-23' },
-      14,
-    );
-    expect(scale.start).toBe('2026-09-16');
+  it('all zoom restores the full historical extent', () => {
+    const scale = computeScale(board, { dayWidth: 14, zoom: 'all' });
+    // Min: the project's 2026-02-23 range start (earlier than today - 7d).
+    expect(scale.start).toBe('2026-02-23');
     expect(scale.end).toBe('2026-10-07');
+  });
+
+  it('pads the 6-month window when the board is empty', () => {
+    const scale = computeScale({ ...board, goals: [], today: '2026-09-23' }, 14);
+    expect(scale.start).toBe('2026-03-16');
+    expect(scale.end).toBe('2026-10-07');
+  });
+
+  it('clamps dirty dates instead of letting them flatten the axis', () => {
+    const project = board.goals![0].projects![0];
+    const dirty: ProjectsBoardResponse = {
+      ...board,
+      goals: [{ ...board.goals![0], projects: [{ ...project, time_range: '2012-01-01/2040-01-01' }] }],
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const scale = computeScale(dirty, { dayWidth: 14, zoom: 'all' });
+    expect(scale.start >= '2015-01-01').toBe(true);
+    expect(scale.end <= '2028-10-07').toBe(true);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('includes done history in the data source (裁决5)', () => {
+    const history = [
+      {
+        id: 'kb_done',
+        title: '已完成',
+        project_id: 'p1',
+        completed_on: '2026-05-10',
+        started_on: '2026-05-01',
+      },
+    ];
+    // Recent zoom: a 2026-05 history bar is inside the window, no extension.
+    const recent = computeScale(board, { dayWidth: 14, history });
+    expect(recent.start).toBe('2026-03-16');
+    // All zoom with an older history bar extends the domain left.
+    const older = [{ ...history[0], completed_on: '2025-11-10', started_on: '2025-11-01' }];
+    const all = computeScale(board, { dayWidth: 14, history: older, zoom: 'all' });
+    expect(all.start).toBe('2025-11-01');
+  });
+});
+
+describe('timelineMath historyBarRange', () => {
+  it('anchors on completed_on with started_on/planned_start fallbacks', () => {
+    expect(
+      historyBarRange({ id: 'a', title: '', completed_on: '2026-09-05', started_on: '2026-09-01' }),
+    ).toEqual({ start: '2026-09-01', end: '2026-09-05' });
+    expect(historyBarRange({ id: 'b', title: '', completed_on: '2026-09-05' })).toEqual({
+      start: '2026-09-05',
+      end: '2026-09-05',
+    });
+    expect(historyBarRange({ id: 'c', title: '' })).toBeNull();
+  });
+});
+
+describe('timelineMath clampRangeToScale', () => {
+  const scale = { start: '2026-04-01', end: '2026-09-30', dayWidth: 10 };
+  it('clips overlapping bars to the domain', () => {
+    expect(clampRangeToScale({ start: '2026-03-01', end: '2026-05-01' }, scale)).toEqual({
+      start: '2026-04-01',
+      end: '2026-05-01',
+    });
+  });
+  it('drops bars fully outside the domain', () => {
+    expect(clampRangeToScale({ start: '2026-01-01', end: '2026-02-01' }, scale)).toBeNull();
+    expect(clampRangeToScale({ start: '2026-10-01', end: '2026-11-01' }, scale)).toBeNull();
   });
 });

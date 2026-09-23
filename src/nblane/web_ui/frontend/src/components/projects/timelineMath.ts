@@ -88,6 +88,76 @@ export interface BarRange {
   end: string;
 }
 
+/** Done/archived task from kanban.md sections — the timeline history layer. */
+export interface TimelineHistoryTask {
+  id: string;
+  title: string;
+  project_id?: string | null;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  started_on?: string | null;
+  completed_on?: string | null;
+}
+
+/**
+ * Dirty-date clamp (裁决5): dates before 2015 or more than 2 years past today
+ * are obviously bogus (they used to drag the scale domain back to 2022 and
+ * flatten everything) — clamp to the boundary and warn once per value.
+ */
+const DIRTY_MIN = '2015-01-01';
+const dirtyWarned = new Set<string>();
+
+export function clampDirtyDate(date: string, today: string): string {
+  const max = formatDate(parseDate(today) + 366 * 2 * DAY_MS);
+  if (date < DIRTY_MIN || date > max) {
+    const clamped = date < DIRTY_MIN ? DIRTY_MIN : max;
+    if (!dirtyWarned.has(date)) {
+      dirtyWarned.add(date);
+      // eslint-disable-next-line no-console
+      console.warn(`[timeline] 脏日期钳制: ${date} → ${clamped}`);
+    }
+    return clamped;
+  }
+  return date;
+}
+
+/** Clamp both ends of a range; returns null when either date is malformed. */
+function clampRange(range: BarRange, today: string): BarRange | null {
+  if (Number.isNaN(parseDate(range.start)) || Number.isNaN(parseDate(range.end))) {
+    return null;
+  }
+  const start = clampDirtyDate(range.start, today);
+  const end = clampDirtyDate(range.end, today);
+  return parseDate(end) < parseDate(start) ? { start, end: start } : { start, end };
+}
+
+/**
+ * A done task's 刻痕 span: `planned_start ?? started_on ?? completed_on` →
+ * `completed_on ?? planned_end`. No anchor at all → null (not rendered).
+ */
+export function historyBarRange(task: TimelineHistoryTask): BarRange | null {
+  const end = task.completed_on || task.planned_end || '';
+  if (!end || Number.isNaN(parseDate(end))) {
+    return null;
+  }
+  const start = task.planned_start || task.started_on || end;
+  if (!start || Number.isNaN(parseDate(start)) || parseDate(start) > parseDate(end)) {
+    return { start: end, end };
+  }
+  return { start, end };
+}
+
+/** Clip a bar to the visible scale domain; null when fully outside. */
+export function clampRangeToScale(range: BarRange, scale: TimelineScale): BarRange | null {
+  if (parseDate(range.end) < parseDate(scale.start) || parseDate(range.start) > parseDate(scale.end)) {
+    return null;
+  }
+  return {
+    start: range.start < scale.start ? scale.start : range.start,
+    end: range.end > scale.end ? scale.end : range.end,
+  };
+}
+
 /**
  * A task's timeline span: `planned_start ?? started_on` →
  * `planned_end ?? completed_on ?? today`. Tasks with no anchor date at all
@@ -122,21 +192,61 @@ export function projectRange(timeRange: string): BarRange | null {
   return parseDate(end) < parseDate(start) ? { start, end: start } : { start, end };
 }
 
+/** Axis zoom: 'recent' = trailing 6 months (default); 'all' = full extent. */
+export type TimelineZoom = 'recent' | 'all';
+
+export interface ComputeScaleOptions {
+  dayWidth?: number;
+  /** Done/archived kanban tasks — the history layer (裁决5:进数据源). */
+  history?: TimelineHistoryTask[];
+  zoom?: TimelineZoom;
+}
+
+/** today minus `months` calendar months (ISO). */
+function monthsAgo(today: string, months: number): string {
+  const d = new Date(parseDate(today));
+  d.setMonth(d.getMonth() - months);
+  return formatDate(d.getTime());
+}
+
 /**
  * Axis bounds over everything the timeline draws: today, task bars, project
- * time ranges, milestone dates, habit week strips — padded one week left and
- * two weeks right so the today line never hugs an edge.
+ * time ranges, milestone dates, habit week strips, and the done/archived
+ * history layer — padded one week left and two weeks right so the today line
+ * never hugs an edge.
+ *
+ * zoom 'recent' (default): the domain is the trailing-6-month window, extended
+ * only by items that overlap it (older history renders clipped at the left
+ * edge — 平移/「全部」 zoom reveals it). Dirty dates are clamped with a
+ * console warning so they can never flatten the axis again.
  */
-export function computeScale(board: ProjectsBoardResponse, dayWidth = 14): TimelineScale {
+export function computeScale(
+  board: ProjectsBoardResponse,
+  options: ComputeScaleOptions | number = {},
+): TimelineScale {
+  const opts: ComputeScaleOptions = typeof options === 'number' ? { dayWidth: options } : options;
+  const dayWidth = opts.dayWidth ?? 14;
+  const zoom = opts.zoom ?? 'recent';
   const today = board.today || formatDate(Date.now());
-  let min = parseDate(today) - 7 * DAY_MS;
+  const windowStart = monthsAgo(today, 6);
+  let min = parseDate(zoom === 'all' ? today : windowStart) - 7 * DAY_MS;
   let max = parseDate(today) + 14 * DAY_MS;
   const visit = (range: BarRange | null) => {
-    if (!range) {
+    const clamped = range ? clampRange(range, today) : null;
+    if (!clamped) {
       return;
     }
-    min = Math.min(min, parseDate(range.start));
-    max = Math.max(max, parseDate(range.end));
+    // In the recent window, history older than 6 months cannot pull the
+    // domain left; overlapping items are clipped to the window edge.
+    if (zoom === 'recent' && parseDate(clamped.end) < parseDate(windowStart)) {
+      return;
+    }
+    const startMs =
+      zoom === 'recent'
+        ? Math.max(parseDate(clamped.start), parseDate(windowStart) - 7 * DAY_MS)
+        : parseDate(clamped.start);
+    min = Math.min(min, startMs);
+    max = Math.max(max, parseDate(clamped.end));
   };
   const visitProject = (project: ProjectsBoardProject) => {
     visit(projectRange(project.time_range ?? ''));
@@ -170,6 +280,9 @@ export function computeScale(board: ProjectsBoardResponse, dayWidth = 14): Timel
     if (week.length > 0) {
       visit({ start: week[0].date, end: week[week.length - 1].date });
     }
+  }
+  for (const task of opts.history ?? []) {
+    visit(historyBarRange(task));
   }
   return { start: formatDate(min), end: formatDate(max), dayWidth };
 }

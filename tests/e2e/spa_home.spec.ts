@@ -82,11 +82,15 @@ test.describe("SPA Home (growth starmap)", () => {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     const detail = page.getByTestId("starmap-detail");
     await expect(detail).toHaveClass(/open/);
-    await expect(detail.locator("h3")).toHaveText("北极星");
-    await expect(detail.getByRole("link")).toHaveAttribute(
-      "href",
-      `/p/${encodeURIComponent(PROFILE)}/goals`,
-    );
+    // Home-editing slice: the pole-star card offers 重刻 (edit mode) instead
+    // of the retired /goals link (GoalsPage deleted, §6). A vacant pole
+    // opens the card straight in edit mode (虚位空星, §2).
+    const heading = await detail.locator("h3").textContent();
+    if (heading === "北极星") {
+      await expect(detail.getByTestId("starmap-recarve")).toBeVisible();
+    } else {
+      await expect(detail.getByTestId("starmap-edit-north")).toBeVisible();
+    }
 
     // Escape dismisses.
     await page.keyboard.press("Escape");

@@ -12,7 +12,7 @@ import { EffectComposer, RenderPass, EffectPass, BloomEffect } from 'postprocess
 import { interpolate, converter } from 'culori';
 import {
   buildLayout, R, R_IN, R_GOAL, R_OUT, BAND_IN, BAND_OUT, BAND_TEXT,
-  INK, GOLD, GOLD_BRIGHT,
+  INK, GOLD, GOLD_BRIGHT, TEMP,
   type StarmapLayout,
 } from './layout';
 import { mulberry32 } from './rng';
@@ -24,6 +24,8 @@ import fellUrl from './assets/fonts/IMFellEnglish-subset.ttf?url';
 
 export interface StarmapSelection {
   kind: 'north' | 'goal' | 'planet' | 'guest' | 'skill';
+  /** Stable domain id: 'north' for the pole star, goal/project/evidence/skill id. */
+  id: string;
   title: string;
   rows: [string, string][];
 }
@@ -39,6 +41,9 @@ export interface StarmapSceneOptions {
     briefing?: HTMLElement | null;
     toggle?: HTMLButtonElement | null;
   };
+  /** 显真 (design 四轮): true names primary + ancient-name notes when on.
+   * Persisted by the caller (localStorage nblane.starmap.reveal). */
+  reveal?: boolean;
   initialState?: 'planisphere' | 'deepspace';
 }
 
@@ -59,6 +64,32 @@ type Morphable = (THREE.Points | THREE.LineSegments) & {
 };
 
 const chan = (t: number, start: number) => Math.min(1, Math.max(0, (t - start) / 0.4));
+
+/** Partition the dim field into carved-on-disc stars vs decorative filler
+ * (the parallax background layer). Triples/quads stay index-aligned. */
+function subsetDim(dim: StarmapLayout['dim'], wantFiller: boolean) {
+  const out = {
+    plan: [] as number[], deep: [] as number[], size: [] as number[],
+    opacity: [] as number[], core: [] as number[], ring: [] as number[],
+    color: [] as number[], deepColor: [] as number[], filler: [] as number[],
+    deepOpScale: [] as number[], deepSizeScale: [] as number[],
+  };
+  for (let i = 0; i < dim.filler.length; i++) {
+    if ((dim.filler[i] === 1) !== wantFiller) continue;
+    out.plan.push(dim.plan[i * 3], dim.plan[i * 3 + 1], dim.plan[i * 3 + 2]);
+    out.deep.push(dim.deep[i * 3], dim.deep[i * 3 + 1], dim.deep[i * 3 + 2]);
+    out.size.push(dim.size[i]);
+    out.opacity.push(dim.opacity[i]);
+    out.core.push(dim.core[i]);
+    out.ring.push(dim.ring[i]);
+    out.color.push(dim.color[i * 3], dim.color[i * 3 + 1], dim.color[i * 3 + 2]);
+    out.deepColor.push(dim.deepColor[i * 3], dim.deepColor[i * 3 + 1], dim.deepColor[i * 3 + 2]);
+    out.filler.push(dim.filler[i]);
+    out.deepOpScale.push(dim.deepOpScale[i]);
+    out.deepSizeScale.push(dim.deepSizeScale[i]);
+  }
+  return out;
+}
 
 export class StarmapScene {
   private root: HTMLElement;
@@ -82,9 +113,15 @@ export class StarmapScene {
   private fadeMats: FadeMat[] = [];
   private labelObjs: LabelRec[] = [];
   private morphables: Morphable[] = [];
+  private reveal: boolean;
   private dimPts!: THREE.Points;
+  /** Decorative background field (parallax-lite layer, 0.3× in 境态). */
+  private dimBgPts!: THREE.Points;
+  private bgLayer = new THREE.Group();
   private litPts!: THREE.Points;
   private goalPts!: THREE.Points;
+  private northPts!: THREE.Points;
+  private northVacant: boolean;
   private planetPts!: THREE.Points;
   private guestPts!: THREE.Points;
   private planetInnerPts!: THREE.Points;
@@ -93,6 +130,18 @@ export class StarmapScene {
   private glows: { spr: THREE.Sprite; mat: THREE.SpriteMaterial; getPos: () => number[]; maxOpacity: number }[] = [];
   private guestGlows: { spr: THREE.Sprite; mat: THREE.SpriteMaterial; idx: number; breathe: boolean }[] = [];
   private nebulae: { spr: THREE.Sprite; mat: THREE.SpriteMaterial; op: number }[] = [];
+  /** 尘埃带泼墨长河: diffuse wash sprites under the dust motes (境态). */
+  private dustRiver: { spr: THREE.Sprite; mat: THREE.SpriteMaterial; base: number }[] = [];
+  /** 境态 prominence tiers: per-cloud deep size/opacity multipliers. */
+  private tiered: {
+    pts: THREE.Points;
+    baseSize: Float32Array;
+    baseOp: Float32Array | null;
+    ds: number;
+    dop: number;
+  }[] = [];
+  /** 境态 4-step color temperature morph targets (aColor lerp by ch2). */
+  private colored: { pts: THREE.Points; plan: Float32Array; deep: Float32Array }[] = [];
   private goalLabelGroups: {
     goalIdx: number;
     segs: Text[];
@@ -119,7 +168,15 @@ export class StarmapScene {
   private hoverIdx = -1;
   private selectedIdx = -1;
   private hoverables: { title: string; info: string; pos: () => number[] }[] = [];
-  private clickables: { kind: StarmapSelection['kind']; idx: number; title: string; pos: () => number[] }[] = [];
+  private clickables: {
+    kind: StarmapSelection['kind'];
+    id: string;
+    idx: number;
+    title: string;
+    pos: () => number[];
+  }[] = [];
+  private focusTween: gsap.core.Tween | null = null;
+  private focusToken = 0;
   private dragging = false;
   private dragLastX = 0;
   private dragLastT = 0;
@@ -180,8 +237,12 @@ export class StarmapScene {
     this.snapshot = snapshot;
     this.opts = opts;
     this.L = buildLayout(snapshot);
+    // 虚位空星 (design §2): when the North Star is unset the pole is an
+    // empty carved ring with a slow faint pulse instead of the gold core.
+    this.northVacant = !(snapshot.north?.is_set ?? snapshot.north_star.trim().length > 0);
     this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.coarsePointer = matchMedia('(pointer: coarse)').matches;
+    this.reveal = opts.reveal ?? false;
     this.state.t = opts.initialState === 'deepspace' ? 1 : 0;
 
     // ---------- DOM layers (bg cross-fade lives in the compositor) ----------
@@ -213,27 +274,31 @@ export class StarmapScene {
     this.camera = new THREE.PerspectiveCamera(45, 1, 1, 2000);
     this.fitPlanCamera();
     this.scene.add(this.chart);
+    // parallax-lite (境态): the decorative background field lives in a child
+    // group counter-rotated each frame so it trails the disc at 0.3×; at
+    // ch2=0 the counter-rotation is zero and the stone carving is untouched.
+    this.chart.add(this.bgLayer);
 
     this.bakeBackgrounds();
     this.buildLinework();
 
-    this.dimPts = this.makePoints({
-      plan: this.L.dim.plan,
-      deep: this.L.dim.deep,
-      size: this.L.dim.size,
-      opacity: this.L.dim.opacity,
-      core: this.L.dim.core,
-      ring: this.L.dim.ring,
-      color: this.L.dim.color,
-    });
-    this.dimPts.userData.filler = this.L.dim.filler;
-    this.dimPts.userData.baseOpacity = new Float32Array(this.L.dim.opacity);
-    this.dimPts.userData.baseSize = new Float32Array(this.L.dim.size);
-    this.dimPts.userData.baseRing = new Float32Array(
-      this.dimPts.geometry.attributes.aRing.array,
-    );
-    this.dimPts.userData.deepOpScale = new Float32Array(this.L.dim.deepOpScale);
-    this.dimPts.userData.deepSizeScale = new Float32Array(this.L.dim.deepSizeScale);
+    // dim field split: locked real nodes + etched semantics stay carved on
+    // the disc (dimPts); the synthetic filler becomes the parallax background
+    // (dimBgPts). Both share the per-star deep magnitude scales.
+    const dimLocked = subsetDim(this.L.dim, false);
+    const dimFiller = subsetDim(this.L.dim, true);
+    this.dimPts = this.makePoints(dimLocked);
+    this.dimBgPts = this.makePoints(dimFiller, this.bgLayer);
+    for (const pts of [this.dimPts, this.dimBgPts]) {
+      pts.userData.filler = pts === this.dimBgPts ? dimFiller.filler : dimLocked.filler;
+      pts.userData.baseOpacity = new Float32Array(pts.geometry.attributes.aOpacity.array);
+      pts.userData.baseSize = new Float32Array(pts.geometry.attributes.aSize.array);
+      pts.userData.baseRing = new Float32Array(pts.geometry.attributes.aRing.array);
+    }
+    this.dimPts.userData.deepOpScale = new Float32Array(dimLocked.deepOpScale);
+    this.dimPts.userData.deepSizeScale = new Float32Array(dimLocked.deepSizeScale);
+    this.dimBgPts.userData.deepOpScale = new Float32Array(dimFiller.deepOpScale);
+    this.dimBgPts.userData.deepSizeScale = new Float32Array(dimFiller.deepSizeScale);
 
     this.litPts = this.makePoints({
       plan: this.L.lit.plan,
@@ -244,15 +309,28 @@ export class StarmapScene {
       ring: this.L.lit.ring,
       color: this.L.lit.color,
     });
+    // goal stars by status (design §4): active = lit gold; paused = dimmed;
+    // completed = 刻痕星 — gold killed, 月白 at ~30%, an empty carved ring
+    // (no core, no glow, no breathing), pinned on the rotating disc.
+    const MOON_WHITE = [0.949, 0.929, 0.878];
     this.goalPts = this.makePoints({
       plan: this.L.goals.flatMap((g) => g.plan),
       deep: this.L.goals.flatMap((g) => g.deep),
-      size: this.L.goals.map(() => 2.6),
-      opacity: this.L.goals.map(() => 1),
-      core: this.L.goals.map(() => 1),
+      size: this.L.goals.map((g) => (g.status === 'completed' ? 2.2 : 2.6)),
+      opacity: this.L.goals.map((g) =>
+        g.status === 'completed' ? 0.3 : g.status === 'paused' ? 0.55 : 1,
+      ),
+      core: this.L.goals.map((g) => (g.status === 'completed' ? 0 : 1)),
       ring: this.L.goals.map(() => 1),
-      color: this.L.goals.flatMap(() => [0.91, 0.72, 0.36]),
+      color: this.L.goals.flatMap((g) =>
+        g.status === 'completed' ? MOON_WHITE : [0.91, 0.72, 0.36],
+      ),
+      // 境态: 目标 = 金 (discrete temperature step); 刻痕星 stays 月白.
+      deepColor: this.L.goals.flatMap((g) =>
+        g.status === 'completed' ? [...TEMP.moonWhite] : [0.95, 0.76, 0.34],
+      ),
     });
+    this.addTier(this.goalPts, 1.18, 1);
     const courtPts = this.makePoints({
       plan: this.L.court.plan,
       deep: this.L.court.plan.map((v, i) => (i % 3 === 2 ? (v ? v : 0) : v * 1.6)),
@@ -264,15 +342,31 @@ export class StarmapScene {
         g ? [0.91, 0.72, 0.36] : [0.961, 0.918, 0.824],
       ),
     });
-    const northPts = this.makePoints({
-      plan: [0, 0, 0],
-      deep: [0, 0, 0],
-      size: [4.4],
-      opacity: [1],
-      core: [1],
-      ring: [0],
-      color: [0.98, 0.85, 0.55],
-    });
+    this.northPts = this.makePoints(
+      this.northVacant
+        ? {
+            // 虚位: empty ring, moon-white, faint (pulse animates opacity)
+            plan: [0, 0, 0],
+            deep: [0, 0, 0],
+            size: [4.4],
+            opacity: [0.3],
+            core: [0],
+            ring: [1],
+            color: MOON_WHITE,
+          }
+        : {
+            plan: [0, 0, 0],
+            deep: [0, 0, 0],
+            size: [4.4],
+            opacity: [1],
+            core: [1],
+            ring: [0],
+            color: [0.98, 0.85, 0.55],
+            // 境态: 北极星 = 暖金, brightest tier
+            deepColor: [...TEMP.warmGold],
+          },
+    );
+    if (!this.northVacant) this.addTier(this.northPts, 1.35, 1);
     this.planetPts = this.makePoints({
       plan: this.L.planets.flatMap((p) => p.plan),
       deep: this.L.planets.flatMap((p) => p.deep),
@@ -281,7 +375,10 @@ export class StarmapScene {
       core: this.L.planets.map(() => 0.4),
       ring: this.L.planets.map(() => 1),
       color: this.L.planets.flatMap(() => [0.961, 0.918, 0.824]),
+      // 境态: 行星 = 淡橙
+      deepColor: this.L.planets.flatMap(() => [...TEMP.softOrange]),
     });
+    this.addTier(this.planetPts, 0.95, 1);
     this.moonPts = this.makePoints({
       plan: this.L.moons.plan,
       deep: this.L.moons.deep,
@@ -290,7 +387,9 @@ export class StarmapScene {
       core: this.L.moons.size.map(() => 1),
       ring: this.L.moons.size.map(() => 0),
       color: this.L.moons.size.flatMap(() => [0.961, 0.918, 0.824]),
+      deepColor: this.L.moons.size.flatMap(() => [...TEMP.moonWhite]),
     });
+    this.addTier(this.moonPts, 0.9, 1);
     const seatedPts = this.makePoints({
       plan: this.L.seated.plan,
       deep: this.L.seated.deep,
@@ -299,7 +398,9 @@ export class StarmapScene {
       core: this.L.seated.size.map(() => 1),
       ring: this.L.seated.size.map(() => 0),
       color: this.L.seated.size.flatMap(() => [0.961, 0.918, 0.824]),
+      deepColor: this.L.seated.size.flatMap(() => [...TEMP.moonWhite]),
     });
+    this.addTier(seatedPts, 0.9, 1);
     this.guestPts = this.makePoints({
       plan: this.L.guests.flatMap((g) => g.plan),
       deep: this.L.guests.flatMap((g) => g.deep),
@@ -308,7 +409,12 @@ export class StarmapScene {
       core: this.L.guests.map(() => 1),
       ring: this.L.guests.map(() => 0),
       color: this.L.guests.flatMap(() => [1.0, 0.95, 0.85]),
+      // 境态: 客星 = 蓝白
+      deepColor: this.L.guests.flatMap(() => [...TEMP.blueWhite]),
     });
+    // size-only tier: guest opacity is re-asserted per frame (no pulse on the
+    // carved dot), so applyMorph must not write aOpacity here.
+    this.addTier(this.guestPts, 0.95, null);
     const dustPts = this.makePoints({
       plan: this.L.dust.plan,
       deep: this.L.dust.deep,
@@ -317,7 +423,23 @@ export class StarmapScene {
       core: this.L.dust.size.map(() => 1),
       ring: this.L.dust.size.map(() => 0),
       color: this.L.dust.size.flatMap(() => [0.961, 0.918, 0.824]),
+      // 境态: 尘埃 = 月白 (coolest, faintest tier)
+      deepColor: this.L.dust.size.flatMap(() => [0.88, 0.9, 0.94]),
     });
+    this.addTier(dustPts, 0.8, 1);
+    // etched sector-asterism figures: 空圈 seats of the 星官 shapes (图态
+    // carvings; they recede in 境态 via their tier's deep opacity).
+    const etchedPts = this.makePoints({
+      plan: this.L.etched.plan,
+      deep: this.L.etched.deep,
+      size: this.L.etched.size,
+      opacity: this.L.etched.opacity,
+      core: this.L.etched.size.map(() => 0),
+      ring: this.L.etched.size.map(() => 1),
+      color: this.L.etched.color,
+      deepColor: this.L.etched.color.slice(),
+    });
+    this.addTier(etchedPts, 0.9, 0.22);
     // dust directional streaks along the band tangent
     const dustTrails = (() => {
       const geo = new THREE.BufferGeometry();
@@ -338,7 +460,16 @@ export class StarmapScene {
       core: this.L.planets.map(() => 0),
       ring: this.L.planets.map(() => 1),
       color: this.L.planets.flatMap(() => [0.961, 0.918, 0.824]),
+      deepColor: this.L.planets.flatMap(() => [...TEMP.softOrange]),
     });
+    this.addTier(this.planetInnerPts, 0.95, 1);
+    // 星官真形连线 (scope-B): the full etched figure under the brighter
+    // formed-member links; background-texture tier (round-2), fades with ch2.
+    if (this.L.shapeLinesPlan.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.L.shapeLinesPlan), 3));
+      this.chart.add(new THREE.LineSegments(geo, this.lineMat(INK, 0.14, 0.05, 2)));
+    }
 
     // planet -> goal hairlines (dissolve with ch1)
     {
@@ -460,19 +591,19 @@ export class StarmapScene {
       this.glows.push({ spr, mat, getPos, maxOpacity });
       return spr;
     };
-    addGlow(() => [0, 0, 0], 20, 0xffd98a, 0.8); // north star warm core glow
-    addGlow(() => [0, 0, 0], 40, 0x96a8dc, 0.1); // north star cool halo
-    this.L.goals.forEach((_g, i) =>
+    addGlow(() => [0, 0, 0], 20, 0xffd98a, this.northVacant ? 0 : 0.8); // north star warm core glow
+    addGlow(() => [0, 0, 0], 40, 0x96a8dc, this.northVacant ? 0 : 0.1); // north star cool halo
+    this.L.goals.forEach((g, i) =>
       addGlow(() => {
         const p = this.goalPts.geometry.attributes.position.array as Float32Array;
         return [p[i * 3], p[i * 3 + 1], p[i * 3 + 2]];
-      }, 9, 0xffcd78, 0.35),
+      }, 9, 0xffcd78, g.status === 'completed' ? 0 : g.status === 'paused' ? 0.12 : 0.35),
     );
     // 呼吸 halos: the breath moves ONLY the halo, never the star point itself
     this.guestGlows = this.L.guests.map((g, i) => {
       const mat = new THREE.SpriteMaterial({
         map: glowTex,
-        color: 0xffe8c0,
+        color: 0xdde8ff, // cool halo to match the 蓝白 guest temperature step
         transparent: true,
         opacity: 0,
         blending: THREE.AdditiveBlending,
@@ -483,6 +614,40 @@ export class StarmapScene {
       this.chart.add(spr);
       return { spr, mat, idx: i, breathe: g.review === 'needs_review' };
     });
+    // 尘埃带泼墨长河 (境态): a diffuse radial-gradient wash UNDER the dust
+    // motes; sprite count and opacity track the real evidence count, so the
+    // river densifies as the pool grows. Guests still fly out of it.
+    {
+      const n = this.L.dust.deep.length / 3;
+      if (n > 0) {
+        const jr = mulberry32(7700);
+        const count = Math.max(6, Math.min(26, Math.round(n * 0.6)));
+        const density = Math.min(1, n / 24);
+        for (let k = 0; k < count; k++) {
+          const t = count <= 1 ? 0 : k / (count - 1);
+          const i = Math.min(n - 1, Math.floor(t * n));
+          const mat = new THREE.SpriteMaterial({
+            map: glowTex,
+            color: 0x8f99ad, // indigo moon-white wash
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+          });
+          const spr = new THREE.Sprite(mat);
+          const sc = 30 + jr() * 26;
+          spr.scale.set(sc, sc, 1);
+          spr.position.set(
+            this.L.dust.deep[i * 3],
+            this.L.dust.deep[i * 3 + 1],
+            this.L.dust.deep[i * 3 + 2] - 4,
+          );
+          spr.visible = false;
+          spr.renderOrder = -1; // under the dust motes
+          this.chart.add(spr);
+          this.dustRiver.push({ spr, mat, base: 0.06 * density * (0.7 + jr() * 0.6) });
+        }
+      }
+    }
     // nebulae stay put when the chart tilts (not in the chart group)
     for (const [x, y, z, sc, color, op] of [
       [150, 70, -120, 260, 0x7a5638, 0.13],
@@ -526,9 +691,9 @@ export class StarmapScene {
 
     // ---------- morphables ----------
     this.morphables = [
-      this.dimPts, this.litPts, this.goalPts, courtPts, northPts,
+      this.dimPts, this.dimBgPts, this.litPts, this.goalPts, courtPts, this.northPts,
       this.planetPts, this.planetInnerPts, this.moonPts, seatedPts,
-      this.guestPts, dustPts,
+      this.guestPts, dustPts, etchedPts,
       this.guestTails as unknown as Morphable,
       dustTrails,
     ] as Morphable[];
@@ -539,10 +704,34 @@ export class StarmapScene {
       pts.userData.orbitManaged = true;
     }
 
+    // 北斗虚位 (design 四轮): every dipper seat without a living goal keeps a
+    // faint hollow carved ring (开阳/摇光 are reserve seats beyond the current
+    // 5-goal cap); the 星表「+」panel is the entry point for the next goal.
+    const vacantSeats = this.L.seats.filter((s) => s.goalIndex === null);
+    if (vacantSeats.length) {
+      const seatPlan = vacantSeats.flatMap((s) => {
+        const a = (s.angle * Math.PI) / 180;
+        return [R_GOAL * Math.cos(a), R_GOAL * Math.sin(a), 0];
+      });
+      const seatsPts = this.makePoints({
+        plan: seatPlan,
+        deep: seatPlan.slice(),
+        size: vacantSeats.map(() => 2.0),
+        opacity: vacantSeats.map(() => 0.16),
+        core: vacantSeats.map(() => 0),
+        ring: vacantSeats.map(() => 1),
+        color: vacantSeats.flatMap(() => [0.961, 0.918, 0.824]),
+      });
+      this.morphables.push(seatsPts as Morphable);
+    }
+
     // ---------- motion bookkeeping ----------
-    this.goalPeriods = this.L.goals.map((_, i) => 60 + i * 15);
-    this.planetPeriods = this.L.planets.map((_, i) => 40 + i * 5);
-    this.guestPeriods = this.L.guests.map((_, i) => 8 + i * 2.3);
+    // 境态调参 (2026-09-23): everything slowed — goals/planets/guests drift
+    // on long periods; the 1h/rev disc spin stays; twinkle/scintillation
+    // (breathing halos, 虚位 pulse) is deliberately untouched (王军 veto).
+    this.goalPeriods = this.L.goals.map((_, i) => 150 + i * 36);
+    this.planetPeriods = this.L.planets.map((_, i) => 100 + i * 14);
+    this.guestPeriods = this.L.guests.map((_, i) => 26 + i * 6.5);
     this.goalPhase = this.L.goals.map(() => 0);
     this.planetPhase = this.L.planets.map(() => 0);
     this.guestPhase = this.L.guests.map(() => 0);
@@ -576,10 +765,21 @@ export class StarmapScene {
       return [a[i * 3], a[i * 3 + 1], a[i * 3 + 2]];
     };
     this.hoverables = [
-      { title: '北极星', info: snapshot.north_star.split(/[，。]/)[0], pos: () => [0, 0, 0] },
+      {
+        title: '北极星',
+        info: this.northVacant
+          ? '虚位 · 点击立星'
+          : snapshot.north_star.split(/[，。]/)[0],
+        pos: () => [0, 0, 0],
+      },
       ...this.L.goals.map((g, i) => ({
         title: g.title,
-        info: '目标恒星',
+        info:
+          g.status === 'completed'
+            ? '刻痕星 · 已镌刻'
+            : g.status === 'paused'
+              ? '目标恒星 · 暂停'
+              : '目标恒星',
         pos: () => attrPos(this.goalPts, i),
       })),
       ...this.L.planets.map((p, i) => ({
@@ -598,18 +798,18 @@ export class StarmapScene {
       })),
     ];
     this.clickables = [
-      { kind: 'north', idx: -1, title: '北极星', pos: () => [0, 0, 0] },
+      { kind: 'north', id: 'north', idx: -1, title: '北极星', pos: () => [0, 0, 0] },
       ...this.L.goals.map((g, i) => ({
-        kind: 'goal' as const, idx: i, title: g.title, pos: () => attrPos(this.goalPts, i),
+        kind: 'goal' as const, id: g.id, idx: i, title: g.title, pos: () => attrPos(this.goalPts, i),
       })),
       ...this.L.planets.map((p, i) => ({
-        kind: 'planet' as const, idx: i, title: p.title, pos: () => attrPos(this.planetPts, i),
+        kind: 'planet' as const, id: p.id, idx: i, title: p.title, pos: () => attrPos(this.planetPts, i),
       })),
       ...this.L.guests.map((g, i) => ({
-        kind: 'guest' as const, idx: i, title: g.title, pos: () => attrPos(this.guestPts, i),
+        kind: 'guest' as const, id: g.id, idx: i, title: g.title, pos: () => attrPos(this.guestPts, i),
       })),
       ...this.L.lit.skills.map((s, i) => ({
-        kind: 'skill' as const, idx: i, title: s.label, pos: () => attrPos(this.litPts, i),
+        kind: 'skill' as const, id: s.id, idx: i, title: s.label, pos: () => attrPos(this.litPts, i),
       })),
     ];
     this.selRing = new THREE.LineLoop(
@@ -637,6 +837,10 @@ export class StarmapScene {
     window.addEventListener('keydown', this.onKeydown);
     window.addEventListener('wheel', this.onWheel, { passive: true });
     this.canvas.addEventListener('pointerdown', (e) => {
+      // 用户手势永远赢: grabbing the disc cancels any in-flight focus.
+      this.focusToken += 1;
+      this.focusTween?.kill();
+      this.focusTween = null;
       if (this.coarsePointer || this.state.t >= 0.5) return;
       this.dragging = true;
       this.dragLastX = e.clientX;
@@ -688,6 +892,10 @@ export class StarmapScene {
   /** Morph to 图态 (0) or 境态 (1). */
   goTo(target: number, instant = false) {
     if (this.tween) this.tween.kill();
+    // A world-state change cancels any in-flight focus (user gesture wins).
+    this.focusToken += 1;
+    this.focusTween?.kill();
+    this.focusTween = null;
     this.closeDetail();
     if (instant || this.reducedMotion) {
       this.state.t = target;
@@ -702,9 +910,100 @@ export class StarmapScene {
     });
   }
 
+  /**
+   * 定位契约 (design §3): locate one star by id and open its inscription
+   * card. Freezes the disc (伸手即停 — pointer-activity timestamp), morphs
+   * back to 图态 first when in 境态, then eases the chart so the star sits
+   * at the top bearing (正北). Any user drag/wheel during the animation
+   * cancels it — the user gesture always wins.
+   *
+   * Returns false when the id is not on the disc (e.g. a goal beyond the
+   * 5-seat layout cap): the caller then opens the card without the locate.
+   */
+  focusStar(id: string): boolean {
+    const idx = this.clickables.findIndex((c) => c.id === id);
+    if (idx < 0 || this.disposed) return false;
+    this.lastPointerActive = performance.now(); // freeze the spin
+    const token = ++this.focusToken;
+    this.focusTween?.kill();
+    this.focusTween = null;
+    const begin = () => {
+      if (token !== this.focusToken || this.disposed) return;
+      this.runFocus(idx, token);
+    };
+    if (this.state.t > 0.5) {
+      // 境态 → 图态 first; the morph tween chains into the focus.
+      if (this.tween) this.tween.kill();
+      this.closeDetail();
+      if (this.reducedMotion) {
+        this.state.t = 0;
+        this.applyMorph();
+        begin();
+        return true;
+      }
+      this.tween = gsap.to(this.state, {
+        t: 0,
+        duration: 2.4,
+        ease: 'power2.inOut',
+        onUpdate: () => this.applyMorph(),
+        onComplete: begin,
+      });
+      return true;
+    }
+    begin();
+    return true;
+  }
+
+  private runFocus(idx: number, token: number) {
+    const c = this.clickables[idx];
+    const open = () => {
+      if (token === this.focusToken && !this.disposed) this.openDetail(idx);
+    };
+    const p = c.pos();
+    const r = Math.hypot(p[0], p[1]);
+    if (r < 1) {
+      // the pole star is already at the chart center — no rotation needed
+      open();
+      return;
+    }
+    const bearing = (Math.atan2(p[1], p[0]) * 180) / Math.PI + (this.chart.rotation.z * 180) / Math.PI;
+    let delta = 90 - bearing; // 正北上位
+    delta = ((delta + 540) % 360) - 180;
+    const finalRot = this.chart.rotation.z + (delta * Math.PI) / 180;
+    if (this.reducedMotion) {
+      this.chart.rotation.z = finalRot;
+      open();
+      return;
+    }
+    this.focusTween = gsap.to(this.chart.rotation, {
+      z: finalRot,
+      duration: 1.1,
+      ease: 'power2.inOut',
+      onComplete: open,
+    });
+  }
+
   /** Morph toggle button hook. */
   toggle() {
     this.goTo(this.state.t > 0.5 ? 0 : 1);
+  }
+
+  /** 显真 switch (design 四轮 + round-2 替换制, remembered global
+   * preference): rebuilds the naming layer in place — true names (泥金)
+   * replace ancient names when on; ancient names only when off. No dual-name
+   * notes on the chart. Positions, rotation and morph state are preserved;
+   * only Text objects churn. */
+  setReveal(v: boolean) {
+    if (v === this.reveal || this.disposed) return;
+    this.reveal = v;
+    for (const { t } of this.labelObjs) {
+      this.chart.remove(t);
+      t.dispose();
+    }
+    this.labelObjs = [];
+    this.goalLabelGroups = [];
+    this.buildLabels();
+    this.applyMorph(); // re-apply fades/positions for the current morph state
   }
 
   /** Clear the current selection (React detail-card close). */
@@ -717,6 +1016,7 @@ export class StarmapScene {
     this.resizeObserver?.disconnect();
     cancelAnimationFrame(this.rafId);
     if (this.tween) this.tween.kill();
+    this.focusTween?.kill();
     window.removeEventListener('pointermove', this.onPointerMoveWindow);
     window.removeEventListener('pointermove', this.onPointerActive);
     window.removeEventListener('click', this.onClickWindow);
@@ -961,15 +1261,19 @@ export class StarmapScene {
     addLine(this.circlePoints(4.2, 64), this.lineMat(INK, 0.55, 0, 2), true);
   }
 
-  private makePoints(opts: {
-    plan: number[];
-    deep: number[];
-    size: number[];
-    opacity: number[];
-    core: number[];
-    ring: number[];
-    color: number[];
-  }): THREE.Points {
+  private makePoints(
+    opts: {
+      plan: number[];
+      deep: number[];
+      size: number[];
+      opacity: number[];
+      core: number[];
+      ring: number[];
+      color: number[];
+      deepColor?: number[];
+    },
+    parent?: THREE.Group,
+  ): THREE.Points {
     const { plan, deep, size, opacity, core, ring, color } = opts;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(plan), 3));
@@ -1024,8 +1328,27 @@ export class StarmapScene {
     const points = new THREE.Points(geo, mat);
     points.userData.plan = new Float32Array(plan);
     points.userData.deep = new Float32Array(deep);
-    this.chart.add(points);
+    if (opts.deepColor) {
+      this.colored.push({
+        pts: points,
+        plan: new Float32Array(color),
+        deep: new Float32Array(opts.deepColor),
+      });
+    }
+    (parent ?? this.chart).add(points);
     return points;
+  }
+
+  /** Register a 境态 prominence tier: deep size/opacity multipliers applied
+   * in applyMorph (identity at ch3=0, so 图态 is untouched). */
+  private addTier(pts: THREE.Points, ds: number, dop: number | null) {
+    this.tiered.push({
+      pts,
+      baseSize: new Float32Array(pts.geometry.attributes.aSize.array),
+      baseOp: dop === null ? null : new Float32Array(pts.geometry.attributes.aOpacity.array),
+      ds,
+      dop: dop ?? 1,
+    });
   }
 
   private makeGlowTexture(): THREE.CanvasTexture {
@@ -1144,63 +1467,158 @@ export class StarmapScene {
     );
   }
 
+  /** Register plain (non-segmented) labels so they follow their goal star's
+   * 境态 drift, same contract as addSegmentedLabel's groups. */
+  private followGoal(goalIdx: number, texts: Text[]) {
+    this.goalLabelGroups.push({
+      goalIdx,
+      segs: texts,
+      base: texts.map((t) => [t.position.x, t.position.y]),
+      anchor: [],
+    });
+  }
+
   private buildLabels() {
     const L = this.L;
-    // outer category-name band: chars rotated along the arc (一点明体, 刻感)
+    // outer rim band (BAND_TEXT): 星官古名 etched per char along the arc.
+    // 显真替换制 (王军 round-2, supersedes 主从反转): default = ancient name
+    // only; reveal = real domain name only — no dual-name notes on the chart
+    // (dual naming lives in the StarCatalog and inscription cards).
     for (const sec of L.sectors) {
       const mid = sec.start + sec.width / 2;
-      const chars = Array.from(sec.name);
-      const angStep = ((3.4 * 1.25) / BAND_TEXT) * (180 / Math.PI);
+      const chars = Array.from(this.reveal ? sec.name : sec.asterism);
+      const color = this.reveal ? GOLD : INK;
+      const angStep = ((3.2 * 1.25) / BAND_TEXT) * (180 / Math.PI);
       const a0 = mid - (angStep * (chars.length - 1)) / 2;
       chars.forEach((ch, i) => {
-        const a = a0 + i * angStep;
-        const rad = (a * Math.PI) / 180;
+        const rad = ((a0 + i * angStep) * Math.PI) / 180;
         this.addLabel(ch, {
           size: 3.2,
-          color: INK,
+          color,
           font: imingUrl,
           fade: 'band',
           pos: [BAND_TEXT * Math.cos(rad), BAND_TEXT * Math.sin(rad), 0],
           rotZ: rad + Math.PI / 2,
         });
       });
+      // 星官名随形 (王军 round-2 alternative): the asterism name stays near
+      // its figure — moved radially outward, just beyond the figure's outer
+      // edge, in the rim band's muted tone at small size (texture-level, not
+      // a shouting label). Default mode only (替换制: reveal = true names).
+      if (!this.reveal && sec.asterism !== sec.name && sec.figRadius > 0) {
+        const rad = (mid * Math.PI) / 180;
+        const lr = R * 0.72 + sec.figRadius + 3.5;
+        this.addLabel(sec.asterism, {
+          size: 2.2,
+          color: 0xb5b0a0, // rim-band muted white, texture tier
+          font: imingUrl,
+          fade: 'band',
+          pos: [lr * Math.cos(rad), lr * Math.sin(rad), 0],
+          rotZ: rad + Math.PI / 2,
+        });
+      }
     }
-    // goal labels (一点明体 + IM Fell segmented for mixed strings)
+    // 北斗环卫 goal labels (names only — no dipper formation lines, goals
+    // keep their ring seats). 显真替换制: OFF = dipper name alone; ON = true
+    // title alone (泥金) — no 古名小注. 虚位 seats show 「名·虚位」 hollow.
+    // 刻痕星 keep their carved true title in both modes — etched history,
+    // name revoked from the dipper pool but the carving stays.
     L.goals.forEach((g, gi) => {
       const cos = Math.cos((g.angle * Math.PI) / 180);
       const align = cos > 0.35 ? 'left' : cos < -0.35 ? 'right' : 'center';
       const rr = R_GOAL + 8;
       const a = (g.angle * Math.PI) / 180;
+      const px = rr * Math.cos(a) + (align === 'left' ? 1 : align === 'right' ? -1 : 0);
+      const py = rr * Math.sin(a);
+      if (g.status === 'completed') {
+        this.addSegmentedLabel(g.title, {
+          size: 3.6,
+          color: 0x9a9276,
+          align,
+          goalIdx: gi,
+          pos: [px, py, 0],
+        });
+        return;
+      }
+      if (!this.reveal) {
+        const t = this.addLabel(g.seatName ?? g.title, {
+          size: 3.8,
+          color: 0xeed696,
+          font: imingUrl,
+          fade: 'goal',
+          pos: [px, py, 0],
+        });
+        this.followGoal(gi, [t]);
+        return;
+      }
       this.addSegmentedLabel(g.title, {
         size: 3.6,
         color: 0xeed696,
         align,
         goalIdx: gi,
-        pos: [rr * Math.cos(a) + (align === 'left' ? 1 : align === 'right' ? -1 : 0), rr * Math.sin(a), 0],
+        pos: [px, py, 0],
       });
     });
-    // north star label (two lines, first clause)
-    const clause = this.snapshot.north_star.split(/[，。]/)[0];
-    const idx = clause.indexOf('成为');
-    const nsLines = idx > 0 ? [clause.slice(0, idx + 2), clause.slice(idx + 2)] : [clause, ''];
-    this.addLabel(nsLines[0], {
-      size: 3.8,
-      color: INK,
-      font: wenkaiUrl,
-      anchorX: 'left',
-      pos: [6.5, 3.4, 0],
-      deepPos: [10.5, -8.5, 0],
-      fade: 'north',
-    });
-    this.addLabel(nsLines[1], {
-      size: 3.8,
-      color: 0xeed696,
-      font: wenkaiUrl,
-      anchorX: 'left',
-      pos: [6.5, -2.6, 0],
-      deepPos: [10.5, -13.6, 0],
-      fade: 'north',
-    });
+    for (const seat of L.seats) {
+      if (seat.goalIndex !== null) continue;
+      const a = (seat.angle * Math.PI) / 180;
+      const rr = R_GOAL + 8;
+      this.addLabel(`${seat.name}·虚位`, {
+        size: 2.8,
+        color: 0x8d8672,
+        font: imingUrl,
+        fade: 'goal',
+        pos: [rr * Math.cos(a), rr * Math.sin(a), 0],
+      });
+    }
+    // north star label (四轮 + 替换制): the chart face shows just「北极星」
+    // (real text lives in the inscription card); 显真 ON = 真名泥金 alone,
+    // no 古名小注. 虚位 keeps the seat marked.
+    if (this.northVacant) {
+      this.addLabel('虚位', {
+        size: 3.8,
+        color: INK,
+        font: wenkaiUrl,
+        anchorX: 'left',
+        pos: [6.5, 0.4, 0],
+        deepPos: [10.5, -10.6, 0],
+        fade: 'north',
+      });
+    } else if (!this.reveal) {
+      this.addLabel('北极星', {
+        size: 3.8,
+        color: INK,
+        font: wenkaiUrl,
+        anchorX: 'left',
+        pos: [6.5, 0.4, 0],
+        deepPos: [10.5, -10.6, 0],
+        fade: 'north',
+      });
+    } else {
+      const clause = this.snapshot.north_star.split(/[，。]/)[0];
+      const idx = clause.indexOf('成为');
+      const nsLines = idx > 0 ? [clause.slice(0, idx + 2), clause.slice(idx + 2)] : [clause, ''];
+      this.addLabel(nsLines[0], {
+        size: 3.8,
+        color: 0xeed696, // 泥金真名
+        font: wenkaiUrl,
+        anchorX: 'left',
+        pos: [6.5, 3.4, 0],
+        deepPos: [10.5, -8.5, 0],
+        fade: 'north',
+      });
+      if (nsLines[1]) {
+        this.addLabel(nsLines[1], {
+          size: 3.8,
+          color: 0xeed696,
+          font: wenkaiUrl,
+          anchorX: 'left',
+          pos: [6.5, -2.6, 0],
+          deepPos: [10.5, -13.6, 0],
+          fade: 'north',
+        });
+      }
+    }
     this.labelsPending = this.labelObjs.length;
     for (const { t } of this.labelObjs) {
       t.sync(() => {
@@ -1269,25 +1687,55 @@ export class StarmapScene {
     } else {
       ng.spr.scale.set(20, 20, 1);
     }
-    // dim field restraint (月.png) + ring taper, both late-phase
-    const dimAttr = this.dimPts.geometry.attributes.aOpacity as THREE.BufferAttribute;
-    const dimSizeAttr = this.dimPts.geometry.attributes.aSize as THREE.BufferAttribute;
-    const dimRingAttr = this.dimPts.geometry.attributes.aRing as THREE.BufferAttribute;
-    const base = this.dimPts.userData.baseOpacity as Float32Array;
-    const baseSz = this.dimPts.userData.baseSize as Float32Array;
-    const baseRing = this.dimPts.userData.baseRing as Float32Array;
-    const dOpS = this.dimPts.userData.deepOpScale as Float32Array;
-    const dSzS = this.dimPts.userData.deepSizeScale as Float32Array;
-    const filler = this.dimPts.userData.filler as number[];
-    for (let i = 0; i < dimAttr.array.length; i++) {
-      const densityGate = filler[i] ? this.state.density : 1;
-      (dimAttr.array as Float32Array)[i] = (base[i] * densityGate * (1 + (dOpS[i] - 1) * ch3));
-      (dimSizeAttr.array as Float32Array)[i] = baseSz[i] * (1 + (dSzS[i] - 1) * ch3);
-      (dimRingAttr.array as Float32Array)[i] = baseRing[i] * (1 - 0.55 * ch3);
+    // dim field restraint (月.png) + ring taper, both late-phase — applied to
+    // the carved dim stars and the parallax background field alike
+    for (const dimPts of [this.dimPts, this.dimBgPts]) {
+      const dimAttr = dimPts.geometry.attributes.aOpacity as THREE.BufferAttribute;
+      const dimSizeAttr = dimPts.geometry.attributes.aSize as THREE.BufferAttribute;
+      const dimRingAttr = dimPts.geometry.attributes.aRing as THREE.BufferAttribute;
+      const base = dimPts.userData.baseOpacity as Float32Array;
+      const baseSz = dimPts.userData.baseSize as Float32Array;
+      const baseRing = dimPts.userData.baseRing as Float32Array;
+      const dOpS = dimPts.userData.deepOpScale as Float32Array;
+      const dSzS = dimPts.userData.deepSizeScale as Float32Array;
+      const filler = dimPts.userData.filler as number[];
+      for (let i = 0; i < dimAttr.array.length; i++) {
+        const densityGate = filler[i] ? this.state.density : 1;
+        (dimAttr.array as Float32Array)[i] = (base[i] * densityGate * (1 + (dOpS[i] - 1) * ch3));
+        (dimSizeAttr.array as Float32Array)[i] = baseSz[i] * (1 + (dSzS[i] - 1) * ch3);
+        (dimRingAttr.array as Float32Array)[i] = baseRing[i] * (1 - 0.55 * ch3);
+      }
+      dimAttr.needsUpdate = true;
+      dimSizeAttr.needsUpdate = true;
+      dimRingAttr.needsUpdate = true;
     }
-    dimAttr.needsUpdate = true;
-    dimSizeAttr.needsUpdate = true;
-    dimRingAttr.needsUpdate = true;
+    // 境态 prominence tiers (北极星 > 目标金 > 行星 > 客星 > 尘埃)
+    for (const e of this.tiered) {
+      const szAttr = e.pts.geometry.attributes.aSize as THREE.BufferAttribute;
+      const szArr = szAttr.array as Float32Array;
+      const sf = 1 + (e.ds - 1) * ch3;
+      for (let i = 0; i < szArr.length; i++) szArr[i] = e.baseSize[i] * sf;
+      szAttr.needsUpdate = true;
+      if (e.baseOp) {
+        const opAttr = e.pts.geometry.attributes.aOpacity as THREE.BufferAttribute;
+        const opArr = opAttr.array as Float32Array;
+        const of = 1 + (e.dop - 1) * ch3;
+        for (let i = 0; i < opArr.length; i++) opArr[i] = e.baseOp[i] * of;
+        opAttr.needsUpdate = true;
+      }
+    }
+    // discrete 4-step color temperature (境态): lerp aColor plan → deep
+    for (const c of this.colored) {
+      const attr = c.pts.geometry.attributes.aColor as THREE.BufferAttribute;
+      const arr = attr.array as Float32Array;
+      for (let i = 0; i < arr.length; i++) arr[i] = c.plan[i] + (c.deep[i] - c.plan[i]) * ch2;
+      attr.needsUpdate = true;
+    }
+    // 尘埃带泼墨长河 wash (density tracks the evidence count, fades with ch3)
+    for (const r of this.dustRiver) {
+      r.mat.opacity = r.base * ch3;
+      r.spr.visible = r.mat.opacity > 0.004;
+    }
     this.applyBackground(ch2, this.state.duskPos);
     this.fxPass.enabled = !this.softGL && ch3 > 0.02;
     this.bloom.intensity = 0.7 * ch3 * this.state.bloom;
@@ -1297,7 +1745,7 @@ export class StarmapScene {
     const refs = this.opts.domRefs;
     if (refs?.cartouche) refs.cartouche.style.opacity = domOpacity;
     if (refs?.briefing) refs.briefing.style.opacity = domOpacity;
-    if (refs?.toggle) refs.toggle.textContent = t > 0.5 ? '→ 图态' : '→ 境态';
+    if (refs?.toggle) refs.toggle.textContent = t > 0.5 ? '图' : '境'; // 印章 glyph = target state
     this.opts.onMorph?.(t);
   }
 
@@ -1341,11 +1789,31 @@ export class StarmapScene {
 
   private detailRows(c: (typeof this.clickables)[number]): [string, string][] {
     const snapshot = this.snapshot;
-    if (c.kind === 'north') return [['类型', '北极星'], ['铭文', snapshot.north_star]];
-    if (c.kind === 'goal') {
-      const g = snapshot.goals[c.idx];
+    if (c.kind === 'north') {
+      const north = snapshot.north;
+      if (this.northVacant) {
+        return [
+          ['类型', '北极星 · 虚位'],
+          ['铭文', '（尚未立星 — 点「重刻」写下北极星）'],
+        ];
+      }
       return [
-        ['状态', g.status],
+        ['类型', '北极星'],
+        ['铭文', north.full || snapshot.north_star],
+        ['简称', north.brief || '—'],
+        ['可见性', north.visibility === 'public' ? '可公开' : '仅本地'],
+      ];
+    }
+    if (c.kind === 'goal') {
+      const g =
+        snapshot.goals.find((x) => x.id === c.id) ??
+        ({ status: this.L.goals[c.idx]?.status ?? 'active', start: '', target: '', summary: '' } as const);
+      const statusLabel =
+        g.status === 'completed' ? '已镌刻' : g.status === 'paused' ? '已暂停' : '进行中';
+      const seatName = this.L.goals[c.idx]?.seatName;
+      return [
+        ['状态', statusLabel],
+        ...(seatName ? ([['星位', seatName]] as [string, string][]) : []),
         ['起始', g.start || '—'],
         ['目标', g.target || '—'],
         ['铭文', g.summary || '—'],
@@ -1356,7 +1824,7 @@ export class StarmapScene {
       const gi = this.L.planets[c.idx].goalIndex;
       return [
         ['状态', p.status === 'active' ? '在轨' : '归档'],
-        ['所属目标', gi >= 0 ? snapshot.goals[gi].title : '（自由轨道）'],
+        ['所属目标', gi >= 0 ? this.L.goals[gi].title : '（自由轨道）'],
         ['任务', `${p.task_count} 项`],
         ['进度', p.progress === null || p.progress === undefined ? '—' : `${Math.round(p.progress * 100)}%`],
         ['时间范围', p.time_range || '—'],
@@ -1373,14 +1841,26 @@ export class StarmapScene {
         ['摘要', 'summary' in e && e.summary ? e.summary : '—'],
       ];
     }
+    // 星官 (skill): 三态 + 关联证据计数 + 入座证据名录 (design §5, read-only —
+    // editing stays on the skill-tree page).
     const s = this.L.lit.skills[c.idx];
-    return [['类别', s.category], ['状态', s.status], ['关联证据', `${s.evidenceCount} 条`]];
+    const seated = snapshot.evidence
+      .filter((e) => e.skill_ids.includes(s.id))
+      .slice(0, 3)
+      .map((e) => e.title);
+    const rows: [string, string][] = [
+      ['类别', s.category],
+      ['状态', s.status],
+      ['关联证据', `${s.evidenceCount} 条`],
+    ];
+    seated.forEach((title, i) => rows.push([i === 0 ? '入座证据' : '', `· ${title}`]));
+    return rows;
   }
 
   private openDetail(i: number) {
     this.selectedIdx = i;
     const c = this.clickables[i];
-    this.opts.onSelect?.({ kind: c.kind, title: c.title, rows: this.detailRows(c) });
+    this.opts.onSelect?.({ kind: c.kind, id: c.id, title: c.title, rows: this.detailRows(c) });
   }
 
   private closeDetail() {
@@ -1396,6 +1876,11 @@ export class StarmapScene {
       return;
     }
     const target = e.target as HTMLElement;
+    // React flushes click handlers synchronously, so a UI control that
+    // re-renders itself (重刻 → edit form, catalog row → close panel) is
+    // already detached by the time this window listener runs — its
+    // [data-starmap-ui] ancestry is gone. Treat detached targets as UI.
+    if (!target.isConnected) return;
     if (target.closest('[data-starmap-ui]')) return;
     let best = -1;
     let bestD = 26;
@@ -1458,6 +1943,10 @@ export class StarmapScene {
       this.chart.rotation.z += this.spinVel * dt;
       this.spinVel *= Math.exp(-dt / 1.2);
     }
+
+    // parallax-lite: the background field trails the disc at 0.3× in 境态
+    // (counter-rotation ramps with ch2; zero in 图态 — carving stays honest)
+    this.bgLayer.rotation.z = -0.7 * ch2 * this.chart.rotation.z;
 
     const rotZ = (x: number, y: number, a: number): [number, number] => [
       x * Math.cos(a) - y * Math.sin(a),
@@ -1532,7 +2021,7 @@ export class StarmapScene {
       L.guests.forEach((g, i) => {
         const deep = this.guestDeepBase[i];
         this.guestPhase[i] += dt * ((2 * Math.PI) / this.guestPeriods[i]) * ch3;
-        const drift = 7 * ch3;
+        const drift = 4 * ch3;
         const gx = g.plan[0] + (deep[0] - g.plan[0]) * ch2 + drift * Math.cos(this.guestPhase[i] + i * 1.3);
         const gy = g.plan[1] + (deep[1] - g.plan[1]) * ch2 + drift * Math.sin(this.guestPhase[i] + i * 1.3);
         const gz = g.plan[2] + (deep[2] - g.plan[2]) * ch2;
@@ -1582,6 +2071,14 @@ export class StarmapScene {
     }
 
     this.updateTooltip();
+    // 虚位空星: slow faint pulse on the empty pole ring (never on a set star)
+    if (this.northVacant) {
+      const a = this.northPts.geometry.attributes.aOpacity as THREE.BufferAttribute;
+      (a.array as Float32Array)[0] = this.reducedMotion
+        ? 0.3
+        : 0.28 + 0.14 * Math.sin(tt * 0.9);
+      a.needsUpdate = true;
+    }
     if (this.selectedIdx >= 0) {
       const p = this.clickables[this.selectedIdx].pos();
       this.selRing.visible = true;

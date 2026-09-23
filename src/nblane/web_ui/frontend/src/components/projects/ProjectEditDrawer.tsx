@@ -9,9 +9,11 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Drawer,
   Group,
   Loader,
+  Modal,
   MultiSelect,
   NativeSelect,
   Progress,
@@ -24,7 +26,8 @@ import {
   TextInput,
   Center,
 } from '@mantine/core';
-import { IconArchive, IconBulb, IconDeviceFloppy, IconPlus } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { IconArchive, IconBulb, IconDeviceFloppy, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
@@ -34,12 +37,15 @@ import {
   useAddProjectTask,
   useArchiveProjectCase,
   useCreateJob,
+  useDeleteProjectCase,
   useDeleteProjectMilestone,
   useMoveProjectTask,
   useProjectBoard,
+  useProjectsBoard,
   useSaveProjectCase,
   useSaveProjectMilestone,
 } from '../../api/hooks';
+import { ApiError } from '../../api/client';
 import { streamJob } from '../../api/jobs';
 import type {
   ProjectBoard,
@@ -48,7 +54,7 @@ import type {
   ProjectRefOption,
   ProjectSuggestRefsResponse,
 } from '../../api/types';
-import { KIND_LABELS, PROJECT_STATUS_LABELS } from './lanes';
+import { collectProjects, KIND_LABELS, PROJECT_STATUS_LABELS } from './lanes';
 
 const PROJECT_STATUSES = Object.keys(PROJECT_STATUS_LABELS);
 
@@ -168,16 +174,168 @@ function useRefreshBoards(profile: string) {
   };
 }
 
+/**
+ * 删除项目 danger zone (裁决3). The confirm dialog carries the consequence
+ * preview composed from the projects-board aggregation (column_counts +
+ * evidence_ref_count — no separate preview endpoint by design), the
+ * type-the-name confirm, and the「记入大事记」checkbox (default OFF: 大事记是
+ * 叙事,家务删除不混入).
+ */
+function DeleteProjectZone({
+  profile,
+  projectCase,
+  etag,
+  onDeleted,
+}: {
+  profile: string;
+  projectCase: ProjectCase;
+  etag: string;
+  onDeleted: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [recordChronicle, setRecordChronicle] = useState(false);
+  const aggregation = useProjectsBoard(profile);
+  const remove = useDeleteProjectCase(profile);
+  const refreshBoard = useRefreshBoards(profile);
+
+  const aggregate = (aggregation.data ? collectProjects(aggregation.data.board) : []).find(
+    (project) => project.id === projectCase.id,
+  );
+  // Live-column task count. Caveat: column_counts.done covers kanban.md's
+  // Done section too, and deletion leaves already-archived history untouched
+  // — so the real unassigned count may be lower (done-archive overcount).
+  const counts = aggregate?.column_counts ?? {};
+  const liveTasks =
+    (counts['queue'] ?? 0) + (counts['doing'] ?? 0) + (counts['someday'] ?? 0) + (counts['done'] ?? 0);
+  const evidenceRefs = aggregate?.evidence_ref_count ?? projectCase.evidence_refs?.length ?? 0;
+  const title = projectCase.title || projectCase.id;
+  const confirmed = confirmTitle === title;
+
+  const runDelete = () => {
+    remove.mutate(
+      {
+        caseId: projectCase.id,
+        body: { confirm_title: confirmTitle, record_chronicle: recordChronicle },
+        etag,
+      },
+      {
+        onSuccess: (result) => {
+          notifications.show({
+            color: 'green',
+            title: '项目已删除',
+            message: `「${title}」已删除;${result.tasks_unassigned ?? 0} 个任务回到未归属,${result.evidence_refs_kept ?? 0} 条证据保留引用。`,
+          });
+          setOpen(false);
+          onDeleted();
+        },
+      },
+    );
+  };
+
+  const mismatch =
+    remove.error instanceof ApiError &&
+    remove.error.status === 422 &&
+    remove.error.code === 'project_delete_confirm_mismatch';
+
+  return (
+    <>
+      <Card
+        withBorder
+        radius="md"
+        padding="sm"
+        data-testid="delete-project-zone"
+        style={{ borderColor: 'rgba(224, 92, 92, 0.45)' }}
+      >
+        <Group justify="space-between" wrap="nowrap">
+          <Stack gap={2}>
+            <Text fw={600} size="sm" c="red">
+              危险区
+            </Text>
+            <Text size="xs" c="dimmed">
+              删除后任务回到未归属,证据引用走墓碑机制保留;此操作不可撤销。
+            </Text>
+          </Stack>
+          <Button
+            variant="outline"
+            color="red"
+            size="compact-sm"
+            leftSection={<IconTrash size={14} />}
+            onClick={() => {
+              setConfirmTitle('');
+              setRecordChronicle(false);
+              setOpen(true);
+            }}
+            data-testid="delete-project-button"
+          >
+            删除项目
+          </Button>
+        </Group>
+      </Card>
+
+      <Modal
+        opened={open}
+        onClose={() => setOpen(false)}
+        title={`删除项目 · ${title}`}
+        data-testid="delete-project-modal"
+      >
+        <Stack gap="sm">
+          <Alert color="red" title="后果预告" data-testid="delete-project-preview">
+            {liveTasks} 个任务将回到未归属 · {evidenceRefs} 条证据保留引用
+            <Text size="xs" c="dimmed" mt={4}>
+              (计数含看板已完成列;已入历史归档的任务不受影响,实际回未归属数可能更少。)
+            </Text>
+          </Alert>
+          <TextInput
+            label={`输入项目名「${title}」以确认`}
+            placeholder={title}
+            value={confirmTitle}
+            onChange={(event) => setConfirmTitle(event.currentTarget.value)}
+            error={mismatch ? '项目名不匹配,请逐字输入。' : undefined}
+            data-testid="delete-confirm-title"
+          />
+          <Checkbox
+            label="记入大事记(chronicle 追加 project.deleted 条目)"
+            checked={recordChronicle}
+            onChange={(event) => setRecordChronicle(event.currentTarget.checked)}
+            data-testid="delete-record-chronicle"
+          />
+          {remove.error && !mismatch && (
+            <MutationErrorAlert error={remove.error} title="删除失败" onRefetch={refreshBoard} />
+          )}
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={() => setOpen(false)}>
+              取消
+            </Button>
+            <Button
+              color="red"
+              disabled={!confirmed}
+              loading={remove.isPending}
+              onClick={runDelete}
+              data-testid="delete-project-confirm"
+            >
+              永久删除
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
+  );
+}
+
 function BasicsTab({
   profile,
   projectCase,
   board,
   etag,
+  onDeleted,
 }: {
   profile: string;
   projectCase: ProjectCase;
   board: ProjectBoard;
   etag: string;
+  /** Fired after a successful delete so the drawer closes. */
+  onDeleted: () => void;
 }) {
   const [draft, setDraft] = useState<CaseDraft>(() => draftFromCase(projectCase));
   const [dirty, setDirty] = useState(false);
@@ -430,6 +588,13 @@ function BasicsTab({
           </Button>
         )}
       </Group>
+
+      <DeleteProjectZone
+        profile={profile}
+        projectCase={projectCase}
+        etag={etag}
+        onDeleted={onDeleted}
+      />
 
       {createJob.isError && (
         <Alert color="red" title="创建建议任务失败" data-testid="suggest-create-error">
@@ -895,6 +1060,7 @@ export function ProjectEditDrawer({
               projectCase={projectCase}
               board={board.data!.data}
               etag={board.data!.etag}
+              onDeleted={onClose}
             />
           </Tabs.Panel>
           <Tabs.Panel value="milestones" pt="md">

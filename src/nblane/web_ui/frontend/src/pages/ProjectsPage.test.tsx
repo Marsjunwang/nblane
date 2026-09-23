@@ -92,6 +92,7 @@ const BOARD = {
           column_counts: { queue: 1, doing: 1, someday: 1, done: 5 },
           done_count: 5,
           archived_done_count: 3,
+          evidence_ref_count: 2,
           last_activity: '2026-09-20',
           habit_id: '',
         },
@@ -127,6 +128,7 @@ const BOARD = {
 const BOARD_ETAG = 'W/"board-1"';
 const KANBAN_ETAG = 'W/"kanban-1"';
 const PLAN_ETAG = 'W/"plan-1"';
+const BOARD_ETAG_PROJECT = 'W/"project-board-1"';
 
 // The full kanban.md section order: lane-local drop indices are translated
 // to section-global ones through this board.
@@ -181,7 +183,10 @@ function stubFetch(handler?: FetchHandler) {
       });
     }
     if (url.endsWith('/profiles/alice/project-board')) {
-      return jsonResponse(200, PROJECT_BOARD);
+      return new Response(JSON.stringify(PROJECT_BOARD), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG_PROJECT },
+      });
     }
     if (method === 'POST') {
       return jsonResponse(200, MUTATION_RESULT);
@@ -257,11 +262,11 @@ describe('ProjectsPage board view', () => {
     const unassigned = screen.getByTestId('unassigned-lane');
     expect(within(unassigned).getByText('无归属任务')).toBeInTheDocument();
 
-    // Habit lane: 7 week dots (1 done), streak + check-in button.
-    const habitLane = screen.getByTestId('habit-lane-exercise');
-    expect(habitLane).toHaveTextContent('保持锻炼');
-    expect(habitLane).toHaveTextContent('连续 1 天');
-    expect(habitLane).toHaveTextContent('累计 38 次');
+    // Habit band row: 7 week dots (1 done), streak + check-in button.
+    const habitRow = screen.getByTestId('habit-band-row-exercise');
+    expect(habitRow).toHaveTextContent('保持锻炼');
+    expect(habitRow).toHaveTextContent('连续 1 天');
+    expect(habitRow).toHaveTextContent('累计 38 次');
     expect(screen.getByTestId('habit-dot-exercise-2026-09-23')).toHaveAttribute(
       'data-done',
       'true',
@@ -270,8 +275,231 @@ describe('ProjectsPage board view', () => {
       'data-done',
       'false',
     );
+    // Quick-add rows pinned to every lane's Queue column top (裁决4).
+    expect(within(screen.getByTestId('lane-column-p1-queue')).getByTestId('quick-add-p1'));
+    expect(
+      within(screen.getByTestId('lane-column-unassigned-queue')).getByTestId('quick-add-unassigned'),
+    );
   });
 
+  it('日课栏 dedupe: a habit-plan renders only as a band row, never as a lane', async () => {
+    const habitPlan = {
+      id: 'plan-exercise',
+      title: '锻炼 30 天',
+      status: 'active',
+      kind: 'habit',
+      visibility: 'private',
+      summary: '',
+      time_range: '2026-09-01/2026-09-30',
+      goal_refs: [],
+      milestones: [],
+      queue: [],
+      doing: [],
+      someday: [],
+      column_counts: {},
+      done_count: 0,
+      archived_done_count: 0,
+      evidence_ref_count: 0,
+      last_activity: '',
+      habit_id: 'exercise',
+    };
+    stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = {
+          ...BOARD,
+          ungrouped_projects: [habitPlan],
+          habits: [{ ...BOARD.habits[0], project_id: 'plan-exercise', recent_days: [] }],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByText('alice · 项目');
+
+    // Exactly one row for the habit, in the band; no swimlane, no 未分组 ghost.
+    expect(screen.getByTestId('habit-band')).toBeInTheDocument();
+    expect(screen.getAllByText('保持锻炼')).toHaveLength(1);
+    expect(screen.queryByTestId('project-lane-plan-exercise')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('lane-group-__ungrouped__')).not.toBeInTheDocument();
+    // Habit-plan row: 第N/30天 progress arc, no Queue/Doing columns.
+    expect(screen.getByTestId('habit-plan-arc')).toHaveTextContent('第23/30天');
+    expect(screen.queryByTestId('lane-column-plan-exercise-queue')).not.toBeInTheDocument();
+  });
+
+  it('quick-add posts a project task with the project-board ETag (裁决4)', async () => {
+    const fetchMock = stubFetch();
+    renderPage();
+    await screen.findByText('读 VLA 综述');
+
+    fireEvent.click(screen.getByTestId('quick-add-p1'));
+    const input = screen.getByTestId('quick-add-input-p1');
+    fireEvent.change(input, { target: { value: '新任务甲' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([inputUrl, init]) =>
+          init?.method === 'POST' && String(inputUrl).endsWith('/project-board/cases/p1/tasks'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        title: '新任务甲',
+        section: 'Queue',
+      });
+      expect((call?.[1]?.headers as Record<string, string>)['If-Match']).toBe(BOARD_ETAG_PROJECT);
+    });
+  });
+
+  it('heatmap expand + empty-cell backfill posts a dated check-in', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = {
+          ...BOARD,
+          habits: [
+            {
+              ...BOARD.habits[0],
+              recent_days: [{ date: '2026-09-01', count: 1 }],
+            },
+          ],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band');
+
+    fireEvent.click(screen.getByTestId('habit-expand-exercise'));
+    const heatmap = await screen.findByTestId('habit-heatmap-exercise');
+    // A filled cell renders but is not clickable (no delete endpoint).
+    expect(screen.getByTestId('heatmap-cell-exercise-2026-09-01')).toHaveAttribute(
+      'data-filled',
+      'true',
+    );
+    // An empty past cell backfills on click.
+    const emptyCell = screen.getByTestId('heatmap-cell-exercise-2026-09-02');
+    expect(emptyCell).toHaveAttribute('data-filled', 'false');
+    fireEvent.click(emptyCell);
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) => init?.method === 'POST' && String(input).endsWith('/checkins'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        habit: 'exercise',
+        date: '2026-09-02',
+      });
+    });
+    expect(within(heatmap).getByText(/近 90 天/)).toBeInTheDocument();
+  });
+
+  it('archived strip expands inline to dimmed read-only lanes', async () => {
+    stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = {
+          ...BOARD,
+          ungrouped_projects: [
+            {
+              id: 'p-old',
+              title: '旧项目',
+              status: 'archived',
+              kind: 'internal',
+              visibility: 'private',
+              summary: '',
+              time_range: '',
+              goal_refs: [],
+              milestones: [],
+              queue: [makeTask({ id: 'kb_old', title: '历史任务', project_id: 'p-old' })],
+              doing: [],
+              someday: [],
+              column_counts: {},
+              done_count: 2,
+              archived_done_count: 0,
+              evidence_ref_count: 0,
+              last_activity: '',
+              habit_id: '',
+            },
+          ],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    const toggle = await screen.findByTestId('archived-strip-toggle');
+    expect(screen.queryByTestId('archived-lane-p-old')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    const lane = await screen.findByTestId('archived-lane-p-old');
+    expect(lane).toHaveTextContent('旧项目');
+    expect(lane).toHaveTextContent('历史任务');
+    // Read-only: no drag handles, no quick-add; drawer + restore actions stay.
+    expect(within(lane).queryByRole('button', { name: /^拖拽卡片 / })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('quick-add-p-old')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '恢复项目 旧项目' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看项目 旧项目' })).toBeInTheDocument();
+  });
+
+  it('restore posts status=active with the project-board ETag', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = {
+          ...BOARD,
+          ungrouped_projects: [
+            {
+              id: 'p-old',
+              title: '旧项目',
+              status: 'archived',
+              kind: 'internal',
+              visibility: 'private',
+              summary: '',
+              time_range: '',
+              goal_refs: [],
+              milestones: [],
+              queue: [],
+              doing: [],
+              someday: [],
+              column_counts: {},
+              done_count: 0,
+              archived_done_count: 0,
+              evidence_ref_count: 0,
+              last_activity: '',
+              habit_id: '',
+            },
+          ],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('archived-strip-toggle'));
+    fireEvent.click(await screen.findByRole('button', { name: '恢复项目 旧项目' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          init?.method === 'POST' && String(input).endsWith('/project-board/cases/p-old/save'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ status: 'active' });
+      expect((call?.[1]?.headers as Record<string, string>)['If-Match']).toBe(BOARD_ETAG_PROJECT);
+    });
+  });
   it('switches grouping to 按活动 (kind buckets)', async () => {
     stubFetch();
     renderPage();
@@ -348,6 +576,99 @@ describe('ProjectsPage selection & views', () => {
 });
 
 describe('ProjectsPage mutations', () => {
+  it('delete project: preview + type-the-name confirm + DELETE with board ETag (裁决3)', async () => {
+    const projectCase = {
+      id: 'p1',
+      title: '知识补全',
+      status: 'active',
+      kind: 'learning',
+      visibility: 'private',
+      time_range: '',
+      summary: '',
+      notes: '',
+      goal_refs: ['g1'],
+      task_refs: [],
+      evidence_refs: ['ev_a', 'ev_b'],
+      source_refs: [],
+      experience_refs: [],
+      output_refs: [],
+      milestones: [],
+      tasks: [],
+      derived_time_range: '',
+    };
+    const fetchMock = stubFetch((url, init) => {
+      const target = String(url);
+      if (target.endsWith('/profiles/alice/project-board') && !init?.method) {
+        return new Response(
+          JSON.stringify({ ...PROJECT_BOARD, cases: [projectCase] }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG_PROJECT },
+          },
+        );
+      }
+      if (init?.method === 'DELETE' && target.endsWith('/project-board/cases/p1')) {
+        return jsonResponse(200, {
+          ok: true,
+          deleted_id: 'p1',
+          tasks_unassigned: 8,
+          evidence_refs_kept: 2,
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByText('读 VLA 综述');
+
+    // Open the drawer from the lane header, enter the danger zone.
+    fireEvent.click(screen.getByRole('button', { name: '编辑项目 知识补全' }));
+    const drawer = await screen.findByTestId('project-edit-drawer');
+    fireEvent.click(await within(drawer).findByTestId('delete-project-button'));
+
+    const modal = await screen.findByTestId('delete-project-modal');
+    expect(modal).toBeInTheDocument();
+    // Consequence preview from column_counts (1+1+1+5) + evidence_ref_count.
+    // (Modal content portals to document.body — query via screen; the root
+    // mounts before its transitioned children, so await them.)
+    expect(await screen.findByTestId('delete-project-preview')).toHaveTextContent(
+      '8 个任务将回到未归属 · 2 条证据保留引用',
+    );
+    const confirm = await screen.findByTestId('delete-project-confirm');
+    expect(confirm).toBeDisabled();
+    // 记入大事记 defaults OFF (家务删除不混入叙事).
+    expect(screen.getByTestId('delete-record-chronicle')).not.toBeChecked();
+
+    // A near-miss title keeps the confirm disabled.
+    fireEvent.change(screen.getByTestId('delete-confirm-title'), {
+      target: { value: '知识补全 ' },
+    });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId('delete-confirm-title'), {
+      target: { value: '知识补全' },
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          init?.method === 'DELETE' && String(input).endsWith('/project-board/cases/p1'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        confirm_title: '知识补全',
+        record_chronicle: false,
+      });
+      expect((call?.[1]?.headers as Record<string, string>)['If-Match']).toBe(BOARD_ETAG_PROJECT);
+    });
+    // Drawer closes and the boards invalidate after a successful delete.
+    expect(await screen.findByText('项目已删除')).toBeInTheDocument();
+    // Mantine keeps the closed Drawer's root mounted; its content unmounts.
+    await waitFor(() =>
+      expect(screen.queryByTestId('delete-project-zone')).not.toBeInTheDocument(),
+    );
+  });
+
   it('in-lane drop posts move with target_section + to_index and the kanban ETag', async () => {
     const fetchMock = stubFetch();
     renderPage();

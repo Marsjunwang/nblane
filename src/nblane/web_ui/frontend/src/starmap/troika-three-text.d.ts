@@ -16,5 +16,6 @@ declare module 'troika-three-text' {
     material: MeshBasicMaterial;
     textRenderInfo: { blockBounds: [number, number, number, number] } | null;
     sync(callback?: () => void): void;
+    dispose(): void;
   }
 }

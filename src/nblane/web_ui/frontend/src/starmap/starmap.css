@@ -101,18 +101,93 @@
   white-space: nowrap;
 }
 
+/* 印章家族 (round-2 印章化): the bottom-right pair joins 星表「+」/日课印 in
+ * one 篆刻 language — same mottled (斑蚀) texture, same border + inset
+ * double-ring, same hover glow; size rhythm on the 44px module. */
+
+/* 境态/图态 toggle: vertical seal bearing the single target glyph 境/图. */
 .starmap-toggle {
   position: absolute;
   right: 20px;
   bottom: 16px;
   z-index: 3;
+  width: 44px;
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: 24px;
+  line-height: 1;
+  color: rgba(234, 197, 126, 0.9);
+  background:
+    radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.1), transparent 42%),
+    radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
+    radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.05), transparent 30%),
+    rgba(20, 34, 54, 0.72);
+  border: 1px solid rgba(220, 174, 85, 0.55);
+  box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.starmap-toggle:hover {
+  color: #f0cd7f;
+  border-color: rgba(240, 205, 127, 0.85);
+  box-shadow:
+    inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22),
+    0 0 14px rgba(220, 174, 85, 0.25);
+}
+
+/* 显真: small square seal above the 境/图 seal. 白文 OFF = moon-white carved
+ * glyph on the dark stone face; 朱文 ON = cinnabar face, gold glyph lit. */
+.starmap-reveal-toggle {
+  position: absolute;
+  right: 20px;
+  bottom: 88px;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
   font-size: 15px;
-  color: #e8e2d2;
-  background: rgba(20, 34, 54, 0.55);
-  border: 1px solid rgba(232, 226, 210, 0.4);
-  padding: 8px 16px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  color: rgba(232, 226, 210, 0.8);
+  text-shadow: 0 1px 1px rgba(6, 10, 18, 0.8); /* 阴刻 */
+  background:
+    radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.06), transparent 42%),
+    radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
+    radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.04), transparent 30%),
+    rgba(16, 27, 44, 0.78);
+  border: 1px solid rgba(232, 226, 210, 0.32);
+  box-shadow: inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.12);
   cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.starmap-reveal-toggle:hover {
+  color: #f5ead2;
+  border-color: rgba(245, 234, 210, 0.6);
+  box-shadow:
+    inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.12),
+    0 0 14px rgba(232, 226, 210, 0.18);
+}
+
+.starmap-reveal-toggle[aria-pressed='true'] {
+  color: #f7d98a;
+  text-shadow: 0 0 6px rgba(247, 217, 138, 0.45); /* 朱文点亮 */
+  background:
+    radial-gradient(circle at 30% 30%, rgba(226, 122, 82, 0.5), transparent 46%),
+    radial-gradient(circle at 70% 72%, rgba(80, 22, 12, 0.5), transparent 50%),
+    #7e2f1f;
+  border-color: rgba(240, 205, 127, 0.75);
+  box-shadow:
+    inset 0 0 0 3px rgba(80, 22, 12, 0.45), inset 0 0 0 4px rgba(240, 205, 127, 0.3),
+    0 0 16px rgba(200, 90, 50, 0.35);
 }
 
 .starmap-tooltip {
@@ -233,7 +308,17 @@
 /* 手机竖屏 = 立轴: 小匾在上, 详情卡底部升起 */
 @media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
   .starmap-cartouche { width: clamp(140px, 44vw, 210px); }
-  .starmap-toggle { right: 12px; bottom: 12px; font-size: 13px; padding: 6px 12px; }
+  .starmap-toggle { right: 12px; bottom: 12px; width: 38px; height: 54px; font-size: 20px; }
+  .starmap-reveal-toggle { right: 12px; bottom: 76px; width: 38px; height: 38px; font-size: 13px; }
+  .starmap-habit-seal {
+    left: 64px;
+    bottom: 12px;
+    font-size: 12px;
+    padding: 6px 10px;
+    gap: 8px;
+    max-width: calc(100vw - 180px);
+    flex-wrap: wrap;
+  }
   .starmap-detail {
     top: auto;
     right: 0;
@@ -254,4 +339,467 @@
 
 @media (prefers-reduced-motion: reduce) {
   .starmap-detail { transition: none; }
+}
+
+/* ---- home-editing slice: 星表 + 重刻铭文 + 落印 (2026-09-23) ---- */
+
+/* 淡金「+」印章按钮: square seal with a mottled (斑蚀) texture built from
+ * layered faint radial blemishes — matches the 石刻 language of the chart. */
+.starmap-catalog-btn {
+  position: absolute;
+  left: 20px;
+  bottom: 16px;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(234, 197, 126, 0.9);
+  background:
+    radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.1), transparent 42%),
+    radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
+    radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.05), transparent 30%),
+    rgba(20, 34, 54, 0.72);
+  border: 1px solid rgba(220, 174, 85, 0.55);
+  box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.starmap-catalog-btn:hover {
+  color: #f0cd7f;
+  border-color: rgba(240, 205, 127, 0.85);
+}
+
+/* 日课印: bottom-left seal strip beside the 星表「+」button (裱边层) —
+ * same mottled-seal language, stretched into a one-line row. */
+.starmap-habit-seal {
+  position: absolute;
+  left: 76px;
+  bottom: 16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: 14px;
+  color: rgba(232, 226, 210, 0.85);
+  background:
+    radial-gradient(circle at 22% 30%, rgba(220, 174, 85, 0.09), transparent 44%),
+    radial-gradient(circle at 74% 72%, rgba(10, 16, 28, 0.35), transparent 48%),
+    rgba(20, 34, 54, 0.72);
+  border: 1px solid rgba(220, 174, 85, 0.4);
+  box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.16);
+}
+
+.starmap-habit-seal-label {
+  color: rgba(234, 197, 126, 0.9);
+  letter-spacing: 2px;
+  font-weight: 600;
+}
+
+.starmap-habit-seal-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.starmap-habit-seal-item:hover {
+  color: #f0cd7f;
+}
+
+.starmap-habit-seal-item:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.starmap-habit-seal-dot {
+  color: rgba(232, 226, 210, 0.55);
+}
+
+.starmap-habit-seal-dot.done {
+  color: #dcae55;
+}
+
+/* 星表面板: desktop slides from the left, mobile rises as a bottom sheet */
+.starmap-catalog {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  width: 280px;
+  max-height: 76%;
+  overflow-y: auto;
+  transform: translate(-130%, -50%);
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.25, 1);
+  background: rgba(14, 24, 40, 0.9);
+  border: 1px solid rgba(220, 174, 85, 0.5);
+  padding: 18px 20px;
+  font-family: 'I.Ming Subset', 'Noto Serif CJK SC', serif;
+  z-index: 11;
+  pointer-events: auto;
+}
+
+.starmap-catalog.open {
+  transform: translate(0, -50%);
+}
+
+.starmap-catalog h3 {
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 19px;
+  font-weight: normal;
+  color: #f0cd7f;
+  letter-spacing: 6px;
+  margin: 0 0 12px;
+  border-bottom: 1px solid rgba(220, 174, 85, 0.3);
+  padding-bottom: 9px;
+}
+
+.starmap-catalog-section h4 {
+  font-size: 12px;
+  font-weight: normal;
+  color: rgba(220, 174, 85, 0.65);
+  letter-spacing: 3px;
+  margin: 14px 0 6px;
+}
+
+.starmap-catalog-section .sec-count {
+  margin-left: 8px;
+  color: rgba(176, 167, 140, 0.8);
+  letter-spacing: 0;
+}
+
+.starmap-catalog-row {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 8px;
+  margin-bottom: 2px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.starmap-catalog-row:hover {
+  background: rgba(220, 174, 85, 0.08);
+  border-left-color: rgba(220, 174, 85, 0.6);
+}
+
+.starmap-catalog-row .row-title {
+  font-size: 14px;
+  color: rgba(245, 234, 210, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.starmap-catalog-row .row-sub {
+  flex: none;
+  font-size: 11px;
+  color: rgba(176, 167, 140, 0.75);
+}
+
+.starmap-catalog-row.vacant .row-title {
+  color: rgba(234, 197, 126, 0.85);
+  letter-spacing: 1px;
+}
+
+.starmap-catalog-row.carved .row-title {
+  color: rgba(242, 237, 224, 0.45); /* 刻痕星: 月白低亮 */
+}
+
+.starmap-catalog-empty {
+  font-size: 12px;
+  color: rgba(176, 167, 140, 0.7);
+  margin: 2px 0 4px;
+}
+
+.starmap-catalog-add {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px 0;
+  background: transparent;
+  border: 1px dashed rgba(220, 174, 85, 0.45);
+  color: rgba(234, 197, 126, 0.85);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 2px;
+  cursor: pointer;
+}
+
+.starmap-catalog-add:hover {
+  border-color: rgba(240, 205, 127, 0.8);
+  color: #f0cd7f;
+}
+
+.starmap-catalog-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: rgba(125, 191, 142, 0.9);
+}
+
+/* 星表键盘交互 (design home-starmap-enhancements §2) */
+
+.starmap-catalog-row.active {
+  background: rgba(220, 174, 85, 0.12);
+  border-left-color: #dcae55;
+}
+
+.starmap-catalog kbd {
+  font-family: inherit;
+  font-size: 10px;
+  color: rgba(242, 237, 224, 0.85); /* 月白 */
+  border: 1px solid rgba(220, 174, 85, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+
+/* kbd shortcut hints appear on hover only */
+.starmap-catalog-row .row-kbd {
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.starmap-catalog-row:hover .row-kbd,
+.starmap-catalog-row.active .row-kbd {
+  opacity: 0.9;
+}
+
+/* One-time 2s fading guide bar on the catalog's first open (per session) */
+.starmap-catalog-hintbar {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(242, 237, 224, 0.6); /* 月白小字 */
+  animation: starmap-catalog-hint-fade 2.4s ease forwards;
+}
+
+@keyframes starmap-catalog-hint-fade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ---- 铭文卡编辑态 (重刻) ---- */
+
+.starmap-detail .starmap-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.starmap-detail .starmap-detail-actions .starmap-detail-link {
+  margin-top: 0;
+}
+
+.starmap-recarve {
+  background: transparent;
+  border: 1px solid rgba(220, 174, 85, 0.55);
+  color: rgba(234, 197, 126, 0.9);
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 12px;
+  letter-spacing: 3px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.starmap-recarve:hover {
+  color: #f0cd7f;
+  border-color: rgba(240, 205, 127, 0.85);
+}
+
+.starmap-edit label,
+.starmap-edit-field {
+  display: block;
+  margin-top: 12px;
+}
+
+.starmap-edit label > span,
+.starmap-edit-field > span {
+  display: block;
+  font-size: 12px;
+  color: rgba(220, 174, 85, 0.65);
+  letter-spacing: 2px;
+  margin-bottom: 4px;
+}
+
+.starmap-edit input,
+.starmap-edit textarea,
+.starmap-edit select {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(8, 15, 29, 0.6);
+  border: 1px solid rgba(220, 174, 85, 0.3);
+  color: rgba(245, 234, 210, 0.95);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 7px 9px;
+  outline: none;
+  color-scheme: dark;
+}
+
+.starmap-edit input:focus,
+.starmap-edit textarea:focus,
+.starmap-edit select:focus {
+  border-color: rgba(240, 205, 127, 0.75);
+}
+
+.starmap-edit textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.starmap-vis-toggle {
+  display: flex;
+  gap: 0;
+}
+
+.starmap-vis-toggle button {
+  flex: 1;
+  padding: 7px 0;
+  background: rgba(8, 15, 29, 0.6);
+  border: 1px solid rgba(220, 174, 85, 0.3);
+  color: rgba(176, 167, 140, 0.85);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 2px;
+  cursor: pointer;
+}
+
+.starmap-vis-toggle button + button {
+  border-left: none;
+}
+
+.starmap-vis-toggle button.on {
+  color: #f0cd7f;
+  border-color: rgba(220, 174, 85, 0.7);
+  background: rgba(220, 174, 85, 0.12);
+}
+
+.starmap-edit-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: rgba(176, 167, 140, 0.75);
+}
+
+.starmap-edit-error {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #e88a8a;
+}
+
+.starmap-edit-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.starmap-save {
+  flex: 1;
+  padding: 8px 0;
+  background: rgba(220, 174, 85, 0.16);
+  border: 1px solid rgba(220, 174, 85, 0.7);
+  color: #f0cd7f;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 14px;
+  letter-spacing: 4px;
+  cursor: pointer;
+}
+
+.starmap-save:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.starmap-cancel {
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid rgba(176, 167, 140, 0.35);
+  color: rgba(176, 167, 140, 0.85);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+/* 落印: seal-stamp micro-animation on save success — one stamp, no loop */
+.starmap-seal {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'LXGW WenKai Subset', serif;
+  font-size: 20px;
+  color: rgba(240, 205, 127, 0.95);
+  border: 2px solid rgba(220, 174, 85, 0.85);
+  box-shadow: inset 0 0 6px rgba(220, 174, 85, 0.35);
+  transform: rotate(-6deg);
+  pointer-events: none;
+  animation: starmap-stamp 0.95s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+@keyframes starmap-stamp {
+  0% {
+    opacity: 0;
+    transform: rotate(-6deg) scale(1.6);
+  }
+  35% {
+    opacity: 1;
+    transform: rotate(-6deg) scale(0.94);
+  }
+  55% {
+    transform: rotate(-6deg) scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(-6deg) scale(1);
+  }
+}
+
+/* mobile: catalog as a bottom sheet above the detail card's layer */
+@media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
+  .starmap-catalog-btn { left: 12px; bottom: 12px; width: 40px; height: 40px; font-size: 20px; }
+  .starmap-catalog {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 56%;
+    transform: translateY(112%);
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+  .starmap-catalog.open { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .starmap-catalog { transition: none; }
+  .starmap-seal { animation-duration: 0.01s; }
 }

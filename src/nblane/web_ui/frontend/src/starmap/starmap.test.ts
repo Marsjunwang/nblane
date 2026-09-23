@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildLayout, R, R_GOAL, SECTOR_START } from './layout';
+import { buildLayout, CARVED_ANGLES, GOAL_ANGLES, R, R_GOAL, SECTOR_START, TEMP, SECTOR_ASTERISM_TABLE, asterismById, asterismLinearity } from './layout';
 import { mulberry32 } from './rng';
-import { normalizeStarmapResponse, type StarmapSnapshot } from './snapshot';
+import { mergeGoalBook, normalizeStarmapResponse, type StarmapSnapshot } from './snapshot';
+import type { GoalsResponse } from '../api/types';
 
 /* Snapshot fixture in the server /starmap shape (post-aggregation: locked
  * schema nodes included, zh category names, flying already computed — those
@@ -10,6 +11,12 @@ import { normalizeStarmapResponse, type StarmapSnapshot } from './snapshot';
 function snapshotFixture(overrides: Partial<StarmapSnapshot> = {}): StarmapSnapshot {
   return {
     north_star: '成为能独立交付机器人 demo 的工程师',
+    north: {
+      is_set: true,
+      full: '成为能独立交付机器人 demo 的工程师',
+      brief: '',
+      visibility: 'private',
+    },
     goals: [
       { id: 'g1', title: 'Goal One', status: 'active', summary: 's', start: '2026-01-01', target: '2026-12-31' },
       { id: 'g2', title: 'Goal Two', status: 'active', summary: '', start: '', target: '' },
@@ -136,6 +143,52 @@ describe('normalizeStarmapResponse', () => {
       evidence: [],
     });
     expect(snap.counts.evidence).toBe(0);
+    expect(snap.north).toMatchObject({ is_set: false, full: '', visibility: 'private' });
+  });
+});
+
+describe('mergeGoalBook', () => {
+  const book: GoalsResponse = {
+    profile: 'alice',
+    north_star: {
+      is_set: true,
+      full: '全文北极星',
+      brief: '简称',
+      visibility: 'public',
+    },
+    goals: [
+      { id: 'g1', title: 'Goal One', status: 'active' },
+      { id: 'g3', title: 'Paused Goal', status: 'paused' },
+      { id: 'g4', title: 'Done Goal', status: 'completed', target: '2026-06-01' },
+    ],
+  } as GoalsResponse;
+
+  it('overlays the authoritative NorthStarModel and appends non-active goals', () => {
+    const merged = mergeGoalBook(snapshotFixture(), book);
+    expect(merged.north).toMatchObject({
+      is_set: true,
+      full: '全文北极星',
+      brief: '简称',
+      visibility: 'public',
+    });
+    expect(merged.north_star).toBe('全文北极星');
+    // active goals keep aggregation order; paused/completed append in book order
+    expect(merged.goals.map((g) => g.id)).toEqual(['g1', 'g2', 'g3', 'g4']);
+    expect(merged.goals[3]).toMatchObject({ status: 'completed', target: '2026-06-01' });
+  });
+
+  it('marks the pole vacant when the book says is_set=false', () => {
+    const merged = mergeGoalBook(snapshotFixture(), {
+      ...book,
+      north_star: { is_set: false, full: '', brief: '', visibility: 'private' },
+    } as GoalsResponse);
+    expect(merged.north.is_set).toBe(false);
+    expect(merged.north_star).toBe('');
+  });
+
+  it('returns the snapshot untouched when the book is unavailable', () => {
+    const snap = snapshotFixture();
+    expect(mergeGoalBook(snap, undefined)).toBe(snap);
   });
 });
 
@@ -240,6 +293,7 @@ describe('buildLayout', () => {
     const empty = buildLayout(
       snapshotFixture({
         north_star: '',
+        north: { is_set: false, full: '', brief: '', visibility: 'private' },
         goals: [],
         categories: [],
         skills: [],
@@ -258,11 +312,144 @@ describe('buildLayout', () => {
     expect(empty.planets).toEqual([]);
     expect(empty.guests).toEqual([]);
   });
+
+  it('pins completed goals on the carved seats (刻痕星, design §4)', () => {
+    const withDone = buildLayout(
+      snapshotFixture({
+        goals: [
+          { id: 'g1', title: 'Goal One', status: 'active', summary: '', start: '', target: '' },
+          { id: 'g2', title: 'Goal Two', status: 'paused', summary: '', start: '', target: '' },
+          { id: 'g3', title: 'Done Goal', status: 'completed', summary: '', start: '', target: '' },
+        ],
+      }),
+    );
+    expect(withDone.goals.map((g) => [g.id, g.status])).toEqual([
+      ['g1', 'active'],
+      ['g2', 'paused'],
+      ['g3', 'completed'],
+    ]);
+    // living goals sit on GOAL_ANGLES; the carved one on CARVED_ANGLES
+    expect(withDone.goals[0].angle).toBe(GOAL_ANGLES[0]);
+    expect(withDone.goals[1].angle).toBe(GOAL_ANGLES[1]);
+    expect(withDone.goals[2].angle).toBe(CARVED_ANGLES[0]);
+    // carved seats share the R_GOAL ring (rotate with the disc, no collision)
+    const r = Math.hypot(withDone.goals[2].plan[0], withDone.goals[2].plan[1]);
+    expect(r).toBeCloseTo(R_GOAL, 6);
+  });
 });
 
 describe('chart constants', () => {
   it('keeps the playground proportions', () => {
     expect(R).toBe(100);
     expect(R_GOAL).toBeCloseTo(54, 6);
+  });
+});
+
+describe('北斗环卫 naming layer (design 四轮)', () => {
+  const snap = snapshotFixture();
+  const L = buildLayout(snap);
+
+  it('names living goals by dipper seat order and keeps 虚位 seats hollow', () => {
+    expect(L.seats).toHaveLength(7);
+    expect(L.seats.map((s) => s.name)).toEqual([
+      '天枢', '天璇', '天玑', '天权', '玉衡', '开阳', '摇光',
+    ]);
+    // two living goals hold 天枢/天璇; the rest are 虚位 (incl. the 开阳/摇光
+    // reserve seats beyond the 5-goal cap)
+    expect(L.seats.map((s) => s.goalIndex)).toEqual([0, 1, null, null, null, null, null]);
+    expect(L.goals[0].seatName).toBe('天枢');
+    expect(L.goals[1].seatName).toBe('天璇');
+    // seat positions stay on the existing goal ring (no repositioning)
+    expect(L.seats[0].angle).toBe(GOAL_ANGLES[0]);
+  });
+
+  it('revokes the dipper name on completion (刻痕星 has no seatName)', () => {
+    const withDone = buildLayout(
+      snapshotFixture({
+        goals: [
+          { id: 'g1', title: 'Goal One', status: 'active', summary: '', start: '', target: '' },
+          { id: 'g3', title: 'Done Goal', status: 'completed', summary: '', start: '', target: '' },
+        ],
+      }),
+    );
+    expect(withDone.goals[0].seatName).toBe('天枢');
+    expect(withDone.goals[1].status).toBe('completed');
+    expect(withDone.goals[1].seatName).toBeUndefined();
+    expect(withDone.seats[1].goalIndex).toBeNull();
+  });
+});
+
+describe('sector asterism figures (星官真形)', () => {
+  const L = buildLayout(snapshotFixture());
+
+  it('maps categories to the user-confirmed 星官 names (rim band labels)', () => {
+    // 控制→轸宿 (name only, shape falls back to templates), 感知→毕宿 (real
+    // shape in asterisms.json), unmapped categories keep their own name
+    expect(L.sectors[0].asterism).toBe('轸宿');
+    expect(L.sectors[1].asterism).toBe('毕宿');
+    expect(L.sectors[2].asterism).toBe('misc');
+  });
+
+  it('carves the full figure: members on shape slots, rest etched 空圈', () => {
+    // 控制: template (7 slots) with 2 members → 5 etched; 感知: 毕宿 (9
+    // stars) with 1 member → 8 etched; misc unmapped+empty → skipped
+    expect(L.etched.plan.length / 3).toBe(5 + 8);
+    // etched lines cover the whole figure (6 template links + 8 毕宿 links)
+    expect(L.shapeLinesPlan.length / 6).toBe(6 + 8);
+  });
+
+  it('etches the full figure for a mapped sector with no lit members (空圈蚀刻)', () => {
+    const locked = buildLayout(
+      snapshotFixture({
+        categories: [
+          { id: 'research', name: '研究', count: 1, lit_count: 0, learning_count: 0 },
+        ],
+        skills: [{ id: 's9', label: 'Skill 9', category: 'research', status: 'locked', lit: false }],
+      }),
+    );
+    expect(locked.sectors[0].asterism).toBe('文昌'); // 心宿 culled (near-collinear)
+    expect(locked.etched.plan.length / 3).toBe(5); // 文昌五星, all vacant seats
+    expect(locked.shapeLinesPlan.length / 6).toBe(4); // its four line segments
+    expect(locked.lit.plan).toHaveLength(0);
+    // figure radius recorded so the muted in-sector name can sit beyond it
+    expect(locked.sectors[0].figRadius).toBeGreaterThan(0);
+  });
+
+  it('culls near-collinear shapes: every mapped real figure passes the linearity guard', () => {
+    // 王军 round-2: figures that read as a straight line at sector scale must
+    // not be mapped (角宿 2星一线 and 心宿 三星近共线 were culled this way).
+    for (const [cat, m] of Object.entries(SECTOR_ASTERISM_TABLE)) {
+      const aster = asterismById(m.id);
+      if (!aster) continue; // template-fallback names (翼/房/箕/轸/轩辕/虚)
+      expect(
+        asterismLinearity(aster.stars),
+        `${cat}→${m.name} reads as a line — substitute or drop it`,
+      ).toBeGreaterThanOrEqual(0.18);
+    }
+    // the two culled figures really are gone from the table
+    expect(Object.values(SECTOR_ASTERISM_TABLE).map((m) => m.id)).not.toContain('jiao');
+    expect(Object.values(SECTOR_ASTERISM_TABLE).map((m) => m.id)).not.toContain('xin');
+  });
+});
+
+describe('境态 deepspace tuning', () => {
+  const L = buildLayout(snapshotFixture());
+
+  it('gives background filler a power-law pseudo-magnitude (~5% bright)', () => {
+    const scales = L.dim.deepOpScale.filter((_, i) => L.dim.filler[i] === 1);
+    const bright = scales.filter((s) => s > 0.9).length;
+    const frac = bright / scales.length;
+    expect(frac).toBeGreaterThan(0.01);
+    expect(frac).toBeLessThan(0.12);
+  });
+
+  it('assigns only the discrete 4-step deep color temperatures', () => {
+    const palette = new Set(
+      [TEMP.blueWhite, TEMP.moonWhite, TEMP.warmGold, TEMP.softOrange].map((c) => c.join(',')),
+    );
+    for (let i = 0; i < L.dim.deepColor.length; i += 3) {
+      const key = [L.dim.deepColor[i], L.dim.deepColor[i + 1], L.dim.deepColor[i + 2]].join(',');
+      expect(palette.has(key)).toBe(true);
+    }
   });
 });

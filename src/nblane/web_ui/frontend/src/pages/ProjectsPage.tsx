@@ -24,7 +24,7 @@ import { IconPlus, IconRefresh } from '@tabler/icons-react';
 import { useCallback, useMemo, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { useKanbanBoard, useProjectsBoard } from '../api/hooks';
+import { useKanbanBoard, useProjectBoard, useProjectsBoard } from '../api/hooks';
 import { BoardView } from '../components/projects/BoardView';
 import { NewPlanModal } from '../components/projects/NewPlanModal';
 import { NewProjectModal } from '../components/projects/NewProjectModal';
@@ -35,6 +35,7 @@ import { handleLaneMutationError } from '../components/projects/ProjectLane';
 import {
   buildLaneGroups,
   collectArchivedProjects,
+  collectHabitRows,
   collectProjects,
   findBoardTask,
 } from '../components/projects/lanes';
@@ -92,6 +93,9 @@ export function ProjectsPage() {
 
   const board = useProjectsBoard(name);
   const kanban = useKanbanBoard(name);
+  // project-board.yaml ETag: quick-add (cases/{id}/tasks) and the archive
+  // strip's 恢复 both mutate through the project-board endpoints.
+  const projectBoard = useProjectBoard(name);
   const [planOpen, setPlanOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editProjectId, setEditProjectId] = useState<string | null>(null);
@@ -125,6 +129,7 @@ export function ProjectsPage() {
   );
   const archived = useMemo(() => (data ? collectArchivedProjects(data) : []), [data]);
   const allProjects = useMemo(() => (data ? collectProjects(data) : []), [data]);
+  const habitRows = useMemo(() => (data ? collectHabitRows(data) : []), [data]);
   // Stable identity: Mantine Select re-syncs its display when `data` churns.
   const activeProjects = useMemo(
     () => allProjects.filter((project) => project.status !== 'archived'),
@@ -269,11 +274,13 @@ export function ProjectsPage() {
         <BoardView
           profile={name}
           groups={groups}
-          habits={data.habits ?? []}
+          habitRows={habitRows}
+          today={data.today ?? ''}
           unassigned={data.unassigned_tasks ?? []}
           archived={archived}
           kanbanEtag={kanban.data?.etag ?? ''}
           kanbanSections={kanban.data?.board.sections}
+          projectBoardEtag={projectBoard.data?.etag ?? ''}
           selectedTaskId={taskId}
           onSelectTask={(id) => updateParams({ task: id })}
           onEditProject={setEditProjectId}
@@ -284,9 +291,10 @@ export function ProjectsPage() {
           profile={name}
           board={data}
           groups={groups}
-          habits={data.habits ?? []}
+          habitRows={habitRows}
           unassigned={data.unassigned_tasks ?? []}
           kanbanEtag={kanban.data?.etag ?? ''}
+          kanbanSections={kanban.data?.board.sections}
           selectedTaskId={taskId}
           onSelectTask={(id) => updateParams({ task: id })}
           onDragError={(error) => handleLaneMutationError(error, '排期失败', onRefresh)}

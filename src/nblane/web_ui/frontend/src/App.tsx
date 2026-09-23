@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 
 import { RequireAuth } from './auth/RequireAuth';
 import { AppLayout } from './components/AppLayout';
@@ -6,7 +6,6 @@ import { ActivityPage } from './pages/ActivityPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { EvidencePage, EvidenceReviewRedirect } from './pages/EvidencePage';
 import { GapPage } from './pages/GapPage';
-import { GoalsPage } from './pages/GoalsPage';
 import { HealthPage } from './pages/HealthPage';
 import { HomePage } from './pages/HomePage';
 import { InboxPage } from './pages/InboxPage';
@@ -20,6 +19,16 @@ import { ReviewPage } from './pages/ReviewPage';
 import { SkillTreePage } from './pages/SkillTreePage';
 import { StudioPage } from './pages/StudioPage';
 import { WorkshopPage } from './pages/WorkshopPage';
+
+/** /goals → /home(目标管理由星图星表吸收,旧链接保留 query 串不破坏)。 */
+function GoalsRedirect() {
+  const { name = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const search = searchParams.toString();
+  return (
+    <Navigate to={`/p/${encodeURIComponent(name)}/home${search ? `?${search}` : ''}`} replace />
+  );
+}
 
 export function App() {
   return (
@@ -43,7 +52,9 @@ export function App() {
           {/* Legacy route: the kanban board merged into the Projects page. */}
           <Route path="/p/:name/kanban" element={<KanbanRedirect />} />
           <Route path="/p/:name/skill-tree" element={<SkillTreePage />} />
-          <Route path="/p/:name/goals" element={<GoalsPage />} />
+          {/* Legacy route: the goals page is absorbed by the home starmap
+              星表 catalog (design: home-editing-starmap-design.md §6). */}
+          <Route path="/p/:name/goals" element={<GoalsRedirect />} />
           <Route path="/p/:name/evidence" element={<EvidencePage />} />
           {/* Legacy route: the review queue merged into the Evidence page. */}
           <Route path="/p/:name/evidence-review" element={<EvidenceReviewRedirect />} />

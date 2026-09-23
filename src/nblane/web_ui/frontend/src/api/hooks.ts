@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiGet, apiGetWithHeaders, apiPatchWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
+import { ApiError, apiDelete, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -13,6 +13,7 @@ import type {
   AssistantStatus,
   CheckinCreateRequest,
   CheckinMutationResponse,
+  ChronicleResponse,
   CurrentUser,
   EvidenceEntryDetail,
   EvidenceEditRequest,
@@ -34,6 +35,9 @@ import type {
   GapAnalysisResult,
   GapAnalyzeRequest,
   GapIntakeRequest,
+  GoalCreateRequest,
+  GoalMutationResponse,
+  GoalPatchRequest,
   GoalsResponse,
   HealthReport,
   HomeResponse,
@@ -50,6 +54,8 @@ import type {
   KanbanCardPatchRequest,
   KanbanCardScheduleRequest,
   KanbanMutationResponse,
+  NorthStarMutationResponse,
+  NorthStarPatchRequest,
   OkResponse,
   PlanTemplateInstantiateRequest,
   PlanTemplateInstantiateResponse,
@@ -59,6 +65,8 @@ import type {
   ProjectBoard,
   ProjectBoardResult,
   ProjectCaseCreateRequest,
+  ProjectCaseDeleteRequest,
+  ProjectCaseDeleteResponse,
   ProjectCaseMutationResponse,
   ProjectCaseUpdateRequest,
   ProjectMilestoneAddRequest,
@@ -659,6 +667,73 @@ export function useGoals(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'goals'],
     queryFn: () => apiGet<GoalsResponse>(`/profiles/${encodeURIComponent(profile)}/goals`),
+    enabled: profile.length > 0,
+  });
+}
+
+// --- Home starmap editing (design: docs/zh/dev/home-editing-starmap-design.md) ---
+// The starmap GET ETag covers SKILL.md + goals.yaml, so every north-star /
+// goal mutation invalidates the starmap snapshot (in-place refresh), the
+// goal book, and the chronicle (briefing-line flavor).
+
+function useInvalidateStarmapEditing(profile: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'starmap'] });
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'goals'] });
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'chronicle'] });
+  };
+}
+
+/**
+ * Surgically rewrite the North Star (full / brief / visibility). No If-Match:
+ * GET /goals carries no SKILL.md ETag and the contract makes it optional;
+ * the server re-checks an in-lock snapshot either way. A no-op patch is a
+ * server-side no-write (changed=false).
+ */
+export function usePatchNorthStar(profile: string) {
+  const invalidate = useInvalidateStarmapEditing(profile);
+  return useMutation({
+    mutationFn: (body: NorthStarPatchRequest) =>
+      apiPatch<NorthStarMutationResponse>(
+        `/profiles/${encodeURIComponent(profile)}/north-star`,
+        body,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/** Create one goal (title required; target ISO date; status active default). */
+export function useCreateGoal(profile: string) {
+  const invalidate = useInvalidateStarmapEditing(profile);
+  return useMutation({
+    mutationFn: (body: GoalCreateRequest) =>
+      apiPost<GoalMutationResponse>(`/profiles/${encodeURIComponent(profile)}/goals`, body),
+    onSuccess: invalidate,
+  });
+}
+
+/** Edit one goal's title/summary/target/status (404 goal_not_found). */
+export function usePatchGoal(profile: string) {
+  const invalidate = useInvalidateStarmapEditing(profile);
+  return useMutation({
+    mutationFn: ({ goalId, body }: { goalId: string; body: GoalPatchRequest }) =>
+      apiPatch<GoalMutationResponse>(
+        `/profiles/${encodeURIComponent(profile)}/goals/${encodeURIComponent(goalId)}`,
+        body,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/** Append-only chronicle, newest first (briefing-line flavor). */
+export function useChronicle(profile: string, limit = 40) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'chronicle', limit],
+    queryFn: () =>
+      apiGet<ChronicleResponse>(
+        `/profiles/${encodeURIComponent(profile)}/chronicle?limit=${limit}`,
+      ),
     enabled: profile.length > 0,
   });
 }
@@ -1295,6 +1370,32 @@ export function useMoveProjectTask(profile: string) {
       apiPost<KanbanMutationResponse>(
         `${projectBoardBase(profile)}/tasks/${encodeURIComponent(taskId)}/move`,
         { target_section: targetSection },
+        { headers: ifMatch(etag) },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Delete one project case for good (type-the-name confirm). The board ETag
+ * (covers kanban.md + project-board.yaml) goes out as If-Match; 422 with
+ * code `project_delete_confirm_mismatch` means the typed title differs.
+ */
+export function useDeleteProjectCase(profile: string) {
+  const invalidate = useInvalidateProjectBoard(profile);
+  return useMutation({
+    mutationFn: ({
+      caseId,
+      body,
+      etag,
+    }: {
+      caseId: string;
+      body: ProjectCaseDeleteRequest;
+      etag: string;
+    }) =>
+      apiDelete<ProjectCaseDeleteResponse>(
+        `${projectBoardBase(profile)}/cases/${encodeURIComponent(caseId)}`,
+        body,
         { headers: ifMatch(etag) },
       ),
     onSuccess: invalidate,

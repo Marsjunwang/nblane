@@ -18,6 +18,7 @@ export function LaneColumn({
   title,
   tasks,
   highlighted,
+  quickAdd,
   children,
 }: {
   laneId: string;
@@ -26,6 +27,8 @@ export function LaneColumn({
   title: string;
   tasks: ProjectsBoardTask[];
   highlighted: boolean;
+  /** Optional persistent inline-create row pinned above the cards. */
+  quickAdd?: ReactNode;
   children: ReactNode;
 }) {
   const { setNodeRef } = useDroppable({ id: laneColumnDroppableId(laneId, column) });
@@ -61,6 +64,7 @@ export function LaneColumn({
       <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
         {/* mih keeps empty columns reachable as drop targets. */}
         <Stack gap="xs" mih={48}>
+          {quickAdd}
           {children}
         </Stack>
       </SortableContext>

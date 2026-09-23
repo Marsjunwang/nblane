@@ -8,6 +8,8 @@ import type {
 import {
   buildLaneGroups,
   collectArchivedProjects,
+  collectHabitPlanIds,
+  collectHabitRows,
   collectProjects,
   findBoardTask,
 } from './lanes';
@@ -49,6 +51,7 @@ function makeProject(overrides: Partial<ProjectsBoardProject>): ProjectsBoardPro
     column_counts: {},
     done_count: 0,
     archived_done_count: 0,
+    evidence_ref_count: 0,
     last_activity: '',
     habit_id: '',
     ...overrides,
@@ -109,6 +112,77 @@ describe('lanes buildLaneGroups (activity)', () => {
     expect(
       groups.flatMap((group) => group.projects).some((project) => project.id === 'p2'),
     ).toBe(false);
+  });
+});
+
+describe('lanes habit dedupe (裁决2:一个习惯全站一行)', () => {
+  const habitPlanBoard: ProjectsBoardResponse = {
+    ...BOARD,
+    ungrouped_projects: [
+      makeProject({ id: 'p3', title: '游离项目', kind: 'research' }),
+      // habit-plan: kind 'habit' + habit-side link → lives only in the band.
+      makeProject({ id: 'plan-exercise', title: '锻炼 30 天', kind: 'habit', habit_id: 'exercise' }),
+      // A normal project with a habit link keeps its swimlane.
+      makeProject({ id: 'p-health', title: '健康', kind: 'internal' }),
+    ],
+    habits: [
+      {
+        id: 'exercise',
+        title: '保持锻炼',
+        kind: 'health',
+        cadence: 'daily',
+        project_id: 'plan-exercise',
+        week: [],
+        recent_days: [],
+        streak: 0,
+        total_checkins: 0,
+        last_checkin: '',
+      },
+      {
+        id: 'reading',
+        title: '阅读',
+        kind: 'learning',
+        cadence: 'daily',
+        project_id: 'p-health',
+        week: [],
+        recent_days: [],
+        streak: 0,
+        total_checkins: 0,
+        last_checkin: '',
+      },
+    ],
+  };
+
+  it('collectHabitRows resolves the link from either side, once per habit', () => {
+    const rows = collectHabitRows(habitPlanBoard);
+    expect(rows.map((row) => row.habit.id)).toEqual(['exercise', 'reading']);
+    expect(rows[0].project?.id).toBe('plan-exercise');
+    expect(rows[1].project?.id).toBe('p-health');
+  });
+
+  it('habit-plan projects are filtered out of every lane grouping', () => {
+    expect([...collectHabitPlanIds(habitPlanBoard)]).toEqual(['plan-exercise']);
+    for (const groupBy of ['goal', 'activity'] as const) {
+      const ids = buildLaneGroups(habitPlanBoard, groupBy).flatMap((group) =>
+        group.projects.map((project) => project.id),
+      );
+      expect(ids).not.toContain('plan-exercise');
+      // Non-habit-plan lanes survive (including habit-linked normal projects).
+      expect(ids).toContain('p-health');
+      expect(ids).toContain('p3');
+    }
+  });
+
+  it('a kind-habit project with NO resolved habit stays a lane (never vanishes)', () => {
+    const orphan: ProjectsBoardResponse = {
+      ...BOARD,
+      habits: [],
+      ungrouped_projects: [makeProject({ id: 'plan-orphan', kind: 'habit' })],
+    };
+    const ids = buildLaneGroups(orphan, 'goal').flatMap((group) =>
+      group.projects.map((project) => project.id),
+    );
+    expect(ids).toContain('plan-orphan');
   });
 });
 

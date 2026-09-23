@@ -253,6 +253,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/chronicle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Chronicle
+         * @description Chronicle entries, newest first (home briefing line / 拓片 / openclaw).
+         *
+         *     Read-only; carries a weak ETag of chronicle.yaml so consumers can poll
+         *     for new entries cheaply.
+         */
+        get: operations["get_profile_chronicle_api_v1_profiles__name__chronicle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/crystallize/apply": {
         parameters: {
             query?: never;
@@ -643,11 +666,43 @@ export interface paths {
          */
         get: operations["get_profile_goals_api_v1_profiles__name__goals_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Profile Goal
+         * @description Create one goal in goals.yaml and append ``goal.added`` to chronicle.
+         *
+         *     The id is a deterministic slug from the title (``goal-<slug>``).
+         *     Honors ``If-Match`` against the goals.yaml ETag (412 on mismatch).
+         */
+        post: operations["create_profile_goal_api_v1_profiles__name__goals_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/goals/{goal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Profile Goal
+         * @description Edit a goal's title/summary/start/target/status in goals.yaml.
+         *
+         *     Chronicle entries fire only for meaningful changes: ``goal.renamed``
+         *     when the title changed and ``goal.completed`` when the status moved to
+         *     ``completed`` — a no-op patch writes nothing and logs nothing. Honors
+         *     ``If-Match`` against the goals.yaml ETag (412 on mismatch).
+         */
+        patch: operations["patch_profile_goal_api_v1_profiles__name__goals__goal_id__patch"];
         trace?: never;
     };
     "/api/v1/profiles/{name}/health": {
@@ -1042,6 +1097,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/north-star": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Profile North Star
+         * @description Surgically rewrite the North Star in SKILL.md's Identity section.
+         *
+         *     Only the ``- **North Star**`` / ``- **North Star Brief**`` /
+         *     ``- **North Star Visibility**`` bullet lines are touched; generated
+         *     blocks and every other byte of the living document stay identical
+         *     (core.north_star.update_north_star). ``visibility`` is binary going
+         *     forward (``public``/``private``) and gates only public artifacts.
+         *     Honors ``If-Match`` against the SKILL.md ETag (412 on mismatch). A
+         *     no-op patch writes nothing and logs no chronicle entry; a real rewrite
+         *     of the full text appends ``north_star.rewritten``.
+         */
+        patch: operations["patch_profile_north_star_api_v1_profiles__name__north_star_patch"];
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/plan-templates": {
         parameters: {
             query?: never;
@@ -1143,6 +1227,42 @@ export interface paths {
          */
         post: operations["create_profile_project_case_api_v1_profiles__name__project_board_cases_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/project-board/cases/{case_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Profile Project Case
+         * @description Delete one project case for good (user-decided, type-the-name confirm).
+         *
+         *     ``confirm_title`` must equal the case title exactly, else 422
+         *     ``project_delete_confirm_mismatch``. Consequences, in write order:
+         *
+         *     1. Live kanban.md tasks owned via ``project_id`` are cleared back to
+         *        unassigned (their ``milestone_id`` is cleared too when it named one
+         *        of the case's milestones); kanban-archive.md history is untouched.
+         *     2. The case is removed from project-board.yaml.
+         *     3. Evidence-pool ``project_refs`` are NOT touched — the tombstone
+         *        mechanism handles display of references to the deleted case.
+         *
+         *     With ``record_chronicle`` (default off) a ``project.deleted`` entry is
+         *     appended to chronicle.yaml with the case title as the note. Both file
+         *     writes re-check their request-start snapshots inside the write locks;
+         *     a mismatch answers 412 with a fresh board ETag (which covers
+         *     kanban.md + project-board.yaml). Honors ``If-Match`` (412 on stale).
+         */
+        delete: operations["delete_profile_project_case_api_v1_profiles__name__project_board_cases__case_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1358,7 +1478,7 @@ export interface paths {
          *     live tasks grouped by column (``someday`` as a badge list, not a
          *     column), an ``unassigned_tasks`` lane for tasks owned by no project, and
          *     habit check-in strips (current ISO week dots + streak ending today +
-         *     total). Full data, no display caps. The response carries the
+         *     total + ``recent_days`` heatmap window over the trailing 90 days). Full data, no display caps. The response carries the
          *     board-source ETag (see module docstring pattern) for use as ``If-Match``
          *     on the kanban/check-in mutations.
          */
@@ -2494,6 +2614,41 @@ export interface components {
             ok: boolean;
         };
         /**
+         * ChronicleEntryModel
+         * @description One append-only chronicle entry (date, kind, ref, note).
+         */
+        ChronicleEntryModel: {
+            /** Date */
+            date: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Ref
+             * @default
+             */
+            ref: string;
+        };
+        /**
+         * ChronicleResponse
+         * @description Chronicle entries, newest first, capped by the ``limit`` query.
+         */
+        ChronicleResponse: {
+            /** Entries */
+            entries?: components["schemas"]["ChronicleEntryModel"][];
+            /** Profile */
+            profile: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
          * CrystallizeApplyRequest
          * @description Body for the crystallize-apply endpoint.
          *
@@ -3480,6 +3635,38 @@ export interface components {
             source: string;
         };
         /**
+         * GoalCreateRequest
+         * @description Body for POST .../goals (only ``title`` is required).
+         *
+         *     ``start``/``target`` must be ISO dates (YYYY-MM-DD) when given; an
+         *     empty ``start`` defaults to today server-side (立项日). ``status``
+         *     accepts ``active``/``paused``/``completed`` (default ``active``).
+         */
+        GoalCreateRequest: {
+            /**
+             * Start
+             * @default
+             */
+            start: string;
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Target
+             * @default
+             */
+            target: string;
+            /** Title */
+            title: string;
+        };
+        /**
          * GoalModel
          * @description One goal in full owner-facing detail (no agent redaction).
          */
@@ -3555,6 +3742,44 @@ export interface components {
              * @default discreet
              */
             ui_visibility: string;
+        };
+        /**
+         * GoalMutationResponse
+         * @description Result of one goal create/patch mutation.
+         *
+         *     ``changed_keys`` lists the fields whose values actually changed (empty
+         *     for a no-op patch, which also skips the chronicle entry).
+         */
+        GoalMutationResponse: {
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            /** Changed Keys */
+            changed_keys?: string[];
+            goal: components["schemas"]["GoalModel"];
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /**
+         * GoalPatchRequest
+         * @description Body for PATCH .../goals/{goal_id}; at least one field is required.
+         */
+        GoalPatchRequest: {
+            /** Start */
+            start?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Target */
+            target?: string | null;
+            /** Title */
+            title?: string | null;
         };
         /**
          * GoalSkillLinkModel
@@ -4509,7 +4734,9 @@ export interface components {
          * @description Owner-facing North Star from SKILL.md identity (no redaction here).
          *
          *     This API serves the authenticated owner's UI, so ``full``/``brief`` are
-         *     returned verbatim; ``visibility`` is informational for the UI badge.
+         *     returned verbatim; ``visibility`` is the binary public-output flag
+         *     (``public``/``private``; legacy ``discreet``/``hidden``/``visible`` map
+         *     on read) and is informational for the UI badge.
          */
         NorthStarModel: {
             /**
@@ -4529,9 +4756,43 @@ export interface components {
             is_set: boolean;
             /**
              * Visibility
-             * @default discreet
+             * @default private
              */
             visibility: string;
+        };
+        /**
+         * NorthStarMutationResponse
+         * @description Result of the surgical North Star rewrite.
+         */
+        NorthStarMutationResponse: {
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            /** Changed Keys */
+            changed_keys?: string[];
+            north_star?: components["schemas"]["NorthStarModel"];
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /**
+         * NorthStarPatchRequest
+         * @description Body for PATCH .../north-star; at least one field is required.
+         *
+         *     ``visibility`` accepts only the canonical binary values
+         *     (``public``/``private``).
+         */
+        NorthStarPatchRequest: {
+            /** Brief */
+            brief?: string | null;
+            /** Full */
+            full?: string | null;
+            /** Visibility */
+            visibility?: string | null;
         };
         /**
          * OkResponse
@@ -4870,6 +5131,56 @@ export interface components {
              * @default private
              */
             visibility: string;
+        };
+        /**
+         * ProjectCaseDeleteRequest
+         * @description Body for the user-decided project case delete.
+         *
+         *     ``confirm_title`` must equal the case title exactly (422
+         *     ``project_delete_confirm_mismatch`` otherwise) — the type-the-name
+         *     confirmation. ``record_chronicle`` opts into a ``project.deleted``
+         *     chronicle entry (default off: household deletes stay out of the
+         *     narrative).
+         */
+        ProjectCaseDeleteRequest: {
+            /**
+             * Confirm Title
+             * @default
+             */
+            confirm_title: string;
+            /**
+             * Record Chronicle
+             * @default false
+             */
+            record_chronicle: boolean;
+        };
+        /**
+         * ProjectCaseDeleteResponse
+         * @description Result of one project case delete.
+         *
+         *     ``tasks_unassigned`` counts live kanban.md tasks whose ``project_id``
+         *     was cleared back to unassigned; ``evidence_refs_kept`` counts
+         *     evidence-pool entries still referencing the deleted case (tombstone
+         *     mechanism handles their display).
+         */
+        ProjectCaseDeleteResponse: {
+            /** Deleted Id */
+            deleted_id: string;
+            /**
+             * Evidence Refs Kept
+             * @default 0
+             */
+            evidence_refs_kept: number;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Tasks Unassigned
+             * @default 0
+             */
+            tasks_unassigned: number;
         };
         /**
          * ProjectCaseModel
@@ -5275,7 +5586,10 @@ export interface components {
          *     ``week`` is the current ISO week (Monday..Sunday); ``streak`` counts
          *     consecutive checked days ending today (0 when today has no check-in
          *     yet); ``total_checkins`` counts distinct checked days overall.
-         *     ``project_id`` links to a project lane when the name heuristic matches.
+         *     ``recent_days`` is the heatmap source: checked days within the trailing
+         *     90-day window ending today (oldest first, same-day rows summed into
+         *     ``count``). ``project_id`` links to a project lane when the name
+         *     heuristic matches.
          */
         ProjectsBoardHabitModel: {
             /**
@@ -5300,6 +5614,8 @@ export interface components {
              * @default
              */
             project_id: string;
+            /** Recent Days */
+            recent_days?: components["schemas"]["ProjectsBoardHabitRecentDayModel"][];
             /**
              * Streak
              * @default 0
@@ -5317,6 +5633,19 @@ export interface components {
             total_checkins: number;
             /** Week */
             week?: components["schemas"]["ProjectsBoardHabitDayModel"][];
+        };
+        /**
+         * ProjectsBoardHabitRecentDayModel
+         * @description One checked day in the trailing 90-day heatmap window.
+         */
+        ProjectsBoardHabitRecentDayModel: {
+            /**
+             * Count
+             * @default 1
+             */
+            count: number;
+            /** Date */
+            date: string;
         };
         /**
          * ProjectsBoardMilestoneModel
@@ -5371,9 +5700,11 @@ export interface components {
          *     list (not a column); Done tasks are folded into ``done_count``, which
          *     includes tasks archived to kanban-archive.md (``archived_done_count``
          *     breaks out the archived share). ``column_counts`` keys are
-         *     queue/doing/someday/done. ``habit_id`` links to a ``habits`` entry: the
-         *     case's explicit ``habit_id`` field wins, otherwise the habit<->project
-         *     name heuristic applies.
+         *     queue/doing/someday/done; together with ``evidence_ref_count`` they
+         *     power the delete dialog's consequence preview ("N tasks back to
+         *     unassigned · M evidence refs kept"). ``habit_id`` links to a ``habits``
+         *     entry: the case's explicit ``habit_id`` field wins, otherwise the
+         *     habit<->project name heuristic applies.
          */
         ProjectsBoardProjectModel: {
             /**
@@ -5392,6 +5723,11 @@ export interface components {
              * @default 0
              */
             done_count: number;
+            /**
+             * Evidence Ref Count
+             * @default 0
+             */
+            evidence_ref_count: number;
             /** Goal Refs */
             goal_refs?: string[];
             /**
@@ -7406,6 +7742,66 @@ export interface operations {
             };
         };
     };
+    get_profile_chronicle_api_v1_profiles__name__chronicle_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChronicleResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     apply_profile_crystallize_api_v1_profiles__name__crystallize_apply_post: {
         parameters: {
             query?: never;
@@ -8467,6 +8863,153 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_profile_goal_api_v1_profiles__name__goals_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoalCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match goals.yaml. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, non-ISO target date, or unknown status. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    patch_profile_goal_api_v1_profiles__name__goals__goal_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                goal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoalPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or goal not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match goals.yaml. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, non-ISO target date, or unknown status. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -9545,6 +10088,79 @@ export interface operations {
             };
         };
     };
+    patch_profile_north_star_api_v1_profiles__name__north_star_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NorthStarPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NorthStarMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match SKILL.md. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No field provided, or visibility is not public/private. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_profile_plan_templates_api_v1_profiles__name__plan_templates_get: {
         parameters: {
             query?: never;
@@ -9796,7 +10412,81 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_profile_project_case_api_v1_profiles__name__project_board_cases__case_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCaseDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCaseDeleteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile, project case, or milestone not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the board source files. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9866,7 +10556,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9940,7 +10630,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10011,7 +10701,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10086,7 +10776,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10160,7 +10850,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10228,7 +10918,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10302,7 +10992,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10376,7 +11066,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, or AI suggest-refs unavailable. */
+            /** @description Blank title, out-of-domain status/kind/visibility, duplicate id, unknown section, delete confirmation title mismatch, or AI suggest-refs unavailable. */
             422: {
                 headers: {
                     [name: string]: unknown;

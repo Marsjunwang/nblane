@@ -1,30 +1,36 @@
-// 泳道看板视图 — the default /projects view. Renders the shared LaneGroup[]
-// (goal or activity grouping), habit check-in lanes (linked habits inline
-// after their project lane, unlinked ones in a trailing 习惯 section), the
-// dashed-gold 未归属 lane, and a count-only archived-projects footer.
+// 泳道看板视图 — the default /projects view. Top-down: 日课栏 habit band
+// (one row per habit, 裱边 hairline separation), the shared LaneGroup[]
+// (goal or activity grouping), the dashed-gold 未归属 lane, and the
+// expandable 已归档 strip (L3: 月白 40% read-only lanes with 恢复).
+//
+// Dedupe invariant (裁决2): a habit appears EXACTLY ONCE, in the band.
+// Habit-plan projects (kind 'habit' with a resolved habit link) are filtered
+// out of the lane groups by buildLaneGroups, so no empty Queue/Doing lanes
+// and no 未分组 doppelgängers.
 
 import { Badge, Group, Stack, Text } from '@mantine/core';
-import { IconArchive } from '@tabler/icons-react';
 
 import type {
   KanbanSection,
-  ProjectsBoardHabit,
   ProjectsBoardProject,
   ProjectsBoardTask,
 } from '../../api/types';
-import { HabitLane } from './HabitLane';
+import { ArchivedStrip } from './ArchivedStrip';
+import { HabitBand } from './HabitBand';
 import { ProjectLane, UnassignedLane } from './ProjectLane';
-import type { LaneGroup } from './lanes';
+import type { HabitRow, LaneGroup } from './lanes';
 import { boardPalette } from './palette';
 
 export interface BoardViewProps {
   profile: string;
   groups: LaneGroup[];
-  habits: ProjectsBoardHabit[];
+  habitRows: HabitRow[];
+  today: string;
   unassigned: ProjectsBoardTask[];
   archived: ProjectsBoardProject[];
   kanbanEtag: string;
   kanbanSections: KanbanSection[] | undefined;
+  projectBoardEtag: string;
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onEditProject: (projectId: string) => void;
@@ -58,30 +64,22 @@ function GoalGroupHeader({ group }: { group: LaneGroup }) {
 export function BoardView({
   profile,
   groups,
-  habits,
+  habitRows,
+  today,
   unassigned,
   archived,
   kanbanEtag,
   kanbanSections,
+  projectBoardEtag,
   selectedTaskId,
   onSelectTask,
   onEditProject,
   onRefresh,
 }: BoardViewProps) {
-  const habitsByProject = new Map<string, ProjectsBoardHabit[]>();
-  const unlinkedHabits: ProjectsBoardHabit[] = [];
-  for (const habit of habits) {
-    if (habit.project_id) {
-      const rows = habitsByProject.get(habit.project_id) ?? [];
-      rows.push(habit);
-      habitsByProject.set(habit.project_id, rows);
-    } else {
-      unlinkedHabits.push(habit);
-    }
-  }
-
   return (
     <Stack gap="xl" data-testid="board-view">
+      <HabitBand profile={profile} rows={habitRows} today={today} />
+
       {groups.map((group) => (
         <Stack key={group.id} gap="sm" data-testid={`lane-group-${group.id}`}>
           <GoalGroupHeader group={group} />
@@ -91,35 +89,21 @@ export function BoardView({
             </Text>
           )}
           {group.projects.map((project) => (
-            <Stack key={project.id} gap="xs">
-              <ProjectLane
-                profile={profile}
-                project={project}
-                kanbanEtag={kanbanEtag}
-                kanbanSections={kanbanSections}
-                selectedTaskId={selectedTaskId}
-                onSelectTask={onSelectTask}
-                onEditProject={onEditProject}
-                onRefresh={onRefresh}
-              />
-              {(habitsByProject.get(project.id) ?? []).map((habit) => (
-                <HabitLane key={habit.id} profile={profile} habit={habit} />
-              ))}
-            </Stack>
+            <ProjectLane
+              key={project.id}
+              profile={profile}
+              project={project}
+              kanbanEtag={kanbanEtag}
+              kanbanSections={kanbanSections}
+              projectBoardEtag={projectBoardEtag}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={onSelectTask}
+              onEditProject={onEditProject}
+              onRefresh={onRefresh}
+            />
           ))}
         </Stack>
       ))}
-
-      {unlinkedHabits.length > 0 && (
-        <Stack gap="sm" data-testid="lane-group-habits">
-          <GoalGroupHeader
-            group={{ id: 'habits', title: '习惯', meta: '持续型打卡', target: '', projects: [] }}
-          />
-          {unlinkedHabits.map((habit) => (
-            <HabitLane key={habit.id} profile={profile} habit={habit} />
-          ))}
-        </Stack>
-      )}
 
       {unassigned.length > 0 && (
         <UnassignedLane
@@ -133,26 +117,14 @@ export function BoardView({
         />
       )}
 
-      {archived.length > 0 && (
-        <Group
-          gap="xs"
-          p="sm"
-          data-testid="archived-projects-footer"
-          style={{
-            border: `1px dashed ${boardPalette.border}`,
-            borderRadius: 12,
-            color: boardPalette.dim,
-          }}
-        >
-          <IconArchive size={14} />
-          <Text size="sm" style={{ color: boardPalette.dim }}>
-            已归档项目 · {archived.length} ▸
-          </Text>
-          <Text size="xs" style={{ color: boardPalette.dim }}>
-            {archived.map((project) => project.title || project.id).join(' / ')}
-          </Text>
-        </Group>
-      )}
+      <ArchivedStrip
+        profile={profile}
+        archived={archived}
+        selectedTaskId={selectedTaskId}
+        onSelectTask={onSelectTask}
+        onEditProject={onEditProject}
+        onRefresh={onRefresh}
+      />
     </Stack>
   );
 }

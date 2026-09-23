@@ -63,8 +63,11 @@ export type KanbanSection = Schemas['KanbanSectionModel'];
 /** KanbanBoardResponse from web_api/schemas.py. */
 export type KanbanBoard = Schemas['KanbanBoardResponse'];
 
-/** KanbanCardCreateRequest from web_api/schemas.py. */
-export type KanbanCardCreateRequest = Schemas['KanbanCardCreateRequest'];
+/** KanbanCardCreateRequest from web_api/schemas.py (only title required; the
+ * other fields are server-defaulted but the OpenAPI snapshot marks them required). */
+export type KanbanCardCreateRequest = { title: string } & Partial<
+  Omit<Schemas['KanbanCardCreateRequest'], 'title'>
+>;
 
 /** KanbanMutationResponse from web_api/schemas.py. */
 export type KanbanMutationResponse = Schemas['KanbanMutationResponse'];
@@ -95,6 +98,30 @@ export type NorthStar = Schemas['NorthStarModel'];
 
 /** GoalsResponse from web_api/schemas.py. */
 export type GoalsResponse = Schemas['GoalsResponse'];
+
+/** NorthStarPatchRequest from web_api/schemas.py (all fields optional). */
+export type NorthStarPatchRequest = Schemas['NorthStarPatchRequest'];
+
+/** NorthStarMutationResponse from web_api/schemas.py. */
+export type NorthStarMutationResponse = Schemas['NorthStarMutationResponse'];
+
+/** GoalCreateRequest from web_api/schemas.py (only title required; the other
+ * fields are server-defaulted but the OpenAPI snapshot marks them required). */
+export type GoalCreateRequest = { title: string } & Partial<
+  Omit<Schemas['GoalCreateRequest'], 'title'>
+>;
+
+/** GoalPatchRequest from web_api/schemas.py (at least one field). */
+export type GoalPatchRequest = Schemas['GoalPatchRequest'];
+
+/** GoalMutationResponse from web_api/schemas.py. */
+export type GoalMutationResponse = Schemas['GoalMutationResponse'];
+
+/** ChronicleEntryModel from web_api/schemas.py (append-only entry). */
+export type ChronicleEntry = Schemas['ChronicleEntryModel'];
+
+/** ChronicleResponse from web_api/schemas.py (newest first). */
+export type ChronicleResponse = Schemas['ChronicleResponse'];
 
 /** EvidenceEntryModel from web_api/schemas.py (list view). */
 export type EvidenceEntry = Schemas['EvidenceEntryModel'];
@@ -442,6 +469,15 @@ export type PlanTemplateInstantiateRequest = Partial<Schemas['PlanTemplateInstan
 
 /** PlanTemplateInstantiateResponse from web_api/schemas.py. */
 export type PlanTemplateInstantiateResponse = Schemas['PlanTemplateInstantiateResponse'];
+
+/** ProjectCaseDeleteRequest from web_api/schemas.py (type-the-name confirm). */
+export type ProjectCaseDeleteRequest = Schemas['ProjectCaseDeleteRequest'];
+
+/** ProjectCaseDeleteResponse from web_api/schemas.py ({ok, deleted_id, …}). */
+export type ProjectCaseDeleteResponse = Schemas['ProjectCaseDeleteResponse'];
+
+/** ProjectsBoardHabitRecentDayModel — one trailing-90-day heatmap cell. */
+export type ProjectsBoardHabitRecentDay = Schemas['ProjectsBoardHabitRecentDayModel'];
 
 // ---------------------------------------------------------------------------
 // Frontend-only composite types (not part of the OpenAPI contract).
