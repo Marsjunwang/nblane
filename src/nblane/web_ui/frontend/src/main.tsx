@@ -24,7 +24,7 @@ installUnauthorizedHandler(queryClient);
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <MantineProvider theme={theme} defaultColorScheme="light">
+      <MantineProvider theme={theme} forceColorScheme="dark">
         <Notifications />
         <App />
       </MantineProvider>

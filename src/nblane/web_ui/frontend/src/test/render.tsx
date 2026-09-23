@@ -19,7 +19,7 @@ export function renderWithProviders(
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MantineProvider theme={theme}>
+      <MantineProvider theme={theme} forceColorScheme="dark">
         <Notifications />
         <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
       </MantineProvider>

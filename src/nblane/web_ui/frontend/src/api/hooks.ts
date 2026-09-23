@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiGet, apiGetWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
+import { ApiError, apiGet, apiGetWithHeaders, apiPatchWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -11,6 +11,8 @@ import type {
   ActivityItemDetail,
   ActivityListResponse,
   AssistantStatus,
+  CheckinCreateRequest,
+  CheckinMutationResponse,
   CurrentUser,
   EvidenceEntryDetail,
   EvidenceEditRequest,
@@ -45,8 +47,14 @@ import type {
   KanbanBoard,
   KanbanBoardResult,
   KanbanCardCreateRequest,
+  KanbanCardPatchRequest,
+  KanbanCardScheduleRequest,
   KanbanMutationResponse,
   OkResponse,
+  PlanTemplateInstantiateRequest,
+  PlanTemplateInstantiateResponse,
+  PlanTemplateListResponse,
+  PlanTemplateListResult,
   ProfileSummary,
   ProjectBoard,
   ProjectBoardResult,
@@ -56,6 +64,8 @@ import type {
   ProjectMilestoneAddRequest,
   ProjectMilestoneUpdateRequest,
   ProjectTaskCreateRequest,
+  ProjectsBoardResponse,
+  ProjectsBoardResult,
   PublicBuildPreviewResponse,
   PublicBuildPublishRequest,
   PublicBuildRequest,
@@ -82,6 +92,7 @@ import type {
   StudioResult,
   StudioValidationResponse,
   WeeklyReviewResult,
+  WorkshopStatus,
 } from './types';
 
 export function useMe() {
@@ -126,6 +137,15 @@ export function useAssistantStatus() {
   return useQuery({
     queryKey: ['system', 'assistant'],
     queryFn: () => apiGet<AssistantStatus>('/system/assistant'),
+    staleTime: 60_000,
+  });
+}
+
+/** Workshop (ttyd terminal) URL + liveness; server caches 60s as well. */
+export function useWorkshopStatus() {
+  return useQuery({
+    queryKey: ['system', 'workshop'],
+    queryFn: () => apiGet<WorkshopStatus>('/system/workshop'),
     staleTime: 60_000,
   });
 }
@@ -185,7 +205,10 @@ function kanbanBase(profile: string): string {
   return `/profiles/${encodeURIComponent(profile)}/kanban`;
 }
 
-/** Board fetch that captures the response ETag for If-Match mutations. */
+/** Board fetch that captures the kanban.md ETag for If-Match mutations and
+ * the full section order (lane-local drag indices must be translated to
+ * section-global ones — the backend's to_index spans ALL cards in a
+ * section, not just the lane's filtered subset). */
 export function useKanbanBoard(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'kanban'],
@@ -197,24 +220,69 @@ export function useKanbanBoard(profile: string) {
   });
 }
 
+/**
+ * Just the kanban.md ETag, selected out of the shared kanban query (same
+ * cache entry as useKanbanBoard — one fetch serves both). Kanban mutations
+ * validate the single-file kanban ETag, NOT the 6-file projects-board ETag —
+ * mixing them 412s reliably.
+ */
+export function useKanbanEtag(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'kanban'],
+    queryFn: async (): Promise<KanbanBoardResult> => {
+      const { data, headers } = await apiGetWithHeaders<KanbanBoard>(kanbanBase(profile));
+      return { board: data, etag: headers.get('ETag') ?? '' };
+    },
+    enabled: profile.length > 0,
+    select: (result) => result.etag,
+  });
+}
+
+/** Refresh the kanban.md ETag straight from the server (post-412). */
+async function refreshKanbanEtag(profile: string): Promise<string> {
+  const { headers } = await apiGetWithHeaders<KanbanBoard>(kanbanBase(profile));
+  return headers.get('ETag') ?? '';
+}
+
+/** Write the post-mutation kanban ETag into the cached kanban board. */
+function writeKanbanEtag(queryClient: QueryClient, profile: string, etag: string) {
+  if (!etag) return;
+  queryClient.setQueryData(
+    ['profiles', profile, 'kanban'],
+    (old: KanbanBoardResult | undefined) => (old ? { ...old, etag } : old),
+  );
+}
+
 function useInvalidateKanban(profile: string) {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+    // Kanban mutations change the projects-board aggregation too.
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+  };
 }
 
 export function useAddKanbanCard(profile: string) {
   const invalidate = useInvalidateKanban(profile);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ body, etag }: { body: KanbanCardCreateRequest; etag: string }) =>
-      apiPost<KanbanMutationResponse>(`${kanbanBase(profile)}/cards`, body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: invalidate,
+      postEtagMutation<KanbanMutationResponse>(
+        `${kanbanBase(profile)}/cards`,
+        body,
+        etag,
+        () => refreshKanbanEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writeKanbanEtag(queryClient, profile, etag);
+      invalidate();
+    },
   });
 }
 
 export function useMoveKanbanCard(profile: string) {
   const invalidate = useInvalidateKanban(profile);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
       cardRef,
@@ -228,25 +296,209 @@ export function useMoveKanbanCard(profile: string) {
       toIndex?: number;
       etag: string;
     }) =>
-      apiPost<KanbanMutationResponse>(
+      postEtagMutation<KanbanMutationResponse>(
         `${kanbanBase(profile)}/cards/${encodeURIComponent(cardRef)}/move`,
         { target_section: targetSection, ...(toIndex === undefined ? {} : { to_index: toIndex }) },
-        { headers: ifMatch(etag) },
+        etag,
+        () => refreshKanbanEtag(profile),
       ),
-    onSuccess: invalidate,
+    onSuccess: ({ etag }) => {
+      writeKanbanEtag(queryClient, profile, etag);
+      invalidate();
+    },
   });
 }
 
 export function useDoneKanbanCard(profile: string) {
   const invalidate = useInvalidateKanban(profile);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ cardRef, etag }: { cardRef: string; etag: string }) =>
-      apiPost<KanbanMutationResponse>(
+      postEtagMutation<KanbanMutationResponse>(
         `${kanbanBase(profile)}/cards/${encodeURIComponent(cardRef)}/done`,
         undefined,
-        { headers: ifMatch(etag) },
+        etag,
+        () => refreshKanbanEtag(profile),
       ),
-    onSuccess: invalidate,
+    onSuccess: ({ etag }) => {
+      writeKanbanEtag(queryClient, profile, etag);
+      invalidate();
+    },
+  });
+}
+
+/** Schedule one card's planned dates ("" clears; null/undefined keeps). */
+export function useScheduleKanbanCard(profile: string) {
+  const invalidate = useInvalidateKanban(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      cardRef,
+      body,
+      etag,
+    }: {
+      cardRef: string;
+      body: KanbanCardScheduleRequest;
+      etag: string;
+    }) =>
+      postEtagMutation<KanbanMutationResponse>(
+        `${kanbanBase(profile)}/cards/${encodeURIComponent(cardRef)}/schedule`,
+        body,
+        etag,
+        () => refreshKanbanEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writeKanbanEtag(queryClient, profile, etag);
+      invalidate();
+    },
+  });
+}
+
+/**
+ * Edit one card's whitelist fields (title/context/why/project_id/
+ * milestone_id/tags). `project_id: ''` unassigns the card from its lane.
+ */
+export function usePatchKanbanCard(profile: string) {
+  const invalidate = useInvalidateKanban(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      cardRef,
+      body,
+      etag,
+    }: {
+      cardRef: string;
+      body: KanbanCardPatchRequest;
+      etag: string;
+    }) =>
+      patchEtagMutation<KanbanMutationResponse>(
+        `${kanbanBase(profile)}/cards/${encodeURIComponent(cardRef)}`,
+        body,
+        etag,
+        () => refreshKanbanEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writeKanbanEtag(queryClient, profile, etag);
+      invalidate();
+      // Lane assignment re-syncs project-board.yaml on the server.
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'project-board'] });
+    },
+  });
+}
+
+// --- Phase 2 unified /projects ----------------------------------------------
+
+function projectsBoardBase(profile: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/projects-board`;
+}
+
+/** Projects-board fetch that captures the 6-file board ETag (display only —
+ * kanban mutations must use the kanban ETag from useKanbanEtag instead). */
+export function useProjectsBoard(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'projects-board'],
+    queryFn: async (): Promise<ProjectsBoardResult> => {
+      const { data, headers } = await apiGetWithHeaders<ProjectsBoardResponse>(
+        projectsBoardBase(profile),
+      );
+      return { board: data, etag: headers.get('ETag') ?? '' };
+    },
+    enabled: profile.length > 0,
+  });
+}
+
+/** Invalidate only the projects-board aggregation (check-ins touch it). */
+export function useInvalidateProjectsBoard(profile: string) {
+  const queryClient = useQueryClient();
+  return () =>
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+}
+
+/**
+ * Append one habit check-in. No GET endpoint exposes the activity-log ETag,
+ * so the first check-in goes out without If-Match (the server still
+ * re-checks an in-lock snapshot); the response ETag is cached for
+ * consecutive check-ins, and a 412 degrades to one retry without If-Match.
+ */
+export function useAddCheckin(profile: string) {
+  const queryClient = useQueryClient();
+  const invalidateBoard = useInvalidateProjectsBoard(profile);
+  const cacheKey = ['profiles', profile, 'checkin-etag'];
+  return useMutation({
+    mutationFn: async (body: CheckinCreateRequest) => {
+      const path = `/profiles/${encodeURIComponent(profile)}/checkins`;
+      const cached = queryClient.getQueryData<string>(cacheKey) ?? '';
+      try {
+        const res = await apiPostWithHeaders<CheckinMutationResponse>(path, body, {
+          headers: ifMatch(cached),
+        });
+        return { data: res.data, etag: res.headers.get('ETag') ?? cached };
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 412) {
+          throw error;
+        }
+        const res = await apiPostWithHeaders<CheckinMutationResponse>(path, body);
+        return { data: res.data, etag: res.headers.get('ETag') ?? '' };
+      }
+    },
+    onSuccess: ({ etag }) => {
+      if (etag) {
+        queryClient.setQueryData(cacheKey, etag);
+      }
+      invalidateBoard();
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+    },
+  });
+}
+
+function planTemplatesBase(profile: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/plan-templates`;
+}
+
+/** Plan-template list fetch that captures the plan-source ETag. */
+export function usePlanTemplates(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'plan-templates'],
+    queryFn: async (): Promise<PlanTemplateListResult> => {
+      const { data, headers } = await apiGetWithHeaders<PlanTemplateListResponse>(
+        planTemplatesBase(profile),
+      );
+      return { data, etag: headers.get('ETag') ?? '' };
+    },
+    enabled: profile.length > 0,
+  });
+}
+
+/** Refresh the plan-templates ETag straight from the server (post-412). */
+async function refreshPlanTemplatesEtag(profile: string): Promise<string> {
+  const { headers } = await apiGetWithHeaders<PlanTemplateListResponse>(
+    planTemplatesBase(profile),
+  );
+  return headers.get('ETag') ?? '';
+}
+
+/** Instantiate one habit-plan template into a project case + habit. */
+export function useInstantiatePlanTemplate(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ body, etag }: { body: PlanTemplateInstantiateRequest; etag: string }) =>
+      postEtagMutation<PlanTemplateInstantiateResponse>(
+        `${planTemplatesBase(profile)}/instantiate`,
+        body,
+        etag,
+        () => refreshPlanTemplatesEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      if (etag) {
+        queryClient.setQueryData(
+          ['profiles', profile, 'plan-templates'],
+          (old: PlanTemplateListResult | undefined) => (old ? { ...old, etag } : old),
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'plan-templates'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'project-board'] });
+    },
   });
 }
 
@@ -507,6 +759,26 @@ async function postEtagMutation<T>(
     }
     const fresh = await refreshEtag();
     const res = await apiPostWithHeaders<T>(path, body, { headers: ifMatch(fresh) });
+    return { data: res.data, etag: res.headers.get('ETag') ?? fresh };
+  }
+}
+
+/** PATCH twin of postEtagMutation (kanban card field edits). */
+async function patchEtagMutation<T>(
+  path: string,
+  body: unknown,
+  etag: string,
+  refreshEtag: () => Promise<string>,
+): Promise<{ data: T; etag: string }> {
+  try {
+    const res = await apiPatchWithHeaders<T>(path, body, { headers: ifMatch(etag) });
+    return { data: res.data, etag: res.headers.get('ETag') ?? etag };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 412) {
+      throw error;
+    }
+    const fresh = await refreshEtag();
+    const res = await apiPatchWithHeaders<T>(path, body, { headers: ifMatch(fresh) });
     return { data: res.data, etag: res.headers.get('ETag') ?? fresh };
   }
 }
@@ -866,8 +1138,10 @@ function useInvalidateProjectBoard(profile: string) {
   const queryClient = useQueryClient();
   return () => {
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'project-board'] });
-    // Case sync and task mutations also write kanban.md / evidence-pool.yaml.
+    // Case sync and task mutations also write kanban.md / evidence-pool.yaml,
+    // and every case change reshapes the projects-board aggregation.
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence'] });
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-review'] });
   };

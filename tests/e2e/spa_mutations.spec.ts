@@ -52,12 +52,10 @@ async function expectJsonMutation(
 }
 
 /**
- * Wait out the mutation success toast. The toast parks bottom-right for ~4s;
- * on a long Queue the tail card's 「…」 menu flips open into exactly that
- * corner (position="bottom-end"), so a still-visible toast swallows the menu
- * click and closes it (surfaced 2026-09-21 once sandbox data growth pushed
- * the tail card to the viewport's bottom edge — same interception class the
- * mobile spec avoids by seeding over the API).
+ * Wait out the mutation success toast. The toast parks bottom-right for ~4s
+ * and can swallow a follow-up click in that corner (surfaced 2026-09-21 once
+ * sandbox data growth pushed the tail card to the viewport's bottom edge —
+ * same interception class the mobile spec avoids by seeding over the API).
  *
  * NB: the toast mounts a beat AFTER the mutation response resolves, so a
  * bare toHaveCount(0) can pass before it ever renders — always wait for the
@@ -73,23 +71,35 @@ async function waitForToastsToSettle(page: Page): Promise<void> {
 }
 
 /**
+ * Seed one kanban card over the API (the unified /projects page has no
+ * quick-add form; card creation lives in the project edit drawer or the
+ * API). Returns the new card's id (used for the `task-card-<id>` testid).
+ */
+async function seedKanbanCard(page: Page, title: string): Promise<string> {
+  const response = await page.request.post(
+    `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/kanban/cards`,
+    { data: { title, section: "Queue", context: "" } },
+  );
+  expect(response.status(), "kanban card seed should succeed").toBe(201);
+  const body = (await response.json()) as { card: { id: string } };
+  return body.card.id;
+}
+
+/**
  * Seed one needs_review evidence row through the real chain (kanban card →
- * 标记完成 → weekly-review save → activity apply). The bulk-accept test must
- * NOT consume whatever row the sandbox happens to hold: every suite run
- * depletes the seeded pool by one, so after a few runs the "first row" simply
- * does not exist and the test dies waiting for it.
+ * 标记 Done on /projects → weekly-review save → activity apply). The
+ * bulk-accept test must NOT consume whatever row the sandbox happens to
+ * hold: every suite run depletes the seeded pool by one, so after a few runs
+ * the "first row" simply does not exist and the test dies waiting for it.
  */
 async function seedNeedsReviewEvidence(page: Page, title: string): Promise<void> {
-  // 1. Done card through the UI (kanban add + 标记完成).
-  await page.goto(spa("kanban"));
-  await page.getByLabel("快速添加").fill(title);
-  await expectJsonMutation(page, "/kanban/cards", () =>
-    page.getByRole("button", { name: "添加", exact: true }).click(),
-  );
-  await waitForToastsToSettle(page);
-  await page.getByLabel(`卡片操作 ${title}`).click();
+  // 1. Done card through the UI (API seed + detail card 标记 Done).
+  const cardId = await seedKanbanCard(page, title);
+  await page.goto(spa("projects"));
+  await page.getByTestId(`task-card-${cardId}`).click();
+  await expect(page.getByTestId("task-detail-card")).toBeVisible();
   await expectJsonMutation(page, "/done", () =>
-    page.getByRole("menuitem", { name: "标记完成" }).click(),
+    page.getByTestId("detail-done").click(),
   );
 
   // 2. Weekly review: the Done card is an evidence candidate → 保存到活动.
@@ -128,27 +138,30 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
     await expect(page.getByText("已加入收件箱。")).toBeVisible();
   });
 
-  test("kanban: add a card into Queue, then move it to Doing", async ({ page }) => {
+  test("projects: seed a card into Queue, then move it to Doing via the detail card", async ({
+    page,
+  }) => {
     const title = `e2e-card-${Date.now()}`;
-    await page.goto(spa("kanban"));
-    const column = (name: string) =>
-      page.locator("div.mantine-Paper-root").filter({ has: page.getByText(name, { exact: true }) });
+    const cardId = await seedKanbanCard(page, title);
+    await page.goto(spa("projects"));
 
-    await page.getByLabel("快速添加").fill(title);
-    await expectJsonMutation(page, "/kanban/cards", () =>
-      page.getByRole("button", { name: "添加", exact: true }).click(),
-    );
-    await expect(column("Queue").getByText(title)).toBeVisible();
+    // Seeded without a project → lands in the dashed-gold 未归属 lane.
+    const unassigned = page.getByTestId("unassigned-lane");
+    await expect(unassigned.getByTestId("lane-column-unassigned-queue").getByText(title)).toBeVisible();
 
-    // Card menu → 移动到… → Doing (sub-menu opens on hover).
+    // Card click opens the inscription detail card; 移至 Doing moves it.
     await waitForToastsToSettle(page);
-    await page.getByLabel(`卡片操作 ${title}`).click();
-    await page.getByRole("menuitem", { name: "移动到…" }).hover();
+    await unassigned.getByTestId(`task-card-${cardId}`).click();
+    await expect(page.getByTestId("task-detail-card")).toBeVisible();
     await expectJsonMutation(page, "/move", () =>
-      page.getByRole("menuitem", { name: "Doing", exact: true }).click(),
+      page.getByRole("button", { name: "移至 Doing" }).click(),
     );
-    await expect(column("Doing").getByText(title)).toBeVisible();
-    await expect(column("Queue").getByText(title)).toHaveCount(0);
+    await expect(
+      unassigned.getByTestId("lane-column-unassigned-doing").getByText(title),
+    ).toBeVisible();
+    await expect(
+      unassigned.getByTestId("lane-column-unassigned-queue").getByText(title),
+    ).toHaveCount(0);
   });
 
   test("evidence review: accept removes the row from the needs_review queue", async ({
@@ -204,16 +217,13 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
   }) => {
     const title = `e2e-chain-${Date.now()}`;
 
-    // 1. Seed a Done card through the UI (kanban add + 标记完成).
-    await page.goto(spa("kanban"));
-    await page.getByLabel("快速添加").fill(title);
-    await expectJsonMutation(page, "/kanban/cards", () =>
-      page.getByRole("button", { name: "添加", exact: true }).click(),
-    );
-    await waitForToastsToSettle(page);
-    await page.getByLabel(`卡片操作 ${title}`).click();
+    // 1. Seed a Done card through the UI (API seed + detail card 标记 Done).
+    const cardId = await seedKanbanCard(page, title);
+    await page.goto(spa("projects"));
+    await page.getByTestId(`task-card-${cardId}`).click();
+    await expect(page.getByTestId("task-detail-card")).toBeVisible();
     await expectJsonMutation(page, "/done", () =>
-      page.getByRole("menuitem", { name: "标记完成" }).click(),
+      page.getByTestId("detail-done").click(),
     );
 
     // 2. Weekly review: the Done card is an evidence candidate → 保存到活动.

@@ -247,6 +247,9 @@ export type AssistantAutomationsStatus = Schemas['AssistantAutomationsStatus'];
 /** AssistantStatusResponse from web_api/assistant.py. */
 export type AssistantStatus = Schemas['AssistantStatusResponse'];
 
+/** WorkshopStatusResponse from web_api/workshop.py. */
+export type WorkshopStatus = Schemas['WorkshopStatusResponse'];
+
 /** ProjectMilestoneModel from web_api/schemas.py (with completion counts). */
 export type ProjectMilestone = Schemas['ProjectMilestoneModel'];
 
@@ -385,6 +388,61 @@ export type ResearchSourceItem = Schemas['ResearchSourceItemModel'];
 /** ResearchResponse from web_api/schemas.py (M4 Research overview). */
 export type ResearchResponse = Schemas['ResearchResponse'];
 
+// --- Phase 2 unified /projects ------------------------------------------------
+
+/** ProjectsBoardTaskModel from web_api/schemas.py (flattened lane task). */
+export type ProjectsBoardTask = Schemas['ProjectsBoardTaskModel'];
+
+/** ProjectsBoardMilestoneModel from web_api/schemas.py (with progress). */
+export type ProjectsBoardMilestone = Schemas['ProjectsBoardMilestoneModel'];
+
+/** ProjectsBoardProjectModel from web_api/schemas.py (one swimlane). */
+export type ProjectsBoardProject = Schemas['ProjectsBoardProjectModel'];
+
+/** ProjectsBoardGoalModel from web_api/schemas.py (goal grouping row). */
+export type ProjectsBoardGoal = Schemas['ProjectsBoardGoalModel'];
+
+/** ProjectsBoardHabitDayModel from web_api/schemas.py (one week dot). */
+export type ProjectsBoardHabitDay = Schemas['ProjectsBoardHabitDayModel'];
+
+/** ProjectsBoardHabitModel from web_api/schemas.py (habit check-in strip). */
+export type ProjectsBoardHabit = Schemas['ProjectsBoardHabitModel'];
+
+/** ProjectsBoardResponse from web_api/schemas.py (unified /projects payload). */
+export type ProjectsBoardResponse = Schemas['ProjectsBoardResponse'];
+
+/** StarmapResponse from web_api/schemas.py (one-shot home starmap snapshot). */
+export type StarmapResponse = Schemas['StarmapResponse'];
+
+/** KanbanCardScheduleRequest from web_api/schemas.py (planned dates).
+ * Partial: `undefined` keeps the value, `""` clears it. */
+export type KanbanCardScheduleRequest = Partial<Schemas['KanbanCardScheduleRequest']>;
+
+/** KanbanCardPatchRequest from web_api/schemas.py (field edit incl. lane). */
+export type KanbanCardPatchRequest = Schemas['KanbanCardPatchRequest'];
+
+/** CheckinCreateRequest from web_api/schemas.py (all fields server-defaulted). */
+export type CheckinCreateRequest = Partial<Schemas['CheckinCreateRequest']>;
+
+/** CheckinMutationResponse from web_api/schemas.py. */
+export type CheckinMutationResponse = Schemas['CheckinMutationResponse'];
+
+/** PlanTemplateModel from web_api/schemas.py (built-in or inline plan). */
+export type PlanTemplate = Schemas['PlanTemplateModel'];
+
+/** PlanTemplateUsageModel from web_api/schemas.py (history row). */
+export type PlanTemplateUsage = Schemas['PlanTemplateUsageModel'];
+
+/** PlanTemplateListResponse from web_api/schemas.py. */
+export type PlanTemplateListResponse = Schemas['PlanTemplateListResponse'];
+
+/** PlanTemplateInstantiateRequest from web_api/schemas.py
+ * (template_id OR inline template; title/start/habit_id overrides). */
+export type PlanTemplateInstantiateRequest = Partial<Schemas['PlanTemplateInstantiateRequest']>;
+
+/** PlanTemplateInstantiateResponse from web_api/schemas.py. */
+export type PlanTemplateInstantiateResponse = Schemas['PlanTemplateInstantiateResponse'];
+
 // ---------------------------------------------------------------------------
 // Frontend-only composite types (not part of the OpenAPI contract).
 
@@ -439,6 +497,18 @@ export interface StudioPostResult {
 /** Public-build GET result: the payload plus the public-layer ETag. */
 export interface PublicBuildResult {
   data: PublicBuildResponse;
+  etag: string;
+}
+
+/** Projects-board GET result: the payload plus the 6-file board ETag. */
+export interface ProjectsBoardResult {
+  board: ProjectsBoardResponse;
+  etag: string;
+}
+
+/** Plan-templates GET result: the payload plus the plan-source ETag. */
+export interface PlanTemplateListResult {
+  data: PlanTemplateListResponse;
   etag: string;
 }
 

@@ -9,7 +9,7 @@ import type { Page, Response } from "@playwright/test";
  * - 差距分析 Gap: analyze → coverage/strong/gap sections → 加入看板 lands a
  *   learning card in the kanban Queue; empty/whitespace task descriptions are
  *   intercepted client-side (no /gap/analyze request ever fires).
- * - 项目看板 Project Board: case → milestone → task → move columns; M-FE-1
+ * - 项目 Projects: case → milestone → task → move columns; M-FE-1
  *   regression (an unsaved basics draft survives a tab switch + the board
  *   refetch triggered by moving a task); archive; AI suggest-refs renders
  *   the degradation card on the no-LLM job-error contract (stubbed — the
@@ -169,10 +169,11 @@ test.describe("SPA Gap (差距分析)", () => {
     await expect(page.getByText(/以上为规则匹配结果/)).toBeVisible();
     await expect(page.getByRole("button", { name: "深度分析(LLM)" })).toBeVisible();
 
-    // Kanban: the learning card really sits in the Queue column (duplicate
-    // titles from earlier runs are fine — assert the first match).
-    await page.goto(spa("kanban"));
-    const queueColumn = page.getByTestId("kanban-column-Queue");
+    // Projects: the learning card (no project) lands in the 未归属 lane's
+    // Queue column (duplicate titles from earlier runs are fine — assert the
+    // first match).
+    await page.goto(spa("projects"));
+    const queueColumn = page.getByTestId("lane-column-unassigned-queue");
     await expect(queueColumn).toBeVisible();
     await expect(queueColumn.getByText(cardTitle).first()).toBeVisible();
   });
@@ -205,7 +206,7 @@ test.describe("SPA Gap (差距分析)", () => {
   });
 });
 
-test.describe("SPA Project Board (项目看板)", () => {
+test.describe("SPA Projects (项目 — 一体化看板)", () => {
   test("case → milestone → task → move → draft protection (M-FE-1) → archive", async ({
     page,
   }) => {
@@ -214,12 +215,12 @@ test.describe("SPA Project Board (项目看板)", () => {
     const milestoneTitle = `e2e-ms-${ts}`;
     const taskTitle = `e2e-task-${ts}`;
 
-    await page.goto(spa("project-board"));
-    await expect(page.getByTestId("board-summary")).toBeVisible();
+    await page.goto(spa("projects"));
+    await expect(page.getByTestId("projects-toolbar")).toBeVisible();
 
-    // 1. Create the case; the detail view opens on the auto-generated id.
+    // 1. Create the case via 新建项目; the edit drawer opens on the new id.
+    await page.getByTestId("new-project-button").click();
     const createForm = page.getByTestId("create-case-form");
-    await createForm.getByRole("button", { name: "展开" }).click();
     await createForm.getByRole("textbox", { name: "标题", exact: true }).fill(caseTitle);
     const createResponse = await waitPost(page, "/project-board/cases", () =>
       createForm.getByRole("button", { name: "创建项目" }).click(),
@@ -230,7 +231,7 @@ test.describe("SPA Project Board (项目看板)", () => {
 
     const detail = page.getByTestId("case-detail");
     await expect(detail).toBeVisible();
-    await expect(detail.getByRole("heading", { name: caseTitle })).toBeVisible();
+    await expect(page.getByTestId("project-edit-drawer")).toContainText(caseTitle);
 
     // 2. Add a milestone.
     await detail.getByRole("tab", { name: "里程碑" }).click();
@@ -242,7 +243,7 @@ test.describe("SPA Project Board (项目看板)", () => {
     expect(milestoneResponse.status()).toBe(201);
     await expect(detail.getByRole("button", { name: new RegExp(milestoneTitle) })).toBeVisible();
 
-    // 3. Add a project task (lands on the kanban board in Queue).
+    // 3. Add a project task (lands on the lane in Queue).
     await detail.getByRole("tab", { name: "任务" }).click();
     const taskForm = detail.getByTestId("add-task-form");
     await taskForm.getByRole("textbox", { name: "标题", exact: true }).fill(taskTitle);
@@ -274,15 +275,16 @@ test.describe("SPA Project Board (项目看板)", () => {
       "unsaved basics draft must survive a tab switch + board refetch (M-FE-1)",
     ).toHaveValue(draftTitle);
 
-    // 6. Archive: badge flips and the case moves to the 已归档 status tab.
+    // 6. Archive: the lane folds into the count-only 已归档项目 footer.
     const archiveResponse = await waitPost(page, "/archive", () =>
       detail.getByRole("button", { name: "归档项目" }).click(),
     );
     expect(archiveResponse.status()).toBe(200);
-    await expect(detail.getByText("已归档", { exact: true })).toBeVisible();
     await expect(detail.getByRole("button", { name: "归档项目" })).toHaveCount(0);
-    await page.getByRole("tab", { name: "已归档", exact: true }).click();
-    await expect(page.getByTestId(`case-card-${caseId}`)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId(`project-lane-${caseId}`)).toHaveCount(0);
+    // The footer shows the SAVED title (the 草稿 draft was never saved).
+    await expect(page.getByTestId("archived-projects-footer")).toContainText(caseTitle);
   });
 
   test("AI 建议引用 shows the degradation card on the no-LLM job contract", async ({ page }) => {
@@ -302,11 +304,11 @@ test.describe("SPA Project Board (项目看板)", () => {
     });
 
     const ts = Date.now();
-    await page.goto(spa("project-board"));
-    await expect(page.getByTestId("board-summary")).toBeVisible();
+    await page.goto(spa("projects"));
+    await expect(page.getByTestId("projects-toolbar")).toBeVisible();
 
+    await page.getByTestId("new-project-button").click();
     const createForm = page.getByTestId("create-case-form");
-    await createForm.getByRole("button", { name: "展开" }).click();
     await createForm
       .getByRole("textbox", { name: "标题", exact: true })
       .fill(`e2e-pb-ai-${ts}`);

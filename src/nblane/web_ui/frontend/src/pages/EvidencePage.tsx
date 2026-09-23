@@ -18,7 +18,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { useDebouncedValue } from '@mantine/hooks';
+import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import {
   IconArchive,
   IconCheck,
@@ -409,7 +409,7 @@ function SkillLinkEditor({
               leftSection={<IconPlus size={12} />}
               onClick={() => save([...linked, item.id])}
               data-testid={`suggest-skill-${item.id}`}
-              style={{ color: '#e6f4f1' }}
+              style={{ color: inscription.bodyColor }}
             >
               {item.label}
               {item.category ? ` · ${item.category}` : ''}
@@ -1343,6 +1343,7 @@ export function EvidencePage() {
   };
 
   const stages = useEvidenceStages(name);
+  const isDesktop = useMediaQuery('(min-width: 62em)');
   const candidates = useCrystallizeCandidates(name);
   const list = useEvidenceReviewList(name, {
     status: STAGE_TO_LIST_STATUS[stage],
@@ -1422,7 +1423,17 @@ export function EvidencePage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" wrap="wrap">
+      <Group
+        justify="space-between"
+        wrap="wrap"
+        bg="var(--mantine-color-body)"
+        style={{
+          position: 'sticky',
+          top: 56,
+          zIndex: 20,
+          paddingBlock: 6,
+        }}
+      >
         <Title order={2}>{name} · 证据</Title>
         <Group gap="xs">
           {stage === 'review' && (
@@ -1585,7 +1596,16 @@ export function EvidencePage() {
           )}
         </Stack>
 
-        <Stack gap="xs" w={{ base: '100%', md: 380 }} data-testid="evidence-detail-pane">
+        <Stack
+          gap="xs"
+          w={{ base: '100%', md: 380 }}
+          data-testid="evidence-detail-pane"
+          style={
+            isDesktop
+              ? { position: 'sticky', top: 116, alignSelf: 'flex-start' }
+              : undefined
+          }
+        >
           {selectedId ? (
             <EvidenceDetailCard
               profile={name}
@@ -1628,8 +1648,17 @@ export function EvidencePage() {
 }
 
 function Box_StageColumn({ children }: { children: ReactNode }) {
+  const isDesktop = useMediaQuery('(min-width: 62em)');
   return (
-    <Stack gap="xs" w={{ base: '100%', md: 200 }}>
+    <Stack
+      gap="xs"
+      w={{ base: '100%', md: 200 }}
+      style={
+        isDesktop
+          ? { position: 'sticky', top: 116, alignSelf: 'flex-start' }
+          : undefined
+      }
+    >
       {children}
     </Stack>
   );

@@ -1,0 +1,257 @@
+/* Growth starmap (SPA home) — scoped port of the playground style.css.
+ * Since the 2026-09-23 immersive-home pass the root is full-bleed: the
+ * AppShell drops its padding on /home, so this fills the whole main area
+ * (no card frame, no border radius, no color seam). */
+
+@font-face {
+  font-family: 'Noto Serif SC Subset';
+  src: url('./assets/NotoSerifSC-subset.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'LXGW WenKai Subset';
+  src: url('./assets/fonts/LXGWWenKai-subset.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'I.Ming Subset';
+  src: url('./assets/fonts/IMing-subset.ttf') format('truetype');
+  font-display: swap;
+}
+
+.starmap-root {
+  position: relative;
+  height: calc(100dvh - 56px);
+  min-height: 480px;
+  overflow: hidden;
+  background: #1d3450;
+}
+
+/* baked stone / slate / dusk textures live in the DOM compositor */
+.starmap-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+}
+
+/* 装裱式三带: 裱绫(顶) / 画心 / 裱绫(底) */
+.starmap-layout {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.starmap-mount-top {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(10px, 2.4dvh, 24px) 0 clamp(6px, 1.2dvh, 12px);
+}
+
+.starmap-cartouche {
+  width: clamp(170px, 21vw, 300px);
+  display: block;
+  pointer-events: none;
+}
+
+.starmap-heart {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  pointer-events: auto;
+}
+
+.starmap-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  touch-action: none;
+}
+
+.starmap-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.55;
+  background: radial-gradient(ellipse at center, rgba(3, 6, 14, 0) 42%, rgba(3, 6, 14, 0.85) 140%);
+}
+
+.starmap-mount-bottom {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(8px, 1.6dvh, 14px) 16px calc(clamp(8px, 1.6dvh, 14px) + env(safe-area-inset-bottom, 0px));
+}
+
+.starmap-briefing {
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: clamp(13px, 1.8dvh, 18px);
+  color: rgba(196, 202, 214, 0.55);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.starmap-toggle {
+  position: absolute;
+  right: 20px;
+  bottom: 16px;
+  z-index: 3;
+  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
+  font-size: 15px;
+  color: #e8e2d2;
+  background: rgba(20, 34, 54, 0.55);
+  border: 1px solid rgba(232, 226, 210, 0.4);
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.starmap-tooltip {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  background: rgba(16, 26, 42, 0.82);
+  border: 1px solid rgba(220, 174, 85, 0.45);
+  padding: 8px 13px;
+  max-width: 300px;
+  z-index: 10;
+}
+
+.starmap-tooltip .tt-title {
+  font-size: 15px;
+  color: #f5ead2;
+  letter-spacing: 1px;
+  margin-bottom: 3px;
+}
+
+.starmap-tooltip .tt-info {
+  font-size: 12px;
+  color: rgba(196, 202, 214, 0.75);
+  letter-spacing: 0.5px;
+}
+
+/* 铭文详情卡: desktop slides from the right, mobile rises as a bottom sheet */
+.starmap-detail {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  width: 300px;
+  max-height: 76%;
+  overflow: hidden;
+  transform: translate(130%, -50%);
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.25, 1);
+  background: rgba(14, 24, 40, 0.88);
+  border: 1px solid rgba(220, 174, 85, 0.5);
+  padding: 20px 22px;
+  font-family: 'I.Ming Subset', 'Noto Serif CJK SC', serif;
+  z-index: 11;
+  pointer-events: auto;
+}
+
+.starmap-detail.open {
+  transform: translate(0, -50%);
+}
+
+.starmap-detail h3 {
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 20px;
+  font-weight: normal;
+  color: #f0cd7f;
+  letter-spacing: 4px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid rgba(220, 174, 85, 0.3);
+  padding-bottom: 10px;
+}
+
+.starmap-detail dl {
+  margin: 0;
+}
+
+.starmap-detail dt {
+  font-size: 12px;
+  color: rgba(220, 174, 85, 0.65);
+  letter-spacing: 2px;
+  margin-top: 12px;
+}
+
+.starmap-detail dd {
+  font-size: 14px;
+  color: rgba(245, 234, 210, 0.92);
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+.starmap-detail .starmap-detail-link {
+  display: inline-block;
+  margin-top: 16px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: rgba(234, 197, 126, 0.85);
+  font-family: 'LXGW WenKai Subset', serif;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(220, 174, 85, 0.35);
+}
+
+/* no-WebGL / reduced-data fallback */
+.starmap-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(180deg, #25405e 0%, #1d3450 100%);
+  color: rgba(232, 226, 210, 0.85);
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  text-align: center;
+  padding: 24px;
+}
+
+.starmap-fallback .fb-title {
+  font-size: 22px;
+  letter-spacing: 6px;
+  color: #f0cd7f;
+}
+
+.starmap-fallback .fb-line {
+  font-size: 14px;
+  color: rgba(196, 202, 214, 0.7);
+}
+
+/* 手机竖屏 = 立轴: 小匾在上, 详情卡底部升起 */
+@media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
+  .starmap-cartouche { width: clamp(140px, 44vw, 210px); }
+  .starmap-toggle { right: 12px; bottom: 12px; font-size: 13px; padding: 6px 12px; }
+  .starmap-detail {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 40%;
+    overflow-y: auto;
+    transform: translateY(112%);
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .starmap-detail.open { transform: translateY(0); }
+  .starmap-detail h3 { font-size: 17px; margin-bottom: 10px; padding-bottom: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .starmap-detail { transition: none; }
+}

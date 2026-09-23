@@ -1,22 +1,22 @@
 import { expect, test } from "@playwright/test";
-import type { Frame, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 /**
  * Desktop viewport layout regression for the SPA — the automated arm of the
  * wide-screen rules in docs/zh/guides/spa-experience-checklist.md §5, against
  * the isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev).
  *
- * Covers the 2026-09-21 wide-screen fixes:
+ * Covers the 2026-09-21 wide-screen fixes (plus the Phase 3 home swap and the
+ * 2026-09-23 dark-unification/icon-rail pass):
  *  a) every page's main column is centered and capped (≤ 1400px) so tables,
  *     cards and forms no longer stretch into unreadable rows at 1920 — the
- *     kanban board is the single full-bleed exemption (data-layout="wide");
+ *     home starmap (immersive full-bleed), the projects board and the
+ *     workshop terminal are the full-bleed exemptions (data-layout="wide");
  *  b) no page overflows horizontally at 1280×800 or 1920×1080;
- *  c) the home galaxy iframe fills its card's width exactly and takes a
- *     viewport-relative height (clamp(640px, 100vh-180px, 900px)) instead of
- *     the old fixed 560px that cut the 3D scene off;
- *  d) the embedded dashboard runs in ?compact=1 mode: the inspector is an
- *     on-demand drawer (no permanent right rail) and the 3D stage keeps the
- *     majority of the iframe width at 1920.
+ *  c) the home growth starmap fills the whole AppShell main area (padding 0,
+ *     no inner card frame) and takes the full viewport height under the 56px
+ *     header;
+ *  d) the desktop sidebar is a 56px icon rail that expands on demand.
  */
 
 const SPA_BASE_URL = (process.env.NBLANE_E2E_SPA_BASE_URL || "http://127.0.0.1:18504").replace(
@@ -51,22 +51,6 @@ async function containerWidth(page: Page): Promise<number> {
   const box = await page.getByTestId("page-container").boundingBox();
   expect(box, "page-container must be laid out").toBeTruthy();
   return Math.round(box!.width);
-}
-
-/** Wait for the galaxy hero to settle; returns the dashboard frame or null. */
-async function galaxyFrame(page: Page): Promise<Frame | null> {
-  const frame = page.locator("[data-testid='sidecar-frame']");
-  const fallback = page.getByTestId("home-galaxy-fallback");
-  await expect(frame.or(fallback), "galaxy hero should resolve to embed or fallback").toBeVisible({
-    timeout: 20_000,
-  });
-  if ((await frame.count()) === 0) {
-    return null;
-  }
-  const dashboard = page.frames().find((f) => f.url().includes("/dashboard"));
-  expect(dashboard, "dashboard iframe should be registered").toBeTruthy();
-  await dashboard!.waitForSelector(".hd-canvas-workbench", { timeout: 20_000 });
-  return dashboard!;
 }
 
 const VIEWPORTS = [
@@ -110,9 +94,10 @@ for (const viewport of VIEWPORTS) {
       await expectNoHorizontalOverflow(page);
     });
 
-    test("看板页: 全宽豁免生效且无横向溢出", async ({ page }) => {
+    test("项目页: 全宽豁免生效且无横向溢出", async ({ page }) => {
+      // /kanban redirects to /projects (legacy deep links stay alive).
       await page.goto(spa("kanban"));
-      await expect(page.getByTestId("kanban-column-Queue")).toBeVisible();
+      await expect(page.getByTestId("projects-toolbar")).toBeVisible();
 
       const container = page.getByTestId("page-container");
       await expect(container).toHaveAttribute("data-layout", "wide");
@@ -120,76 +105,85 @@ for (const viewport of VIEWPORTS) {
       if (viewport.width >= 1920) {
         expect(
           width,
-          `kanban is the full-bleed exemption — board (${width}px) should use the wide viewport`,
+          `projects is the full-bleed exemption — board (${width}px) should use the wide viewport`,
         ).toBeGreaterThan(CONTENT_MAX_WIDTH);
       }
       await expectNoHorizontalOverflow(page);
     });
 
-    test("首页: 星系 iframe 与卡片同宽、高度合理、compact embed 无固定右栏", async ({ page }) => {
+    test("首页: 星图全出血填满内容区、高度随视口、无横向溢出", async ({ page }) => {
+      // Phase 3 + dark unification: the home is the growth starmap rendered
+      // full-bleed — AppShell padding drops to 0, so there is no inner card
+      // frame or color seam around the indigo canvas.
       await page.goto(spa("home"));
-      const dashboard = await galaxyFrame(page);
-      test.skip(!dashboard, "sidecar dashboard unreachable in this stack");
+      const root = page.getByTestId("starmap-root");
+      await expect(root).toBeVisible({ timeout: 30_000 });
+      // WebGL canvas, or the explicit no-WebGL fallback — never a blank box.
+      await expect(
+        root.locator("canvas.starmap-canvas").or(page.getByTestId("starmap-fallback")),
+      ).toBeVisible({ timeout: 30_000 });
 
-      const frame = page.locator("[data-testid='sidecar-frame']");
-      const src = await frame.getAttribute("src");
-      expect(src, "galaxy embed should request the compact dashboard mode").toContain("compact=1");
-
-      const frameBox = await frame.boundingBox();
-      const cardBox = await page.getByTestId("home-galaxy-hero").boundingBox();
-      expect(frameBox).toBeTruthy();
-      expect(cardBox).toBeTruthy();
-      // The iframe fills the card's content box: card padding (lg=24px each
-      // side) + border are the only allowed difference.
-      const slack = cardBox!.width - frameBox!.width;
+      const container = page.getByTestId("page-container");
+      await expect(container).toHaveAttribute("data-layout", "wide");
+      const rootBox = await root.boundingBox();
+      const containerBox = await container.boundingBox();
+      expect(rootBox).toBeTruthy();
+      expect(containerBox).toBeTruthy();
+      // Full bleed: the starmap matches the container exactly on both axes —
+      // any slack (padding/frame) would show up as a seam here.
       expect(
-        slack,
-        `iframe width ${frameBox!.width} should match the hero card content width ${cardBox!.width}`,
-      ).toBeLessThanOrEqual(52);
+        Math.abs(containerBox!.width - rootBox!.width),
+        `starmap width ${rootBox!.width} should match the full-bleed container ${containerBox!.width}`,
+      ).toBeLessThanOrEqual(4);
       expect(
-        frameBox!.height,
-        `iframe height ${frameBox!.height} must sit inside the clamp(640px,100vh-180px,900px) band`,
-      ).toBeGreaterThanOrEqual(560);
-      expect(frameBox!.height).toBeLessThanOrEqual(1000);
-
-      // Compact embed: no permanent inspector rail — it is a closed drawer —
-      // and the 3D stage keeps the majority of the iframe width.
-      const inner = await dashboard!.evaluate(() => {
-        const shell = document.querySelector(".hd-shell");
-        const inspector = document.querySelector(".hd-inspector");
-        const stage = document.querySelector(".hd-graph3d-stage");
-        return {
-          compact: shell?.classList.contains("hd-shell-compact") ?? false,
-          inspectorVisible: inspector
-            ? inspector.getBoundingClientRect().width > 0 &&
-              getComputedStyle(inspector).display !== "none"
-            : false,
-          stageWidth: stage ? Math.round(stage.getBoundingClientRect().width) : 0,
-        };
-      });
-      expect(inner.compact, "embed should carry the hd-shell-compact class").toBe(true);
-      expect(inner.inspectorVisible, "no permanent inspector rail before a node is picked").toBe(
-        false,
-      );
-      if (viewport.width >= 1920) {
-        expect(
-          inner.stageWidth / frameBox!.width,
-          `3D stage (${inner.stageWidth}px) should keep the majority of the ${frameBox!.width}px iframe`,
-        ).toBeGreaterThan(0.55);
-      }
-
-      // The compact embed fits its canvas inside the iframe: no internal
-      // document scroll taller than a small slack.
-      const innerScroll = await dashboard!.evaluate(() => ({
-        body: document.body.scrollHeight,
-        inner: window.innerHeight,
-      }));
+        Math.abs(containerBox!.x - rootBox!.x),
+        `starmap x ${rootBox!.x} should align with the container x ${containerBox!.x}`,
+      ).toBeLessThanOrEqual(2);
       expect(
-        innerScroll.body - innerScroll.inner,
-        `embed content (${innerScroll.body}px) should fit the ${innerScroll.inner}px iframe without a tall internal scroll`,
-      ).toBeLessThanOrEqual(80);
+        rootBox!.height,
+        `starmap height ${rootBox!.height} must be 100dvh minus the 56px header`,
+      ).toBeGreaterThanOrEqual(viewport.height - 56 - 4);
 
       await expectNoHorizontalOverflow(page);
     });
   });
 }
+
+test.describe("SPA 桌面图标导航栏", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("默认 56px 图标栏收起, 可展开为标签栏并记住状态", async ({ page }) => {
+    await page.goto(spa("home"));
+    await expect(page.getByTestId("starmap-root")).toBeVisible({ timeout: 30_000 });
+    const navbar = page.locator("[class*='AppShell-navbar']");
+    await expect(navbar).toBeVisible();
+
+    // Collapsed icon rail (~56px): links are icon-only but keep aria-labels.
+    await expect
+      .poll(async () => Math.round((await navbar.boundingBox())!.width))
+      .toBeLessThanOrEqual(64);
+    await expect(navbar.getByRole("link", { name: "首页", exact: true })).toBeAttached();
+    // Labels are not rendered as visible text while collapsed.
+    await expect(navbar.getByText("技能树", { exact: true })).toBeHidden();
+
+    // Expand to the full labelled rail.
+    await page.getByTestId("rail-toggle").click();
+    await expect
+      .poll(async () => Math.round((await navbar.boundingBox())!.width))
+      .toBeGreaterThan(150);
+    await expect(navbar.getByText("技能树", { exact: true })).toBeVisible();
+
+    // Persisted across reloads.
+    await page.reload();
+    await expect(page.getByTestId("starmap-root")).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => Math.round((await navbar.boundingBox())!.width))
+      .toBeGreaterThan(150);
+
+    // Collapse again to leave a clean state.
+    await page.getByTestId("rail-toggle").click();
+    await expect
+      .poll(async () => Math.round((await navbar.boundingBox())!.width))
+      .toBeLessThanOrEqual(64);
+  });
+});

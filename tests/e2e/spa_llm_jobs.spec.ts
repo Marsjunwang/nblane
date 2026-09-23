@@ -233,10 +233,10 @@ test.describe("SPA Project Board AI 建议引用 (project-suggest-refs job + SSE
     );
 
     const ts = Date.now();
-    await page.goto(spa("project-board"));
-    await expect(page.getByTestId("board-summary")).toBeVisible();
+    await page.goto(spa("projects"));
+    await expect(page.getByTestId("projects-toolbar")).toBeVisible();
+    await page.getByTestId("new-project-button").click();
     const createForm = page.getByTestId("create-case-form");
-    await createForm.getByRole("button", { name: "展开" }).click();
     await createForm.getByRole("textbox", { name: "标题", exact: true }).fill(`e2e-suggest-${ts}`);
     const createResponse = await waitPost(page, "/project-board/cases", () =>
       createForm.getByRole("button", { name: "创建项目" }).click(),
@@ -275,10 +275,10 @@ test.describe("SPA Project Board AI 建议引用 (project-suggest-refs job + SSE
     test.setTimeout(120_000);
 
     const ts = Date.now();
-    await page.goto(spa("project-board"));
-    await expect(page.getByTestId("board-summary")).toBeVisible();
+    await page.goto(spa("projects"));
+    await expect(page.getByTestId("projects-toolbar")).toBeVisible();
+    await page.getByTestId("new-project-button").click();
     const createForm = page.getByTestId("create-case-form");
-    await createForm.getByRole("button", { name: "展开" }).click();
     await createForm
       .getByRole("textbox", { name: "标题", exact: true })
       .fill(`e2e-suggest-real-${ts}`);

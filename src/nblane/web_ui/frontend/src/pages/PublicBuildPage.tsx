@@ -419,7 +419,7 @@ function PreviewCard({
                       height: 720,
                       border: '1px solid var(--mantine-color-default-border)',
                       borderRadius: 'var(--mantine-radius-md)',
-                      background: 'white',
+                      background: 'var(--mantine-color-body)',
                     }}
                   />
                 )}

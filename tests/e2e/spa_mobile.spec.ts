@@ -8,15 +8,16 @@ import type { APIRequestContext, Page } from "@playwright/test";
  * 9 tests across four groups:
  *
  * Coverage:
- *  a) navigation: hamburger open/close, every menu entry clickable, 看板
+ *  a) navigation: hamburger open/close, every menu entry clickable, 项目
  *     navigates and collapses the drawer;
- *  b) the wide-content pages (周回顾/项目看板/研究台 keep wide tables; 证据 is
+ *  b) the wide-content pages (周回顾/项目抽屉/研究台 keep wide tables; 证据 is
  *     now the Phase 1 single page with the five-stage nav): tables stay
  *     inside their Table.ScrollContainer and the document never overflows
  *     horizontally;
- *  c) kanban touch drag: a real CDP touch gesture (press-and-hold past the
- *     dnd-kit TouchSensor 250ms delay, then drag) moves a card Queue→Doing,
- *     plus the「…」移动到… menu fallback over tap;
+ *  c) projects lane touch drag: a real CDP touch gesture (press-and-hold past
+ *     the dnd-kit TouchSensor 250ms delay, then drag) moves a card
+ *     Queue→Doing inside its lane, plus the detail-card 移至 Doing fallback
+ *     over tap;
  *  d) inbox quick capture at 375px: usable input width, submit succeeds, no
  *     horizontal overflow.
  *
@@ -137,7 +138,7 @@ async function expectNavbarOpen(page: Page): Promise<void> {
 }
 
 test.describe("SPA mobile 375px — 导航", () => {
-  test("汉堡菜单可开合,全部菜单项可点,点看板正确跳转并收合", async ({ page }) => {
+  test("汉堡菜单可开合,全部菜单项可点,点项目正确跳转并收合", async ({ page }) => {
     await page.goto(spa("home"));
     const burger = page.getByRole("button", { name: "切换导航" });
     await expect(burger).toBeVisible();
@@ -145,22 +146,21 @@ test.describe("SPA mobile 375px — 导航", () => {
     // Collapsed on load (off-canvas); tap opens, tap again closes.
     await expectNavbarCollapsed(page);
     await burger.tap();
-    await expect(page.getByRole("link", { name: "看板", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "项目", exact: true })).toBeVisible();
     await expectNavbarOpen(page);
     await burger.tap();
     await expectNavbarCollapsed(page);
 
-    // Click through every drawer entry: 14 profile pages + 档案列表, plus the
-    // header 助手 entry (16 clickable entries total on mobile).
+    // Click through every drawer entry: 13 profile pages + 档案列表, plus the
+    // header 助手 entry (15 clickable entries total on mobile).
     const drawerItems: { label: string; url: string }[] = [
       { label: "首页", url: spa("home") },
-      { label: "看板", url: spa("kanban") },
+      { label: "项目", url: spa("projects") },
       { label: "技能树", url: spa("skill-tree") },
       { label: "目标", url: spa("goals") },
       { label: "证据", url: spa("evidence") },
       { label: "差距分析", url: spa("gap") },
       { label: "周回顾", url: spa("review") },
-      { label: "项目看板", url: spa("project-board") },
       { label: "输出工作室", url: spa("studio") },
       { label: "公开构建", url: spa("public-build") },
       { label: "研究台", url: spa("research") },
@@ -180,7 +180,7 @@ test.describe("SPA mobile 375px — 导航", () => {
       await expectNavbarCollapsed(page);
     }
 
-    // The header 助手 entry stays reachable on mobile (16th entry).
+    // The header 助手 entry stays reachable on mobile (15th entry).
     await page.getByRole("link", { name: "助手" }).click();
     await expect(page).toHaveURL(`${SPA_BASE_URL}/assistant`);
 
@@ -190,12 +190,12 @@ test.describe("SPA mobile 375px — 导航", () => {
     await page.getByRole("link", { name: "档案列表", exact: true }).click();
     await expect(page).toHaveURL(`${SPA_BASE_URL}/`);
 
-    // Explicit 看板 journey: open → tap 看板 → correct page, drawer collapsed.
+    // Explicit 项目 journey: open → tap 项目 → correct page, drawer collapsed.
     await page.goto(spa("home"));
     await burger.tap();
-    await page.getByRole("link", { name: "看板", exact: true }).click();
-    await expect(page).toHaveURL(spa("kanban"));
-    await expect(page.getByText("· 看板")).toBeVisible();
+    await page.getByRole("link", { name: "项目", exact: true }).click();
+    await expect(page).toHaveURL(spa("projects"));
+    await expect(page.getByTestId("projects-toolbar")).toBeVisible();
     await expectNavbarCollapsed(page);
     await expectNoHorizontalOverflow(page);
   });
@@ -235,8 +235,8 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("项目看板页: 案例任务表格横向滚动且文档不溢出", async ({ page, request }) => {
-    // Seed a case with one task so the detail 任务 tab renders its table.
+  test("项目页编辑抽屉: 案例任务表格横向滚动且文档不溢出", async ({ page, request }) => {
+    // Seed a case with one task so the drawer 任务 tab renders its table.
     const run = Date.now();
     const create = await request.post(api("/project-board/cases"), {
       data: { title: `e2e-mob-case-${run}` },
@@ -248,13 +248,13 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
     });
     expect(task.status(), "project task seed should succeed").toBe(201);
 
-    await page.goto(spa("project-board"));
-    const caseCard = page.getByTestId(`case-card-${caseId}`);
-    await expect(caseCard).toBeVisible();
-    await caseCard.getByRole("button", { name: "选择" }).click();
+    await page.goto(spa("projects"));
+    const lane = page.getByTestId(`project-lane-${caseId}`);
+    await expect(lane).toBeVisible();
+    await lane.getByRole("button", { name: `编辑项目 e2e-mob-case-${run}` }).tap();
     const detail = page.getByTestId("case-detail");
     await expect(detail).toBeVisible();
-    await detail.getByRole("tab", { name: "任务" }).click();
+    await detail.getByRole("tab", { name: "任务" }).tap();
     await expect(page.locator("table").first()).toBeVisible();
     await expect(
       page.locator("[data-testid^='project-task-']").getByText(`e2e-mob-task-${run}`),
@@ -271,7 +271,7 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
   });
 });
 
-test.describe("SPA mobile 375px — 看板触屏", () => {
+test.describe("SPA mobile 375px — 项目泳道触屏", () => {
   test("触屏长按拖拽把 Queue 卡移到 Doing(真 CDP touch + auto-scroll)", async ({
     page,
     context,
@@ -280,14 +280,15 @@ test.describe("SPA mobile 375px — 看板触屏", () => {
     const title = `e2e-mob-dnd-${Date.now()}`;
     await seedKanbanCard(request, title);
     // Move to the Queue head: at the tail card's scroll depth the shorter
-    // columns' boxes have ended and the pointer would hover dead space.
+    // column's box has ended and the pointer would hover dead space.
     const toHead = await request.post(api(`/kanban/cards/${encodeURIComponent(title)}/move`), {
       data: { target_section: "Queue", to_index: 0 },
     });
     expect(toHead.status()).toBeLessThan(300);
 
-    await page.goto(spa("kanban"));
-    await page.getByTestId("kanban-column-Queue").getByText(title).first().waitFor();
+    // Seeded without a project → the 未归属 lane (Queue left, Doing right).
+    await page.goto(spa("projects"));
+    await page.getByTestId("lane-column-unassigned-queue").getByText(title).first().waitFor();
     const handle = page.getByRole("button", { name: `拖拽卡片 ${title}` }).first();
     await handle.scrollIntoViewIfNeeded();
     const handleBox = await handle.boundingBox();
@@ -311,9 +312,9 @@ test.describe("SPA mobile 375px — 看板触屏", () => {
         "true",
       );
 
-      // Drag briskly to the left edge, then jiggle: dnd-kit auto-scrolls the
-      // column strip until Doing slides under the parked pointer.
-      for (let x = startX; x > 40; x -= 30) {
+      // Drag briskly toward the right edge, then jiggle: dnd-kit auto-scrolls
+      // the lane strip until Doing slides under the parked pointer.
+      for (let x = startX; x < 350; x += 30) {
         await session.send("Input.dispatchTouchEvent", {
           type: "touchMove",
           touchPoints: [{ x, y: startY, id: 1 }],
@@ -325,11 +326,11 @@ test.describe("SPA mobile 375px — 看板触屏", () => {
       for (let i = 0; i < 40 && !highlighted; i++) {
         await session.send("Input.dispatchTouchEvent", {
           type: "touchMove",
-          touchPoints: [{ x: 30 + (i % 2 === 0 ? 0 : 6), y: startY, id: 1 }],
+          touchPoints: [{ x: 345 - (i % 2 === 0 ? 0 : 6), y: startY, id: 1 }],
         });
         await page.waitForTimeout(120);
         highlighted =
-          (await doingHighlight.getAttribute("data-testid")) === "kanban-column-Doing";
+          (await doingHighlight.getAttribute("data-testid")) === "lane-column-unassigned-doing";
       }
       expect(highlighted, "auto-scroll should bring the Doing column under the pointer").toBe(true);
       await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
@@ -342,31 +343,28 @@ test.describe("SPA mobile 375px — 看板触屏", () => {
     expect((response.request().postDataJSON() as { target_section?: string }).target_section).toBe(
       "Doing",
     );
-    await expect(page.getByTestId("kanban-column-Doing").getByText(title)).toBeVisible();
-    await expect(page.getByTestId("kanban-column-Queue").getByText(title)).toHaveCount(0);
+    await expect(page.getByTestId("lane-column-unassigned-doing").getByText(title)).toBeVisible();
+    await expect(page.getByTestId("lane-column-unassigned-queue").getByText(title)).toHaveCount(0);
   });
 
-  test("「…」菜单挪列在触屏上可用(无拖拽回退路径)", async ({ page, request }) => {
+  test("详情卡「移至 Doing」在触屏上可用(无拖拽回退路径)", async ({ page, request }) => {
     const title = `e2e-mob-menu-${Date.now()}`;
     await seedKanbanCard(request, title);
-    await page.goto(spa("kanban"));
-    await page.getByTestId("kanban-column-Queue").getByText(title).waitFor();
+    await page.goto(spa("projects"));
+    await page.getByTestId("lane-column-unassigned-queue").getByText(title).waitFor();
 
-    const menuButton = page.getByRole("button", { name: `卡片操作 ${title}` });
-    await menuButton.scrollIntoViewIfNeeded();
-    await menuButton.tap();
-    const subTarget = page.getByRole("menuitem", { name: "移动到…" });
-    await expect(subTarget).toBeVisible();
-    await subTarget.tap();
-    const doingItem = page.getByRole("menuitem", { name: "Doing", exact: true });
-    await expect(doingItem).toBeVisible();
+    // Tap the card (not a drag) → the inscription detail card opens.
+    const card = page.getByTestId("lane-column-unassigned-queue").getByText(title);
+    await card.scrollIntoViewIfNeeded();
+    await card.tap();
+    await expect(page.getByTestId("task-detail-card")).toBeVisible();
 
     const moveResponse = page.waitForResponse(
       (res) => res.url().includes("/move") && res.request().method() === "POST",
     );
-    await doingItem.tap();
+    await page.getByRole("button", { name: "移至 Doing" }).tap();
     expect((await moveResponse).status()).toBeLessThan(300);
-    await expect(page.getByTestId("kanban-column-Doing").getByText(title)).toBeVisible();
+    await expect(page.getByTestId("lane-column-unassigned-doing").getByText(title)).toBeVisible();
   });
 });
 

@@ -1,10 +1,15 @@
+// 项目编辑 Drawer — the ProjectBoardPage case-detail capability (基本信息 /
+// 里程碑 / 任务 tabs) re-homed onto the /projects lane header「编辑」button.
+// Data still comes from useProjectBoard (full case + ref pickers + board
+// ETag); projects-board is invalidated alongside so lanes refresh too.
+
 import {
   Accordion,
   Alert,
   Badge,
   Button,
   Card,
-  Center,
+  Drawer,
   Group,
   Loader,
   MultiSelect,
@@ -17,55 +22,35 @@ import {
   Text,
   Textarea,
   TextInput,
-  Title,
+  Center,
 } from '@mantine/core';
-import {
-  IconArchive,
-  IconBulb,
-  IconDeviceFloppy,
-  IconPlus,
-} from '@tabler/icons-react';
+import { IconArchive, IconBulb, IconDeviceFloppy, IconPlus } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
 
-import { MutationErrorAlert } from '../components/ConflictAlert';
+import { MutationErrorAlert } from '../ConflictAlert';
 import {
   useAddProjectMilestone,
   useAddProjectTask,
   useArchiveProjectCase,
   useCreateJob,
-  useCreateProjectCase,
   useDeleteProjectMilestone,
   useMoveProjectTask,
   useProjectBoard,
   useSaveProjectCase,
   useSaveProjectMilestone,
-} from '../api/hooks';
-import { streamJob } from '../api/jobs';
+} from '../../api/hooks';
+import { streamJob } from '../../api/jobs';
 import type {
   ProjectBoard,
   ProjectCase,
   ProjectMilestone,
   ProjectRefOption,
   ProjectSuggestRefsResponse,
-} from '../api/types';
+} from '../../api/types';
+import { KIND_LABELS, PROJECT_STATUS_LABELS } from './lanes';
 
-const PROJECT_STATUS_LABELS: Record<string, string> = {
-  active: '进行中',
-  paused: '已暂停',
-  completed: '已完成',
-  archived: '已归档',
-};
 const PROJECT_STATUSES = Object.keys(PROJECT_STATUS_LABELS);
-
-const KIND_LABELS: Record<string, string> = {
-  internal: '内部',
-  research: '研究',
-  work: '工作',
-  side_project: '副业',
-  learning: '学习',
-};
 
 const VISIBILITY_LABELS: Record<string, string> = {
   private: '私有',
@@ -174,145 +159,26 @@ interface SuggestJobProgress {
   message: string;
 }
 
-/** Refetch the project board after a 412 conflict. */
-function useRefreshBoard() {
-  const { name = '' } = useParams();
+/** Refetch the project board (and the /projects aggregation) after a 412. */
+function useRefreshBoards(profile: string) {
   const queryClient = useQueryClient();
-  return () =>
-    void queryClient.invalidateQueries({ queryKey: ['profiles', name, 'project-board'] });
-}
-
-function CreateCaseCard({
-  board,
-  etag,
-  onCreated,
-}: {
-  board: ProjectBoard;
-  etag: string;
-  onCreated: (caseId: string) => void;
-}) {
-  const { name = '' } = useParams();
-  const [opened, setOpened] = useState((board.cases ?? []).length === 0);
-  const [title, setTitle] = useState('');
-  const [caseId, setCaseId] = useState('');
-  const [kind, setKind] = useState('internal');
-  const [visibility, setVisibility] = useState('private');
-  const [summary, setSummary] = useState('');
-  const [goalRefs, setGoalRefs] = useState<string[]>([]);
-  const create = useCreateProjectCase(name);
-  const refreshBoard = useRefreshBoard();
-
-  const submit = () => {
-    if (!title.trim()) {
-      return;
-    }
-    create.mutate(
-      {
-        body: {
-          title: title.trim(),
-          id: caseId.trim(),
-          status: 'active',
-          kind,
-          visibility,
-          summary: summary.trim(),
-          goal_refs: goalRefs,
-          evidence_refs: [],
-        },
-        etag,
-      },
-      {
-        onSuccess: (result) => {
-          setTitle('');
-          setCaseId('');
-          setSummary('');
-          setGoalRefs([]);
-          onCreated(result.case.id);
-        },
-      },
-    );
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'project-board'] });
+    void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
   };
-
-  return (
-    <Card withBorder radius="md" data-testid="create-case-form">
-      <Group justify="space-between">
-        <Text fw={500}>新建项目</Text>
-        <Button
-          size="compact-sm"
-          variant="subtle"
-          onClick={() => setOpened((value) => !value)}
-          aria-expanded={opened}
-        >
-          {opened ? '收起' : '展开'}
-        </Button>
-      </Group>
-      {opened && (
-        <Stack gap="sm" mt="sm">
-          <Group grow align="flex-start">
-            <TextInput
-              label="标题"
-              value={title}
-              onChange={(event) => setTitle(event.currentTarget.value)}
-              required
-            />
-            <TextInput
-              label="ID（留空自动生成）"
-              value={caseId}
-              onChange={(event) => setCaseId(event.currentTarget.value)}
-            />
-          </Group>
-          <Group grow align="flex-start">
-            <Select
-              label="类型"
-              data={labeledData(KIND_LABELS, Object.keys(KIND_LABELS))}
-              value={kind}
-              onChange={(value) => setKind(value ?? 'internal')}
-            />
-            <Select
-              label="可见性"
-              data={labeledData(VISIBILITY_LABELS, Object.keys(VISIBILITY_LABELS))}
-              value={visibility}
-              onChange={(value) => setVisibility(value ?? 'private')}
-            />
-          </Group>
-          <Textarea
-            label="摘要"
-            value={summary}
-            onChange={(event) => setSummary(event.currentTarget.value)}
-            minRows={2}
-          />
-          <MultiSelect
-            label="关联目标"
-            data={refSelectData(board.options?.goals ?? [], goalRefs)}
-            value={goalRefs}
-            onChange={setGoalRefs}
-          />
-          <MutationErrorAlert error={create.error} title="创建失败" onRefetch={refreshBoard} />
-          <Group>
-            <Button
-              leftSection={<IconPlus size={14} />}
-              onClick={submit}
-              loading={create.isPending}
-              disabled={!title.trim()}
-            >
-              创建项目
-            </Button>
-          </Group>
-        </Stack>
-      )}
-    </Card>
-  );
 }
 
 function BasicsTab({
+  profile,
   projectCase,
   board,
   etag,
 }: {
+  profile: string;
   projectCase: ProjectCase;
   board: ProjectBoard;
   etag: string;
 }) {
-  const { name = '' } = useParams();
   const [draft, setDraft] = useState<CaseDraft>(() => draftFromCase(projectCase));
   const [dirty, setDirty] = useState(false);
   const [suggestions, setSuggestions] = useState<ProjectSuggestRefsResponse | null>(null);
@@ -320,15 +186,14 @@ function BasicsTab({
   const [suggestError, setSuggestError] = useState<{ code: string; message: string } | null>(
     null,
   );
-  const save = useSaveProjectCase(name);
-  const archive = useArchiveProjectCase(name);
-  const createJob = useCreateJob(name);
-  const refreshBoard = useRefreshBoard();
+  const save = useSaveProjectCase(profile);
+  const archive = useArchiveProjectCase(profile);
+  const createJob = useCreateJob(profile);
+  const refreshBoard = useRefreshBoards(profile);
   const stopStreamRef = useRef<(() => void) | null>(null);
 
-  // CaseDetail is keyed by case id only, so board-level refetches re-render
-  // this tab instead of remounting it. Follow server-side changes only while
-  // the local draft is untouched; a dirty draft always wins.
+  // Follow server-side changes only while the local draft is untouched; a
+  // dirty draft always wins.
   const lastSynced = useRef(projectCase);
   useEffect(() => {
     if (!dirty && projectCase !== lastSynced.current) {
@@ -342,15 +207,14 @@ function BasicsTab({
     stopStreamRef.current = null;
   };
 
-  // Cancel the SSE subscription on unmount and whenever the profile or case
-  // changes; a stale stream must never write another case's state.
+  // Cancel the SSE subscription on unmount and whenever the case changes.
   useEffect(() => {
     setSuggestJob(null);
     setSuggestions(null);
     setSuggestError(null);
     return stopStream;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, projectCase.id]);
+  }, [profile, projectCase.id]);
 
   const set = <K extends keyof CaseDraft>(field: K, value: CaseDraft[K]) => {
     setDirty(true);
@@ -374,7 +238,7 @@ function BasicsTab({
         onSuccess: (created) => {
           const jobId = created.job_id;
           setSuggestJob({ jobId, phase: created.job.phase || 'queued', message: '' });
-          stopStreamRef.current = streamJob(name, jobId, {
+          stopStreamRef.current = streamJob(profile, jobId, {
             onProgress: (frame) => {
               setSuggestJob((prev) =>
                 prev && prev.jobId === jobId
@@ -636,23 +500,24 @@ function BasicsTab({
 }
 
 function MilestoneEditor({
+  profile,
   projectCase,
   milestone,
   etag,
 }: {
+  profile: string;
   projectCase: ProjectCase;
   milestone: ProjectMilestone;
   etag: string;
 }) {
-  const { name = '' } = useParams();
   const [title, setTitle] = useState(milestone.title ?? '');
   const [status, setStatus] = useState(milestone.status ?? 'planned');
   const [target, setTarget] = useState(milestone.target ?? '');
   const [date, setDate] = useState(milestone.date ?? '');
   const [summary, setSummary] = useState(milestone.summary ?? '');
-  const save = useSaveProjectMilestone(name);
-  const remove = useDeleteProjectMilestone(name);
-  const refreshBoard = useRefreshBoard();
+  const save = useSaveProjectMilestone(profile);
+  const remove = useDeleteProjectMilestone(profile);
+  const refreshBoard = useRefreshBoards(profile);
 
   return (
     <Stack gap="xs">
@@ -727,18 +592,19 @@ function MilestoneEditor({
 }
 
 function MilestonesTab({
+  profile,
   projectCase,
   etag,
 }: {
+  profile: string;
   projectCase: ProjectCase;
   etag: string;
 }) {
-  const { name = '' } = useParams();
   const [title, setTitle] = useState('');
   const [target, setTarget] = useState('');
   const [date, setDate] = useState('');
-  const add = useAddProjectMilestone(name);
-  const refreshBoard = useRefreshBoard();
+  const add = useAddProjectMilestone(profile);
+  const refreshBoard = useRefreshBoards(profile);
 
   const submit = () => {
     if (!title.trim()) {
@@ -776,8 +642,7 @@ function MilestonesTab({
                   {milestone.title || milestone.id}
                 </Text>
                 <Badge size="sm" variant="light">
-                  {MILESTONE_STATUS_LABELS[milestone.status ?? ''] ??
-                    milestone.status}
+                  {MILESTONE_STATUS_LABELS[milestone.status ?? ''] ?? milestone.status}
                 </Badge>
                 {(milestone.total_count ?? 0) > 0 && (
                   <Badge size="sm" variant="light" color="green">
@@ -788,6 +653,7 @@ function MilestonesTab({
             </Accordion.Control>
             <Accordion.Panel>
               <MilestoneEditor
+                profile={profile}
                 projectCase={projectCase}
                 milestone={milestone}
                 etag={etag}
@@ -839,19 +705,20 @@ function MilestonesTab({
 }
 
 function TasksTab({
+  profile,
   projectCase,
   etag,
 }: {
+  profile: string;
   projectCase: ProjectCase;
   etag: string;
 }) {
-  const { name = '' } = useParams();
   const [title, setTitle] = useState('');
   const [section, setSection] = useState('Queue');
   const [milestoneId, setMilestoneId] = useState('');
-  const add = useAddProjectTask(name);
-  const move = useMoveProjectTask(name);
-  const refreshBoard = useRefreshBoard();
+  const add = useAddProjectTask(profile);
+  const move = useMoveProjectTask(profile);
+  const refreshBoard = useRefreshBoards(profile);
 
   const milestoneOptions = [
     { value: '', label: '无里程碑' },
@@ -894,44 +761,44 @@ function TasksTab({
         <Card withBorder radius="md" p={0}>
           <Table.ScrollContainer minWidth={420}>
             <Table highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>任务</Table.Th>
-                <Table.Th>看板列</Table.Th>
-                <Table.Th>日期</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {tasks.map((task) => (
-                <Table.Tr key={task.id} data-testid={`project-task-${task.id}`}>
-                  <Table.Td>
-                    <Text size="sm">
-                      {task.title || task.id}
-                      {task.archived ? '(已归档)' : ''}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <NativeSelect
-                      size="xs"
-                      data={labeledData(SECTION_LABELS, KANBAN_SECTIONS)}
-                      value={task.section ?? 'Queue'}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        if (value && value !== task.section) {
-                          move.mutate({ taskId: task.id, targetSection: value, etag });
-                        }
-                      }}
-                      aria-label={`移动 ${task.title || task.id}`}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c="dimmed">
-                      {task.completed_on || task.started_on || '—'}
-                    </Text>
-                  </Table.Td>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>任务</Table.Th>
+                  <Table.Th>看板列</Table.Th>
+                  <Table.Th>日期</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
+              </Table.Thead>
+              <Table.Tbody>
+                {tasks.map((task) => (
+                  <Table.Tr key={task.id} data-testid={`project-task-${task.id}`}>
+                    <Table.Td>
+                      <Text size="sm">
+                        {task.title || task.id}
+                        {task.archived ? '(已归档)' : ''}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <NativeSelect
+                        size="xs"
+                        data={labeledData(SECTION_LABELS, KANBAN_SECTIONS)}
+                        value={task.section ?? 'Queue'}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          if (value && value !== task.section) {
+                            move.mutate({ taskId: task.id, targetSection: value, etag });
+                          }
+                        }}
+                        aria-label={`移动 ${task.title || task.id}`}
+                      />
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="xs" c="dimmed">
+                        {task.completed_on || task.started_on || '—'}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
         </Card>
@@ -983,196 +850,62 @@ function TasksTab({
   );
 }
 
-function CaseDetail({
-  projectCase,
-  board,
-  etag,
+/** Lane-header「编辑」drawer: basics + milestones + tasks for one case. */
+export function ProjectEditDrawer({
+  profile,
+  projectId,
+  onClose,
 }: {
-  projectCase: ProjectCase;
-  board: ProjectBoard;
-  etag: string;
+  profile: string;
+  /** null = closed. */
+  projectId: string | null;
+  onClose: () => void;
 }) {
+  const board = useProjectBoard(profile);
+  const projectCase = (board.data?.data.cases ?? []).find((item) => item.id === projectId);
+
   return (
-    <Card withBorder radius="md" data-testid="case-detail">
-      <Stack gap="sm">
-        <Group gap="sm">
-          <Title order={3}>{projectCase.title || projectCase.id}</Title>
-          <Badge variant="light">
-            {PROJECT_STATUS_LABELS[projectCase.status ?? ''] ?? projectCase.status}
-          </Badge>
-          <Badge variant="light" color="gray">
-            {KIND_LABELS[projectCase.kind ?? ''] ?? projectCase.kind}
-          </Badge>
-        </Group>
-        <Text size="xs" c="dimmed">
-          {[
-            projectCase.id,
-            projectCase.time_range || projectCase.derived_time_range,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </Text>
-        <Tabs defaultValue="basics">
+    <Drawer
+      opened={projectId !== null}
+      onClose={onClose}
+      position="right"
+      size="xl"
+      title={projectCase ? `编辑项目 · ${projectCase.title || projectCase.id}` : '编辑项目'}
+      data-testid="project-edit-drawer"
+    >
+      {board.isPending ? (
+        <Center py="xl">
+          <Loader />
+        </Center>
+      ) : !projectCase ? (
+        <Alert color="yellow" title="项目不存在">
+          未在项目看板中找到该项目;可能已删除。
+        </Alert>
+      ) : (
+        <div data-testid="case-detail">
+        <Tabs defaultValue="basics" key={projectCase.id}>
           <Tabs.List>
             <Tabs.Tab value="basics">基本信息</Tabs.Tab>
             <Tabs.Tab value="milestones">里程碑</Tabs.Tab>
             <Tabs.Tab value="tasks">任务</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="basics" pt="md">
-            <BasicsTab projectCase={projectCase} board={board} etag={etag} />
+            <BasicsTab
+              profile={profile}
+              projectCase={projectCase}
+              board={board.data!.data}
+              etag={board.data!.etag}
+            />
           </Tabs.Panel>
           <Tabs.Panel value="milestones" pt="md">
-            <MilestonesTab projectCase={projectCase} etag={etag} />
+            <MilestonesTab profile={profile} projectCase={projectCase} etag={board.data!.etag} />
           </Tabs.Panel>
           <Tabs.Panel value="tasks" pt="md">
-            <TasksTab projectCase={projectCase} etag={etag} />
+            <TasksTab profile={profile} projectCase={projectCase} etag={board.data!.etag} />
           </Tabs.Panel>
         </Tabs>
-      </Stack>
-    </Card>
-  );
-}
-
-export function ProjectBoardPage() {
-  const { name = '' } = useParams();
-  const board = useProjectBoard(name);
-  const [selectedId, setSelectedId] = useState('');
-
-  if (board.isPending) {
-    return (
-      <Center py="xl">
-        <Loader />
-      </Center>
-    );
-  }
-  if (board.isError || !board.data) {
-    return (
-      <Alert color="red" title="加载失败">
-        {board.error?.message ?? '无法加载项目看板。'}
-      </Alert>
-    );
-  }
-
-  const data = board.data.data;
-  const etag = board.data.etag;
-  const cases = data.cases ?? [];
-  const summary = data.summary;
-  const selected = cases.find((item) => item.id === selectedId) ?? null;
-
-  return (
-    <Stack gap="md">
-      <Title order={2}>{name} · 项目看板</Title>
-      <Text size="sm" c="dimmed">
-        内部项目案例:把目标、看板任务、证据与资料串成可执行的项目档案。
-      </Text>
-
-      {summary && (
-        <Group gap="xs" wrap="wrap" data-testid="board-summary">
-          {PROJECT_STATUSES.map((status) => (
-            <Badge key={status} color="brand" variant="light">
-              {PROJECT_STATUS_LABELS[status]} {summary.status_counts?.[status] ?? 0}
-            </Badge>
-          ))}
-          <Badge
-            color={summary.unassigned_tasks ? 'orange' : 'gray'}
-            variant="light"
-          >
-            未归属任务 {summary.unassigned_tasks ?? 0}
-          </Badge>
-          <Badge
-            color={summary.unassigned_evidence ? 'orange' : 'gray'}
-            variant="light"
-          >
-            未归属证据 {summary.unassigned_evidence ?? 0}
-          </Badge>
-          <Badge color="blue" variant="light">
-            当前目标项目 {summary.current_goal_projects ?? 0}
-          </Badge>
-        </Group>
+        </div>
       )}
-
-      <CreateCaseCard board={data} etag={etag} onCreated={setSelectedId} />
-
-      {cases.length === 0 ? (
-        <Alert color="blue" title="空看板">
-          还没有项目案例,先用上方表单创建一个。
-        </Alert>
-      ) : (
-        <Tabs defaultValue="active">
-          <Tabs.List>
-            {PROJECT_STATUSES.map((status) => (
-              <Tabs.Tab key={status} value={status}>
-                {PROJECT_STATUS_LABELS[status]}
-              </Tabs.Tab>
-            ))}
-          </Tabs.List>
-          {PROJECT_STATUSES.map((status) => (
-            <Tabs.Panel key={status} value={status} pt="md">
-              <Stack gap="sm">
-                {cases.filter((item) => item.status === status).length === 0 && (
-                  <Text c="dimmed" size="sm">
-                    该状态下暂无项目。
-                  </Text>
-                )}
-                {cases
-                  .filter((item) => item.status === status)
-                  .map((item) => (
-                    <Card
-                      key={item.id}
-                      withBorder
-                      radius="md"
-                      data-testid={`case-card-${item.id}`}
-                    >
-                      <Group justify="space-between" wrap="wrap">
-                        <Stack gap={2}>
-                          <Text fw={500}>{item.title || item.id}</Text>
-                          <Text size="xs" c="dimmed">
-                            {[
-                              item.id,
-                              KIND_LABELS[item.kind ?? ''] ?? item.kind,
-                              item.time_range || item.derived_time_range,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            目标 {item.goal_refs?.length ?? 0} · 任务{' '}
-                            {item.task_refs?.length ?? 0} · 证据{' '}
-                            {item.evidence_refs?.length ?? 0} · 里程碑{' '}
-                            {item.milestones?.length ?? 0}
-                          </Text>
-                        </Stack>
-                        <Button
-                          size="compact-sm"
-                          variant={selectedId === item.id ? 'filled' : 'default'}
-                          disabled={selectedId === item.id}
-                          onClick={() => setSelectedId(item.id)}
-                        >
-                          {selectedId === item.id ? '已选中' : '选择'}
-                        </Button>
-                      </Group>
-                    </Card>
-                  ))}
-              </Stack>
-            </Tabs.Panel>
-          ))}
-        </Tabs>
-      )}
-
-      {selected ? (
-        <CaseDetail
-          key={selected.id}
-          projectCase={selected}
-          board={data}
-          etag={etag}
-        />
-      ) : (
-        cases.length > 0 && (
-          <Text c="dimmed" size="sm">
-            选择一个项目查看与编辑详情。
-          </Text>
-        )
-      )}
-    </Stack>
+    </Drawer>
   );
 }

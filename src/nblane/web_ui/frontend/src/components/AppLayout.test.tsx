@@ -31,7 +31,10 @@ describe('AppLayout', () => {
       '/p/we ird/home',
     );
 
-    const link = await screen.findByRole('link', { name: '看板' });
-    expect(link).toHaveAttribute('href', '/p/we%20ird/kanban');
+    const link = await screen.findByRole('link', { name: '项目' });
+    expect(link).toHaveAttribute('href', '/p/we%20ird/projects');
+    // The old 看板/项目看板 entries are gone (merged into /projects).
+    expect(screen.queryByRole('link', { name: '看板' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '项目看板' })).not.toBeInTheDocument();
   });
 });

@@ -78,15 +78,15 @@ test.describe("SPA login journey (auth-enabled web_api on " + SPA_BASE_URL + ")"
     );
   });
 
-  test("a) unauthenticated /p/<profile>/kanban bounces to /login; API answers 401", async ({
+  test("a) unauthenticated /p/<profile>/projects bounces to /login; API answers 401", async ({
     page,
   }) => {
-    await page.goto(profileURL("kanban"));
+    await page.goto(profileURL("projects"));
     await page.waitForURL("**/login");
     await expect(page.getByRole("heading", { name: "nblane 登录" })).toBeVisible();
 
     const res = await page.request.get(
-      spaURL(`/api/v1/profiles/${encodeURIComponent(SPA_E2E_PROFILE)}/kanban`),
+      spaURL(`/api/v1/profiles/${encodeURIComponent(SPA_E2E_PROFILE)}/projects-board`),
     );
     expect(res.status()).toBe(401);
   });
@@ -122,11 +122,11 @@ test.describe("SPA login journey (auth-enabled web_api on " + SPA_BASE_URL + ")"
 
     test("c) valid login returns to the original target page (M-FE-3)", async ({ page }) => {
       test.setTimeout(60_000);
-      await page.goto(profileURL("kanban"));
+      await page.goto(profileURL("projects"));
       await page.waitForURL("**/login");
       await submitLoginForm(page, SPA_ADMIN_USER, SPA_ADMIN_PASSWORD);
-      await page.waitForURL(`**/p/${encodeURIComponent(SPA_E2E_PROFILE)}/kanban`);
-      await expect(page.getByRole("heading", { name: /看板/ })).toBeVisible();
+      await page.waitForURL(`**/p/${encodeURIComponent(SPA_E2E_PROFILE)}/projects`);
+      await expect(page.getByTestId("projects-toolbar")).toBeVisible();
     });
   });
 
@@ -139,7 +139,7 @@ test.describe("SPA login journey (auth-enabled web_api on " + SPA_BASE_URL + ")"
     await page.waitForURL("**/login");
     await expect(page.getByRole("heading", { name: "nblane 登录" })).toBeVisible();
 
-    await page.goto(profileURL("kanban"));
+    await page.goto(profileURL("projects"));
     await page.waitForURL("**/login");
   });
 

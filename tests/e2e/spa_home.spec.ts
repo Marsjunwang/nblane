@@ -1,20 +1,18 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Acceptance suite for the SPA Home redesign (2026-09-20 UX batch):
+ * Acceptance suite for the Phase 3 SPA Home: the growth starmap replaces the
+ * Phase-1 dashboard cards and the sidecar 3D iframe (the Streamlit home is
+ * retired with it — see docs/zh/dev/phase-plan.md).
  *
- * 1. iOS-style reduction — the old quick-entry button bar and the 8-card flat
- *    grid are gone; the page is 焦点卡 + 成长星系 hero + 今日待办聚合带.
- * 2. Sidecar URL regression — `GET /api/v1/profiles/<name>/home` used to
- *    answer the hardcoded default `http://127.0.0.1:8502` on the isolated
- *    stack (dev-web.sh never injected NBLANE_READER_API_BASE into the
- *    web-api tmux session), so the embedded dashboard iframe landed on a
- *    "refused to connect" page. The script now passes the resolved reader
- *    base through, so the sandbox home/research payloads point at 18502.
- * 3. Reachability gating — the SPA probes the sidecar before embedding:
- *    reachable → full-width galaxy iframe (asserted here as a real 200
- *    document response, i.e. NOT a browser error page); unreachable → a
- *    static metrics band instead of a refused-connection gray box.
+ * 1. Starmap rendering — the planisphere mounts with real profile data from
+ *    the dedicated aggregation (GET /api/v1/profiles/<name>/starmap: sectors
+ *    from skill categories incl. locked schema nodes, planets from projects,
+ *    guest stars from evidence), the cartouche + briefing + morph toggle
+ *    chrome, and hover/click → inscription detail card.
+ * 2. Sidecar URL regression (kept) — `GET /api/v1/profiles/<name>/home` and
+ *    `/research` used to answer the hardcoded default `http://127.0.0.1:8502`
+ *    on the isolated stack; the payloads must follow the stack's reader port.
  *
  * Self-contained like spa_smoke.spec.ts: targets the SPA backend
  * (web_api), default http://127.0.0.1:18504 (isolated sandbox, profile=dev).
@@ -35,65 +33,64 @@ function spa(path: string): string {
   return `${SPA_BASE_URL}/p/${encodeURIComponent(PROFILE)}/${path}`;
 }
 
-test.describe("SPA Home (UX redesign + sidecar cohesion)", () => {
-  test("focus card + today band render; quick-entry bar and flat grid are gone", async ({
+test.describe("SPA Home (growth starmap)", () => {
+  test("starmap mounts with real data: briefing counts match the API", async ({
     page,
     request,
   }) => {
-    const homeResponse = await request.get(
-      `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/home`,
+    const starmapRes = await request.get(
+      `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/starmap`,
     );
-    expect(homeResponse.status()).toBe(200);
-    const home = await homeResponse.json();
+    expect(starmapRes.status()).toBe(200);
+    const starmap = await starmapRes.json();
+    const activeProjects = starmap.counts.projects_active ?? 0;
+    const needsReview = starmap.counts.evidence_needs_review ?? 0;
 
     await page.goto(spa("home"));
+    const root = page.getByTestId("starmap-root");
+    await expect(root).toBeVisible({ timeout: 30_000 });
+    // WebGL canvas (or the explicit no-WebGL fallback, never a blank box).
+    const canvas = root.locator("canvas.starmap-canvas");
+    const fallback = page.getByTestId("starmap-fallback");
+    await expect(canvas.or(fallback)).toBeVisible({ timeout: 30_000 });
 
-    // Focus card: north star + primary goal (dev profile has both set).
-    const focus = page.getByTestId("home-focus-card");
-    await expect(focus).toBeVisible();
-    if (home.north_star?.is_set) {
-      await expect(
-        page.getByText(home.north_star.brief || home.north_star.full),
-      ).toBeVisible();
-    }
-    if (home.primary_goal) {
-      await expect(focus.getByText(home.primary_goal.title)).toBeVisible();
-      await expect(focus.getByRole("progressbar")).toBeVisible();
-    }
+    const briefing = page.getByTestId("starmap-briefing");
+    await expect(briefing).toBeVisible();
+    await expect(briefing).toContainText(`${needsReview} 条客星待评审`);
+    await expect(briefing).toContainText(`${activeProjects} 颗行星在轨`);
 
-    // Removed in the redesign: the 7 quick-entry buttons and the flat cards.
-    for (const label of ["看板", "技能树", "目标", "证据评审", "周回顾", "研究台", "输出工作室"]) {
-      await expect(page.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+    // Morph toggle flips the world state label.
+    const toggle = page.getByTestId("starmap-toggle");
+    if ((await canvas.count()) > 0) {
+      await expect(toggle).toContainText("境态");
+      await toggle.click();
+      await expect(toggle).toContainText("图态", { timeout: 10_000 });
+      await toggle.click();
+      await expect(toggle).toContainText("境态", { timeout: 10_000 });
     }
-    for (const testId of [
-      "home-skills-card",
-      "home-kanban-card",
-      "home-evidence-card",
-      "home-research-card",
-      "home-activity-card",
-      "home-projects-card",
-      "home-health-card",
-      "home-dashboard-card",
-    ]) {
-      await expect(page.getByTestId(testId)).toHaveCount(0);
-    }
+  });
 
-    // Today band aggregates approvals / reviews / doing and links out.
-    const band = page.getByTestId("home-today-band");
-    await expect(band).toBeVisible();
-    if ((home.agent_activity?.pending_total ?? 0) > 0) {
-      const approvals = band.getByTestId("home-todo-approvals");
-      await expect(approvals).toBeVisible();
-      await approvals.click();
-      await page.waitForURL(`**/p/${encodeURIComponent(PROFILE)}/activity`);
-      await page.goto(spa("home"));
-    }
-    if ((home.evidence?.needs_review_count ?? 0) > 0) {
-      await expect(band.getByTestId("home-todo-review")).toBeVisible();
-    }
-    if ((home.kanban?.doing ?? []).length > 0) {
-      await expect(band.getByTestId("home-todo-doing").first()).toBeVisible();
-    }
+  test("clicking the pole star opens the inscription detail card", async ({ page }) => {
+    await page.goto(spa("home"));
+    const heart = page.getByTestId("starmap-heart");
+    await expect(heart).toBeVisible({ timeout: 30_000 });
+    const canvas = page.locator("canvas.starmap-canvas");
+    test.skip((await canvas.count()) === 0, "no WebGL in this environment");
+
+    // The pole star sits at the chart center.
+    const box = (await heart.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const detail = page.getByTestId("starmap-detail");
+    await expect(detail).toHaveClass(/open/);
+    await expect(detail.locator("h3")).toHaveText("北极星");
+    await expect(detail.getByRole("link")).toHaveAttribute(
+      "href",
+      `/p/${encodeURIComponent(PROFILE)}/goals`,
+    );
+
+    // Escape dismisses.
+    await page.keyboard.press("Escape");
+    await expect(detail).not.toHaveClass(/open/);
   });
 
   test("sidecar coordinates point at this stack's reader port (18502 in the sandbox)", async ({
@@ -114,52 +111,5 @@ test.describe("SPA Home (UX redesign + sidecar cohesion)", () => {
       expect(sidecar.configured).toBe(true);
       expect(sidecar.dashboard_url).toContain(`${EXPECTED_SIDECAR_BASE}/dashboard`);
     }
-  });
-
-  test("reachable sidecar embeds the galaxy iframe and it really loads (no refused page)", async ({
-    page,
-    request,
-  }) => {
-    const homeResponse = await request.get(
-      `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/home`,
-    );
-    const sidecar = (await homeResponse.json()).sidecar;
-
-    // The probe must hit the sidecar origin, and the dashboard document must
-    // answer 200 — a refused connection would produce no response at all.
-    const probeSeen = page.waitForRequest(`${sidecar.base}/auth/session-ok`);
-    const dashboardLoaded = page.waitForResponse(
-      (res) => res.url().startsWith(`${sidecar.base}/dashboard`),
-      { timeout: 20_000 },
-    );
-    await page.goto(spa("home"));
-    await probeSeen;
-
-    const frame = page.locator('iframe[data-testid="sidecar-frame"]');
-    await expect(frame).toBeVisible();
-    await expect(frame).toHaveAttribute("src", sidecar.dashboard_url);
-    const response = await dashboardLoaded;
-    expect(response.status(), "dashboard document should load, not refuse").toBe(200);
-
-    // Metric chips overlay the galaxy and dive into their pages.
-    const chips = page.getByTestId("home-galaxy-metrics");
-    await expect(chips).toBeVisible();
-    await expect(page.getByTestId("home-galaxy-fallback")).toHaveCount(0);
-  });
-
-  test("unreachable sidecar degrades to a static metrics band instead of an error frame", async ({
-    page,
-  }) => {
-    // Simulate the refused connection by aborting the reachability probe.
-    await page.route("**/auth/session-ok", (route) => route.abort());
-    await page.goto(spa("home"));
-
-    const fallback = page.getByTestId("home-galaxy-fallback");
-    await expect(fallback).toBeVisible({ timeout: 15_000 });
-    // No iframe is mounted at all — the browser can never render its
-    // "refused to connect" error page inside the page.
-    await expect(page.locator('iframe[data-testid="sidecar-frame"]')).toHaveCount(0);
-    await expect(fallback.getByText(/3D 仪表盘服务暂时不可达/)).toBeVisible();
-    await expect(fallback.getByRole("button", { name: "重试" })).toBeVisible();
   });
 });

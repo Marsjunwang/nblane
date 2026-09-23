@@ -133,3 +133,24 @@ export function apiPostWithHeaders<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+export function apiPatch<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  return request<T>(path, {
+    ...init,
+    method: 'PATCH',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/** PATCH that also exposes response headers (fresh ETag after a mutation). */
+export function apiPatchWithHeaders<T>(
+  path: string,
+  body?: unknown,
+  init?: RequestInit,
+): Promise<{ data: T; headers: Headers }> {
+  return requestWithHeaders<T>(path, {
+    ...init,
+    method: 'PATCH',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}

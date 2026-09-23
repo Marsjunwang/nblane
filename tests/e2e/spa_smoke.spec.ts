@@ -57,10 +57,10 @@ test.describe("SPA smoke (web_api on " + SPA_BASE_URL + ")", () => {
     }
   });
 
-  test("client-route fallback: /p/anything/kanban serves the SPA html, not 404", async ({
+  test("client-route fallback: /p/anything/projects serves the SPA html, not 404", async ({
     request,
   }) => {
-    const response = await request.get(spaURL("/p/anything/kanban"));
+    const response = await request.get(spaURL("/p/anything/projects"));
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("text/html");
     const html = await response.text();
@@ -74,7 +74,7 @@ test.describe("SPA smoke (web_api on " + SPA_BASE_URL + ")", () => {
     expect(body.ok).toBe(true);
   });
 
-  test("UI smoke: profiles view, first profile kanban, assistant page", async ({
+  test("UI smoke: profiles view, first profile projects, assistant page", async ({
     page,
     request,
   }) => {
@@ -104,25 +104,23 @@ test.describe("SPA smoke (web_api on " + SPA_BASE_URL + ")", () => {
       await page.waitForURL(`**/p/${encodeURIComponent(first.name)}/health`);
       expect(page.url()).not.toContain("/login");
 
-      // Kanban page: heading always renders; sections render column headers,
-      // an empty board renders its empty state instead.
+      // Projects page (/kanban redirects here): the toolbar always renders;
+      // lanes render when the board has projects/tasks, otherwise the page
+      // still shows the header and stats row.
       await page.goto(spaURL(`/p/${encodeURIComponent(first.name)}/kanban`));
-      await expect(page.getByRole("heading", { name: /看板/ })).toBeVisible();
-      const kanbanResponse = await request.get(
-        spaURL(`/api/v1/profiles/${encodeURIComponent(first.name)}/kanban`),
+      await page.waitForURL(`**/p/${encodeURIComponent(first.name)}/projects**`);
+      await expect(page.getByTestId("projects-toolbar")).toBeVisible();
+      const boardResponse = await request.get(
+        spaURL(`/api/v1/profiles/${encodeURIComponent(first.name)}/projects-board`),
       );
-      expect(kanbanResponse.status()).toBe(200);
-      const kanbanBody = await kanbanResponse.json();
-      // Flat shape: {profile, sections: [{name, tasks}], total} (the frontend
-      // wraps it as {board, etag} itself).
-      const sections: Array<{ name: string }> = kanbanBody.sections ?? [];
-      const total: number = kanbanBody.total ?? 0;
-      if (sections.length === 0 || total === 0) {
-        await expect(page.getByText(/看板为空/)).toBeVisible();
-      } else {
-        for (const section of sections) {
-          await expect(page.getByText(section.name, { exact: true }).first()).toBeVisible();
-        }
+      expect(boardResponse.status()).toBe(200);
+      const boardBody = await boardResponse.json();
+      // Aggregated shape: {profile, today, goals, ungrouped_projects,
+      // unassigned_tasks, habits, stats}.
+      const goals: Array<{ id: string }> = boardBody.goals ?? [];
+      const ungrouped: Array<{ id: string }> = boardBody.ungrouped_projects ?? [];
+      if (goals.length > 0 || ungrouped.length > 0) {
+        await expect(page.getByTestId("board-view")).toBeVisible();
       }
     }
 
