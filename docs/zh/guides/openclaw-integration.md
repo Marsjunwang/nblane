@@ -150,6 +150,19 @@ Claude Pro/Max 订阅 OAuth 接第三方工具违反 Anthropic 条款,不要用�
 - Owner 已在 `commands.ownerAllowFrom` 中;命令只作用于当前微信会话可见任务。
 - `tools.message.crossContext` 允许跨渠道标记(本机前缀 `[后台任务]`)。
 
+### F. nblane HTTP API 客户端(`nblane_api`,服务账号 openclaw)
+
+自动化直接调 8504 的 `/api/v1`(完整写面;MCP 写面刻意更窄)时使用
+`scripts/openclaw/skills/bin/nblane_api.py`(仅依赖 httpx,随 `skills/bin/`
+同步到 workspace;httpx 只在仓库 `.venv` 里,prompt/自动化须以仓库
+`.venv/bin/python` 调用,或把该 venv 的 python 放进 Gateway PATH)。子命令:`login`、`get`/`post`(通用逃生舱)、`checkin`、
+`starmap`、`board`、`chronicle`、`divine`、`health`、`activity`;会话 cookie
+缓存在 `~/.cache/nblane/api-cookies.json`,401 自动重登一次,mutation 复刻
+SPA 的 ETag 纪律(首发不带 If-Match,412 取新 ETag 重试一次)。**删除类
+(页面确认级)被客户端硬拒**,无 delete 子命令。密码只从环境变量
+`NBLANE_OPENCLAW_API_PASSWORD` 读;base URL 用 `NBLANE_API_BASE` 覆盖。
+账号设计与分级授权见 `docs/zh/dev/production-launch-plan.md` §3.1/§3.3。
+
 ### 账号与密钥清单(全部私有,不入库)
 
 | 项 | 占位写法 | 用途 |

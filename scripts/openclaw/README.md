@@ -12,6 +12,8 @@ scripts/openclaw/
 │   ├── kimi-dev/SKILL.md      # Kimi 委派 Skill
 │   └── bin/                   # 两个 Skill 共用的 wrapper（dev-delegate.sh、
 │                              #   dev_delegate.py、delegation.md、tests/）
+│                              #   + nblane_api.py(8504 HTTP API 客户端,
+│                              #   见 docs/zh/dev/production-launch-plan.md §3.1)
 ├── plugins/
 │   └── weixin-task-bridge/    # 微信任务桥插件源码（package.json、
 │                              #   openclaw.plugin.json、dist/index.js），
