@@ -88,6 +88,7 @@ from nblane.core.models import (
     EVIDENCE_TYPES,
     EvidenceRecord,
     KanbanTask,
+    KanbanTodo,
 )
 from nblane.core.growth_review import build_weekly_review
 from nblane.core.public_curation import evidence_contexts
@@ -260,6 +261,7 @@ from nblane.web_api.schemas import (
     KanbanMutationResponse,
     KanbanSectionModel,
     KanbanSubtaskModel,
+    KanbanTodoModel,
     KanbanSummary,
     KanbanTaskModel,
     NorthStarModel,
@@ -321,6 +323,9 @@ from nblane.web_api.schemas import (
     ReviewSaveResponse,
     ReviewSummaryModel,
     SidecarInfoModel,
+    SkillNodePatchRequest,
+    SkillNodePatchResponse,
+    SkillTreeCategoryModel,
     SkillTreeNodeModel,
     SkillTreeResponse,
     SkillTreeSummary,
@@ -607,6 +612,33 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
         if nid not in placed:
             nodes.append(build(nid, frozenset({nid})))
 
+    # Per-category rollup for the banner headers: zh display name from the
+    # same CATEGORY_ZH table the starmap sector band uses (so the SPA's
+    # 官名 lookup keys match), 点亮 = solid+expert (LIT_STATUSES), locked is
+    # derived client-side as count − lit − learning.
+    category_of: dict[str, str] = {
+        nid: str(schema_index[nid].category or "") if nid in schema_index else ""
+        for nid in overlay
+    }
+    cat_order: list[str] = []
+    for nid in sorted(overlay, key=lambda x: order.get(x, 0)):
+        cat = category_of[nid]
+        if cat not in cat_order:
+            cat_order.append(cat)
+    categories: list[SkillTreeCategoryModel] = []
+    for cat in cat_order:
+        members = [nid for nid in overlay if category_of[nid] == cat]
+        statuses = [str(overlay[nid].get("status") or "locked") for nid in members]
+        categories.append(
+            SkillTreeCategoryModel(
+                id=cat,
+                name=starmap_snapshot_core.CATEGORY_ZH.get(cat, cat),
+                count=len(members),
+                lit_count=sum(1 for s in statuses if s in starmap_snapshot_core.LIT_STATUSES),
+                learning_count=sum(1 for s in statuses if s == "learning"),
+            )
+        )
+
     response.headers["ETag"] = _skill_tree_etag(pdir)
     return SkillTreeResponse(
         profile=pdir.name,
@@ -614,6 +646,126 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
         updated=str(raw.get("updated") or ""),
         status_counts=count_nodes(raw),
         nodes=nodes,
+        categories=categories,
+    )
+
+
+# 三态 (UI/starmap) → skill-tree.yaml status mapping. locked=空圈 → locked,
+# learning=实点 → learning, lit=点套圈 → solid. The YAML also knows `expert`
+# (精通) — a review-earned rung above 点亮 that this endpoint never writes;
+# patching an expert node to "lit" steps it down to solid.
+SKILL_NODE_EDIT_STATUSES = ("locked", "learning", "lit")
+_SKILL_NODE_STATUS_TO_YAML = {"locked": "locked", "learning": "learning", "lit": "solid"}
+
+SKILL_NODE_MUTATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    404: {
+        "model": ErrorResponse,
+        "description": "Profile or skill node not found.",
+    },
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match skill-tree.yaml.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": "Status outside the 三态 vocabulary (locked/learning/lit).",
+    },
+}
+
+
+@router.patch(
+    "/profiles/{name}/skill-tree/nodes/{node_id}",
+    response_model=SkillNodePatchResponse,
+    responses=SKILL_NODE_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_skill_node(
+    name: str,
+    node_id: str,
+    body: SkillNodePatchRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> SkillNodePatchResponse | JSONResponse:
+    """Set one skill node's 三态 status in skill-tree.yaml (G3 write).
+
+    Body vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``);
+    ``lit`` lands as the YAML status ``solid`` (see
+    ``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml
+    ETag from the tree read (412 on mismatch); the write goes through
+    ``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and
+    the SKILL.md generated block is re-synced after a real change. A no-op
+    patch writes nothing (``changed=false``).
+    """
+    pdir = _resolve_profile(name)
+    etag = _skill_tree_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _evidence_review_error(
+            412,
+            "etag_mismatch",
+            "技能树已被其他改动更新,正在为你刷新;请重试。",
+            etag,
+        )
+    clean = body.status.strip().lower()
+    if clean not in _SKILL_NODE_STATUS_TO_YAML:
+        raise ApiError(
+            422,
+            "invalid_skill_status",
+            f"status must be one of {', '.join(SKILL_NODE_EDIT_STATUSES)}, "
+            f"got {body.status!r}.",
+        )
+    yaml_status = _SKILL_NODE_STATUS_TO_YAML[clean]
+    nid = node_id.strip()
+    raw = profile_io.load_skill_tree_raw(pdir) or {}
+    node = next(
+        (
+            item
+            for item in (raw.get("nodes") or [])
+            if isinstance(item, dict) and str(item.get("id", "") or "").strip() == nid
+        ),
+        None,
+    )
+    if node is None:
+        raise ApiError(
+            404, "skill_node_not_found", f"Unknown skill node: {nid}"
+        )
+    previous = str(node.get("status") or "locked")
+    changed = previous != yaml_status
+    if changed:
+
+        def _apply(doc: dict[str, Any]) -> None:
+            for item in doc.get("nodes") or []:
+                if (
+                    isinstance(item, dict)
+                    and str(item.get("id", "") or "").strip() == nid
+                ):
+                    item["status"] = yaml_status
+            doc["profile"] = pdir.name
+
+        try:
+            profile_io.update_skill_tree(
+                pdir.name,
+                _apply,
+                expected_snapshot=file_state.snapshot_file(
+                    pdir / profile_io.SKILL_TREE_FILENAME
+                ),
+            )
+        except file_state.FileConflictError:
+            return _evidence_review_error(
+                412,
+                "etag_mismatch",
+                "技能树在写入期间被其他改动更新,请重试。",
+                _skill_tree_etag(pdir),
+            )
+        if (pdir / "SKILL.md").exists():
+            write_generated_blocks(pdir)
+    response.headers["ETag"] = _skill_tree_etag(pdir)
+    return SkillNodePatchResponse(
+        ok=True,
+        node_id=nid,
+        status=yaml_status,
+        previous_status=previous,
+        changed=changed,
     )
 
 
@@ -968,6 +1120,10 @@ def _kanban_task_model(task: KanbanTask) -> KanbanTaskModel:
         subtasks=[
             KanbanSubtaskModel(title=st.title, done=st.done)
             for st in task.subtasks
+        ],
+        todos=[
+            KanbanTodoModel(text=todo.text, done=todo.done)
+            for todo in task.todos
         ],
         details=list(task.details),
     )
@@ -1397,12 +1553,13 @@ def patch_profile_kanban_card(
     response: Response,
     if_match: str | None = Header(default=None),
 ) -> KanbanMutationResponse | JSONResponse:
-    """Edit one card's fields (lane assignment, title, context, why, tags).
+    """Edit one card's fields (lane assignment, title, context, why, tags, todos).
 
     ``None`` fields keep the current value; ``""`` clears
     ``context``/``why``/``project_id``/``milestone_id`` (``project_id``
     clearing unassigns the card from its lane); ``tags`` replaces the
-    whole tag list when given. ``title`` must not be blank when given.
+    whole tag list when given; ``todos`` fully replaces the checklist
+    when given (``[]`` clears it). ``title`` must not be blank when given.
     Section moves stay on the move endpoint — Someday is a section, not a
     flag. When ``project_id`` changed, project-board.yaml task refs are
     re-synced from kanban metadata (task side is authoritative), same as
@@ -1435,6 +1592,13 @@ def patch_profile_kanban_card(
         updates["tags"] = ", ".join(
             tag.strip() for tag in body.tags if tag.strip()
         )
+    if body.todos is not None:
+        # Full-replace semantics: [] clears the checklist.
+        updates["todos"] = [
+            KanbanTodo(text=todo.text.strip(), done=todo.done)
+            for todo in body.todos
+            if todo.text.strip()
+        ]
     if not updates:
         raise ApiError(
             422,
@@ -2476,6 +2640,14 @@ def list_profile_evidence(
         ),
     ),
     q: str = Query("", description="Case-insensitive title substring filter."),
+    skill_id: str = Query(
+        "",
+        description=(
+            "Skill-node filter: only entries cited by this node's "
+            "evidence_refs in skill-tree.yaml (the reverse of "
+            "evidence_usage_index). Combines with status/q (AND)."
+        ),
+    ),
     limit: int = Query(100, ge=1, le=500),
 ) -> EvidenceListResponse:
     """Filtered evidence-pool entries (read-only list for the SPA)."""
@@ -2502,10 +2674,21 @@ def list_profile_evidence(
     if query:
         entries = [record for record in entries if query in record.title.lower()]
 
+    clean_skill = skill_id.strip()
+    if clean_skill:
+        usage = evidence_review_core.evidence_usage_index(pdir)
+        linked = {
+            eid
+            for eid, refs in usage.items()
+            if any(ref.get("id") == clean_skill for ref in refs)
+        }
+        entries = [record for record in entries if record.id in linked]
+
     return EvidenceListResponse(
         profile=pdir.name,
         status=clean_status,
         q=q.strip(),
+        skill_id=clean_skill,
         limit=limit,
         total=len(entries),
         items=[_evidence_item(record) for record in entries[:limit]],

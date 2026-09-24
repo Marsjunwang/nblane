@@ -131,3 +131,27 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
 - 真人 QA(vite dev 15173 → 隔离栈 18504,王军数据,Playwright 6 旅程全绿):
   任务 create→edit→schedule→move→done 闭环、热力图补卡→销印往返、
   空项目 归档→恢复→删除、时间轴交互;截图 /tmp/qa-shots/。
+
+## 实施状态(2026-09-24 收尾片:日课项目可删除 + 快添即入详情 + 任务 TODO 清单)
+
+- **日课项目可删除**:habit-plan 行(日课栏)新增悬停浮现的 设置 钮
+  (`habit-plan-settings-<caseId>`,键盘 focus 同样浮现)→ 打开该 case 的
+  ProjectEditDrawer(基本信息/里程碑/任务 + 危险区删除,复用裁决3 全套确认)。
+  **纯习惯行不给入口**:habit 不是 project case,项目侧无可删对象
+  (习惯生命周期归 activity-log/设置页),不做 archive-only 半吊子入口。
+- **快添即入详情**:≤1-click 规则不变(快添仍只产标题卡),但项目泳道
+  (`POST /cases/{id}/tasks`)与未归属泳道(`POST /kanban/cards`)快添成功后
+  立即 `?task=<newId>` 打开铭文详情卡——要补上下文的直接落在编辑语境,
+  只要标题的 Esc/点即走,零成本。
+- **任务 TODO 清单(常用功能)**:kanban 任务新增可选 `todos: [{text, done}]`,
+  存为 `- todo: [x]/[ ] text` meta 子弹(契约见
+  docs/zh/architecture/data-contracts.md「Kanban 任务元数据字段」;
+  旧式 `- todo: 自由文本` 按 detail 兼容,3-way merge 按 list 字段整体 carry)。
+  `PATCH /kanban/cards/{ref}` 新增 `todos` 全量替换(`[]` 清空)。
+  详情卡新增 TODO 区:勾选/回车加项/删除,本地乐观更新 + 400ms 防抖批量 PATCH;
+  看板卡显示 清单 d/t 进度(projects-board 聚合携带 todos)。
+- 测试:pytest 新增 4(test_kanban_io todos round-trip + legacy detail 兼容、
+  test_kanban_merge todos carry、test_web_api_projects_board PATCH 全量替换/
+  清空/聚合携带)全量 1728;vitest 新增 7(TaskDetailCard 清单 4、
+  ProjectsPage 快添自动打开 2 + 日课设置钮 1 + 卡片进度 1)全量 246;tsc 绿;
+  openapi.json + schema.d.ts 已重生成。无新增依赖(packaging-manifest 已登记)。

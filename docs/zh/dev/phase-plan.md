@@ -296,6 +296,39 @@ Phase 1 建成通用件:mutation API 样板、embedding 建议能力(core/ai/)�
   Playwright r5-* 全仪式帧 + 双模式 + Esc + 移动;规则兜底实证
   (NBLANE_DEV_ENV_FILE 死 LLM → source=rule 离线卦)。
 
+### 星图六轮:境态残差漂移修复 + 图态归环(2026-09-24)
+
+- **根因**:两处未按 ch3 门控的残差——goalNow 轨道旋转残差(相位出境态即
+  冻结,展开车道把残差从不可见放大到数单位/轮)、planetNow 跟随项错用目标
+  星 deep 基址(编组行星首载即位移,实测 t0 径向 16–78)。修复:轨道数学抽
+  纯函数 `orbitPos`/`orbitPosAnchored`(残差 ×ch3,跟随项对照 morph 基址)。
+- **图态归环**:行星 plan 全部正落 R_GOAL(角向偏移保留,径向 ±10 与游离
+  +24 归零);deep 车道不变。
+- 验证:探针实测修复前 玉衡 54→59.68/5 轮 → 修复后每轮恒 54;cycle 4 帧
+  落境态读数恰为车道值(58…162/206)反证车道数学。vitest 246 绿(+6);
+  tsc+build 绿;pytest 1728 绿;截图 r6-before/after-*。
+
+### 技能树页三项升级:类目星官化 + 节点铭文卡 + 状态写端点(2026-09-24)
+
+- **类目头星官化**:`GET /skill-tree` 新增 `categories` 卷积(zh 名取自
+  `core.starmap_snapshot.CATEGORY_ZH`,lit=solid+expert);页面按类目分组,
+  横幅刻星官小像(asterisms.json 真形,泥金 SVG,复用 starmap/layout.ts
+  `SECTOR_ASTERISM_TABLE` + `asterismById`)+ 官名 + 三态统计 + 小传(lore
+  单行);翼/房/箕/轸/轩辕/虚六个无真形域挂「拟形·模板」标记。
+- **节点铭文卡 + 关联证据(G6)**:点击节点开右侧铭文卡(只读复用
+  starmap `InscriptionCard` + starmap.css 铬件);`GET /evidence` 新增
+  `skill_id` 过滤(evidence_usage_index 反查,与 status/q 正交),证据行
+  深链 `/evidence?stage=<seated|review>&focus=<id>`(证据页新增 focus
+  预选支持)。
+- **技能状态写端点(G3)**:`PATCH /skill-tree/nodes/{node_id}`,三态词汇
+  locked/learning/lit(lit 落 YAML `solid`;expert 评审授予不可写),
+  ETag/If-Match + `update_skill_tree` 锁内快照,写后重写 SKILL.md 生成块;
+  铭文卡三态步进器乐观更新 + skill-tree/projects-board/starmap 失效。
+- 验证:vitest 251 绿(技能树页 9 例:横幅 2、铭文卡深链 1、步进器
+  PATCH/If-Match/乐观更新 1,证据页 focus 深链 1);tsc 绿;pytest 新增
+  PATCH 200/404/422/412/401 + skill_id 过滤用例;openapi.json +
+  schema.d.ts 已重生成。
+
 
 
 ### 工具页风格对齐 + 日课印销印接线(2026-09-24 落地)

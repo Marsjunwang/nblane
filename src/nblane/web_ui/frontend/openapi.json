@@ -1510,6 +1510,11 @@
       "title": "Q",
       "type": "string"
      },
+     "skill_id": {
+      "default": "",
+      "title": "Skill Id",
+      "type": "string"
+     },
      "status": {
       "default": "",
       "title": "Status",
@@ -3529,7 +3534,7 @@
     "type": "object"
    },
    "KanbanCardPatchRequest": {
-    "description": "Edit body for PATCH .../kanban/cards/{card_ref}.\n\n``None`` keeps the current value; ``\"\"`` clears text fields\n(``context``/``why``/``project_id``/``milestone_id``); ``tags``\nreplaces the whole tag list when given. ``title`` must not be blank\nwhen given. Section moves (incl. Someday, which is a section, not a\nflag) stay on the move endpoint.",
+    "description": "Edit body for PATCH .../kanban/cards/{card_ref}.\n\n``None`` keeps the current value; ``\"\"`` clears text fields\n(``context``/``why``/``project_id``/``milestone_id``); ``tags``\nreplaces the whole tag list when given. ``title`` must not be blank\nwhen given. ``todos`` fully replaces the checklist when given\n(``[]`` clears it). Section moves (incl. Someday, which is a section,\nnot a flag) stay on the move endpoint.",
     "properties": {
      "context": {
       "anyOf": [
@@ -3592,6 +3597,20 @@
        }
       ],
       "title": "Title"
+     },
+     "todos": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/KanbanTodoModel"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Todos"
      },
      "why": {
       "anyOf": [
@@ -3854,6 +3873,13 @@
       "title": "Title",
       "type": "string"
      },
+     "todos": {
+      "items": {
+       "$ref": "#/components/schemas/KanbanTodoModel"
+      },
+      "title": "Todos",
+      "type": "array"
+     },
      "why": {
       "default": "",
       "title": "Why",
@@ -3864,6 +3890,27 @@
      "title"
     ],
     "title": "KanbanTaskModel",
+    "type": "object"
+   },
+   "KanbanTodoModel": {
+    "description": "One lightweight checklist item (``todo:`` meta bullet) on a card.\n\nDistinct from ``KanbanSubtaskModel`` (the AI-drafted milestone\nbreakdown stored as nested checkboxes): todos are the user's own\nchecklist, managed via ``PATCH .../kanban/cards/{ref}``.",
+    "properties": {
+     "done": {
+      "default": false,
+      "title": "Done",
+      "type": "boolean"
+     },
+     "text": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "KanbanTodoModel",
     "type": "object"
    },
    "LoginRequest": {
@@ -5721,6 +5768,13 @@
       "title": "Title",
       "type": "string"
      },
+     "todos": {
+      "items": {
+       "$ref": "#/components/schemas/KanbanTodoModel"
+      },
+      "title": "Todos",
+      "type": "array"
+     },
      "why": {
       "default": "",
       "title": "Why",
@@ -6533,6 +6587,88 @@
     "title": "SidecarInfoModel",
     "type": "object"
    },
+   "SkillNodePatchRequest": {
+    "description": "Body for the skill-node status mutation (G3, 三态 write).\n\nThe UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /\n``lit``; the endpoint maps ``lit`` onto the YAML status ``solid`` (the\n精通 rung ``expert`` is review-earned and not settable here).",
+    "properties": {
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "status"
+    ],
+    "title": "SkillNodePatchRequest",
+    "type": "object"
+   },
+   "SkillNodePatchResponse": {
+    "description": "Result of the skill-node status mutation (``status`` is post-map YAML).",
+    "properties": {
+     "changed": {
+      "default": false,
+      "title": "Changed",
+      "type": "boolean"
+     },
+     "node_id": {
+      "title": "Node Id",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "previous_status": {
+      "default": "",
+      "title": "Previous Status",
+      "type": "string"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "node_id"
+    ],
+    "title": "SkillNodePatchResponse",
+    "type": "object"
+   },
+   "SkillTreeCategoryModel": {
+    "description": "Per-category rollup for the category banner headers.\n\n``name`` is the zh display name (``core.starmap_snapshot.CATEGORY_ZH``,\nid as fallback) — the same source the home starmap sector band uses, so\nthe skill-tree banners and the starmap agree on 官名 lookup keys.\n``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −\nlearning.",
+    "properties": {
+     "count": {
+      "default": 0,
+      "title": "Count",
+      "type": "integer"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "learning_count": {
+      "default": 0,
+      "title": "Learning Count",
+      "type": "integer"
+     },
+     "lit_count": {
+      "default": 0,
+      "title": "Lit Count",
+      "type": "integer"
+     },
+     "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "SkillTreeCategoryModel",
+    "type": "object"
+   },
    "SkillTreeNodeModel": {
     "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded). ``category``\nis the schema grouping (empty for nodes unknown to the schema) — the\nhome starmap uses it to size its sector band.",
     "properties": {
@@ -6577,6 +6713,13 @@
    "SkillTreeResponse": {
     "description": "Full skill tree: queue-wide status counters plus the nested nodes.",
     "properties": {
+     "categories": {
+      "items": {
+       "$ref": "#/components/schemas/SkillTreeCategoryModel"
+      },
+      "title": "Categories",
+      "type": "array"
+     },
      "nodes": {
       "items": {
        "$ref": "#/components/schemas/SkillTreeNodeModel"
@@ -9004,6 +9147,18 @@
        "default": "",
        "description": "Case-insensitive title substring filter.",
        "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Skill-node filter: only entries cited by this node's evidence_refs in skill-tree.yaml (the reverse of evidence_usage_index). Combines with status/q (AND).",
+      "in": "query",
+      "name": "skill_id",
+      "required": false,
+      "schema": {
+       "default": "",
+       "description": "Skill-node filter: only entries cited by this node's evidence_refs in skill-tree.yaml (the reverse of evidence_usage_index). Combines with status/q (AND).",
+       "title": "Skill Id",
        "type": "string"
       }
      },
@@ -11544,7 +11699,7 @@
   },
   "/api/v1/profiles/{name}/kanban/cards/{card_ref}": {
    "patch": {
-    "description": "Edit one card's fields (lane assignment, title, context, why, tags).\n\n``None`` fields keep the current value; ``\"\"`` clears\n``context``/``why``/``project_id``/``milestone_id`` (``project_id``\nclearing unassigns the card from its lane); ``tags`` replaces the\nwhole tag list when given. ``title`` must not be blank when given.\nSection moves stay on the move endpoint — Someday is a section, not a\nflag. When ``project_id`` changed, project-board.yaml task refs are\nre-synced from kanban metadata (task side is authoritative), same as\nthe project-task move endpoint. ``card_ref`` follows the move/done\nsemantics (exact title or unique substring). Honors ``If-Match``\n(412 on mismatch); a concurrent kanban write is 3-way merged.",
+    "description": "Edit one card's fields (lane assignment, title, context, why, tags, todos).\n\n``None`` fields keep the current value; ``\"\"`` clears\n``context``/``why``/``project_id``/``milestone_id`` (``project_id``\nclearing unassigns the card from its lane); ``tags`` replaces the\nwhole tag list when given; ``todos`` fully replaces the checklist\nwhen given (``[]`` clears it). ``title`` must not be blank when given.\nSection moves stay on the move endpoint — Someday is a section, not a\nflag. When ``project_id`` changed, project-board.yaml task refs are\nre-synced from kanban metadata (task side is authoritative), same as\nthe project-task move endpoint. ``card_ref`` follows the move/done\nsemantics (exact title or unique substring). Honors ``If-Match``\n(412 on mismatch); a concurrent kanban write is 3-way merged.",
     "operationId": "patch_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__patch",
     "parameters": [
      {
@@ -14500,6 +14655,121 @@
      }
     },
     "summary": "Get Profile Skill Tree"
+   }
+  },
+  "/api/v1/profiles/{name}/skill-tree/nodes/{node_id}": {
+   "patch": {
+    "description": "Set one skill node's 三态 status in skill-tree.yaml (G3 write).\n\nBody vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``);\n``lit`` lands as the YAML status ``solid`` (see\n``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml\nETag from the tree read (412 on mismatch); the write goes through\n``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and\nthe SKILL.md generated block is re-synced after a real change. A no-op\npatch writes nothing (``changed=false``).",
+    "operationId": "patch_profile_skill_node_api_v1_profiles__name__skill_tree_nodes__node_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "node_id",
+      "required": true,
+      "schema": {
+       "title": "Node Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SkillNodePatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SkillNodePatchResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or skill node not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match skill-tree.yaml."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Status outside the 三态 vocabulary (locked/learning/lit)."
+     }
+    },
+    "summary": "Patch Profile Skill Node"
    }
   },
   "/api/v1/profiles/{name}/starmap": {

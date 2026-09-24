@@ -971,6 +971,59 @@ class TestKanbanCardPatch(ProjectsBoardTestBase):
             board = load_project_board(profile).by_id()["project:robot-arm"]
             self.assertNotIn("kb_someday_free", board.task_refs)
 
+    def test_todos_full_replace_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            url = "/api/v1/profiles/alice/kanban/cards/Queued arm work"
+            response = client.patch(
+                url,
+                json={
+                    "todos": [
+                        {"text": "draft outline", "done": True},
+                        {"text": "collect refs"},
+                        {"text": "   "},
+                    ]
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            card = response.json()["card"]
+            # Blank items are dropped; omitted done defaults to False.
+            self.assertEqual(
+                card["todos"],
+                [
+                    {"text": "draft outline", "done": True},
+                    {"text": "collect refs", "done": False},
+                ],
+            )
+            # Persisted as todo: meta bullets in kanban.md.
+            stored = parse_kanban(profile)["Queue"][0]
+            self.assertEqual(
+                [(todo.text, todo.done) for todo in stored.todos],
+                [("draft outline", True), ("collect refs", False)],
+            )
+            raw = (profile / "kanban.md").read_text(encoding="utf-8")
+            self.assertIn("  - todo: [x] draft outline", raw)
+            self.assertIn("  - todo: [ ] collect refs", raw)
+            # The projects-board aggregation carries the checklist too.
+            board = client.get("/api/v1/profiles/alice/projects-board").json()
+            lane = board["goals"][0]["projects"][0]
+            queued = {task["id"]: task for task in lane["queue"]}
+            self.assertEqual(
+                queued["kb_queue_p1"]["todos"],
+                card["todos"],
+            )
+            # A patch without todos keeps the checklist; [] clears it.
+            keep = client.patch(url, json={"context": "touched"})
+            self.assertEqual(keep.status_code, 200)
+            self.assertEqual(len(keep.json()["card"]["todos"]), 2)
+            cleared = client.patch(url, json={"todos": []})
+            self.assertEqual(cleared.status_code, 200)
+            self.assertEqual(cleared.json()["card"]["todos"], [])
+            stored = parse_kanban(profile)["Queue"][0]
+            self.assertEqual(stored.todos, [])
+
     def test_text_fields_and_tags_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

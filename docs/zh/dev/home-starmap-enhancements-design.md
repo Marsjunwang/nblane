@@ -308,6 +308,32 @@ source_of_truth: 首页星图增强设计(古星名映射/日课钤印/占卜/�
   (NBLANE_DEV_ENV_FILE 指死 LLM → source=rule + 离线卦签,同一卦确定性
   复现);事后恢复正常栈。
 
+### 六轮:境态残差漂移修复 + 图态归环(2026-09-24)
+
+**Bug**:多次切换图态⇄境态后,目标星与行星在图态逐轮外漂(用户截图:斗星名
+与行星点漂出石环)。**根因**(两处同族残差,round-4 展开后被放大暴露):
+1. `goalNow` 的轨道旋转残差 `(rotZ(deep,φ) − deep)` 未按 ch3 门控——φ 只在
+   境态累积,回图态时冻结在上次值;展开前 |deep|≈|plan|(±5 抖动,残差不可
+   见),展开后 |deep|=58…162,冻结残差把星抛离 R_GOAL,且逐轮变大(外车道
+   漂得最快,实测 玉衡 54→59.68/5 轮)。
+2. `planetNow` 的跟随项 `(anchorNow − anchorDeep)` 拿目标星的 deep 基址比较,
+   而非其 ch2-morph 位置——编组行星连首载就带 `plan_g − deep_g` 位移(实测
+   t0 行星径向 16–78 乱布;用户"首载正常"只适用于目标星)。
+修复:轨道数学抽成纯函数 `orbitPos`/`orbitPosAnchored`(layout.ts),残差一
+律 ×ch3、跟随项对照 morph 基址;基址数组自始至终不可变(原本就是 .slice()
+拷贝,问题从不是基址被改写,而是残差未门控)。
+
+**图态归环**(一并落地):行星 plan 坐标全部正落 R_GOAL(保留角向 SIB_OFF,
+去掉 ±10 径向抖动;游离行星 R_GOAL+24 → R_GOAL);deep 展开车道不变。
+
+- 验证:复现测量(Playwright + 只读探针 window.__starmapProbe.goalRadials/
+  planetRadials):修复前 5 轮后 玉衡 r=59.68、行星漂移加剧;修复后**每轮**
+  目标星与行星 r 恒 = 54(cycle 4 探针帧恰好落在境态,读数恰为展开车道
+  58/84/110/136/162 与 FREE_LANE=206,反向验证车道数学)。vitest 246 绿
+  (+6:orbitPos 图态精确归位任意相位/满境态=旋转后 deep、anchored 变体零
+  残差与纯跟随项;归环两例);tsc+build 绿;pytest 1728 绿。截图
+  r6-before/after-00/01(5 轮后漂移 vs 紧贴石环)。
+
 **验证**:vitest 209 全绿(starmap +7:座位/映射/蚀刻形/幂律比例/离散色板);
 tsc + vite build 绿;pytest 1694 全绿(无 .py 改动);隔离栈 18504 Playwright
 截图 /tmp/starmap-incr-shots/(图态默认/显真/重载持久化 + 境态 0/15/30s 帧

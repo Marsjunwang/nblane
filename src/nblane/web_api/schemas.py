@@ -59,6 +59,23 @@ class SkillTreeNodeModel(BaseModel):
     children: list[SkillTreeNodeModel] = Field(default_factory=list)
 
 
+class SkillTreeCategoryModel(BaseModel):
+    """Per-category rollup for the category banner headers.
+
+    ``name`` is the zh display name (``core.starmap_snapshot.CATEGORY_ZH``,
+    id as fallback) — the same source the home starmap sector band uses, so
+    the skill-tree banners and the starmap agree on 官名 lookup keys.
+    ``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −
+    learning.
+    """
+
+    id: str
+    name: str = ""
+    count: int = 0
+    lit_count: int = 0
+    learning_count: int = 0
+
+
 class SkillTreeResponse(BaseModel):
     """Full skill tree: queue-wide status counters plus the nested nodes."""
 
@@ -67,6 +84,27 @@ class SkillTreeResponse(BaseModel):
     updated: str = ""
     status_counts: dict[str, int] = Field(default_factory=dict)
     nodes: list[SkillTreeNodeModel] = Field(default_factory=list)
+    categories: list[SkillTreeCategoryModel] = Field(default_factory=list)
+
+
+class SkillNodePatchRequest(BaseModel):
+    """Body for the skill-node status mutation (G3, 三态 write).
+
+    The UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /
+    ``lit``; the endpoint maps ``lit`` onto the YAML status ``solid`` (the
+    精通 rung ``expert`` is review-earned and not settable here)."""
+
+    status: str
+
+
+class SkillNodePatchResponse(BaseModel):
+    """Result of the skill-node status mutation (``status`` is post-map YAML)."""
+
+    ok: bool = True
+    node_id: str
+    status: str = ""
+    previous_status: str = ""
+    changed: bool = False
 
 
 class GoalSummary(BaseModel):
@@ -202,6 +240,20 @@ class KanbanSubtaskModel(BaseModel):
     done: bool = False
 
 
+class KanbanTodoModel(BaseModel):
+    """One lightweight checklist item (``todo:`` meta bullet) on a card.
+
+    Distinct from ``KanbanSubtaskModel`` (the AI-drafted milestone
+    breakdown stored as nested checkboxes): todos are the user's own
+    checklist, managed via ``PATCH .../kanban/cards/{ref}``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    text: str = Field(min_length=1, max_length=500)
+    done: bool = False
+
+
 class KanbanTaskModel(BaseModel):
     """One parsed kanban card (mirrors core KanbanTask)."""
 
@@ -222,6 +274,7 @@ class KanbanTaskModel(BaseModel):
     agent_task_id: str = ""
     tags: str = ""
     subtasks: list[KanbanSubtaskModel] = Field(default_factory=list)
+    todos: list[KanbanTodoModel] = Field(default_factory=list)
     details: list[str] = Field(default_factory=list)
 
 
@@ -268,8 +321,9 @@ class KanbanCardPatchRequest(BaseModel):
     ``None`` keeps the current value; ``""`` clears text fields
     (``context``/``why``/``project_id``/``milestone_id``); ``tags``
     replaces the whole tag list when given. ``title`` must not be blank
-    when given. Section moves (incl. Someday, which is a section, not a
-    flag) stay on the move endpoint.
+    when given. ``todos`` fully replaces the checklist when given
+    (``[]`` clears it). Section moves (incl. Someday, which is a section,
+    not a flag) stay on the move endpoint.
     """
 
     title: str | None = Field(default=None, max_length=200)
@@ -278,6 +332,7 @@ class KanbanCardPatchRequest(BaseModel):
     project_id: str | None = Field(default=None, max_length=200)
     milestone_id: str | None = Field(default=None, max_length=200)
     tags: list[str] | None = None
+    todos: list[KanbanTodoModel] | None = None
 
 
 class KanbanCardMoveRequest(BaseModel):
@@ -753,6 +808,7 @@ class EvidenceListResponse(BaseModel):
     profile: str
     status: str = ""
     q: str = ""
+    skill_id: str = ""
     limit: int = 100
     total: int = 0
     items: list[EvidenceEntryModel] = Field(default_factory=list)
@@ -1276,6 +1332,7 @@ class ProjectsBoardTaskModel(BaseModel):
     project_id: str = ""
     milestone_id: str = ""
     tags: str = ""
+    todos: list[KanbanTodoModel] = Field(default_factory=list)
 
 
 class ProjectsBoardMilestoneModel(BaseModel):

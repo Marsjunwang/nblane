@@ -431,6 +431,19 @@ class KanbanSubtask:
 
 
 @dataclass
+class KanbanTodo:
+    """One lightweight checklist item (``todo:`` meta bullet) on a task.
+
+    Distinct from ``KanbanSubtask``: subtasks are the AI-drafted milestone
+    breakdown rendered as nested checkboxes, while todos are the user's own
+    working checklist managed from the /projects detail card.
+    """
+
+    text: str
+    done: bool = False
+
+
+@dataclass
 class KanbanTask:
     """One task entry in a kanban board."""
 
@@ -451,6 +464,7 @@ class KanbanTask:
     agent_task_id: str = ""
     tags: str = ""
     subtasks: list[KanbanSubtask] = field(default_factory=list)
+    todos: list[KanbanTodo] = field(default_factory=list)
     details: list[str] = field(default_factory=list)
 
 

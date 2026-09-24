@@ -15,7 +15,7 @@ from nblane.core import git_backup
 from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_state import FileSnapshot, assert_unchanged
 from nblane.core.file_write import atomic_write_text
-from nblane.core.models import KanbanSubtask, KanbanTask
+from nblane.core.models import KanbanSubtask, KanbanTask, KanbanTodo
 from nblane.core.profile_io import profile_dir
 
 KANBAN_DOING = "Doing"
@@ -46,6 +46,10 @@ _KANBAN_META_BULLET_RE = re.compile(
 _KANBAN_DETAIL_PREFIX_RE = re.compile(
     r"^([a-zA-Z][^:]*?):\s*(.*)$"
 )
+# Value shape of a ``todo:`` meta bullet: ``[ ]`` / ``[x]`` + non-empty text.
+# A ``todo:`` bullet whose value is not checkbox-shaped is a legacy free
+# detail and stays one (parse falls through to details).
+_KANBAN_TODO_VALUE_RE = re.compile(r"^\[([ xX])\]\s*(.*)$")
 
 
 def _normalize_kanban_meta_key(raw_key: str) -> str | None:
@@ -71,6 +75,8 @@ def _normalize_kanban_meta_key(raw_key: str) -> str | None:
         return "blocked_by"
     if k == "crystallized":
         return "crystallized"
+    if k in ("todo", "todos"):
+        return "todo"
     return None
 
 
@@ -112,6 +118,15 @@ def _kanban_apply_meta(task: KanbanTask, field: str, val: object) -> None:
         task.agent_task_id = val.strip()
     elif field == "tags" and isinstance(val, str):
         task.tags = val.strip()
+    elif field == "todo" and isinstance(val, str):
+        match = _KANBAN_TODO_VALUE_RE.match(val.strip())
+        if match and match.group(2).strip():
+            task.todos.append(
+                KanbanTodo(
+                    text=match.group(2).strip(),
+                    done=match.group(1).lower() == "x",
+                )
+            )
 
 
 def _kanban_tags_text(value: object) -> str:
@@ -217,6 +232,7 @@ def _copy_kanban_task(
     copied = replace(
         task,
         subtasks=[replace(st) for st in task.subtasks],
+        todos=[replace(td) for td in task.todos],
         details=list(task.details),
     )
     if changes:
@@ -673,6 +689,10 @@ def _parse_kanban_sections(
                         current_task.details.append(detail)
                         continue
                 nk = _normalize_kanban_meta_key(raw_key)
+                # Legacy ``- todo: free text`` lines predate the checklist
+                # contract; only checkbox-shaped values become todos.
+                if nk == "todo" and not _KANBAN_TODO_VALUE_RE.match(val_part):
+                    nk = None
                 if nk is not None:
                     is_literal_block = False
                     if (
@@ -808,6 +828,12 @@ def _render_kanban_task_lines(
                 lines.append(f"    {block_line}")
         else:
             lines.append(f"  - {mk}: {mv}")
+    for todo in task.todos:
+        text = todo.text.strip()
+        if not text:
+            continue
+        ch = "[x]" if todo.done else "[ ]"
+        lines.append(f"  - todo: {ch} {text}")
     for st in task.subtasks:
         if not st.title.strip():
             continue

@@ -28,7 +28,7 @@ from nblane.core.kanban_io import (
     KANBAN_SOMEDAY,
     parse_kanban,
 )
-from nblane.core.models import KanbanTask
+from nblane.core.models import KanbanTask, KanbanTodo
 from nblane.core.project_board import ProjectCase, load_project_board
 
 # Kanban section -> board column key. Someday is surfaced as a badge list on
@@ -59,6 +59,7 @@ class BoardTask:
     project_id: str = ""
     milestone_id: str = ""
     tags: str = ""
+    todos: list[KanbanTodo] = field(default_factory=list)
 
 
 @dataclass
@@ -188,6 +189,7 @@ def _board_task(task: KanbanTask, section: str) -> BoardTask:
         project_id=task.project_id,
         milestone_id=task.milestone_id,
         tags=task.tags,
+        todos=[KanbanTodo(text=todo.text, done=todo.done) for todo in task.todos],
     )
 
 

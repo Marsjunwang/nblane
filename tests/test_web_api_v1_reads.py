@@ -183,6 +183,22 @@ EVIDENCE_POOL = {
     ],
 }
 
+SKILL_TREE = {
+    "profile": "alice",
+    "schema": "",
+    "updated": "2026-09-10",
+    "nodes": [
+        {
+            "id": "ros2_basics",
+            "status": "solid",
+            # ev_4 stays linked on purpose: the skill_id filter must still
+            # honor the default non-deprecated status behavior.
+            "evidence_refs": ["ev_1", "ev_2", "ev_4"],
+        },
+        {"id": "moveit2", "status": "learning"},
+    ],
+}
+
 AGENT_TASKS = {
     "schema_version": "1.0",
     "profile": "alice",
@@ -268,6 +284,7 @@ def _write_profile(root: Path, name: str = "alice") -> Path:
     _dump("agent-tasks.yaml", AGENT_TASKS)
     _dump("goals.yaml", GOALS)
     _dump("evidence-pool.yaml", EVIDENCE_POOL)
+    _dump("skill-tree.yaml", SKILL_TREE)
     return profile
 
 
@@ -612,6 +629,55 @@ class TestProfileReads(unittest.TestCase):
         self.assertEqual(len(payload["items"]), 2)
         self.assertEqual(payload["limit"], 2)
         self.assertEqual(too_big.status_code, 422)
+
+    def test_evidence_skill_id_filter_matches_node_evidence_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_profile(root)
+            client = self._client(root)
+            linked = client.get(
+                "/api/v1/profiles/alice/evidence",
+                params={"skill_id": "ros2_basics"},
+            )
+            everything = client.get(
+                "/api/v1/profiles/alice/evidence",
+                params={"skill_id": "ros2_basics", "status": "all"},
+            )
+            unlinked = client.get(
+                "/api/v1/profiles/alice/evidence",
+                params={"skill_id": "moveit2"},
+            )
+            unknown = client.get(
+                "/api/v1/profiles/alice/evidence",
+                params={"skill_id": "no_such_node"},
+            )
+        # Default status behavior still applies: linked-but-deprecated ev_4
+        # drops out; status=all brings it back.
+        payload = linked.json()
+        self.assertEqual(payload["skill_id"], "ros2_basics")
+        self.assertEqual([i["id"] for i in payload["items"]], ["ev_1", "ev_2"])
+        self.assertEqual(
+            [i["id"] for i in everything.json()["items"]],
+            ["ev_1", "ev_2", "ev_4"],
+        )
+        self.assertEqual(unlinked.json()["total"], 0)
+        self.assertEqual(unknown.json()["total"], 0)
+
+    def test_evidence_skill_id_combines_with_status_and_q(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_profile(root)
+            client = self._client(root)
+            reviewed = client.get(
+                "/api/v1/profiles/alice/evidence",
+                params={"skill_id": "ros2_basics", "status": "reviewed"},
+            )
+            queried = client.get(
+                "/api/v1/profiles/alice/evidence",
+                params={"skill_id": "ros2_basics", "q": "workshop"},
+            )
+        self.assertEqual([i["id"] for i in reviewed.json()["items"]], ["ev_1"])
+        self.assertEqual([i["id"] for i in queried.json()["items"]], ["ev_2"])
 
     def test_evidence_detail_returns_full_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

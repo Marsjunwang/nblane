@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 source_of_truth: true
 ---
 
@@ -94,6 +94,20 @@ evidence-pool.yaml
 - `status` 提升需要人确认。
 - `SKILL.md` 生成块不要手改。
 
+技能状态写端点（2026-09-24，G3）：
+`PATCH /api/v1/profiles/{name}/skill-tree/nodes/{node_id}` 是 skill-tree.yaml 节点
+状态的 UI 写路径。词汇表映射：UI/星图三态 `locked | learning | lit`，YAML 事实源
+`locked | learning | solid | expert`（`core/profile_io.py STATUSES`）——端点把 `lit`
+落为 `solid`;`expert`（精通）是评审授予的第四级，不可经此端点写入。写纪律与
+skill-links 一致：`If-Match` 携带 skill-tree.yaml 弱 ETag（412 重试），写经
+`profile_io.update_skill_tree` 的锁内快照复核；状态落盘后在 SKILL.md 存在时重写其
+生成块（`write_generated_blocks`）。no-op patch 不写文件、不改 ETag。
+
+证据按技能反查（同日）：`GET /api/v1/profiles/{name}/evidence?skill_id=<id>` 复用
+`evidence_usage_index` 的反向映射（skill-tree.yaml `evidence_refs` 是唯一写侧），
+与既有 `status/q/limit` 过滤正交组合；返回非废弃条目（默认 status 语义不变），
+技能节点铭文卡的「关联证据」即读此过滤器。
+
 ### Evidence -> Claim Bridge
 
 ```text
@@ -174,7 +188,7 @@ kanban Done task
 ### Kanban 任务元数据字段
 
 任务以 Markdown checkbox + 缩进 `key: value` 子弹存储于 `kanban.md`，唯一合法写路径是
-`core/kanban_io.py`。除 `id/context/why/blocked by/outcome/tags/subtasks` 外，日期类字段：
+`core/kanban_io.py`。除 `id/context/why/blocked by/outcome/tags/subtasks/todos` 外，日期类字段：
 
 - `started_on` / `completed_on`：列移动习语自动维护（进 Doing 记 started_on，进 Done 记
   completed_on，离开 Done 清除）。
@@ -182,6 +196,14 @@ kanban Done task
   视图的拖拽改期；与列日期正交，不随列移动自动改写。写入经
   `POST /api/v1/profiles/{name}/kanban/cards/{card_ref}/schedule`（ISO `YYYY-MM-DD`，
   空串清除，两者皆设时 start ≤ end），随 kanban.md 正常 round-trip。
+- `todos`（2026-09-24 新增，可选）：**任务内 TODO 清单**，每项一条 meta 子弹
+  `- todo: [x] 已完成项` / `- todo: [ ] 待办项`（解析进 `KanbanTask.todos: list[KanbanTodo{text, done}]`，
+  渲染在普通 meta 子弹之后、subtasks 嵌套 checkbox 之前）。与 `subtasks`（AI 起草的里程碑拆解）
+  正交：todos 是用户自管的轻量清单。兼容规则：值不是 `[ ]`/`[x]` 开头的旧式 `- todo: 自由文本`
+  行按 detail 处理（保存时走 `detail:` 转义，round-trip 稳定）。写入经
+  `PATCH /api/v1/profiles/{name}/kanban/cards/{card_ref}` 的 `todos` 字段（**全量替换**，
+  `[]` 清空，空文本项丢弃）；3-way merge 按 list 字段整体 diff/replay，随 kanban.md
+  正常 round-trip，projects-board 聚合的 `todos` 供卡片进度（d/t）与详情卡清单使用。
 
 ### Public Surface
 

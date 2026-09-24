@@ -224,6 +224,206 @@ class TestSkillTreeRead(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["code"], "profile_not_found")
 
+    def test_categories_rollup_for_banner_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root, tree=SKILL_TREE)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            response = client.get("/api/v1/profiles/alice/skill-tree")
+        self.assertEqual(response.status_code, 200)
+        categories = response.json()["categories"]
+        # Schema order: foundations (root_a) first, then the uncategorized
+        # bucket (schema nodes without category + off-schema nodes).
+        self.assertEqual([c["id"] for c in categories], ["foundations", ""])
+        foundations = categories[0]
+        self.assertEqual(foundations["name"], "基础")  # CATEGORY_ZH table
+        self.assertEqual(foundations["count"], 1)
+        self.assertEqual(foundations["lit_count"], 1)  # solid counts as lit
+        self.assertEqual(foundations["learning_count"], 0)
+        misc = categories[1]
+        self.assertEqual(misc["name"], "")
+        self.assertEqual(misc["count"], 5)
+        # root_b is expert (lit); child_a1/child_a2/off_schema are learning.
+        self.assertEqual(misc["lit_count"], 1)
+        self.assertEqual(misc["learning_count"], 3)
+
+
+SKILL_MD_WITH_BLOCK = """# SKILL — {name}
+
+<!-- BEGIN GENERATED:skill_tree -->
+- stale
+<!-- END GENERATED:skill_tree -->
+
+<!-- BEGIN GENERATED:current_focus -->
+- stale
+<!-- END GENERATED:current_focus -->
+"""
+
+
+class TestSkillNodePatch(unittest.TestCase):
+    """PATCH /skill-tree/nodes/{node_id}: 三态 status write (G3)."""
+
+    def _client(self, root: Path, schemas: Path) -> TestClient:
+        for target, value in (
+            ("nblane.core.profile_io.PROFILES_DIR", root),
+            ("nblane.core.io.PROFILES_DIR", root),
+            ("nblane.core.schema_io.SCHEMAS_DIR", schemas),
+        ):
+            patcher = patch(target, value)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+        return TestClient(app)
+
+    def _setup(self, base: Path, skill_md: bool = False) -> tuple[TestClient, Path]:
+        root = base / "profiles"
+        pdir = _write_profile(root, tree=SKILL_TREE)
+        if skill_md:
+            (pdir / "SKILL.md").write_text(
+                SKILL_MD_WITH_BLOCK.format(name="alice"), encoding="utf-8"
+            )
+        schemas = _write_schemas(base)
+        return self._client(root, schemas), pdir
+
+    def _tree_status(self, pdir: Path, node_id: str) -> str:
+        raw = yaml.safe_load((pdir / "skill-tree.yaml").read_text(encoding="utf-8"))
+        node = next(n for n in raw["nodes"] if n["id"] == node_id)
+        return str(node.get("status") or "locked")
+
+    def test_patch_lit_maps_to_solid_and_syncs_skill_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp), skill_md=True)
+            etag = client.get("/api/v1/profiles/alice/skill-tree").headers["ETag"]
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/child_a1",
+                json={"status": "lit"},
+                headers={"If-Match": etag},
+            )
+            skill_md = (pdir / "SKILL.md").read_text(encoding="utf-8")
+            disk_status = self._tree_status(pdir, "child_a1")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["node_id"], "child_a1")
+        self.assertEqual(payload["previous_status"], "learning")
+        # 点亮 (三态 lit) lands as the YAML status solid.
+        self.assertEqual(payload["status"], "solid")
+        self.assertTrue(payload["changed"])
+        self.assertTrue(response.headers["ETag"])
+        self.assertNotEqual(response.headers["ETag"], etag)
+        self.assertEqual(disk_status, "solid")
+        # SKILL.md generated block re-synced: learning icon -> lit icon.
+        self.assertIn("- [x] child_a1 (`child_a1`)", skill_md)
+
+    def test_patch_locked_and_learning_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp))
+            etag = client.get("/api/v1/profiles/alice/skill-tree").headers["ETag"]
+            first = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/grand_a11",
+                json={"status": "learning"},
+                headers={"If-Match": etag},
+            )
+            back = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/grand_a11",
+                json={"status": "locked"},
+                headers={"If-Match": first.headers["ETag"]},
+            )
+            disk_status = self._tree_status(pdir, "grand_a11")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(back.status_code, 200)
+        self.assertEqual(disk_status, "locked")
+
+    def test_noop_patch_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp))
+            etag = client.get("/api/v1/profiles/alice/skill-tree").headers["ETag"]
+            before = (pdir / "skill-tree.yaml").read_text(encoding="utf-8")
+            # root_a is already solid; 三态 lit maps to solid: no-op.
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/root_a",
+                json={"status": "lit"},
+                headers={"If-Match": etag},
+            )
+            after = (pdir / "skill-tree.yaml").read_text(encoding="utf-8")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["changed"])
+        self.assertEqual(before, after)
+
+    def test_unknown_node_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, _ = self._setup(Path(tmp))
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/ghost_node",
+                json={"status": "learning"},
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "skill_node_not_found")
+
+    def test_invalid_status_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, _ = self._setup(Path(tmp))
+            responses = [
+                client.patch(
+                    "/api/v1/profiles/alice/skill-tree/nodes/root_a",
+                    json={"status": "glowing"},
+                ),
+                # Raw YAML rungs are not part of the 三态 write vocabulary.
+                client.patch(
+                    "/api/v1/profiles/alice/skill-tree/nodes/root_a",
+                    json={"status": "expert"},
+                ),
+                client.patch(
+                    "/api/v1/profiles/alice/skill-tree/nodes/root_a",
+                    json={"status": "solid"},
+                ),
+            ]
+        for response in responses:
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json()["code"], "invalid_skill_status")
+
+    def test_stale_if_match_412(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp))
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/child_a1",
+                json={"status": "lit"},
+                headers={"If-Match": 'W/"stale"'},
+            )
+            disk_status = self._tree_status(pdir, "child_a1")
+        self.assertEqual(response.status_code, 412)
+        self.assertEqual(response.json()["code"], "etag_mismatch")
+        self.assertEqual(disk_status, "learning")
+
+    def test_unauthenticated_401(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root, tree=SKILL_TREE)
+            schemas = _write_schemas(base)
+            for target, value in (
+                ("nblane.core.profile_io.PROFILES_DIR", root),
+                ("nblane.core.io.PROFILES_DIR", root),
+                ("nblane.core.schema_io.SCHEMAS_DIR", schemas),
+            ):
+                patcher = patch(target, value)
+                self.addCleanup(patcher.stop)
+                patcher.start()
+            users_file = _write_users_file(root / "users.yaml")
+            env = {
+                "NBLANE_AUTH_FILE": str(users_file),
+                "NBLANE_AUTH_SESSION_SECRET": TEST_SESSION_SECRET,
+            }
+            patcher = patch.dict(os.environ, env)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+            client = TestClient(create_app())
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/child_a1",
+                json={"status": "lit"},
+            )
+        self.assertEqual(response.status_code, 401)
+
 
 class TestSkillTreeScope(unittest.TestCase):
     """401/403 enforcement under auth-on."""

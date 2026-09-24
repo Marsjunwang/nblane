@@ -26,7 +26,7 @@ from nblane.core.kanban_merge import (
     diff_kanban_sections,
     save_kanban_with_merge,
 )
-from nblane.core.models import KanbanTask
+from nblane.core.models import KanbanTask, KanbanTodo
 
 
 def _sections(*, queue=(), doing=(), done=(), someday=()):
@@ -152,6 +152,40 @@ class TestApplyKanbanChanges(unittest.TestCase):
         task = merged[KANBAN_QUEUE][0]
         self.assertEqual(task.why, "our why")
         self.assertEqual(task.context, "external ctx")
+
+    def test_update_carries_todos_and_keeps_external_todos(self) -> None:
+        """The todos list diffs/replays like any other list field."""
+        base = _sections(
+            queue=[KanbanTask(title="A", id="a", todos=[KanbanTodo(text="old")])],
+        )
+        ours = _sections(
+            queue=[
+                KanbanTask(
+                    title="A",
+                    id="a",
+                    todos=[KanbanTodo(text="old", done=True), KanbanTodo(text="new")],
+                )
+            ],
+        )
+        changes = diff_kanban_sections(base, ours)
+        updates = [c for c in changes if c.kind == CHANGE_UPDATE]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(
+            updates[0].fields,
+            {"todos": [KanbanTodo(text="old", done=True), KanbanTodo(text="new")]},
+        )
+        # Our todos replay onto a disk state where someone else edited why.
+        theirs = _sections(
+            queue=[KanbanTask(title="A", id="a", why="external", todos=[KanbanTodo(text="old")])],
+        )
+        merged, dropped = apply_kanban_changes(theirs, changes)
+        self.assertEqual(dropped, [])
+        task = merged[KANBAN_QUEUE][0]
+        self.assertEqual(
+            task.todos,
+            [KanbanTodo(text="old", done=True), KanbanTodo(text="new")],
+        )
+        self.assertEqual(task.why, "external")
 
     def test_remove_of_missing_task_is_silent_noop(self) -> None:
         theirs = _sections(queue=[KanbanTask(title="B", id="b")])

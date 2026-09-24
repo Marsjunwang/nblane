@@ -28,7 +28,7 @@ from nblane.core.io import (
     render_kanban,
     save_kanban,
 )
-from nblane.core.models import KanbanSubtask, KanbanTask
+from nblane.core.models import KanbanSubtask, KanbanTask, KanbanTodo
 
 
 class _FixedDate(date):
@@ -96,6 +96,57 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertFalse(t.subtasks[0].done)
         self.assertTrue(t.subtasks[1].done)
         self.assertEqual(t.details, ["free note"])
+
+    def test_todos_meta_roundtrip(self) -> None:
+        """todo: meta bullets survive parse/render as a typed checklist."""
+        sections = {
+            KANBAN_DOING: [],
+            KANBAN_DONE: [],
+            KANBAN_QUEUE: [
+                KanbanTask(
+                    title="Main",
+                    todos=[
+                        KanbanTodo(text="draft outline", done=True),
+                        KanbanTodo(text="collect refs"),
+                    ],
+                )
+            ],
+            KANBAN_SOMEDAY: [],
+        }
+        text = render_kanban("u1", sections)
+        self.assertIn("  - todo: [x] draft outline", text)
+        self.assertIn("  - todo: [ ] collect refs", text)
+        back = self._parse_markdown("u1", text)
+        task = back[KANBAN_QUEUE][0]
+        self.assertEqual(
+            task.todos,
+            [
+                KanbanTodo(text="draft outline", done=True),
+                KanbanTodo(text="collect refs", done=False),
+            ],
+        )
+        self.assertEqual(task.subtasks, [])
+        self.assertEqual(task.details, [])
+
+    def test_legacy_todo_detail_stays_a_detail(self) -> None:
+        """A non-checkbox ``- todo: text`` line predates the checklist and
+        round-trips as a plain detail (via the detail: escape on save)."""
+        markdown = (
+            "# u1 · Kanban\n\n## Queue\n\n"
+            "- [ ] Old task\n"
+            "  - id: kb_old\n"
+            "  - todo: remember the milk\n"
+        )
+        back = self._parse_markdown("u1", markdown)
+        task = back[KANBAN_QUEUE][0]
+        self.assertEqual(task.todos, [])
+        self.assertEqual(task.details, ["todo: remember the milk"])
+        # Saving escapes the detail so a re-parse still lands on details.
+        rendered = render_kanban("u1", back)
+        self.assertIn("  - detail: todo: remember the milk", rendered)
+        again = self._parse_markdown("u1", rendered)
+        self.assertEqual(again[KANBAN_QUEUE][0].details, ["todo: remember the milk"])
+        self.assertEqual(again[KANBAN_QUEUE][0].todos, [])
 
     def test_planned_dates_roundtrip(self) -> None:
         """planned_start/planned_end metadata survives parse/render."""
