@@ -33,9 +33,6 @@ import type {
   CrystallizeCandidatesResponse,
   CrystallizeDraftRequest,
   CrystallizeDraftResponse,
-  GapAnalysisResult,
-  GapAnalyzeRequest,
-  GapIntakeRequest,
   GoalCreateRequest,
   GoalMutationResponse,
   GoalPatchRequest,
@@ -1326,30 +1323,6 @@ export function useCrystallizeApply(profile: string) {
 }
 
 
-function gapBase(profile: string): string {
-  return `/profiles/${encodeURIComponent(profile)}/gap`;
-}
-
-/** Gap analysis runs as a plain mutation; the page renders mutation.data. */
-export function useGapAnalyze(profile: string) {
-  return useMutation({
-    mutationFn: (body: GapAnalyzeRequest) =>
-      apiPost<GapAnalysisResult>(`${gapBase(profile)}/analyze`, body),
-  });
-}
-
-/**
- * Deep (LLM) gap analysis: the same endpoint with `use_llm: true` answers
- * 202 with a job handle; the page then subscribes to the job's SSE stream
- * (see api/jobs.ts) for progress phases and the final GapAnalysisResult.
- */
-export function useGapDeepAnalyze(profile: string) {
-  return useMutation({
-    mutationFn: (body: GapAnalyzeRequest) =>
-      apiPost<JobCreateResponse>(`${gapBase(profile)}/analyze`, body),
-  });
-}
-
 /**
  * Generic async-job creation (LLM long tasks: `studio-jd-match`,
  * `project-suggest-refs`, ...). Answers 202 with a job handle; the page
@@ -1360,18 +1333,6 @@ export function useCreateJob(profile: string) {
   return useMutation({
     mutationFn: (body: JobCreateRequest) =>
       apiPost<JobCreateResponse>(`/profiles/${encodeURIComponent(profile)}/jobs`, body),
-  });
-}
-
-export function useGapIntake(profile: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: GapIntakeRequest) =>
-      apiPost<KanbanMutationResponse>(`${gapBase(profile)}/intake`, body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
-    },
   });
 }
 

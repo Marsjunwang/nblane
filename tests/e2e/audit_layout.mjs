@@ -26,7 +26,6 @@ const PAGES = [
   ["ProjectBoard", `/p/${PROFILE}/project-board`],
   ["Studio", `/p/${PROFILE}/studio`],
   ["Research", `/p/${PROFILE}/research`],
-  ["Gap", `/p/${PROFILE}/gap`],
   ["Goals", `/p/${PROFILE}/goals`],
   ["Activity", `/p/${PROFILE}/activity`],
   ["PublicBuild", `/p/${PROFILE}/public-build`],

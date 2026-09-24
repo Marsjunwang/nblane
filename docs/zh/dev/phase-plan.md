@@ -387,7 +387,15 @@ gen:api 重生成,类型为 schema 别名)。
   锚定的 `anchors.gap.closure` 缺节点(is_gap)逐一顺序走既有
   `POST /gap/intake`(`学习 {label}` + node_id + why=所问,Queue)入看板;
   kanban/projects-board 双失效;成功后卡内小笺带 /projects 深链;失败就地
-  报错可重试。`useGapIntake` 顺带补 projects-board 失效。
+  报错可重试。`useGapIntake` 顺带补 projects-board 失效(该钩子随后随
+  GapPage 本体一并移除,Divination 改为直接 `apiPost` + 内联双失效)。
+- **GapPage 本体删除执行**(§2.3,2026-09-24):SPA `GapPage`(+ vitest
+  测试)、`/p/:name/gap` 路由、nav「差距分析」与 `useGapAnalyze`/
+  `useGapDeepAnalyze`/`useGapIntake` 钩子移除;e2e 删 `spa_gap_deep.spec.ts`、
+  `spa_pages.spec.ts` 的 Gap describe 与 `spa_mobile.spec.ts` 抽屉项
+  (11→10 个 profile 页入口),`audit_layout.mjs` 删 Gap 行。
+  `POST /gap/analyze` 与 `POST /gap/intake` 端点保留(openclaw 与占卜
+  「化为任务」在用);Streamlit `pages/2_Gap_Analysis.py` 随 8501 终态再退。
 - **健康页解散执行**(§2.2):SPA `HealthPage`(+测试)与 nav「健康」删除;
   `/p/:name/health` 重定向 `/evidence?stage=strengthen`;档案列表卡片入口
   改指 `/home`;`useHealthReport` 钩子和 Health 类型导出随页移除;
@@ -413,8 +421,9 @@ gen:api 重生成,类型为 schema 别名)。
   test_web_api_evidence_review 补突破投影断言);openapi 快照同步;隔离栈
   18504 Playwright 抽查 7/7(化为任务 9 缺口 9/9 入看板、health 重定向、
   突破徽章、四条 P2),截图 /tmp/c-tail-shots/,沙箱数据净不变(化为任务
-  与临时卡已清、突破旗已还原)。已知边角:标题含 `/` 的看板卡无法经
-  `DELETE /kanban/cards/{card_ref}` 寻址(路径参数 405),记录在案未修。
+  与临时卡已清、突破旗已还原)。已知边角「标题含 `/` 的看板卡无法经
+  `DELETE /kanban/cards/{card_ref}` 寻址(路径参数 405)」已于当日修复:
+  card_ref 改为 id 优先寻址(见 data-contracts.md「任务删除」)。
 
 
 

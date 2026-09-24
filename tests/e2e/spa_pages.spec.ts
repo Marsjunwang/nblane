@@ -2,13 +2,10 @@ import { expect, test } from "@playwright/test";
 import type { Page, Response } from "@playwright/test";
 
 /**
- * Real-browser journeys for the four core SPA pages that had no e2e coverage
+ * Real-browser journeys for the core SPA pages that had no e2e coverage
  * (2026-09-21 batch), against the isolated sandbox
  * (`scripts/dev-web.sh --isolated`, profile=dev):
  *
- * - 差距分析 Gap: analyze → coverage/strong/gap sections → 加入看板 lands a
- *   learning card in the kanban Queue; empty/whitespace task descriptions are
- *   intercepted client-side (no /gap/analyze request ever fires).
  * - 项目 Projects: case → milestone → task → move columns; M-FE-1
  *   regression (an unsaved basics draft survives a tab switch + the board
  *   refetch triggered by moving a task); archive; AI suggest-refs renders
@@ -122,89 +119,6 @@ async function stubFailingJob(
     });
   });
 }
-
-test.describe("SPA Gap (差距分析)", () => {
-  test("analyze → coverage/strong/gap sections → 加入看板 creates a Queue learning card", async ({
-    page,
-  }) => {
-    await page.goto(spa("gap"));
-    await page.getByLabel("任务描述").fill("用机械臂完成抓取并放置的任务");
-    const analyze = await waitPost(page, "/gap/analyze", () =>
-      page.getByRole("button", { name: "分析", exact: true }).click(),
-    );
-    expect(analyze.status()).toBe(200);
-
-    // Coverage bar + the two partitions render.
-    await expect(page.getByText(/技能覆盖率/)).toBeVisible();
-    await expect(page.getByRole("progressbar", { name: "技能覆盖率" })).toBeVisible();
-    const strong = page.getByTestId("gap-strong-section");
-    const missing = page.getByTestId("gap-missing-section");
-    await expect(strong).toBeVisible();
-    await expect(missing).toBeVisible();
-    await expect(strong.getByText(/已具备的技能 \(\d+\)/)).toBeVisible();
-    await expect(missing.getByText(/能力差距 \(\d+\)/)).toBeVisible();
-
-    // The rule-based analysis of this task always finds gaps on the dev
-    // sandbox. The learning card title is 学习 <node label> — read the label
-    // off the first gap row so the kanban assertion tracks the real payload.
-    // (NB: a `has:` locator chain must resolve within the candidate subtree —
-    // rooting it at `missing` matches nothing, and `.first()` inside `has:`
-    // never matches either.)
-    const firstIntake = missing.getByRole("button", { name: "加入看板" }).first();
-    await expect(firstIntake).toBeVisible();
-    const firstRow = missing
-      .locator("div.mantine-Group-root", {
-        has: page.getByRole("button", { name: "加入看板" }),
-      })
-      .first();
-    const label = (await firstRow.locator("p").first().innerText()).trim();
-    const cardTitle = `学习 ${label}`;
-
-    const intake = await waitPost(page, "/gap/intake", () => firstIntake.click());
-    expect(intake.status()).toBe(201);
-    await expect(page.getByText("学习任务已加入看板 Queue。")).toBeVisible();
-
-    // Rule results point at the deep-analysis entry: the blue info alert
-    // explains the 深度分析(LLM) button (wired to the async jobs slice).
-    await expect(page.getByText(/以上为规则匹配结果/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "深度分析(LLM)" })).toBeVisible();
-
-    // Projects: the learning card (no project) lands in the 未归属 lane's
-    // Queue column (duplicate titles from earlier runs are fine — assert the
-    // first match).
-    await page.goto(spa("projects"));
-    const queueColumn = page.getByTestId("lane-column-unassigned-queue");
-    await expect(queueColumn).toBeVisible();
-    await expect(queueColumn.getByText(cardTitle).first()).toBeVisible();
-  });
-
-  test("empty and whitespace task descriptions are blocked client-side (no analyze request)", async ({
-    page,
-  }) => {
-    let analyzeCalls = 0;
-    page.on("request", (req) => {
-      if (req.url().includes("/gap/analyze")) {
-        analyzeCalls += 1;
-      }
-    });
-
-    await page.goto(spa("gap"));
-    const analyzeButton = page.getByRole("button", { name: "分析", exact: true });
-    const validationError = page.getByText("请先描述要分析的任务。");
-
-    await analyzeButton.click();
-    await expect(validationError).toBeVisible();
-
-    // Whitespace-only input is also intercepted (the page trims).
-    await page.getByLabel("任务描述").fill("   ");
-    await analyzeButton.click();
-    await expect(validationError).toBeVisible();
-
-    // Give any stray request a chance to fire, then prove none did.
-    await page.waitForTimeout(500);
-    expect(analyzeCalls, "client-side validation must not POST /gap/analyze").toBe(0);
-  });
-});
 
 test.describe("SPA Projects (项目 — 一体化看板)", () => {
   test("case → milestone → task → move → draft protection (M-FE-1) → archive", async ({

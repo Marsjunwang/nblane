@@ -5,7 +5,6 @@ import { AppLayout } from './components/AppLayout';
 import { ActivityPage } from './pages/ActivityPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { EvidencePage, EvidenceReviewRedirect, HealthRedirect } from './pages/EvidencePage';
-import { GapPage } from './pages/GapPage';
 import { HomePage } from './pages/HomePage';
 import { InboxPage } from './pages/InboxPage';
 import { LoginPage } from './pages/LoginPage';
@@ -59,7 +58,6 @@ export function App() {
           <Route path="/p/:name/evidence" element={<EvidencePage />} />
           {/* Legacy route: the review queue merged into the Evidence page. */}
           <Route path="/p/:name/evidence-review" element={<EvidenceReviewRedirect />} />
-          <Route path="/p/:name/gap" element={<GapPage />} />
           <Route path="/p/:name/review" element={<ReviewPage />} />
           {/* Legacy route: the project board merged into the Projects page. */}
           <Route path="/p/:name/project-board" element={<ProjectBoardRedirect />} />

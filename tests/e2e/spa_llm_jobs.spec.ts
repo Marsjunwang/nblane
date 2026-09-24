@@ -3,7 +3,7 @@ import type { Page, Response } from "@playwright/test";
 
 /**
  * JD 匹配 (studio-jd-match) + AI 建议引用 (project-suggest-refs) 的
- * LLM jobs + SSE 迁移 e2e(2026-09-21,参照 spa_gap_deep.spec.ts 手法):
+ * LLM jobs + SSE 迁移 e2e(2026-09-21,沿用已删除的 spa_gap_deep.spec.ts 手法):
  *
  * - Fast path (network stub): `POST /api/v1/profiles/{name}/jobs` 被拦截
  *   返回 202 mock job,SSE stream 端点按帧序列兑现(job → progress 阶段 →

@@ -55,7 +55,7 @@ Playwright is split into three projects:
   stacks it bakes an empty state, so behavior there is unchanged.
 - `chromium` — every pre-existing spec; loads the baked file as
   `storageState`, so SPA specs (spa_smoke/spa_home/spa_mutations/
-  spa_kanban_dnd/spa_pages/spa_gap_deep/spa_llm_jobs) keep passing with auth on, and
+  spa_kanban_dnd/spa_pages/spa_llm_jobs) keep passing with auth on, and
   Streamlit/sidecar specs are unaffected (they ignore the extra cookie).
 - `spa-auth` (`spa_auth.spec.ts`) — the login journey itself (deep-link
   bounce, generic wrong-password error, redirect-back after login, logout,
