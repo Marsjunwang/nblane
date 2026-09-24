@@ -98,6 +98,4 @@ export const boardPalette = {
   selectedBorder: chrome.goldText,
   /** Today line (dashed gold). */
   todayLine: chrome.goldText,
-  /** Habit check-in green (semantic only). */
-  habitGreen: '#7dbf8e',
 } as const;

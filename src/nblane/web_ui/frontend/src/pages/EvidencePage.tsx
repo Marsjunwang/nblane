@@ -316,13 +316,25 @@ function EvidenceRow({
               已废弃
             </Badge>
           ) : (
-            <Badge
-              size="sm"
-              variant={item.review_status === 'reviewed' ? 'light' : 'outline'}
-              color={item.review_status === 'reviewed' ? 'brand' : 'gray'}
-            >
-              {STRENGTH_LABELS[item.strength ?? 'unrated'] ?? item.strength}
-            </Badge>
+            <>
+              {item.breakthrough && (
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  color="brand"
+                  data-testid={`row-breakthrough-${item.id}`}
+                >
+                  突破
+                </Badge>
+              )}
+              <Badge
+                size="sm"
+                variant={item.review_status === 'reviewed' ? 'light' : 'outline'}
+                color={item.review_status === 'reviewed' ? 'brand' : 'gray'}
+              >
+                {STRENGTH_LABELS[item.strength ?? 'unrated'] ?? item.strength}
+              </Badge>
+            </>
           )}
         </Group>
       </Group>
@@ -607,6 +619,26 @@ function EvidenceDetailCard({
             aria-label="分量"
             disabled={editing}
           />
+          <Tooltip label="突破证据额外 +1000 计入技能进阶分" withinPortal>
+            <Button
+              size="compact-xs"
+              variant={detail.breakthrough ? 'light' : 'outline'}
+              color="brand"
+              aria-pressed={Boolean(detail.breakthrough)}
+              disabled={editing || edit.isPending}
+              onClick={() =>
+                edit.mutate({
+                  entryId,
+                  // 突破 round-trips as "true"/"false" strings (data-contracts).
+                  body: { fields: { breakthrough: detail.breakthrough ? 'false' : 'true' } },
+                  etag,
+                })
+              }
+              data-testid="evidence-breakthrough-toggle"
+            >
+              突破
+            </Button>
+          </Tooltip>
         </Group>
 
         <ProvenanceSection detail={detail} />

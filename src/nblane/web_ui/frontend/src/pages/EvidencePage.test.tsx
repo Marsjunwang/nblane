@@ -439,6 +439,47 @@ describe('EvidencePage', () => {
     expect(within(detail).getByText('MoveIt2 workshop notes')).toBeInTheDocument();
   });
 
+  it('突破 toggle PATCHes the flag via the edit endpoint', async () => {
+    const fetchMock = stubFetch();
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    const detail = await screen.findByTestId('evidence-detail');
+    const toggle = within(detail).getByTestId('evidence-breakthrough-toggle');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((call) => ({
+        url: String(call[0]),
+        init: call[1],
+      }));
+      const edit = calls.find(
+        (call) => call.url.includes('/evidence/ev_2/edit') && call.init?.method === 'POST',
+      );
+      expect(edit).toBeTruthy();
+      expect(JSON.parse(String(edit!.init?.body))).toEqual({
+        fields: { breakthrough: 'true' },
+      });
+    });
+  });
+
+  it('reviewed list rows show a small 突破 badge', async () => {
+    stubFetch((url) => {
+      if (url.includes('/evidence-review')) {
+        return jsonResponse(200, {
+          ...REVIEW_QUEUE,
+          items: [{ ...REVIEW_QUEUE.items[0], breakthrough: true }],
+        });
+      }
+      return null;
+    });
+    renderPage();
+
+    const row = await screen.findByTestId('evidence-row-ev_2');
+    expect(within(row).getByTestId('row-breakthrough-ev_2')).toHaveTextContent('突破');
+  });
+
   it('detail card shows only 分量; confidence/readiness live under 更多', async () => {
     stubFetch();
     renderPage();

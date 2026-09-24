@@ -53,30 +53,42 @@ function SealSlip({
   habit,
   streak,
   done,
+  today,
 }: {
   habit: ProjectsBoardHabit;
   streak: number;
   done: boolean;
+  today: string;
 }) {
   return (
     <div style={{ maxWidth: 240 }}>
       <div style={{ fontSize: 14, marginBottom: 6 }}>{habit.title || habit.id}</div>
       <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 6 }}>
-        {(habit.week ?? []).map((day) => (
-          <span
-            key={day.date}
-            title={day.date}
-            style={{
-              display: 'inline-block',
-              width: 9,
-              height: 9,
-              borderRadius: '50%',
-              background: day.done ? '#dcae55' : 'transparent',
-              border: `1px solid ${day.done ? '#dcae55' : 'rgba(232, 226, 210, 0.55)'}`,
-              opacity: day.future ? 0.4 : 1,
-            }}
-          />
-        ))}
+        {(habit.week ?? []).map((day) => {
+          // 石刻化 dots (same vocabulary as the /projects week strip):
+          // hollow 月白-35% ring / 泥金 fill, today ringed in thin gold.
+          const isToday = day.date === today && !day.future;
+          return (
+            <span
+              key={day.date}
+              title={day.date}
+              data-testid={`seal-slip-dot-${habit.id}-${day.date}`}
+              data-done={day.done ? 'true' : 'false'}
+              data-today={isToday ? 'true' : 'false'}
+              style={{
+                display: 'inline-block',
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                boxSizing: 'border-box',
+                background: day.done ? '#dcae55' : 'transparent',
+                border: `1px solid ${day.done ? '#dcae55' : 'rgba(242, 237, 224, 0.35)'}`,
+                boxShadow: isToday ? '0 0 0 1.5px #dcae55' : undefined,
+                opacity: day.future ? 0.4 : 1,
+              }}
+            />
+          );
+        })}
       </div>
       <div style={{ fontSize: 12, opacity: 0.8 }}>连续 {streak} 天</div>
       <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
@@ -230,7 +242,7 @@ export function HabitSeal({ profile }: { profile: string }) {
         return (
           <Tooltip
             key={id}
-            label={<SealSlip habit={habit} streak={habit.streak ?? 0} done={done} />}
+            label={<SealSlip habit={habit} streak={habit.streak ?? 0} done={done} today={today} />}
             withArrow
             position="top"
             // While the 销印 confirm is up, hover slips would overlap it.

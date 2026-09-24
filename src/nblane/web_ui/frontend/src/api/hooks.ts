@@ -40,6 +40,10 @@ import type {
   GoalMutationResponse,
   GoalPatchRequest,
   GoalsResponse,
+  HabitArchiveRequest,
+  HabitArchiveResponse,
+  HabitDeleteRequest,
+  HabitDeleteResponse,
   HealthReport,
   HomeResponse,
   InboxCaptureRequest,
@@ -73,6 +77,7 @@ import type {
   ProjectMilestoneAddRequest,
   ProjectMilestoneUpdateRequest,
   ProjectTaskCreateRequest,
+  ProjectsBoardHabit,
   ProjectsBoardResponse,
   ProjectsBoardResult,
   PublicBuildPreviewResponse,
@@ -451,6 +456,24 @@ export function useInvalidateProjectsBoard(profile: string) {
 }
 
 /**
+ * Server-side archived habits (projects-board ?include_archived=true, rows
+ * flagged `archived: true`). Fetched lazily by the 日课栏 显示已归档 toggle;
+ * shares the projects-board key prefix so lifecycle mutations invalidate it.
+ */
+export function useArchivedBoardHabits(profile: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'projects-board', 'archived-habits'],
+    queryFn: async (): Promise<ProjectsBoardHabit[]> => {
+      const { data } = await apiGetWithHeaders<ProjectsBoardResponse>(
+        `${projectsBoardBase(profile)}?include_archived=true`,
+      );
+      return (data.habits ?? []).filter((habit) => habit.archived);
+    },
+    enabled: enabled && profile.length > 0,
+  });
+}
+
+/**
  * Append one habit check-in. No GET endpoint exposes the activity-log ETag,
  * so the first check-in goes out without If-Match (the server still
  * re-checks an in-lock snapshot); the response ETag is cached for
@@ -523,11 +546,52 @@ export function useDeleteCheckin(profile: string) {
   });
 }
 
-function planTemplatesBase(profile: string): string {
-  return `/profiles/${encodeURIComponent(profile)}/plan-templates`;
+// --- Habit lifecycle (日课栏 gear menu) ---------------------------------------
+
+function habitPath(profile: string, habitId: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/habits/${encodeURIComponent(habitId)}`;
 }
 
-/** Plan-template list fetch that captures the plan-source ETag. */
+/**
+ * Archive (or restore) one habit: POST .../habits/{id}/archive {archived}.
+ * The projects-board aggregation owns the habit strip, so it invalidates;
+ * the activity log keeps the habit's check-in history either way.
+ */
+export function useArchiveHabit(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ habitId, archived }: { habitId: string; archived: boolean }) =>
+      apiPost<HabitArchiveResponse>(`${habitPath(profile, habitId)}/archive`, {
+        archived,
+      } satisfies HabitArchiveRequest),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+    },
+  });
+}
+
+/**
+ * Delete one habit for good (type-the-name confirm): DELETE .../habits/{id}
+ * with {confirm_title, record_chronicle} → {ok, deleted_id, checkins_removed}.
+ * 422 `habit_delete_confirm_mismatch` means the typed title differs.
+ */
+export function useDeleteHabit(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ habitId, body }: { habitId: string; body: HabitDeleteRequest }) =>
+      apiDelete<HabitDeleteResponse>(habitPath(profile, habitId), body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'chronicle'] });
+    },
+  });
+}
+
+function planTemplatesBase(profile: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/plan-templates`;
+}/** Plan-template list fetch that captures the plan-source ETag. */
 export function usePlanTemplates(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'plan-templates'],

@@ -21,7 +21,8 @@ export type OkResponse = Schemas['OkResponse'];
 /** ProfileSummary from web_api/schemas.py. */
 export type ProfileSummary = Schemas['ProfileSummary'];
 
-/** SkillTreeNodeModel from web_api/schemas.py (recursive tree node). */
+/** SkillTreeNodeModel from web_api/schemas.py (recursive tree node; `progress`
+ * is the 进阶进度 readout — 弱1/中10/强100/突破1000, thresholds 10/30/100). */
 export type SkillTreeNode = Schemas['SkillTreeNodeModel'];
 
 /** SkillTreeResponse from web_api/schemas.py. */
@@ -138,14 +139,19 @@ export type ChronicleResponse = Schemas['ChronicleResponse'];
 /** EvidenceEntryModel from web_api/schemas.py (list view). */
 export type EvidenceEntry = Schemas['EvidenceEntryModel'];
 
-/** EvidenceEntryDetailModel from web_api/schemas.py (detail view). */
+/** EvidenceEntryDetailModel from web_api/schemas.py (detail view, with the
+ * 突破 `breakthrough` flag). */
 export type EvidenceEntryDetail = Schemas['EvidenceEntryDetailModel'];
 
 /** EvidenceListResponse from web_api/schemas.py. */
 export type EvidenceListResponse = Schemas['EvidenceListResponse'];
 
-/** EvidenceReviewItemModel from web_api/schemas.py (triage row). */
-export type EvidenceReviewItem = Schemas['EvidenceReviewItemModel'];
+/** EvidenceReviewItemModel from web_api/schemas.py (triage row). The review
+ * queue projection does not carry 突破 yet (only entry list/detail do); the
+ * badge renders whenever the row does include it. */
+export type EvidenceReviewItem = Schemas['EvidenceReviewItemModel'] & {
+  breakthrough?: boolean;
+};
 
 /** EvidenceReviewSummaryModel — queue-wide counters, ignoring list filters. */
 export type EvidenceReviewSummary = Schemas['EvidenceReviewSummaryModel'];
@@ -162,7 +168,8 @@ export type EvidenceReviewDeprecateRequest = Schemas['EvidenceReviewDeprecateReq
 /** EvidenceReviewMutationResponse from web_api/schemas.py. */
 export type EvidenceReviewMutationResponse = Schemas['EvidenceReviewMutationResponse'];
 
-/** EvidenceEditRequest from web_api/schemas.py (whitelist field edit). */
+/** EvidenceEditRequest from web_api/schemas.py (whitelist field edit; the
+ * 突破 flag round-trips as "true"/"false"/"" strings through `fields`). */
 export type EvidenceEditRequest = Schemas['EvidenceEditRequest'];
 
 /** EvidenceEntryActionRequest from web_api/schemas.py (accept/reject/restore). */
@@ -444,8 +451,13 @@ export type ProjectsBoardGoal = Schemas['ProjectsBoardGoalModel'];
 /** ProjectsBoardHabitDayModel from web_api/schemas.py (one week dot). */
 export type ProjectsBoardHabitDay = Schemas['ProjectsBoardHabitDayModel'];
 
-/** ProjectsBoardHabitModel from web_api/schemas.py (habit check-in strip). */
-export type ProjectsBoardHabit = Schemas['ProjectsBoardHabitModel'];
+/** ProjectsBoardHabitModel from web_api/schemas.py (habit check-in strip).
+ * The OpenAPI snapshot marks `archived` required (server defaults false);
+ * relaxed here so older fixtures and pre-contract payloads still typecheck —
+ * the flag only matters on ?include_archived=true rows. */
+export type ProjectsBoardHabit = Omit<Schemas['ProjectsBoardHabitModel'], 'archived'> & {
+  archived?: boolean;
+};
 
 /** ProjectsBoardResponse from web_api/schemas.py (unified /projects payload). */
 export type ProjectsBoardResponse = Schemas['ProjectsBoardResponse'];
@@ -575,3 +587,24 @@ export type InboxClarifyAction =
   | 'to_evidence_draft'
   | 'discard'
   | 'archive';
+
+// ---------------------------------------------------------------------------
+// Habit lifecycle + skill progression (contract landed 2026-09-24; openapi.json
+// regenerated same day, these are plain schema aliases).
+
+/** SkillNodeProgressModel from web_api/schemas.py — 进阶进度 readout attached
+ * to GET /skill-tree nodes (弱1/中10/强100/突破1000; thresholds 10/30/100). */
+export type SkillNodeProgress = Schemas['SkillNodeProgressModel'];
+
+/** HabitArchiveRequest — POST .../habits/{habit_id}/archive body. */
+export type HabitArchiveRequest = Schemas['HabitArchiveRequest'];
+
+/** HabitArchiveResponse — archive acknowledgement (`changed=false` = no-op). */
+export type HabitArchiveResponse = Schemas['HabitArchiveResponse'];
+
+/** HabitDeleteRequest — DELETE .../habits/{habit_id} body (type-the-name). */
+export type HabitDeleteRequest = Schemas['HabitDeleteRequest'];
+
+/** HabitDeleteResponse — {ok, deleted_id, checkins_removed}; 422
+ * `habit_delete_confirm_mismatch` on a mismatched confirm_title. */
+export type HabitDeleteResponse = Schemas['HabitDeleteResponse'];

@@ -48,12 +48,21 @@ function statusMeta(status: string): { label: string; shape: StateShape; color: 
 }
 
 /** 三态 glyph: 空圈 (hollow ring) / 实点 (filled dot) / 点套圈 (dot in ring). */
-function StateGlyph({ shape, color }: { shape: StateShape; color: string }) {
+function StateGlyph({
+  shape,
+  color,
+  className,
+}: {
+  shape: StateShape;
+  color: string;
+  className?: string;
+}) {
   const ring = shape !== 'dot';
   const dot = shape !== 'ring';
   return (
     <span
       aria-hidden="true"
+      className={className}
       style={{
         display: 'inline-flex',
         width: 14,
@@ -262,6 +271,8 @@ function NodeRow({ node, depth, collapsed, onToggle, forceExpanded, selectedId, 
   const locked = node.status === 'locked';
   const evidenceCount = node.evidence_count ?? 0;
   const selected = selectedId === node.id;
+  // 可进阶脉冲: eligible nodes' glyphs breathe a soft gold ring.
+  const eligible = node.progress?.eligible ?? false;
   return (
     <>
       <Group
@@ -270,6 +281,7 @@ function NodeRow({ node, depth, collapsed, onToggle, forceExpanded, selectedId, 
         py={6}
         pl={depth * 22}
         data-testid={`skill-node-${node.id}`}
+        data-eligible={eligible ? 'true' : undefined}
         onClick={() => onSelect(node.id)}
         style={{
           cursor: 'pointer',
@@ -293,7 +305,11 @@ function NodeRow({ node, depth, collapsed, onToggle, forceExpanded, selectedId, 
         ) : (
           <Box w={28} style={{ flexShrink: 0 }} />
         )}
-        <StateGlyph shape={meta.shape} color={meta.color} />
+        <StateGlyph
+          shape={meta.shape}
+          color={meta.color}
+          className={eligible ? 'nblane-eligible-pulse' : undefined}
+        />
         <Text
           size="sm"
           lineClamp={1}
@@ -408,6 +424,71 @@ function evidenceStageFor(item: { review_status?: string }): string {
   return 'review';
 }
 
+/** 进阶进度 block: current rung → next rung with a score/threshold 泥金 bar,
+ * breakthrough count, and the 可进阶 hint that pairs with the stepper pulse. */
+function SkillProgressBlock({ node }: { node: SkillTreeNode }) {
+  const progress = node.progress;
+  if (!progress) {
+    return null;
+  }
+  const currentLabel = statusMeta(node.status ?? 'locked').label;
+  const nextLabel = progress.next_rung ? statusMeta(progress.next_rung).label : null;
+  const threshold = progress.threshold_next;
+  const fraction =
+    threshold && threshold > 0 ? Math.min(progress.score / threshold, 1) : 1;
+  return (
+    <div data-testid="skill-progress" style={{ marginTop: 14 }}>
+      <p className="starmap-detail-hint" style={hintStyle}>
+        进阶
+      </p>
+      <Group justify="space-between" wrap="nowrap">
+        <Text size="sm" style={{ color: chrome.text }}>
+          {nextLabel ? `${currentLabel} → ${nextLabel}` : `${currentLabel} · 已至顶阶`}
+        </Text>
+        <Text
+          size="xs"
+          style={{ color: chrome.dim, fontVariantNumeric: 'tabular-nums' }}
+        >
+          {threshold ? `${progress.score} / ${threshold}` : `${progress.score}`}
+        </Text>
+      </Group>
+      <div
+        style={{
+          height: 6,
+          borderRadius: 3,
+          background: 'rgba(242, 237, 224, 0.12)',
+          marginTop: 6,
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          data-testid="skill-progress-fill"
+          style={{
+            height: '100%',
+            width: `${(fraction * 100).toFixed(1)}%`,
+            background: GOLD,
+            borderRadius: 3,
+          }}
+        />
+      </div>
+      {(progress.breakthrough_count > 0 || progress.eligible) && (
+        <Group gap="sm" wrap="wrap" style={{ marginTop: 4 }}>
+          {progress.breakthrough_count > 0 && (
+            <Text size="xs" style={{ color: GOLD }} data-testid="skill-breakthroughs">
+              突破 ×{progress.breakthrough_count}
+            </Text>
+          )}
+          {progress.eligible && (
+            <Text size="xs" style={{ color: GOLD }} data-testid="skill-eligible-hint">
+              已达进阶门槛 — 可在下方境界晋升
+            </Text>
+          )}
+        </Group>
+      )}
+    </div>
+  );
+}
+
 function SkillInscriptionCard({
   profile,
   node,
@@ -426,6 +507,15 @@ function SkillInscriptionCard({
   const meta = statusMeta(node.status ?? 'locked');
   const mapping = category ? SECTOR_ASTERISM_TABLE[category.name || category.id || ''] : undefined;
   const activeStep = stepIndexOf(node.status ?? 'locked');
+  // Suggested upgrade: progress.eligible points at the stepper rung matching
+  // next_rung (solid → the 点亮 step; expert is review-earned, no step).
+  const upgradeStepKey = node.progress?.eligible
+    ? node.progress.next_rung === 'solid'
+      ? 'lit'
+      : node.progress.next_rung === 'learning'
+        ? 'learning'
+        : null
+    : null;
 
   const selection: StarmapSelection = {
     kind: 'skill',
@@ -484,11 +574,14 @@ function SkillInscriptionCard({
           <Group gap={6} wrap="nowrap">
             {STATUS_STEPS.map((step, index) => {
               const active = index === activeStep;
+              const suggested = !active && step.key === upgradeStepKey;
               return (
                 <button
                   key={step.key}
                   type="button"
+                  className={suggested ? 'nblane-eligible-pulse' : undefined}
                   data-testid={`stepper-${step.key}`}
+                  data-suggested={suggested ? 'true' : undefined}
                   aria-pressed={active}
                   disabled={active || patchStatus.isPending}
                   onClick={() => {
@@ -502,16 +595,34 @@ function SkillInscriptionCard({
                     gap: 5,
                     padding: '4px 10px',
                     borderRadius: 999,
-                    border: `1px solid ${active ? GOLD : 'rgba(220, 174, 85, 0.28)'}`,
-                    background: active ? 'rgba(220, 174, 85, 0.16)' : 'transparent',
-                    color: active ? '#f0cd7f' : 'rgba(245, 234, 210, 0.6)',
+                    border: `1px solid ${
+                      active || suggested ? GOLD : 'rgba(220, 174, 85, 0.28)'
+                    }`,
+                    background: active
+                      ? 'rgba(220, 174, 85, 0.16)'
+                      : suggested
+                        ? 'rgba(220, 174, 85, 0.08)'
+                        : 'transparent',
+                    color:
+                      active || suggested ? '#f0cd7f' : 'rgba(245, 234, 210, 0.6)',
                     fontSize: 12,
                     cursor: patchStatus.isPending ? 'wait' : 'pointer',
                     fontFamily: 'inherit',
                   }}
                 >
-                  <StateGlyph shape={step.shape} color={active ? GOLD : 'rgba(232, 226, 210, 0.4)'} />
+                  <StateGlyph
+                    shape={step.shape}
+                    color={active || suggested ? GOLD : 'rgba(232, 226, 210, 0.4)'}
+                  />
                   {step.label}
+                  {suggested && (
+                    <span
+                      data-testid={`stepper-upgrade-${step.key}`}
+                      style={{ color: GOLD, fontSize: 11, letterSpacing: 1 }}
+                    >
+                      可进阶
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -525,6 +636,7 @@ function SkillInscriptionCard({
             </p>
           )}
         </div>
+        <SkillProgressBlock node={node} />
         <div data-testid="skill-evidence" style={{ marginTop: 14 }}>
           <p style={hintStyle}>关联证据</p>
           {evidence.isPending && <Loader size="xs" />}

@@ -1206,3 +1206,16 @@
   .div-casting-label,
   .hexagram-symbol.casting .hex-yao { animation: none; }
 }
+
+/* 可进阶脉冲 (skill progression, 2026-09-24): eligible skill glyphs and the
+ * stepper's suggested rung breathe a soft 泥金 ring. Reduced-motion kills it. */
+@keyframes nblane-eligible-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 174, 85, 0.55); }
+  50% { box-shadow: 0 0 0 4px rgba(220, 174, 85, 0); }
+}
+
+.nblane-eligible-pulse { animation: nblane-eligible-pulse 2.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nblane-eligible-pulse { animation: none; }
+}

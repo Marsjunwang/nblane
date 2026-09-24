@@ -561,8 +561,10 @@ export interface paths {
          *
          *     Text fields (``title``/``summary``/``date``/``url``) take any string
          *     ("" clears all but ``title``); enum fields (``type`` plus the review
-         *     whitelist) must be in their domain ("" clears). Honors ``If-Match``
-         *     (412 on mismatch, fresh ETag in the header).
+         *     whitelist) must be in their domain ("" clears); bool flags
+         *     (``breakthrough``) take ``"true"``/``"false"`` ("" or ``"false"``
+         *     clears the flag). Honors ``If-Match`` (412 on mismatch, fresh ETag in
+         *     the header).
          */
         post: operations["edit_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__edit_post"];
         delete?: never;
@@ -759,6 +761,60 @@ export interface paths {
          *     ``If-Match`` against the goals.yaml ETag (412 on mismatch).
          */
         patch: operations["patch_profile_goal_api_v1_profiles__name__goals__goal_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/habits/{habit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Profile Habit
+         * @description Delete one habit and every check-in referencing it (confirmed).
+         *
+         *     ``confirm_title`` must equal the habit's title exactly, else 422
+         *     ``habit_delete_confirm_mismatch`` and nothing is written. The purge
+         *     removes the catalog entry plus all its check-in rows and answers the
+         *     removed count. ``record_chronicle=true`` appends a ``habit.deleted``
+         *     chronicle entry (default off). Honors ``If-Match`` against the
+         *     activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
+         */
+        delete: operations["delete_profile_habit_api_v1_profiles__name__habits__habit_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/habits/{habit_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Profile Habit
+         * @description Archive or unarchive one habit (``archived`` flag in activity-log.yaml).
+         *
+         *     Archiving is reversible housekeeping: the habit entry and its whole
+         *     check-in history stay on disk, and the habit leaves the active catalog
+         *     (the projects-board ``habits`` list excludes it unless
+         *     ``include_archived`` is set). A request matching the current state is a
+         *     no-op (``changed=false``, nothing written). Honors ``If-Match`` against
+         *     the activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
+         */
+        post: operations["archive_profile_habit_api_v1_profiles__name__habits__habit_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/profiles/{name}/health": {
@@ -1535,7 +1591,9 @@ export interface paths {
          *     live tasks grouped by column (``someday`` as a badge list, not a
          *     column), an ``unassigned_tasks`` lane for tasks owned by no project, and
          *     habit check-in strips (current ISO week dots + streak ending today +
-         *     total + ``recent_days`` heatmap window over the trailing 90 days). Full data, no display caps. The response carries the
+         *     total + ``recent_days`` heatmap window over the trailing 90 days).
+         *     Archived habits stay out of ``habits`` unless ``include_archived`` is
+         *     set. Full data, no display caps. The response carries the
          *     board-source ETag (see module docstring pattern) for use as ``If-Match``
          *     on the kanban/check-in mutations.
          */
@@ -3057,7 +3115,8 @@ export interface components {
          *     ``fields`` maps field name -> new value. Allowed keys: the review
          *     whitelist (``review_status``/``strength``/``confidence``/
          *     ``public_readiness``, domain-validated, "" clears) plus the text fields
-         *     ``title``/``summary``/``date``/``url`` and ``type`` (domain-validated).
+         *     ``title``/``summary``/``date``/``url`` and ``type`` (domain-validated),
+         *     plus the bool flag ``breakthrough`` ("true"/"false", "" clears).
          *     Unknown keys answer 422; provenance fields (``origin*``, refs,
          *     ``original_content``) are not editable here — the original snapshot is
          *     immutable once crystallized.
@@ -3101,6 +3160,11 @@ export interface components {
          * @description One evidence-pool entry, full detail view.
          */
         EvidenceEntryDetailModel: {
+            /**
+             * Breakthrough
+             * @default false
+             */
+            breakthrough: boolean;
             /**
              * Confidence
              * @default
@@ -3226,6 +3290,11 @@ export interface components {
          * @description One evidence-pool entry, list view.
          */
         EvidenceEntryModel: {
+            /**
+             * Breakthrough
+             * @default false
+             */
+            breakthrough: boolean;
             /**
              * Date
              * @default
@@ -4035,6 +4104,82 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HabitArchiveRequest
+         * @description Body for POST .../habits/{habit_id}/archive (archive or restore).
+         */
+        HabitArchiveRequest: {
+            /** Archived */
+            archived: boolean;
+        };
+        /**
+         * HabitArchiveResponse
+         * @description Result of the habit archive mutation.
+         *
+         *     ``changed`` is false when the habit was already in the requested state
+         *     (a no-op writes nothing).
+         */
+        HabitArchiveResponse: {
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            /** Habit Id */
+            habit_id: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /**
+         * HabitDeleteRequest
+         * @description Body for DELETE .../habits/{habit_id} (confirmed destructive delete).
+         *
+         *     ``confirm_title`` must equal the habit's title exactly, else 422
+         *     ``habit_delete_confirm_mismatch`` — the typed-name guard against
+         *     fat-finger deletes. ``record_chronicle`` opts into a ``habit.deleted``
+         *     chronicle entry (default off: routine catalog pruning is not a
+         *     narrative event).
+         */
+        HabitDeleteRequest: {
+            /**
+             * Confirm Title
+             * @default
+             */
+            confirm_title: string;
+            /**
+             * Record Chronicle
+             * @default false
+             */
+            record_chronicle: boolean;
+        };
+        /**
+         * HabitDeleteResponse
+         * @description Result of the habit delete mutation.
+         *
+         *     ``checkins_removed`` counts every check-in row purged with the habit.
+         */
+        HabitDeleteResponse: {
+            /**
+             * Checkins Removed
+             * @default 0
+             */
+            checkins_removed: number;
+            /** Deleted Id */
+            deleted_id: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /**
          * HealthIssueModel
@@ -5798,6 +5943,11 @@ export interface components {
          */
         ProjectsBoardHabitModel: {
             /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /**
              * Cadence
              * @default
              */
@@ -6718,6 +6868,37 @@ export interface components {
             status: string;
         };
         /**
+         * SkillNodeProgressModel
+         * @description Progression readout for one skill node (core.skill_progression).
+         *
+         *     ``score`` sums the node's non-deprecated evidence_refs (weak/medium/
+         *     strong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /
+         *     ``threshold_next`` describe the rung above the current YAML status
+         *     (both null at expert); ``eligible`` means the node qualifies for a
+         *     rung-up prompt (score threshold met, or at least one breakthrough).
+         */
+        SkillNodeProgressModel: {
+            /**
+             * Breakthrough Count
+             * @default 0
+             */
+            breakthrough_count: number;
+            /**
+             * Eligible
+             * @default false
+             */
+            eligible: boolean;
+            /** Next Rung */
+            next_rung?: string | null;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+            /** Threshold Next */
+            threshold_next?: number | null;
+        };
+        /**
          * SkillTreeCategoryModel
          * @description Per-category rollup for the category banner headers.
          *
@@ -6760,7 +6941,8 @@ export interface components {
          *     the profile overlay; ``evidence_count`` counts resolved evidence (pool
          *     refs plus inline rows, deprecated/missing refs excluded). ``category``
          *     is the schema grouping (empty for nodes unknown to the schema) — the
-         *     home starmap uses it to size its sector band.
+         *     home starmap uses it to size its sector band. ``progress`` is the
+         *     tunable rung-up readout (see ``SkillNodeProgressModel``).
          */
         SkillTreeNodeModel: {
             /**
@@ -6777,6 +6959,7 @@ export interface components {
             evidence_count: number;
             /** Id */
             id: string;
+            progress?: components["schemas"]["SkillNodeProgressModel"];
             /**
              * Status
              * @default locked
@@ -9433,6 +9616,154 @@ export interface operations {
             };
         };
     };
+    delete_profile_habit_api_v1_profiles__name__habits__habit_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                habit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["HabitDeleteRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitDeleteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or habit not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the activity log file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description confirm_title does not match the habit title. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    archive_profile_habit_api_v1_profiles__name__habits__habit_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                habit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HabitArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitArchiveResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or habit not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the activity log file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing/unknown habit, unlinked project, invalid date, or non-positive count. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_profile_health_api_v1_profiles__name__health_get: {
         parameters: {
             query?: never;
@@ -11498,7 +11829,10 @@ export interface operations {
     };
     get_profile_projects_board_api_v1_profiles__name__projects_board_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Include archived habits in habits[] (flagged archived=true). By default archived habits are excluded. */
+                include_archived?: boolean;
+            };
             header?: never;
             path: {
                 name: string;

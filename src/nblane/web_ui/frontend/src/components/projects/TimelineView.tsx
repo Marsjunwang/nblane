@@ -391,8 +391,8 @@ function HabitRow({
               width: (daysBetween(clipped.start, clipped.end) + 1) * scale.dayWidth,
               height: 12,
               borderRadius: 6,
-              border: `1px dashed ${boardPalette.habitGreen}`,
-              background: 'rgba(125, 191, 142, 0.08)',
+              border: `1px dashed ${boardPalette.gold}`,
+              background: 'rgba(220, 174, 85, 0.08)',
             }}
           />
         )}
@@ -410,7 +410,7 @@ function HabitRow({
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: boardPalette.habitGreen,
+                background: boardPalette.gold,
               }}
             />
           ))}

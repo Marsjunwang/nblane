@@ -137,6 +137,7 @@ describe('lanes habit dedupe (裁决2:一个习惯全站一行)', () => {
         streak: 0,
         total_checkins: 0,
         last_checkin: '',
+        archived: false,
       },
       {
         id: 'reading',
@@ -149,6 +150,7 @@ describe('lanes habit dedupe (裁决2:一个习惯全站一行)', () => {
         streak: 0,
         total_checkins: 0,
         last_checkin: '',
+        archived: false,
       },
     ],
   };

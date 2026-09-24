@@ -269,6 +269,83 @@ function stubRichFetch() {
   return calls;
 }
 
+describe('SkillTreePage 进阶进度', () => {
+  const TREE_WITH_PROGRESS = {
+    ...TREE,
+    nodes: [
+      {
+        id: 'point_cloud',
+        title: 'Point Cloud Processing',
+        status: 'learning',
+        evidence_count: 2,
+        children: [],
+        progress: {
+          score: 12,
+          next_rung: 'solid',
+          threshold_next: 30,
+          breakthrough_count: 1,
+          eligible: false,
+        },
+      },
+      {
+        id: 'git_workflow',
+        title: 'Git / GitHub workflow',
+        status: 'learning',
+        evidence_count: 0,
+        children: [],
+        progress: {
+          score: 35,
+          next_rung: 'solid',
+          threshold_next: 30,
+          breakthrough_count: 0,
+          eligible: true,
+        },
+      },
+    ],
+  };
+
+  it('inscription card shows rung ladder, 泥金 score bar and breakthrough count', async () => {
+    stubFetch(TREE_WITH_PROGRESS);
+    renderPage();
+
+    fireEvent.click(await screen.findByText('Point Cloud Processing'));
+    const card = await screen.findByTestId('skill-inscription');
+    const block = within(card).getByTestId('skill-progress');
+    expect(block).toHaveTextContent('学习中 → 扎实');
+    expect(block).toHaveTextContent('12 / 30');
+    // 12/30 → 40% 泥金 fill.
+    expect(within(card).getByTestId('skill-progress-fill').style.width).toBe('40%');
+    expect(within(card).getByTestId('skill-breakthroughs')).toHaveTextContent('突破 ×1');
+    // Not eligible: no suggested-upgrade state on the stepper.
+    expect(within(card).queryByTestId('stepper-upgrade-lit')).not.toBeInTheDocument();
+    expect(within(card).getByTestId('stepper-lit')).not.toHaveClass('nblane-eligible-pulse');
+  });
+
+  it('eligible nodes pulse in the list and the stepper marks the next rung 可进阶', async () => {
+    stubFetch(TREE_WITH_PROGRESS);
+    renderPage();
+
+    // Node list glyph carries the pulse class; the ineligible one does not.
+    const row = await screen.findByTestId('skill-node-git_workflow');
+    expect(row).toHaveAttribute('data-eligible', 'true');
+    expect(
+      screen.getByTestId('skill-node-point_cloud'),
+    ).not.toHaveAttribute('data-eligible');
+
+    fireEvent.click(row);
+    const card = await screen.findByTestId('skill-inscription');
+    expect(within(card).getByTestId('skill-eligible-hint')).toHaveTextContent(
+      '已达进阶门槛',
+    );
+    const lit = within(card).getByTestId('stepper-lit');
+    expect(lit).toHaveAttribute('data-suggested', 'true');
+    expect(lit).toHaveClass('nblane-eligible-pulse');
+    expect(within(card).getByTestId('stepper-upgrade-lit')).toHaveTextContent('可进阶');
+    // breakthrough_count 0 → no breakthrough line.
+    expect(within(card).queryByTestId('skill-breakthroughs')).not.toBeInTheDocument();
+  });
+});
+
 describe('SkillTreePage category banners (星官化)', () => {
   it('renders asterism figure, 官名, 三态统计 and lore per mapped category', async () => {
     stubRichFetch();

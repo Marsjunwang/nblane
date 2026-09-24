@@ -7,9 +7,13 @@
 // a 第N/总天 progress arc (N from the plan's time_range vs board.today) and a
 // hover-revealed 设置 affordance that opens the ProjectEditDrawer for the
 // linked case (basics/milestones/delete live there — 日课项目可删除).
-// Pure habit rows get NO such affordance: a habit is not a project case, so
-// there is nothing to delete from the project side (habit lifecycle stays
-// in the activity log / settings). A row expands into the month heatmap
+// Pure-habit rows get the same hover-reveal gear, opening a lifecycle menu:
+// 归档 (one click, the row folds away; 显示已归档 toggle brings it back
+// dimmed with a 恢复 item) and 删除 (type-the-name confirm modal with the
+// 打卡记录 consequence preview + optional 记入大事记). The week dots are
+// 石刻化: unchecked = thin 月白-35% hollow ring, checked = 泥金 filled dot,
+// today carries a thin gold outer ring (no Mantine green).
+// A row expands into the month heatmap
 // (recent_days, 月白→泥金). Clicking an
 // EMPTY past/today cell backfills a check-in for that date (POST /checkins);
 // clicking a FILLED cell with known check-in ids offers 销印 (inline confirm
@@ -17,12 +21,38 @@
 // predate check-in ids are read-only (tooltip explains). The starmap
 // HabitSeal stays disabled until it is wired to the same endpoint.
 
-import { ActionIcon, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Button,
+  Checkbox,
+  Group,
+  Menu,
+  Modal,
+  Stack,
+  Text,
+  TextInput,
+  Tooltip,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconChevronDown, IconChevronRight, IconSettings } from '@tabler/icons-react';
+import {
+  IconArchive,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconSettings,
+  IconTrash,
+} from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
-import { useAddCheckin, useDeleteCheckin } from '../../api/hooks';
+import { ApiError } from '../../api/client';
+import {
+  useAddCheckin,
+  useArchivedBoardHabits,
+  useArchiveHabit,
+  useDeleteCheckin,
+  useDeleteHabit,
+} from '../../api/hooks';
 import type { ProjectsBoardHabit } from '../../api/types';
 import { buildHeatmapWeeks, heatmapCellColor } from './habitHeatmap';
 import type { HabitRow } from './lanes';
@@ -86,32 +116,37 @@ function PlanArc({ current, total }: { current: number; total: number }) {
   );
 }
 
-function WeekDots({ habit }: { habit: ProjectsBoardHabit }) {
+/** 石刻化 week dots: unchecked = thin 月白-35% hollow ring, checked = 泥金
+ * filled dot, today's cell carries a thin gold outer ring (box-shadow so the
+ * fill/border vocabulary stays intact). No Mantine green. */
+function WeekDots({ habit, today }: { habit: ProjectsBoardHabit; today: string }) {
   return (
     <Group gap={6} wrap="nowrap" data-testid={`habit-week-${habit.id}`}>
-      {(habit.week ?? []).map((day) => (
-        <Tooltip key={day.date} label={day.date} withArrow>
-          <span
-            data-testid={`habit-dot-${habit.id}-${day.date}`}
-            data-done={day.done ? 'true' : 'false'}
-            style={{
-              display: 'inline-block',
-              width: 12,
-              height: 12,
-              borderRadius: '50%',
-              background: day.done ? boardPalette.habitGreen : 'transparent',
-              border: `1.5px solid ${
-                day.done
-                  ? boardPalette.habitGreen
-                  : day.future
-                    ? 'rgba(176, 167, 140, 0.4)'
-                    : boardPalette.dim
-              }`,
-              opacity: day.future ? 0.5 : 1,
-            }}
-          />
-        </Tooltip>
-      ))}
+      {(habit.week ?? []).map((day) => {
+        const isToday = isTodayDate(day.date, today) && !day.future;
+        return (
+          <Tooltip key={day.date} label={day.date} withArrow>
+            <span
+              data-testid={`habit-dot-${habit.id}-${day.date}`}
+              data-done={day.done ? 'true' : 'false'}
+              data-today={isToday ? 'true' : 'false'}
+              style={{
+                display: 'inline-block',
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                boxSizing: 'border-box',
+                background: day.done ? boardPalette.gold : 'transparent',
+                border: `1px solid ${
+                  day.done ? boardPalette.gold : 'rgba(242, 237, 224, 0.35)'
+                }`,
+                boxShadow: isToday ? `0 0 0 1.5px ${boardPalette.gold}` : undefined,
+                opacity: day.future ? 0.5 : 1,
+              }}
+            />
+          </Tooltip>
+        );
+      })}
     </Group>
   );
 }
@@ -303,17 +338,236 @@ function HabitHeatmap({
   );
 }
 
+/**
+ * 删除习惯 confirm modal: consequence preview (将移除 N 条打卡记录) +
+ * type-the-name confirm + optional 记入大事记 (default off). 422
+ * `habit_delete_confirm_mismatch` lands as an inline field error.
+ */
+function DeleteHabitModal({
+  profile,
+  habit,
+  opened,
+  onClose,
+  onDeleted,
+}: {
+  profile: string;
+  habit: ProjectsBoardHabit;
+  opened: boolean;
+  onClose: () => void;
+  onDeleted: (habitId: string) => void;
+}) {
+  const remove = useDeleteHabit(profile);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [recordChronicle, setRecordChronicle] = useState(false);
+  const title = habit.title || habit.id;
+  const checkins = habit.total_checkins ?? 0;
+  const confirmed = confirmTitle === title;
+
+  const close = () => {
+    setConfirmTitle('');
+    setRecordChronicle(false);
+    remove.reset();
+    onClose();
+  };
+
+  const runDelete = () => {
+    remove.mutate(
+      {
+        habitId: habit.id,
+        body: { confirm_title: confirmTitle, record_chronicle: recordChronicle },
+      },
+      {
+        onSuccess: (result) => {
+          notifications.show({
+            color: 'green',
+            title: '习惯已删除',
+            message: `「${title}」已删除,移除 ${result.checkins_removed ?? 0} 条打卡记录。`,
+          });
+          onDeleted(habit.id);
+          close();
+        },
+      },
+    );
+  };
+
+  const mismatch =
+    remove.error instanceof ApiError &&
+    remove.error.status === 422 &&
+    remove.error.code === 'habit_delete_confirm_mismatch';
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={close}
+      title={`删除习惯 · ${title}`}
+      data-testid={`delete-habit-modal-${habit.id}`}
+    >
+      <Stack gap="sm">
+        <Alert color="red" title="后果预告" data-testid={`delete-habit-preview-${habit.id}`}>
+          将移除 {checkins} 条打卡记录,习惯「{title}」不再出现在日课栏;此操作不可撤销。
+        </Alert>
+        <TextInput
+          label={`输入习惯名「${title}」以确认`}
+          placeholder={title}
+          value={confirmTitle}
+          onChange={(event) => setConfirmTitle(event.currentTarget.value)}
+          error={mismatch ? '习惯名不匹配,请逐字输入。' : undefined}
+          data-testid={`delete-habit-confirm-title-${habit.id}`}
+        />
+        <Checkbox
+          label="记入大事记(chronicle 追加 habit.deleted 条目)"
+          checked={recordChronicle}
+          onChange={(event) => setRecordChronicle(event.currentTarget.checked)}
+          data-testid={`delete-habit-record-chronicle-${habit.id}`}
+        />
+        {remove.error && !mismatch && (
+          <Alert color="red" title="删除失败">
+            {remove.error.message}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={close}>
+            取消
+          </Button>
+          <Button
+            color="red"
+            disabled={!confirmed}
+            loading={remove.isPending}
+            onClick={runDelete}
+            data-testid={`delete-habit-confirm-${habit.id}`}
+          >
+            永久删除
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+/** Pure-habit lifecycle gear: hover-revealed, opens the 归档/删除 menu. */
+function HabitLifecycleMenu({
+  profile,
+  habit,
+  archived,
+  visible,
+  onVisibility,
+  onArchived,
+  onDeleted,
+}: {
+  profile: string;
+  habit: ProjectsBoardHabit;
+  archived: boolean;
+  visible: boolean;
+  onVisibility: (visible: boolean) => void;
+  onArchived: (habitId: string, archived: boolean) => void;
+  onDeleted: (habitId: string) => void;
+}) {
+  const archiveHabit = useArchiveHabit(profile);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const title = habit.title || habit.id;
+
+  const runArchive = (next: boolean) => {
+    archiveHabit.mutate(
+      { habitId: habit.id, archived: next },
+      {
+        onSuccess: () => {
+          notifications.show({
+            color: 'green',
+            title: next ? '已归档' : '已恢复',
+            message: next
+              ? `「${title}」已归档,不再出现在日课栏;打卡历史保留。`
+              : `「${title}」已恢复到日课栏。`,
+          });
+          onArchived(habit.id, next);
+        },
+        onError: (error) => {
+          notifications.show({
+            color: 'red',
+            title: next ? '归档失败' : '恢复失败',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        },
+      },
+    );
+  };
+
+  return (
+    <>
+      <Menu withinPortal position="bottom-end" shadow="md">
+        <Menu.Target>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            aria-label={`习惯设置 ${title}`}
+            data-testid={`habit-menu-${habit.id}`}
+            onFocus={() => onVisibility(true)}
+            onBlur={() => onVisibility(false)}
+            style={{
+              color: boardPalette.dim,
+              opacity: visible ? 1 : 0,
+              transition: 'opacity 120ms ease',
+            }}
+          >
+            <IconSettings size={14} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          {archived ? (
+            <Menu.Item
+              leftSection={<IconArchive size={14} />}
+              onClick={() => runArchive(false)}
+              data-testid={`habit-restore-${habit.id}`}
+            >
+              恢复
+            </Menu.Item>
+          ) : (
+            <Menu.Item
+              leftSection={<IconArchive size={14} />}
+              onClick={() => runArchive(true)}
+              data-testid={`habit-archive-${habit.id}`}
+            >
+              归档
+            </Menu.Item>
+          )}
+          <Menu.Item
+            color="red"
+            leftSection={<IconTrash size={14} />}
+            onClick={() => setDeleteOpen(true)}
+            data-testid={`habit-delete-${habit.id}`}
+          >
+            删除…
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      <DeleteHabitModal
+        profile={profile}
+        habit={habit}
+        opened={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={onDeleted}
+      />
+    </>
+  );
+}
+
 function HabitBandRow({
   profile,
   row,
   today,
+  archived,
   onEditProject,
+  onArchived,
+  onDeleted,
 }: {
   profile: string;
   row: HabitRow;
   today: string;
+  /** Locally archived (folded away unless 显示已归档 is on). */
+  archived: boolean;
   /** Opens the ProjectEditDrawer for a habit-plan case (日课项目可删除). */
   onEditProject?: (projectId: string) => void;
+  onArchived: (habitId: string, archived: boolean) => void;
+  onDeleted: (habitId: string) => void;
 }) {
   const { habit, project } = row;
   const [expanded, setExpanded] = useState(false);
@@ -354,7 +608,7 @@ function HabitBandRow({
       gap={6}
       py={6}
       data-testid={`habit-band-row-${habit.id}`}
-      style={{ opacity: planArchived ? 0.55 : 1 }}
+      style={{ opacity: archived ? 0.5 : planArchived ? 0.55 : 1 }}
       onMouseEnter={() => setSettingsVisible(true)}
       onMouseLeave={() => setSettingsVisible(false)}
     >
@@ -401,6 +655,22 @@ function HabitBandRow({
               <IconSettings size={14} />
             </ActionIcon>
           )}
+          {!isPlan && (
+            <HabitLifecycleMenu
+              profile={profile}
+              habit={habit}
+              archived={archived}
+              visible={settingsVisible}
+              onVisibility={setSettingsVisible}
+              onArchived={onArchived}
+              onDeleted={onDeleted}
+            />
+          )}
+          {archived && (
+            <Text size="xs" style={{ color: boardPalette.dim }}>
+              已归档
+            </Text>
+          )}
           <Text size="xs" style={{ color: boardPalette.dim }}>
             连续 {habit.streak ?? 0} 天
             {habit.last_checkin ? ` · 上次 ${habit.last_checkin.slice(5)}` : ''} · 累计{' '}
@@ -409,11 +679,11 @@ function HabitBandRow({
         </Group>
         <Group gap="sm" wrap="nowrap" style={{ flexShrink: 0 }}>
           {progress && <PlanArc current={progress.current} total={progress.total} />}
-          <WeekDots habit={habit} />
+          <WeekDots habit={habit} today={today} />
           <Button
             size="compact-sm"
             variant={todayDone ? 'subtle' : 'light'}
-            color="green"
+            color="brand"
             leftSection={<IconCheck size={14} />}
             loading={checkin.isPending}
             onClick={runCheckin}
@@ -431,6 +701,10 @@ function HabitBandRow({
 /**
  * The 日课栏 band: one row per habit (linked or not), separated from the goal
  * groups by a 裱边 gold hairline. Renders nothing when the board has no habits.
+ * Locally archived rows fold away instantly; the 显示已归档 toggle then
+ * fetches server-side archived habits (?include_archived=true) and renders
+ * them dimmed with a 恢复 item. A board whose habits are ALL archived renders
+ * no band (nothing to toggle from).
  */
 export function HabitBand({
   profile,
@@ -444,6 +718,54 @@ export function HabitBand({
   /** Passed to habit-plan rows for the hover 设置 affordance. */
   onEditProject?: (projectId: string) => void;
 }) {
+  const [archivedIds, setArchivedIds] = useState<ReadonlySet<string>>(new Set());
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
+  // Server-side archived habits, fetched lazily once the toggle is on
+  // (archived habits exit the default board payload per the contract).
+  const archivedQuery = useArchivedBoardHabits(profile, showArchived);
+
+  const setHabitArchived = (habitId: string, archived: boolean) => {
+    setArchivedIds((prev) => {
+      const next = new Set(prev);
+      if (archived) {
+        next.add(habitId);
+      } else {
+        next.delete(habitId);
+      }
+      return next;
+    });
+  };
+  const removeHabit = (habitId: string) => {
+    setArchivedIds((prev) => {
+      if (!prev.has(habitId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(habitId);
+      return next;
+    });
+    setDeletedIds((prev) => new Set(prev).add(habitId));
+  };
+
+  const liveRows = rows.filter(
+    (row) => !deletedIds.has(row.habit.id) && !archivedIds.has(row.habit.id),
+  );
+  // 已归档 rows (toggle on): locally archived rows still inside `rows` (the
+  // refetch window) plus server-side archived habits not already rendered.
+  const archivedRows: HabitRow[] = showArchived
+    ? [
+        ...rows.filter((row) => archivedIds.has(row.habit.id) && !deletedIds.has(row.habit.id)),
+        ...(archivedQuery.data ?? [])
+          .filter(
+            (habit) =>
+              !deletedIds.has(habit.id) && !rows.some((row) => row.habit.id === habit.id),
+          )
+          .map((habit) => ({ habit, project: null })),
+      ]
+    : [];
+  const visibleRows = [...liveRows, ...archivedRows];
+  const archivedCount = archivedIds.size + (archivedQuery.data?.length ?? 0);
   if (rows.length === 0) {
     return null;
   }
@@ -461,16 +783,32 @@ export function HabitBand({
         borderRadius: 4,
       }}
     >
-      <Text size="xs" fw={700} style={{ color: boardPalette.goldText, letterSpacing: 2 }}>
-        日课
-      </Text>
-      {rows.map((row) => (
+      <Group justify="space-between" wrap="nowrap">
+        <Text size="xs" fw={700} style={{ color: boardPalette.goldText, letterSpacing: 2 }}>
+          日课
+        </Text>
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          color="gray"
+          onClick={() => setShowArchived((value) => !value)}
+          data-testid="habit-show-archived-toggle"
+        >
+          {showArchived
+            ? '隐藏已归档'
+            : `显示已归档${archivedCount > 0 ? ` (${archivedCount})` : ''}`}
+        </Button>
+      </Group>
+      {visibleRows.map((row) => (
         <HabitBandRow
           key={row.habit.id}
           profile={profile}
           row={row}
           today={today}
+          archived={archivedIds.has(row.habit.id) || row.habit.archived === true}
           onEditProject={onEditProject}
+          onArchived={setHabitArchived}
+          onDeleted={removeHabit}
         />
       ))}
     </Stack>

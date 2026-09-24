@@ -164,7 +164,7 @@ function stubFetch(handler?: FetchHandler) {
     if (custom) {
       return custom;
     }
-    if (url.endsWith('/profiles/alice/projects-board')) {
+    if (url.includes('/profiles/alice/projects-board')) {
       return new Response(JSON.stringify(BOARD), {
         status: 200,
         headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
@@ -668,6 +668,191 @@ describe('ProjectsPage board view', () => {
     expect(await screen.findByTestId('lane-group-learning')).toBeInTheDocument();
     expect(screen.queryByTestId('lane-group-g1')).not.toBeInTheDocument();
     expect(lastSearch).toContain('group=activity');
+  });
+});
+
+describe('ProjectsPage habit lifecycle', () => {
+  it('week dots are 石刻化: 泥金 fill / 月白 hollow ring / today gold ring (no green)', async () => {
+    stubFetch();
+    renderPage();
+    await screen.findByTestId('habit-band');
+
+    const done = screen.getByTestId('habit-dot-exercise-2026-09-23');
+    expect(done).toHaveAttribute('data-done', 'true');
+    // 2026-09-23 is board.today: thin gold outer ring via box-shadow.
+    expect(done).toHaveAttribute('data-today', 'true');
+    expect(done.style.cssText).toContain('220, 174, 85');
+    expect(done.style.cssText).not.toContain('125, 191, 142');
+
+    const undone = screen.getByTestId('habit-dot-exercise-2026-09-22');
+    expect(undone).toHaveAttribute('data-done', 'false');
+    expect(undone).toHaveAttribute('data-today', 'false');
+    expect(undone.style.cssText).toContain('rgba(242, 237, 224, 0.35)');
+  });
+
+  it('归档 folds the row away; 显示已归档 brings it back dimmed with 恢复', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/habits/exercise/archive')) {
+        const body = JSON.parse(String(init.body)) as { archived: boolean };
+        return jsonResponse(200, { ok: true, habit_id: 'exercise', archived: body.archived });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-archive-exercise'));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          init?.method === 'POST' && String(input).endsWith('/habits/exercise/archive'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ archived: true });
+    });
+    // One click and the row disappears (restore comes via the toggle).
+    expect(await screen.findByText('已归档')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId('habit-band-row-exercise')).not.toBeInTheDocument(),
+    );
+
+    // 显示已归档 toggle surfaces the row dimmed, with a 恢复 menu item.
+    fireEvent.click(screen.getByTestId('habit-show-archived-toggle'));
+    const row = await screen.findByTestId('habit-band-row-exercise');
+    expect(row).toHaveTextContent('已归档');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-restore-exercise'));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          init?.method === 'POST' &&
+          String(input).endsWith('/habits/exercise/archive') &&
+          JSON.parse(String(init?.body)).archived === false,
+      );
+      expect(call).toBeDefined();
+    });
+    expect(await screen.findByText('已恢复')).toBeInTheDocument();
+    // Back to a live row: the 已归档 badge clears.
+    await waitFor(() =>
+      expect(screen.getByTestId('habit-band-row-exercise')).not.toHaveTextContent('已归档'),
+    );
+  });
+
+  it('显示已归档 also surfaces server-side archived habits (?include_archived=true)', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (!init?.method && url.includes('include_archived=true')) {
+        const board = {
+          ...BOARD,
+          habits: [
+            ...BOARD.habits,
+            { ...BOARD.habits[0], id: 'piano', title: '练琴', archived: true },
+          ],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    // The server-archived habit only appears after the toggle.
+    expect(screen.queryByTestId('habit-band-row-piano')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('habit-show-archived-toggle'));
+    const row = await screen.findByTestId('habit-band-row-piano');
+    expect(row).toHaveTextContent('练琴');
+    expect(row).toHaveTextContent('已归档');
+
+    // 恢复 posts archived:false through the same lifecycle menu.
+    fireEvent.click(screen.getByTestId('habit-menu-piano'));
+    fireEvent.click(await screen.findByTestId('habit-restore-piano'));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          init?.method === 'POST' && String(input).endsWith('/habits/piano/archive'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ archived: false });
+    });
+  });
+
+  it('delete habit: consequence preview + type-the-name confirm + DELETE body', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (init?.method === 'DELETE' && url.endsWith('/habits/exercise')) {
+        return jsonResponse(200, { ok: true, deleted_id: 'exercise', checkins_removed: 38 });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-delete-exercise'));
+
+    // Consequence preview counts the habit's total check-ins.
+    expect(await screen.findByTestId('delete-habit-preview-exercise')).toHaveTextContent(
+      '将移除 38 条打卡记录',
+    );
+    const confirm = screen.getByTestId('delete-habit-confirm-exercise');
+    expect(confirm).toBeDisabled();
+    // 记入大事记 defaults OFF.
+    expect(screen.getByTestId('delete-habit-record-chronicle-exercise')).not.toBeChecked();
+
+    fireEvent.change(screen.getByTestId('delete-habit-confirm-title-exercise'), {
+      target: { value: '保持锻炼 ' },
+    });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId('delete-habit-confirm-title-exercise'), {
+      target: { value: '保持锻炼' },
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          init?.method === 'DELETE' && String(input).endsWith('/habits/exercise'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        confirm_title: '保持锻炼',
+        record_chronicle: false,
+      });
+    });
+    expect(await screen.findByText('习惯已删除')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId('habit-band-row-exercise')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('delete habit: 422 habit_delete_confirm_mismatch lands as an inline error', async () => {
+    stubFetch((url, init) => {
+      if (init?.method === 'DELETE' && url.endsWith('/habits/exercise')) {
+        return jsonResponse(422, {
+          code: 'habit_delete_confirm_mismatch',
+          message: 'confirm_title does not match the habit title',
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-delete-exercise'));
+    fireEvent.change(await screen.findByTestId('delete-habit-confirm-title-exercise'), {
+      target: { value: '保持锻炼' },
+    });
+    fireEvent.click(screen.getByTestId('delete-habit-confirm-exercise'));
+
+    expect(await screen.findByText('习惯名不匹配,请逐字输入。')).toBeInTheDocument();
+    // The row survives a rejected delete.
+    expect(screen.getByTestId('habit-band-row-exercise')).toBeInTheDocument();
   });
 });
 
