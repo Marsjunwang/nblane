@@ -697,6 +697,8 @@ class TestCmdAutomationsSync(unittest.TestCase):
                     name="每周巩固",
                     schedule={"cron": "0 20 * * 0", "tz": "Asia/Shanghai"},
                     session="main",
+                    # 2026.9: main-session jobs carry no announce delivery.
+                    delivery=None,
                     message=PROMPT_WEEKLY,
                 ),
             ]
@@ -729,6 +731,8 @@ class TestCmdAutomationsSync(unittest.TestCase):
                     name="每周巩固",
                     schedule={"cron": "0 20 * * 0", "tz": "Asia/Shanghai"},
                     session="main",
+                    # 2026.9: main-session jobs carry no announce delivery.
+                    delivery=None,
                     message=PROMPT_WEEKLY,
                 ),
                 {"declarationKey": "nblane:stale", "name": "旧任务"},
