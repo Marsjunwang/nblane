@@ -53,6 +53,16 @@ source_of_truth: 生产上线与 openclaw 第一环集成计划;事实依据 src
 
 ## 1. 生产上线清单
 
+> **执行状态(2026-09-24)**:A 全部完成(stale profiles 隔离至
+> `/srv/nblane-app/deploy-backups/profiles-王军-stale-202604`;数据仓卫生快照
+> `10eea35` 已推送;reader 补齐 git 备份变量;CW-1 MCP 已注册,CW-2 备份调度
+> `openclaw-backup-scheduled` 已建;A.4 经核实 habit_id 挂接已存在)。
+> B 已完成本机侧:8504 unit 启用、users.yaml(wang→admin、openclaw 服务账号)、
+> .env 键、Caddy `spa.nblane.cloud` 站点块(含全部 8502 handle + /terminal)、
+> 环回冒烟全过(登录/星图/建卡→git commit actor=openclaw→删卡)。**唯一阻塞:
+> spa.nblane.cloud 的 DNS A 记录未建**,公网冒烟待 DNS 就位后进行。
+> A.2 的 Git 备份闭环验收已在 B 冒烟中达成(8504 mutation → 数据仓 commit)。
+
 ### A. 数据安全(先于一切,低峰窗口)
 
 1. **三树归位核查**:确认 `nblane.service` / `nblane-reader.service` 的
@@ -300,13 +310,16 @@ commit actor 是默认 "cli"~~(现由 `GitActorMiddleware` 按请求设为当前
 > **执行进展(2026-09-24)**:`profiles/王军/assistant/automations.yaml` 与
 > 4 个 prompt(daily-plan / daily-review / weekly-maintenance /
 > weekly-divination)已按 §3.3/§3.4 写入数据仓(`/srv/nblane-data`),模板侧
-> 已同步回灌(含新增 `nblane:weekly-divination`)。`automations sync 王军`
-> dry-run 通过:新增 4、外部跳过 7(含 3 条 `personal-assistant:*`,灰度方案 A
-> 并存)。**待变更窗口 `--apply`**;apply 后旧任务由用户手工停用。
-> 前置依赖:`scripts/openclaw/install.sh` 需重跑一次把 `bin/nblane_api.py`
-> 同步进 `~/.openclaw/workspace/skills/bin/`(prompt 以
-> `~/.openclaw/workspace/skills/bin/nblane_api.py` 形态调用),且 openclaw
-> gateway 环境需带 `NBLANE_OPENCLAW_API_PASSWORD`。
+> 已同步回灌(含新增 `nblane:weekly-divination`)。**已于 2026-09-24
+> `--apply` 完成 CW-3**:4 条 `nblane:*` 全部上线并与声明一致,旧 3 条
+> `personal-assistant:*` 按灰度方案 A 并存,验证一个周期后由用户手工停用。
+> 配套落地:`install.sh` 现在会建 `~/.openclaw/workspace/skills/.venv`
+> (httpx)并生成包装命令 `bin/nblane_api`(prompt 调用形态,无绝对路径);
+> gateway 经 user unit drop-in(0600)注入 `NBLANE_OPENCLAW_API_PASSWORD`。
+> 过程中修复三处 2026.9 CLI 漂移:add 需显式 `--name`、main 会话任务只收
+> `--system-event` 且忽略 model/deliver、`automations list` 改为 jobs 包裹 +
+> payload 嵌套字段(见 `core/openclaw_automations.py` 与
+> `core/openclaw_ops.py` 及对应测试)。
 
 - 把现有 3 条 `personal-assistant:*` 自动化纳管进
   `profiles/王军/assistant/automations.yaml`(模板:
