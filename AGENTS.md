@@ -157,6 +157,13 @@ npm run test:e2e
   (18504) for hands-on review.
 - New designs build on the production texture/quality as baseline; mockups
   validate composition and concepts, they do not redefine strokes.
+- **Every change names the pain it kills**: no "this might look nicer"
+  proposals — a change must declare which felt pain it removes. Pure aesthetic
+  experiments go to a prototype first. Identity-bearing grammar (polar
+  top-down view, stone-engraving texture, seal language, inscription cards)
+  is frozen by default unless a prototype proves a clear win (example: the
+  camera-tilt idea was discussed and shelved 2026-09-24 — revisit only if the
+  flat vocabulary provably falls short after the current tuning lands).
 
 ## Code style guidelines
 

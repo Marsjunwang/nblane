@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1353,6 +1353,7 @@ class ProjectsBoardHabitRecentDayModel(BaseModel):
 
     date: str
     count: float = 1.0
+    checkin_ids: list[str] = Field(default_factory=list)
 
 
 class ProjectsBoardHabitModel(BaseModel):
@@ -1511,6 +1512,50 @@ class StarmapResponse(BaseModel):
     counts: StarmapCountsModel = Field(default_factory=StarmapCountsModel)
 
 
+class DivinationRequest(BaseModel):
+    """Body for POST .../divination (占卜; design §5).
+
+    ``mode=play`` (戏占, default) needs no input; ``mode=serious`` (正占)
+    requires a non-empty ``question`` (the route answers 422
+    ``question_required`` otherwise). The question is length-capped.
+    """
+
+    mode: Literal["play", "serious"] = "play"
+    question: str = Field(default="", max_length=500)
+
+
+class DivinationHexagramModel(BaseModel):
+    """One cast hexagram: name, six yao, and the 卦辞 judgment.
+
+    ``symbol_lines`` are the six yao bottom-to-top (初爻→上爻);
+    1 = yang (⚊), 0 = yin (⚋).
+    """
+
+    name: str
+    symbol_lines: list[int] = Field(default_factory=list)
+    judgment: str = ""
+
+
+class DivinationResponse(BaseModel):
+    """Single-consumption divination result (nothing is persisted).
+
+    ``anchors`` carries the real starmap data points the reading quotes
+    (counts, in-orbit projects, pending reviews, habit streaks; plus the
+    real gap-analysis summary for serious mode). ``source`` is ``"llm"``
+    when the AI gateway produced the texts, ``"rule"`` for the
+    deterministic data-anchored fallback (unconfigured/error/timeout).
+    """
+
+    profile: str
+    mode: str = "play"
+    question: str = ""
+    hexagram: DivinationHexagramModel
+    reading: str = ""
+    anchors: dict[str, Any] = Field(default_factory=dict)
+    source: str = "rule"
+    generated_on: str = ""
+
+
 class CheckinCreateRequest(BaseModel):
     """Body for POST .../checkins (append one habit check-in).
 
@@ -1560,6 +1605,13 @@ class CheckinMutationResponse(BaseModel):
 
     ok: bool
     checkin: CheckinModel
+
+
+class CheckinDeleteResponse(BaseModel):
+    """Result of the check-in delete mutation (销印)."""
+
+    ok: bool
+    checkin_id: str
 
 
 # --- Habit-plan templates (Phase 2 click-to-instantiate plans) -------------

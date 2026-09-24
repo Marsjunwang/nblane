@@ -126,10 +126,15 @@ class BoardHabitDay:
 
 @dataclass
 class BoardHabitRecentDay:
-    """One checked day in the heatmap window (date + summed check-in count)."""
+    """One checked day in the heatmap window (date + summed check-in count).
+
+    ``checkin_ids`` lists the underlying check-in rows (id-less legacy rows
+    are omitted) so the UI can 销印 a specific entry via DELETE /checkins.
+    """
 
     date: str
     count: float = 1.0
+    checkin_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -318,18 +323,23 @@ def _build_project(
     return project
 
 
-def _habit_checkin_day_counts(
+def _habit_checkin_day_index(
     log: activity_log.ActivityLog, habit_id: str
-) -> dict[str, float]:
-    """ISO date -> summed check-in count for one habit (days deduped)."""
-    counts: dict[str, float] = {}
+) -> dict[str, tuple[float, list[str]]]:
+    """ISO date -> (summed check-in count, check-in ids) for one habit."""
+    index: dict[str, tuple[float, list[str]]] = {}
     for checkin in log.checkins:
         if habit_id not in checkin.habits and checkin.habit_id != habit_id:
             continue
         text = activity_log._coerce_date_text(checkin.date)
-        if text:
-            counts[text] = counts.get(text, 0.0) + checkin.count
-    return counts
+        if not text:
+            continue
+        count, ids = index.get(text, (0.0, []))
+        index[text] = (
+            count + checkin.count,
+            ids + ([checkin.id] if checkin.id else []),
+        )
+    return index
 
 
 # Trailing window (days, today inclusive) for the habit heatmap rows.
@@ -338,7 +348,7 @@ RECENT_DAYS_WINDOW = 90
 
 def _build_habit(
     habit: activity_log.Habit,
-    day_counts: dict[str, float],
+    day_index: dict[str, tuple[float, list[str]]],
     today: date,
 ) -> BoardHabit:
     """Week dots + streak + totals + heatmap window for one habit.
@@ -350,7 +360,7 @@ def _build_habit(
     today (sorted ascending); ``total_checkins``/``last_checkin`` still
     reflect the whole history.
     """
-    dates = set(day_counts)
+    dates = set(day_index)
     week_start = today - timedelta(days=today.weekday())
     week = [
         BoardHabitDay(
@@ -367,8 +377,8 @@ def _build_habit(
         cursor -= timedelta(days=1)
     window_start = (today - timedelta(days=RECENT_DAYS_WINDOW - 1)).isoformat()
     recent_days = [
-        BoardHabitRecentDay(date=day, count=day_counts[day])
-        for day in sorted(day_counts)
+        BoardHabitRecentDay(date=day, count=count, checkin_ids=list(ids))
+        for day, (count, ids) in sorted(day_index.items())
         if window_start <= day <= today.isoformat()
     ]
     return BoardHabit(
@@ -419,7 +429,7 @@ def build_projects_board(
     habits: list[BoardHabit] = []
     habit_rows: dict[str, BoardHabit] = {}
     for habit in log.habits:
-        row = _build_habit(habit, _habit_checkin_day_counts(log, habit.id), today)
+        row = _build_habit(habit, _habit_checkin_day_index(log, habit.id), today)
         habits.append(row)
         habit_rows[habit.id] = row
 

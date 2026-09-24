@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军 + kimi
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/frontend/src/components/projects/
 ---
 
@@ -84,8 +84,9 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
   优先、`project.habit_id` 兜底;kind ∈ {habit, habit-plan} 且有解析链接的项目
   不再渲染泳道,孤儿 habit-plan 项目仍保留泳道兜底);habit-plan 行带 第N/总天
   进度弧(time_range vs board.today);行展开 = 近 90 天 GitHub 式热力图
-  (月白→泥金),空格点击补卡(POST /checkins 带 date);**已打卡格子不可消卡**
-  (无删除端点,tooltip 明示,UI 内注明此不对称)。
+  (月白→泥金),空格点击补卡(POST /checkins 带 date);**实格点击销印**
+  (2026-09-24 起:格子带 checkin_ids 时点击 → 就地确认条 →
+  DELETE /checkins/{id} 删当日最近一次;无 id 的历史行 tooltip 明示不可销印)。
 - **行内快添**:`QuickAddInput.tsx` 常驻每条泳道 Queue 列顶;项目泳道走
   `POST /cases/{id}/tasks`(project-board ETag;`/kanban/cards` 无 project_id 字段),
   未归属泳道走 `POST /kanban/cards`(kanban ETag)。
@@ -104,3 +105,29 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
 - 测试:vitest 26 文件 189 例(新增 lanes 去重 3、timelineMath 5、habitHeatmap 4、
   ProjectsPage 5、HomePage 1);e2e `tests/e2e/spa_projects_hci.spec.ts` 8 例
   (隔离栈 18504 + 王军数据,截图 /tmp/hci-shots/)。
+
+## 实施状态(2026-09-24 缺口闭合:销印 + 任务编辑)
+
+- **销印端点**:`DELETE /api/v1/profiles/{name}/checkins/{checkin_id}` — 从
+  activity-log.yaml 删除一条打卡(纯家务,**不写 chronicle**);flock +
+  expected_snapshot 锁内复核,If-Match 412 纪律与 POST 相同;未知 id → 404
+  `checkin_not_found`;响应 `{ok, checkin_id}` + 新 ETag。无 id 的历史行
+  不可寻址(404)。
+- **热力图数据**:`habits[].recent_days[]` 增加 `checkin_ids`(当日打卡行 id,
+  升序;无 id 行省略)——销印寻址所需,单端点原则不变。
+- **日课栏销印 UI**:实格(有 checkin_ids)点击 → 网格下方就地确认条
+  「销印 <date> 最近一次打卡?」→ 确认删当日**最近一次**记录 → 失效刷新;
+  caption 改为「空格点击补卡,实格点击销印(删最近一次)」,补卡/销印对称。
+  首页 starmap HabitSeal 暂未接销印(待接线,见 HabitBand.tsx 头注)。
+- **任务编辑**:铭文详情卡 `TaskDetailCard.tsx` 新增编辑模式(头部「编辑」
+  切换)——标题/上下文/为什么/归属/标签五字段,保存走既有
+  `PATCH /kanban/cards/{ref}`(kanban.md ETag + If-Match,只提交改动字段,
+  标题不可空);排期仍归既有排期行,不重复造。归属 Select 在编辑模式并入表单,
+  阅读模式保持即选即改。
+- 测试:pytest `tests/test_web_api_projects_board.py` 新增 TestCheckinDelete 3 例
+  (删除回写 + 聚合更新 + 无 chronicle、404、412;auth 401 覆盖面同步扩展);
+  vitest 新增 habitHeatmap checkin_ids 1 例、ProjectsPage 销印往返 1 例、
+  TaskDetailCard 编辑模式 4 例。全量:pytest 1724、vitest 229、tsc 绿。
+- 真人 QA(vite dev 15173 → 隔离栈 18504,王军数据,Playwright 6 旅程全绿):
+  任务 create→edit→schedule→move→done 闭环、热力图补卡→销印往返、
+  空项目 归档→恢复→删除、时间轴交互;截图 /tmp/qa-shots/。

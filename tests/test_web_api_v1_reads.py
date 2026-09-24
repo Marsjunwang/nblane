@@ -516,8 +516,9 @@ class TestProfileReads(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         north_star = response.json()["north_star"]
         self.assertTrue(north_star["is_set"])
-        self.assertEqual(north_star["visibility"], "discreet")
-        # Owner view: no discreet/hidden redaction, full and brief verbatim.
+        # Binary contract: legacy ``discreet`` maps to ``private`` on read.
+        self.assertEqual(north_star["visibility"], "private")
+        # Owner view: no redaction, full and brief verbatim.
         self.assertEqual(
             north_star["full"],
             "Become a robotics generalist who ships real demos",

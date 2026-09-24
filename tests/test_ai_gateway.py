@@ -65,6 +65,7 @@ class TestAIGateway(unittest.TestCase):
                 "profile.kanban_ingest",
                 "output.visual_caption",
                 "dashboard.daily_brief",
+                "divination.cast",
             },
         )
 

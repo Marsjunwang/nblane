@@ -596,6 +596,25 @@
     "title": "CheckinCreateRequest",
     "type": "object"
    },
+   "CheckinDeleteResponse": {
+    "description": "Result of the check-in delete mutation (销印).",
+    "properties": {
+     "checkin_id": {
+      "title": "Checkin Id",
+      "type": "string"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "ok",
+     "checkin_id"
+    ],
+    "title": "CheckinDeleteResponse",
+    "type": "object"
+   },
    "CheckinModel": {
     "description": "One stored activity-log check-in (mirrors core Checkin).",
     "properties": {
@@ -1089,6 +1108,102 @@
      "role"
     ],
     "title": "CurrentUser",
+    "type": "object"
+   },
+   "DivinationHexagramModel": {
+    "description": "One cast hexagram: name, six yao, and the 卦辞 judgment.\n\n``symbol_lines`` are the six yao bottom-to-top (初爻→上爻);\n1 = yang (⚊), 0 = yin (⚋).",
+    "properties": {
+     "judgment": {
+      "default": "",
+      "title": "Judgment",
+      "type": "string"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "symbol_lines": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Symbol Lines",
+      "type": "array"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "DivinationHexagramModel",
+    "type": "object"
+   },
+   "DivinationRequest": {
+    "description": "Body for POST .../divination (占卜; design §5).\n\n``mode=play`` (戏占, default) needs no input; ``mode=serious`` (正占)\nrequires a non-empty ``question`` (the route answers 422\n``question_required`` otherwise). The question is length-capped.",
+    "properties": {
+     "mode": {
+      "default": "play",
+      "enum": [
+       "play",
+       "serious"
+      ],
+      "title": "Mode",
+      "type": "string"
+     },
+     "question": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Question",
+      "type": "string"
+     }
+    },
+    "title": "DivinationRequest",
+    "type": "object"
+   },
+   "DivinationResponse": {
+    "description": "Single-consumption divination result (nothing is persisted).\n\n``anchors`` carries the real starmap data points the reading quotes\n(counts, in-orbit projects, pending reviews, habit streaks; plus the\nreal gap-analysis summary for serious mode). ``source`` is ``\"llm\"``\nwhen the AI gateway produced the texts, ``\"rule\"`` for the\ndeterministic data-anchored fallback (unconfigured/error/timeout).",
+    "properties": {
+     "anchors": {
+      "additionalProperties": true,
+      "title": "Anchors",
+      "type": "object"
+     },
+     "generated_on": {
+      "default": "",
+      "title": "Generated On",
+      "type": "string"
+     },
+     "hexagram": {
+      "$ref": "#/components/schemas/DivinationHexagramModel"
+     },
+     "mode": {
+      "default": "play",
+      "title": "Mode",
+      "type": "string"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "question": {
+      "default": "",
+      "title": "Question",
+      "type": "string"
+     },
+     "reading": {
+      "default": "",
+      "title": "Reading",
+      "type": "string"
+     },
+     "source": {
+      "default": "rule",
+      "title": "Source",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile",
+     "hexagram"
+    ],
+    "title": "DivinationResponse",
     "type": "object"
    },
    "ErrorResponse": {
@@ -5279,6 +5394,13 @@
    "ProjectsBoardHabitRecentDayModel": {
     "description": "One checked day in the trailing 90-day heatmap window.",
     "properties": {
+     "checkin_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Checkin Ids",
+      "type": "array"
+     },
      "count": {
       "default": 1.0,
       "title": "Count",
@@ -8340,6 +8462,111 @@
     "summary": "Add Profile Checkin"
    }
   },
+  "/api/v1/profiles/{name}/checkins/{checkin_id}": {
+   "delete": {
+    "description": "Remove one check-in row from the activity log (销印).\n\nPure housekeeping: nothing is recorded in chronicle.yaml. Check-ins\nwithout an ``id`` (legacy rows) are not addressable and answer 404.\nThe write goes through ``core.activity_log.delete_checkin`` under the\nactivity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh\nETag in the header).",
+    "operationId": "delete_profile_checkin_api_v1_profiles__name__checkins__checkin_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "checkin_id",
+      "required": true,
+      "schema": {
+       "title": "Checkin Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CheckinDeleteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the activity log file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Missing/unknown habit, unlinked project, invalid date, or non-positive count."
+     }
+    },
+    "summary": "Delete Profile Checkin"
+   }
+  },
   "/api/v1/profiles/{name}/chronicle": {
    "get": {
     "description": "Chronicle entries, newest first (home briefing line / 拓片 / openclaw).\n\nRead-only; carries a weak ETag of chronicle.yaml so consumers can poll\nfor new entries cheaply.",
@@ -8660,6 +8887,86 @@
      }
     },
     "summary": "Draft Profile Crystallize"
+   }
+  },
+  "/api/v1/profiles/{name}/divination": {
+   "post": {
+    "description": "Cast one 卦 anchored in the profile's REAL starmap data.\n\n戏占 (``play``, default): playful reading (大富大贵彩头) whose every\nnumber comes from the live snapshot anchors. 正占 (``serious``): the\nquestion runs through the real rule gap analysis (``core.gap``) and\nthe reading wraps its gaps/strong nodes in 卦辞 language. Texts are\nLLM-polished via the AI gateway action ``divination.cast`` when\nconfigured (``source=\"llm\"``); otherwise a deterministic\ndata-anchored rule reading answers (``source=\"rule\"``). The hexagram\nitself is deterministic for (profile state, day, mode, question).\nThe result is single-consumption: nothing is persisted.",
+    "operationId": "cast_profile_divination_api_v1_profiles__name__divination_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DivinationRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DivinationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Serious mode (正占) requires a non-empty question; also raised for request-body validation failures."
+     }
+    },
+    "summary": "Cast Profile Divination"
    }
   },
   "/api/v1/profiles/{name}/evidence": {

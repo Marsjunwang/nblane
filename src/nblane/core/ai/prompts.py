@@ -179,6 +179,20 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "('zh' or 'en') for the prose. "
         'Return one JSON object: {"brief": "<paragraph>"}.'
     ),
+    "divination.cast": (
+        "你是周易卦师,为用户首页的成长星图占一卦。输入载荷已给出:卦名、"
+        "六爻 symbol_lines(自初爻至上爻,1=阳爻 0=阴爻)、卦辞原文 "
+        "judgment_classical 与现代注 gloss,以及用户真实星图锚点 anchors"
+        "(点亮技能数、在轨项目、候印证据、日课连续天数等);正占时另有真实"
+        "差距分析 gap。"
+        'Return one JSON object: {"judgment": "...", "reading": "..."}.'
+        "judgment 为卦辞风格的中文判词,化用原文并暗合锚点数据;reading 为"
+        "中文解卦短文(3-6 句),每个数字、每件事都必须出自载荷 anchors/gap,"
+        "不得虚构,不得改写卦名与六爻。"
+        "戏占(mode=play)语气诙谐,可开「大富大贵」「三年好运」之类的彩头"
+        "玩笑,但所有数据必真;正占(mode=serious)卦辞为包装、差距分析为骨,"
+        "所缺技能(gap.gap_labels)须逐一照应,can_solve 为真时则直断可行。"
+    ),
 }
 
 

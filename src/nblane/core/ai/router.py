@@ -652,6 +652,25 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         activity_policy="none",
         schema=schema_for_keys(["brief"]),
     ),
+    "divination.cast": AIActionSpec(
+        name="divination.cast",
+        owner="starmap",
+        default_backend="direct_llm",
+        # No generic rule fallback: core/divination.py already composes a
+        # data-anchored rule reading, so a template "AI" text would be a lie.
+        fallback_backend="",
+        output_mode="json",
+        # Single-consumption result (设计 §5): no Agent Activity item.
+        activity_policy="none",
+        temperature=0.8,
+        schema=schema_for_keys(
+            ["judgment", "reading"],
+            properties={
+                "judgment": {"type": "string"},
+                "reading": {"type": "string"},
+            },
+        ),
+    ),
 }
 
 

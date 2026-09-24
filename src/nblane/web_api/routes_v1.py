@@ -52,6 +52,7 @@ from nblane.core import activity_log, home_dashboard, jd_match, learning_log, ta
 from nblane.core import auth as auth_core
 from nblane.core import plan_templates, profile_io, project_suggest, projects_board, schema_io
 from nblane.core import starmap_snapshot as starmap_snapshot_core
+from nblane.core import divination as divination_core
 from nblane.core.claims import accepted_claims_for_profile
 from nblane.core.evidence_resolve import resolve_node_evidence_dict
 from nblane.core.experience import load_experience_book
@@ -183,6 +184,7 @@ from nblane.web_api.schemas import (
     AgentTaskListResponse,
     AgentTaskModel,
     CheckinCreateRequest,
+    CheckinDeleteResponse,
     CheckinModel,
     CheckinMutationResponse,
     ChronicleEntryModel,
@@ -212,6 +214,8 @@ from nblane.web_api.schemas import (
     CrystallizeDraftRequest,
     CrystallizeDraftResponse,
     CrystallizeTaskModel,
+    DivinationRequest,
+    DivinationResponse,
     ProvenanceRefModel,
     EvidenceSummary,
     GapAnalysisResponse,
@@ -5160,6 +5164,53 @@ def get_profile_starmap(name: str, response: Response) -> StarmapResponse:
     )
 
 
+# --- Divination (占卜; design home-starmap-enhancements §5) -------------------
+
+DIVINATION_RESPONSES = {
+    **ERROR_RESPONSES,
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Serious mode (正占) requires a non-empty question; also raised "
+            "for request-body validation failures."
+        ),
+    },
+}
+
+
+@router.post(
+    "/profiles/{name}/divination",
+    response_model=DivinationResponse,
+    responses=DIVINATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def cast_profile_divination(name: str, body: DivinationRequest) -> DivinationResponse:
+    """Cast one 卦 anchored in the profile's REAL starmap data.
+
+    戏占 (``play``, default): playful reading (大富大贵彩头) whose every
+    number comes from the live snapshot anchors. 正占 (``serious``): the
+    question runs through the real rule gap analysis (``core.gap``) and
+    the reading wraps its gaps/strong nodes in 卦辞 language. Texts are
+    LLM-polished via the AI gateway action ``divination.cast`` when
+    configured (``source="llm"``); otherwise a deterministic
+    data-anchored rule reading answers (``source="rule"``). The hexagram
+    itself is deterministic for (profile state, day, mode, question).
+    The result is single-consumption: nothing is persisted.
+    """
+    pdir = _resolve_profile(name)
+    question = body.question.strip()
+    if body.mode == "serious" and not question:
+        raise ApiError(
+            422,
+            "question_required",
+            "正占需提供所问之事 (question)。",
+        )
+    outcome = divination_core.cast_divination(
+        pdir, mode=body.mode, question=question
+    )
+    return DivinationResponse(**outcome)
+
+
 def _activity_log_etag(pdir: Path) -> str:
     """Weak ETag for the profile's activity-log.yaml (sha256 fingerprint)."""
     snapshot = file_state.snapshot_file(
@@ -5295,6 +5346,64 @@ def add_profile_checkin(
     return CheckinMutationResponse(
         ok=True, checkin=CheckinModel(**entry.to_dict())
     )
+
+
+@router.delete(
+    "/profiles/{name}/checkins/{checkin_id}",
+    response_model=CheckinDeleteResponse,
+    responses=CHECKIN_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_checkin(
+    name: str,
+    checkin_id: str,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> CheckinDeleteResponse | JSONResponse:
+    """Remove one check-in row from the activity log (销印).
+
+    Pure housekeeping: nothing is recorded in chronicle.yaml. Check-ins
+    without an ``id`` (legacy rows) are not addressable and answer 404.
+    The write goes through ``core.activity_log.delete_checkin`` under the
+    activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
+    ETag in the header).
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before deleting the check-in.",
+            etag,
+        )
+    try:
+        deleted = activity_log.delete_checkin(
+            pdir,
+            checkin_id,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / activity_log.ACTIVITY_LOG_FILENAME
+            ),
+        )
+    except file_state.FileConflictError:
+        # A concurrent write landed between the If-Match check and the
+        # in-lock snapshot re-check (TOCTOU closure).
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed while deleting the check-in; "
+            "reload before retrying.",
+            _activity_log_etag(pdir),
+        )
+    if not deleted:
+        raise ApiError(
+            404,
+            "checkin_not_found",
+            f"Unknown check-in id for profile {pdir.name}: {checkin_id}",
+        )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    return CheckinDeleteResponse(ok=True, checkin_id=checkin_id)
 
 
 # --- Habit-plan templates (Phase 2): click-to-instantiate plans -------------

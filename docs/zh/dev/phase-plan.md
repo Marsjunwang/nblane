@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军 + kimi
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 source_of_truth: 全局路线图与各 Phase 边界;Phase 1 细节见 phase1-evidence-page-design.md
 ---
 
@@ -111,6 +111,18 @@ Phase 1 建成通用件:mutation API 样板、embedding 建议能力(core/ai/)�
 - 首页左下「日课印」:`日课 锻炼○ 学习●` 印章,点名即打卡,悬停本周七点。
 - 细节与取舍见 phase2-projects-hci.md「实施状态(前端)」;e2e
   `tests/e2e/spa_projects_hci.spec.ts`(隔离栈 + 王军真实数据,截图 /tmp/hci-shots/)。
+
+### 项目页缺口闭合(2026-09-24 落地)
+
+- **销印**:`DELETE /api/v1/profiles/{name}/checkins/{checkin_id}`(删一条打卡,
+  不写 chronicle;flock + expected_snapshot + If-Match 412;未知 id 404);
+  projects-board `habits[].recent_days[]` 增加 `checkin_ids` 供寻址;日课栏热力图
+  实格点击 → 就地确认条 → 删当日最近一次,与补卡对称。首页 HabitSeal 已接线
+  (见「工具页风格对齐 + 销印接线」节)。
+- **任务编辑**:铭文详情卡编辑模式(标题/上下文/为什么/归属/标签,PATCH 只提交
+  改动字段,kanban ETag 纪律);排期仍归排期行,不重复。
+- 测试:pytest 1724(TestCheckinDelete 3 例新增)、vitest 229(销印/编辑 6 例新增)、
+  tsc 绿;真人 QA 6 旅程全绿(vite dev 15173 → 隔离栈 18504,截图 /tmp/qa-shots/)。
 
 ## Phase 3 进展
 
@@ -238,6 +250,78 @@ Phase 1 建成通用件:mutation API 样板、embedding 建议能力(core/ai/)�
   未实现,归入同族待做。
 - 测试:vitest 210 绿;tsc+build 绿;pytest 1694 绿;截图 r2-* 同目录。
 
+### 星图增量三轮(2026-09-23 深夜二轮,王军规格)
+
+- **日课印成章**:横条撤除,竖刻「日课」款 + 每习惯 44×44 单字印(文楷,
+  自动取字+精选字表 炼/学/复/读/跑/坐/息),白文/朱文 = 未打卡/已打卡;
+  点击打卡带钤印微动画(reduced-motion 关闭);悬停小笺(全名+连续+本周
+  七点);**销印后端已到**:`DELETE /profiles/{name}/checkins/{checkin_id}`
+  2026-09-24 上线(按 id 寻址,非 date?habit= 草案);日课栏热力图已接;
+  HabitSeal 前端接线 2026-09-24 落地(见末节「工具页风格对齐 + 销印接线」)。
+- **观瞻印组**:真印(44²「真」白/朱)+ 境/图方印(单字目标态翻印);卜印
+  槽位注释在真印左(right:128px)。族规:44px 模数/斑蚀/细双圈/2px 圆角/
+  悬停金晕,星表「+」对齐;移动端 ≥44px,小笺长按唤出。
+- **图面**:扇区内星官小字删除(R3 撤销);星官图节点=小空圈细蚀;字级
+  统一明体一梯(北极星/北斗=泥金,环带官名=月白 muted,虚位注再暗一档,
+  简报行月白小字;北极星标签弃文楷)。
+- 测试:vitest 213 绿(+3 sealGlyph);tsc+build 绿;pytest 1694 绿;截图
+  r3-*(印章两态/小笺/打卡往返(e2e-zh 实证)/移动 390px)。
+
+### 境态碰撞修正(2026-09-24,设计 home-starmap-enhancements-design.md 境态碰撞修正节)
+
+- **境态=展开**:目标系径向散开车道化(58+座次×26,方位沿用盘座;刻痕星
+  静道 60),车道间距 26 > 两系轨道半径和 → 任意相位不相交(vitest 不变量)。
+- **行星轨道分级**:同目标行星分道(5+n×2.2≤12.6);自由行星走环极外道。
+- **标签**:行星本无文字(维持);斗星名随展开外推 ×(1+0.9·ch2);碰撞按
+  优先级淡出(极>斗名>虚位注,不跳不移位);**境态星名 upright**(标签反旋
+  -chart·ch2,图态零影响——石刻随盘是本意)。
+- **光晕收敛**:行星无独立 glow(糊块=环芯点+bloom),深态 tier 0.95→0.6,
+  不透明度降 0.85 档。
+- 测试:vitest 217 绿(+4 展开不变量);tsc+build 绿;pytest 绿(1721;期间
+  捡了一条并行占卜线的测试欠账:test_ai_gateway 注册表断言补 divination.cast)。
+  帧序列 r4-*(图态回归/morph 中段/境态 0/15/30/45s)逐帧目检无互撞。
+
+### 星图五轮:境态第二层 + 占卜前端(2026-09-24,设计文档五轮节)
+
+- **境态第二层**:大测绘圈 morph 早期消融(ch1);圈随星走(每行星道一条
+  细暖金椭圆随目标星展开位,微光沿圈流转 46s/圈);星官点燃(图形锚定
+  +z 抖动,空圈席位燃为实心小星,逐槽色温,蚀刻线 dip-and-return);
+  行星时间弧实现但默认关(PLANET_TRAILS flag);尘埃带吸积盘式径向梯度。
+- **占卜前端**(§5):卜印入右下印组最左;星尘聚卦仪式(canvas 尘粒聚向
+  左盘区成卦,摇卦常活无死 spinner);卦辞卡左缘滑入停靠最左、卦旗居卡
+  首;戏占|正占(空问不发);离线卦签;Esc 回纯图;移动端底部 sheet。
+  修复:连续起卦清旧卦辞;移动端卜印 hit target 与日课印行重叠,印组上移
+  一行。
+- 测试:vitest 229 绿(+5 卦象渲染);tsc+build 绿;pytest 1724 绿;
+  Playwright r5-* 全仪式帧 + 双模式 + Esc + 移动;规则兜底实证
+  (NBLANE_DEV_ENV_FILE 死 LLM → source=rule 离线卦)。
+
+
+
+### 工具页风格对齐 + 日课印销印接线(2026-09-24 落地)
+
+- **HabitSeal 销印接线**:右键/长按(coarse)朱文印 → 印行上方就地确认条
+  (印章族样式:斑蚀底/细金边/明体,销印钮取朱砂色)→ `DELETE /checkins/{id}`
+  删当日**最近一次**(recent_days[today].checkin_ids 末位,`todayCheckinId` 纯函数);
+  成功后 projects-board 失效重取,印面回落白文。当日记录缺 id(历史遗留)时
+  黄条提示不可销印,与日课栏热力图同契约;白文印右键无操作;Esc/取消收条;
+  确认条打开期间悬停小笺关闭(防遮挡);长按后尾随 click 不再误打卡
+  (suppressClick,顺带修了移动端长按小笺也会打卡的旧毛病)。
+- **技能树页对齐星图语言**:节点四态换三态篆刻词汇——锁定=空圈、在学=实点、
+  扎实/精通=点套圈(精通环取泥金,对应星图字级梯子最高档);汇总 chip 同字形;
+  页面标题/正文 明体;节点列表收进铭文相邻面板(深底 `rgba(22,38,61,.55)` +
+  细金边 `rgba(220,174,85,.22)` + 行间发丝金线);证据计数非零显泥金。
+  纯换肤+层级整理,折叠/筛选/计数功能与 testid 全部保留。
+- **证据页抛光**:五阶段导航从 Mantine Button 改为铭文相邻行(明体、active
+  细金边+金底 10%、计数 tabular-nums);列表行/候选卡/风险卡/向导卡统一深底
+  细金边;快评光标行从 Mantine yellow 改泥金虚线;强度徽章去绿/黄(reviewed=
+  泥金 light,未评级=灰 outline);「接受」「入库」按钮 green→brand 泥金;
+  详情卡沿用 InscriptionCard 不动。红色仅留语义(废弃/删除)。
+- 测试:vitest 234 绿(+5:todayCheckinId 3 例、销印 round-trip/取消与右键白文
+  2 例);tsc+build 绿;pytest 1724 绿(零 .py 改动);隔离栈 18504 Playwright
+  实证:技能树/证据五阶段/销印往返(王军 exercise 销印后补回,数据净不变,
+  id 确定性复用 act_20260924_exercise)/移动 390px 零横向溢出,截图
+  /tmp/style-align-shots/。
 
 
 ## Backlog(已讨论,暂不开发)

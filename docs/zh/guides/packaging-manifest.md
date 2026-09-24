@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军 + kimi
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 source_of_truth: nblane 打包/迁移时的一切外部依赖与系统配置的登记处
 ---
 
@@ -49,3 +49,5 @@ nblane 本体是 `pip install -e .`(Python 依赖见 pyproject.toml/uv.lock);本
 - 2026-09-23 首页星图编辑后端(north-star 外科写入、goals CRUD、chronicle.yaml):**无新增依赖**——纯 Python(`core/north_star.py` / `core/chronicle.py` / `core/goals.py` 加锁与快照)复用既有 file_lock/file_state/file_write 与 FastAPI 栈;无新端口/服务;profile 侧新增 append-only 小文件 `chronicle.yaml`(随 profiles/ 一并 git 迁移)。
 - 2026-09-23 项目页 HCI 后端补件(项目删除端点、habits[] 90 天热力图 recent_days):**无新增依赖**——删除走既有 kanban_io/project_board/chronicle 锁与快照纪律,热力图只是 `core/projects_board.py` 聚合口径扩展;无新端口/服务/包。
 - 2026-09-23 星官数据资产(22 星官:紫微垣核心+太微/天市垣墙+角亢心斗奎毕参柳):**无新增运行时依赖**——纯静态 JSON 入库(`src/nblane/web_ui/frontend/src/starmap/data/asterisms.json`),一次性抓取 Stellarium chinese 星空文化 + Hipparcos I/239 生成,生成脚本不入库(再生步骤见同目录 README.md);无新端口/服务/包。
+- 2026-09-24 占卜后端(§5,`POST /profiles/{name}/divination`):**无新增依赖**——纯 Python(`core/divination.py` 卦表/锚点/确定性起卦)复用既有 starmap_snapshot/projects_board/gap 读路径与 AI gateway(`divination.cast`,60s 超时,失败回落规则解卦);卦表为代码内精选 34 卦文本(易经原文,公有领域),无新数据资产、无新端口/服务/包;结果一次性消费,profile 侧无新文件。
+- 2026-09-24 项目页缺口闭合(checkin 销印端点 + recent_days checkin_ids + 任务编辑前端):**无新增依赖**——删除走既有 activity_log 锁与快照纪律,前端复用 Mantine/react-query 存量;无新端口/服务/包。

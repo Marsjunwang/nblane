@@ -976,8 +976,15 @@ def add_checkin(
 def delete_checkin(
     path_or_dir: str | Path,
     checkin_id: str,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> bool:
-    """Delete one check-in by id and persist the activity log."""
+    """Delete one check-in by id and persist the activity log.
+
+    When *expected_snapshot* is given, ``save`` re-checks it inside the
+    activity-log write lock and raises ``file_state.FileConflictError`` on
+    mismatch instead of silently overwriting a concurrent edit.
+    """
     target = _clean_text(checkin_id)
     if not target:
         return False
@@ -988,7 +995,7 @@ def delete_checkin(
         return False
 
     log.checkins = kept
-    save(path_or_dir, log)
+    save(path_or_dir, log, expected_snapshot=expected_snapshot)
     return True
 
 

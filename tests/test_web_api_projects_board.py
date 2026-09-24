@@ -5,9 +5,10 @@ a badge list, Done counts including kanban-archive.md, milestone progress,
 the unassigned lane, habit week dots/streak/totals plus the 90-day
 ``recent_days`` heatmap window, the delete-preview ``evidence_ref_count``,
 ETag header), the kanban card schedule mutation (planned_start/planned_end
-set/clear, validation, If-Match 412), and the check-in append mutation
-(habit or project ref, default date, validation, If-Match 412). All
-profiles are built under tmp_path; real profiles/ is never touched.
+set/clear, validation, If-Match 412), and the check-in mutations (append by
+habit or project ref with default date/validation, delete by id 销印 with
+404/412 discipline, no chronicle record). All profiles are built under
+tmp_path; real profiles/ is never touched.
 """
 
 from __future__ import annotations
@@ -358,12 +359,16 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         self.assertEqual(exercise["total_checkins"], 3)
         self.assertEqual(exercise["last_checkin"], TODAY.isoformat())
         # Heatmap window: checked days ascending, same-day rows summed.
+        # Fixture rows carry no ids, so checkin_ids is empty throughout.
         self.assertEqual(
             exercise["recent_days"],
             [
-                {"date": FIVE_DAYS_AGO.isoformat(), "count": 1.0},
-                {"date": YESTERDAY.isoformat(), "count": 2.0},
-                {"date": TODAY.isoformat(), "count": 1.0},
+                {"date": FIVE_DAYS_AGO.isoformat(), "count": 1.0,
+                 "checkin_ids": []},
+                {"date": YESTERDAY.isoformat(), "count": 2.0,
+                 "checkin_ids": []},
+                {"date": TODAY.isoformat(), "count": 1.0,
+                 "checkin_ids": []},
             ],
         )
         # habit<->project name link (habit id == project title, normalized).
@@ -376,7 +381,8 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         self.assertEqual(reading["last_checkin"], TEN_DAYS_AGO.isoformat())
         self.assertEqual(
             reading["recent_days"],
-            [{"date": TEN_DAYS_AGO.isoformat(), "count": 1.0}],
+            [{"date": TEN_DAYS_AGO.isoformat(), "count": 1.0,
+              "checkin_ids": []}],
         )
         self.assertEqual(reading["project_id"], "")
 
@@ -397,10 +403,12 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
             log_path = profile / "activity-log.yaml"
             raw = yaml.safe_load(log_path.read_text(encoding="utf-8"))
             raw["checkins"] = [
-                {"date": in_window.isoformat(), "habit_id": "exercise"},
-                {"date": out_window.isoformat(), "habit_id": "exercise"},
+                {"date": in_window.isoformat(), "habit_id": "exercise",
+                 "id": "act_in"},
+                {"date": out_window.isoformat(), "habit_id": "exercise",
+                 "id": "act_out"},
                 {"date": (TODAY + timedelta(days=1)).isoformat(),
-                 "habit_id": "exercise"},
+                 "habit_id": "exercise", "id": "act_future"},
             ]
             log_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
             payload = self._get(self._client(root))
@@ -409,7 +417,8 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         # history-wide totals still count every distinct checked day.
         self.assertEqual(
             exercise["recent_days"],
-            [{"date": in_window.isoformat(), "count": 1.0}],
+            [{"date": in_window.isoformat(), "count": 1.0,
+              "checkin_ids": ["act_in"]}],
         )
         self.assertEqual(exercise["total_checkins"], 3)
         self.assertEqual(
@@ -690,6 +699,92 @@ class TestCheckins(ProjectsBoardTestBase):
             self.assertTrue(stale.headers["ETag"].startswith('W/"'))
 
 
+class TestCheckinDelete(ProjectsBoardTestBase):
+    """DELETE /checkins/{checkin_id}: 销印 one row (no chronicle record)."""
+
+    def _seed_checkin(self, client: TestClient) -> str:
+        response = client.post(
+            "/api/v1/profiles/alice/checkins", json={"habit": "exercise"}
+        )
+        self.assertEqual(response.status_code, 201)
+        return response.json()["checkin"]["id"]
+
+    def test_delete_removes_row_and_updates_board(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            checkin_id = self._seed_checkin(client)
+            etag = client.get(
+                "/api/v1/profiles/alice/projects-board"
+            ).headers["ETag"]
+            response = client.delete(
+                f"/api/v1/profiles/alice/checkins/{checkin_id}"
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.json(), {"ok": True, "checkin_id": checkin_id}
+            )
+            self.assertNotEqual(response.headers["ETag"], etag)
+            raw = yaml.safe_load(
+                (profile / "activity-log.yaml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(raw["checkins"]), 5)
+            self.assertNotIn(
+                checkin_id, {row.get("id") for row in raw["checkins"]}
+            )
+            # The board aggregation no longer counts the deleted row: today
+            # drops back to the fixture's single (id-less) check-in.
+            board = client.get("/api/v1/profiles/alice/projects-board").json()
+            exercise = next(
+                h for h in board["habits"] if h["id"] == "exercise"
+            )
+            self.assertEqual(exercise["total_checkins"], 3)
+            self.assertEqual(exercise["streak"], 2)
+            today_row = next(
+                day
+                for day in exercise["recent_days"]
+                if day["date"] == TODAY.isoformat()
+            )
+            self.assertEqual(today_row["count"], 1.0)
+            self.assertEqual(today_row["checkin_ids"], [])
+            # 销印是家务: no chronicle entry is recorded.
+            self.assertFalse((profile / "chronicle.yaml").exists())
+
+    def test_delete_unknown_id_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            response = client.delete(
+                "/api/v1/profiles/alice/checkins/act_nope"
+            )
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.json()["code"], "checkin_not_found")
+
+    def test_if_match_412(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            checkin_id = self._seed_checkin(client)
+            stale_etag = client.get(
+                "/api/v1/profiles/alice/projects-board"
+            ).headers["ETag"]
+            self._seed_checkin(client)  # second row moves the ETag
+            stale = client.delete(
+                f"/api/v1/profiles/alice/checkins/{checkin_id}",
+                headers={"If-Match": stale_etag},
+            )
+            self.assertEqual(stale.status_code, 412)
+            self.assertEqual(stale.json()["code"], "etag_mismatch")
+            self.assertTrue(stale.headers["ETag"].startswith('W/"'))
+            raw = yaml.safe_load(
+                (profile / "activity-log.yaml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(raw["checkins"]), 7)
+
+
 class TestProjectsBoardScope(ProjectsBoardTestBase):
     """401/403 enforcement under auth-on."""
 
@@ -721,6 +816,9 @@ class TestProjectsBoardScope(ProjectsBoardTestBase):
             checkin = client.post(
                 "/api/v1/profiles/alice/checkins", json={"habit": "exercise"}
             )
+            uncheckin = client.delete(
+                "/api/v1/profiles/alice/checkins/act_x"
+            )
             schedule = client.post(
                 "/api/v1/profiles/alice/kanban/cards/Queued arm work/schedule",
                 json={"planned_start": "2026-10-01"},
@@ -736,6 +834,7 @@ class TestProjectsBoardScope(ProjectsBoardTestBase):
             )
         self.assertEqual(listing.status_code, 401)
         self.assertEqual(checkin.status_code, 401)
+        self.assertEqual(uncheckin.status_code, 401)
         self.assertEqual(schedule.status_code, 401)
         self.assertEqual(patch.status_code, 401)
         self.assertEqual(templates.status_code, 401)
