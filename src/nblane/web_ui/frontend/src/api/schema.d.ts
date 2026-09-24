@@ -1109,7 +1109,20 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Profile Kanban Card
+         * @description Delete one kanban card for good (detail-card danger action).
+         *
+         *     ``card_ref`` follows the move/done semantics (exact title or unique
+         *     substring; ambiguous → 422, unknown → 404). The card's todos, subtasks,
+         *     and metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT
+         *     touched — the tombstone mechanism handles references to the deleted
+         *     task. With ``record_chronicle`` (default off) a ``task.deleted`` entry
+         *     is appended to chronicle.yaml (ref = task id, note = title). Honors
+         *     ``If-Match`` (412 on stale); a concurrent kanban write between parse
+         *     and save is 3-way merged like the other card mutations.
+         */
+        delete: operations["delete_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__delete"];
         options?: never;
         head?: never;
         /**
@@ -4855,6 +4868,40 @@ export interface components {
             tags?: string[];
             /** Title */
             title: string;
+        };
+        /**
+         * KanbanCardDeleteRequest
+         * @description Body for DELETE .../kanban/cards/{card_ref}.
+         *
+         *     ``record_chronicle`` opts into a ``task.deleted`` chronicle entry
+         *     (default off: routine task pruning is not a narrative event).
+         */
+        KanbanCardDeleteRequest: {
+            /**
+             * Record Chronicle
+             * @default false
+             */
+            record_chronicle: boolean;
+        };
+        /**
+         * KanbanCardDeleteResponse
+         * @description Result of one kanban card delete.
+         *
+         *     ``deleted_ref`` is the deleted card's task id (falling back to the
+         *     title for legacy id-less cards); ``deleted_title`` echoes the matched
+         *     card title. Evidence-pool ``kanban_refs`` are NOT touched — the
+         *     tombstone mechanism handles references to the deleted task.
+         */
+        KanbanCardDeleteResponse: {
+            /** Deleted Ref */
+            deleted_ref: string;
+            /** Deleted Title */
+            deleted_title: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /**
          * KanbanCardMoveRequest
@@ -10497,6 +10544,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KanbanMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or kanban card not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the current kanban file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, unknown section, or ambiguous card_ref. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                card_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["KanbanCardDeleteRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KanbanCardDeleteResponse"];
                 };
             };
             /** @description Invalid profile name. */

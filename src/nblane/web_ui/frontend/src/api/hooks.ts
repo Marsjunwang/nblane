@@ -56,6 +56,8 @@ import type {
   KanbanBoard,
   KanbanBoardResult,
   KanbanCardCreateRequest,
+  KanbanCardDeleteRequest,
+  KanbanCardDeleteResponse,
   KanbanCardPatchRequest,
   KanbanCardScheduleRequest,
   KanbanMutationResponse,
@@ -423,6 +425,36 @@ export function usePatchKanbanCard(profile: string) {
       invalidate();
       // Lane assignment re-syncs project-board.yaml on the server.
       queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'project-board'] });
+    },
+  });
+}
+
+/**
+ * Delete one kanban card for good (detail-card danger action).
+ * `record_chronicle` (default off) appends a task.deleted chronicle entry.
+ */
+export function useDeleteKanbanCard(profile: string) {
+  const invalidate = useInvalidateKanban(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      cardRef,
+      body,
+      etag,
+    }: {
+      cardRef: string;
+      body: KanbanCardDeleteRequest;
+      etag: string;
+    }) =>
+      deleteEtagMutation<KanbanCardDeleteResponse>(
+        `${kanbanBase(profile)}/cards/${encodeURIComponent(cardRef)}`,
+        body,
+        etag,
+        () => refreshKanbanEtag(profile),
+      ),
+    onSuccess: ({ etag }) => {
+      writeKanbanEtag(queryClient, profile, etag);
+      invalidate();
     },
   });
 }
@@ -982,6 +1014,26 @@ async function patchEtagMutation<T>(
     }
     const fresh = await refreshEtag();
     const res = await apiPatchWithHeaders<T>(path, body, { headers: ifMatch(fresh) });
+    return { data: res.data, etag: res.headers.get('ETag') ?? fresh };
+  }
+}
+
+/** DELETE twin of postEtagMutation (kanban card delete). */
+async function deleteEtagMutation<T>(
+  path: string,
+  body: unknown,
+  etag: string,
+  refreshEtag: () => Promise<string>,
+): Promise<{ data: T; etag: string }> {
+  try {
+    const res = await apiDeleteWithHeaders<T>(path, body, { headers: ifMatch(etag) });
+    return { data: res.data, etag: res.headers.get('ETag') ?? etag };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 412) {
+      throw error;
+    }
+    const fresh = await refreshEtag();
+    const res = await apiDeleteWithHeaders<T>(path, body, { headers: ifMatch(fresh) });
     return { data: res.data, etag: res.headers.get('ETag') ?? fresh };
   }
 }

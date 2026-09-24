@@ -63,10 +63,17 @@ function patchResponse(title: string) {
   });
 }
 
-function renderCard(task: ProjectsBoardTask = TASK) {
+function deleteResponse() {
+  return jsonResponse(200, { ok: true, deleted_ref: 'kb_1', deleted_title: '读 VLA 综述' });
+}
+
+function renderCard(task: ProjectsBoardTask = TASK, { onClose }: { onClose?: () => void } = {}) {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'PATCH') {
       return patchResponse('读 VLA 综述 · 第二版');
+    }
+    if (init?.method === 'DELETE') {
+      return deleteResponse();
     }
     return jsonResponse(404, { code: 'not_found', message: 'not found' });
   });
@@ -80,7 +87,7 @@ function renderCard(task: ProjectsBoardTask = TASK) {
       habits={[]}
       today="2026-09-23"
       kanbanEtag={KANBAN_ETAG}
-      onClose={() => {}}
+      onClose={onClose ?? (() => {})}
       onRefresh={() => {}}
     />,
   );
@@ -222,5 +229,99 @@ describe('TaskDetailCard TODO checklist', () => {
     expect(screen.queryByTestId('todo-item-1')).not.toBeInTheDocument();
     const body = await lastPatchBody(fetchMock);
     expect(body).toEqual({ todos: [{ text: '整理笔记', done: false }] });
+  });
+});
+
+describe('TaskDetailCard delete action', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('删除任务 reveals the inline confirm (记入大事记 off); 取消 hides it without a DELETE', () => {
+    const fetchMock = renderCard();
+    fireEvent.click(screen.getByTestId('detail-delete'));
+
+    const confirm = screen.getByTestId('delete-confirm');
+    expect(confirm).toHaveTextContent('将删除任务「读 VLA 综述」,不可恢复');
+    expect(screen.getByTestId('delete-record-chronicle')).not.toBeChecked();
+    // The danger button collapses while the confirm is showing.
+    expect(screen.queryByTestId('detail-delete')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('delete-cancel'));
+    expect(screen.queryByTestId('delete-confirm')).not.toBeInTheDocument();
+    expect(screen.getByTestId('detail-delete')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+
+  it('confirm DELETEs with If-Match and record_chronicle off, then closes the card', async () => {
+    const onClose = vi.fn();
+    const fetchMock = renderCard(TASK, { onClose });
+    fireEvent.click(screen.getByTestId('detail-delete'));
+    fireEvent.click(screen.getByTestId('delete-confirm-button'));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE')!;
+    expect(String(call[0])).toContain(
+      `/profiles/alice/kanban/cards/${encodeURIComponent('读 VLA 综述')}`,
+    );
+    expect((call[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ record_chronicle: false });
+  });
+
+  it('记入大事记 checkbox sends record_chronicle: true', async () => {
+    const onClose = vi.fn();
+    const fetchMock = renderCard(TASK, { onClose });
+    fireEvent.click(screen.getByTestId('detail-delete'));
+    fireEvent.click(screen.getByTestId('delete-record-chronicle'));
+    fireEvent.click(screen.getByTestId('delete-confirm-button'));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE')!;
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ record_chronicle: true });
+  });
+
+  it('a 412 retries once with a freshly fetched ETag, then closes', async () => {
+    const onClose = vi.fn();
+    let deleteCalls = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        deleteCalls += 1;
+        if (deleteCalls === 1) {
+          return new Response(JSON.stringify({ code: 'etag_mismatch', message: 'stale' }), {
+            status: 412,
+            headers: { 'Content-Type': 'application/json', ETag: 'W/"kanban-fresh"' },
+          });
+        }
+        return deleteResponse();
+      }
+      // refreshKanbanEtag: GET the board for a fresh ETag.
+      return new Response(
+        JSON.stringify({ profile: 'alice', sections: [], total: 0 }),
+        { status: 200, headers: { 'Content-Type': 'application/json', ETag: 'W/"kanban-fresh"' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(
+      <TaskDetailCard
+        profile="alice"
+        task={TASK}
+        project={PROJECT}
+        projects={[PROJECT]}
+        habits={[]}
+        today="2026-09-23"
+        kanbanEtag={KANBAN_ETAG}
+        onClose={onClose}
+        onRefresh={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('detail-delete'));
+    fireEvent.click(screen.getByTestId('delete-confirm-button'));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+    expect(deletes).toHaveLength(2);
+    expect((deletes[0][1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    expect((deletes[1][1]?.headers as Record<string, string>)['If-Match']).toBe('W/"kanban-fresh"');
   });
 });

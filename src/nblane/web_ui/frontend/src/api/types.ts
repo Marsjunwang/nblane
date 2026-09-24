@@ -85,6 +85,12 @@ export type KanbanCardCreateRequest = { title: string } & Partial<
 /** KanbanMutationResponse from web_api/schemas.py. */
 export type KanbanMutationResponse = Schemas['KanbanMutationResponse'];
 
+/** KanbanCardDeleteRequest from web_api/schemas.py (record_chronicle opt-in). */
+export type KanbanCardDeleteRequest = Schemas['KanbanCardDeleteRequest'];
+
+/** KanbanCardDeleteResponse from web_api/schemas.py. */
+export type KanbanCardDeleteResponse = Schemas['KanbanCardDeleteResponse'];
+
 /** InboxHistoryEventModel from web_api/schemas.py. */
 export type InboxHistoryEvent = Schemas['InboxHistoryEventModel'];
 

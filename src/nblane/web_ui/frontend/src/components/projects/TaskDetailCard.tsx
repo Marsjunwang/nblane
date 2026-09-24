@@ -2,10 +2,11 @@
 // `?task=<id>`, reuses the InscriptionCard shell, and carries the action row:
 // section moves, planned-date scheduling (timeline-drag fallback), habit
 // check-in, crystallize hand-off, 归属变更 (PATCH project_id — the only
-// cross-lane assignment path; board DnD stays in-lane), and an edit mode
+// cross-lane assignment path; board DnD stays in-lane), an edit mode
 // (编辑) for title/context/why/project_id/tags via PATCH /kanban/cards/{ref}
-// under the kanban.md ETag. Planned dates stay in the 排期 row — edit mode
-// deliberately does not duplicate scheduling.
+// under the kanban.md ETag, and the「删除任务」danger action (inline confirm
+// + optional 记入大事记) via DELETE /kanban/cards/{ref}. Planned dates stay
+// in the 排期 row — edit mode deliberately does not duplicate scheduling.
 
 import {
   ActionIcon,
@@ -21,13 +22,14 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core';
-import { IconArrowRight, IconPencil, IconSparkles, IconX } from '@tabler/icons-react';
+import { IconArrowRight, IconPencil, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ApiError } from '../../api/client';
 import {
   useAddCheckin,
+  useDeleteKanbanCard,
   useDoneKanbanCard,
   useMoveKanbanCard,
   usePatchKanbanCard,
@@ -211,6 +213,7 @@ export function TaskDetailCard({
   const doneCard = useDoneKanbanCard(profile);
   const scheduleCard = useScheduleKanbanCard(profile);
   const patchCard = usePatchKanbanCard(profile);
+  const deleteCard = useDeleteKanbanCard(profile);
   const checkin = useAddCheckin(profile);
 
   const [plannedStart, setPlannedStart] = useState('');
@@ -222,6 +225,8 @@ export function TaskDetailCard({
   const [editWhy, setEditWhy] = useState('');
   const [editProjectId, setEditProjectId] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [recordChronicle, setRecordChronicle] = useState(false);
 
   // Re-seed the local editors whenever a different task opens (or the same
   // task's server state lands after a mutation).
@@ -230,6 +235,8 @@ export function TaskDetailCard({
     setPlannedEnd(task?.planned_end ?? '');
     setAssignTo(task?.project_id ?? project?.id ?? '');
     setEditing(false);
+    setConfirmingDelete(false);
+    setRecordChronicle(false);
   }, [task?.id, task?.planned_start, task?.planned_end, task?.project_id, project?.id]);
 
   if (!task) {
@@ -241,9 +248,15 @@ export function TaskDetailCard({
     doneCard.isPending ||
     scheduleCard.isPending ||
     patchCard.isPending ||
+    deleteCard.isPending ||
     checkin.isPending;
   const firstError =
-    moveCard.error ?? doneCard.error ?? scheduleCard.error ?? patchCard.error ?? checkin.error;
+    moveCard.error ??
+    doneCard.error ??
+    scheduleCard.error ??
+    patchCard.error ??
+    deleteCard.error ??
+    checkin.error;
   const ambiguous =
     firstError instanceof ApiError &&
     firstError.status === 422 &&
@@ -283,6 +296,18 @@ export function TaskDetailCard({
     checkin.mutate(
       { habit: habitId, related_kanban: [task.title], date: '', summary: task.title, note: '' },
       { onError: onError('打卡失败') },
+    );
+
+  // 删除任务: irreversible — the hook invalidates board/kanban on success,
+  // then the card closes itself (the task no longer exists).
+  const runDelete = () =>
+    deleteCard.mutate(
+      {
+        cardRef: task.title,
+        body: { record_chronicle: recordChronicle },
+        etag: kanbanEtag,
+      },
+      { onSuccess: onClose, onError: onError('删除失败') },
     );
 
   const startedDays = task.started_on && today ? daysSince(task.started_on, today) : null;
@@ -631,9 +656,67 @@ export function TaskDetailCard({
             >
               结晶为证据
             </Button>
+            {!confirmingDelete && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                color="red"
+                ml="auto"
+                leftSection={<IconTrash size={14} />}
+                disabled={mutating}
+                onClick={() => {
+                  setRecordChronicle(false);
+                  setConfirmingDelete(true);
+                }}
+                data-testid="detail-delete"
+              >
+                删除任务
+              </Button>
+            )}
               </>
             )}
           </Group>
+
+          {confirmingDelete && (
+            <Alert
+              color="red"
+              variant="light"
+              data-testid="delete-confirm"
+              styles={{ message: { width: '100%' } }}
+            >
+              <Stack gap="xs">
+                <Text size="sm">将删除任务「{task.title}」,不可恢复</Text>
+                <Checkbox
+                  size="xs"
+                  label="记入大事记(chronicle 追加 task.deleted 条目)"
+                  checked={recordChronicle}
+                  onChange={(event) => setRecordChronicle(event.currentTarget.checked)}
+                  data-testid="delete-record-chronicle"
+                />
+                <Group gap="xs">
+                  <Button
+                    size="compact-sm"
+                    color="red"
+                    variant="light"
+                    loading={deleteCard.isPending}
+                    onClick={runDelete}
+                    data-testid="delete-confirm-button"
+                  >
+                    确认删除
+                  </Button>
+                  <Button
+                    size="compact-sm"
+                    variant="subtle"
+                    disabled={deleteCard.isPending}
+                    onClick={() => setConfirmingDelete(false)}
+                    data-testid="delete-cancel"
+                  >
+                    取消
+                  </Button>
+                </Group>
+              </Stack>
+            </Alert>
+          )}
         </Stack>
       </InscriptionCard>
     </Modal>
