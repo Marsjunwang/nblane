@@ -59,8 +59,12 @@ source_of_truth: 生产上线与 openclaw 第一环集成计划;事实依据 src
 > `openclaw-backup-scheduled` 已建;A.4 经核实 habit_id 挂接已存在)。
 > B 已完成本机侧:8504 unit 启用、users.yaml(wang→admin、openclaw 服务账号)、
 > .env 键、Caddy `spa.nblane.cloud` 站点块(含全部 8502 handle + /terminal)、
-> 环回冒烟全过(登录/星图/建卡→git commit actor=openclaw→删卡)。**唯一阻塞:
-> spa.nblane.cloud 的 DNS A 记录未建**,公网冒烟待 DNS 就位后进行。
+> 环回冒烟全过(登录/星图/建卡→git commit actor=openclaw→删卡)。
+> **公网冒烟已于 2026-09-25 07:50 全部通过**:DNS A 记录生效后 Caddy 自动签发
+> 生产证书(LE YE1);https://spa.nblane.cloud 的 health/SPA index/8502 auth
+> handoff/服务账号登录+starmap 公网读取全部 200。(注意:Caddy 证书申请在
+> DNS 未就位期间会指数退避,最长 6h 重试一次;DNS 生效后 `systemctl restart
+> caddy` 可立即触发重试。)
 > A.2 的 Git 备份闭环验收已在 B 冒烟中达成(8504 mutation → 数据仓 commit)。
 
 ### A. 数据安全(先于一切,低峰窗口)
