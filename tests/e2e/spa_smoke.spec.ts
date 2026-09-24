@@ -97,11 +97,11 @@ test.describe("SPA smoke (web_api on " + SPA_BASE_URL + ")", () => {
     } else {
       const first = profiles[0];
       // The profiles grid renders one card per profile; each card links to
-      // the profile health page.
+      // the profile home starmap.
       const firstCard = page.getByRole("link", { name: new RegExp(first.name) }).first();
       await expect(firstCard).toBeVisible();
       await firstCard.click();
-      await page.waitForURL(`**/p/${encodeURIComponent(first.name)}/health`);
+      await page.waitForURL(`**/p/${encodeURIComponent(first.name)}/home`);
       expect(page.url()).not.toContain("/login");
 
       // Projects page (/kanban redirects here): the toolbar always renders;

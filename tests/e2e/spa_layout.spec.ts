@@ -82,6 +82,14 @@ for (const viewport of VIEWPORTS) {
       await expectNoHorizontalOverflow(page);
     });
 
+    test("旧健康页重定向到证据「待补强」", async ({ page }) => {
+      // 健康页解散 (2026-09-24): /health → /evidence?stage=strengthen; the
+      // GET /health API stays for openclaw/CLI, only the SPA page is gone.
+      await page.goto(spa("health"));
+      await expect(page).toHaveURL(/\/evidence\?stage=strengthen/);
+      await expect(page.getByTestId("stage-nav")).toBeVisible();
+    });
+
     test("输出工作室页: 内容限宽居中且无横向溢出", async ({ page }) => {
       await page.goto(spa("studio"));
       await expect(page.getByRole("heading", { name: /输出工作室/ })).toBeVisible();

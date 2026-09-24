@@ -2,6 +2,7 @@
 // form for title/context/why/project_id/tags under the kanban.md ETag.
 
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanNotifications } from '@mantine/notifications';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectsBoardProject, ProjectsBoardTask } from '../../api/types';
@@ -229,6 +230,60 @@ describe('TaskDetailCard TODO checklist', () => {
     expect(screen.queryByTestId('todo-item-1')).not.toBeInTheDocument();
     const body = await lastPatchBody(fetchMock);
     expect(body).toEqual({ todos: [{ text: '整理笔记', done: false }] });
+  });
+});
+
+describe('TaskDetailCard 排期与标记完成', () => {
+  afterEach(() => {
+    cleanNotifications();
+    vi.unstubAllGlobals();
+  });
+
+  it('排期 DateInput displays yyyy-mm-dd regardless of browser locale', () => {
+    renderCard({ ...TASK, planned_start: '2026-09-10', planned_end: '2026-10-01' });
+    // Mantine DateInput (valueFormat) — native type=date would render the
+    // browser locale's mm/dd/yyyy in en-locale browsers.
+    expect(screen.getByLabelText('排期开始')).toHaveValue('2026-09-10');
+    expect(screen.getByLabelText('排期结束')).toHaveValue('2026-10-01');
+  });
+
+  it('标记 Done POSTs and raises a 已标记完成 notification', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST' && url.includes('/kanban/cards/') && url.endsWith('/done')) {
+        return jsonResponse(200, {
+          ok: true,
+          card: { ...TASK, done: true },
+          section: 'Done',
+          warnings: [],
+          merged_external: false,
+          merge_notices: [],
+        });
+      }
+      return jsonResponse(404, { code: 'not_found', message: url });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(
+      <TaskDetailCard
+        profile="alice"
+        task={TASK}
+        project={PROJECT}
+        projects={[PROJECT]}
+        habits={[]}
+        today="2026-09-23"
+        kanbanEtag={KANBAN_ETAG}
+        onClose={() => {}}
+        onRefresh={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('detail-done'));
+    // The confirmation survives the card closing on refetch.
+    expect(await screen.findByText('已标记完成')).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(
+      ([input, init]) => init?.method === 'POST' && String(input).endsWith('/done'),
+    )!;
+    expect((call[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
   });
 });
 

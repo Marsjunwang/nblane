@@ -3418,8 +3418,15 @@ export interface components {
          *     ``review_reason`` mirrors the Streamlit page rule: a row needs review
          *     when its strength is unrated and/or its review_status is not reviewed.
          *     ``skill_refs`` / ``usage_count`` count skill-tree nodes citing the row.
+         *     ``breakthrough`` mirrors the raw row's 突破 flag (extra progression
+         *     weight); the review list renders a small badge for it.
          */
         EvidenceReviewItemModel: {
+            /**
+             * Breakthrough
+             * @default false
+             */
+            breakthrough: boolean;
             /**
              * Confidence
              * @default

@@ -10,13 +10,34 @@
  * the ritual stays alive (摇卦 — the yao lines keep shuffling; no dead
  * spinner, however long it takes). `source: "rule"` shows a 「离线卦」 note.
  *
+ * 正占 readings whose gap analysis found missing nodes carry a 「化为任务」
+ * action: each gap node becomes one kanban learning task via the existing
+ * POST /profiles/{name}/gap/intake endpoint (same contract as the retired
+ * GapPage 加入看板 button), then kanban/projects-board queries invalidate.
+ *
  * Backend: POST /api/v1/profiles/{name}/divination (single-consumption,
  * nothing persisted; 60s LLM timeout with deterministic rule fallback).
  */
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { apiPost } from '../api/client';
 import type { DivinationRequest, DivinationResponse } from '../api/types';
+
+/** One node of the serious-cast gap closure (anchors.gap.closure). */
+export interface DivinationGapNode {
+  id: string;
+  label: string;
+  status: string;
+  is_gap: boolean;
+}
+
+/** Gap (is_gap) nodes of a serious cast — the 化为任务 material. Pure. */
+export function gapNodesOf(result: DivinationResponse | null): DivinationGapNode[] {
+  const gap = result?.anchors?.gap as { closure?: DivinationGapNode[] } | undefined;
+  return (gap?.closure ?? []).filter((node) => node.is_gap);
+}
 
 /** Yao rows for display: symbol_lines are bottom-up (初爻 first); the symbol
  * renders top-down. Pure — vitest-covered. */
@@ -214,13 +235,21 @@ export function DivinationPanel({
   const [result, setResult] = useState<DivinationResponse | null>(null);
   const [error, setError] = useState('');
   const [cardIn, setCardIn] = useState(false);
+  // 化为任务: idle → working → done (count) | error.
+  const [intake, setIntake] = useState<{ state: 'idle' | 'working' | 'done' | 'error'; count: number; error: string }>({
+    state: 'idle',
+    count: 0,
+    error: '',
+  });
   const genRef = useRef(0);
+  const queryClient = useQueryClient();
 
   const cast = async (m: 'play' | 'serious', q: string) => {
     const gen = ++genRef.current;
     setPhase('casting');
     setResult(null); // never show a stale reading under 摇卦
     setError('');
+    setIntake({ state: 'idle', count: 0, error: '' });
     try {
       const body: DivinationRequest = { mode: m, question: q };
       const res = await apiPost<DivinationResponse>(
@@ -236,6 +265,32 @@ export function DivinationPanel({
       setError(e instanceof Error ? e.message : String(e));
       setPhase('error');
       window.setTimeout(() => setCardIn(true), reduced ? 0 : 500);
+    }
+  };
+
+  // 化为任务: one kanban learning task per gap node. Sequential — every
+  // intake writes kanban.md under a file lock, so no parallel fan-out.
+  const runIntake = async (nodes: DivinationGapNode[], q: string) => {
+    if (intake.state === 'working' || intake.state === 'done') return;
+    setIntake({ state: 'working', count: 0, error: '' });
+    try {
+      for (const node of nodes) {
+        await apiPost(`/profiles/${encodeURIComponent(profile)}/gap/intake`, {
+          title: `学习 ${node.label || node.id}`,
+          node_id: node.id,
+          why: q,
+          section: 'Queue',
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+      setIntake({ state: 'done', count: nodes.length, error: '' });
+    } catch (e) {
+      setIntake({
+        state: 'error',
+        count: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   };
 
@@ -259,6 +314,7 @@ export function DivinationPanel({
 
   const hx = result?.hexagram;
   const lines = hx?.symbol_lines ?? [1, 1, 1, 1, 1, 1];
+  const gapNodes = gapNodesOf(result);
 
   return (
     <div
@@ -313,6 +369,41 @@ export function DivinationPanel({
               <p className="div-reading" data-testid="divination-reading">
                 {result.reading}
               </p>
+              {result.mode === 'serious' && gapNodes.length > 0 && (
+                <div className="div-intake" data-testid="divination-intake-zone">
+                  {intake.state === 'done' ? (
+                    <p className="div-intake-done" data-testid="divination-intake-done">
+                      已将 {intake.count} 处缺口化为看板任务(Queue)。
+                      <Link
+                        to={`/p/${encodeURIComponent(profile)}/projects`}
+                        className="div-intake-link"
+                        data-testid="divination-intake-link"
+                      >
+                        去项目页看看 →
+                      </Link>
+                    </p>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="div-cast-btn div-intake-btn"
+                        disabled={intake.state === 'working'}
+                        data-testid="divination-intake"
+                        onClick={() => runIntake(gapNodes, result.question)}
+                      >
+                        {intake.state === 'working'
+                          ? '化为任务…'
+                          : `化为任务(${gapNodes.length} 处所缺)`}
+                      </button>
+                      {intake.state === 'error' && (
+                        <p className="div-error" role="alert" data-testid="divination-intake-error">
+                          化为任务未果:{intake.error}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </>
           )
         )}

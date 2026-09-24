@@ -4,9 +4,8 @@ import { RequireAuth } from './auth/RequireAuth';
 import { AppLayout } from './components/AppLayout';
 import { ActivityPage } from './pages/ActivityPage';
 import { AssistantPage } from './pages/AssistantPage';
-import { EvidencePage, EvidenceReviewRedirect } from './pages/EvidencePage';
+import { EvidencePage, EvidenceReviewRedirect, HealthRedirect } from './pages/EvidencePage';
 import { GapPage } from './pages/GapPage';
-import { HealthPage } from './pages/HealthPage';
 import { HomePage } from './pages/HomePage';
 import { InboxPage } from './pages/InboxPage';
 import { LoginPage } from './pages/LoginPage';
@@ -46,7 +45,9 @@ export function App() {
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/workshop" element={<WorkshopPage />} />
           <Route path="/p/:name/home" element={<HomePage />} />
-          <Route path="/p/:name/health" element={<HealthPage />} />
+          {/* Legacy route: the health page dissolved — 证据风险 lives under
+              证据「待补强」; GET /health API stays for openclaw/CLI. */}
+          <Route path="/p/:name/health" element={<HealthRedirect />} />
           <Route path="/p/:name/activity" element={<ActivityPage />} />
           <Route path="/p/:name/inbox" element={<InboxPage />} />
           {/* Legacy route: the kanban board merged into the Projects page. */}

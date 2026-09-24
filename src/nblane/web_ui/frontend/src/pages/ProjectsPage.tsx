@@ -139,6 +139,12 @@ export function ProjectsPage() {
     () => (data && taskId ? findBoardTask(data, taskId) : null),
     [data, taskId],
   );
+  // Lane-truth unassigned counts: the 未归属 lane hides Done-column cards.
+  const unassignedLaneCount = useMemo(
+    () => (data?.unassigned_tasks ?? []).filter((task) => task.column !== 'done').length,
+    [data],
+  );
+  const unassignedDoneCount = (data?.unassigned_tasks?.length ?? 0) - unassignedLaneCount;
 
   const onRefresh = useCallback(() => void board.refetch(), [board]);
 
@@ -257,16 +263,28 @@ export function ProjectsPage() {
           <Text size="sm" style={{ color: boardPalette.dim }}>
             今天 {data.today}
           </Text>
-          {Object.entries(data.stats).map(([key, value]) => (
-            <Badge
-              key={key}
-              size="sm"
-              variant="outline"
-              style={{ borderColor: boardPalette.border, color: boardPalette.dim }}
-            >
-              {STATS_LABELS[key] ?? key} {value}
-            </Badge>
-          ))}
+          {Object.entries(data.stats).map(([key, value]) => {
+            // 未归属 honesty: stats.tasks_unassigned counts Done-column cards
+            // too, but the lane only renders queue/doing/someday — show the
+            // lane-visible count and name the hidden done remainder.
+            const laneVisible =
+              key === 'tasks_unassigned'
+                ? unassignedLaneCount
+                : value;
+            const hiddenDone = key === 'tasks_unassigned' ? unassignedDoneCount : 0;
+            return (
+              <Badge
+                key={key}
+                size="sm"
+                variant="outline"
+                style={{ borderColor: boardPalette.border, color: boardPalette.dim }}
+                data-testid={`stats-${key}`}
+              >
+                {STATS_LABELS[key] ?? key} {laneVisible}
+                {hiddenDone > 0 ? `(含已完成 ${hiddenDone})` : ''}
+              </Badge>
+            );
+          })}
         </Group>
       )}
 

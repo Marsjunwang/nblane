@@ -1139,6 +1139,27 @@
 .div-cast-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .div-cast-btn:not(:disabled):hover { color: #f0cd7f; border-color: rgba(240, 205, 127, 0.85); }
 
+/* 化为任务 (正占): gap nodes → kanban learning tasks, docks under the reading */
+.div-intake { margin: -6px 0 14px; }
+
+.div-intake-btn { margin-top: 0; letter-spacing: 2px; }
+
+.div-intake-done {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(232, 226, 210, 0.82);
+  margin: 0;
+}
+
+.div-intake-link {
+  color: #f0cd7f;
+  margin-left: 8px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(240, 205, 127, 0.4);
+}
+
+.div-intake-link:hover { border-bottom-color: #f0cd7f; }
+
 /* 卦象符号: 6 yao rows (top-down), solid 阳 / broken 阴 */
 .hexagram-symbol {
   position: relative;

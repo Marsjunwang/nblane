@@ -9,7 +9,6 @@ import {
   IconChevronsLeft,
   IconChevronsRight,
 
-  IconHeartbeat,
   IconHome,
   IconInbox,
   IconLogout,
@@ -38,7 +37,6 @@ const NAV_ITEMS = [
   { label: '研究台', path: 'research', icon: IconBook2 },
   { label: '收件箱', path: 'inbox', icon: IconInbox },
   { label: '代理活动', path: 'activity', icon: IconRobot },
-  { label: '健康', path: 'health', icon: IconHeartbeat },
 ];
 
 // Wide-viewport policy: every page's main column is centered and capped so

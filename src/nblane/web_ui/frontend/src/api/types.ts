@@ -37,12 +37,6 @@ export type SkillNodePatchRequest = Schemas['SkillNodePatchRequest'];
 /** SkillNodePatchResponse from web_api/schemas.py (post-map YAML status). */
 export type SkillNodePatchResponse = Schemas['SkillNodePatchResponse'];
 
-/** HealthIssueModel from web_api/schemas.py. */
-export type HealthIssue = Schemas['HealthIssueModel'];
-
-/** HealthReportModel from web_api/schemas.py. */
-export type HealthReport = Schemas['HealthReportModel'];
-
 /** Structured error body (web_api/schemas.py ErrorResponse, via ApiError). */
 export type ErrorResponseBody = Schemas['ErrorResponse'];
 
@@ -152,12 +146,9 @@ export type EvidenceEntryDetail = Schemas['EvidenceEntryDetailModel'];
 /** EvidenceListResponse from web_api/schemas.py. */
 export type EvidenceListResponse = Schemas['EvidenceListResponse'];
 
-/** EvidenceReviewItemModel from web_api/schemas.py (triage row). The review
- * queue projection does not carry 突破 yet (only entry list/detail do); the
- * badge renders whenever the row does include it. */
-export type EvidenceReviewItem = Schemas['EvidenceReviewItemModel'] & {
-  breakthrough?: boolean;
-};
+/** EvidenceReviewItemModel from web_api/schemas.py (triage row, carries the
+ * 突破 `breakthrough` flag — the review list renders a small badge for it). */
+export type EvidenceReviewItem = Schemas['EvidenceReviewItemModel'];
 
 /** EvidenceReviewSummaryModel — queue-wide counters, ignoring list filters. */
 export type EvidenceReviewSummary = Schemas['EvidenceReviewSummaryModel'];

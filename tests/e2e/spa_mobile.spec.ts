@@ -151,9 +151,10 @@ test.describe("SPA mobile 375px — 导航", () => {
     await burger.tap();
     await expectNavbarCollapsed(page);
 
-    // Click through every drawer entry: 12 profile pages + 档案列表, plus the
-    // header 助手 entry (14 clickable entries total on mobile). The 目标 page
-    // was absorbed by the home starmap 星表 (home-editing slice, 2026-09-23).
+    // Click through every drawer entry: 11 profile pages + 档案列表, plus the
+    // header 助手 entry (13 clickable entries total on mobile). The 目标 page
+    // was absorbed by the home starmap 星表 (home-editing slice, 2026-09-23);
+    // the 健康 page dissolved into 证据「待补强」(2026-09-24, /health redirects).
     const drawerItems: { label: string; url: string }[] = [
       { label: "首页", url: spa("home") },
       { label: "项目", url: spa("projects") },
@@ -166,7 +167,6 @@ test.describe("SPA mobile 375px — 导航", () => {
       { label: "研究台", url: spa("research") },
       { label: "收件箱", url: spa("inbox") },
       { label: "代理活动", url: spa("activity") },
-      { label: "健康", url: spa("health") },
     ];
     for (const item of drawerItems) {
       if ((await navbarRightEdge(page)) <= 0) {
@@ -180,7 +180,7 @@ test.describe("SPA mobile 375px — 导航", () => {
       await expectNavbarCollapsed(page);
     }
 
-    // The header 助手 entry stays reachable on mobile (14th entry).
+    // The header 助手 entry stays reachable on mobile (13th entry).
     await page.getByRole("link", { name: "助手" }).click();
     await expect(page).toHaveURL(`${SPA_BASE_URL}/assistant`);
 

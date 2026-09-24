@@ -22,7 +22,10 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core';
+import { DateInput } from '@mantine/dates';
+import { notifications } from '@mantine/notifications';
 import { IconArrowRight, IconPencil, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
+import 'dayjs/locale/zh-cn';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -276,7 +279,20 @@ export function TaskDetailCard({
     );
 
   const runDone = () =>
-    doneCard.mutate({ cardRef: task.title, etag: kanbanEtag }, { onError: onError('操作失败') });
+    doneCard.mutate(
+      { cardRef: task.title, etag: kanbanEtag },
+      {
+        // The card closes itself on refetch (the task leaves the live lanes),
+        // so the confirmation must fire from the mutation callback.
+        onSuccess: () =>
+          notifications.show({
+            color: 'green',
+            title: '已标记完成',
+            message: `「${task.title}」已入 Done。`,
+          }),
+        onError: onError('操作失败'),
+      },
+    );
 
   const runSchedule = (start: string, end: string) =>
     scheduleCard.mutate(
@@ -417,20 +433,29 @@ export function TaskDetailCard({
           )}
           <InscriptionRow label="排期">
             <Group gap="xs" wrap="nowrap">
-              <TextInput
-                type="date"
+              {/* Mantine DateInput: native type=date renders the browser
+                  locale's mm/dd/yyyy for en-locale browsers; DateInput pins
+                  the display to valueFormat regardless of browser locale. */}
+              <DateInput
                 size="xs"
                 aria-label="排期开始"
-                value={plannedStart}
-                onChange={(event) => setPlannedStart(event.currentTarget.value)}
+                valueFormat="YYYY-MM-DD"
+                placeholder="YYYY-MM-DD"
+                locale="zh-cn"
+                clearable
+                value={plannedStart || null}
+                onChange={(value) => setPlannedStart(value ?? '')}
               />
               <Text size="sm">→</Text>
-              <TextInput
-                type="date"
+              <DateInput
                 size="xs"
                 aria-label="排期结束"
-                value={plannedEnd}
-                onChange={(event) => setPlannedEnd(event.currentTarget.value)}
+                valueFormat="YYYY-MM-DD"
+                placeholder="YYYY-MM-DD"
+                locale="zh-cn"
+                clearable
+                value={plannedEnd || null}
+                onChange={(value) => setPlannedEnd(value ?? '')}
               />
               <Button
                 size="compact-sm"

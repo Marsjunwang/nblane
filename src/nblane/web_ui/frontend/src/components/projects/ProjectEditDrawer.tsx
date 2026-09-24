@@ -278,6 +278,9 @@ function DeleteProjectZone({
         onClose={() => setOpen(false)}
         title={`删除项目 · ${title}`}
         data-testid="delete-project-modal"
+        // Render above the hosting edit drawer: both Drawer and Modal default
+        // to the 200 modal tier, so the confirm dialog needs an explicit lift.
+        zIndex={300}
       >
         <Stack gap="sm">
           <Alert color="red" title="后果预告" data-testid="delete-project-preview">

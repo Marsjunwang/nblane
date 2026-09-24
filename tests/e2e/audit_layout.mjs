@@ -28,7 +28,6 @@ const PAGES = [
   ["Research", `/p/${PROFILE}/research`],
   ["Gap", `/p/${PROFILE}/gap`],
   ["Goals", `/p/${PROFILE}/goals`],
-  ["Health", `/p/${PROFILE}/health`],
   ["Activity", `/p/${PROFILE}/activity`],
   ["PublicBuild", `/p/${PROFILE}/public-build`],
   ["SkillTree", `/p/${PROFILE}/skill-tree`],

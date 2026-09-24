@@ -1798,3 +1798,16 @@ export function EvidenceReviewRedirect() {
     />
   );
 }
+
+/** /health → /evidence?stage=strengthen(健康页解散裁决:证据风险由
+ * 「待补强」承接,体检报告由 openclaw 周回顾推送;`GET /health` API 保留给
+ * openclaw/CLI,见 production-launch-plan.md §2.2)。 */
+export function HealthRedirect() {
+  const { name = '' } = useParams();
+  return (
+    <Navigate
+      to={`/p/${encodeURIComponent(name)}/evidence?stage=strengthen`}
+      replace
+    />
+  );
+}

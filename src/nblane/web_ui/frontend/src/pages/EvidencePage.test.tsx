@@ -62,6 +62,7 @@ const REVIEW_QUEUE = {
       confidence: '',
       public_readiness: 'private',
       deprecated: false,
+      breakthrough: false,
       usage_count: 0,
       skill_refs: [],
       review_reason: 'missing_strength, needs_review',
@@ -478,6 +479,15 @@ describe('EvidencePage', () => {
 
     const row = await screen.findByTestId('evidence-row-ev_2');
     expect(within(row).getByTestId('row-breakthrough-ev_2')).toHaveTextContent('突破');
+  });
+
+  it('review rows without the 突破 flag render no badge', async () => {
+    // Default fixture carries breakthrough: false (the queue projection field).
+    stubFetch();
+    renderPage();
+
+    const row = await screen.findByTestId('evidence-row-ev_2');
+    expect(within(row).queryByTestId('row-breakthrough-ev_2')).not.toBeInTheDocument();
   });
 
   it('detail card shows only 分量; confidence/readiness live under 更多', async () => {

@@ -38,7 +38,7 @@ export function ProfilesPage() {
               radius="md"
               padding="lg"
               component={Link}
-              to={`/p/${encodeURIComponent(p.name)}/health`}
+              to={`/p/${encodeURIComponent(p.name)}/home`}
             >
               <Title order={4}>{p.name}</Title>
               <Text size="sm" c="dimmed" mt="xs">

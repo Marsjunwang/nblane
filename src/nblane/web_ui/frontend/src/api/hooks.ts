@@ -44,7 +44,6 @@ import type {
   HabitArchiveResponse,
   HabitDeleteRequest,
   HabitDeleteResponse,
-  HealthReport,
   HomeResponse,
   InboxCaptureRequest,
   InboxClarifyAction,
@@ -165,14 +164,6 @@ export function useWorkshopStatus() {
     queryKey: ['system', 'workshop'],
     queryFn: () => apiGet<WorkshopStatus>('/system/workshop'),
     staleTime: 60_000,
-  });
-}
-
-export function useHealthReport(profile: string) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'health'],
-    queryFn: () => apiGet<HealthReport>(`/profiles/${encodeURIComponent(profile)}/health`),
-    enabled: profile.length > 0,
   });
 }
 
@@ -1379,6 +1370,7 @@ export function useGapIntake(profile: string) {
       apiPost<KanbanMutationResponse>(`${gapBase(profile)}/intake`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
     },
   });
 }

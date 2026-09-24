@@ -257,7 +257,6 @@ describe('ProjectsPage board view', () => {
 
     // Done fold count includes archived tasks.
     expect(screen.getByTestId('done-count-p1')).toHaveTextContent('Done · 5（含归档 3）');
-
     // Unassigned lane (dashed gold) with its task.
     const unassigned = screen.getByTestId('unassigned-lane');
     expect(within(unassigned).getByText('无归属任务')).toBeInTheDocument();
@@ -280,6 +279,55 @@ describe('ProjectsPage board view', () => {
     expect(
       within(screen.getByTestId('lane-column-unassigned-queue')).getByTestId('quick-add-unassigned'),
     );
+  });
+
+  it('未归属 stats badge matches the lane, naming the hidden done remainder', async () => {
+    // Backend stats.tasks_unassigned counts Done-column cards too (they are
+    // still live kanban rows); the lane only renders queue/doing/someday.
+    stubFetch((url) => {
+      if (url.includes('/profiles/alice/projects-board')) {
+        return new Response(
+          JSON.stringify({
+            ...BOARD,
+            unassigned_tasks: [
+              makeTask({ id: 'kb_9', title: '无归属任务' }),
+              makeTask({
+                id: 'kb_10',
+                title: '已完成旧任务',
+                section: 'Done',
+                column: 'done',
+                done: true,
+              }),
+            ],
+            stats: { tasks_total: 5, tasks_unassigned: 2 },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG } },
+        );
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+
+    const badge = await screen.findByTestId('stats-tasks_unassigned');
+    // Lane truth: 1 visible card; the done one is named, not miscounted.
+    expect(badge).toHaveTextContent('未归属 1(含已完成 1)');
+  });
+
+  it('未归属 stats badge without hidden done cards shows the plain count', async () => {
+    stubFetch((url) => {
+      if (url.includes('/profiles/alice/projects-board')) {
+        return new Response(
+          JSON.stringify({ ...BOARD, stats: { tasks_total: 4, tasks_unassigned: 1 } }),
+          { status: 200, headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG } },
+        );
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+
+    const badge = await screen.findByTestId('stats-tasks_unassigned');
+    expect(badge).toHaveTextContent('未归属 1');
+    expect(badge).not.toHaveTextContent('含已完成');
   });
 
   it('日课栏 dedupe: a habit-plan renders only as a band row, never as a lane', async () => {
