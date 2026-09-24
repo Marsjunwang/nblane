@@ -457,10 +457,12 @@ def load_automations_file(
         timeout_seconds = _parse_timeout(merged.get("timeout_seconds"), where)
         channel, to = _parse_deliver(merged.get("deliver"), where)
         if session == "main":
-            # OpenClaw 2026.9 rejects --announce on main-session jobs; the
-            # main session already is the owner's chat, so delivery is a
-            # no-op. Normalize it away to keep reconcile drift-free.
+            # OpenClaw 2026.9: main-session jobs are system events — the
+            # gateway rejects announce delivery and silently drops the
+            # agent-turn fields (model/fallbacks/timeoutSeconds). Normalize
+            # all of them away to keep reconcile drift-free.
             channel, to = "", ""
+            model, fallbacks, timeout_seconds = "", (), None
         prompt_text = _resolve_prompt(
             base_dir, _require_str(merged.get("prompt"), "prompt", where), where
         )

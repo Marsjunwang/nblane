@@ -27,7 +27,7 @@ automations:
     name: 每周巩固
     cron: "0 20 * * 0"
     session: main # 覆盖 defaults：周维护需要主会话的记忆上下文
-    model: qwen/qwen3.8-flash # 主会话可能很长，3.8-flash 长上下文单价更稳
+    # main 会话任务在 2026.9 是 system event：model/fallbacks/timeout/deliver 均被网关忽略
     prompt: prompts/weekly-maintenance.md
   - key: nblane:weekly-divination
     name: 每周占卜
