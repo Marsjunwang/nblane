@@ -539,6 +539,10 @@ class TestApplyReconcile(unittest.TestCase):
         argv = runner.calls[0]
         self.assertNotIn("--message", argv)
         self.assertEqual(argv[argv.index("--system-event") + 1], PROMPT_PLAN)
+        # 2026.9 also rejects --announce on main-session jobs: the main
+        # session already is the owner's chat.
+        self.assertNotIn("--announce", argv)
+        self.assertNotIn("--channel", argv)
 
     def test_prune_requires_flag(self) -> None:
         [action] = plan_reconcile([], [_live_job("nblane:stale")])

@@ -456,6 +456,11 @@ def load_automations_file(
         fallbacks = _parse_fallbacks(merged.get("fallbacks"), where)
         timeout_seconds = _parse_timeout(merged.get("timeout_seconds"), where)
         channel, to = _parse_deliver(merged.get("deliver"), where)
+        if session == "main":
+            # OpenClaw 2026.9 rejects --announce on main-session jobs; the
+            # main session already is the owner's chat, so delivery is a
+            # no-op. Normalize it away to keep reconcile drift-free.
+            channel, to = "", ""
         prompt_text = _resolve_prompt(
             base_dir, _require_str(merged.get("prompt"), "prompt", where), where
         )
@@ -538,12 +543,22 @@ def _normalize_live_job(job: Mapping[str, Any]) -> dict[str, Any]:
 
     fallbacks_raw = job.get("fallbacks") or []
     timeout_raw = job.get("timeoutSeconds")
+    payload = job.get("payload")
+    if not isinstance(payload, Mapping):
+        payload = {}
+    # 2026.9 nests agent-turn fields (model/fallbacks/timeoutSeconds) and the
+    # message text inside the payload object.
+    model = str(job.get("model") or payload.get("model") or "")
+    if not fallbacks_raw and isinstance(payload.get("fallbacks"), list):
+        fallbacks_raw = payload["fallbacks"]
+    if timeout_raw is None:
+        timeout_raw = payload.get("timeoutSeconds")
     return {
         "key": str(job.get("declarationKey") or job.get("name") or ""),
         "cron": cron,
         "tz": tz,
-        "session": str(job.get("session") or ""),
-        "model": str(job.get("model") or ""),
+        "session": str(job.get("session") or job.get("sessionTarget") or ""),
+        "model": model,
         "fallbacks": [str(item) for item in fallbacks_raw]
         if isinstance(fallbacks_raw, list)
         else [],
@@ -551,7 +566,14 @@ def _normalize_live_job(job: Mapping[str, Any]) -> dict[str, Any]:
         "announce": announce,
         "channel": channel,
         "to": to,
-        "message": str(job.get("message") or job.get("prompt") or ""),
+        "message": str(
+            job.get("message")
+            or job.get("prompt")
+            # 2026.9 nests the payload: agentTurn.message / systemEvent.text
+            or payload.get("message")
+            or payload.get("text")
+            or ""
+        ),
     }
 
 
@@ -695,7 +717,9 @@ def _spec_field_argv(spec: AutomationSpec) -> list[str]:
         argv += ["--fallbacks", ",".join(spec.fallbacks)]
     if spec.timeout_seconds is not None:
         argv += ["--timeout-seconds", str(spec.timeout_seconds)]
-    if spec.deliver_channel:
+    if spec.deliver_channel and spec.session != "main":
+        # 2026.9 rejects --announce on main-session jobs; a main-session
+        # system event already lands in the owner's chat.
         argv += [
             "--announce",
             "--best-effort-deliver",
