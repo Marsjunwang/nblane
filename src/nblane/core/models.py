@@ -112,6 +112,9 @@ class EvidenceRecord:
     source_content_hash: str = ""
     deprecated: bool = False
     replaced_by: str = ""
+    # 突破 marker: a landmark proof that outweighs routine evidence in the
+    # skill-progression score (core.skill_progression.BREAKTHROUGH_WEIGHT).
+    breakthrough: bool = False
 
     def to_evidence(self) -> Evidence:
         """Map pool fields to inline Evidence (for gap/context)."""
@@ -179,6 +182,7 @@ class EvidenceRecord:
             source_content_hash=str(d.get("source_content_hash", "") or ""),
             deprecated=bool(d.get("deprecated", False)),
             replaced_by=str(d.get("replaced_by", "") or ""),
+            breakthrough=bool(d.get("breakthrough", False)),
         )
 
     def to_dict(self) -> dict:
@@ -234,6 +238,8 @@ class EvidenceRecord:
             out["deprecated"] = True
         if self.replaced_by:
             out["replaced_by"] = self.replaced_by
+        if self.breakthrough:
+            out["breakthrough"] = True
         return out
 
 

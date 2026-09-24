@@ -139,6 +139,8 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
   ProjectEditDrawer(基本信息/里程碑/任务 + 危险区删除,复用裁决3 全套确认)。
   **纯习惯行不给入口**:habit 不是 project case,项目侧无可删对象
   (习惯生命周期归 activity-log/设置页),不做 archive-only 半吊子入口。
+  (2026-09-24 晚更新:习惯生命周期端点落地后,纯习惯行已获同款齿轮菜单,
+  见文末「习惯生命周期 + 打卡点石刻化」节。)
 - **快添即入详情**:≤1-click 规则不变(快添仍只产标题卡),但项目泳道
   (`POST /cases/{id}/tasks`)与未归属泳道(`POST /kanban/cards`)快添成功后
   立即 `?task=<newId>` 打开铭文详情卡——要补上下文的直接落在编辑语境,
@@ -155,3 +157,25 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
   清空/聚合携带)全量 1728;vitest 新增 7(TaskDetailCard 清单 4、
   ProjectsPage 快添自动打开 2 + 日课设置钮 1 + 卡片进度 1)全量 246;tsc 绿;
   openapi.json + schema.d.ts 已重生成。无新增依赖(packaging-manifest 已登记)。
+
+## 实施状态(2026-09-24 晚:习惯生命周期 + 打卡点石刻化)
+
+- **习惯生命周期 UI(纯习惯行)**:日课栏纯习惯行获得与 habit-plan 行同款
+  悬停浮现齿轮(`habit-menu-<id>`),开菜单两项——
+  - **归档**:一键 `POST .../habits/{id}/archive {archived:true}`,行即刻折起
+    (本地 archivedIds,服务端归档行默认退出 board 载荷);顶栏「显示已归档」
+    开关拉取 `?include_archived=true`(`useArchivedBoardHabits`,与主 board
+    共享 query-key 前缀,生命周期 mutation 一并失效),归档行弱显并带 已归档
+    徽标,菜单换成「恢复」(`archived:false`)。
+  - **删除**:确认弹窗复用项目删除裁决——后果预告「将移除 N 条打卡记录」
+    (N 取 `total_checkins`)+ 逐字输入习惯名 + 记入大事记(默认 OFF)→
+    `DELETE .../habits/{id} {confirm_title, record_chronicle}` →
+    `{ok, deleted_id, checkins_removed}`;422 `habit_delete_confirm_mismatch`
+    落为行内字段错误,行保留。
+- **打卡点石刻化**:日课栏周点与时间轴习惯带、首页日课印悬停浮条统一
+  词汇——未打卡 = 月白 35% 细空心环,已打卡 = 泥金实点,今日格外套细金环
+  (box-shadow,不扰填充/描边语义);`boardPalette.habitGreen` 全站退役,
+  打卡按钮 green → brand 泥金,无 Mantine 绿。
+- 测试:本片 vitest 新增 5(石刻样式 1、归档折起/开关/恢复 1、服务端归档行 1、
+  删除预告+逐字确认+DELETE body 1、422 mismatch 1);同日前端另有技能进阶进度
+  与证据突破标记(见 phase-plan.md 末节),全量 260、tsc 绿。

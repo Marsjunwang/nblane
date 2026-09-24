@@ -124,6 +124,32 @@ Phase 1 建成通用件:mutation API 样板、embedding 建议能力(core/ai/)�
 - 测试:pytest 1724(TestCheckinDelete 3 例新增)、vitest 229(销印/编辑 6 例新增)、
   tsc 绿;真人 QA 6 旅程全绿(vite dev 15173 → 隔离栈 18504,截图 /tmp/qa-shots/)。
 
+### 习惯生命周期 + 技能进阶前端(2026-09-24 晚落地,跨 /projects·技能树·证据)
+
+契约见 data-contracts.md「习惯生命周期」「技能进阶进度」「证据 breakthrough」;
+本片为纯前端(后端契约同日并行落地,openapi.json + schema.d.ts 已随
+gen:api 重生成,类型为 schema 别名)。
+
+- **日课栏习惯生命周期**:纯习惯行悬停齿轮 → 归档(一键折起;「显示已归档」
+  开关经 `?include_archived=true` 带回服务端归档行,弱显 + 恢复)/ 删除
+  (后果预告 N 条打卡 + 逐字确认 + 记入大事记默认 OFF;422
+  `habit_delete_confirm_mismatch` 行内报错)。详见 phase2-projects-hci.md 末节。
+- **打卡点石刻化**:日课栏周点、时间轴习惯带、日课印浮条统一为 月白35% 空心环
+  / 泥金实点 / 今日细金环;`habitGreen` 退役。
+- **技能进阶进度(技能树页)**:节点铭文卡新增「进阶」块——当前阶 → 下一阶、
+  score/threshold_next 泥金进度条、突破 ×N(>0 时);`progress.eligible` 时
+  列表字形与境界 stepper 目标阶带柔金脉冲(`.nblane-eligible-pulse`,
+  reduced-motion 关闭)并标「可进阶」。脉冲是纯提示,升阶仍走三态 PATCH。
+- **证据突破标记**:详情卡 分量 旁「突破」开关(经 edit 端点
+  `fields.breakthrough` "true"/"false" 字符串 round-trip),列表行显示 突破
+  徽章;计分规则(突破 +1000)在 `core/skill_progression.py`。
+  (注意:evidence-review 队列投影暂未携带 breakthrough——详情/条目列表
+  投影有;徽章在投影补齐后即自动出现,前端已按可选字段渲染。)
+- **未做**:首页星图(图态)eligible 星点脉冲——StarmapResponse 契约不含
+  progress/eligible,需跨端点拼接并改 scene 逐点属性动画,超出「trivial」
+  门槛且触碰冻结的场景语法;待后端把 eligible 折进 /starmap 聚合后再评。
+- 测试:vitest 新增 9(日课栏 5、进阶 2、突破 2)全量 260;tsc 绿;pytest 零改动。
+
 ## Phase 3 进展
 
 ### home 星图进 SPA(2026-09-23 kickoff 落地)

@@ -331,6 +331,9 @@ class Habit:
     skill_refs: list[str] = field(default_factory=list)
     review_policy: str = "weekly_rollup"
     notes: str = ""
+    # Archived habits keep their history but leave the active catalog
+    # (excluded from the projects-board habits list by default).
+    archived: bool = False
 
     @classmethod
     def from_dict(cls, raw: object) -> "Habit":
@@ -365,6 +368,7 @@ class Habit:
                 or "weekly_rollup"
             ),
             notes=_clean_text(raw.get("notes") or raw.get("note")),
+            archived=bool(raw.get("archived", False)),
         )
 
     def merged(self, other: "Habit") -> "Habit":
@@ -381,6 +385,7 @@ class Habit:
             ),
             review_policy=other.review_policy or self.review_policy,
             notes=other.notes or self.notes,
+            archived=self.archived or other.archived,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -402,6 +407,8 @@ class Habit:
             out["review_policy"] = self.review_policy
         if self.notes:
             out["notes"] = self.notes
+        if self.archived:
+            out["archived"] = True
         return out
 
 
@@ -1108,6 +1115,63 @@ def add_habit(
     log.habits.append(habit)
     save(name_or_dir, log, expected_snapshot=expected_snapshot)
     return habit
+
+
+def set_habit_archived(
+    name_or_dir: str | Path,
+    habit_id: str,
+    archived: bool,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> Habit | None:
+    """Archive or unarchive one habit; returns the habit, None if unknown.
+
+    Archiving keeps the habit entry and all check-ins — it only flips the
+    ``archived`` flag so readers can drop it from the active catalog. The
+    save honors *expected_snapshot* with the same in-lock re-check as
+    ``save`` (raises ``file_state.FileConflictError`` on mismatch).
+    """
+    log = load(name_or_dir)
+    resolved_id = resolve_habit_id(log, habit_id)
+    if resolved_id is None:
+        return None
+    habit = log.habit_index()[resolved_id]
+    habit.archived = bool(archived)
+    save(name_or_dir, log, expected_snapshot=expected_snapshot)
+    return habit
+
+
+def delete_habit(
+    name_or_dir: str | Path,
+    habit_id: str,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> tuple[Habit, int] | None:
+    """Remove one habit and every check-in referencing it.
+
+    Returns ``(habit, checkins_removed)`` for the deleted habit, or None
+    when the id/title resolves to nothing. Every check-in row that names
+    the habit (``habit_id`` or ``habits``) is purged and counted in
+    ``checkins_removed`` — deletion is a confirmed destructive op, so a
+    shared multi-habit row goes with the habit rather than keeping a
+    dangling partial history. The save honors *expected_snapshot* with
+    the same in-lock re-check as ``save``.
+    """
+    log = load(name_or_dir)
+    resolved_id = resolve_habit_id(log, habit_id)
+    if resolved_id is None:
+        return None
+    habit = log.habit_index()[resolved_id]
+    log.habits = [item for item in log.habits if item.id != resolved_id]
+    kept = [
+        checkin
+        for checkin in log.checkins
+        if checkin.habit_id != resolved_id and resolved_id not in checkin.habits
+    ]
+    removed = len(log.checkins) - len(kept)
+    log.checkins = kept
+    save(name_or_dir, log, expected_snapshot=expected_snapshot)
+    return habit, removed
 
 
 def add_activity_checkin(

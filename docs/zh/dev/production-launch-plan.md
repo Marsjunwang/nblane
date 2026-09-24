@@ -23,6 +23,13 @@ source_of_truth: 生产上线与 openclaw 第一环集成计划;事实依据 src
   `DELETE /checkins/{id}`(:5351)、`GET/POST /plan-templates[/instantiate]`
   (:5473/:5558)、`PATCH /north-star`(:1992)、goals CRUD(:2144/:2220)、
   `GET /chronicle`(:2343)。
+- 习惯生命周期 + 技能进阶后端(**已落地 2026-09-24**):
+  `POST /habits/{id}/archive`、`DELETE /habits/{id}`(confirm_title 逐字确认 +
+  checkins 连删 + 可选 `habit.deleted`)、证据 `breakthrough` 字段(编辑白名单
+  可写)、`GET /skill-tree` 节点 `progress`(规则集中在
+  `core/skill_progression.py`,唯一调参处)、PATCH 升阶自动记 `skill.lit`。
+  剩余缺口:仅 SPA 前端接线(习惯归档/删除入口、progress 升阶提示),
+  后端无新增缺口;`eligible` 只是提示,晋升仍走人工确认的 PATCH。
 - SPA(React+Mantine)在隔离栈 18504 验收通过(`docs/zh/dev/phase-plan.md`
   Phase 1–3 节);构建产物提交在 `src/nblane/web_ui/static/`,CI 有
   frontend-artifacts 新鲜度比对。生产侧:`nblane-web-api` unit(8504)写好

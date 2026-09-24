@@ -157,6 +157,7 @@ class BoardHabit:
     last_checkin: str = ""
     project_id: str = ""
     recent_days: list[BoardHabitRecentDay] = field(default_factory=list)
+    archived: bool = False
 
 
 @dataclass
@@ -393,15 +394,22 @@ def _build_habit(
         total_checkins=len(dates),
         last_checkin=max(dates) if dates else "",
         recent_days=recent_days,
+        archived=habit.archived,
     )
 
 
 def build_projects_board(
-    profile: str | Path, *, today: date | None = None
+    profile: str | Path,
+    *,
+    today: date | None = None,
+    include_archived: bool = False,
 ) -> ProjectsBoard:
     """Aggregate the /projects board from one profile directory.
 
     *today* is injectable for tests; defaults to the real current date.
+    Archived habits (``archived: true`` in activity-log.yaml) leave the
+    ``habits`` list and the habit<->project link pass unless
+    *include_archived* is set — then they appear with ``archived=True``.
     """
     pdir = Path(profile)
     today = today or date.today()
@@ -431,6 +439,8 @@ def build_projects_board(
     habits: list[BoardHabit] = []
     habit_rows: dict[str, BoardHabit] = {}
     for habit in log.habits:
+        if habit.archived and not include_archived:
+            continue
         row = _build_habit(habit, _habit_checkin_day_index(log, habit.id), today)
         habits.append(row)
         habit_rows[habit.id] = row
@@ -451,7 +461,7 @@ def build_projects_board(
         if habit_id:
             _attach(habit_id, case.id)
     for habit in log.habits:
-        if habit_rows[habit.id].project_id:
+        if habit.id not in habit_rows or habit_rows[habit.id].project_id:
             continue
         for case in board.project_cases:
             project = by_id.get(case.id)

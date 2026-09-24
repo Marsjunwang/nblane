@@ -73,8 +73,11 @@ append-only;每条 `{date, kind, ref, note}`。`core/chronicle.py` 的
 合并),`expected_snapshot` 冲突时路由层用新快照重试一次。当前 kind:
 `north_star.rewritten`、`goal.added`、`goal.completed`、`goal.renamed`、
 `project.deleted`(2026-09-23 起,仅在删除项目时显式勾选「记入大事记」
-才落笔,默认不记);只在变化真实发生时落笔(重命名只在 title 变了时记,
-no-op 保存不记)。
+才落笔,默认不记)、`habit.deleted`(2026-09-24,习惯删除同样默认不记,
+`record_chronicle=true` 才落笔,ref = habit id,note = 习惯标题)、
+`skill.lit`(2026-09-24,技能节点状态沿 locked→learning→solid→expert
+升阶时自动落笔,降阶/no-op 不记,ref = 节点 id,note = schema 标签);
+只在变化真实发生时落笔(重命名只在 title 变了时记,no-op 保存不记)。
 消费者:首页简报行、拓片年度叙事、openclaw 复盘素材。
 
 ## 更新顺序
@@ -101,7 +104,19 @@ evidence-pool.yaml
 落为 `solid`;`expert`（精通）是评审授予的第四级，不可经此端点写入。写纪律与
 skill-links 一致：`If-Match` 携带 skill-tree.yaml 弱 ETag（412 重试），写经
 `profile_io.update_skill_tree` 的锁内快照复核；状态落盘后在 SKILL.md 存在时重写其
-生成块（`write_generated_blocks`）。no-op patch 不写文件、不改 ETag。
+生成块（`write_generated_blocks`）。no-op patch 不写文件、不改 ETag。状态沿
+`locked→learning→solid→expert` 真实升阶时追加 chronicle `skill.lit`
+（降阶/no-op 不记;2026-09-24 起）。
+
+技能进阶进度（同日落地,只读）:`GET /skill-tree` 每个节点带 `progress`
+对象 `{score, next_rung, threshold_next, breakthrough_count, eligible}`,规则全部
+集中在 `core/skill_progression.py`(唯一调参处,常量 + docstring):
+节点非废弃 `evidence_refs` 逐条计分,分量 弱/中/强 = 1/10/100(`high_trust`
+按强计,未评级按 1),`breakthrough: true` 的证据行额外 +1000;升阶阈值
+locked→learning 10、learning→solid 30、solid→expert 100,expert 无下一阶
+(`next_rung`/`threshold_next` 为 null);`eligible` = 存在下一阶 且
+(score ≥ threshold_next 或 breakthrough_count ≥ 1)。eligible 只是升阶提示,
+状态写入仍走上面的 PATCH 端点(三态词汇,`lit` 落 `solid`)。
 
 证据按技能反查（同日）：`GET /api/v1/profiles/{name}/evidence?skill_id=<id>` 复用
 `evidence_usage_index` 的反向映射（skill-tree.yaml `evidence_refs` 是唯一写侧），
@@ -364,6 +379,25 @@ project-board.yaml
   `recent_days`——近 90 天(今日含当日,窗口 = today-89..today)有打卡的
   `{date, count}` 列表,同日多行打卡 count 求和、按日期升序;`week` /
   `streak` / `total_checkins` 口径不变(total 仍数全历史去重天数)。
+- 习惯生命周期(2026-09-24,activity-log.yaml):
+  - `POST .../habits/{habit_id}/archive`(body `{archived: bool}`):可逆归档——
+    habit 条目获得 `archived: true`(取消归档时键被移除),打卡历史原样保留;
+    已归档习惯默认退出 projects-board `habits[]` 与 habit↔project 链接
+    (`?include_archived=true` 可带回,行上标 `archived: true`)。与当前状态
+    一致的请求是 no-op(`changed=false`,不写文件)。ETag/412 纪律同 checkins。
+  - `DELETE .../habits/{habit_id}`(body `{confirm_title, record_chronicle=false}`):
+    破坏性删除,裁决同项目删除——`confirm_title` 必须与习惯标题逐字一致,
+    否则 422 `habit_delete_confirm_mismatch` 且不写任何内容;删除移除 habit
+    条目及所有引用它的 checkin 行(响应 `{ok, deleted_id, checkins_removed}`),
+    其他 habit 的行不动;`record_chronicle=true` 时追加 `habit.deleted`
+    (默认不记)。核心实现 `core/activity_log.py` 的
+    `set_habit_archived` / `delete_habit`,均走写锁 + 锁内快照复核。
+- 证据 `breakthrough` 字段(2026-09-24,evidence-pool.yaml):可选 bool,
+  默认 false(为 true 时才落盘),标记里程碑级证据;`EvidenceRecord`
+  解析模型与 raw 路径(`load_evidence_pool_raw` / `update_evidence_pool`)
+  双路 round-trip;可经单条编辑端点 `POST .../evidence/{id}/edit` 的
+  `fields.breakthrough`("true"/"false",空串清除)读写,列表/详情 API
+  投影均携带。计分作用见上文「技能进阶进度」。
 
 ### Research Workspace（已落地 P4 v1）
 

@@ -42,13 +42,15 @@ from nblane.core.yaml_io import _load_yaml_dict
 CHRONICLE_FILENAME = "chronicle.yaml"
 
 # Kinds currently emitted by the write endpoints. ``ref`` points at the
-# changed object (goal id; empty for the North Star).
+# changed object (goal/habit/skill-node id; empty for the North Star).
 CHRONICLE_KINDS: tuple[str, ...] = (
     "north_star.rewritten",
     "goal.added",
     "goal.completed",
     "goal.renamed",
     "project.deleted",
+    "habit.deleted",
+    "skill.lit",
 )
 
 

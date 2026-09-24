@@ -40,6 +40,23 @@ class SkillTreeSummary(BaseModel):
     status_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class SkillNodeProgressModel(BaseModel):
+    """Progression readout for one skill node (core.skill_progression).
+
+    ``score`` sums the node's non-deprecated evidence_refs (weak/medium/
+    strong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /
+    ``threshold_next`` describe the rung above the current YAML status
+    (both null at expert); ``eligible`` means the node qualifies for a
+    rung-up prompt (score threshold met, or at least one breakthrough).
+    """
+
+    score: int = 0
+    next_rung: str | None = None
+    threshold_next: int | None = None
+    breakthrough_count: int = 0
+    eligible: bool = False
+
+
 class SkillTreeNodeModel(BaseModel):
     """One node in the recursive skill-tree view.
 
@@ -48,7 +65,8 @@ class SkillTreeNodeModel(BaseModel):
     the profile overlay; ``evidence_count`` counts resolved evidence (pool
     refs plus inline rows, deprecated/missing refs excluded). ``category``
     is the schema grouping (empty for nodes unknown to the schema) — the
-    home starmap uses it to size its sector band.
+    home starmap uses it to size its sector band. ``progress`` is the
+    tunable rung-up readout (see ``SkillNodeProgressModel``).
     """
 
     id: str
@@ -56,6 +74,9 @@ class SkillTreeNodeModel(BaseModel):
     status: str = "locked"
     category: str = ""
     evidence_count: int = 0
+    progress: SkillNodeProgressModel = Field(
+        default_factory=SkillNodeProgressModel
+    )
     children: list[SkillTreeNodeModel] = Field(default_factory=list)
 
 
@@ -635,6 +656,7 @@ class EvidenceEntryModel(BaseModel):
     url: str = ""
     summary: str = ""
     source_refs: list[str] = Field(default_factory=list)
+    breakthrough: bool = False
 
 
 class EvidenceEntryDetailModel(EvidenceEntryModel):
@@ -900,7 +922,8 @@ class EvidenceEditRequest(BaseModel):
     ``fields`` maps field name -> new value. Allowed keys: the review
     whitelist (``review_status``/``strength``/``confidence``/
     ``public_readiness``, domain-validated, "" clears) plus the text fields
-    ``title``/``summary``/``date``/``url`` and ``type`` (domain-validated).
+    ``title``/``summary``/``date``/``url`` and ``type`` (domain-validated),
+    plus the bool flag ``breakthrough`` ("true"/"false", "" clears).
     Unknown keys answer 422; provenance fields (``origin*``, refs,
     ``original_content``) are not editable here — the original snapshot is
     immutable once crystallized.
@@ -1437,6 +1460,7 @@ class ProjectsBoardHabitModel(BaseModel):
     recent_days: list[ProjectsBoardHabitRecentDayModel] = Field(
         default_factory=list
     )
+    archived: bool = False
 
 
 class ProjectsBoardResponse(BaseModel):
@@ -1669,6 +1693,50 @@ class CheckinDeleteResponse(BaseModel):
 
     ok: bool
     checkin_id: str
+
+
+# --- Habit lifecycle (archive / confirmed delete) ----------------------------
+
+
+class HabitArchiveRequest(BaseModel):
+    """Body for POST .../habits/{habit_id}/archive (archive or restore)."""
+
+    archived: bool
+
+
+class HabitArchiveResponse(BaseModel):
+    """Result of the habit archive mutation.
+
+    ``changed`` is false when the habit was already in the requested state
+    (a no-op writes nothing)."""
+
+    ok: bool = True
+    habit_id: str
+    archived: bool = False
+    changed: bool = False
+
+
+class HabitDeleteRequest(BaseModel):
+    """Body for DELETE .../habits/{habit_id} (confirmed destructive delete).
+
+    ``confirm_title`` must equal the habit's title exactly, else 422
+    ``habit_delete_confirm_mismatch`` — the typed-name guard against
+    fat-finger deletes. ``record_chronicle`` opts into a ``habit.deleted``
+    chronicle entry (default off: routine catalog pruning is not a
+    narrative event)."""
+
+    confirm_title: str = ""
+    record_chronicle: bool = False
+
+
+class HabitDeleteResponse(BaseModel):
+    """Result of the habit delete mutation.
+
+    ``checkins_removed`` counts every check-in row purged with the habit."""
+
+    ok: bool = True
+    deleted_id: str
+    checkins_removed: int = 0
 
 
 # --- Habit-plan templates (Phase 2 click-to-instantiate plans) -------------

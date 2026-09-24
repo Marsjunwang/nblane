@@ -1226,7 +1226,7 @@
     "type": "object"
    },
    "EvidenceEditRequest": {
-    "description": "Body for the single-entry edit mutation.\n\n``fields`` maps field name -> new value. Allowed keys: the review\nwhitelist (``review_status``/``strength``/``confidence``/\n``public_readiness``, domain-validated, \"\" clears) plus the text fields\n``title``/``summary``/``date``/``url`` and ``type`` (domain-validated).\nUnknown keys answer 422; provenance fields (``origin*``, refs,\n``original_content``) are not editable here — the original snapshot is\nimmutable once crystallized.",
+    "description": "Body for the single-entry edit mutation.\n\n``fields`` maps field name -> new value. Allowed keys: the review\nwhitelist (``review_status``/``strength``/``confidence``/\n``public_readiness``, domain-validated, \"\" clears) plus the text fields\n``title``/``summary``/``date``/``url`` and ``type`` (domain-validated),\nplus the bool flag ``breakthrough`` (\"true\"/\"false\", \"\" clears).\nUnknown keys answer 422; provenance fields (``origin*``, refs,\n``original_content``) are not editable here — the original snapshot is\nimmutable once crystallized.",
     "properties": {
      "fields": {
       "additionalProperties": {
@@ -1277,6 +1277,11 @@
    "EvidenceEntryDetailModel": {
     "description": "One evidence-pool entry, full detail view.",
     "properties": {
+     "breakthrough": {
+      "default": false,
+      "title": "Breakthrough",
+      "type": "boolean"
+     },
      "confidence": {
       "default": "",
       "title": "Confidence",
@@ -1438,6 +1443,11 @@
    "EvidenceEntryModel": {
     "description": "One evidence-pool entry, list view.",
     "properties": {
+     "breakthrough": {
+      "default": false,
+      "title": "Breakthrough",
+      "type": "boolean"
+     },
      "date": {
       "default": "",
       "title": "Date",
@@ -2562,6 +2572,90 @@
      }
     },
     "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "HabitArchiveRequest": {
+    "description": "Body for POST .../habits/{habit_id}/archive (archive or restore).",
+    "properties": {
+     "archived": {
+      "title": "Archived",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "archived"
+    ],
+    "title": "HabitArchiveRequest",
+    "type": "object"
+   },
+   "HabitArchiveResponse": {
+    "description": "Result of the habit archive mutation.\n\n``changed`` is false when the habit was already in the requested state\n(a no-op writes nothing).",
+    "properties": {
+     "archived": {
+      "default": false,
+      "title": "Archived",
+      "type": "boolean"
+     },
+     "changed": {
+      "default": false,
+      "title": "Changed",
+      "type": "boolean"
+     },
+     "habit_id": {
+      "title": "Habit Id",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "habit_id"
+    ],
+    "title": "HabitArchiveResponse",
+    "type": "object"
+   },
+   "HabitDeleteRequest": {
+    "description": "Body for DELETE .../habits/{habit_id} (confirmed destructive delete).\n\n``confirm_title`` must equal the habit's title exactly, else 422\n``habit_delete_confirm_mismatch`` — the typed-name guard against\nfat-finger deletes. ``record_chronicle`` opts into a ``habit.deleted``\nchronicle entry (default off: routine catalog pruning is not a\nnarrative event).",
+    "properties": {
+     "confirm_title": {
+      "default": "",
+      "title": "Confirm Title",
+      "type": "string"
+     },
+     "record_chronicle": {
+      "default": false,
+      "title": "Record Chronicle",
+      "type": "boolean"
+     }
+    },
+    "title": "HabitDeleteRequest",
+    "type": "object"
+   },
+   "HabitDeleteResponse": {
+    "description": "Result of the habit delete mutation.\n\n``checkins_removed`` counts every check-in row purged with the habit.",
+    "properties": {
+     "checkins_removed": {
+      "default": 0,
+      "title": "Checkins Removed",
+      "type": "integer"
+     },
+     "deleted_id": {
+      "title": "Deleted Id",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "deleted_id"
+    ],
+    "title": "HabitDeleteResponse",
     "type": "object"
    },
    "HealthIssueModel": {
@@ -5378,6 +5472,11 @@
    "ProjectsBoardHabitModel": {
     "description": "Habit check-in aggregation for continuous (habit) lanes.\n\n``week`` is the current ISO week (Monday..Sunday); ``streak`` counts\nconsecutive checked days ending today (0 when today has no check-in\nyet); ``total_checkins`` counts distinct checked days overall.\n``recent_days`` is the heatmap source: checked days within the trailing\n90-day window ending today (oldest first, same-day rows summed into\n``count``). ``project_id`` links to a project lane when the name\nheuristic matches.",
     "properties": {
+     "archived": {
+      "default": false,
+      "title": "Archived",
+      "type": "boolean"
+     },
      "cadence": {
       "default": "",
       "title": "Cadence",
@@ -6635,6 +6734,50 @@
     "title": "SkillNodePatchResponse",
     "type": "object"
    },
+   "SkillNodeProgressModel": {
+    "description": "Progression readout for one skill node (core.skill_progression).\n\n``score`` sums the node's non-deprecated evidence_refs (weak/medium/\nstrong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /\n``threshold_next`` describe the rung above the current YAML status\n(both null at expert); ``eligible`` means the node qualifies for a\nrung-up prompt (score threshold met, or at least one breakthrough).",
+    "properties": {
+     "breakthrough_count": {
+      "default": 0,
+      "title": "Breakthrough Count",
+      "type": "integer"
+     },
+     "eligible": {
+      "default": false,
+      "title": "Eligible",
+      "type": "boolean"
+     },
+     "next_rung": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Next Rung"
+     },
+     "score": {
+      "default": 0,
+      "title": "Score",
+      "type": "integer"
+     },
+     "threshold_next": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Threshold Next"
+     }
+    },
+    "title": "SkillNodeProgressModel",
+    "type": "object"
+   },
    "SkillTreeCategoryModel": {
     "description": "Per-category rollup for the category banner headers.\n\n``name`` is the zh display name (``core.starmap_snapshot.CATEGORY_ZH``,\nid as fallback) — the same source the home starmap sector band uses, so\nthe skill-tree banners and the starmap agree on 官名 lookup keys.\n``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −\nlearning.",
     "properties": {
@@ -6670,7 +6813,7 @@
     "type": "object"
    },
    "SkillTreeNodeModel": {
-    "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded). ``category``\nis the schema grouping (empty for nodes unknown to the schema) — the\nhome starmap uses it to size its sector band.",
+    "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded). ``category``\nis the schema grouping (empty for nodes unknown to the schema) — the\nhome starmap uses it to size its sector band. ``progress`` is the\ntunable rung-up readout (see ``SkillNodeProgressModel``).",
     "properties": {
      "category": {
       "default": "",
@@ -6692,6 +6835,9 @@
      "id": {
       "title": "Id",
       "type": "string"
+     },
+     "progress": {
+      "$ref": "#/components/schemas/SkillNodeProgressModel"
      },
      "status": {
       "default": "locked",
@@ -9699,7 +9845,7 @@
   },
   "/api/v1/profiles/{name}/evidence/{entry_id}/edit": {
    "post": {
-    "description": "Edit whitelist fields on one pool row.\n\nText fields (``title``/``summary``/``date``/``url``) take any string\n(\"\" clears all but ``title``); enum fields (``type`` plus the review\nwhitelist) must be in their domain (\"\" clears). Honors ``If-Match``\n(412 on mismatch, fresh ETag in the header).",
+    "description": "Edit whitelist fields on one pool row.\n\nText fields (``title``/``summary``/``date``/``url``) take any string\n(\"\" clears all but ``title``); enum fields (``type`` plus the review\nwhitelist) must be in their domain (\"\" clears); bool flags\n(``breakthrough``) take ``\"true\"``/``\"false\"`` (\"\" or ``\"false\"``\nclears the flag). Honors ``If-Match`` (412 on mismatch, fresh ETag in\nthe header).",
     "operationId": "edit_profile_evidence_entry_api_v1_profiles__name__evidence__entry_id__edit_post",
     "parameters": [
      {
@@ -10600,6 +10746,243 @@
      }
     },
     "summary": "Patch Profile Goal"
+   }
+  },
+  "/api/v1/profiles/{name}/habits/{habit_id}": {
+   "delete": {
+    "description": "Delete one habit and every check-in referencing it (confirmed).\n\n``confirm_title`` must equal the habit's title exactly, else 422\n``habit_delete_confirm_mismatch`` and nothing is written. The purge\nremoves the catalog entry plus all its check-in rows and answers the\nremoved count. ``record_chronicle=true`` appends a ``habit.deleted``\nchronicle entry (default off). Honors ``If-Match`` against the\nactivity-log.yaml ETag (412 on mismatch, fresh ETag in the header).",
+    "operationId": "delete_profile_habit_api_v1_profiles__name__habits__habit_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "habit_id",
+      "required": true,
+      "schema": {
+       "title": "Habit Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/HabitDeleteRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HabitDeleteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or habit not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the activity log file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "confirm_title does not match the habit title."
+     }
+    },
+    "summary": "Delete Profile Habit"
+   }
+  },
+  "/api/v1/profiles/{name}/habits/{habit_id}/archive": {
+   "post": {
+    "description": "Archive or unarchive one habit (``archived`` flag in activity-log.yaml).\n\nArchiving is reversible housekeeping: the habit entry and its whole\ncheck-in history stay on disk, and the habit leaves the active catalog\n(the projects-board ``habits`` list excludes it unless\n``include_archived`` is set). A request matching the current state is a\nno-op (``changed=false``, nothing written). Honors ``If-Match`` against\nthe activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).",
+    "operationId": "archive_profile_habit_api_v1_profiles__name__habits__habit_id__archive_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "habit_id",
+      "required": true,
+      "schema": {
+       "title": "Habit Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/HabitArchiveRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HabitArchiveResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or habit not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the activity log file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Missing/unknown habit, unlinked project, invalid date, or non-positive count."
+     }
+    },
+    "summary": "Archive Profile Habit"
    }
   },
   "/api/v1/profiles/{name}/health": {
@@ -13614,7 +13997,7 @@
   },
   "/api/v1/profiles/{name}/projects-board": {
    "get": {
-    "description": "Aggregated projects board for the unified /projects SPA page.\n\nOne shot for both views (kanban swimlanes + timeline): goals with their\nprojects (a project groups under the first of its ``goal_refs`` naming a\nknown goal; the rest land in ``ungrouped_projects``), per-project\nmilestones with progress, Done counts that include kanban-archive.md,\nlive tasks grouped by column (``someday`` as a badge list, not a\ncolumn), an ``unassigned_tasks`` lane for tasks owned by no project, and\nhabit check-in strips (current ISO week dots + streak ending today +\ntotal + ``recent_days`` heatmap window over the trailing 90 days). Full data, no display caps. The response carries the\nboard-source ETag (see module docstring pattern) for use as ``If-Match``\non the kanban/check-in mutations.",
+    "description": "Aggregated projects board for the unified /projects SPA page.\n\nOne shot for both views (kanban swimlanes + timeline): goals with their\nprojects (a project groups under the first of its ``goal_refs`` naming a\nknown goal; the rest land in ``ungrouped_projects``), per-project\nmilestones with progress, Done counts that include kanban-archive.md,\nlive tasks grouped by column (``someday`` as a badge list, not a\ncolumn), an ``unassigned_tasks`` lane for tasks owned by no project, and\nhabit check-in strips (current ISO week dots + streak ending today +\ntotal + ``recent_days`` heatmap window over the trailing 90 days).\nArchived habits stay out of ``habits`` unless ``include_archived`` is\nset. Full data, no display caps. The response carries the\nboard-source ETag (see module docstring pattern) for use as ``If-Match``\non the kanban/check-in mutations.",
     "operationId": "get_profile_projects_board_api_v1_profiles__name__projects_board_get",
     "parameters": [
      {
@@ -13624,6 +14007,18 @@
       "schema": {
        "title": "Name",
        "type": "string"
+      }
+     },
+     {
+      "description": "Include archived habits in habits[] (flagged archived=true). By default archived habits are excluded.",
+      "in": "query",
+      "name": "include_archived",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Include archived habits in habits[] (flagged archived=true). By default archived habits are excluded.",
+       "title": "Include Archived",
+       "type": "boolean"
       }
      }
     ],

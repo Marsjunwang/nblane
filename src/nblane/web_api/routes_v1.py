@@ -51,6 +51,7 @@ from nblane.core import evidence_review as evidence_review_core
 from nblane.core import activity_log, home_dashboard, jd_match, learning_log, task_intake
 from nblane.core import auth as auth_core
 from nblane.core import plan_templates, profile_io, project_suggest, projects_board, schema_io
+from nblane.core import skill_progression as skill_progression_core
 from nblane.core import starmap_snapshot as starmap_snapshot_core
 from nblane.core import divination as divination_core
 from nblane.core.claims import accepted_claims_for_profile
@@ -228,6 +229,10 @@ from nblane.web_api.schemas import (
     GoalPatchRequest,
     GoalSummary,
     GoalsResponse,
+    HabitArchiveRequest,
+    HabitArchiveResponse,
+    HabitDeleteRequest,
+    HabitDeleteResponse,
     HealthIssueModel,
     HealthReportModel,
     HealthResponse,
@@ -325,6 +330,7 @@ from nblane.web_api.schemas import (
     SidecarInfoModel,
     SkillNodePatchRequest,
     SkillNodePatchResponse,
+    SkillNodeProgressModel,
     SkillTreeCategoryModel,
     SkillTreeNodeModel,
     SkillTreeResponse,
@@ -594,6 +600,9 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
             status=str(node.get("status") or "locked"),
             category=str(meta.category if meta else ""),
             evidence_count=len(resolve_node_evidence_dict(node, pool)),
+            progress=SkillNodeProgressModel(
+                **skill_progression_core.node_progress(node, pool).to_dict()
+            ),
             children=[
                 build(kid, ancestors | {kid})
                 for kid in children_of[nid]
@@ -759,6 +768,29 @@ def patch_profile_skill_node(
             )
         if (pdir / "SKILL.md").exists():
             write_generated_blocks(pdir)
+        # Rung-ups are narrative events; downgrades/no-ops are not. The
+        # note carries the schema label (id as fallback) for the briefing
+        # line and rubbings.
+        if skill_progression_core.rung_index(
+            yaml_status
+        ) > skill_progression_core.rung_index(previous):
+            note = nid
+            schema = (
+                schema_io.load_schema(schema_name)
+                if (schema_name := str(raw.get("schema") or ""))
+                else None
+            )
+            if schema is not None and nid in schema.node_index():
+                note = schema.node_index()[nid].label or nid
+            _append_chronicle_entry(
+                pdir,
+                "skill.lit",
+                ref=nid,
+                note=note,
+                snapshot=file_state.snapshot_file(
+                    pdir / chronicle_core.CHRONICLE_FILENAME
+                ),
+            )
     response.headers["ETag"] = _skill_tree_etag(pdir)
     return SkillNodePatchResponse(
         ok=True,
@@ -2550,6 +2582,7 @@ def _evidence_item(record: EvidenceRecord) -> EvidenceEntryModel:
         url=record.url,
         summary=record.summary,
         source_refs=list(record.source_refs),
+        breakthrough=record.breakthrough,
     )
 
 
@@ -3057,6 +3090,10 @@ _EVIDENCE_ENUM_EDITABLE_FIELDS: dict[str, tuple[str, ...]] = {
     **evidence_review_core.POOL_EDITABLE_FIELDS,
     "type": tuple(sorted(EVIDENCE_TYPES)),
 }
+# Bool flags take "true"/"false" ("" clears, i.e. removes the key — the
+# YAML round-trip only writes true flags). ``breakthrough`` marks a
+# landmark proof (core.skill_progression.BREAKTHROUGH_WEIGHT).
+_EVIDENCE_BOOL_EDITABLE_FIELDS = ("breakthrough",)
 
 
 @router.post(
@@ -3076,11 +3113,14 @@ def edit_profile_evidence_entry(
 
     Text fields (``title``/``summary``/``date``/``url``) take any string
     ("" clears all but ``title``); enum fields (``type`` plus the review
-    whitelist) must be in their domain ("" clears). Honors ``If-Match``
-    (412 on mismatch, fresh ETag in the header).
+    whitelist) must be in their domain ("" clears); bool flags
+    (``breakthrough``) take ``"true"``/``"false"`` ("" or ``"false"``
+    clears the flag). Honors ``If-Match`` (412 on mismatch, fresh ETag in
+    the header).
     """
     eid = entry_id.strip()
     cleaned: dict[str, str] = {}
+    bool_flags: dict[str, bool] = {}
     for field, raw_value in body.fields.items():
         field = field.strip()
         value = str(raw_value or "").strip()
@@ -3089,13 +3129,27 @@ def edit_profile_evidence_entry(
                 raise ApiError(422, "invalid_edit_value", "title cannot be empty.")
             cleaned[field] = value
             continue
+        if field in _EVIDENCE_BOOL_EDITABLE_FIELDS:
+            lowered = value.lower()
+            if lowered in ("", "false"):
+                bool_flags[field] = False
+            elif lowered == "true":
+                bool_flags[field] = True
+            else:
+                raise ApiError(
+                    422,
+                    "invalid_edit_value",
+                    f"Value {value!r} is not valid for {field} "
+                    "(expected true/false, or empty to clear).",
+                )
+            continue
         allowed = _EVIDENCE_ENUM_EDITABLE_FIELDS.get(field)
         if allowed is None:
             raise ApiError(
                 422,
                 "invalid_edit_field",
                 f"Field {field!r} is not editable (expected one of: "
-                f"{', '.join(sorted([*_EVIDENCE_ENUM_EDITABLE_FIELDS, *_EVIDENCE_TEXT_EDITABLE_FIELDS]))}).",
+                f"{', '.join(sorted([*_EVIDENCE_ENUM_EDITABLE_FIELDS, *_EVIDENCE_TEXT_EDITABLE_FIELDS, *_EVIDENCE_BOOL_EDITABLE_FIELDS]))}).",
             )
         if value and value not in allowed:
             raise ApiError(
@@ -3113,6 +3167,11 @@ def edit_profile_evidence_entry(
             for field, value in cleaned.items():
                 if value:
                     row[field] = value
+                else:
+                    row.pop(field, None)
+            for field, flag in bool_flags.items():
+                if flag:
+                    row[field] = True
                 else:
                     row.pop(field, None)
             return 1, []
@@ -5199,7 +5258,17 @@ def _projects_board_project_model(
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def get_profile_projects_board(name: str, response: Response) -> ProjectsBoardResponse:
+def get_profile_projects_board(
+    name: str,
+    response: Response,
+    include_archived: bool = Query(
+        default=False,
+        description=(
+            "Include archived habits in habits[] (flagged archived=true). "
+            "By default archived habits are excluded."
+        ),
+    ),
+) -> ProjectsBoardResponse:
     """Aggregated projects board for the unified /projects SPA page.
 
     One shot for both views (kanban swimlanes + timeline): goals with their
@@ -5209,12 +5278,16 @@ def get_profile_projects_board(name: str, response: Response) -> ProjectsBoardRe
     live tasks grouped by column (``someday`` as a badge list, not a
     column), an ``unassigned_tasks`` lane for tasks owned by no project, and
     habit check-in strips (current ISO week dots + streak ending today +
-    total + ``recent_days`` heatmap window over the trailing 90 days). Full data, no display caps. The response carries the
+    total + ``recent_days`` heatmap window over the trailing 90 days).
+    Archived habits stay out of ``habits`` unless ``include_archived`` is
+    set. Full data, no display caps. The response carries the
     board-source ETag (see module docstring pattern) for use as ``If-Match``
     on the kanban/check-in mutations.
     """
     pdir = _resolve_profile(name)
-    board = projects_board.build_projects_board(pdir)
+    board = projects_board.build_projects_board(
+        pdir, include_archived=include_archived
+    )
     identity = parse_identity_fields(profile_io.load_skill_md(pdir.name))
     north_star = str(identity.get("North Star", "") or "").strip()
     response.headers["ETag"] = _projects_board_etag(pdir)
@@ -5262,6 +5335,7 @@ def get_profile_projects_board(name: str, response: Response) -> ProjectsBoardRe
                     ProjectsBoardHabitRecentDayModel(**vars(day))
                     for day in habit.recent_days
                 ],
+                archived=habit.archived,
             )
             for habit in board.habits
         ],
@@ -5587,6 +5661,184 @@ def delete_profile_checkin(
         )
     response.headers["ETag"] = _activity_log_etag(pdir)
     return CheckinDeleteResponse(ok=True, checkin_id=checkin_id)
+
+
+# --- Habit lifecycle: archive (reversible) and confirmed delete --------------
+
+
+HABIT_MUTATION_RESPONSES = {
+    **CHECKIN_MUTATION_RESPONSES,
+    404: {
+        "model": ErrorResponse,
+        "description": "Profile or habit not found.",
+    },
+}
+
+
+def _resolve_habit_or_404(pdir: Path, habit_ref: str) -> activity_log.Habit:
+    """Resolve a habit id/title to the catalog habit or raise ApiError(404)."""
+    log = activity_log.load(pdir)
+    resolved_id = activity_log.resolve_habit_id(log, habit_ref)
+    habit = log.habit_index().get(resolved_id) if resolved_id else None
+    if habit is None:
+        raise ApiError(
+            404,
+            "habit_not_found",
+            f"Unknown habit for profile {pdir.name}: {habit_ref.strip()}",
+        )
+    return habit
+
+
+@router.post(
+    "/profiles/{name}/habits/{habit_id}/archive",
+    response_model=HabitArchiveResponse,
+    responses=HABIT_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def archive_profile_habit(
+    name: str,
+    habit_id: str,
+    body: HabitArchiveRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> HabitArchiveResponse | JSONResponse:
+    """Archive or unarchive one habit (``archived`` flag in activity-log.yaml).
+
+    Archiving is reversible housekeeping: the habit entry and its whole
+    check-in history stay on disk, and the habit leaves the active catalog
+    (the projects-board ``habits`` list excludes it unless
+    ``include_archived`` is set). A request matching the current state is a
+    no-op (``changed=false``, nothing written). Honors ``If-Match`` against
+    the activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before archiving the habit.",
+            etag,
+        )
+    habit = _resolve_habit_or_404(pdir, habit_id)
+    changed = habit.archived != body.archived
+    if changed:
+        try:
+            activity_log.set_habit_archived(
+                pdir,
+                habit.id,
+                body.archived,
+                expected_snapshot=file_state.snapshot_file(
+                    pdir / activity_log.ACTIVITY_LOG_FILENAME
+                ),
+            )
+        except file_state.FileConflictError:
+            # TOCTOU closure: a concurrent write landed between the If-Match
+            # check and the in-lock snapshot re-check.
+            return _kanban_error(
+                412,
+                "etag_mismatch",
+                "activity-log.yaml changed while archiving the habit; "
+                "reload before retrying.",
+                _activity_log_etag(pdir),
+            )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    return HabitArchiveResponse(
+        ok=True,
+        habit_id=habit.id,
+        archived=body.archived,
+        changed=changed,
+    )
+
+
+@router.delete(
+    "/profiles/{name}/habits/{habit_id}",
+    response_model=HabitDeleteResponse,
+    responses={
+        **HABIT_MUTATION_RESPONSES,
+        422: {
+            "model": ErrorResponse,
+            "description": "confirm_title does not match the habit title.",
+        },
+    },
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_habit(
+    name: str,
+    habit_id: str,
+    response: Response,
+    body: HabitDeleteRequest | None = None,
+    if_match: str | None = Header(default=None),
+) -> HabitDeleteResponse | JSONResponse:
+    """Delete one habit and every check-in referencing it (confirmed).
+
+    ``confirm_title`` must equal the habit's title exactly, else 422
+    ``habit_delete_confirm_mismatch`` and nothing is written. The purge
+    removes the catalog entry plus all its check-in rows and answers the
+    removed count. ``record_chronicle=true`` appends a ``habit.deleted``
+    chronicle entry (default off). Honors ``If-Match`` against the
+    activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before deleting the habit.",
+            etag,
+        )
+    habit = _resolve_habit_or_404(pdir, habit_id)
+    confirm = (body.confirm_title if body else "") or ""
+    if confirm != habit.title:
+        raise ApiError(
+            422,
+            "habit_delete_confirm_mismatch",
+            "confirm_title must match the habit title exactly "
+            f"({habit.title!r}).",
+        )
+    try:
+        outcome = activity_log.delete_habit(
+            pdir,
+            habit.id,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / activity_log.ACTIVITY_LOG_FILENAME
+            ),
+        )
+    except file_state.FileConflictError:
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed while deleting the habit; "
+            "reload before retrying.",
+            _activity_log_etag(pdir),
+        )
+    if outcome is None:
+        # Vanished between the resolve and the locked delete.
+        raise ApiError(
+            404,
+            "habit_not_found",
+            f"Unknown habit for profile {pdir.name}: {habit_id.strip()}",
+        )
+    _habit, checkins_removed = outcome
+    if body is not None and body.record_chronicle:
+        _append_chronicle_entry(
+            pdir,
+            "habit.deleted",
+            ref=habit.id,
+            note=habit.title,
+            snapshot=file_state.snapshot_file(
+                pdir / chronicle_core.CHRONICLE_FILENAME
+            ),
+        )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    return HabitDeleteResponse(
+        ok=True,
+        deleted_id=habit.id,
+        checkins_removed=checkins_removed,
+    )
 
 
 # --- Habit-plan templates (Phase 2): click-to-instantiate plans -------------
