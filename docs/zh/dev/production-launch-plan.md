@@ -297,6 +297,17 @@ commit actor 是默认 "cli"~~(现由 `GitActorMiddleware` 按请求设为当前
 
 ### 3.5 部署方式(自动化即代码收口)
 
+> **执行进展(2026-09-24)**:`profiles/王军/assistant/automations.yaml` 与
+> 4 个 prompt(daily-plan / daily-review / weekly-maintenance /
+> weekly-divination)已按 §3.3/§3.4 写入数据仓(`/srv/nblane-data`),模板侧
+> 已同步回灌(含新增 `nblane:weekly-divination`)。`automations sync 王军`
+> dry-run 通过:新增 4、外部跳过 7(含 3 条 `personal-assistant:*`,灰度方案 A
+> 并存)。**待变更窗口 `--apply`**;apply 后旧任务由用户手工停用。
+> 前置依赖:`scripts/openclaw/install.sh` 需重跑一次把 `bin/nblane_api.py`
+> 同步进 `~/.openclaw/workspace/skills/bin/`(prompt 以
+> `~/.openclaw/workspace/skills/bin/nblane_api.py` 形态调用),且 openclaw
+> gateway 环境需带 `NBLANE_OPENCLAW_API_PASSWORD`。
+
 - 把现有 3 条 `personal-assistant:*` 自动化纳管进
   `profiles/王军/assistant/automations.yaml`(模板:
   `profiles/template/assistant/automations.yaml`),prompt 按 §3.4 改写;

@@ -29,3 +29,7 @@ automations:
     session: main # 覆盖 defaults：周维护需要主会话的记忆上下文
     model: qwen/qwen3.8-flash # 主会话可能很长，3.8-flash 长上下文单价更稳
     prompt: prompts/weekly-maintenance.md
+  - key: nblane:weekly-divination
+    name: 每周占卜
+    cron: "30 20 * * 0" # 周报（20:00）之后，戏占卦辞推微信
+    prompt: prompts/weekly-divination.md

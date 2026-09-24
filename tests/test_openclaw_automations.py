@@ -303,12 +303,14 @@ class TestLoadAutomationsFile(unittest.TestCase):
                 "nblane:daily-plan",
                 "nblane:daily-review",
                 "nblane:weekly-maintenance",
+                "nblane:weekly-divination",
             ],
         )
         self.assertEqual(specs[0].cron, "30 8 * * *")
         self.assertEqual(specs[1].cron, "30 21 * * *")
         self.assertEqual(specs[2].cron, "0 20 * * 0")
         self.assertEqual(specs[2].session, "main")
+        self.assertEqual(specs[3].cron, "30 20 * * 0")
         for spec in specs:
             self.assertIn("profile://", spec.prompt_text)
             self.assertNotIn("/srv/", spec.prompt_text)
