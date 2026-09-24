@@ -500,6 +500,10 @@ class TestApplyReconcile(unittest.TestCase):
                 "main",
                 "--session",
                 "isolated",
+                "--name",
+                "nblane-daily-plan",
+                "--display-name",
+                "每日计划",
                 "--model",
                 "qwen/qwen3.8-flash",
                 "--fallbacks",
@@ -526,6 +530,15 @@ class TestApplyReconcile(unittest.TestCase):
         apply_reconcile([action], runner, dry_run=False)
         self.assertNotIn("--announce", runner.calls[0])
         self.assertNotIn("--channel", runner.calls[0])
+
+    def test_main_session_payload_uses_system_event(self) -> None:
+        # OpenClaw 2026.9 rejects --message on main-session jobs.
+        runner = FakeRunner([(("openclaw",), _ok())])
+        [action] = plan_reconcile([_spec(session="main")], [])
+        apply_reconcile([action], runner, dry_run=False)
+        argv = runner.calls[0]
+        self.assertNotIn("--message", argv)
+        self.assertEqual(argv[argv.index("--system-event") + 1], PROMPT_PLAN)
 
     def test_prune_requires_flag(self) -> None:
         [action] = plan_reconcile([], [_live_job("nblane:stale")])

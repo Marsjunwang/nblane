@@ -681,6 +681,13 @@ def _spec_field_argv(spec: AutomationSpec) -> list[str]:
         "main",
         "--session",
         spec.session,
+        # OpenClaw 2026.9 requires an explicit job name; keep it slug-like
+        # (declaration key with ':' -> '-') and carry the human label via
+        # --display-name.
+        "--name",
+        spec.key.replace(":", "-"),
+        "--display-name",
+        spec.name,
     ]
     if spec.model:
         argv += ["--model", spec.model]
@@ -697,7 +704,12 @@ def _spec_field_argv(spec: AutomationSpec) -> list[str]:
             "--to",
             spec.deliver_to,
         ]
-    argv += ["--message", spec.prompt_text]
+    if spec.session == "main":
+        # 2026.9 rejects --message for main-session jobs; the payload must
+        # arrive as a system event instead.
+        argv += ["--system-event", spec.prompt_text]
+    else:
+        argv += ["--message", spec.prompt_text]
     return argv
 
 
