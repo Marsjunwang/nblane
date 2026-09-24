@@ -179,3 +179,24 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
 - 测试:本片 vitest 新增 5(石刻样式 1、归档折起/开关/恢复 1、服务端归档行 1、
   删除预告+逐字确认+DELETE body 1、422 mismatch 1);同日前端另有技能进阶进度
   与证据突破标记(见 phase-plan.md 末节),全量 260、tsc 绿。
+
+## 实施状态(2026-09-24 晚:任务可删除)
+
+- **删除任务端点**:`DELETE /api/v1/profiles/{name}/kanban/cards/{card_ref}`
+  — 永久删除一张看板卡。`card_ref` 语义同 move/done/patch(精确标题或唯一
+  子串;歧义 422、未知 404);kanban.md ETag/If-Match 412 + 锁内快照复核 +
+  3-way merge 纪律与其他卡片写端点一致。请求体 `{record_chronicle=false}`:
+  勾选才追加 `task.deleted`(ref = 任务 id,note = 标题,默认不记——
+  家务删除不混入叙事)。响应 `{ok, deleted_ref, deleted_title}`。
+  任务的 todos/subtasks/meta 随卡片消失;evidence-pool `kanban_refs`
+  不动(墓碑机制)。
+- **删除任务 UI**:铭文详情卡行动行尾(与主操作分开,`ml-auto` 弱红
+  subtle 钮)「删除任务」→ 就地确认条「将删除任务「title」,不可恢复」+
+  记入大事记勾选(默认 OFF)→ 确认删除 → 失效 board/kanban → 关详情卡;
+  412 由 hook 取新 ETag 自动重试一次。
+- 测试:pytest `tests/test_web_api_kanban.py` 新增 TestKanbanCardDelete 8 例
+  (happy path 文件/看板双验证、子串、歧义 422、未知 404、 stale If-Match
+  412、无 body、chronicle on/off、证据 kanban_refs 不动;auth 401/403 覆盖
+  同步扩展)全量 1781;vitest 新增 4(确认条显隐/取消、DELETE body+If-Match+
+  关卡、记入大事记 on、412 重试)全量 264;tsc 绿;openapi.json +
+  schema.d.ts 已重生成。无新增依赖(packaging-manifest 已登记)。

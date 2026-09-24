@@ -384,6 +384,30 @@ class KanbanMutationResponse(BaseModel):
     merge_notices: list[str] = Field(default_factory=list)
 
 
+class KanbanCardDeleteRequest(BaseModel):
+    """Body for DELETE .../kanban/cards/{card_ref}.
+
+    ``record_chronicle`` opts into a ``task.deleted`` chronicle entry
+    (default off: routine task pruning is not a narrative event).
+    """
+
+    record_chronicle: bool = False
+
+
+class KanbanCardDeleteResponse(BaseModel):
+    """Result of one kanban card delete.
+
+    ``deleted_ref`` is the deleted card's task id (falling back to the
+    title for legacy id-less cards); ``deleted_title`` echoes the matched
+    card title. Evidence-pool ``kanban_refs`` are NOT touched — the
+    tombstone mechanism handles references to the deleted task.
+    """
+
+    ok: bool = True
+    deleted_ref: str
+    deleted_title: str
+
+
 class InboxHistoryEventModel(BaseModel):
     """One transition recorded against an inbox item."""
 

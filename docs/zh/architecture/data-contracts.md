@@ -75,6 +75,8 @@ append-only;每条 `{date, kind, ref, note}`。`core/chronicle.py` 的
 `project.deleted`(2026-09-23 起,仅在删除项目时显式勾选「记入大事记」
 才落笔,默认不记)、`habit.deleted`(2026-09-24,习惯删除同样默认不记,
 `record_chronicle=true` 才落笔,ref = habit id,note = 习惯标题)、
+`task.deleted`(2026-09-24,看板任务删除同样默认不记,
+`record_chronicle=true` 才落笔,ref = 任务 id,note = 任务标题)、
 `skill.lit`(2026-09-24,技能节点状态沿 locked→learning→solid→expert
 升阶时自动落笔,降阶/no-op 不记,ref = 节点 id,note = schema 标签);
 只在变化真实发生时落笔(重命名只在 title 变了时记,no-op 保存不记)。
@@ -219,6 +221,17 @@ kanban Done task
   `PATCH /api/v1/profiles/{name}/kanban/cards/{card_ref}` 的 `todos` 字段（**全量替换**，
   `[]` 清空，空文本项丢弃）；3-way merge 按 list 字段整体 diff/replay，随 kanban.md
   正常 round-trip，projects-board 聚合的 `todos` 供卡片进度（d/t）与详情卡清单使用。
+
+任务删除（2026-09-24，`DELETE /api/v1/profiles/{name}/kanban/cards/{card_ref}`）：
+
+- `card_ref` 语义同 move/done/patch：精确标题或唯一子串，歧义 422
+  `kanban_card_ambiguous`、未知 404 `kanban_card_not_found`；ETag/If-Match 412 与
+  锁内快照复核 + 3-way merge 纪律同其他卡片写端点。
+- 任务的 todos/subtasks/meta 子弹随卡片块一并消失；evidence-pool 的
+  `kanban_refs` **不清理**——墓碑机制负责展示指向已删任务的引用。
+- 请求体 `{record_chronicle=false}`：为 true 时追加 `task.deleted`
+  （ref = 任务 id,note = 任务标题）；响应 `{ok, deleted_ref, deleted_title}`
+  （deleted_ref = 任务 id,无 id 的旧卡回落标题）。
 
 ### Public Surface
 

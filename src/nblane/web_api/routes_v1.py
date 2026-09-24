@@ -260,6 +260,8 @@ from nblane.web_api.schemas import (
     JobStatusResponse,
     KanbanBoardResponse,
     KanbanCardCreateRequest,
+    KanbanCardDeleteRequest,
+    KanbanCardDeleteResponse,
     KanbanCardMoveRequest,
     KanbanCardPatchRequest,
     KanbanCardScheduleRequest,
@@ -1673,6 +1675,69 @@ def patch_profile_kanban_card(
         section=section,
         merged_external=result.merged_external,
         merge_notices=_merge_notices(result),
+    )
+
+
+@router.delete(
+    "/profiles/{name}/kanban/cards/{card_ref}",
+    response_model=KanbanCardDeleteResponse,
+    responses=KANBAN_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_kanban_card(
+    name: str,
+    card_ref: str,
+    response: Response,
+    body: KanbanCardDeleteRequest | None = None,
+    if_match: str | None = Header(default=None),
+) -> KanbanCardDeleteResponse | JSONResponse:
+    """Delete one kanban card for good (detail-card danger action).
+
+    ``card_ref`` follows the move/done semantics (exact title or unique
+    substring; ambiguous → 422, unknown → 404). The card's todos, subtasks,
+    and metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT
+    touched — the tombstone mechanism handles references to the deleted
+    task. With ``record_chronicle`` (default off) a ``task.deleted`` entry
+    is appended to chronicle.yaml (ref = task id, note = title). Honors
+    ``If-Match`` (412 on stale); a concurrent kanban write between parse
+    and save is 3-way merged like the other card mutations.
+    """
+    pdir = _resolve_profile(name)
+    etag = _kanban_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "kanban.md changed since it was loaded; reload before deleting.",
+            etag,
+        )
+    snapshot = file_state.snapshot_file(kanban_path(pdir))
+    sections = parse_kanban(pdir)
+    base = copy_kanban_sections(sections)
+    ref = card_ref.strip()
+    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    if hit is None:
+        if match_kind == "ambiguous":
+            raise ApiError(422, "kanban_card_ambiguous", match_error)
+        raise ApiError(404, "kanban_card_not_found", match_error)
+    from_section, _index, task = hit
+    deleted_title = task.title.strip()
+    deleted_ref = task.id or deleted_title
+    del sections[from_section][_index]
+    _save_kanban_mutation(pdir, sections, base, snapshot)
+    if body is not None and body.record_chronicle:
+        _append_chronicle_entry(
+            pdir,
+            "task.deleted",
+            ref=deleted_ref,
+            note=deleted_title,
+            snapshot=file_state.snapshot_file(
+                pdir / chronicle_core.CHRONICLE_FILENAME
+            ),
+        )
+    response.headers["ETag"] = _kanban_etag(pdir)
+    return KanbanCardDeleteResponse(
+        ok=True, deleted_ref=deleted_ref, deleted_title=deleted_title
     )
 
 

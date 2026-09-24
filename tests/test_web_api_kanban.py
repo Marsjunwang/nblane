@@ -20,6 +20,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from nblane.core import auth as auth_core
+from nblane.core import chronicle as chronicle_core
 from nblane.core.kanban_io import parse_kanban, save_kanban
 from nblane.core.models import KanbanTask
 from nblane.core.paths import REPO_ROOT
@@ -505,6 +506,197 @@ class TestKanbanMutations(unittest.TestCase):
         self.assertEqual(tail_titles, ["卡片 A", "卡片 B", "卡片 C"])
 
 
+class TestKanbanCardDelete(unittest.TestCase):
+    """DELETE /kanban/cards/{card_ref}: permanent card removal."""
+
+    def _client(self, root: Path) -> TestClient:
+        for target in (
+            "nblane.core.profile_io.PROFILES_DIR",
+            "nblane.core.io.PROFILES_DIR",
+        ):
+            patcher = patch(target, root)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+        patcher = patch("nblane.core.kanban_io.git_backup.record_change")
+        self.addCleanup(patcher.stop)
+        patcher.start()
+        patcher = patch("nblane.core.chronicle.git_backup.record_change")
+        self.addCleanup(patcher.stop)
+        patcher.start()
+        return TestClient(app)
+
+    def _delete(
+        self, client: TestClient, ref: str, body: dict | None = None, **kwargs: object
+    ):
+        return client.request(
+            "DELETE",
+            f"/api/v1/profiles/alice/kanban/cards/{ref}",
+            json={"record_chronicle": False, **(body or {})},
+            **kwargs,
+        )
+
+    def test_delete_happy_path_removes_card_and_its_meta(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            card = _add_card(client, "删掉我", context="临时任务")
+            _add_card(client, "保留我")
+            # Todos/subtasks/meta live inside the card block and die with it.
+            patched = client.patch(
+                "/api/v1/profiles/alice/kanban/cards/删掉我",
+                json={"todos": [{"text": "子任务甲", "done": False}]},
+            )
+            self.assertEqual(patched.status_code, 200)
+
+            deleted = self._delete(client, "删掉我")
+            board = client.get("/api/v1/profiles/alice/kanban")
+            kanban_text = (profile / "kanban.md").read_text(encoding="utf-8")
+            sections = parse_kanban(profile)
+
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.headers["etag"].startswith('W/"'))
+        payload = deleted.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["deleted_ref"], card["id"])
+        self.assertEqual(payload["deleted_title"], "删掉我")
+        self.assertNotIn("删掉我", kanban_text)
+        self.assertNotIn("子任务甲", kanban_text)
+        self.assertIn("保留我", kanban_text)
+        self.assertEqual(
+            [task.title for task in sections["Queue"]], ["保留我"]
+        )
+        # Board refetch is clean: the card is gone from the JSON too.
+        self.assertEqual(board.status_code, 200)
+        titles = [
+            task["title"]
+            for section in board.json()["sections"]
+            for task in section["tasks"]
+        ]
+        self.assertEqual(titles, ["保留我"])
+        # record_chronicle defaults off: no chronicle file is created.
+        self.assertFalse((profile / "chronicle.yaml").exists())
+
+    def test_delete_by_unique_substring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "读 VLA 综述论文")
+            deleted = self._delete(client, "VLA 综述")
+            titles = _section_titles(profile, "Queue")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["deleted_title"], "读 VLA 综述论文")
+        self.assertEqual(titles, [])
+
+    def test_delete_ambiguous_ref_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "Review paper A")
+            _add_card(client, "Review paper B")
+            before = (profile / "kanban.md").read_text(encoding="utf-8")
+            response = self._delete(client, "Review paper")
+            after = (profile / "kanban.md").read_text(encoding="utf-8")
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "kanban_card_ambiguous")
+        self.assertEqual(after, before)
+
+    def test_delete_unknown_card_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            response = self._delete(client, "不存在的卡片")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "kanban_card_not_found")
+
+    def test_delete_stale_if_match_412_then_fresh_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "卡片 A")
+            board = client.get("/api/v1/profiles/alice/kanban")
+            stale_etag = board.headers["etag"]
+            _add_card(client, "卡片 B")  # rotates the ETag
+
+            conflicted = self._delete(
+                client, "卡片 A", headers={"If-Match": stale_etag}
+            )
+            matching = self._delete(
+                client, "卡片 A", headers={"If-Match": conflicted.headers["etag"]}
+            )
+
+        self.assertEqual(conflicted.status_code, 412)
+        self.assertEqual(conflicted.json()["code"], "etag_mismatch")
+        self.assertNotEqual(conflicted.headers["etag"], stale_etag)
+        self.assertEqual(matching.status_code, 200)
+        self.assertEqual(matching.json()["deleted_title"], "卡片 A")
+
+    def test_delete_without_body_proceeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "裸删")
+            response = client.request(
+                "DELETE", "/api/v1/profiles/alice/kanban/cards/裸删"
+            )
+            titles = _section_titles(profile, "Queue")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(titles, [])
+
+    def test_delete_record_chronicle_appends_task_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            card = _add_card(client, "里程碑式删除")
+            deleted = self._delete(client, "里程碑式删除", {"record_chronicle": True})
+            entries = chronicle_core.load_chronicle(profile)
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].kind, "task.deleted")
+        self.assertEqual(entries[0].ref, card["id"])
+        self.assertEqual(entries[0].note, "里程碑式删除")
+
+    def test_delete_leaves_evidence_kanban_refs_untouched(self) -> None:
+        """Evidence kanban_refs keep pointing at the deleted task (tombstone)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            card = _add_card(client, "被证据引用的任务")
+            pool_text = yaml.safe_dump(
+                {
+                    "profile": "alice",
+                    "updated": "2026-09-19",
+                    "evidence_entries": [
+                        {
+                            "id": "ev-1",
+                            "title": "Demo 视频",
+                            "type": "practice",
+                            "review_status": "reviewed",
+                            "kanban_refs": [f"kanban:{card['id']}"],
+                        }
+                    ],
+                },
+                allow_unicode=True,
+            )
+            (profile / "evidence-pool.yaml").write_text(pool_text, encoding="utf-8")
+
+            deleted = self._delete(client, "被证据引用的任务")
+            after = (profile / "evidence-pool.yaml").read_text(encoding="utf-8")
+
+        self.assertEqual(deleted.status_code, 200)
+        # The pool file is byte-identical: tombstone display handles the
+        # dangling ref, the delete never rewrites evidence.
+        self.assertEqual(after, pool_text)
+        self.assertIn(f"kanban:{card['id']}", after)
+
+
 class TestKanbanMutationAuth(unittest.TestCase):
     """401/403 rules for the kanban mutations under auth-on."""
 
@@ -542,7 +734,12 @@ class TestKanbanMutationAuth(unittest.TestCase):
                 json={"target_section": "Doing"},
             )
             done = client.post("/api/v1/profiles/alice/kanban/cards/x/done")
-        for response in (added, moved, done):
+            deleted = client.request(
+                "DELETE",
+                "/api/v1/profiles/alice/kanban/cards/x",
+                json={"record_chronicle": False},
+            )
+        for response in (added, moved, done, deleted):
             self.assertEqual(response.status_code, 401)
 
     def test_member_forbidden_from_other_profile_403(self) -> None:
@@ -563,8 +760,13 @@ class TestKanbanMutationAuth(unittest.TestCase):
                 json={"target_section": "Doing"},
             )
             done = client.post("/api/v1/profiles/alice/kanban/cards/x/done")
+            deleted = client.request(
+                "DELETE",
+                "/api/v1/profiles/alice/kanban/cards/x",
+                json={"record_chronicle": False},
+            )
         self.assertEqual(login.status_code, 200)
-        for response in (added, moved, done):
+        for response in (added, moved, done, deleted):
             self.assertEqual(response.status_code, 403)
             self.assertEqual(response.json()["code"], "profile_forbidden")
 

@@ -3602,6 +3602,42 @@
     "title": "KanbanCardCreateRequest",
     "type": "object"
    },
+   "KanbanCardDeleteRequest": {
+    "description": "Body for DELETE .../kanban/cards/{card_ref}.\n\n``record_chronicle`` opts into a ``task.deleted`` chronicle entry\n(default off: routine task pruning is not a narrative event).",
+    "properties": {
+     "record_chronicle": {
+      "default": false,
+      "title": "Record Chronicle",
+      "type": "boolean"
+     }
+    },
+    "title": "KanbanCardDeleteRequest",
+    "type": "object"
+   },
+   "KanbanCardDeleteResponse": {
+    "description": "Result of one kanban card delete.\n\n``deleted_ref`` is the deleted card's task id (falling back to the\ntitle for legacy id-less cards); ``deleted_title`` echoes the matched\ncard title. Evidence-pool ``kanban_refs`` are NOT touched — the\ntombstone mechanism handles references to the deleted task.",
+    "properties": {
+     "deleted_ref": {
+      "title": "Deleted Ref",
+      "type": "string"
+     },
+     "deleted_title": {
+      "title": "Deleted Title",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "deleted_ref",
+     "deleted_title"
+    ],
+    "title": "KanbanCardDeleteResponse",
+    "type": "object"
+   },
    "KanbanCardMoveRequest": {
     "description": "Move body for POST .../kanban/cards/{card_ref}/move.\n\n``to_index`` is the 0-based insertion index inside the target column\n(post-removal, matching ``apply_kanban_reorder``); when omitted the\ncard is appended to the column tail. Out-of-range values clamp like\nthe core reorder: negative to the column head, beyond-end to the tail.",
     "properties": {
@@ -12081,6 +12117,126 @@
    }
   },
   "/api/v1/profiles/{name}/kanban/cards/{card_ref}": {
+   "delete": {
+    "description": "Delete one kanban card for good (detail-card danger action).\n\n``card_ref`` follows the move/done semantics (exact title or unique\nsubstring; ambiguous → 422, unknown → 404). The card's todos, subtasks,\nand metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT\ntouched — the tombstone mechanism handles references to the deleted\ntask. With ``record_chronicle`` (default off) a ``task.deleted`` entry\nis appended to chronicle.yaml (ref = task id, note = title). Honors\n``If-Match`` (412 on stale); a concurrent kanban write between parse\nand save is 3-way merged like the other card mutations.",
+    "operationId": "delete_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "card_ref",
+      "required": true,
+      "schema": {
+       "title": "Card Ref",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/KanbanCardDeleteRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/KanbanCardDeleteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or kanban card not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current kanban file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, unknown section, or ambiguous card_ref."
+     }
+    },
+    "summary": "Delete Profile Kanban Card"
+   },
    "patch": {
     "description": "Edit one card's fields (lane assignment, title, context, why, tags, todos).\n\n``None`` fields keep the current value; ``\"\"`` clears\n``context``/``why``/``project_id``/``milestone_id`` (``project_id``\nclearing unassigns the card from its lane); ``tags`` replaces the\nwhole tag list when given; ``todos`` fully replaces the checklist\nwhen given (``[]`` clears it). ``title`` must not be blank when given.\nSection moves stay on the move endpoint — Someday is a section, not a\nflag. When ``project_id`` changed, project-board.yaml task refs are\nre-synced from kanban metadata (task side is authoritative), same as\nthe project-task move endpoint. ``card_ref`` follows the move/done\nsemantics (exact title or unique substring). Honors ``If-Match``\n(412 on mismatch); a concurrent kanban write is 3-way merged.",
     "operationId": "patch_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__patch",
