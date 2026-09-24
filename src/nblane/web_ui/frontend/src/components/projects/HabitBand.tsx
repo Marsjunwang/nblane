@@ -6,16 +6,18 @@
 // Row: [name · streak · this-week 7 dots · 打卡 button]; habit-plan rows add
 // a 第N/总天 progress arc (N from the plan's time_range vs board.today).
 // A row expands into the month heatmap (recent_days, 月白→泥金). Clicking an
-// EMPTY past/today cell backfills a check-in for that date (POST /checkins).
-// Filled cells are not clickable: there is no check-in delete endpoint, so
-// 消卡 is impossible — they show a tooltip with the date/count instead.
+// EMPTY past/today cell backfills a check-in for that date (POST /checkins);
+// clicking a FILLED cell with known check-in ids offers 销印 (inline confirm
+// → DELETE /checkins/{id} of the day's latest row). Filled cells whose rows
+// predate check-in ids are read-only (tooltip explains). The starmap
+// HabitSeal stays disabled until it is wired to the same endpoint.
 
 import { ActionIcon, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
-import { useAddCheckin } from '../../api/hooks';
+import { useAddCheckin, useDeleteCheckin } from '../../api/hooks';
 import type { ProjectsBoardHabit } from '../../api/types';
 import { buildHeatmapWeeks, heatmapCellColor } from './habitHeatmap';
 import type { HabitRow } from './lanes';
@@ -109,7 +111,8 @@ function WeekDots({ habit }: { habit: ProjectsBoardHabit }) {
   );
 }
 
-/** GitHub-style trailing-90-day grid; empty past/today cells backfill. */
+/** GitHub-style trailing-90-day grid; empty past/today cells backfill,
+ * filled cells (with known check-in ids) offer 销印 via an inline confirm. */
 function HabitHeatmap({
   profile,
   habit,
@@ -120,6 +123,7 @@ function HabitHeatmap({
   today: string;
 }) {
   const checkin = useAddCheckin(profile);
+  const deleteCheckin = useDeleteCheckin(profile);
   const weeks = useMemo(() => buildHeatmapWeeks(habit, today), [habit, today]);
   const maxCount = useMemo(
     () =>
@@ -130,6 +134,8 @@ function HabitHeatmap({
     [weeks],
   );
   const [pendingDate, setPendingDate] = useState<string | null>(null);
+  /** Date whose filled cell is awaiting 销印 confirmation. */
+  const [confirmDate, setConfirmDate] = useState<string | null>(null);
 
   const backfill = (date: string) => {
     setPendingDate(date);
@@ -155,6 +161,46 @@ function HabitHeatmap({
     );
   };
 
+  const confirmCell = confirmDate
+    ? weeks.flat().find((cell) => cell.date === confirmDate)
+    : undefined;
+  /** 销印 removes the day's LATEST check-in row first (most likely a mis-tap). */
+  const confirmTargetId =
+    confirmCell && confirmCell.checkinIds.length > 0
+      ? confirmCell.checkinIds[confirmCell.checkinIds.length - 1]
+      : null;
+
+  const unseal = () => {
+    if (!confirmDate || !confirmTargetId) {
+      return;
+    }
+    const date = confirmDate;
+    setPendingDate(date);
+    deleteCheckin.mutate(
+      { checkinId: confirmTargetId },
+      {
+        onSuccess: () => {
+          notifications.show({
+            color: 'green',
+            title: '已销印',
+            message: `${habit.title || habit.id} · ${date} 最近一次打卡已删除。`,
+          });
+        },
+        onError: (error) => {
+          notifications.show({
+            color: 'red',
+            title: '销印失败',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        },
+        onSettled: () => {
+          setPendingDate(null);
+          setConfirmDate(null);
+        },
+      },
+    );
+  };
+
   if (weeks.length === 0) {
     return null;
   }
@@ -165,20 +211,38 @@ function HabitHeatmap({
           <Stack key={weekIndex} gap={3}>
             {week.map((cell) => {
               const filled = cell.count > 0;
-              const clickable = !filled && !cell.future;
+              const deletable = filled && cell.checkinIds.length > 0;
+              const backfillable = !filled && !cell.future;
+              const busy = pendingDate !== null;
               const label = filled
-                ? `${cell.date} · 已打卡 ${cell.count} 次（暂不支持消卡:无删除端点)`
+                ? deletable
+                  ? `${cell.date} · 已打卡 ${cell.count} 次 · 点击销印最近一次`
+                  : `${cell.date} · 已打卡 ${cell.count} 次（记录缺少 id,暂不可销印)`
                 : cell.future
                   ? `${cell.date} · 未来`
                   : `${cell.date} · 点击补卡`;
+              const onClick = busy
+                ? undefined
+                : backfillable
+                  ? () => backfill(cell.date)
+                  : deletable
+                    ? () => setConfirmDate(cell.date)
+                    : undefined;
               return (
                 <Tooltip key={cell.date} label={label} withArrow>
                   <span
-                    role={clickable ? 'button' : undefined}
-                    aria-label={clickable ? `补卡 ${habit.title || habit.id} ${cell.date}` : undefined}
+                    role={onClick ? 'button' : undefined}
+                    aria-label={
+                      backfillable
+                        ? `补卡 ${habit.title || habit.id} ${cell.date}`
+                        : deletable
+                          ? `销印 ${habit.title || habit.id} ${cell.date}`
+                          : undefined
+                    }
+                    aria-pressed={deletable ? confirmDate === cell.date : undefined}
                     data-testid={`heatmap-cell-${habit.id}-${cell.date}`}
                     data-filled={filled ? 'true' : 'false'}
-                    onClick={clickable && pendingDate === null ? () => backfill(cell.date) : undefined}
+                    onClick={onClick}
                     style={{
                       display: 'inline-block',
                       width: 11,
@@ -186,12 +250,14 @@ function HabitHeatmap({
                       borderRadius: 2,
                       background: heatmapCellColor(cell.count, maxCount),
                       border: `1px solid ${
-                        isTodayDate(cell.date, today)
-                          ? boardPalette.gold
-                          : 'rgba(242, 237, 224, 0.12)'
+                        confirmDate === cell.date
+                          ? boardPalette.goldText
+                          : isTodayDate(cell.date, today)
+                            ? boardPalette.gold
+                            : 'rgba(242, 237, 224, 0.12)'
                       }`,
                       opacity: cell.future ? 0.35 : pendingDate === cell.date ? 0.5 : 1,
-                      cursor: clickable ? 'pointer' : 'default',
+                      cursor: onClick ? 'pointer' : 'default',
                     }}
                   />
                 </Tooltip>
@@ -200,8 +266,33 @@ function HabitHeatmap({
           </Stack>
         ))}
       </Group>
+      {confirmDate && (
+        <Group gap="xs" data-testid={`unseal-confirm-${habit.id}`} wrap="nowrap">
+          <Text size="xs" style={{ color: boardPalette.titleText }}>
+            销印 {confirmDate} 最近一次打卡?
+          </Text>
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="red"
+            disabled={!confirmTargetId || deleteCheckin.isPending}
+            onClick={unseal}
+            data-testid={`unseal-confirm-yes-${habit.id}`}
+          >
+            确认销印
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            onClick={() => setConfirmDate(null)}
+            data-testid={`unseal-confirm-no-${habit.id}`}
+          >
+            取消
+          </Button>
+        </Group>
+      )}
       <Text size="xs" style={{ color: boardPalette.dim }}>
-        近 90 天 · 空格点击补卡,已打卡格子不可消卡(无删除端点)
+        近 90 天 · 空格点击补卡,实格点击销印(删最近一次)
       </Text>
     </Stack>
   );

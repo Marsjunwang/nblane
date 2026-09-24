@@ -1,8 +1,11 @@
 // 铭文详情卡 — task detail overlay for the unified /projects page. Opens on
 // `?task=<id>`, reuses the InscriptionCard shell, and carries the action row:
 // section moves, planned-date scheduling (timeline-drag fallback), habit
-// check-in, crystallize hand-off, and 归属变更 (PATCH project_id — the only
-// cross-lane assignment path; board DnD stays in-lane).
+// check-in, crystallize hand-off, 归属变更 (PATCH project_id — the only
+// cross-lane assignment path; board DnD stays in-lane), and an edit mode
+// (编辑) for title/context/why/project_id/tags via PATCH /kanban/cards/{ref}
+// under the kanban.md ETag. Planned dates stay in the 排期 row — edit mode
+// deliberately does not duplicate scheduling.
 
 import {
   Alert,
@@ -13,9 +16,10 @@ import {
   Select,
   Stack,
   Text,
+  Textarea,
   TextInput,
 } from '@mantine/core';
-import { IconArrowRight, IconSparkles } from '@tabler/icons-react';
+import { IconArrowRight, IconPencil, IconSparkles } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -28,6 +32,7 @@ import {
   useScheduleKanbanCard,
 } from '../../api/hooks';
 import type {
+  KanbanCardPatchRequest,
   ProjectsBoardHabit,
   ProjectsBoardProject,
   ProjectsBoardTask,
@@ -83,6 +88,12 @@ export function TaskDetailCard({
   const [plannedStart, setPlannedStart] = useState('');
   const [plannedEnd, setPlannedEnd] = useState('');
   const [assignTo, setAssignTo] = useState<string>('');
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContext, setEditContext] = useState('');
+  const [editWhy, setEditWhy] = useState('');
+  const [editProjectId, setEditProjectId] = useState('');
+  const [editTags, setEditTags] = useState('');
 
   // Re-seed the local editors whenever a different task opens (or the same
   // task's server state lands after a mutation).
@@ -90,6 +101,7 @@ export function TaskDetailCard({
     setPlannedStart(task?.planned_start ?? '');
     setPlannedEnd(task?.planned_end ?? '');
     setAssignTo(task?.project_id ?? project?.id ?? '');
+    setEditing(false);
   }, [task?.id, task?.planned_start, task?.planned_end, task?.project_id, project?.id]);
 
   if (!task) {
@@ -151,6 +163,49 @@ export function TaskDetailCard({
     .map((tag) => tag.trim())
     .filter(Boolean);
 
+  const startEdit = () => {
+    setEditTitle(task.title);
+    setEditContext(task.context ?? '');
+    setEditWhy(task.why ?? '');
+    setEditProjectId(task.project_id ?? '');
+    setEditTags(tags.join(', '));
+    setEditing(true);
+  };
+
+  // PATCH carries only the fields that actually changed (None keeps server
+  // side; "" clears context/why/project_id).
+  const trimmedEditTitle = editTitle.trim();
+  const nextTags = editTags
+    .split(/[,，\s]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  const editBody: KanbanCardPatchRequest = {};
+  if (trimmedEditTitle && trimmedEditTitle !== task.title) {
+    editBody.title = trimmedEditTitle;
+  }
+  if (editContext !== (task.context ?? '')) {
+    editBody.context = editContext.trim();
+  }
+  if (editWhy !== (task.why ?? '')) {
+    editBody.why = editWhy.trim();
+  }
+  if (editProjectId !== (task.project_id ?? '')) {
+    editBody.project_id = editProjectId;
+  }
+  if (nextTags.join(', ') !== tags.join(', ')) {
+    editBody.tags = nextTags;
+  }
+  const editDirty = Object.keys(editBody).length > 0;
+
+  const runSaveEdit = () =>
+    patchCard.mutate(
+      { cardRef: task.title, body: editBody, etag: kanbanEtag },
+      {
+        onSuccess: () => setEditing(false),
+        onError: onError('保存失败'),
+      },
+    );
+
   return (
     <Modal
       opened
@@ -165,11 +220,24 @@ export function TaskDetailCard({
     >
       <InscriptionCard
         testId="task-detail-card"
-        title={task.title}
+        title={editing ? `编辑 · ${task.title}` : task.title}
         aside={
-          <Button size="compact-sm" variant="subtle" onClick={onClose} aria-label="关闭详情">
-            关闭
-          </Button>
+          <Group gap={4} wrap="nowrap">
+            {!editing && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                leftSection={<IconPencil size={13} />}
+                onClick={startEdit}
+                data-testid="detail-edit"
+              >
+                编辑
+              </Button>
+            )}
+            <Button size="compact-sm" variant="subtle" onClick={onClose} aria-label="关闭详情">
+              关闭
+            </Button>
+          </Group>
         }
       >
         <Stack gap="xs">
@@ -233,42 +301,107 @@ export function TaskDetailCard({
               )}
             </Group>
           </InscriptionRow>
-          {task.context && <InscriptionRow label="上下文">{task.context}</InscriptionRow>}
-          {task.why && <InscriptionRow label="为什么">{task.why}</InscriptionRow>}
-          <InscriptionRow label="归属">
-            <Group gap="xs" wrap="nowrap">
-              <Select
-                size="xs"
-                aria-label="归属变更"
-                data={[
-                  { value: '', label: '未归属' },
-                  ...projects.map((lane) => ({
-                    value: lane.id,
-                    label: lane.title || lane.id,
-                  })),
-                ]}
-                value={assignTo}
-                onChange={(value) => runAssign(value ?? '')}
-                disabled={mutating}
-                data-testid="assign-select"
-              />
-            </Group>
-          </InscriptionRow>
-          {tags.length > 0 && (
-            <InscriptionRow label="标签">
-              <Group gap={4}>
-                {tags.map((tag) => (
-                  <Badge
-                    key={tag}
-                    size="sm"
-                    variant="outline"
-                    style={{ borderColor: boardPalette.border, color: boardPalette.dim }}
-                  >
-                    {tag}
-                  </Badge>
-                ))}
-              </Group>
-            </InscriptionRow>
+          {editing ? (
+            <>
+              <InscriptionRow label="标题">
+                <TextInput
+                  size="xs"
+                  aria-label="编辑标题"
+                  value={editTitle}
+                  onChange={(event) => setEditTitle(event.currentTarget.value)}
+                  error={trimmedEditTitle ? undefined : '标题不能为空'}
+                  data-testid="edit-title"
+                />
+              </InscriptionRow>
+              <InscriptionRow label="上下文">
+                <Textarea
+                  size="xs"
+                  autosize
+                  minRows={2}
+                  aria-label="编辑上下文"
+                  value={editContext}
+                  onChange={(event) => setEditContext(event.currentTarget.value)}
+                  data-testid="edit-context"
+                />
+              </InscriptionRow>
+              <InscriptionRow label="为什么">
+                <Textarea
+                  size="xs"
+                  autosize
+                  minRows={2}
+                  aria-label="编辑为什么"
+                  value={editWhy}
+                  onChange={(event) => setEditWhy(event.currentTarget.value)}
+                  data-testid="edit-why"
+                />
+              </InscriptionRow>
+              <InscriptionRow label="归属">
+                <Select
+                  size="xs"
+                  aria-label="编辑归属"
+                  data={[
+                    { value: '', label: '未归属' },
+                    ...projects.map((lane) => ({
+                      value: lane.id,
+                      label: lane.title || lane.id,
+                    })),
+                  ]}
+                  value={editProjectId}
+                  onChange={(value) => setEditProjectId(value ?? '')}
+                  data-testid="edit-project"
+                />
+              </InscriptionRow>
+              <InscriptionRow label="标签">
+                <TextInput
+                  size="xs"
+                  aria-label="编辑标签"
+                  placeholder="逗号或空格分隔"
+                  value={editTags}
+                  onChange={(event) => setEditTags(event.currentTarget.value)}
+                  data-testid="edit-tags"
+                />
+              </InscriptionRow>
+            </>
+          ) : (
+            <>
+              {task.context && <InscriptionRow label="上下文">{task.context}</InscriptionRow>}
+              {task.why && <InscriptionRow label="为什么">{task.why}</InscriptionRow>}
+              <InscriptionRow label="归属">
+                <Group gap="xs" wrap="nowrap">
+                  <Select
+                    size="xs"
+                    aria-label="归属变更"
+                    data={[
+                      { value: '', label: '未归属' },
+                      ...projects.map((lane) => ({
+                        value: lane.id,
+                        label: lane.title || lane.id,
+                      })),
+                    ]}
+                    value={assignTo}
+                    onChange={(value) => runAssign(value ?? '')}
+                    disabled={mutating}
+                    data-testid="assign-select"
+                  />
+                </Group>
+              </InscriptionRow>
+              {tags.length > 0 && (
+                <InscriptionRow label="标签">
+                  <Group gap={4}>
+                    {tags.map((tag) => (
+                      <Badge
+                        key={tag}
+                        size="sm"
+                        variant="outline"
+                        style={{ borderColor: boardPalette.border, color: boardPalette.dim }}
+                      >
+                        {tag}
+                      </Badge>
+                    ))}
+                  </Group>
+                </InscriptionRow>
+              )}
+            </>
           )}
 
           {ambiguous && (
@@ -281,6 +414,31 @@ export function TaskDetailCard({
           )}
 
           <Group gap="xs" mt="sm" wrap="wrap">
+            {editing ? (
+              <>
+                <Button
+                  size="compact-sm"
+                  variant="light"
+                  color="green"
+                  disabled={mutating || !editDirty || !trimmedEditTitle}
+                  loading={patchCard.isPending}
+                  onClick={runSaveEdit}
+                  data-testid="edit-save"
+                >
+                  保存修改
+                </Button>
+                <Button
+                  size="compact-sm"
+                  variant="subtle"
+                  disabled={patchCard.isPending}
+                  onClick={() => setEditing(false)}
+                  data-testid="edit-cancel"
+                >
+                  取消
+                </Button>
+              </>
+            ) : (
+              <>
             {task.column !== 'doing' && (
               <Button
                 size="compact-sm"
@@ -336,6 +494,8 @@ export function TaskDetailCard({
             >
               结晶为证据
             </Button>
+              </>
+            )}
           </Group>
         </Stack>
       </InscriptionCard>

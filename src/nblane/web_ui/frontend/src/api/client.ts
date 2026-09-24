@@ -163,3 +163,16 @@ export function apiPatchWithHeaders<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+/** DELETE that also exposes response headers (fresh ETag after a mutation). */
+export function apiDeleteWithHeaders<T>(
+  path: string,
+  body?: unknown,
+  init?: RequestInit,
+): Promise<{ data: T; headers: Headers }> {
+  return requestWithHeaders<T>(path, {
+    ...init,
+    method: 'DELETE',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}

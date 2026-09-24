@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 
 import { useChronicle } from '../api/hooks';
 import { chronicleFlavor, withChronicleFlavor } from './briefing';
+import { DivinationPanel } from './Divination';
 import { HabitSeal } from './HabitSeal';
 import { InscriptionCard } from './InscriptionCard';
 import { StarCatalog } from './StarCatalog';
@@ -37,6 +38,7 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
   const pendingFocusRef = useRef<{ id: string; at: number } | null>(null);
   const [selection, setSelection] = useState<StarmapSelection | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [divOpen, setDivOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   // 显真 (design 四轮): remembered global preference — true names primary
   // (泥金) with ancient-name notes when on; ancient names only when off.
@@ -95,13 +97,14 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
   }, [snapshot, chronicle.data]);
 
   // Esc = 一键回纯图, no layering (design home-starmap-enhancements §2):
-  // any open card / catalog / edit mode closes back to the bare chart. The
-  // scene has its own Esc listener for disc selections; this one also covers
-  // the catalog and fallback cards the scene never owned.
+  // any open card / catalog / divination / edit mode closes back to the bare
+  // chart. The scene has its own Esc listener for disc selections; this one
+  // also covers the catalog and fallback cards the scene never owned.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setCatalogOpen(false);
+      setDivOpen(false);
       setSelection(null);
       pendingFocusRef.current = null;
       sceneRef.current?.deselect();
@@ -111,7 +114,11 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
   }, []);
 
   return (
-    <div className="starmap-root" ref={rootRef} data-testid="starmap-root">
+    <div
+      className={`starmap-root${divOpen ? ' divining' : ''}`}
+      ref={rootRef}
+      data-testid="starmap-root"
+    >
       <div className="starmap-layout">
         <div className="starmap-mount-top">
           <img
@@ -130,6 +137,20 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
       </div>
       {!failed && (
         <>
+          {/* 观瞻印组 (round-3/5, L-cluster at the bottom-right): 卜印 (占卜,
+           * design §5) takes the leftmost slot, then 真印, then 境/图印. */}
+          <button
+            type="button"
+            className="starmap-div-btn"
+            data-starmap-ui
+            data-testid="starmap-div-btn"
+            aria-label="占卜"
+            aria-pressed={divOpen}
+            title="占卜 — 星尘聚卦"
+            onClick={() => setDivOpen((v) => !v)}
+          >
+            卜
+          </button>
           <button
             type="button"
             className="starmap-toggle"
@@ -149,7 +170,7 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
             data-testid="starmap-reveal-toggle"
             aria-pressed={reveal}
             aria-label="显真"
-            title={reveal ? '显真·朱文 — 点击钤回古名' : '显真·白文 — 点击显现真名（已记住此偏好）'}
+            title={reveal ? '真·朱文 — 点击钤回古名' : '真·白文 — 点击显现真名（已记住此偏好）'}
             onClick={() => {
               const v = !reveal;
               setReveal(v);
@@ -157,8 +178,7 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
               sceneRef.current?.setReveal(v);
             }}
           >
-            <span aria-hidden="true">显</span>
-            <span aria-hidden="true">真</span>
+            真
           </button>
           <button
             type="button"
@@ -175,6 +195,8 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
       )}
       {/* 日课印 (裁决2): data-only 裱边层 — renders with or without WebGL. */}
       <HabitSeal profile={name} />
+      {/* 占卜 (design §5): 卜印 → 星尘聚卦仪式 + 左侧卦辞卡; Esc 回纯图. */}
+      <DivinationPanel profile={name} open={divOpen} onClose={() => setDivOpen(false)} />
       <StarCatalog
         open={catalogOpen}
         snapshot={snapshot}

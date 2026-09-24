@@ -94,30 +94,31 @@
 }
 
 .starmap-briefing {
-  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
-  font-size: clamp(13px, 1.8dvh, 18px);
-  color: rgba(196, 202, 214, 0.55);
+  font-family: 'I.Ming Subset', 'Noto Serif CJK SC', serif;
+  font-size: clamp(12px, 1.6dvh, 15px);
+  color: rgba(181, 176, 160, 0.6); /* 月白 muted, 字级小档 (round-3 字级统一) */
   pointer-events: none;
   white-space: nowrap;
 }
 
-/* 印章家族 (round-2 印章化): the bottom-right pair joins 星表「+」/日课印 in
- * one 篆刻 language — same mottled (斑蚀) texture, same border + inset
- * double-ring, same hover glow; size rhythm on the 44px module. */
+/* 观瞻印组 (round-3 印章化, L-cluster bottom-right): 真印 + 境/图印 —
+ * same seal family as 星表「+」/日课印: 44px module, mottled stone texture,
+ * thin double-ring border, 2px radius, hover gold glow. The future 卜印
+ * (design §5) takes the slot left of 真印 (right: 128px). */
 
-/* 境态/图态 toggle: vertical seal bearing the single target glyph 境/图. */
+/* 境态/图态 toggle: 44×44 square seal bearing the single TARGET glyph 境/图. */
 .starmap-toggle {
   position: absolute;
   right: 20px;
   bottom: 16px;
   z-index: 3;
   width: 44px;
-  height: 62px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
-  font-size: 24px;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 22px;
   line-height: 1;
   color: rgba(234, 197, 126, 0.9);
   background:
@@ -126,6 +127,7 @@
     radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.05), transparent 30%),
     rgba(20, 34, 54, 0.72);
   border: 1px solid rgba(220, 174, 85, 0.55);
+  border-radius: 2px;
   box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22);
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
@@ -139,47 +141,47 @@
     0 0 14px rgba(220, 174, 85, 0.25);
 }
 
-/* 显真: small square seal above the 境/图 seal. 白文 OFF = moon-white carved
- * glyph on the dark stone face; 朱文 ON = cinnabar face, gold glyph lit. */
+/* 真印 (显真): 44×44 square seal left of the 境/图印. 白文 OFF = moon-white
+ * carved glyph on the dark stone face; 朱文 ON = cinnabar face, gold glyph
+ * lit with a subtle outer glow. */
 .starmap-reveal-toggle {
   position: absolute;
-  right: 20px;
-  bottom: 88px;
+  right: 74px;
+  bottom: 16px;
   z-index: 3;
   width: 44px;
   height: 44px;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
-  font-size: 15px;
-  line-height: 1.15;
-  letter-spacing: 0;
-  color: rgba(232, 226, 210, 0.8);
-  text-shadow: 0 1px 1px rgba(6, 10, 18, 0.8); /* 阴刻 */
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(232, 226, 210, 0.35); /* 白文: 月白阴刻 */
+  text-shadow: 0 1px 1px rgba(6, 10, 18, 0.8);
   background:
     radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.06), transparent 42%),
     radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
     radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.04), transparent 30%),
     rgba(16, 27, 44, 0.78);
-  border: 1px solid rgba(232, 226, 210, 0.32);
-  box-shadow: inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.12);
+  border: 1px solid rgba(232, 226, 210, 0.28);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.1);
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
 .starmap-reveal-toggle:hover {
-  color: #f5ead2;
-  border-color: rgba(245, 234, 210, 0.6);
+  color: rgba(245, 234, 210, 0.75);
+  border-color: rgba(240, 205, 127, 0.6);
   box-shadow:
-    inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.12),
-    0 0 14px rgba(232, 226, 210, 0.18);
+    inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.1),
+    0 0 14px rgba(220, 174, 85, 0.22);
 }
 
 .starmap-reveal-toggle[aria-pressed='true'] {
-  color: #f7d98a;
-  text-shadow: 0 0 6px rgba(247, 217, 138, 0.45); /* 朱文点亮 */
+  color: #f7d98a; /* 朱文: 泥金点亮 */
+  text-shadow: 0 0 6px rgba(247, 217, 138, 0.45);
   background:
     radial-gradient(circle at 30% 30%, rgba(226, 122, 82, 0.5), transparent 46%),
     radial-gradient(circle at 70% 72%, rgba(80, 22, 12, 0.5), transparent 50%),
@@ -187,7 +189,7 @@
   border-color: rgba(240, 205, 127, 0.75);
   box-shadow:
     inset 0 0 0 3px rgba(80, 22, 12, 0.45), inset 0 0 0 4px rgba(240, 205, 127, 0.3),
-    0 0 16px rgba(200, 90, 50, 0.35);
+    0 0 14px rgba(200, 90, 50, 0.3);
 }
 
 .starmap-tooltip {
@@ -308,17 +310,11 @@
 /* 手机竖屏 = 立轴: 小匾在上, 详情卡底部升起 */
 @media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
   .starmap-cartouche { width: clamp(140px, 44vw, 210px); }
-  .starmap-toggle { right: 12px; bottom: 12px; width: 38px; height: 54px; font-size: 20px; }
-  .starmap-reveal-toggle { right: 12px; bottom: 76px; width: 38px; height: 38px; font-size: 13px; }
-  .starmap-habit-seal {
-    left: 64px;
-    bottom: 12px;
-    font-size: 12px;
-    padding: 6px 10px;
-    gap: 8px;
-    max-width: calc(100vw - 180px);
-    flex-wrap: wrap;
-  }
+  /* 印章族规: never below the 44px module, even on mobile. The L-cluster
+   * rises one row so 日课印 (bottom row) never covers the 卜印 hit target. */
+  .starmap-toggle { right: 12px; bottom: 68px; }
+  .starmap-reveal-toggle { right: 66px; bottom: 68px; }
+  .starmap-habit-seal { left: 64px; bottom: 12px; gap: 8px; }
   .starmap-detail {
     top: auto;
     right: 0;
@@ -362,18 +358,24 @@
     radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.05), transparent 30%),
     rgba(20, 34, 54, 0.72);
   border: 1px solid rgba(220, 174, 85, 0.55);
+  border-radius: 2px;
   box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
 .starmap-catalog-btn:hover {
   color: #f0cd7f;
   border-color: rgba(240, 205, 127, 0.85);
+  box-shadow:
+    inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22),
+    0 0 14px rgba(220, 174, 85, 0.25);
 }
 
-/* 日课印: bottom-left seal strip beside the 星表「+」button (裱边层) —
- * same mottled-seal language, stretched into a one-line row. */
+/* 日课印 (round-3 印章化): vertical etched caption「日课」+ one 44×44 seal per
+ * habit — no bar. 白文 = 未打卡 (etched moon-white 35%); 朱文 = 已打卡
+ * (cinnabar face, gold glyph, subtle gold outer glow). Same seal family:
+ * 44px module, mottled stone texture, thin double-ring border, 2px radius. */
 .starmap-habit-seal {
   position: absolute;
   left: 76px;
@@ -382,51 +384,144 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 14px;
-  font-family: 'Noto Serif SC Subset', 'Noto Serif CJK SC', serif;
-  font-size: 14px;
-  color: rgba(232, 226, 210, 0.85);
-  background:
-    radial-gradient(circle at 22% 30%, rgba(220, 174, 85, 0.09), transparent 44%),
-    radial-gradient(circle at 74% 72%, rgba(10, 16, 28, 0.35), transparent 48%),
-    rgba(20, 34, 54, 0.72);
-  border: 1px solid rgba(220, 174, 85, 0.4);
-  box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.16);
 }
 
-.starmap-habit-seal-label {
-  color: rgba(234, 197, 126, 0.9);
-  letter-spacing: 2px;
-  font-weight: 600;
-}
-
-.starmap-habit-seal-item {
-  display: inline-flex;
+.starmap-habit-seal-caption {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 0;
-  background: none;
-  border: none;
-  font: inherit;
-  color: inherit;
+  font-family: 'I.Ming Subset', 'Noto Serif CJK SC', serif;
+  font-size: 13px;
+  line-height: 1.3;
+  color: rgba(232, 226, 210, 0.4); /* 月白 40%, 刻款 */
+  letter-spacing: 0;
+}
+
+.starmap-habit-stamp {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif; /* 文楷入印 */
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(232, 226, 210, 0.35); /* 白文: 月白阴刻 */
+  text-shadow: 0 1px 1px rgba(6, 10, 18, 0.8);
+  background:
+    radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.06), transparent 42%),
+    radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
+    radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.04), transparent 30%),
+    rgba(16, 27, 44, 0.78);
+  border: 1px solid rgba(232, 226, 210, 0.28);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.1);
   cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
-.starmap-habit-seal-item:hover {
-  color: #f0cd7f;
+.starmap-habit-stamp:hover {
+  color: rgba(245, 234, 210, 0.75);
+  border-color: rgba(240, 205, 127, 0.6);
+  box-shadow:
+    inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(232, 226, 210, 0.1),
+    0 0 14px rgba(220, 174, 85, 0.22);
 }
 
-.starmap-habit-seal-item:disabled {
+.starmap-habit-stamp[data-done='true'] {
+  color: #f7d98a; /* 朱文: 泥金印面字 */
+  text-shadow: 0 0 6px rgba(247, 217, 138, 0.45);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(226, 122, 82, 0.5), transparent 46%),
+    radial-gradient(circle at 70% 72%, rgba(80, 22, 12, 0.5), transparent 50%),
+    #7e2f1f;
+  border-color: rgba(240, 205, 127, 0.75);
+  box-shadow:
+    inset 0 0 0 3px rgba(80, 22, 12, 0.45), inset 0 0 0 4px rgba(240, 205, 127, 0.3),
+    0 0 14px rgba(200, 90, 50, 0.3);
+}
+
+.starmap-habit-stamp:disabled {
   opacity: 0.6;
   cursor: wait;
 }
 
-.starmap-habit-seal-dot {
-  color: rgba(232, 226, 210, 0.55);
+/* 销印确认条: rises above the seal row (right-click / long-press a 朱文印).
+ * Same seal family — mottled stone ground, hairline gold frame, 2px radius;
+ * text in 明体 月白, the danger verb in cinnabar echoing the 朱文 face. */
+.starmap-habit-unseal {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  font-family: 'I.Ming Subset', 'Noto Serif CJK SC', serif;
+  font-size: 13px;
+  color: rgba(232, 226, 210, 0.85);
+  background:
+    radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.08), transparent 42%),
+    radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
+    rgba(16, 27, 44, 0.92);
+  border: 1px solid rgba(220, 174, 85, 0.45);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 0 0 3px rgba(16, 27, 44, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.14),
+    0 4px 18px rgba(6, 10, 18, 0.55);
 }
 
-.starmap-habit-seal-dot.done {
-  color: #dcae55;
+.starmap-habit-unseal-btn {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+  color: rgba(234, 197, 126, 0.85);
+  background: transparent;
+  border: 1px solid rgba(220, 174, 85, 0.4);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.starmap-habit-unseal-btn:hover {
+  color: #f0cd7f;
+  border-color: rgba(240, 205, 127, 0.8);
+  box-shadow: 0 0 10px rgba(220, 174, 85, 0.22);
+}
+
+.starmap-habit-unseal-btn.danger {
+  color: #f2b8a0;
+  border-color: rgba(200, 90, 50, 0.65);
+}
+
+.starmap-habit-unseal-btn.danger:hover {
+  color: #ffd0bc;
+  border-color: rgba(226, 122, 82, 0.9);
+  box-shadow: 0 0 10px rgba(200, 90, 50, 0.3);
+}
+
+.starmap-habit-unseal-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* 钤印微动画: press down, then release with a faint gold settle */
+@keyframes starmap-stamp-press {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.86); }
+  70% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+.starmap-habit-stamp.stamping {
+  animation: starmap-stamp-press 0.36s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .starmap-habit-stamp.stamping { animation: none; }
 }
 
 /* 星表面板: desktop slides from the left, mobile rises as a bottom sheet */
@@ -782,7 +877,7 @@
 
 /* mobile: catalog as a bottom sheet above the detail card's layer */
 @media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
-  .starmap-catalog-btn { left: 12px; bottom: 12px; width: 40px; height: 40px; font-size: 20px; }
+  .starmap-catalog-btn { left: 12px; bottom: 12px; }
   .starmap-catalog {
     top: auto;
     left: 0;
@@ -802,4 +897,312 @@
 @media (prefers-reduced-motion: reduce) {
   .starmap-catalog { transition: none; }
   .starmap-seal { animation-duration: 0.01s; }
+}
+
+/* ---- 占卜 (round-5, design §5): 卜印 + 星尘聚卦仪式 + 左侧卦辞卡 ---- */
+
+/* 卜印: L-cluster leftmost slot, same seal family (44px module, mottled
+ * texture, thin double-ring border, 2px radius, hover gold glow). */
+.starmap-div-btn {
+  position: absolute;
+  right: 128px;
+  bottom: 16px;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(234, 197, 126, 0.9);
+  background:
+    radial-gradient(circle at 28% 32%, rgba(220, 174, 85, 0.1), transparent 42%),
+    radial-gradient(circle at 68% 70%, rgba(10, 16, 28, 0.35), transparent 46%),
+    radial-gradient(circle at 52% 18%, rgba(245, 234, 210, 0.05), transparent 30%),
+    rgba(20, 34, 54, 0.72);
+  border: 1px solid rgba(220, 174, 85, 0.55);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.starmap-div-btn:hover {
+  color: #f0cd7f;
+  border-color: rgba(240, 205, 127, 0.85);
+  box-shadow:
+    inset 0 0 0 3px rgba(20, 34, 54, 0.5), inset 0 0 0 4px rgba(220, 174, 85, 0.22),
+    0 0 14px rgba(220, 174, 85, 0.25);
+}
+
+/* 占卜进行中 = 朱文态(仪式在场) */
+.starmap-div-btn[aria-pressed='true'] {
+  color: #f7d98a;
+  text-shadow: 0 0 6px rgba(247, 217, 138, 0.45);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(226, 122, 82, 0.5), transparent 46%),
+    radial-gradient(circle at 70% 72%, rgba(80, 22, 12, 0.5), transparent 50%),
+    #7e2f1f;
+  border-color: rgba(240, 205, 127, 0.75);
+  box-shadow:
+    inset 0 0 0 3px rgba(80, 22, 12, 0.45), inset 0 0 0 4px rgba(240, 205, 127, 0.3),
+    0 0 14px rgba(200, 90, 50, 0.3);
+}
+
+/* 微光一滞: the chart dims slightly while the ritual is up */
+.starmap-root.divining .starmap-canvas {
+  filter: brightness(0.82) saturate(0.92);
+  transition: filter 0.6s ease;
+}
+
+.starmap-canvas { transition: filter 0.6s ease; }
+
+.starmap-div-root {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none; /* chart stays alive under the ritual */
+}
+
+.starmap-div-overlay {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.8s ease;
+}
+
+.starmap-div-root.docked .starmap-div-overlay {
+  opacity: 0; /* 卦象移位: the emblem now rests at the card's head-left */
+}
+
+.starmap-div-ritual-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 卦辞卡: slides in from the LEFT edge, docks at far left */
+.starmap-div-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(340px, 86vw);
+  padding: 20px 18px;
+  overflow-y: auto;
+  pointer-events: auto;
+  font-family: 'LXGW WenKai Subset', 'Noto Serif CJK SC', serif;
+  color: #e8e2d2;
+  background:
+    radial-gradient(circle at 80% 12%, rgba(220, 174, 85, 0.07), transparent 46%),
+    linear-gradient(180deg, rgba(16, 27, 44, 0.92), rgba(11, 19, 32, 0.94));
+  border-right: 1px solid rgba(220, 174, 85, 0.35);
+  box-shadow: inset -3px 0 0 rgba(20, 34, 54, 0.5), inset -4px 0 0 rgba(220, 174, 85, 0.14);
+  transform: translateX(-104%);
+  transition: transform 0.7s cubic-bezier(0.22, 0.9, 0.28, 1);
+}
+
+.starmap-div-card.open { transform: translateX(0); }
+
+.div-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(232, 226, 210, 0.16);
+  margin-bottom: 12px;
+}
+
+.div-card-title {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.div-hx-name {
+  font-size: 22px;
+  color: #f0cd7f;
+  letter-spacing: 2px;
+}
+
+.div-offline-note {
+  font-size: 11px;
+  color: rgba(181, 176, 160, 0.75);
+  border: 1px solid rgba(181, 176, 160, 0.35);
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.div-casting-label {
+  font-size: 16px;
+  color: rgba(232, 226, 210, 0.7);
+  letter-spacing: 4px;
+  animation: div-casting-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes div-casting-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+.div-close {
+  background: none;
+  border: none;
+  color: rgba(232, 226, 210, 0.55);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.div-close:hover { color: #f0cd7f; }
+
+.div-judgment {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #f5ead2;
+  margin: 0 0 10px;
+}
+
+.div-reading {
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: rgba(232, 226, 210, 0.82);
+  white-space: pre-line;
+  margin: 0 0 16px;
+}
+
+.div-error {
+  color: #e0a080;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.div-error-label { color: #e0a080; font-size: 16px; }
+
+.div-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.div-chip {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 14px;
+  color: rgba(232, 226, 210, 0.65);
+  background: none;
+  border: 1px solid rgba(232, 226, 210, 0.28);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.div-chip.active {
+  color: #f0cd7f;
+  border-color: rgba(220, 174, 85, 0.6);
+  background: rgba(220, 174, 85, 0.08);
+}
+
+.div-question { margin-top: 10px; }
+
+.div-question textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #e8e2d2;
+  background: rgba(11, 19, 32, 0.6);
+  border: 1px solid rgba(232, 226, 210, 0.25);
+  border-radius: 2px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.div-question textarea:focus { outline: none; border-color: rgba(220, 174, 85, 0.6); }
+
+.div-cast-btn {
+  margin-top: 8px;
+  font-family: inherit;
+  font-size: 13.5px;
+  letter-spacing: 3px;
+  padding: 6px 18px;
+  color: rgba(234, 197, 126, 0.9);
+  background: rgba(20, 34, 54, 0.72);
+  border: 1px solid rgba(220, 174, 85, 0.55);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.div-cast-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.div-cast-btn:not(:disabled):hover { color: #f0cd7f; border-color: rgba(240, 205, 127, 0.85); }
+
+/* 卦象符号: 6 yao rows (top-down), solid 阳 / broken 阴 */
+.hexagram-symbol {
+  position: relative;
+  flex: none;
+}
+
+.hex-yao {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #dcae55;
+  box-shadow: 0 0 6px rgba(220, 174, 85, 0.35);
+}
+
+.hex-yao.broken {
+  background: none;
+  box-shadow: none;
+  display: flex;
+  justify-content: space-between;
+}
+
+.hex-yao.broken::before,
+.hex-yao.broken::after {
+  content: '';
+  display: block;
+  width: 38%;
+  height: 100%;
+  background: #dcae55;
+  box-shadow: 0 0 6px rgba(220, 174, 85, 0.35);
+}
+
+.hex-yao-gap { display: none; }
+
+.hexagram-symbol.casting .hex-yao {
+  animation: div-yao-shimmer 1.1s ease-in-out infinite;
+}
+
+.hexagram-symbol.casting .hex-yao:nth-child(2n) { animation-delay: 0.18s; }
+.hexagram-symbol.casting .hex-yao:nth-child(3n) { animation-delay: 0.32s; }
+
+@keyframes div-yao-shimmer {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
+  .starmap-div-btn { right: 120px; bottom: 68px; }
+  /* mobile: the card rises as a bottom sheet (same pattern as 铭文卡) */
+  .starmap-div-card {
+    top: auto;
+    right: 0;
+    width: auto;
+    max-height: 46%;
+    border-right: none;
+    border-top: 1px solid rgba(220, 174, 85, 0.35);
+    box-shadow: inset 0 3px 0 rgba(20, 34, 54, 0.5), inset 0 4px 0 rgba(220, 174, 85, 0.14);
+    transform: translateY(112%);
+  }
+  .starmap-div-card.open { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .starmap-div-card { transition: none; }
+  .starmap-div-overlay { transition: none; }
+  .div-casting-label,
+  .hexagram-symbol.casting .hex-yao { animation: none; }
 }

@@ -441,6 +441,10 @@ export type ProjectsBoardResponse = Schemas['ProjectsBoardResponse'];
 /** StarmapResponse from web_api/schemas.py (one-shot home starmap snapshot). */
 export type StarmapResponse = Schemas['StarmapResponse'];
 
+/** DivinationRequest / DivinationResponse from web_api/schemas.py (占卜 §5). */
+export type DivinationRequest = Schemas['DivinationRequest'];
+export type DivinationResponse = Schemas['DivinationResponse'];
+
 /** KanbanCardScheduleRequest from web_api/schemas.py (planned dates).
  * Partial: `undefined` keeps the value, `""` clears it. */
 export type KanbanCardScheduleRequest = Partial<Schemas['KanbanCardScheduleRequest']>;
@@ -453,6 +457,9 @@ export type CheckinCreateRequest = Partial<Schemas['CheckinCreateRequest']>;
 
 /** CheckinMutationResponse from web_api/schemas.py. */
 export type CheckinMutationResponse = Schemas['CheckinMutationResponse'];
+
+/** CheckinDeleteResponse from web_api/schemas.py ({ok, checkin_id}). */
+export type CheckinDeleteResponse = Schemas['CheckinDeleteResponse'];
 
 /** PlanTemplateModel from web_api/schemas.py (built-in or inline plan). */
 export type PlanTemplate = Schemas['PlanTemplateModel'];

@@ -205,10 +205,11 @@ test.describe("SPA Home editing (重刻铭文 · 星表 · 刻痕星)", () => {
     test.skip(!active, "profile has no active goal to locate");
 
     await openHome(page);
-    // Let the disc spin freely, then morph to 境态.
+    // Let the disc spin freely, then morph to 境态. The flip-seal glyph names
+    // the TARGET state (round-3 印章化): 境态 world → glyph 图.
     await page.waitForTimeout(3_500);
     await page.getByTestId("starmap-toggle").click();
-    await expect(page.getByTestId("starmap-toggle")).toContainText("图态", { timeout: 10_000 });
+    await expect(page.getByTestId("starmap-toggle")).toContainText("图", { timeout: 10_000 });
 
     // Focus a goal star mid/after-morph: the scene must morph back first.
     await page.getByTestId("starmap-catalog-btn").click();
@@ -219,8 +220,8 @@ test.describe("SPA Home editing (重刻铭文 · 星表 · 刻痕星)", () => {
     const detail = page.getByTestId("starmap-detail");
     await expect(detail).toHaveClass(/open/, { timeout: 15_000 });
     await expect(detail.locator("h3")).toHaveText(active.title || active.id);
-    // World state returned to 图态 (toggle offers 境态 again).
-    await expect(page.getByTestId("starmap-toggle")).toContainText("境态", { timeout: 10_000 });
+    // World state returned to 图态 (toggle seal offers 境 again).
+    await expect(page.getByTestId("starmap-toggle")).toContainText("境", { timeout: 10_000 });
     await shot(page, "08-focus-after-morph");
   });
 

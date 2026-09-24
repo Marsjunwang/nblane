@@ -59,14 +59,16 @@ test.describe("SPA Home (growth starmap)", () => {
     await expect(briefing).toContainText(`${needsReview} 条客星待评审`);
     await expect(briefing).toContainText(`${activeProjects} 颗行星在轨`);
 
-    // Morph toggle flips the world state label.
+    // Morph toggle flips the world state. Round-3 印章化: the toggle is a
+    // 44px flip seal whose single glyph names the TARGET state (境/图),
+    // rewritten imperatively by the scene mid-morph.
     const toggle = page.getByTestId("starmap-toggle");
     if ((await canvas.count()) > 0) {
-      await expect(toggle).toContainText("境态");
+      await expect(toggle).toContainText("境");
       await toggle.click();
-      await expect(toggle).toContainText("图态", { timeout: 10_000 });
+      await expect(toggle).toContainText("图", { timeout: 10_000 });
       await toggle.click();
-      await expect(toggle).toContainText("境态", { timeout: 10_000 });
+      await expect(toggle).toContainText("境", { timeout: 10_000 });
     }
   });
 

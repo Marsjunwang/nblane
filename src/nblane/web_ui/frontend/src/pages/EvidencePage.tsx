@@ -1,6 +1,7 @@
 import {
   Alert,
   Badge,
+  Box,
   Button,
   Card,
   Center,
@@ -50,7 +51,7 @@ import {
 import { streamJob } from '../api/jobs';
 import { MutationErrorAlert } from '../components/ConflictAlert';
 import { InscriptionCard, InscriptionRow } from '../components/InscriptionCard';
-import { inscription } from '../theme';
+import { inscription, chrome } from '../theme';
 import type {
   CrystallizeCandidate,
   CrystallizeDraftResponse,
@@ -148,6 +149,9 @@ function stageCount(
 
 // --- Left column: five-stage nav --------------------------------------------
 
+// Inscription-adjacent nav rows (深底/细金边/明体): active = hairline gold
+// frame + gold-tinted ground; inactive = quiet 月白 row with a gold hover
+// wash. Counts are dim tabular numerals, gold only on the active stage.
 function StageNav({
   stages,
   active,
@@ -159,24 +163,60 @@ function StageNav({
 }) {
   return (
     <Stack gap={4} data-testid="stage-nav">
-      {STAGES.map((stage) => (
-        <Button
-          key={stage.key}
-          variant={active === stage.key ? 'light' : 'subtle'}
-          color={stage.key === 'deprecated' ? 'gray' : 'brand'}
-          fullWidth
-          justify="space-between"
-          rightSection={
-            <Badge size="sm" variant="filled" color={active === stage.key ? 'brand' : 'gray'}>
+      {STAGES.map((stage) => {
+        const isActive = active === stage.key;
+        return (
+          <Box
+            key={stage.key}
+            component="button"
+            type="button"
+            onClick={() => onSelect(stage.key)}
+            data-testid={`stage-${stage.key}`}
+            style={{
+              display: 'flex',
+              width: '100%',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              padding: '8px 12px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontFamily: inscription.bodyFontFamily,
+              fontSize: 14,
+              color: isActive
+                ? chrome.goldText
+                : stage.key === 'deprecated'
+                  ? chrome.dim
+                  : chrome.text,
+              background: isActive ? 'rgba(220, 174, 85, 0.10)' : 'transparent',
+              border: `1px solid ${isActive ? 'rgba(220, 174, 85, 0.45)' : 'transparent'}`,
+              transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+            }}
+            onMouseEnter={(event) => {
+              if (!isActive) {
+                event.currentTarget.style.background = 'rgba(220, 174, 85, 0.06)';
+              }
+            }}
+            onMouseLeave={(event) => {
+              if (!isActive) {
+                event.currentTarget.style.background = 'transparent';
+              }
+            }}
+          >
+            <span>{stage.label}</span>
+            <span
+              style={{
+                fontSize: 12,
+                fontVariantNumeric: 'tabular-nums',
+                color: isActive ? chrome.goldText : chrome.dim,
+              }}
+            >
               {stageCount(stages, stage.key)}
-            </Badge>
-          }
-          onClick={() => onSelect(stage.key)}
-          data-testid={`stage-${stage.key}`}
-        >
-          {stage.label}
-        </Button>
-      ))}
+            </span>
+          </Box>
+        );
+      })}
     </Stack>
   );
 }
@@ -212,11 +252,15 @@ function EvidenceRow({
       data-testid={`evidence-row-${item.id}`}
       style={{
         cursor: 'pointer',
+        // Inscription-adjacent row: deep ground, hairline gold edge; selected
+        // = solid gold, quick-review cursor = dashed gold (not Mantine yellow).
+        background: 'rgba(22, 38, 61, 0.55)',
         borderColor: active
           ? 'var(--mantine-color-brand-5)'
           : cursor
-            ? 'var(--mantine-color-yellow-6)'
-            : undefined,
+            ? chrome.goldText
+            : 'rgba(220, 174, 85, 0.16)',
+        borderStyle: cursor && !active ? 'dashed' : 'solid',
         opacity: deprecated ? 0.72 : 1,
       }}
     >
@@ -274,8 +318,8 @@ function EvidenceRow({
           ) : (
             <Badge
               size="sm"
-              variant="light"
-              color={item.review_status === 'reviewed' ? 'green' : 'yellow'}
+              variant={item.review_status === 'reviewed' ? 'light' : 'outline'}
+              color={item.review_status === 'reviewed' ? 'brand' : 'gray'}
             >
               {STRENGTH_LABELS[item.strength ?? 'unrated'] ?? item.strength}
             </Badge>
@@ -663,7 +707,7 @@ function EvidenceDetailCard({
               {(detail.review_status ?? 'needs_review') !== 'reviewed' && (
                 <Button
                   size="compact-sm"
-                  color="green"
+                  color="brand"
                   leftSection={<IconCheck size={14} />}
                   loading={review.isPending}
                   onClick={() => review.mutate({ entryId, body: reviewBody('accept'), etag })}
@@ -963,7 +1007,16 @@ function CrystallizeWizard({
           {items.map((task) => {
             const key = task.id || task.title;
             return (
-              <Card key={key} withBorder radius="md" p="xs">
+              <Card
+                key={key}
+                withBorder
+                radius="md"
+                p="xs"
+                style={{
+                  background: 'rgba(22, 38, 61, 0.55)',
+                  borderColor: picked.has(key) ? 'var(--mantine-color-brand-5)' : 'rgba(220, 174, 85, 0.16)',
+                }}
+              >
                 <Group wrap="nowrap" align="flex-start">
                   <Checkbox
                     aria-label={`选择 ${task.title}`}
@@ -1109,7 +1162,7 @@ function CrystallizeWizard({
           )}
           <Group justify="flex-end">
             <Button
-              color="green"
+              color="brand"
               loading={applyMutation.isPending}
               disabled={!draftRows.some((row) => row.include)}
               onClick={apply}
@@ -1160,7 +1213,16 @@ function WizardDraftRow({
   const snapshot = String(row.original_content ?? '').trim();
   const evidenceType = String(row.type ?? 'practice');
   return (
-    <Card withBorder radius="md" p="xs" data-testid={`wizard-row-${index}`}>
+    <Card
+      withBorder
+      radius="md"
+      p="xs"
+      data-testid={`wizard-row-${index}`}
+      style={{
+        background: 'rgba(22, 38, 61, 0.55)',
+        borderColor: 'rgba(220, 174, 85, 0.16)',
+      }}
+    >
       <Group wrap="nowrap" align="flex-start">
         <Checkbox
           aria-label={`入库 ${String(row.title ?? index)}`}
@@ -1440,7 +1502,8 @@ export function EvidencePage() {
             <Tooltip label="j/k 移动 · a 接受 · s 跳过 · 1/2/3 定分量" withinPortal>
               <Button
                 size="compact-sm"
-                variant={quickMode ? 'filled' : 'default'}
+                variant={quickMode ? 'light' : 'subtle'}
+                color="brand"
                 leftSection={<IconKeyboard size={14} />}
                 onClick={() => setQuickMode((value) => !value)}
                 data-testid="quick-review-toggle"
@@ -1499,10 +1562,11 @@ export function EvidencePage() {
                   }}
                   style={{
                     cursor: 'pointer',
+                    background: 'rgba(22, 38, 61, 0.55)',
                     borderColor:
                       selectedCandidate && (selectedCandidate.id || selectedCandidate.title) === (task.id || task.title)
                         ? 'var(--mantine-color-brand-5)'
-                        : undefined,
+                        : 'rgba(220, 174, 85, 0.16)',
                   }}
                   data-testid={`candidate-${task.id || task.title}`}
                 >
@@ -1546,7 +1610,13 @@ export function EvidencePage() {
                     setSelectedId('');
                     setSelectedCandidate(null);
                   }}
-                  style={{ cursor: 'pointer' }}
+                  style={{
+                    cursor: 'pointer',
+                    background: 'rgba(22, 38, 61, 0.55)',
+                    borderColor: selectedRisk?.skill_id === risk.skill_id
+                      ? 'var(--mantine-color-brand-5)'
+                      : 'rgba(220, 174, 85, 0.16)',
+                  }}
                   data-testid={`risk-${risk.skill_id}`}
                 >
                   <Group justify="space-between" wrap="nowrap">
@@ -1622,9 +1692,17 @@ export function EvidencePage() {
           ) : selectedRisk ? (
             <RiskDetailCard risk={selectedRisk} />
           ) : (
-            <Card withBorder radius="md" p="lg">
+            <Card
+              withBorder
+              radius="md"
+              p="lg"
+              style={{
+                background: 'rgba(22, 38, 61, 0.55)',
+                borderColor: 'rgba(220, 174, 85, 0.16)',
+              }}
+            >
               <Group gap="xs">
-                <IconLink size={16} />
+                <IconLink size={16} color={chrome.gold} />
                 <Text size="sm" c="dimmed">
                   选中一条证据查看铭文详情。
                 </Text>

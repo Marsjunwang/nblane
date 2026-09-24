@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiDelete, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
+import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -12,6 +12,7 @@ import type {
   ActivityListResponse,
   AssistantStatus,
   CheckinCreateRequest,
+  CheckinDeleteResponse,
   CheckinMutationResponse,
   ChronicleResponse,
   CurrentUser,
@@ -446,6 +447,42 @@ export function useAddCheckin(profile: string) {
           throw error;
         }
         const res = await apiPostWithHeaders<CheckinMutationResponse>(path, body);
+        return { data: res.data, etag: res.headers.get('ETag') ?? '' };
+      }
+    },
+    onSuccess: ({ etag }) => {
+      if (etag) {
+        queryClient.setQueryData(cacheKey, etag);
+      }
+      invalidateBoard();
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+    },
+  });
+}
+
+/**
+ * Remove one check-in row (销印). Shares the cached activity-log ETag with
+ * useAddCheckin; the first call may go out without If-Match, and a 412
+ * degrades to one retry without If-Match (same contract as the POST).
+ */
+export function useDeleteCheckin(profile: string) {
+  const queryClient = useQueryClient();
+  const invalidateBoard = useInvalidateProjectsBoard(profile);
+  const cacheKey = ['profiles', profile, 'checkin-etag'];
+  return useMutation({
+    mutationFn: async ({ checkinId }: { checkinId: string }) => {
+      const path = `/profiles/${encodeURIComponent(profile)}/checkins/${encodeURIComponent(checkinId)}`;
+      const cached = queryClient.getQueryData<string>(cacheKey) ?? '';
+      try {
+        const res = await apiDeleteWithHeaders<CheckinDeleteResponse>(path, undefined, {
+          headers: ifMatch(cached),
+        });
+        return { data: res.data, etag: res.headers.get('ETag') ?? cached };
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 412) {
+          throw error;
+        }
+        const res = await apiDeleteWithHeaders<CheckinDeleteResponse>(path);
         return { data: res.data, etag: res.headers.get('ETag') ?? '' };
       }
     },

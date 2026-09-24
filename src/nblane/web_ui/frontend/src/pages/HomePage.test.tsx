@@ -103,7 +103,7 @@ const PROJECTS_BOARD = {
       cadence: 'daily',
       project_id: '',
       week: [{ date: '2026-09-23', done: true, future: false }],
-      recent_days: [],
+      recent_days: [{ date: '2026-09-23', count: 2, checkin_ids: ['ck_study_1', 'ck_study_2'] }],
       streak: 5,
       total_checkins: 40,
       last_checkin: '2026-09-23',
@@ -121,6 +121,9 @@ function mockFetch(body: Record<string, unknown> = {}) {
     if (url.includes('/projects-board')) return jsonResponse(200, PROJECTS_BOARD);
     if (url.includes('/checkins') && init?.method === 'POST') {
       return jsonResponse(201, { ok: true, checkin: { id: 'c1' } });
+    }
+    if (url.includes('/checkins/') && init?.method === 'DELETE') {
+      return jsonResponse(200, { ok: true, deleted_id: 'ck_study_2' });
     }
     return jsonResponse(404, { code: 'not_found', message: `unexpected: ${url}`, ...body });
   });
@@ -159,14 +162,16 @@ describe('HomePage (starmap)', () => {
     expect(await screen.findByTestId('starmap-error')).toBeInTheDocument();
   });
 
-  it('日课印: bottom-left seal renders 空圈/金点 and clicking a name checks in', async () => {
+  it('日课印: bottom-left seal cluster renders 白文/朱文 stamps and clicking checks in', async () => {
     const fetchMock = mockFetch();
     renderPage(fetchMock);
     const seal = await screen.findByTestId('habit-seal');
     expect(seal).toHaveTextContent('日课');
-    // 锻炼 not checked in today (○), 学习 done (●).
-    expect(screen.getByTestId('habit-seal-exercise')).toHaveTextContent('锻炼○');
-    expect(screen.getByTestId('habit-seal-study')).toHaveTextContent('学习●');
+    // round-3 印章化: one 44px stamp per habit with an auto-picked glyph —
+    // 锻炼/Exercise → 炼 (unchecked = 白文), 学习 → 学 (checked = 朱文).
+    expect(screen.getByTestId('habit-seal-exercise')).toHaveTextContent('炼');
+    expect(screen.getByTestId('habit-seal-exercise')).toHaveAttribute('data-done', 'false');
+    expect(screen.getByTestId('habit-seal-study')).toHaveTextContent('学');
     expect(screen.getByTestId('habit-seal-study')).toHaveAttribute('data-done', 'true');
 
     fireEvent.click(screen.getByTestId('habit-seal-exercise'));
@@ -177,5 +182,49 @@ describe('HomePage (starmap)', () => {
       expect(call).toBeDefined();
       expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ habit: 'exercise' });
     });
+  });
+
+  it('日课印销印: right-click a 朱文 seal → inline confirm → DELETE today\'s latest check-in', async () => {
+    const fetchMock = mockFetch();
+    renderPage(fetchMock);
+    const seal = await screen.findByTestId('habit-seal-study');
+    expect(seal).toHaveAttribute('data-done', 'true');
+
+    // Right-click (contextmenu) opens the inline 销印 confirm strip.
+    fireEvent.contextMenu(seal);
+    const confirm = await screen.findByTestId('seal-unseal-study');
+    expect(confirm).toHaveTextContent('销印「学习」今日最近一次打卡?');
+
+    // Confirm → DELETE the day's LATEST check-in row (ck_study_2).
+    fireEvent.click(screen.getByTestId('seal-unseal-yes-study'));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) => String(input).includes('/checkins/') && init?.method === 'DELETE',
+      );
+      expect(call).toBeDefined();
+      expect(String(call?.[0])).toContain('/checkins/ck_study_2');
+    });
+    // The strip closes once the mutation settles.
+    await waitFor(() => {
+      expect(screen.queryByTestId('seal-unseal-study')).not.toBeInTheDocument();
+    });
+  });
+
+  it('日课印销印: cancel closes the confirm without a DELETE; right-click on 白文 is a no-op', async () => {
+    const fetchMock = mockFetch();
+    renderPage(fetchMock);
+    const seal = await screen.findByTestId('habit-seal-study');
+
+    fireEvent.contextMenu(seal);
+    await screen.findByTestId('seal-unseal-study');
+    fireEvent.click(screen.getByTestId('seal-unseal-no-study'));
+    expect(screen.queryByTestId('seal-unseal-study')).not.toBeInTheDocument();
+
+    // Unchecked (白文) seals never open the confirm.
+    fireEvent.contextMenu(screen.getByTestId('habit-seal-exercise'));
+    expect(screen.queryByTestId('seal-unseal-exercise')).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE'),
+    ).toBe(false);
   });
 });

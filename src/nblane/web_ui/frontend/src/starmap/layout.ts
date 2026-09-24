@@ -191,10 +191,6 @@ export interface Sector {
   start: number;
   width: number;
   count: number;
-  /** Outer radius of the sector's asterism figure (chart units, from the
-   * figure centroid at R*0.72); 0 when the sector has no figure. The muted
-   * in-sector asterism name sits just beyond it. */
-  figRadius: number;
 }
 
 export interface DimField {
@@ -221,6 +217,8 @@ export interface LitField {
   core: number[];
   ring: number[];
   color: number[];
+  /** 境态 4-step color temperature per star (蓝白 bright / 月白 dim). */
+  deepColor: number[];
   links: number[];
   skills: {
     id: string;
@@ -298,6 +296,8 @@ export interface DustField extends PointCloud {
  * seats for shape stars with no lit/learning member). All core=0, ring=1. */
 export interface EtchedField extends PointCloud {
   color: number[];
+  /** 境态 ignite tints (per-slot temperature, same anchor as the figure). */
+  deepColor: number[];
 }
 
 export interface StarmapLayout {
@@ -316,6 +316,9 @@ export interface StarmapLayout {
   /** Full sector-asterism line figures (flat xyz segment endpoints, plan
    * coords) — the etched carve under the brighter formed-member links. */
   shapeLinesPlan: number[];
+  /** Same segments in 境态 constellation coords (per-slot z jitter, so the
+   * persisting faint lines are not coplanar). */
+  shapeLinesDeep: number[];
 }
 
 export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
@@ -334,7 +337,6 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       start: acc,
       width,
       count: cat.count,
-      figRadius: 0,
     });
     acc += width;
   }
@@ -446,12 +448,17 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
   // figure is carved faintly under the brighter formed-member links. Sectors
   // mapped to 星官 missing from the data asset (翼/房/箕/轸/轩辕/虚) fall back
   // to the generic morphology templates; unmapped empty sectors stay blank.
+  //
+  // 星官点燃 (round-5, 2026-09-24): in 境态 the figure stays put as a living
+  // constellation — deep coords anchor to the figure (×1.08 breath, per-slot
+  // z jitter so nothing is coplanar) instead of scattering into the field.
   const lit: LitField = {
     plan: [], deep: [], size: [], opacity: [], core: [], ring: [], color: [],
-    links: [], skills: [],
+    deepColor: [], links: [], skills: [],
   };
-  const etched: EtchedField = { plan: [], deep: [], size: [], opacity: [], color: [] };
+  const etched: EtchedField = { plan: [], deep: [], size: [], opacity: [], color: [], deepColor: [] };
   const shapeLinesPlan: number[] = [];
+  const shapeLinesDeep: number[] = [];
   const evCountBySkill = new Map<string, number>();
   snapshot.evidence.forEach((e) =>
     e.skill_ids.forEach((id) => evCountBySkill.set(id, (evCountBySkill.get(id) || 0) + 1)),
@@ -470,6 +477,7 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
 
     let slots: Slot[];
     let links: [number, number][];
+    let slotTints: (readonly number[])[];
     if (aster) {
       // real figure: rotate so local +y points radially outward, scale tight
       // into the sector arc (texture tier, not a centerpiece); no jitter —
@@ -484,24 +492,39 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
         const os = 0.55 + Math.min(3, Math.max(0, 5.6 - mag)) * 0.11;
         return [(s.x * cs - s.y * sn) * scale, (s.x * sn + s.y * cs) * scale, os] as Slot;
       });
+      // 境态色温: bright stars run 蓝白, the rest 月白 (discrete steps)
+      slotTints = aster.stars.map((s) => ((s.mag ?? 5) < 3 ? TEMP.blueWhite : TEMP.moonWhite));
       links = aster.lines;
     } else {
       const tpl = TEMPLATES[ci % TEMPLATES.length];
       slots = tpl.slots.map((s) => [s[0], s[1], s[2]] as Slot);
+      slotTints = tpl.slots.map(() => TEMP.moonWhite);
       links = tpl.links;
     }
     while (slots.length < members.length) {
       // extend as a chain if needed
       const last = slots[slots.length - 1];
       slots.push([last[0] + 4.5, last[1] + (jrnd() - 0.5) * 3, 0.58]);
+      slotTints.push(TEMP.moonWhite);
     }
-    sec.figRadius = slots.reduce((a, s) => Math.max(a, Math.hypot(s[0], s[1])), 0);
-    // full figure carve (faint etched lines under the formed-member links)
+    // per-slot constellation anchors for 境态 (shared by member stars, etched
+    // seats and line endpoints so the figure stays connected, not coplanar)
+    const slotDeep: [number, number, number][] = slots.map(([ox, oy]) => [
+      ccx + ox * 1.08,
+      ccy + oy * 1.08,
+      (jrnd() - 0.5) * 36,
+    ]);
+    // full figure carve (faint etched lines under the formed-member links);
+    // the carve dissolves early in the morph (境不留图线)
     for (const [a, b] of links) {
       if (a >= slots.length || b >= slots.length) continue;
       shapeLinesPlan.push(
         ccx + slots[a][0], ccy + slots[a][1], 0,
         ccx + slots[b][0], ccy + slots[b][1], 0,
+      );
+      shapeLinesDeep.push(
+        slotDeep[a][0], slotDeep[a][1], slotDeep[a][2],
+        slotDeep[b][0], slotDeep[b][1], slotDeep[b][2],
       );
     }
     const base = vertexCount;
@@ -512,7 +535,7 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       const jy = aster ? 0 : (jrnd() - 0.5) * 1.6;
       const px = ccx + ox + jx;
       const py = ccy + oy + jy;
-      const [dx, dy, dz] = deepSpread();
+      const [dx, dy, dz] = slotDeep[i];
       lit.plan.push(px, py, 0);
       lit.deep.push(dx, dy, dz);
       lit.size.push(os * (sk.lit ? 1.15 : 0.9));
@@ -520,6 +543,8 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       lit.core.push(1); // 实点
       lit.ring.push(sk.lit ? 1 : 0); // 点亮 = 点外套圈
       lit.color.push(0.961, 0.918, 0.824); // unified warm white
+      const tint = slotTints[i];
+      lit.deepColor.push(tint[0], tint[1], tint[2]);
       lit.skills.push({
         id: sk.id,
         label: sk.label,
@@ -529,16 +554,19 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       });
       vertexCount += 1;
     });
-    // shape slots with no member: faint etched 空圈 (locked seats of the 星官)
-    // — background-texture tier (王军 round-2: figures recede, skills shine)
+    // shape slots with no member: small open rings (小空圈, Suzhou 石刻 style)
+    // in 图态; in 境态 they ignite as the constellation's fainter stars
+    // (color-temperature per slot, same anchor as the figure).
     for (let i = members.length; i < slots.length; i++) {
       const [ox, oy, os] = slots[i];
-      const [dx, dy, dz] = deepSpread();
+      const [dx, dy, dz] = slotDeep[i];
       etched.plan.push(ccx + ox, ccy + oy, 0);
       etched.deep.push(dx, dy, dz);
-      etched.size.push(Math.max(0.42, os * 0.75));
+      etched.size.push(Math.max(0.7, os * 0.85));
       etched.opacity.push(0.16);
       etched.color.push(TEMP.moonWhite[0], TEMP.moonWhite[1], TEMP.moonWhite[2]);
+      const tint = slotTints[i];
+      etched.deepColor.push(tint[0], tint[1], tint[2]);
     }
     // only formed asterisms (>= 3 stars) get links; segments join actual star points
     if (members.length >= 3) {
@@ -561,6 +589,13 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
   const goals: GoalPoint[] = placed.map(({ g, angle, seat }, i) => {
     const [px, py] = polar(R_GOAL, angle);
     const jr = mulberry32(900 + i);
+    // 境态 = 展开 (round-4): each living goal's system gets its own radial
+    // lane (bearing kept from the disc seat), so planet systems never share
+    // sweep tracks. Lane step 26 > 2× the widest planet orbit lane (≤12.6),
+    // so no two systems' orbits intersect at any rotation phase. 刻痕星 host
+    // no systems and stay on a shared quiet lane near the ring.
+    const lane = seat >= 0 ? 58 + seat * 26 : 60;
+    const [dx, dy] = polar(lane, angle);
     return {
       id: g.id,
       title: g.title,
@@ -568,7 +603,7 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       angle,
       seatName: seat >= 0 ? DIPPER_NAMES[seat] : undefined,
       plan: [px, py, 0],
-      deep: [px + (jr() - 0.5) * 10, py + (jr() - 0.5) * 6, (jr() - 0.5) * 24],
+      deep: [dx, dy, (jr() - 0.5) * 20],
     };
   });
   const seats: DipperSeat[] = SEAT_ANGLES.map((angle, si) => ({
@@ -591,26 +626,39 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
   const catBySkill = new Map(snapshot.skills.map((s) => [s.id, s.category]));
   const goalIndexOf = new Map(goals.map((g, i) => [g.id, i]));
   const goalAngleOf = new Map(goals.map((g) => [g.id, g.angle]));
+  const goalDeepOf = new Map(goals.map((g) => [g.id, g.deep]));
   const SIB_OFF = [-13, 9, -6, 15];
   const sibCount = new Map<string, number>();
   let freeIdx = 0;
   const planets: Planet[] = [];
+  // 行星轨道分级 (round-4): siblings of one goal get stepped orbit lanes in
+  // 境态 (each its own track). Free planets take a circumpolar lane beyond
+  // the outermost goal system so they never cross a system's orbit.
+  const livingLaneCount = living.slice(0, GOAL_ANGLES.length).length;
+  const FREE_LANE = 58 + livingLaneCount * 26 + 18;
   snapshot.projects.forEach((p) => {
     const gid = (p.goal_ids || []).find((id) => goalAngleOf.has(id));
     let angle: number, rr: number, goalIndex = -1;
+    let deep: number[];
+    const jr = mulberry32(3000 + planets.length);
     if (gid !== undefined) {
       goalIndex = goalIndexOf.get(gid) ?? -1;
       const n = sibCount.get(gid) || 0;
       sibCount.set(gid, n + 1);
       angle = goalAngleOf.get(gid)! + SIB_OFF[n % SIB_OFF.length];
       rr = R_GOAL + (n % 2 === 0 ? -10 : 10);
+      const gd = goalDeepOf.get(gid)!;
+      const orbitLane = 5 + Math.min(n, 4) * 2.2; // stepped lanes, ≤ 12.6
+      const [ox, oy] = polar(orbitLane, jr() * 360);
+      deep = [gd[0] + ox, gd[1] + oy, gd[2] + (jr() - 0.5) * 8];
     } else {
       angle = -170 + freeIdx * 42;
       freeIdx += 1;
       rr = R_GOAL + 24;
+      const [fx, fy] = polar(FREE_LANE, angle);
+      deep = [fx, fy, (jr() - 0.5) * 12];
     }
     const [px, py] = polar(rr, angle);
-    const jr = mulberry32(3000 + planets.length);
     planets.push({
       id: p.id,
       title: p.title,
@@ -619,7 +667,7 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       taskCount: p.task_count,
       goalIndex,
       plan: [px, py, 0],
-      deep: [px + (jr() - 0.5) * 8, py + (jr() - 0.5) * 8, (jr() - 0.5) * 10],
+      deep,
     });
   });
 
@@ -727,5 +775,5 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
     });
   }
 
-  return { sectors, dim, lit, goals, seats, court, planets, moons, guests, seated, dust, etched, shapeLinesPlan };
+  return { sectors, dim, lit, goals, seats, court, planets, moons, guests, seated, dust, etched, shapeLinesPlan, shapeLinesDeep };
 }

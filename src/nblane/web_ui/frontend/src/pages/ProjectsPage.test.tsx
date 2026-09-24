@@ -378,7 +378,7 @@ describe('ProjectsPage board view', () => {
 
     fireEvent.click(screen.getByTestId('habit-expand-exercise'));
     const heatmap = await screen.findByTestId('habit-heatmap-exercise');
-    // A filled cell renders but is not clickable (no delete endpoint).
+    // A filled cell with id-less rows renders but offers no 销印 target.
     expect(screen.getByTestId('heatmap-cell-exercise-2026-09-01')).toHaveAttribute(
       'data-filled',
       'true',
@@ -399,6 +399,60 @@ describe('ProjectsPage board view', () => {
       });
     });
     expect(within(heatmap).getByText(/近 90 天/)).toBeInTheDocument();
+  });
+
+  it('filled heatmap cell with ids offers 销印 (confirm → DELETE → invalidate)', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = {
+          ...BOARD,
+          habits: [
+            {
+              ...BOARD.habits[0],
+              recent_days: [
+                { date: '2026-09-01', count: 2, checkin_ids: ['act_a', 'act_b'] },
+              ],
+            },
+          ],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      if (init?.method === 'DELETE' && url.includes('/checkins/')) {
+        return jsonResponse(200, { ok: true, checkin_id: 'act_b' });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band');
+
+    fireEvent.click(screen.getByTestId('habit-expand-exercise'));
+    await screen.findByTestId('habit-heatmap-exercise');
+    const cell = screen.getByTestId('heatmap-cell-exercise-2026-09-01');
+    expect(cell).toHaveAttribute('data-filled', 'true');
+    fireEvent.click(cell);
+
+    // Inline confirm names the date; cancel dismisses without a DELETE.
+    const confirmBar = await screen.findByTestId('unseal-confirm-exercise');
+    expect(confirmBar).toHaveTextContent('销印 2026-09-01 最近一次打卡?');
+    fireEvent.click(screen.getByTestId('unseal-confirm-no-exercise'));
+    expect(screen.queryByTestId('unseal-confirm-exercise')).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE'),
+    ).toBe(false);
+
+    // Confirm deletes the day's LATEST check-in id.
+    fireEvent.click(cell);
+    fireEvent.click(await screen.findByTestId('unseal-confirm-yes-exercise'));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) => init?.method === 'DELETE' && String(input).includes('/checkins/'),
+      );
+      expect(call).toBeDefined();
+      expect(String(call?.[0])).toContain('/checkins/act_b');
+    });
   });
 
   it('archived strip expands inline to dimmed read-only lanes', async () => {

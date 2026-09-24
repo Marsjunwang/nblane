@@ -253,6 +253,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/checkins/{checkin_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Profile Checkin
+         * @description Remove one check-in row from the activity log (销印).
+         *
+         *     Pure housekeeping: nothing is recorded in chronicle.yaml. Check-ins
+         *     without an ``id`` (legacy rows) are not addressable and answer 404.
+         *     The write goes through ``core.activity_log.delete_checkin`` under the
+         *     activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
+         *     ETag in the header).
+         */
+        delete: operations["delete_profile_checkin_api_v1_profiles__name__checkins__checkin_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/chronicle": {
         parameters: {
             query?: never;
@@ -346,6 +372,36 @@ export interface paths {
          *     whose result carries the same payload shape with ``backend="llm"``.
          */
         post: operations["draft_profile_crystallize_api_v1_profiles__name__crystallize_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/divination": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cast Profile Divination
+         * @description Cast one 卦 anchored in the profile's REAL starmap data.
+         *
+         *     戏占 (``play``, default): playful reading (大富大贵彩头) whose every
+         *     number comes from the live snapshot anchors. 正占 (``serious``): the
+         *     question runs through the real rule gap analysis (``core.gap``) and
+         *     the reading wraps its gaps/strong nodes in 卦辞 language. Texts are
+         *     LLM-polished via the AI gateway action ``divination.cast`` when
+         *     configured (``source="llm"``); otherwise a deterministic
+         *     data-anchored rule reading answers (``source="rule"``). The hexagram
+         *     itself is deterministic for (profile state, day, mode, question).
+         *     The result is single-consumption: nothing is persisted.
+         */
+        post: operations["cast_profile_divination_api_v1_profiles__name__divination_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2535,6 +2591,16 @@ export interface components {
             workout_type: string;
         };
         /**
+         * CheckinDeleteResponse
+         * @description Result of the check-in delete mutation (销印).
+         */
+        CheckinDeleteResponse: {
+            /** Checkin Id */
+            checkin_id: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
          * CheckinModel
          * @description One stored activity-log check-in (mirrors core Checkin).
          */
@@ -2861,6 +2927,89 @@ export interface components {
             role: string;
             /** Teams */
             teams?: string[];
+        };
+        /**
+         * DivinationHexagramModel
+         * @description One cast hexagram: name, six yao, and the 卦辞 judgment.
+         *
+         *     ``symbol_lines`` are the six yao bottom-to-top (初爻→上爻);
+         *     1 = yang (⚊), 0 = yin (⚋).
+         */
+        DivinationHexagramModel: {
+            /**
+             * Judgment
+             * @default
+             */
+            judgment: string;
+            /** Name */
+            name: string;
+            /** Symbol Lines */
+            symbol_lines?: number[];
+        };
+        /**
+         * DivinationRequest
+         * @description Body for POST .../divination (占卜; design §5).
+         *
+         *     ``mode=play`` (戏占, default) needs no input; ``mode=serious`` (正占)
+         *     requires a non-empty ``question`` (the route answers 422
+         *     ``question_required`` otherwise). The question is length-capped.
+         */
+        DivinationRequest: {
+            /**
+             * Mode
+             * @default play
+             * @enum {string}
+             */
+            mode: "play" | "serious";
+            /**
+             * Question
+             * @default
+             */
+            question: string;
+        };
+        /**
+         * DivinationResponse
+         * @description Single-consumption divination result (nothing is persisted).
+         *
+         *     ``anchors`` carries the real starmap data points the reading quotes
+         *     (counts, in-orbit projects, pending reviews, habit streaks; plus the
+         *     real gap-analysis summary for serious mode). ``source`` is ``"llm"``
+         *     when the AI gateway produced the texts, ``"rule"`` for the
+         *     deterministic data-anchored fallback (unconfigured/error/timeout).
+         */
+        DivinationResponse: {
+            /** Anchors */
+            anchors?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Generated On
+             * @default
+             */
+            generated_on: string;
+            hexagram: components["schemas"]["DivinationHexagramModel"];
+            /**
+             * Mode
+             * @default play
+             */
+            mode: string;
+            /** Profile */
+            profile: string;
+            /**
+             * Question
+             * @default
+             */
+            question: string;
+            /**
+             * Reading
+             * @default
+             */
+            reading: string;
+            /**
+             * Source
+             * @default rule
+             */
+            source: string;
         };
         /**
          * ErrorResponse
@@ -5639,6 +5788,8 @@ export interface components {
          * @description One checked day in the trailing 90-day heatmap window.
          */
         ProjectsBoardHabitRecentDayModel: {
+            /** Checkin Ids */
+            checkin_ids?: string[];
             /**
              * Count
              * @default 1
@@ -7742,6 +7893,76 @@ export interface operations {
             };
         };
     };
+    delete_profile_checkin_api_v1_profiles__name__checkins__checkin_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                checkin_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckinDeleteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the activity log file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing/unknown habit, unlinked project, invalid date, or non-positive count. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_profile_chronicle_api_v1_profiles__name__chronicle_get: {
         parameters: {
             query?: {
@@ -7989,6 +8210,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cast_profile_divination_api_v1_profiles__name__divination_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DivinationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DivinationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Serious mode (正占) requires a non-empty question; also raised for request-body validation failures. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

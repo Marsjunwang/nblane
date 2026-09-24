@@ -411,8 +411,18 @@ describe('sector asterism figures (星官真形)', () => {
     expect(locked.etched.plan.length / 3).toBe(5); // 文昌五星, all vacant seats
     expect(locked.shapeLinesPlan.length / 6).toBe(4); // its four line segments
     expect(locked.lit.plan).toHaveLength(0);
-    // figure radius recorded so the muted in-sector name can sit beyond it
-    expect(locked.sectors[0].figRadius).toBeGreaterThan(0);
+  });
+
+  it('keeps 境态 deep coords figure-anchored (星官点燃, not scattered)', () => {
+    // round-5: lit stars morph to the constellation (±small z), never into
+    // the ±250 deep field; line segments carry matching deep endpoints
+    for (let i = 0; i < L.lit.plan.length; i += 3) {
+      const spread = Math.hypot(L.lit.deep[i] - L.lit.plan[i], L.lit.deep[i + 1] - L.lit.plan[i + 1]);
+      expect(spread).toBeLessThan(20);
+      expect(Math.abs(L.lit.deep[i + 2])).toBeLessThanOrEqual(18); // z jitter
+    }
+    expect(L.shapeLinesDeep.length).toBe(L.shapeLinesPlan.length);
+    expect(L.shapeLinesDeep.some((v, i) => i % 3 === 2 && v !== 0)).toBe(true);
   });
 
   it('culls near-collinear shapes: every mapped real figure passes the linearity guard', () => {
@@ -429,6 +439,54 @@ describe('sector asterism figures (星官真形)', () => {
     // the two culled figures really are gone from the table
     expect(Object.values(SECTOR_ASTERISM_TABLE).map((m) => m.id)).not.toContain('jiao');
     expect(Object.values(SECTOR_ASTERISM_TABLE).map((m) => m.id)).not.toContain('xin');
+  });
+});
+
+describe('境态 fan-out (round-4: 展开成野)', () => {
+  const L = buildLayout(snapshotFixture());
+  const r2 = (p: number[]) => Math.hypot(p[0], p[1]);
+
+  it('fans living goals onto distinct radial lanes (bearing kept from the seat)', () => {
+    expect(r2(L.goals[0].deep)).toBeCloseTo(58, 6); // seat 0 lane
+    expect(r2(L.goals[1].deep)).toBeCloseTo(58 + 26, 6); // seat 1 lane
+    // bearing preserved from the disc seat (morph reads 收敛成盘 ⇄ 展开成野)
+    const planA = Math.atan2(L.goals[0].plan[1], L.goals[0].plan[0]);
+    const deepA = Math.atan2(L.goals[0].deep[1], L.goals[0].deep[0]);
+    expect(deepA).toBeCloseTo(planA, 6);
+  });
+
+  it('steps sibling planet orbit lanes (each its own track)', () => {
+    const p1 = L.planets.find((p) => p.id === 'p1')!;
+    const g = L.goals[0];
+    const orbit = Math.hypot(p1.deep[0] - g.deep[0], p1.deep[1] - g.deep[1]);
+    expect(orbit).toBeCloseTo(5, 6); // first sibling lane = 5 + 0×2.2
+  });
+
+  it('sends free planets to a circumpolar lane beyond the outermost system', () => {
+    const p2 = L.planets.find((p) => p.id === 'p2')!;
+    expect(r2(p2.deep)).toBeCloseTo(58 + 2 * 26 + 18, 6); // 2 living goals
+  });
+
+  it('guarantees no two systems share sweep tracks (lane step > 2× max orbit)', () => {
+    // the construction invariant: lane step 26, orbit lanes ≤ 5 + 4×2.2 = 13.8…
+    // capped at 12.6 by min(n,4)… verify on the built layout for all pairs
+    const living = L.goals.filter((g) => g.seatName);
+    const orbitOf = (gi: number) =>
+      Math.max(
+        0,
+        ...L.planets.filter((p) => p.goalIndex === gi).map((p) => {
+          const g = L.goals[gi];
+          return Math.hypot(p.deep[0] - g.deep[0], p.deep[1] - g.deep[1]);
+        }),
+      );
+    for (let i = 0; i < living.length; i++) {
+      for (let j = i + 1; j < living.length; j++) {
+        const gi = L.goals.indexOf(living[i]);
+        const gj = L.goals.indexOf(living[j]);
+        const laneGap = Math.abs(r2(living[i].deep) - r2(living[j].deep));
+        expect(laneGap).toBeGreaterThan(orbitOf(gi) + orbitOf(gj));
+      }
+    }
   });
 });
 

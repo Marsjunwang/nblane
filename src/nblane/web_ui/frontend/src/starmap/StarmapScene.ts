@@ -19,7 +19,6 @@ import { mulberry32 } from './rng';
 import type { StarmapSnapshot } from './snapshot';
 import fontUrl from './assets/NotoSerifSC-subset.ttf?url';
 import imingUrl from './assets/fonts/IMing-subset.ttf?url';
-import wenkaiUrl from './assets/fonts/LXGWWenKai-subset.ttf?url';
 import fellUrl from './assets/fonts/IMFellEnglish-subset.ttf?url';
 
 export interface StarmapSelection {
@@ -53,6 +52,15 @@ type LabelRec = {
   fade: 'band' | 'north' | 'goal';
   planPos: number[];
   deepPos: number[] | null;
+  /** Creation-time rotation.z — 图态 carving angle. In 境态 labels
+   * counter-rotate by -chart.rotation.z·ch2 so names stay upright. */
+  rotZ: number;
+  /** Collision-fade priority (境态): 0 北极星 > 1 斗星名 > 2 虚位注. */
+  prio: number;
+  /** Segments of one label share a group id (a group never fights itself). */
+  grpId: number;
+  ca: number;
+  caTarget: number;
 };
 type Morphable = (THREE.Points | THREE.LineSegments) & {
   userData: {
@@ -64,6 +72,11 @@ type Morphable = (THREE.Points | THREE.LineSegments) & {
 };
 
 const chan = (t: number, start: number) => Math.min(1, Math.max(0, (t - start) / 0.4));
+
+/** 行星时间弧 (round-5): ultra-faint self-erasing planet trails. OFF by
+ * default — the user wants the orbit rings evaluated first; flip to true to
+ * compare (star-trails rationale: rotation draws the circles). */
+const PLANET_TRAILS = false;
 
 /** Partition the dim field into carved-on-disc stars vs decorative filler
  * (the parallax background layer). Triples/quads stay index-aligned. */
@@ -111,6 +124,35 @@ export class StarmapScene {
   private vignette: HTMLDivElement;
   private tooltip: HTMLDivElement;
   private fadeMats: FadeMat[] = [];
+  /** Custom opacity curves across the morph channels (dip-and-return etc.). */
+  private fadeFns: {
+    mat: THREE.LineBasicMaterial;
+    fn: (ch1: number, ch2: number, ch3: number) => number;
+  }[] = [];
+  private shapeLines: THREE.LineSegments | null = null;
+  private asterLinks: THREE.LineSegments | null = null;
+  /** 境态 orbit ellipses (round-5, 100k Stars ruling): one thin warm-gold
+   * ring per planet lane, riding its goal star at the fanned-out position;
+   * `flow` is the slow light-trickle arc along the ring. */
+  private orbitRings: {
+    ring: THREE.LineLoop;
+    ringMat: THREE.LineBasicMaterial;
+    flow: THREE.Line;
+    flowMat: THREE.LineBasicMaterial;
+    goalIdx: number;
+    phase: number;
+    shimmer: number;
+  }[] = [];
+  /** 行星时间弧 (round-5): self-erasing motion trails — OFF by default
+   * (PLANET_TRAILS flag; evaluate with rings on before enabling). */
+  private planetTrails: {
+    line: THREE.Line;
+    mat: THREE.LineBasicMaterial;
+    hist: Float32Array;
+  }[] = [];
+  private trailTimer = 0;
+  /** 星官点燃: aCore plan→deep lerp (etched 空圈 ignite into solid stars). */
+  private coreLerp: { pts: THREE.Points; plan: Float32Array; deep: Float32Array }[] = [];
   private labelObjs: LabelRec[] = [];
   private morphables: Morphable[] = [];
   private reveal: boolean;
@@ -190,6 +232,8 @@ export class StarmapScene {
   private resizeObserver: ResizeObserver | null = null;
   private labelsPending = 0;
   private segPending = 0;
+  private labelGrpSeq = 0;
+  private collisionTick = 0;
   private reducedMotion: boolean;
   private coarsePointer: boolean;
   private softGL: boolean;
@@ -308,7 +352,10 @@ export class StarmapScene {
       core: this.L.lit.core,
       ring: this.L.lit.ring,
       color: this.L.lit.color,
+      // 星官点燃 (round-5): 境态 stays on the figure as a living constellation
+      deepColor: this.L.lit.deepColor,
     });
+    this.addTier(this.litPts, 1.15, 1);
     // goal stars by status (design §4): active = lit gold; paused = dimmed;
     // completed = 刻痕星 — gold killed, 月白 at ~30%, an empty carved ring
     // (no core, no glow, no breathing), pinned on the rotating disc.
@@ -378,7 +425,9 @@ export class StarmapScene {
       // 境态: 行星 = 淡橙
       deepColor: this.L.planets.flatMap(() => [...TEMP.softOrange]),
     });
-    this.addTier(this.planetPts, 0.95, 1);
+    // 光晕收敛 (round-4): planets have no dedicated glow sprites — the blobs
+    // were the ring/core points under bloom; deep tier roughly halves them.
+    this.addTier(this.planetPts, 0.6, 0.85);
     this.moonPts = this.makePoints({
       plan: this.L.moons.plan,
       deep: this.L.moons.deep,
@@ -427,8 +476,9 @@ export class StarmapScene {
       deepColor: this.L.dust.size.flatMap(() => [0.88, 0.9, 0.94]),
     });
     this.addTier(dustPts, 0.8, 1);
-    // etched sector-asterism figures: 空圈 seats of the 星官 shapes (图态
-    // carvings; they recede in 境态 via their tier's deep opacity).
+    // etched sector-asterism figures: 空圈 seats of the 星官 shapes. 图态 =
+    // carvings; 境态 = 星官点燃 — the seats ignite into the constellation's
+    // fainter solid stars (core 0→0.85, opacity up, per-slot temperature).
     const etchedPts = this.makePoints({
       plan: this.L.etched.plan,
       deep: this.L.etched.deep,
@@ -437,9 +487,10 @@ export class StarmapScene {
       core: this.L.etched.size.map(() => 0),
       ring: this.L.etched.size.map(() => 1),
       color: this.L.etched.color,
-      deepColor: this.L.etched.color.slice(),
+      deepColor: this.L.etched.deepColor.slice(),
+      deepCore: this.L.etched.size.map(() => 0.85),
     });
-    this.addTier(etchedPts, 0.9, 0.22);
+    this.addTier(etchedPts, 1.05, 1.8);
     // dust directional streaks along the band tangent
     const dustTrails = (() => {
       const geo = new THREE.BufferGeometry();
@@ -462,13 +513,110 @@ export class StarmapScene {
       color: this.L.planets.flatMap(() => [0.961, 0.918, 0.824]),
       deepColor: this.L.planets.flatMap(() => [...TEMP.softOrange]),
     });
-    this.addTier(this.planetInnerPts, 0.95, 1);
-    // 星官真形连线 (scope-B): the full etched figure under the brighter
-    // formed-member links; background-texture tier (round-2), fades with ch2.
+    this.addTier(this.planetInnerPts, 0.6, 0.85);
+    // 星官真形连线 (round-5 星官点燃): the etched diagram dissolves early in
+    // the morph, then the constellation's lines re-emerge faint and
+    // depth-attenuated (per-slot z jitter — not coplanar) in 境态.
     if (this.L.shapeLinesPlan.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.L.shapeLinesPlan), 3));
-      this.chart.add(new THREE.LineSegments(geo, this.lineMat(INK, 0.14, 0.05, 2)));
+      const mat = new THREE.LineBasicMaterial({
+        color: INK,
+        transparent: true,
+        opacity: 0.14,
+        depthWrite: false,
+      });
+      const line = new THREE.LineSegments(geo, mat);
+      this.chart.add(line);
+      this.shapeLines = line;
+      this.shapeLines.userData.plan = new Float32Array(this.L.shapeLinesPlan);
+      this.shapeLines.userData.deep = new Float32Array(this.L.shapeLinesDeep);
+      // dip-and-return: carve fades out with ch1, constellation lines fade in with ch3
+      this.fadeFns.push({ mat, fn: (c1, _c2, c3) => 0.14 * (1 - c1) + 0.05 * c3 });
+    }
+
+    // 境态轨道环 (round-5, 100k Stars ruling): one thin warm-gold ellipse per
+    // planet lane, riding its goal star at the fanned-out lane position — the
+    // big survey circles stay 图态-only (they dissolve early, above). A slow
+    // light-flow arc trickles along each ring (微光沿圈流转; reduced-motion
+    // freezes it). Rings exist only in 境态 (opacity scales with ch3).
+    {
+      const jr = mulberry32(6600);
+      for (const p of this.L.planets) {
+        if (p.goalIndex < 0) continue; // 游离行星: no ring (circumpolar lane)
+        const g = this.L.goals[p.goalIndex];
+        const radius = Math.hypot(p.deep[0] - g.deep[0], p.deep[1] - g.deep[1]);
+        const ringMat = new THREE.LineBasicMaterial({
+          color: GOLD,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+        });
+        const ring = new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(this.circlePoints(radius, 72)),
+          ringMat,
+        );
+        this.chart.add(ring);
+        // light-flow arc: ~16° of the ring, slightly brighter gold
+        const flowMat = new THREE.LineBasicMaterial({
+          color: GOLD_BRIGHT,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+        });
+        const flowPts: THREE.Vector3[] = [];
+        for (let i = 0; i <= 10; i++) {
+          const a = (i / 10) * (Math.PI * 2) * 0.045;
+          flowPts.push(new THREE.Vector3(radius * Math.cos(a), radius * Math.sin(a), 0));
+        }
+        const flow = new THREE.Line(new THREE.BufferGeometry().setFromPoints(flowPts), flowMat);
+        ring.add(flow);
+        this.orbitRings.push({
+          ring,
+          ringMat,
+          flow,
+          flowMat,
+          goalIdx: p.goalIndex,
+          phase: jr() * Math.PI * 2,
+          shimmer: jr() * Math.PI * 2,
+        });
+      }
+    }
+
+    // 行星时间弧 (round-5): OFF by default — evaluate the orbit rings first
+    // (flag at module top). Self-erasing motion trails, shorter and dimmer
+    // than guest tails; the orbit is drawn by the planet's own motion.
+    if (PLANET_TRAILS) {
+      const N = 22;
+      for (const p of this.L.planets) {
+        const hist = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+          hist[i * 3] = p.deep[0];
+          hist[i * 3 + 1] = p.deep[1];
+          hist[i * 3 + 2] = p.deep[2];
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(hist.slice(), 3));
+        const colors = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+          const f = i / (N - 1); // 0 = tail, 1 = head
+          colors[i * 3] = 0.86 * f * f;
+          colors[i * 3 + 1] = 0.68 * f * f;
+          colors[i * 3 + 2] = 0.33 * f * f;
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const mat = new THREE.LineBasicMaterial({
+          vertexColors: true,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const line = new THREE.Line(geo, mat);
+        line.frustumCulled = false;
+        this.chart.add(line);
+        this.planetTrails.push({ line, mat, hist });
+      }
     }
 
     // planet -> goal hairlines (dissolve with ch1)
@@ -509,7 +657,7 @@ export class StarmapScene {
         this.chart.add(
           new THREE.LineSegments(
             new THREE.BufferGeometry().setFromPoints(pts),
-            this.lineMat(GOLD, 0.55, 0, 2),
+            this.lineMat(GOLD, 0.55, 0, 1),
           ),
         );
       }
@@ -644,7 +792,11 @@ export class StarmapScene {
           spr.visible = false;
           spr.renderOrder = -1; // under the dust motes
           this.chart.add(spr);
-          this.dustRiver.push({ spr, mat, base: 0.06 * density * (0.7 + jr() * 0.6) });
+          // accretion-disk luminosity (round-5): inner-bright, outer-dim —
+          // not a uniform wash
+          const rr = Math.hypot(this.L.dust.deep[i * 3], this.L.dust.deep[i * 3 + 1]);
+          const falloff = Math.min(1.15, Math.max(0.3, 1.25 - rr / 240));
+          this.dustRiver.push({ spr, mat, base: 0.06 * density * falloff * (0.7 + jr() * 0.6) });
         }
       }
     }
@@ -697,6 +849,9 @@ export class StarmapScene {
       this.guestTails as unknown as Morphable,
       dustTrails,
     ] as Morphable[];
+    // constellation line sets morph with their stars (figure-anchored deep)
+    if (this.shapeLines) this.morphables.push(this.shapeLines as unknown as Morphable);
+    if (this.asterLinks) this.morphables.push(this.asterLinks as unknown as Morphable);
     for (const pts of [
       this.goalPts, this.planetPts, this.planetInnerPts, this.moonPts,
       this.guestPts, this.guestTails,
@@ -1152,13 +1307,13 @@ export class StarmapScene {
 
   private buildLinework() {
     const L = this.L;
-    const ringMat = this.lineMat(INK, 0.42, 0.2, 2);
+    const ringMat = this.lineMat(INK, 0.42, 0, 1); // 测绘线先消融 (round-5): survey circles dissolve early
     const tickMat = this.lineMat(INK, 0.55, 0, 1);
     const spokeMat = this.lineMat(INK, 0.18, 0, 1);
     const subSpokeMat = this.lineMat(INK, 0.08, 0, 1);
-    const bandMat = this.lineMat(INK, 0.5, 0, 2);
-    const asterMat = this.lineMat(INK, 0.52, 0.15, 2);
-    const courtMat = this.lineMat(INK, 0.35, 0, 2);
+    const bandMat = this.lineMat(INK, 0.5, 0, 1);
+    const asterMat = this.lineMat(INK, 0.52, 0.12, 2);
+    const courtMat = this.lineMat(INK, 0.35, 0, 1);
 
     const addLine = (pts: THREE.Vector3[], mat: THREE.LineBasicMaterial, loop = false) => {
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -1234,17 +1389,26 @@ export class StarmapScene {
       );
     }
     {
-      // asterism links
+      // asterism links (formed members): in 图态 the bright carve; in 境态 the
+      // constellation's faint connective lines, anchored to the same per-slot
+      // deep coords as the stars (深度衰减,不共面).
       const pts: THREE.Vector3[] = [];
+      const deep: number[] = [];
       const P = L.lit.plan;
+      const D = L.lit.deep;
       for (let i = 0; i < L.lit.links.length; i += 2) {
         const a = L.lit.links[i] * 3;
         const b = L.lit.links[i + 1] * 3;
         pts.push(new THREE.Vector3(P[a], P[a + 1], 0));
         pts.push(new THREE.Vector3(P[b], P[b + 1], 0));
+        deep.push(D[a], D[a + 1], D[a + 2], D[b], D[b + 1], D[b + 2]);
       }
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      this.chart.add(new THREE.LineSegments(geo, asterMat));
+      const line = new THREE.LineSegments(geo, asterMat);
+      this.chart.add(line);
+      this.asterLinks = line;
+      this.asterLinks.userData.plan = new Float32Array(pts.flatMap((v) => [v.x, v.y, v.z]));
+      this.asterLinks.userData.deep = new Float32Array(deep);
     }
     {
       // court links
@@ -1257,8 +1421,8 @@ export class StarmapScene {
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       this.chart.add(new THREE.LineSegments(geo, courtMat));
     }
-    // engraved ring around the north star
-    addLine(this.circlePoints(4.2, 64), this.lineMat(INK, 0.55, 0, 2), true);
+    // engraved ring around the north star — 图态 carving, dissolves early
+    addLine(this.circlePoints(4.2, 64), this.lineMat(INK, 0.55, 0, 1), true);
   }
 
   private makePoints(
@@ -1271,6 +1435,8 @@ export class StarmapScene {
       ring: number[];
       color: number[];
       deepColor?: number[];
+      /** 星官点燃: aCore lerp target in 境态 (空圈 ignite into solid stars). */
+      deepCore?: number[];
     },
     parent?: THREE.Group,
   ): THREE.Points {
@@ -1335,6 +1501,13 @@ export class StarmapScene {
         deep: new Float32Array(opts.deepColor),
       });
     }
+    if (opts.deepCore) {
+      this.coreLerp.push({
+        pts: points,
+        plan: new Float32Array(core),
+        deep: new Float32Array(opts.deepCore),
+      });
+    }
     (parent ?? this.chart).add(points);
     return points;
   }
@@ -1375,6 +1548,7 @@ export class StarmapScene {
       rotZ?: number;
       anchorX?: 'left' | 'center' | 'right';
       fade?: LabelRec['fade'];
+      prio?: number;
     } = {},
   ): Text {
     const {
@@ -1386,6 +1560,7 @@ export class StarmapScene {
       rotZ = 0,
       anchorX = 'center',
       fade = 'band',
+      prio = 2,
     } = opts;
     const t = new Text();
     t.text = text;
@@ -1402,7 +1577,17 @@ export class StarmapScene {
     t.outlineColor = 0x0b1626;
     t.outlineOpacity = 0.85;
     this.chart.add(t);
-    this.labelObjs.push({ t, fade, planPos: pos.slice(), deepPos: deepPos ? deepPos.slice() : null });
+    this.labelObjs.push({
+      t,
+      fade,
+      planPos: pos.slice(),
+      deepPos: deepPos ? deepPos.slice() : null,
+      rotZ,
+      prio,
+      grpId: this.labelGrpSeq++,
+      ca: 1,
+      caTarget: 1,
+    });
     return t;
   }
 
@@ -1415,9 +1600,11 @@ export class StarmapScene {
       align?: 'left' | 'right' | 'center';
       fade?: LabelRec['fade'];
       goalIdx?: number;
+      prio?: number;
     },
   ) {
-    const { size = 3.6, color = 0xeed696, pos, align = 'left', fade = 'goal', goalIdx = -1 } = opts;
+    const { size = 3.6, color = 0xeed696, pos, align = 'left', fade = 'goal', goalIdx = -1, prio = 1 } = opts;
+    const grpId = this.labelGrpSeq++;
     const segs = text.split(/([A-Za-z0-9.]+)/).filter(Boolean);
     const group: (typeof this.goalLabelGroups)[number] = {
       goalIdx,
@@ -1439,7 +1626,9 @@ export class StarmapScene {
       t.outlineColor = 0x0b1626;
       t.outlineOpacity = 0.85;
       this.chart.add(t);
-      this.labelObjs.push({ t, fade, planPos: pos.slice(), deepPos: null });
+      this.labelObjs.push({
+        t, fade, planPos: pos.slice(), deepPos: null, rotZ: 0, prio, grpId, ca: 1, caTarget: 1,
+      });
       group.segs.push(t);
       return t;
     });
@@ -1487,7 +1676,7 @@ export class StarmapScene {
     for (const sec of L.sectors) {
       const mid = sec.start + sec.width / 2;
       const chars = Array.from(this.reveal ? sec.name : sec.asterism);
-      const color = this.reveal ? GOLD : INK;
+      const color = this.reveal ? GOLD : 0xb5b0a0; // rim 官名 = 月白 muted
       const angStep = ((3.2 * 1.25) / BAND_TEXT) * (180 / Math.PI);
       const a0 = mid - (angStep * (chars.length - 1)) / 2;
       chars.forEach((ch, i) => {
@@ -1501,22 +1690,8 @@ export class StarmapScene {
           rotZ: rad + Math.PI / 2,
         });
       });
-      // 星官名随形 (王军 round-2 alternative): the asterism name stays near
-      // its figure — moved radially outward, just beyond the figure's outer
-      // edge, in the rim band's muted tone at small size (texture-level, not
-      // a shouting label). Default mode only (替换制: reveal = true names).
-      if (!this.reveal && sec.asterism !== sec.name && sec.figRadius > 0) {
-        const rad = (mid * Math.PI) / 180;
-        const lr = R * 0.72 + sec.figRadius + 3.5;
-        this.addLabel(sec.asterism, {
-          size: 2.2,
-          color: 0xb5b0a0, // rim-band muted white, texture tier
-          font: imingUrl,
-          fade: 'band',
-          pos: [lr * Math.cos(rad), lr * Math.sin(rad), 0],
-          rotZ: rad + Math.PI / 2,
-        });
-      }
+      // round-3 ruling: the rim band is the ONLY name place for skill
+      // domains — no in-sector text beside the figures (R3 reverted).
     }
     // 北斗环卫 goal labels (names only — no dipper formation lines, goals
     // keep their ring seats). 显真替换制: OFF = dipper name alone; ON = true
@@ -1571,28 +1746,30 @@ export class StarmapScene {
         pos: [rr * Math.cos(a), rr * Math.sin(a), 0],
       });
     }
-    // north star label (四轮 + 替换制): the chart face shows just「北极星」
-    // (real text lives in the inscription card); 显真 ON = 真名泥金 alone,
-    // no 古名小注. 虚位 keeps the seat marked.
+    // north star label (round-3 字级统一: one 明体 ladder — 北极星/北斗星名
+    // = 泥金; 虚位注 = 再暗一档). 替换制: default shows just「北极星」, reveal
+    // shows the true text alone. 虚位 keeps the seat marked.
     if (this.northVacant) {
       this.addLabel('虚位', {
         size: 3.8,
-        color: INK,
-        font: wenkaiUrl,
+        color: 0x8d8672,
+        font: imingUrl,
         anchorX: 'left',
         pos: [6.5, 0.4, 0],
         deepPos: [10.5, -10.6, 0],
         fade: 'north',
+        prio: 0,
       });
     } else if (!this.reveal) {
       this.addLabel('北极星', {
         size: 3.8,
-        color: INK,
-        font: wenkaiUrl,
+        color: 0xeed696, // 泥金
+        font: imingUrl,
         anchorX: 'left',
         pos: [6.5, 0.4, 0],
         deepPos: [10.5, -10.6, 0],
         fade: 'north',
+        prio: 0,
       });
     } else {
       const clause = this.snapshot.north_star.split(/[，。]/)[0];
@@ -1601,21 +1778,23 @@ export class StarmapScene {
       this.addLabel(nsLines[0], {
         size: 3.8,
         color: 0xeed696, // 泥金真名
-        font: wenkaiUrl,
+        font: imingUrl,
         anchorX: 'left',
         pos: [6.5, 3.4, 0],
         deepPos: [10.5, -8.5, 0],
         fade: 'north',
+        prio: 0,
       });
       if (nsLines[1]) {
         this.addLabel(nsLines[1], {
           size: 3.8,
           color: 0xeed696,
-          font: wenkaiUrl,
+          font: imingUrl,
           anchorX: 'left',
           pos: [6.5, -2.6, 0],
           deepPos: [10.5, -13.6, 0],
           fade: 'north',
+          prio: 0,
         });
       }
     }
@@ -1652,6 +1831,9 @@ export class StarmapScene {
     for (const { mat, plan, deep, ch } of this.fadeMats) {
       const c = ch === 1 ? ch1 : ch === 3 ? ch3 : ch2;
       mat.opacity = plan + (deep - plan) * c;
+    }
+    for (const { mat, fn } of this.fadeFns) {
+      mat.opacity = fn(ch1, ch2, ch3);
     }
     for (const { t: txt, fade, planPos, deepPos } of this.labelObjs) {
       if (fade === 'band') {
@@ -1727,6 +1909,13 @@ export class StarmapScene {
     // discrete 4-step color temperature (境态): lerp aColor plan → deep
     for (const c of this.colored) {
       const attr = c.pts.geometry.attributes.aColor as THREE.BufferAttribute;
+      const arr = attr.array as Float32Array;
+      for (let i = 0; i < arr.length; i++) arr[i] = c.plan[i] + (c.deep[i] - c.plan[i]) * ch2;
+      attr.needsUpdate = true;
+    }
+    // 星官点燃: lerp aCore plan → deep (etched 空圈 become solid stars)
+    for (const c of this.coreLerp) {
+      const attr = c.pts.geometry.attributes.aCore as THREE.BufferAttribute;
       const arr = attr.array as Float32Array;
       for (let i = 0; i < arr.length; i++) arr[i] = c.plan[i] + (c.deep[i] - c.plan[i]) * ch2;
       attr.needsUpdate = true;
@@ -1968,16 +2157,21 @@ export class StarmapScene {
       });
       goalNow.forEach((p, i) => gAttr.setXYZ(i, p[0], p[1], p[2]));
       gAttr.needsUpdate = true;
+      // goal-name labels follow the fan-out: label = goalNow + plan-offset,
+      // with the offset itself spreading outward in 境态 (×1.9) so a system's
+      // own planet lanes (≤12.6) never sweep across its name.
+      const labelSpread = 1 + 0.9 * ch2;
       for (const grp of this.goalLabelGroups) {
         if (!grp.base.length) continue;
         const gp = goalNow[grp.goalIdx];
         const morphBase = L.goals[grp.goalIdx].plan;
-        const deep = this.goalDeepBase[grp.goalIdx];
-        const bx = morphBase[0] + (deep[0] - morphBase[0]) * ch2;
-        const by = morphBase[1] + (deep[1] - morphBase[1]) * ch2;
-        const dx = gp[0] - bx;
-        const dy = gp[1] - by;
-        grp.segs.forEach((s, si) => s.position.set(grp.base[si][0] + dx, grp.base[si][1] + dy, 0));
+        grp.segs.forEach((s, si) =>
+          s.position.set(
+            gp[0] + (grp.base[si][0] - morphBase[0]) * labelSpread,
+            gp[1] + (grp.base[si][1] - morphBase[1]) * labelSpread,
+            0,
+          ),
+        );
       }
 
       const pAttr = this.planetPts.geometry.attributes.position as THREE.BufferAttribute;
@@ -2016,6 +2210,46 @@ export class StarmapScene {
       });
       mAttr.needsUpdate = true;
 
+      // 境态轨道环: ride the goal stars (fanned-out lanes), shimmer faintly,
+      // and trickle the light-flow arc — all gated by ch3 (图态 untouched)
+      for (const orb of this.orbitRings) {
+        const gp = goalNow[orb.goalIdx];
+        orb.ring.position.set(gp[0], gp[1], gp[2]);
+        const shimmer = this.reducedMotion ? 1 : 0.92 + 0.08 * Math.sin(tt * 0.5 + orb.shimmer);
+        orb.ringMat.opacity = 0.22 * ch3 * shimmer;
+        orb.ring.visible = orb.ringMat.opacity > 0.004;
+        if (this.reducedMotion) {
+          orb.flowMat.opacity = 0;
+          orb.flow.visible = false;
+        } else {
+          orb.phase += dt * ((2 * Math.PI) / 46); // 微光沿圈流转, very slow
+          orb.flow.rotation.z = orb.phase;
+          orb.flowMat.opacity = 0.5 * ch3 * shimmer;
+          orb.flow.visible = orb.flowMat.opacity > 0.004;
+        }
+      }
+
+      // 行星时间弧 (flag-gated, default OFF): self-erasing motion trails
+      if (PLANET_TRAILS && this.planetTrails.length) {
+        this.trailTimer += dt;
+        const record = ch3 > 0.5 && this.trailTimer > 0.22 && !this.reducedMotion;
+        if (record) this.trailTimer = 0;
+        this.planetTrails.forEach((tr, i) => {
+          tr.mat.opacity = 0.3 * ch3;
+          tr.line.visible = tr.mat.opacity > 0.01;
+          if (!record) return;
+          const h = tr.hist;
+          h.copyWithin(0, 3); // shift left: oldest drops off (self-erasing)
+          const N = h.length / 3;
+          h[(N - 1) * 3] = planetNow[i][0];
+          h[(N - 1) * 3 + 1] = planetNow[i][1];
+          h[(N - 1) * 3 + 2] = planetNow[i][2];
+          const attr = tr.line.geometry.attributes.position as THREE.BufferAttribute;
+          (attr.array as Float32Array).set(h);
+          attr.needsUpdate = true;
+        });
+      }
+
       const guAttr = this.guestPts.geometry.attributes.position as THREE.BufferAttribute;
       const tAttr = this.guestTails.geometry.attributes.position as THREE.BufferAttribute;
       L.guests.forEach((g, i) => {
@@ -2034,6 +2268,59 @@ export class StarmapScene {
       });
       guAttr.needsUpdate = true;
       tAttr.needsUpdate = true;
+    }
+
+    // ---- 境态 label declutter (round-4): names stay upright while the disc
+    // spins (counter-rotate by -chart·ch2 — zero effect in 图态, where the
+    // carving must rotate with the stone); colliding labels FADE by priority
+    // (北极星 > 斗星名 > 虚位注), never jump or reposition. Planets carry no
+    // text labels at all (mark glyph only; details via click).
+    for (const rec of this.labelObjs) {
+      if (rec.fade === 'band') continue; // rim chars fade out with ch2 anyway
+      rec.t.rotation.z = rec.rotZ - this.chart.rotation.z * ch2;
+    }
+    this.collisionTick += 1;
+    const collisionActive = ch2 > 0.6;
+    if (collisionActive && this.collisionTick % 12 === 0) {
+      const cand = this.labelObjs.filter(
+        (r) => r.fade !== 'band' && r.t.visible && r.t.textRenderInfo,
+      );
+      const rects = cand.map((r) => {
+        const [cx, cy] = this.screenOf([r.t.position.x, r.t.position.y, 0]);
+        const b = r.t.textRenderInfo!.blockBounds;
+        const wWorld = Math.max(0.5, b[2] - b[0]);
+        const hWorld = Math.max(0.5, b[3] - b[1]);
+        const [ex] = this.screenOf([r.t.position.x + 1, r.t.position.y, 0]);
+        const pxPerUnit = Math.abs(ex - cx) || 1;
+        const w = wWorld * pxPerUnit;
+        const h = hWorld * pxPerUnit;
+        // anchorX left/right shift the box off the position point
+        const ax = r.t.anchorX === 'left' ? 0 : r.t.anchorX === 'right' ? -w : -w / 2;
+        return { r, x0: cx + ax, y0: cy - h / 2, x1: cx + ax + w, y1: cy + h / 2 };
+      });
+      const losers = new Set<number>();
+      for (let i = 0; i < rects.length; i++) {
+        for (let j = i + 1; j < rects.length; j++) {
+          const A = rects[i];
+          const B = rects[j];
+          if (A.r.grpId === B.r.grpId) continue;
+          const overlap =
+            Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0) > 1 &&
+            Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0) > 1;
+          if (!overlap) continue;
+          // lower priority fades (larger prio number loses; ties: later group)
+          losers.add(A.r.prio === B.r.prio ? Math.max(A.r.grpId, B.r.grpId) : A.r.prio > B.r.prio ? A.r.grpId : B.r.grpId);
+        }
+      }
+      for (const r of this.labelObjs) r.caTarget = losers.has(r.grpId) ? 0 : 1;
+    } else if (!collisionActive) {
+      for (const r of this.labelObjs) r.caTarget = 1;
+    }
+    for (const rec of this.labelObjs) {
+      if (rec.fade === 'band') continue;
+      rec.ca += (rec.caTarget - rec.ca) * Math.min(1, dt / 0.35);
+      const baseFade = rec.fade === 'north' ? 1 - 0.25 * ch2 : 1;
+      rec.t.material.opacity = baseFade * rec.ca;
     }
 
     // ---- breathing: halos only, star points never move (11s period) ----

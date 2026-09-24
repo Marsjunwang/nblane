@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectsBoardHabit } from '../../api/types';
-import { buildHeatmapWeeks, habitCountMap, heatmapCellColor } from './habitHeatmap';
+import { buildHeatmapWeeks, habitCheckinIdMap, habitCountMap, heatmapCellColor } from './habitHeatmap';
 
 function makeHabit(overrides: Partial<ProjectsBoardHabit>): ProjectsBoardHabit {
   return {
@@ -56,6 +56,31 @@ describe('habitHeatmap buildHeatmapWeeks', () => {
 
   it('returns no grid when today is malformed', () => {
     expect(buildHeatmapWeeks(makeHabit({}), 'not-a-date')).toEqual([]);
+  });
+
+  it('carries check-in ids into cells for 销印 (week-dot fallback has none)', () => {
+    const habit = makeHabit({
+      recent_days: [
+        { date: '2026-09-01', count: 2, checkin_ids: ['act_a', 'act_b'] },
+        { date: '2026-09-02', count: 1 }, // legacy id-less row
+        { date: '2026-09-03', count: 1, checkin_ids: ['act_c'] },
+      ],
+      week: [{ date: '2026-09-23', done: true, future: false }],
+    });
+    const ids = habitCheckinIdMap(habit);
+    expect(ids.get('2026-09-01')).toEqual(['act_a', 'act_b']);
+    expect(ids.get('2026-09-02')).toBeUndefined();
+    const cells = new Map(
+      buildHeatmapWeeks(habit, today)
+        .flat()
+        .map((cell) => [cell.date, cell]),
+    );
+    expect(cells.get('2026-09-01')?.checkinIds).toEqual(['act_a', 'act_b']);
+    expect(cells.get('2026-09-02')?.checkinIds).toEqual([]);
+    expect(cells.get('2026-09-03')?.checkinIds).toEqual(['act_c']);
+    // Week-dot fallback fills the count but has no addressable row.
+    expect(cells.get('2026-09-23')?.count).toBe(1);
+    expect(cells.get('2026-09-23')?.checkinIds).toEqual([]);
   });
 });
 
