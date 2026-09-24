@@ -27,7 +27,13 @@ TEST_SESSION_SECRET = "web-api-evidence-review-test-secret"
 EVIDENCE_POOL = {
     "profile": "alice",
     "evidence_entries": [
-        {"id": "ev_alpha", "type": "project", "title": "Alpha", "strength": "strong"},
+        {
+            "id": "ev_alpha",
+            "type": "project",
+            "title": "Alpha",
+            "strength": "strong",
+            "breakthrough": True,
+        },
         {
             "id": "ev_beta",
             "type": "practice",
@@ -146,6 +152,9 @@ class TestEvidenceReviewQueue(EvidenceReviewTestBase):
         self.assertEqual(by_id["ev_alpha"]["skill_refs"], ["robotics"])
         self.assertEqual(by_id["ev_alpha"]["review_reason"], "needs_review")
         self.assertEqual(by_id["ev_alpha"]["strength"], "strong")
+        # The raw row's 突破 flag projects into the queue item.
+        self.assertTrue(by_id["ev_alpha"]["breakthrough"])
+        self.assertFalse(by_id["ev_delta"]["breakthrough"])
         # Unrated strength is reported as such and feeds the review reason.
         self.assertEqual(by_id["ev_delta"]["strength"], "unrated")
         self.assertEqual(

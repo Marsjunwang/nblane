@@ -1594,8 +1594,13 @@
     "type": "object"
    },
    "EvidenceReviewItemModel": {
-    "description": "One evidence-pool row in the Evidence Review triage view.\n\n``review_reason`` mirrors the Streamlit page rule: a row needs review\nwhen its strength is unrated and/or its review_status is not reviewed.\n``skill_refs`` / ``usage_count`` count skill-tree nodes citing the row.",
+    "description": "One evidence-pool row in the Evidence Review triage view.\n\n``review_reason`` mirrors the Streamlit page rule: a row needs review\nwhen its strength is unrated and/or its review_status is not reviewed.\n``skill_refs`` / ``usage_count`` count skill-tree nodes citing the row.\n``breakthrough`` mirrors the raw row's 突破 flag (extra progression\nweight); the review list renders a small badge for it.",
     "properties": {
+     "breakthrough": {
+      "default": false,
+      "title": "Breakthrough",
+      "type": "boolean"
+     },
      "confidence": {
       "default": "",
       "title": "Confidence",

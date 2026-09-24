@@ -866,6 +866,8 @@ class EvidenceReviewItemModel(BaseModel):
     ``review_reason`` mirrors the Streamlit page rule: a row needs review
     when its strength is unrated and/or its review_status is not reviewed.
     ``skill_refs`` / ``usage_count`` count skill-tree nodes citing the row.
+    ``breakthrough`` mirrors the raw row's 突破 flag (extra progression
+    weight); the review list renders a small badge for it.
     """
 
     id: str
@@ -878,6 +880,7 @@ class EvidenceReviewItemModel(BaseModel):
     confidence: str = ""
     public_readiness: str = "private"
     deprecated: bool = False
+    breakthrough: bool = False
     usage_count: int = 0
     skill_refs: list[str] = Field(default_factory=list)
     review_reason: str = ""

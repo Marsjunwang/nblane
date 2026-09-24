@@ -153,9 +153,14 @@ Streamlit `pages/8_Review.py` 随 8501 终态一起退,不单独删。
 
 ### 2.2 健康页(SPA `HealthPage` /health + Streamlit `pages/5_Profile_Health.py`)
 
-**裁决:SPA 页现在就可删(nav 移除 + /health 重定向到
-/evidence?stage=risks),但保留 `GET /health` API;前提是接受 §2.2.1 的
-过渡方案,否则等「Settings 档案维护」小项落地。**
+**裁决:已执行(2026-09-24 C 尾清理包)**——SPA `HealthPage` 与 nav
+「健康」项删除,`/p/:name/health` 重定向到 `/evidence?stage=strengthen`
+(五阶段词表中的实际键;本节先前提到的 `stage=risks` 为笔误),档案列表
+卡片入口改指 `/home`。`GET /health` API 保留(openclaw/CLI 消费)。
+
+~~裁决:SPA 页现在就可删(nav 移除 + /health 重定向到~~
+~~/evidence?stage=risks),但保留 `GET /health` API;前提是接受 §2.2.1 的~~
+~~过渡方案,否则等「Settings 档案维护」小项落地。~~
 
 Health 解散是已定案(phase-plan.md:31;phase1-evidence-page-design.md:54),
 四个去向逐一核对:
@@ -177,6 +182,9 @@ issue),工作量小,列入 §4 缺口 G5。
 ### 2.3 GapPage(SPA /gap + Streamlit `pages/2_Gap_Analysis.py`)
 
 **裁决:删,前置一个小改动——给占卜卦辞卡接「化为任务」动作。**
+**(前置已于 2026-09-24 落地:正占卦辞卡「化为任务」把卦象锚定的 gap
+缺节点逐一 POST /gap/intake 入看板 Queue,双失效 + /projects 深链小笺;
+GapPage 页面/nav 本体删除仍待执行。)**
 
 差距分析已按定案变成首页占卜(phase-plan 星图五轮 :284–297):
 `POST /divination` 正占直接跑 `core.gap` 真规则并包成卦辞,LLM 润色走
@@ -321,8 +329,10 @@ commit actor 是默认 "cli"~~(现由 `GitActorMiddleware` 按请求设为当前
 2. G1/G2/G3 三个小后端项( pytest + CI 五关)→
 3. openclaw 服务账号 + nblane_api 客户端(§3.1/3.2)→
 4. prompt 改写 + CW-3 纳管 + 新增 weekly-divination(§3.4/3.5)→
-5. 页面删除:GapPage(卦辞卡接 intake 后)、周回顾(复盘推送闭环后)、
-   SPA HealthPage(接受 §2.2.1 过渡即可先行)→
+5. 页面删除:GapPage(卦辞卡接 intake **已落地 2026-09-24**,页面/nav 本体
+   删除待执行)、周回顾(复盘推送闭环后)、
+   ~~SPA HealthPage(接受 §2.2.1 过渡即可先行)~~ **已删除 2026-09-24**
+   (/health → /evidence?stage=strengthen,API 保留)→
 6. 观测两周:留痕簿抽查、git 历史、自动化投递、412 重试日志 →
 7. Streamlit 终态评估(Settings/Team/BlockNote 三遗留有结论后切主域名)。
 

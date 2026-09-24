@@ -28,7 +28,7 @@ source_of_truth: 全局路线图与各 Phase 边界;Phase 1 细节见 phase1-evi
 - **Agent 后端可切换**:`NBLANE_AGENT_BACKEND=openclaw|none`;openclaw 提供"主动性"(调度+触达),能力永远在 nblane core;关掉 openclaw 全站照常工作,只是没有晨报和主动推送。集成面只有两处:MCP server + automations 声明,禁止深度私有集成。agent 动作的唯一入口是 `agent-activity.yaml` 审批队列。
 - **SPA 是唯一新前端;Streamlit 冻结**,页面随 SPA 覆盖逐个分层退役;**Streamlit 首页(app.py)在 Phase 3 完全弃用**,随星图组件替换一起换。
 - 所有写操作只走 API(ETag/If-Match + flock 样板);kanban.md 只经 `core/kanban_io.py`;前端永不直碰 YAML。
-- Profile Health 页解散:证据风险→证据页「待补强」;数据卫生→Settings「档案维护」;体检报告→openclaw 周回顾主动推送;成长统计→首页/拓片。
+- Profile Health 页解散:证据风险→证据页「待补强」;数据卫生→Settings「档案维护」;体检报告→openclaw 周回顾主动推送;成长统计→首页/拓片。(SPA 页本体已删 2026-09-24,/health → /evidence?stage=strengthen,`GET /health` API 保留。)
 - Claims 封存,Phase 5 输出层重建时复活(消费者:拓片铭文/简历 bullet)。
 - home 星图组件为双栈共享组件,替换时两栈同时生效。
 
@@ -381,9 +381,42 @@ gen:api 重生成,类型为 schema 别名)。
   实证:技能树/证据五阶段/销印往返(王军 exercise 销印后补回,数据净不变,
   id 确定性复用 act_20260924_exercise)/移动 390px 零横向溢出,截图
   /tmp/style-align-shots/。
+### 生产上线 C 尾清理包(2026-09-24,production-launch-plan §2 裁决执行)
+
+- **占卜「化为任务」桥**(§2.3 前置落地):正占卦辞卡新增「化为任务」——卦象
+  锚定的 `anchors.gap.closure` 缺节点(is_gap)逐一顺序走既有
+  `POST /gap/intake`(`学习 {label}` + node_id + why=所问,Queue)入看板;
+  kanban/projects-board 双失效;成功后卡内小笺带 /projects 深链;失败就地
+  报错可重试。`useGapIntake` 顺带补 projects-board 失效。
+- **健康页解散执行**(§2.2):SPA `HealthPage`(+测试)与 nav「健康」删除;
+  `/p/:name/health` 重定向 `/evidence?stage=strengthen`;档案列表卡片入口
+  改指 `/home`;`useHealthReport` 钩子和 Health 类型导出随页移除;
+  `GET /health` API 保留(openclaw/CLI 消费)。e2e:spa_mobile 抽屉项
+  12→11、spa_smoke 档案卡落点改 /home、audit_layout 删 Health 行、
+  spa_layout 新增重定向用例。
+- **突破徽章队列投影**:`EvidenceReviewItemModel` + `_review_item_model` 补
+  `breakthrough`(原始行透传);openapi.json + schema.d.ts 重生成;
+  `EvidenceReviewItem` 类型去掉手工扩展;评审行「突破」徽章真正点亮
+  (此前前端徽章已就位但投影缺字段)。
+- **P2 打磨四条**:(a) 排期输入换 Mantine `DateInput`(valueFormat
+  YYYY-MM-DD,locale=zh-cn)——原生 type=date 的显示格式跟随浏览器 UI
+  locale,lang 属性实测(Chromium 探针)不影响渲染,locale attrs 路线证伪;
+  (b) 标记 Done 在 mutation onSuccess 发「已标记完成」通知(卡片随 refetch
+  自闭,通知须在回调里发);(c) 删除项目确认 Modal `zIndex={300}` 压过编辑
+  Drawer(200 层),elementsFromPoint 实测命中顶层;(d) 未归属统计徽章对齐
+  泳道口径(只计 queue/doing/someday),Done 列余量以「(含已完成 N)」明示,
+  双数字不藏。
+- **新增依赖**:`@mantine/dates@^8.3.18` + `dayjs@^1.11.23`(已登记
+  packaging-manifest)。
+- 验证:vitest 273 绿(+12:占卜面板 7、证据页突破 1、任务详情卡 2、
+  项目页统计 2);tsc+build 绿;pytest 1795 绿(零新增测试文件,
+  test_web_api_evidence_review 补突破投影断言);openapi 快照同步;隔离栈
+  18504 Playwright 抽查 7/7(化为任务 9 缺口 9/9 入看板、health 重定向、
+  突破徽章、四条 P2),截图 /tmp/c-tail-shots/,沙箱数据净不变(化为任务
+  与临时卡已清、突破旗已还原)。已知边角:标题含 `/` 的看板卡无法经
+  `DELETE /kanban/cards/{card_ref}` 寻址(路径参数 405),记录在案未修。
 
 
-## Backlog(已讨论,暂不开发)
 
 - **用户初始化链路优化**(2026-09-23 王军提出):现状是"简历 → LLM 解析 →
   robotics-engineer schema 骨架",非工程领域用户(如教师)不成立。方向:领域

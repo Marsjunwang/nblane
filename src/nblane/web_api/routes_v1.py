@@ -3030,6 +3030,7 @@ def _review_item_model(
             row.get("public_readiness")
         ),
         deprecated=bool(row.get("deprecated", False)),
+        breakthrough=bool(row.get("breakthrough", False)),
         usage_count=len(used_by),
         skill_refs=[str(item.get("id", "")) for item in used_by],
         review_reason=evidence_review_core.review_reason_for_row(row),
