@@ -569,6 +569,19 @@ class TestFetchLiveAutomations(unittest.TestCase):
         )
         self.assertEqual(len(fetch_live_automations(runner)), 1)
 
+    def test_parses_jobs_shape(self) -> None:
+        # OpenClaw 2026.9 wraps the list in a "jobs" key.
+        runner = FakeRunner(
+            [
+                (
+                    ("openclaw", "automations", "list"),
+                    _ok(json.dumps({"jobs": [_live_job()], "total": 1})),
+                )
+            ]
+        )
+        jobs = fetch_live_automations(runner)
+        self.assertEqual(jobs[0]["declarationKey"], "nblane:daily-plan")
+
     def test_cli_failure_raises(self) -> None:
         runner = FakeRunner([])
         with self.assertRaisesRegex(RuntimeError, "failed"):

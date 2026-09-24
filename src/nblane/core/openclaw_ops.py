@@ -221,7 +221,10 @@ def check_nblane_mcp_registered(runner: Runner = run_command) -> DoctorCheck:
         )
     entries: Any = data
     if isinstance(data, Mapping):
-        entries = data.get("servers", data.get("mcp", []))
+        entries = data.get("servers", data.get("mcp"))
+        if entries is None:
+            # Newer CLI prints the servers mapping directly at top level.
+            entries = list(data.keys())
     if isinstance(entries, Mapping):
         entries = list(entries.keys())
     names = {
@@ -371,14 +374,17 @@ def check_automations_in_sync(
     return _check("automations_in_sync", True, SEVERITY_INFO, detail)
 
 
-_BACKUP_ID_RE = re.compile(r"(?:^|[\s:/_])backup(?:[\s:/_-]|$)", re.IGNORECASE)
+_BACKUP_ID_RE = re.compile(r"(?:^|[\s:/_-])backup(?:[\s:/_-]|$)", re.IGNORECASE)
 
 
 def _is_scheduled_job(job: Mapping[str, Any]) -> bool:
     """True when the live job carries a cron/every schedule."""
     schedule = job.get("schedule")
     if isinstance(schedule, Mapping):
-        return bool(schedule.get("cron") or schedule.get("every"))
+        if schedule.get("cron") or schedule.get("every"):
+            return True
+        # Newer CLI shape: {"kind": "every"|"cron", "everyMs"/"expr": ...}
+        return schedule.get("kind") in ("cron", "every")
     return bool(str(schedule or "").strip())
 
 

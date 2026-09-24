@@ -127,6 +127,15 @@ class TestNblaneMcpRegistered(unittest.TestCase):
         )
         self.assertTrue(check_nblane_mcp_registered(runner).ok)
 
+    def test_registered_top_level_servers_mapping(self) -> None:
+        # OpenClaw 2026.9: `mcp list --json` prints the servers mapping
+        # directly, e.g. {"nblane": {"command": ...}}.
+        runner = _runner_for(
+            ("openclaw", "mcp", "list"),
+            _ok(json.dumps({"nblane": {"command": "/venv/bin/nblane-mcp"}})),
+        )
+        self.assertTrue(check_nblane_mcp_registered(runner).ok)
+
     def test_missing(self) -> None:
         runner = _runner_for(
             ("openclaw", "mcp", "list"), _ok(json.dumps([{"name": "other"}]))
@@ -330,6 +339,18 @@ class TestBackupSchedule(unittest.TestCase):
                 "declarationKey": "system:backup-daily",
                 "name": "backup",
                 "schedule": {"every": "24h"},
+            }
+        ]
+        check = check_backup_schedule(FakeRunner([]), live_jobs=live)
+        self.assertTrue(check.ok)
+
+    def test_backup_job_present_new_cli_shape(self) -> None:
+        # OpenClaw 2026.9: schedule is {"kind": "every", "everyMs": ...}.
+        live = [
+            {
+                "declarationKey": "openclaw-backup-scheduled",
+                "name": "openclaw-backup-scheduled",
+                "schedule": {"kind": "every", "everyMs": 86400000},
             }
         ]
         check = check_backup_schedule(FakeRunner([]), live_jobs=live)

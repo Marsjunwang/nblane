@@ -499,7 +499,8 @@ def fetch_live_automations(runner: Runner) -> list[dict[str, Any]]:
             f"as JSON: {exc}"
         ) from exc
     if isinstance(data, dict):
-        data = data.get("automations", [])
+        # Older CLI wraps in "automations"; OpenClaw 2026.9 uses "jobs".
+        data = data.get("automations") or data.get("jobs") or []
     if not isinstance(data, list):
         raise RuntimeError(
             "unexpected `automations list --json` shape: expected a list"
@@ -513,7 +514,10 @@ def _normalize_live_job(job: Mapping[str, Any]) -> dict[str, Any]:
     schedule = job.get("schedule")
     cron = tz = ""
     if isinstance(schedule, Mapping):
-        cron = str(schedule.get("cron") or schedule.get("every") or "")
+        # Newer CLI: {"kind": "cron", "expr": ...} / {"kind": "every", "everyMs": ...}
+        cron = str(
+            schedule.get("cron") or schedule.get("every") or schedule.get("expr") or ""
+        )
         tz = str(schedule.get("tz") or "")
     elif isinstance(schedule, str):
         cron = schedule
