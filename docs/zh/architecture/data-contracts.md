@@ -224,8 +224,11 @@ kanban Done task
 
 任务删除（2026-09-24，`DELETE /api/v1/profiles/{name}/kanban/cards/{card_ref}`）：
 
-- `card_ref` 语义同 move/done/patch：精确标题或唯一子串，歧义 422
-  `kanban_card_ambiguous`、未知 404 `kanban_card_not_found`；ETag/If-Match 412 与
+- `card_ref` 语义同 move/done/patch/schedule：**优先按任务 id 寻址**
+  （2026-09-24 修复：id 是 URL 安全的 `kb_` + hex,标题含 `/` 的卡按标题
+  寻址会被路由拆段返回 405）;ref 不是现存 id 时回落精确标题或唯一子串，
+  歧义 422 `kanban_card_ambiguous`、未知 404 `kanban_card_not_found`；
+  ETag/If-Match 412 与
   锁内快照复核 + 3-way merge 纪律同其他卡片写端点。
 - 任务的 todos/subtasks/meta 子弹随卡片块一并消失；evidence-pool 的
   `kanban_refs` **不清理**——墓碑机制负责展示指向已删任务的引用。

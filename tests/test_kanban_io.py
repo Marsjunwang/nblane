@@ -17,6 +17,7 @@ from nblane.core.kanban_io import (
     KANBAN_SOMEDAY,
     apply_kanban_reorder,
     ensure_kanban_task_ids,
+    find_kanban_card_by_id,
     kanban_snapshot_to_moves,
     materialize_kanban_task_ids,
     parse_kanban_text,
@@ -938,6 +939,36 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertIn("Archive linked", archive)
         self.assertIn("  - project_id: project:demo", archive)
         self.assertIn("  - milestone_id: milestone:first", archive)
+
+
+class TestFindKanbanCardById(unittest.TestCase):
+    """Id-based card lookup (the URL-safe addressing path for the web API)."""
+
+    def _sections(self) -> dict[str, list[KanbanTask]]:
+        return {
+            KANBAN_QUEUE: [
+                KanbanTask(title="学习 ROS2/运动控制", id="kb_a1"),
+                KanbanTask(title="kb_a1", id="kb_shadow"),
+            ],
+            KANBAN_DOING: [KanbanTask(title="写文档", id="kb_b2")],
+        }
+
+    def test_exact_id_hit_across_sections(self) -> None:
+        hit = find_kanban_card_by_id(self._sections(), "kb_b2")
+        self.assertIsNotNone(hit)
+        section, index, task = hit
+        self.assertEqual((section, index, task.title), (KANBAN_DOING, 0, "写文档"))
+
+    def test_id_match_wins_over_title_collision(self) -> None:
+        # "kb_a1" is both a card id and another card's title: the id wins.
+        hit = find_kanban_card_by_id(self._sections(), "kb_a1")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit[2].title, "学习 ROS2/运动控制")
+
+    def test_unknown_or_blank_id_returns_none(self) -> None:
+        sections = self._sections()
+        self.assertIsNone(find_kanban_card_by_id(sections, "kb_missing"))
+        self.assertIsNone(find_kanban_card_by_id(sections, "  "))
 
 
 if __name__ == "__main__":

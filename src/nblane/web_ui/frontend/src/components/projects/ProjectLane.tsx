@@ -354,7 +354,8 @@ export function TaskLaneDnd({
     }
     moveCard.mutate(
       {
-        cardRef: task.title,
+        // Id-first addressing: the task id is URL-safe, unlike titles with '/'.
+        cardRef: task.id || task.title,
         targetSection: LANE_SECTIONS[toName],
         toIndex: globalToIndex,
         etag: kanbanEtag,

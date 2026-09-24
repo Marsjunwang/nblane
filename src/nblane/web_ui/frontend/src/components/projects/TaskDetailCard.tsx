@@ -5,7 +5,9 @@
 // cross-lane assignment path; board DnD stays in-lane), an edit mode
 // (编辑) for title/context/why/project_id/tags via PATCH /kanban/cards/{ref}
 // under the kanban.md ETag, and the「删除任务」danger action (inline confirm
-// + optional 记入大事记) via DELETE /kanban/cards/{ref}. Planned dates stay
+// + optional 记入大事记) via DELETE /kanban/cards/{ref}. {ref} is the task id
+// (URL-safe, survives titles containing '/'), with title as the fallback.
+// Planned dates stay
 // in the 排期 row — edit mode deliberately does not duplicate scheduling.
 
 import {
@@ -66,6 +68,13 @@ function daysSince(start: string, today: string): number {
 // full-replace write against kanban.md.
 const TODO_SAVE_DELAY_MS = 400;
 
+/** Card-ref for the /kanban/cards/{ref} endpoints: the stable task id
+ * (URL-safe even when the title contains '/'), falling back to the title
+ * for cards that never got an id persisted. */
+function cardRefOf(task: ProjectsBoardTask): string {
+  return task.id || task.title;
+}
+
 interface TodoDraft {
   text: string;
   done: boolean;
@@ -116,7 +125,7 @@ function TodoChecklist({
       timerRef.current = null;
       patchCard.mutate(
         {
-          cardRef: task.title,
+          cardRef: cardRefOf(task),
           body: { todos: next.map((todo) => ({ text: todo.text, done: todo.done })) },
           etag: kanbanEtag,
         },
@@ -274,13 +283,13 @@ export function TaskDetailCard({
 
   const runMove = (targetSection: string) =>
     moveCard.mutate(
-      { cardRef: task.title, targetSection, etag: kanbanEtag },
+      { cardRef: cardRefOf(task), targetSection, etag: kanbanEtag },
       { onError: onError('移动失败') },
     );
 
   const runDone = () =>
     doneCard.mutate(
-      { cardRef: task.title, etag: kanbanEtag },
+      { cardRef: cardRefOf(task), etag: kanbanEtag },
       {
         // The card closes itself on refetch (the task leaves the live lanes),
         // so the confirmation must fire from the mutation callback.
@@ -296,14 +305,14 @@ export function TaskDetailCard({
 
   const runSchedule = (start: string, end: string) =>
     scheduleCard.mutate(
-      { cardRef: task.title, body: { planned_start: start, planned_end: end }, etag: kanbanEtag },
+      { cardRef: cardRefOf(task), body: { planned_start: start, planned_end: end }, etag: kanbanEtag },
       { onError: onError('排期失败') },
     );
 
   const runAssign = (projectId: string) => {
     setAssignTo(projectId);
     patchCard.mutate(
-      { cardRef: task.title, body: { project_id: projectId }, etag: kanbanEtag },
+      { cardRef: cardRefOf(task), body: { project_id: projectId }, etag: kanbanEtag },
       { onError: onError('归属变更失败') },
     );
   };
@@ -319,7 +328,7 @@ export function TaskDetailCard({
   const runDelete = () =>
     deleteCard.mutate(
       {
-        cardRef: task.title,
+        cardRef: cardRefOf(task),
         body: { record_chronicle: recordChronicle },
         etag: kanbanEtag,
       },
@@ -368,7 +377,7 @@ export function TaskDetailCard({
 
   const runSaveEdit = () =>
     patchCard.mutate(
-      { cardRef: task.title, body: editBody, etag: kanbanEtag },
+      { cardRef: cardRefOf(task), body: editBody, etag: kanbanEtag },
       {
         onSuccess: () => setEditing(false),
         onError: onError('保存失败'),

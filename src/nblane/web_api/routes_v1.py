@@ -74,6 +74,7 @@ from nblane.core.kanban_io import (
     apply_kanban_reorder,
     ensure_kanban_task_ids,
     find_kanban_card,
+    find_kanban_card_by_id,
     kanban_path,
     parse_kanban,
     resolve_kanban_section,
@@ -1348,6 +1349,24 @@ def _merge_notices(result) -> list[str]:
     return notices
 
 
+def _resolve_kanban_card(
+    sections: dict[str, list[KanbanTask]],
+    card_ref: str,
+) -> tuple[tuple[str, int, KanbanTask] | None, str, str]:
+    """Resolve a ``card_ref`` path segment: task id first, then title.
+
+    Card ids (``kb_`` + hex) are URL-safe, so id addressing survives titles
+    containing ``/`` — a title-only ref would be split by route parsing and
+    never reach the endpoint (405). When the ref is not an existing id the
+    lookup falls back to ``find_kanban_card`` (exact title or unique
+    substring), keeping the documented title semantics intact.
+    """
+    by_id = find_kanban_card_by_id(sections, card_ref)
+    if by_id is not None:
+        return by_id, "", ""
+    return find_kanban_card(sections, card_ref)
+
+
 def _find_card_by_id(
     sections: dict[str, list[KanbanTask]],
     task_id: str,
@@ -1481,8 +1500,10 @@ def _mutate_kanban_card_section(
 ) -> KanbanMutationResponse | JSONResponse:
     """Shared move/done mutation: relocate one card to *target*.
 
-    ``card_ref`` is an exact title or unique substring (same semantics as
-    the Review kanban-move candidate). The move reuses
+    ``card_ref`` is the card's task id (preferred — URL-safe even when the
+    title contains ``/``), falling back to an exact title or unique
+    substring (same semantics as the Review kanban-move candidate). The
+    move reuses
     ``apply_kanban_reorder(auto_dates=True)``, so landing in Done marks the
     card done with ``completed_on`` and leaving Done clears both.
     ``to_index`` (0-based, post-removal) positions the card inside the
@@ -1503,7 +1524,7 @@ def _mutate_kanban_card_section(
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
-    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
     if hit is None:
         if match_kind == "ambiguous":
             raise ApiError(422, "kanban_card_ambiguous", match_error)
@@ -1623,8 +1644,9 @@ def schedule_profile_kanban_card(
     value; both set means start must not be after end (422 otherwise). The
     fields persist as kanban.md metadata bullets, orthogonal to the
     column-date idiom (``started_on`` / ``completed_on``). ``card_ref``
-    follows the move/done semantics: exact card title or unique title
-    substring (not the task id). Honors
+    is the task id first (URL-safe; survives titles containing ``/``),
+    then the move/done fallback semantics: exact card title or unique
+    title substring. Honors
     ``If-Match`` (412 on mismatch); a concurrent write between parse and
     save is 3-way merged.
     """
@@ -1654,7 +1676,7 @@ def schedule_profile_kanban_card(
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
-    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
     if hit is None:
         if match_kind == "ambiguous":
             raise ApiError(422, "kanban_card_ambiguous", match_error)
@@ -1713,8 +1735,9 @@ def patch_profile_kanban_card(
     Section moves stay on the move endpoint — Someday is a section, not a
     flag. When ``project_id`` changed, project-board.yaml task refs are
     re-synced from kanban metadata (task side is authoritative), same as
-    the project-task move endpoint. ``card_ref`` follows the move/done
-    semantics (exact title or unique substring). Honors ``If-Match``
+    the project-task move endpoint. ``card_ref`` is the task id first
+    (URL-safe; survives titles containing ``/``), then the move/done
+    fallback semantics (exact title or unique substring). Honors ``If-Match``
     (412 on mismatch); a concurrent kanban write is 3-way merged.
     """
     pdir = _resolve_profile(name)
@@ -1760,7 +1783,7 @@ def patch_profile_kanban_card(
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
-    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
     if hit is None:
         if match_kind == "ambiguous":
             raise ApiError(422, "kanban_card_ambiguous", match_error)
@@ -1822,7 +1845,8 @@ def delete_profile_kanban_card(
 ) -> KanbanCardDeleteResponse | JSONResponse:
     """Delete one kanban card for good (detail-card danger action).
 
-    ``card_ref`` follows the move/done semantics (exact title or unique
+    ``card_ref`` is the task id first (URL-safe; survives titles containing
+    ``/``), then the move/done fallback semantics (exact title or unique
     substring; ambiguous → 422, unknown → 404). The card's todos, subtasks,
     and metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT
     touched — the tombstone mechanism handles references to the deleted
@@ -1844,7 +1868,7 @@ def delete_profile_kanban_card(
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
-    hit, match_kind, match_error = find_kanban_card(sections, ref)
+    hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
     if hit is None:
         if match_kind == "ambiguous":
             raise ApiError(422, "kanban_card_ambiguous", match_error)

@@ -138,7 +138,7 @@ describe('TaskDetailCard edit mode', () => {
       expect(call).toBeDefined();
       const [input, init] = call!;
       expect(String(input)).toContain(
-        `/profiles/alice/kanban/cards/${encodeURIComponent('读 VLA 综述')}`,
+        `/profiles/alice/kanban/cards/${TASK.id}`,
       );
       expect((init?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
       // Only the two changed fields go out; context/why/project_id keep.
@@ -317,7 +317,7 @@ describe('TaskDetailCard delete action', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE')!;
     expect(String(call[0])).toContain(
-      `/profiles/alice/kanban/cards/${encodeURIComponent('读 VLA 综述')}`,
+      `/profiles/alice/kanban/cards/${TASK.id}`,
     );
     expect((call[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
     expect(JSON.parse(String(call[1]?.body))).toEqual({ record_chronicle: false });

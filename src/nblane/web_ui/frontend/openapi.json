@@ -12123,7 +12123,7 @@
   },
   "/api/v1/profiles/{name}/kanban/cards/{card_ref}": {
    "delete": {
-    "description": "Delete one kanban card for good (detail-card danger action).\n\n``card_ref`` follows the move/done semantics (exact title or unique\nsubstring; ambiguous → 422, unknown → 404). The card's todos, subtasks,\nand metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT\ntouched — the tombstone mechanism handles references to the deleted\ntask. With ``record_chronicle`` (default off) a ``task.deleted`` entry\nis appended to chronicle.yaml (ref = task id, note = title). Honors\n``If-Match`` (412 on stale); a concurrent kanban write between parse\nand save is 3-way merged like the other card mutations.",
+    "description": "Delete one kanban card for good (detail-card danger action).\n\n``card_ref`` is the task id first (URL-safe; survives titles containing\n``/``), then the move/done fallback semantics (exact title or unique\nsubstring; ambiguous → 422, unknown → 404). The card's todos, subtasks,\nand metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT\ntouched — the tombstone mechanism handles references to the deleted\ntask. With ``record_chronicle`` (default off) a ``task.deleted`` entry\nis appended to chronicle.yaml (ref = task id, note = title). Honors\n``If-Match`` (412 on stale); a concurrent kanban write between parse\nand save is 3-way merged like the other card mutations.",
     "operationId": "delete_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__delete",
     "parameters": [
      {
@@ -12243,7 +12243,7 @@
     "summary": "Delete Profile Kanban Card"
    },
    "patch": {
-    "description": "Edit one card's fields (lane assignment, title, context, why, tags, todos).\n\n``None`` fields keep the current value; ``\"\"`` clears\n``context``/``why``/``project_id``/``milestone_id`` (``project_id``\nclearing unassigns the card from its lane); ``tags`` replaces the\nwhole tag list when given; ``todos`` fully replaces the checklist\nwhen given (``[]`` clears it). ``title`` must not be blank when given.\nSection moves stay on the move endpoint — Someday is a section, not a\nflag. When ``project_id`` changed, project-board.yaml task refs are\nre-synced from kanban metadata (task side is authoritative), same as\nthe project-task move endpoint. ``card_ref`` follows the move/done\nsemantics (exact title or unique substring). Honors ``If-Match``\n(412 on mismatch); a concurrent kanban write is 3-way merged.",
+    "description": "Edit one card's fields (lane assignment, title, context, why, tags, todos).\n\n``None`` fields keep the current value; ``\"\"`` clears\n``context``/``why``/``project_id``/``milestone_id`` (``project_id``\nclearing unassigns the card from its lane); ``tags`` replaces the\nwhole tag list when given; ``todos`` fully replaces the checklist\nwhen given (``[]`` clears it). ``title`` must not be blank when given.\nSection moves stay on the move endpoint — Someday is a section, not a\nflag. When ``project_id`` changed, project-board.yaml task refs are\nre-synced from kanban metadata (task side is authoritative), same as\nthe project-task move endpoint. ``card_ref`` is the task id first\n(URL-safe; survives titles containing ``/``), then the move/done\nfallback semantics (exact title or unique substring). Honors ``If-Match``\n(412 on mismatch); a concurrent kanban write is 3-way merged.",
     "operationId": "patch_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__patch",
     "parameters": [
      {
@@ -12578,7 +12578,7 @@
   },
   "/api/v1/profiles/{name}/kanban/cards/{card_ref}/schedule": {
    "post": {
-    "description": "Set or clear one card's planned date range (timeline drag-to-reschedule).\n\n``planned_start`` / ``planned_end`` accept an ISO ``YYYY-MM-DD`` date to\nset, ``\"\"`` to clear, or are omitted (``null``) to keep the current\nvalue; both set means start must not be after end (422 otherwise). The\nfields persist as kanban.md metadata bullets, orthogonal to the\ncolumn-date idiom (``started_on`` / ``completed_on``). ``card_ref``\nfollows the move/done semantics: exact card title or unique title\nsubstring (not the task id). Honors\n``If-Match`` (412 on mismatch); a concurrent write between parse and\nsave is 3-way merged.",
+    "description": "Set or clear one card's planned date range (timeline drag-to-reschedule).\n\n``planned_start`` / ``planned_end`` accept an ISO ``YYYY-MM-DD`` date to\nset, ``\"\"`` to clear, or are omitted (``null``) to keep the current\nvalue; both set means start must not be after end (422 otherwise). The\nfields persist as kanban.md metadata bullets, orthogonal to the\ncolumn-date idiom (``started_on`` / ``completed_on``). ``card_ref``\nis the task id first (URL-safe; survives titles containing ``/``),\nthen the move/done fallback semantics: exact card title or unique\ntitle substring. Honors\n``If-Match`` (412 on mismatch); a concurrent write between parse and\nsave is 3-way merged.",
     "operationId": "schedule_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__schedule_post",
     "parameters": [
      {

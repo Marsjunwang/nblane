@@ -1078,7 +1078,7 @@ describe('ProjectsPage mutations', () => {
     );
     expect(moveCall).toBeDefined();
     expect(String(moveCall?.[0])).toContain(
-      `/kanban/cards/${encodeURIComponent('读 VLA 综述')}/move`,
+      `/kanban/cards/kb_1/move`,
     );
     expect(JSON.parse(String(moveCall?.[1]?.body))).toEqual({
       target_section: 'Doing',
@@ -1139,7 +1139,7 @@ describe('ProjectsPage mutations', () => {
       const patchCall = fetchMock.mock.calls.find(
         ([input, init]) =>
           init?.method === 'PATCH' &&
-          String(input).includes(`/kanban/cards/${encodeURIComponent('无归属任务')}`),
+          String(input).includes('/kanban/cards/kb_9'),
       );
       expect(patchCall).toBeDefined();
       expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({ project_id: 'p1' });

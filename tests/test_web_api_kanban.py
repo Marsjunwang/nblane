@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import quote
 
 import yaml
 from fastapi.testclient import TestClient
@@ -233,6 +234,29 @@ class TestKanbanMutations(unittest.TestCase):
             )
         self.assertEqual(moved.status_code, 200)
         self.assertEqual(moved.json()["card"]["title"], "读 VLA 综述论文")
+
+    def test_move_by_id_with_slash_in_title(self) -> None:
+        """Id addressing also fixes move for titles containing '/'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            card = _add_card(client, "学习 ROS2/运动控制")
+
+            moved = client.post(
+                f"/api/v1/profiles/alice/kanban/cards/{card['id']}/move",
+                json={"target_section": "Doing"},
+            )
+            sections = parse_kanban(profile)
+
+        self.assertEqual(moved.status_code, 200)
+        body = moved.json()
+        self.assertEqual(body["section"], "Doing")
+        self.assertEqual(body["card"]["id"], card["id"])
+        self.assertEqual(body["card"]["title"], "学习 ROS2/运动控制")
+        self.assertEqual(
+            [task.title for task in sections["Doing"]], ["学习 ROS2/运动控制"]
+        )
 
     def test_move_ambiguous_ref_422(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -588,6 +612,57 @@ class TestKanbanCardDelete(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.json()["deleted_title"], "读 VLA 综述论文")
         self.assertEqual(titles, [])
+
+    def test_delete_by_id_with_slash_in_title(self) -> None:
+        """A title containing '/' splits the route and 405s; the id works."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            card = _add_card(client, "学习 ROS2/运动控制")
+            _add_card(client, "保留我")
+
+            by_title = self._delete(
+                client, quote("学习 ROS2/运动控制", safe="")
+            )
+            by_id = self._delete(client, card["id"])
+            sections = parse_kanban(profile)
+
+        self.assertEqual(by_title.status_code, 405)
+        self.assertEqual(by_id.status_code, 200)
+        self.assertEqual(by_id.json()["deleted_ref"], card["id"])
+        self.assertEqual(by_id.json()["deleted_title"], "学习 ROS2/运动控制")
+        self.assertEqual(
+            [task.title for task in sections["Queue"]], ["保留我"]
+        )
+
+    def test_delete_by_id_plain_title_no_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            card = _add_card(client, "普通标题")
+            deleted = self._delete(client, card["id"])
+            titles = _section_titles(profile, "Queue")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["deleted_title"], "普通标题")
+        self.assertEqual(titles, [])
+
+    def test_delete_id_wins_over_title_fallback(self) -> None:
+        """A ref equal to a card id resolves that card, not a title match."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            first = _add_card(client, "第一张")
+            # Title-shadowing edge: a second card titled like the first id
+            # still loses to the id match.
+            _add_card(client, first["id"])
+            deleted = self._delete(client, first["id"])
+            titles = _section_titles(profile, "Queue")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["deleted_title"], "第一张")
+        self.assertEqual(titles, [first["id"]])
 
     def test_delete_ambiguous_ref_422(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

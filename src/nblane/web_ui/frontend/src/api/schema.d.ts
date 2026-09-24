@@ -1113,7 +1113,8 @@ export interface paths {
          * Delete Profile Kanban Card
          * @description Delete one kanban card for good (detail-card danger action).
          *
-         *     ``card_ref`` follows the move/done semantics (exact title or unique
+         *     ``card_ref`` is the task id first (URL-safe; survives titles containing
+         *     ``/``), then the move/done fallback semantics (exact title or unique
          *     substring; ambiguous → 422, unknown → 404). The card's todos, subtasks,
          *     and metadata bullets die with it. Evidence-pool ``kanban_refs`` are NOT
          *     touched — the tombstone mechanism handles references to the deleted
@@ -1137,8 +1138,9 @@ export interface paths {
          *     Section moves stay on the move endpoint — Someday is a section, not a
          *     flag. When ``project_id`` changed, project-board.yaml task refs are
          *     re-synced from kanban metadata (task side is authoritative), same as
-         *     the project-task move endpoint. ``card_ref`` follows the move/done
-         *     semantics (exact title or unique substring). Honors ``If-Match``
+         *     the project-task move endpoint. ``card_ref`` is the task id first
+         *     (URL-safe; survives titles containing ``/``), then the move/done
+         *     fallback semantics (exact title or unique substring). Honors ``If-Match``
          *     (412 on mismatch); a concurrent kanban write is 3-way merged.
          */
         patch: operations["patch_profile_kanban_card_api_v1_profiles__name__kanban_cards__card_ref__patch"];
@@ -1211,8 +1213,9 @@ export interface paths {
          *     value; both set means start must not be after end (422 otherwise). The
          *     fields persist as kanban.md metadata bullets, orthogonal to the
          *     column-date idiom (``started_on`` / ``completed_on``). ``card_ref``
-         *     follows the move/done semantics: exact card title or unique title
-         *     substring (not the task id). Honors
+         *     is the task id first (URL-safe; survives titles containing ``/``),
+         *     then the move/done fallback semantics: exact card title or unique
+         *     title substring. Honors
          *     ``If-Match`` (412 on mismatch); a concurrent write between parse and
          *     save is 3-way merged.
          */

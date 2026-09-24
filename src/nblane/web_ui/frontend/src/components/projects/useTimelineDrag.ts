@@ -89,7 +89,8 @@ export function useTimelineDrag({
         // seeded from the rendered range (planned_start ?? started_on …).
         schedule.mutate(
           {
-            cardRef: current.task.title,
+            // Id-first addressing: the task id is URL-safe, unlike titles with '/'.
+            cardRef: current.task.id || current.task.title,
             body: {
               planned_start: shiftDate(current.range.start, deltaDays),
               planned_end: shiftDate(current.range.end, deltaDays),

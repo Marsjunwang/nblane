@@ -459,6 +459,26 @@ def resolve_kanban_section(raw: object) -> str | None:
     return None
 
 
+def find_kanban_card_by_id(
+    sections: dict[str, list[KanbanTask]],
+    card_id: str,
+) -> tuple[str, int, KanbanTask] | None:
+    """Locate one card by its stable task id, or None when no card matches.
+
+    Ids are unique within a board (``ensure_kanban_task_ids``), URL-safe
+    (``kb_`` + hex), and immune to titles containing ``/`` — the web API
+    prefers them over title refs for exactly that reason.
+    """
+    clean = _clean_task_text(card_id)
+    if not clean:
+        return None
+    for section, tasks in sections.items():
+        for index, task in enumerate(tasks):
+            if _clean_task_text(task.id) == clean:
+                return section, index, task
+    return None
+
+
 def find_kanban_card(
     sections: dict[str, list[KanbanTask]],
     card_ref: str,

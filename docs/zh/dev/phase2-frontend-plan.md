@@ -14,8 +14,9 @@ source_of_truth: Phase 2 前端(/projects 一页双视图)实施计划;后端契
 - **ETag 不可混用**:projects-board 的 ETag 是 6 文件联合摘要,kanban mutation 校验的是
   kanban.md 单文件 ETag(`_kanban_etag`,routes_v1.py:899),checkins 校验 activity-log.yaml
   单文件 ETag。把 board ETag 当 If-Match 发会稳定 412。
-- **card_ref 按标题寻址**(精确标题或唯一子串,不是 task id);重名 → 422
-  `kanban_card_ambiguous`。`?task=` 选中态与 dnd id 用 task.id(kb_xxx),mutation 传 title。
+- **card_ref 按 id 寻址**(2026-09-24 起:id 优先,标题精确/唯一子串为回落);
+  重名 → 422 `kanban_card_ambiguous`。`?task=` 选中态、dnd id 与 mutation 统一传
+  task.id(kb_xxx)——标题含 `/` 的卡按标题寻址会被路由拆段 405。
 - checkins 没有任何 GET 端点返回 activity-log ETag;首次打卡只能不带 If-Match
   (服务端 flock + expected_snapshot 仍兜底),成功后缓存响应 ETag 供连续打卡使用,
   412 时降级为无 If-Match 重试一次。

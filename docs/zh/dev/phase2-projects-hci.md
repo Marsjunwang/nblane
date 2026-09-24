@@ -183,8 +183,8 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
 ## 实施状态(2026-09-24 晚:任务可删除)
 
 - **删除任务端点**:`DELETE /api/v1/profiles/{name}/kanban/cards/{card_ref}`
-  — 永久删除一张看板卡。`card_ref` 语义同 move/done/patch(精确标题或唯一
-  子串;歧义 422、未知 404);kanban.md ETag/If-Match 412 + 锁内快照复核 +
+  — 永久删除一张看板卡。`card_ref` 语义同 move/done/patch(id 优先,
+  标题精确/唯一子串为回落;歧义 422、未知 404);kanban.md ETag/If-Match 412 + 锁内快照复核 +
   3-way merge 纪律与其他卡片写端点一致。请求体 `{record_chronicle=false}`:
   勾选才追加 `task.deleted`(ref = 任务 id,note = 标题,默认不记——
   家务删除不混入叙事)。响应 `{ok, deleted_ref, deleted_title}`。
