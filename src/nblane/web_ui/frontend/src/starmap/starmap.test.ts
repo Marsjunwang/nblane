@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildLayout, CARVED_ANGLES, GOAL_ANGLES, R, R_GOAL, SECTOR_START, TEMP, SECTOR_ASTERISM_TABLE, asterismById, asterismLinearity } from './layout';
+import { buildLayout, CARVED_ANGLES, GOAL_ANGLES, R, R_GOAL, SECTOR_START, TEMP, SECTOR_ASTERISM_TABLE, asterismById, asterismLinearity, orbitPos, orbitPosAnchored } from './layout';
 import { mulberry32 } from './rng';
 import { mergeGoalBook, normalizeStarmapResponse, type StarmapSnapshot } from './snapshot';
 import type { GoalsResponse } from '../api/types';
@@ -214,11 +214,17 @@ describe('buildLayout', () => {
     expect(dist).toBeLessThan(R_GOAL * 0.4); // sibling offset, not across the chart
   });
 
-  it('sends ungrouped planets to free orbit slots', () => {
+  it('sends ungrouped planets to free orbit slots on R_GOAL (归环)', () => {
     const p2 = L.planets.find((p) => p.id === 'p2')!;
     expect(p2.goalIndex).toBe(-1);
     const rr = Math.hypot(p2.plan[0], p2.plan[1]);
-    expect(rr).toBeCloseTo(R_GOAL + 24, 3);
+    expect(rr).toBeCloseTo(R_GOAL, 6);
+  });
+
+  it('rings grouped planets exactly on R_GOAL (angular sibling offsets only)', () => {
+    const p1 = L.planets.find((p) => p.id === 'p1')!;
+    expect(p1.goalIndex).toBe(0);
+    expect(Math.hypot(p1.plan[0], p1.plan[1])).toBeCloseTo(R_GOAL, 6);
   });
 
   it('emits one moon per task (capped at 5)', () => {
@@ -439,6 +445,44 @@ describe('sector asterism figures (星官真形)', () => {
     // the two culled figures really are gone from the table
     expect(Object.values(SECTOR_ASTERISM_TABLE).map((m) => m.id)).not.toContain('jiao');
     expect(Object.values(SECTOR_ASTERISM_TABLE).map((m) => m.id)).not.toContain('xin');
+  });
+});
+
+describe('orbit position math (round-6 drift fix)', () => {
+  const plan = [40, 30, 0];
+  const deep = [120, -60, 14];
+  const anchorDeep = [100, -50, 10];
+  const anchorMorph = [70, -10, 0];
+  const anchorNow = [72, -8, 0];
+
+  it('lands EXACTLY on plan in 图态, whatever phase the orbit reached', () => {
+    for (const phase of [0, 0.7, 2.4, -1.3, 12.8]) {
+      const [x, y, z] = orbitPos(plan, deep, phase, 0, 0);
+      expect(x).toBeCloseTo(plan[0], 9);
+      expect(y).toBeCloseTo(plan[1], 9);
+      expect(z).toBeCloseTo(plan[2], 9);
+    }
+  });
+
+  it('equals the rotated deep vector at full 境态', () => {
+    const phase = 0.9;
+    const [x, y] = orbitPos(plan, deep, phase, 1, 1);
+    expect(x).toBeCloseTo(deep[0] * Math.cos(phase) - deep[1] * Math.sin(phase), 9);
+    expect(y).toBeCloseTo(deep[0] * Math.sin(phase) + deep[1] * Math.cos(phase), 9);
+  });
+
+  it('anchored variant: no residual at ch3=0 when the anchor is at its morph base', () => {
+    for (const phase of [0, 1.1, 5.7]) {
+      const [x, y] = orbitPosAnchored(plan, deep, anchorDeep, anchorMorph, anchorMorph, phase, 0, 0);
+      expect(x).toBeCloseTo(plan[0], 9);
+      expect(y).toBeCloseTo(plan[1], 9);
+    }
+  });
+
+  it('anchored variant: the follow term carries only the anchor delta', () => {
+    const [x, y] = orbitPosAnchored(plan, deep, anchorDeep, anchorMorph, anchorNow, 1.3, 0, 0);
+    expect(x).toBeCloseTo(plan[0] + (anchorNow[0] - anchorMorph[0]), 9);
+    expect(y).toBeCloseTo(plan[1] + (anchorNow[1] - anchorMorph[1]), 9);
   });
 });
 

@@ -121,6 +121,52 @@ export function sectorAsterismName(categoryName: string): string {
   return SECTOR_ASTERISM[categoryName]?.name ?? categoryName;
 }
 
+/** Orbit-managed star position (round-6 fix): morph lerp plan→deep by ch2,
+ * plus the slow orbit-rotation residual — gated by ch3 so 图态 always lands
+ * EXACTLY on plan, no matter what phase the orbit reached during 境态.
+ * (The round-6 drift bug: the residual used to apply at all ch values, so
+ * the phase frozen on leaving 境态 displaced stars off R_GOAL — invisible
+ * before the fan-out, massive after it.) */
+export function orbitPos(
+  plan: number[],
+  deep: number[],
+  phase: number,
+  ch2: number,
+  ch3: number,
+): [number, number, number] {
+  const rx = deep[0] * Math.cos(phase) - deep[1] * Math.sin(phase);
+  const ry = deep[0] * Math.sin(phase) + deep[1] * Math.cos(phase);
+  return [
+    plan[0] + (deep[0] - plan[0]) * ch2 + (rx - deep[0]) * ch3,
+    plan[1] + (deep[1] - plan[1]) * ch2 + (ry - deep[1]) * ch3,
+    plan[2] + (deep[2] - plan[2]) * ch2,
+  ];
+}
+
+/** Anchored variant (planets riding a goal star): the follow term compares
+ * the anchor's CURRENT position against its ch2-MORPHED base (never its deep
+ * base), and the planet's own orbit residual is likewise ch3-gated. */
+export function orbitPosAnchored(
+  plan: number[],
+  deep: number[],
+  anchorDeep: number[],
+  anchorMorph: number[],
+  anchorNow: number[],
+  phase: number,
+  ch2: number,
+  ch3: number,
+): [number, number, number] {
+  const ox = deep[0] - anchorDeep[0];
+  const oy = deep[1] - anchorDeep[1];
+  const rx = ox * Math.cos(phase) - oy * Math.sin(phase);
+  const ry = ox * Math.sin(phase) + oy * Math.cos(phase);
+  return [
+    plan[0] + (deep[0] - plan[0]) * ch2 + (anchorNow[0] - anchorMorph[0]) + (rx - ox) * ch3,
+    plan[1] + (deep[1] - plan[1]) * ch2 + (anchorNow[1] - anchorMorph[1]) + (ry - oy) * ch3,
+    plan[2] + (deep[2] - plan[2]) * ch2,
+  ];
+}
+
 // Asterism morphology templates (ported from the v2 mockup).
 type Slot = [number, number, number];
 const TEMPLATES: { slots: Slot[]; links: [number, number][] }[] = [
@@ -646,7 +692,9 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
       const n = sibCount.get(gid) || 0;
       sibCount.set(gid, n + 1);
       angle = goalAngleOf.get(gid)! + SIB_OFF[n % SIB_OFF.length];
-      rr = R_GOAL + (n % 2 === 0 ? -10 : 10);
+      // 图态归环 (round-6): planets sit exactly on R_GOAL — angular sibling
+      // offsets only, no radial jitter; deep lanes (fan-out) unchanged.
+      rr = R_GOAL;
       const gd = goalDeepOf.get(gid)!;
       const orbitLane = 5 + Math.min(n, 4) * 2.2; // stepped lanes, ≤ 12.6
       const [ox, oy] = polar(orbitLane, jr() * 360);
@@ -654,7 +702,7 @@ export function buildLayout(snapshot: StarmapSnapshot): StarmapLayout {
     } else {
       angle = -170 + freeIdx * 42;
       freeIdx += 1;
-      rr = R_GOAL + 24;
+      rr = R_GOAL; // free planets ring in on R_GOAL too (was +24)
       const [fx, fy] = polar(FREE_LANE, angle);
       deep = [fx, fy, (jr() - 0.5) * 12];
     }

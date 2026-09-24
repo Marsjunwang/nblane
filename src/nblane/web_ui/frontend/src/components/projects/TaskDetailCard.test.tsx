@@ -46,6 +46,10 @@ const TASK: ProjectsBoardTask = {
   project_id: 'p1',
   milestone_id: '',
   tags: 'reading, survey',
+  todos: [
+    { text: '扫引用列表', done: true },
+    { text: '整理笔记', done: false },
+  ],
 } as unknown as ProjectsBoardTask;
 
 function patchResponse(title: string) {
@@ -156,5 +160,67 @@ describe('TaskDetailCard edit mode', () => {
     // 排期 row is still rendered (not duplicated inside the edit form).
     expect(screen.getByLabelText('排期开始')).toBeInTheDocument();
     expect(screen.getByTestId('schedule-save')).toBeInTheDocument();
+  });
+});
+
+describe('TaskDetailCard TODO checklist', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function lastPatchBody(fetchMock: ReturnType<typeof renderCard>) {
+    await waitFor(
+      () => {
+        expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true);
+      },
+      { timeout: 2000 },
+    );
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
+    expect((call[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    return JSON.parse(String(call[1]?.body)) as { todos: { text: string; done: boolean }[] };
+  }
+
+  it('renders the checklist with done state and an add input', () => {
+    renderCard();
+    expect(screen.getByTestId('todo-section')).toBeInTheDocument();
+    expect(screen.getByTestId('todo-item-0')).toHaveTextContent('扫引用列表');
+    expect(screen.getByTestId('todo-item-1')).toHaveTextContent('整理笔记');
+    expect(screen.getByTestId('todo-toggle-0')).toBeChecked();
+    expect(screen.getByTestId('todo-toggle-1')).not.toBeChecked();
+    expect(screen.getByTestId('todo-add-input')).toBeInTheDocument();
+  });
+
+  it('toggle flips optimistically and PATCHes the full list (debounced)', async () => {
+    const fetchMock = renderCard();
+    fireEvent.click(screen.getByTestId('todo-toggle-1'));
+    // Optimistic: the checkbox flips before the debounced PATCH lands.
+    expect(screen.getByTestId('todo-toggle-1')).toBeChecked();
+    const body = await lastPatchBody(fetchMock);
+    expect(body).toEqual({
+      todos: [
+        { text: '扫引用列表', done: true },
+        { text: '整理笔记', done: true },
+      ],
+    });
+  });
+
+  it('add appends an item on Enter and PATCHes the grown list', async () => {
+    const fetchMock = renderCard();
+    const input = screen.getByTestId('todo-add-input');
+    fireEvent.change(input, { target: { value: '写摘要' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('todo-item-2')).toHaveTextContent('写摘要');
+    expect(input).toHaveValue('');
+    const body = await lastPatchBody(fetchMock);
+    expect(body.todos).toHaveLength(3);
+    expect(body.todos[2]).toEqual({ text: '写摘要', done: false });
+  });
+
+  it('delete removes an item and PATCHes the shrunk list', async () => {
+    const fetchMock = renderCard();
+    fireEvent.click(screen.getByTestId('todo-delete-0'));
+    expect(screen.queryByTestId('todo-item-1')).not.toBeInTheDocument();
+    const body = await lastPatchBody(fetchMock);
+    expect(body).toEqual({ todos: [{ text: '整理笔记', done: false }] });
   });
 });

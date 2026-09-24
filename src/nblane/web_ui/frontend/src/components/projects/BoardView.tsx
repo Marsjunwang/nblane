@@ -78,7 +78,7 @@ export function BoardView({
 }: BoardViewProps) {
   return (
     <Stack gap="xl" data-testid="board-view">
-      <HabitBand profile={profile} rows={habitRows} today={today} />
+      <HabitBand profile={profile} rows={habitRows} today={today} onEditProject={onEditProject} />
 
       {groups.map((group) => (
         <Stack key={group.id} gap="sm" data-testid={`lane-group-${group.id}`}>

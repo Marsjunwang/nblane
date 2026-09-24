@@ -87,6 +87,8 @@ import type {
   ReviewResponse,
   ReviewSaveRequest,
   ReviewSaveResponse,
+  SkillNodePatchRequest,
+  SkillNodePatchResponse,
   SkillTreeResponse,
   StudioCandidateRequest,
   StudioCandidateResponse,
@@ -167,12 +169,37 @@ export function useHealthReport(profile: string) {
   });
 }
 
+export interface SkillTreeResult {
+  tree: SkillTreeResponse;
+  /** skill-tree.yaml ETag for If-Match on node-status mutations. */
+  etag: string;
+}
+
+/** Skill tree fetch that captures the tree-file ETag for If-Match. */
 export function useSkillTree(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'skill-tree'],
-    queryFn: () =>
-      apiGet<SkillTreeResponse>(`/profiles/${encodeURIComponent(profile)}/skill-tree`),
+    queryFn: async (): Promise<SkillTreeResult> => {
+      const { data, headers } = await apiGetWithHeaders<SkillTreeResponse>(
+        `/profiles/${encodeURIComponent(profile)}/skill-tree`,
+      );
+      return { tree: data, etag: headers.get('ETag') ?? '' };
+    },
     enabled: profile.length > 0,
+  });
+}
+
+/** Evidence rows linked to one skill node (skill-tree.yaml evidence_refs). */
+export function useSkillEvidence(profile: string, skillId: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'evidence', 'skill', skillId],
+    queryFn: () => {
+      const params = new URLSearchParams({ skill_id: skillId, limit: '200' });
+      return apiGet<EvidenceListResponse>(
+        `/profiles/${encodeURIComponent(profile)}/evidence?${params.toString()}`,
+      );
+    },
+    enabled: profile.length > 0 && skillId.length > 0,
   });
 }
 
@@ -920,13 +947,79 @@ function writePoolEtag(queryClient: QueryClient, profile: string, etag: string) 
   );
 }
 
-/** Write the post-mutation tree ETag into the cached flat skill tree. */
+/** Write the post-mutation tree ETag into the cached skill-tree reads. */
 function writeTreeEtag(queryClient: QueryClient, profile: string, etag: string) {
   if (!etag) return;
   queryClient.setQueryData(
     ['profiles', profile, 'skill-tree', 'flat'],
     (old: SkillTreeFlatResult | undefined) => (old ? { ...old, etag } : old),
   );
+  queryClient.setQueryData(
+    ['profiles', profile, 'skill-tree'],
+    (old: SkillTreeResult | undefined) => (old ? { ...old, etag } : old),
+  );
+}
+
+/** Optimistically rewrite one node's status inside the cached tree. */
+function patchCachedNodeStatus(
+  queryClient: QueryClient,
+  profile: string,
+  nodeId: string,
+  yamlStatus: string,
+): SkillTreeResult | undefined {
+  const previous = queryClient.getQueryData<SkillTreeResult>([
+    'profiles',
+    profile,
+    'skill-tree',
+  ]);
+  if (!previous) return undefined;
+  const walk = (nodes: SkillTreeResponse['nodes']): SkillTreeResponse['nodes'] =>
+    (nodes ?? []).map((node) =>
+      node.id === nodeId
+        ? { ...node, status: yamlStatus }
+        : { ...node, children: walk(node.children ?? []) },
+    );
+  const next = {
+    ...previous,
+    tree: { ...previous.tree, nodes: walk(previous.tree.nodes ?? []) },
+  };
+  queryClient.setQueryData(['profiles', profile, 'skill-tree'], next);
+  return previous;
+}
+
+/** 三态 write (G3): PATCH one node's status; lit lands as YAML `solid`. */
+export function usePatchSkillNodeStatus(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeId, status, etag }: { nodeId: string; status: string; etag: string }) =>
+      patchEtagMutation<SkillNodePatchResponse>(
+        `/profiles/${encodeURIComponent(profile)}/skill-tree/nodes/${encodeURIComponent(nodeId)}`,
+        { status } satisfies SkillNodePatchRequest,
+        etag,
+        () => refreshTreeEtag(profile),
+      ),
+    onMutate: ({ nodeId, status }) => {
+      queryClient.cancelQueries({ queryKey: ['profiles', profile, 'skill-tree'] });
+      const yamlStatus = status === 'lit' ? 'solid' : status;
+      const previous = patchCachedNodeStatus(queryClient, profile, nodeId, yamlStatus);
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['profiles', profile, 'skill-tree'], context.previous);
+      }
+    },
+    onSuccess: ({ etag }) => {
+      writeTreeEtag(queryClient, profile, etag);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'skill-tree'] });
+      // The home starmap + projects boards read skill statuses too.
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'starmap'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'home'] });
+    },
+  });
 }
 
 /** Bulk accept/tag: set one pool-editable field on the selected rows. */

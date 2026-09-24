@@ -430,6 +430,15 @@ describe('EvidencePage', () => {
     expect(screen.queryByTestId('evidence-detail')).not.toBeInTheDocument();
   });
 
+  it('preselects the entry named by the focus query param (deep link)', async () => {
+    stubFetch();
+    renderPage('/p/alice/evidence?stage=review&focus=ev_2');
+
+    // Same end state as clicking the row: the inscription detail opens.
+    const detail = await screen.findByTestId('evidence-detail');
+    expect(within(detail).getByText('MoveIt2 workshop notes')).toBeInTheDocument();
+  });
+
   it('detail card shows only 分量; confidence/readiness live under 更多', async () => {
     stubFetch();
     renderPage();

@@ -1058,12 +1058,13 @@ export interface paths {
         head?: never;
         /**
          * Patch Profile Kanban Card
-         * @description Edit one card's fields (lane assignment, title, context, why, tags).
+         * @description Edit one card's fields (lane assignment, title, context, why, tags, todos).
          *
          *     ``None`` fields keep the current value; ``""`` clears
          *     ``context``/``why``/``project_id``/``milestone_id`` (``project_id``
          *     clearing unassigns the card from its lane); ``tags`` replaces the
-         *     whole tag list when given. ``title`` must not be blank when given.
+         *     whole tag list when given; ``todos`` fully replaces the checklist
+         *     when given (``[]`` clears it). ``title`` must not be blank when given.
          *     Section moves stay on the move endpoint — Someday is a section, not a
          *     flag. When ``project_id`` changed, project-board.yaml task refs are
          *     re-synced from kanban metadata (task side is authoritative), same as
@@ -1829,6 +1830,34 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/skill-tree/nodes/{node_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Profile Skill Node
+         * @description Set one skill node's 三态 status in skill-tree.yaml (G3 write).
+         *
+         *     Body vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``);
+         *     ``lit`` lands as the YAML status ``solid`` (see
+         *     ``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml
+         *     ETag from the tree read (412 on mismatch); the write goes through
+         *     ``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and
+         *     the SKILL.md generated block is re-synced after a real change. A no-op
+         *     patch writes nothing (``changed=false``).
+         */
+        patch: operations["patch_profile_skill_node_api_v1_profiles__name__skill_tree_nodes__node_id__patch"];
         trace?: never;
     };
     "/api/v1/profiles/{name}/starmap": {
@@ -3251,6 +3280,11 @@ export interface components {
              * @default
              */
             q: string;
+            /**
+             * Skill Id
+             * @default
+             */
+            skill_id: string;
             /**
              * Status
              * @default
@@ -4699,8 +4733,9 @@ export interface components {
          *     ``None`` keeps the current value; ``""`` clears text fields
          *     (``context``/``why``/``project_id``/``milestone_id``); ``tags``
          *     replaces the whole tag list when given. ``title`` must not be blank
-         *     when given. Section moves (incl. Someday, which is a section, not a
-         *     flag) stay on the move endpoint.
+         *     when given. ``todos`` fully replaces the checklist when given
+         *     (``[]`` clears it). Section moves (incl. Someday, which is a section,
+         *     not a flag) stay on the move endpoint.
          */
         KanbanCardPatchRequest: {
             /** Context */
@@ -4713,6 +4748,8 @@ export interface components {
             tags?: string[] | null;
             /** Title */
             title?: string | null;
+            /** Todos */
+            todos?: components["schemas"]["KanbanTodoModel"][] | null;
             /** Why */
             why?: string | null;
         };
@@ -4862,11 +4899,30 @@ export interface components {
             tags: string;
             /** Title */
             title: string;
+            /** Todos */
+            todos?: components["schemas"]["KanbanTodoModel"][];
             /**
              * Why
              * @default
              */
             why: string;
+        };
+        /**
+         * KanbanTodoModel
+         * @description One lightweight checklist item (``todo:`` meta bullet) on a card.
+         *
+         *     Distinct from ``KanbanSubtaskModel`` (the AI-drafted milestone
+         *     breakdown stored as nested checkboxes): todos are the user's own
+         *     checklist, managed via ``PATCH .../kanban/cards/{ref}``.
+         */
+        KanbanTodoModel: {
+            /**
+             * Done
+             * @default false
+             */
+            done: boolean;
+            /** Text */
+            text: string;
         };
         /**
          * LoginRequest
@@ -6023,6 +6079,8 @@ export interface components {
              * @default
              */
             title: string;
+            /** Todos */
+            todos?: components["schemas"]["KanbanTodoModel"][];
             /**
              * Why
              * @default
@@ -6620,6 +6678,80 @@ export interface components {
             paper_library_url: string;
         };
         /**
+         * SkillNodePatchRequest
+         * @description Body for the skill-node status mutation (G3, 三态 write).
+         *
+         *     The UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /
+         *     ``lit``; the endpoint maps ``lit`` onto the YAML status ``solid`` (the
+         *     精通 rung ``expert`` is review-earned and not settable here).
+         */
+        SkillNodePatchRequest: {
+            /** Status */
+            status: string;
+        };
+        /**
+         * SkillNodePatchResponse
+         * @description Result of the skill-node status mutation (``status`` is post-map YAML).
+         */
+        SkillNodePatchResponse: {
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Previous Status
+             * @default
+             */
+            previous_status: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /**
+         * SkillTreeCategoryModel
+         * @description Per-category rollup for the category banner headers.
+         *
+         *     ``name`` is the zh display name (``core.starmap_snapshot.CATEGORY_ZH``,
+         *     id as fallback) — the same source the home starmap sector band uses, so
+         *     the skill-tree banners and the starmap agree on 官名 lookup keys.
+         *     ``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −
+         *     learning.
+         */
+        SkillTreeCategoryModel: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /** Id */
+            id: string;
+            /**
+             * Learning Count
+             * @default 0
+             */
+            learning_count: number;
+            /**
+             * Lit Count
+             * @default 0
+             */
+            lit_count: number;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+        };
+        /**
          * SkillTreeNodeModel
          * @description One node in the recursive skill-tree view.
          *
@@ -6661,6 +6793,8 @@ export interface components {
          * @description Full skill tree: queue-wide status counters plus the nested nodes.
          */
         SkillTreeResponse: {
+            /** Categories */
+            categories?: components["schemas"]["SkillTreeCategoryModel"][];
             /** Nodes */
             nodes?: components["schemas"]["SkillTreeNodeModel"][];
             /** Profile */
@@ -8283,6 +8417,8 @@ export interface operations {
                 status?: string;
                 /** @description Case-insensitive title substring filter. */
                 q?: string;
+                /** @description Skill-node filter: only entries cited by this node's evidence_refs in skill-tree.yaml (the reverse of evidence_usage_index). Combines with status/q (AND). */
+                skill_id?: string;
                 limit?: number;
             };
             header?: never;
@@ -12123,6 +12259,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_profile_skill_node_api_v1_profiles__name__skill_tree_nodes__node_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillNodePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillNodePatchResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or skill node not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match skill-tree.yaml. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Status outside the 三态 vocabulary (locked/learning/lit). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

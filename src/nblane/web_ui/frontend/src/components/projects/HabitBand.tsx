@@ -4,8 +4,13 @@
 // never render Queue/Doing swimlanes.
 //
 // Row: [name · streak · this-week 7 dots · 打卡 button]; habit-plan rows add
-// a 第N/总天 progress arc (N from the plan's time_range vs board.today).
-// A row expands into the month heatmap (recent_days, 月白→泥金). Clicking an
+// a 第N/总天 progress arc (N from the plan's time_range vs board.today) and a
+// hover-revealed 设置 affordance that opens the ProjectEditDrawer for the
+// linked case (basics/milestones/delete live there — 日课项目可删除).
+// Pure habit rows get NO such affordance: a habit is not a project case, so
+// there is nothing to delete from the project side (habit lifecycle stays
+// in the activity log / settings). A row expands into the month heatmap
+// (recent_days, 月白→泥金). Clicking an
 // EMPTY past/today cell backfills a check-in for that date (POST /checkins);
 // clicking a FILLED cell with known check-in ids offers 销印 (inline confirm
 // → DELETE /checkins/{id} of the day's latest row). Filled cells whose rows
@@ -14,7 +19,7 @@
 
 import { ActionIcon, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconChevronRight, IconSettings } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
 import { useAddCheckin, useDeleteCheckin } from '../../api/hooks';
@@ -302,13 +307,18 @@ function HabitBandRow({
   profile,
   row,
   today,
+  onEditProject,
 }: {
   profile: string;
   row: HabitRow;
   today: string;
+  /** Opens the ProjectEditDrawer for a habit-plan case (日课项目可删除). */
+  onEditProject?: (projectId: string) => void;
 }) {
   const { habit, project } = row;
   const [expanded, setExpanded] = useState(false);
+  // Hover (or keyboard focus on the button) reveals the 设置 affordance.
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const checkin = useAddCheckin(profile);
   const todayDone = (habit.week ?? []).some(
     (day) => day.done && !day.future && isTodayDate(day.date, today),
@@ -345,6 +355,8 @@ function HabitBandRow({
       py={6}
       data-testid={`habit-band-row-${habit.id}`}
       style={{ opacity: planArchived ? 0.55 : 1 }}
+      onMouseEnter={() => setSettingsVisible(true)}
+      onMouseLeave={() => setSettingsVisible(false)}
     >
       <Group justify="space-between" wrap="wrap">
         <Group gap="xs" wrap="wrap" style={{ minWidth: 0, flex: '1 1 220px' }}>
@@ -370,6 +382,24 @@ function HabitBandRow({
                   ? `习惯计划 · ${project.title}`
                   : '习惯计划'}
             </Text>
+          )}
+          {isPlan && project && onEditProject && (
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              aria-label={`编辑项目 ${project.title || project.id}`}
+              data-testid={`habit-plan-settings-${project.id}`}
+              onClick={() => onEditProject(project.id)}
+              onFocus={() => setSettingsVisible(true)}
+              onBlur={() => setSettingsVisible(false)}
+              style={{
+                color: boardPalette.dim,
+                opacity: settingsVisible ? 1 : 0,
+                transition: 'opacity 120ms ease',
+              }}
+            >
+              <IconSettings size={14} />
+            </ActionIcon>
           )}
           <Text size="xs" style={{ color: boardPalette.dim }}>
             连续 {habit.streak ?? 0} 天
@@ -406,10 +436,13 @@ export function HabitBand({
   profile,
   rows,
   today,
+  onEditProject,
 }: {
   profile: string;
   rows: HabitRow[];
   today: string;
+  /** Passed to habit-plan rows for the hover 设置 affordance. */
+  onEditProject?: (projectId: string) => void;
 }) {
   if (rows.length === 0) {
     return null;
@@ -432,7 +465,13 @@ export function HabitBand({
         日课
       </Text>
       {rows.map((row) => (
-        <HabitBandRow key={row.habit.id} profile={profile} row={row} today={today} />
+        <HabitBandRow
+          key={row.habit.id}
+          profile={profile}
+          row={row}
+          today={today}
+          onEditProject={onEditProject}
+        />
       ))}
     </Stack>
   );

@@ -330,7 +330,7 @@ describe('ProjectsPage board view', () => {
     expect(screen.queryByTestId('lane-column-plan-exercise-queue')).not.toBeInTheDocument();
   });
 
-  it('quick-add posts a project task with the project-board ETag (裁决4)', async () => {
+  it('quick-add posts a project task with the project-board ETag (裁决4) and auto-opens the detail card', async () => {
     const fetchMock = stubFetch();
     renderPage();
     await screen.findByText('读 VLA 综述');
@@ -352,6 +352,110 @@ describe('ProjectsPage board view', () => {
       });
       expect((call?.[1]?.headers as Record<string, string>)['If-Match']).toBe(BOARD_ETAG_PROJECT);
     });
+    // ≤1-click kept, but the detail card opens on the created card so edits
+    // land in context (MUTATION_RESULT.card.id = kb_1 in this fixture).
+    await waitFor(() => expect(lastSearch).toContain('task=kb_1'));
+    expect(await screen.findByTestId('task-detail-card')).toHaveTextContent('读 VLA 综述');
+  });
+
+  it('unassigned quick-add posts a kanban card and auto-opens the detail card', async () => {
+    const fetchMock = stubFetch();
+    renderPage();
+    await screen.findByText('无归属任务');
+
+    fireEvent.click(screen.getByTestId('quick-add-unassigned'));
+    const input = screen.getByTestId('quick-add-input-unassigned');
+    fireEvent.change(input, { target: { value: '野卡片' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([inputUrl, init]) =>
+          init?.method === 'POST' && String(inputUrl).endsWith('/kanban/cards'),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        title: '野卡片',
+        section: 'Queue',
+      });
+      expect((call?.[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    });
+    await waitFor(() => expect(lastSearch).toContain('task=kb_1'));
+    expect(await screen.findByTestId('task-detail-card')).toBeInTheDocument();
+  });
+
+  it('habit-plan band rows expose a 设置 affordance that opens the edit drawer (日课项目可删除)', async () => {
+    const habitPlan = {
+      id: 'plan-exercise',
+      title: '锻炼 30 天',
+      status: 'active',
+      kind: 'habit',
+      visibility: 'private',
+      summary: '',
+      time_range: '2026-09-01/2026-09-30',
+      goal_refs: [],
+      milestones: [],
+      queue: [],
+      doing: [],
+      someday: [],
+      column_counts: {},
+      done_count: 0,
+      archived_done_count: 0,
+      evidence_ref_count: 0,
+      last_activity: '',
+      habit_id: 'exercise',
+    };
+    stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = {
+          ...BOARD,
+          ungrouped_projects: [habitPlan],
+          habits: [{ ...BOARD.habits[0], project_id: 'plan-exercise', recent_days: [] }],
+        };
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    await screen.findByTestId('habit-band');
+
+    // The pure-habit affordance is absent when the row has no linked case…
+    // (this row IS linked, so its 设置 button is present in the DOM and
+    // reveals on hover/focus).
+    const settings = screen.getByTestId('habit-plan-settings-plan-exercise');
+    fireEvent.click(settings);
+
+    // The drawer opens for the habit-plan case (delete zone lives inside).
+    const drawer = await screen.findByTestId('project-edit-drawer');
+    expect(drawer).toBeInTheDocument();
+    expect(await screen.findByText('项目不存在')).toBeInTheDocument();
+  });
+
+  it('task card shows checklist progress (清单 done/total)', async () => {
+    stubFetch((url, init) => {
+      if (url.endsWith('/profiles/alice/projects-board') && !init?.method) {
+        const board = JSON.parse(JSON.stringify(BOARD)) as typeof BOARD;
+        board.goals[0].projects[0].doing[0] = {
+          ...board.goals[0].projects[0].doing[0],
+          todos: [
+            { text: '拆 schema', done: true },
+            { text: '接线页面', done: false },
+          ],
+        } as never;
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+    expect(await screen.findByTestId('todo-progress-kb_2')).toHaveTextContent('清单 1/2');
+    // Cards without a checklist render no progress line.
+    expect(screen.queryByTestId('todo-progress-kb_1')).not.toBeInTheDocument();
   });
 
   it('heatmap expand + empty-cell backfill posts a dated check-in', async () => {

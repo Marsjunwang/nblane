@@ -27,6 +27,9 @@ export function TaskCardBody({
   selected?: boolean;
 }) {
   const tags = splitTags(task.tags ?? '');
+  const todos = task.todos ?? [];
+  const todoTotal = todos.length;
+  const todoDone = todos.filter((todo) => todo.done).length;
   return (
     <Card
       radius="sm"
@@ -82,6 +85,11 @@ export function TaskCardBody({
             : task.completed_on
               ? `完成于 ${task.completed_on}`
               : `开始于 ${task.started_on}`}
+        </Text>
+      )}
+      {todoTotal > 0 && (
+        <Text size="xs" mt={6} style={{ color: boardPalette.dim }} data-testid={`todo-progress-${task.id}`}>
+          清单 {todoDone}/{todoTotal}
         </Text>
       )}
     </Card>

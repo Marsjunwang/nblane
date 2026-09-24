@@ -73,6 +73,8 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
       return;
     }
     sceneRef.current = scene;
+    // round-6 drift bug hunt: read-only probe for Playwright measurements
+    (window as unknown as { __starmapProbe?: StarmapScene }).__starmapProbe = scene;
     // Replay a focus interrupted by a data refresh (post-mutation rebuild).
     const pending = pendingFocusRef.current;
     if (pending && performance.now() - pending.at < 6000) {
@@ -86,6 +88,7 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
       pendingFocusRef.current = null;
     }
     return () => {
+      (window as unknown as { __starmapProbe?: StarmapScene }).__starmapProbe = undefined;
       scene?.dispose();
       sceneRef.current = null;
     };

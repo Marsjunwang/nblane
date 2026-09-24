@@ -8,9 +8,11 @@
 // deliberately does not duplicate scheduling.
 
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
+  Checkbox,
   Group,
   Modal,
   Select,
@@ -19,8 +21,8 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core';
-import { IconArrowRight, IconPencil, IconSparkles } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { IconArrowRight, IconPencil, IconSparkles, IconX } from '@tabler/icons-react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ApiError } from '../../api/client';
@@ -53,6 +55,132 @@ function daysSince(start: string, today: string): number {
   const from = new Date(`${start}T00:00:00`);
   const to = new Date(`${today}T00:00:00`);
   return Math.max(0, Math.round((to.getTime() - from.getTime()) / 86_400_000));
+}
+
+// Debounce window for checklist PATCHes: toggles/add/removes batch into one
+// full-replace write against kanban.md.
+const TODO_SAVE_DELAY_MS = 400;
+
+interface TodoDraft {
+  text: string;
+  done: boolean;
+}
+
+/** Checklist section of the detail card: toggle / add / delete with an
+ * optimistic local list and a debounced full-replace PATCH. */
+function TodoChecklist({
+  task,
+  kanbanEtag,
+  patchCard,
+  onError,
+}: {
+  task: ProjectsBoardTask;
+  kanbanEtag: string;
+  patchCard: ReturnType<typeof usePatchKanbanCard>;
+  onError: (title: string) => (error: unknown) => void;
+}) {
+  const [todos, setTodos] = useState<TodoDraft[]>(() =>
+    (task.todos ?? []).map((todo) => ({ text: todo.text, done: todo.done ?? false })),
+  );
+  const [newTodo, setNewTodo] = useState('');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Re-seed only when a different task opens; same-task refetches must not
+  // clobber an in-flight optimistic edit (the local list is what we sent).
+  useEffect(() => {
+    setTodos((task.todos ?? []).map((todo) => ({ text: todo.text, done: todo.done ?? false })));
+    setNewTodo('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    },
+    [],
+  );
+
+  const commit = (next: TodoDraft[]) => {
+    setTodos(next);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      patchCard.mutate(
+        {
+          cardRef: task.title,
+          body: { todos: next.map((todo) => ({ text: todo.text, done: todo.done })) },
+          etag: kanbanEtag,
+        },
+        { onError: onError('清单保存失败') },
+      );
+    }, TODO_SAVE_DELAY_MS);
+  };
+
+  const toggle = (index: number) =>
+    commit(todos.map((todo, i) => (i === index ? { ...todo, done: !todo.done } : todo)));
+  const remove = (index: number) => commit(todos.filter((_, i) => i !== index));
+  const add = () => {
+    const text = newTodo.trim();
+    if (!text) {
+      return;
+    }
+    setNewTodo('');
+    commit([...todos, { text, done: false }]);
+  };
+
+  return (
+    <Stack gap={4} data-testid="todo-section">
+      {todos.map((todo, index) => (
+        <Group key={`${index}-${todo.text}`} gap="xs" wrap="nowrap" data-testid={`todo-item-${index}`}>
+          <Checkbox
+            size="xs"
+            checked={todo.done}
+            onChange={() => toggle(index)}
+            aria-label={`勾选 ${todo.text}`}
+            data-testid={`todo-toggle-${index}`}
+          />
+          <Text
+            size="sm"
+            style={{
+              flex: 1,
+              textDecoration: todo.done ? 'line-through' : undefined,
+              color: todo.done ? boardPalette.dim : undefined,
+            }}
+          >
+            {todo.text}
+          </Text>
+          <ActionIcon
+            size="xs"
+            variant="subtle"
+            aria-label={`删除 ${todo.text}`}
+            data-testid={`todo-delete-${index}`}
+            onClick={() => remove(index)}
+            style={{ color: boardPalette.dim }}
+          >
+            <IconX size={12} />
+          </ActionIcon>
+        </Group>
+      ))}
+      <TextInput
+        size="xs"
+        placeholder="添加清单项,回车确认"
+        aria-label="添加清单项"
+        value={newTodo}
+        onChange={(event) => setNewTodo(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            add();
+          }
+        }}
+        data-testid="todo-add-input"
+      />
+    </Stack>
+  );
 }
 
 export function TaskDetailCard({
@@ -300,6 +428,15 @@ export function TaskDetailCard({
                 </Button>
               )}
             </Group>
+          </InscriptionRow>
+          <InscriptionRow label="TODO">
+            <TodoChecklist
+              key={task.id}
+              task={task}
+              kanbanEtag={kanbanEtag}
+              patchCard={patchCard}
+              onError={onError}
+            />
           </InscriptionRow>
           {editing ? (
             <>

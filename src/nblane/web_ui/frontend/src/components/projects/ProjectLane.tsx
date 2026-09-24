@@ -479,8 +479,16 @@ export function ProjectLane({
           etag: projectBoardEtag,
         },
         {
-          onSuccess: () =>
-            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` }),
+          onSuccess: (result) => {
+            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` });
+            // ≤1-click rule kept: the card exists with just a title, but the
+            // detail card opens right away so edits land in context (Esc /
+            // click-away costs nothing when the title was enough).
+            const createdId = result?.card?.id;
+            if (createdId) {
+              onSelectTask(createdId);
+            }
+          },
           onError: (error) => handleLaneMutationError(error, '添加失败', onRefresh),
         },
       ),
@@ -584,8 +592,14 @@ export function UnassignedLane({
       addCard.mutate(
         { body: { title, section: 'Queue', context: '' }, etag: kanbanEtag },
         {
-          onSuccess: () =>
-            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` }),
+          onSuccess: (result) => {
+            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` });
+            // Same auto-open as the project lanes: land in the detail card.
+            const createdId = result?.data?.card?.id;
+            if (createdId) {
+              onSelectTask(createdId);
+            }
+          },
           onError: (error) => handleLaneMutationError(error, '添加失败', onRefresh),
         },
       ),

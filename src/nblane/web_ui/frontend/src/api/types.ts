@@ -27,6 +27,15 @@ export type SkillTreeNode = Schemas['SkillTreeNodeModel'];
 /** SkillTreeResponse from web_api/schemas.py. */
 export type SkillTreeResponse = Schemas['SkillTreeResponse'];
 
+/** SkillTreeCategoryModel from web_api/schemas.py (banner rollup). */
+export type SkillTreeCategory = Schemas['SkillTreeCategoryModel'];
+
+/** SkillNodePatchRequest from web_api/schemas.py (三态 status write). */
+export type SkillNodePatchRequest = Schemas['SkillNodePatchRequest'];
+
+/** SkillNodePatchResponse from web_api/schemas.py (post-map YAML status). */
+export type SkillNodePatchResponse = Schemas['SkillNodePatchResponse'];
+
 /** HealthIssueModel from web_api/schemas.py. */
 export type HealthIssue = Schemas['HealthIssueModel'];
 
@@ -53,6 +62,9 @@ export type ActivityDismissResponse = Schemas['ActivityDismissResponse'];
 
 /** KanbanSubtaskModel from web_api/schemas.py. */
 export type KanbanSubtask = Schemas['KanbanSubtaskModel'];
+
+/** KanbanTodoModel from web_api/schemas.py (detail-card checklist item). */
+export type KanbanTodo = Schemas['KanbanTodoModel'];
 
 /** KanbanTaskModel from web_api/schemas.py. */
 export type KanbanTask = Schemas['KanbanTaskModel'];

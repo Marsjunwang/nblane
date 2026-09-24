@@ -12,7 +12,7 @@ import { EffectComposer, RenderPass, EffectPass, BloomEffect } from 'postprocess
 import { interpolate, converter } from 'culori';
 import {
   buildLayout, R, R_IN, R_GOAL, R_OUT, BAND_IN, BAND_OUT, BAND_TEXT,
-  INK, GOLD, GOLD_BRIGHT, TEMP,
+  INK, GOLD, GOLD_BRIGHT, TEMP, orbitPos, orbitPosAnchored,
   type StarmapLayout,
 } from './layout';
 import { mulberry32 } from './rng';
@@ -1042,6 +1042,27 @@ export class StarmapScene {
     this.applyMorph();
     if (opts.initialState === 'deepspace') this.goTo(1, true);
     this.loop();
+  }
+
+  /** Read-only debug probe: current chart-space radial distance of each goal
+   * star from the pole. In 图态 this must equal R_GOAL for every goal, at
+   * every morph cycle count (round-6 drift bug hunt). */
+  goalRadials(): { id: string; seatName?: string; r: number }[] {
+    const attr = this.goalPts.geometry.attributes.position.array as Float32Array;
+    return this.L.goals.map((g, i) => ({
+      id: g.id,
+      seatName: g.seatName,
+      r: Math.hypot(attr[i * 3], attr[i * 3 + 1]),
+    }));
+  }
+
+  /** Same probe for planets (round-6: anchored-formula residual check). */
+  planetRadials(): { id: string; r: number }[] {
+    const attr = this.planetPts.geometry.attributes.position.array as Float32Array;
+    return this.L.planets.map((p, i) => ({
+      id: p.id,
+      r: Math.hypot(attr[i * 3], attr[i * 3 + 1]),
+    }));
   }
 
   /** Morph to 图态 (0) or 境态 (1). */
@@ -2137,23 +2158,13 @@ export class StarmapScene {
     // (counter-rotation ramps with ch2; zero in 图态 — carving stays honest)
     this.bgLayer.rotation.z = -0.7 * ch2 * this.chart.rotation.z;
 
-    const rotZ = (x: number, y: number, a: number): [number, number] => [
-      x * Math.cos(a) - y * Math.sin(a),
-      x * Math.sin(a) + y * Math.cos(a),
-    ];
-
     // ---- orbit-managed clouds: single writer (morph lerp + integrated phase) ----
     {
       const gAttr = this.goalPts.geometry.attributes.position as THREE.BufferAttribute;
       const goalNow = L.goals.map((g, i) => {
         const deep = this.goalDeepBase[i];
         this.goalPhase[i] += dt * ((2 * Math.PI) / this.goalPeriods[i]) * ch3;
-        const [rx, ry] = rotZ(deep[0], deep[1], this.goalPhase[i]);
-        return [
-          g.plan[0] + (deep[0] - g.plan[0]) * ch2 + (rx - deep[0]),
-          g.plan[1] + (deep[1] - g.plan[1]) * ch2 + (ry - deep[1]),
-          g.plan[2] + (deep[2] - g.plan[2]) * ch2,
-        ];
+        return orbitPos(g.plan, deep, this.goalPhase[i], ch2, ch3);
       });
       goalNow.forEach((p, i) => gAttr.setXYZ(i, p[0], p[1], p[2]));
       gAttr.needsUpdate = true;
@@ -2183,14 +2194,16 @@ export class StarmapScene {
         const gi = p.goalIndex;
         const anchorDeep = gi >= 0 ? this.goalDeepBase[gi] : [0, 0, 0];
         const anchorNow = gi >= 0 ? goalNow[gi] : [0, 0, 0];
-        const [rx, ry] = rotZ(deep[0] - anchorDeep[0], deep[1] - anchorDeep[1], this.planetPhase[i]);
-        const morphX = p.plan[0] + (deep[0] - p.plan[0]) * ch2;
-        const morphY = p.plan[1] + (deep[1] - p.plan[1]) * ch2;
-        return [
-          morphX + (anchorNow[0] - anchorDeep[0]) + (rx - (deep[0] - anchorDeep[0])),
-          morphY + (anchorNow[1] - anchorDeep[1]) + (ry - (deep[1] - anchorDeep[1])),
-          p.plan[2] + (deep[2] - p.plan[2]) * ch2,
-        ];
+        // the follow term compares against the goal's ch2-MORPHED base — never
+        // its deep base (round-6 fix: deep-base comparison displaced grouped
+        // planets even on first load)
+        const gPlan = gi >= 0 ? L.goals[gi].plan : [0, 0, 0];
+        const anchorMorph = gi >= 0
+          ? [gPlan[0] + (anchorDeep[0] - gPlan[0]) * ch2, gPlan[1] + (anchorDeep[1] - gPlan[1]) * ch2]
+          : [0, 0];
+        return orbitPosAnchored(
+          p.plan, deep, anchorDeep, anchorMorph, anchorNow, this.planetPhase[i], ch2, ch3,
+        );
       });
       planetNow.forEach((p, i) => {
         pAttr.setXYZ(i, p[0], p[1], p[2]);

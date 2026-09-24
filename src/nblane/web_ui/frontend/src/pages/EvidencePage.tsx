@@ -1436,6 +1436,20 @@ export function EvidencePage() {
     setCursor(0);
   };
 
+  // Deep link (?stage=<stage>&focus=<entry_id>, e.g. from the skill-tree
+  // inscription card): preselect the entry once its stage list loads.
+  const focusParam = searchParams.get('focus') ?? '';
+  useEffect(() => {
+    if (!focusParam || selectedId === focusParam) {
+      return;
+    }
+    if (items.some((item) => item.id === focusParam)) {
+      setSelectedId(focusParam);
+      setSelectedRisk(null);
+      setSelectedCandidate(null);
+    }
+  }, [focusParam, items, selectedId]);
+
   // Keyboard quick-review mode (j/k navigate, a accept, s skip, 1/2/3 grade).
   useEffect(() => {
     if (!quickMode || stage !== 'review' || items.length === 0) {
