@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from nblane.core import auth as auth_core
+from nblane.core import git_backup
 
 SESSION_TTL_SECONDS = 12 * 3600
 
@@ -224,11 +225,13 @@ def _load_users_or_500() -> dict[str, auth_core.User]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def require_user(request: Request) -> CurrentUser:
-    """FastAPI dependency: resolve the current user or reject with 401.
+def _resolve_request_user(request: Request) -> CurrentUser | None:
+    """Resolve the request's user without enforcing authentication.
 
     Auth off (no ``NBLANE_AUTH_FILE``) yields the synthetic local admin;
-    auth on requires a valid ``nblane_auth_session`` cookie.
+    auth on yields the cookie's user or ``None`` when the session is
+    missing/invalid. Shared by ``require_user`` (which turns ``None`` into
+    401) and the git-actor middleware (which treats ``None`` as anonymous).
     """
     if not auth_core.auth_configured():
         return CurrentUser.from_user(_local_user(), auth_enabled=False)
@@ -239,7 +242,40 @@ def require_user(request: Request) -> CurrentUser:
             user = _load_users_or_500().get(claims.user_id)
             if user is not None:
                 return CurrentUser.from_user(user, auth_enabled=True)
-    raise HTTPException(status_code=401, detail="Authentication required")
+    return None
+
+
+def require_user(request: Request) -> CurrentUser:
+    """FastAPI dependency: resolve the current user or reject with 401.
+
+    Auth off (no ``NBLANE_AUTH_FILE``) yields the synthetic local admin;
+    auth on requires a valid ``nblane_auth_session`` cookie.
+    """
+    user = _resolve_request_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+class GitActorMiddleware:
+    """Pure-ASGI middleware: per-request git actor + backup result scope.
+
+    Starts a ``git_backup`` operation scoped to the authenticated user id
+    (the synthetic local admin when auth is off) so web-API mutations
+    commit as the caller instead of the default ``cli`` actor, keeping the
+    git history and the agent-activity writeback trace cross-checkable.
+    Pure ASGI (not ``BaseHTTPMiddleware``) so the contextvar set here
+    propagates into the threadpool contexts that run sync route handlers.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            user = _resolve_request_user(Request(scope))
+            git_backup.start_operation(user.id if user is not None else None)
+        await self.app(scope, receive, send)
 
 
 @router.post("/login", response_model=CurrentUser)

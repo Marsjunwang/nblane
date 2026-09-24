@@ -217,19 +217,27 @@ issue),工作量小,列入 §4 缺口 G5。
 
 ### 3.2 留痕簿:agent 动作可审计(契约 §7 的硬要求)
 
-现状缺口:**直接 API mutation 不落 agent-activity**——writeback 目前只有
-Review/Studio 流写(`core/review_actions.py:822` `record_writeback_activity`);
-checkins/goals/north-star/plan 实例化等端点无留痕。另外 8504 的 git commit
-actor 是默认 "cli"(web_api 未调 `git_backup.set_actor`,core/git_backup.py:12)。
+现状缺口(**已于 2026-09-24 由 G1/G2 闭合**):~~直接 API mutation 不落
+agent-activity~~——writeback 此前只有 Review/Studio 流写
+(`core/review_actions.py` `record_writeback_activity`);~~8504 的 git
+commit actor 是默认 "cli"~~(现由 `GitActorMiddleware` 按请求设为当前
+用户 id,core/git_backup.py `start_operation`)。
 
-建设(G1/G2,见 §4):
+建设(G1/G2,见 §4;**均已落地 2026-09-24**):
 - **G1**:web_api 在 mutation 完成且 `CurrentUser.id == "openclaw"` 时追加
   writeback 条目(`kind=writeback`、`source_page="openclaw"`、
-  `status="applied"`、note=触发它的那句对话确认、refs、changed_paths),
-  复用 `record_writeback_activity`。覆盖第一环写面:checkins、kanban
-  move/done/schedule/patch、goals/north-star、plan instantiate、结晶 apply。
-- **G2**:web_api 每个请求以 user id 调 `git_backup.start_operation(actor=
-  user.id)`,git 历史与留痕簿互证。
+  `status="applied"`、note=动作摘要、refs、changed_paths),复用
+  `record_writeback_activity`(routes_v1 `_record_agent_writeback`;
+  `source_ref` 带唯一后缀保证每次 mutation 各成条目;no-op 不留痕,其他
+  用户不留痕;新增非人类账号时放宽 id 判断即可扩展)。覆盖第一环写面:
+  checkins POST/DELETE、kanban cards POST/DELETE + move/done/schedule/
+  patch、goals POST/PATCH、PATCH north-star、plan-templates instantiate、
+  结晶 apply、证据 review/skill-links/edit、skill-tree 节点 PATCH、habits
+  archive/delete、project case save/archive/delete。
+- **G2**:web_api 每个请求经纯 ASGI `GitActorMiddleware`
+  (web_api/auth.py)以 user id 调 `git_backup.start_operation(actor=
+  user.id)`——与 `require_user` 共享 `_resolve_request_user` 会话解析;
+  auth 关闭时 actor 为合成账号 `local`。git 历史与留痕簿互证。
 - 留痕簿消费面已有:SPA 代理活动页(ActivityPage)+
   `GET /activity`(:647)可筛选 `kind=writeback`。
 
@@ -295,8 +303,8 @@ actor 是默认 "cli"(web_api 未调 `git_backup.set_actor`,core/git_backup.py:1
 
 | # | 缺口 | 为什么排这 | 落点 |
 |---|---|---|---|
-| G1 | **agent writeback 留痕**(mutation 落 agent-activity) | 没有它,§7 契约不可审计,openclaw 上线即裸奔 | web_api mutation 层 + `record_writeback_activity` |
-| G2 | **git actor = 当前用户** | 与 G1 互证,一行级改动 | web_api 请求生命周期 |
+| G1 | ~~**agent writeback 留痕**(mutation 落 agent-activity)~~ **已落地 2026-09-24** | 没有它,§7 契约不可审计,openclaw 上线即裸奔 | web_api mutation 层 + `record_writeback_activity` |
+| G2 | ~~**git actor = 当前用户**~~ **已落地 2026-09-24** | 与 G1 互证,一行级改动 | web_api 请求生命周期 |
 | G3 | ~~**技能状态写 API**(PATCH skill-tree 节点 status)~~ **已落地 2026-09-24** | 第一环唯一没有 API 写面的阶段——证据评审后点亮技能仍要手改 YAML,直接卡 phase-plan 验收标准 | `PATCH /profiles/{name}/skill-tree/nodes/{id}`(status 域 locked/learning/lit,lit 落 YAML `solid`,ETag/412 样板照抄;技能树页铭文卡三态步进器已接上) |
 | G4 | **拓片**(chronicle + claims 年度叙事) | 成长统计的定案去向(首页/拓片),chronicle.yaml 数据已在累积(home-editing-starmap-design.md §8),只欠渲染 | 先只读 API + 首页入口 |
 | G5 | **Settings 档案维护 / 首页健康印** | Health 页删除的正式承接(§2.2) | SPA Settings 小节渲染 `GET /health` |

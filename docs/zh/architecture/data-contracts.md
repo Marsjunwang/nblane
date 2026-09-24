@@ -303,6 +303,14 @@ items:
 - 第一版只有 Review 来源且 owner 为 evidence / kanban / public site 的 pending item 可在 Activity 页直接应用；其他 patch 只审查和跳转 owner 页面。
 - 看板内 Codex 只读 AI backend 失败时，`source_page` 为 `Kanban`、`source_ref`
   为 `kanban:<task_id>`，并返回 `activity_item_id` 给看板错误卡片用于跳转。
+- **agent 直写留痕(G1,2026-09-24)**:web_api 第一环 mutation 端点在
+  `CurrentUser.id == "openclaw"` 且实际发生变更时追加
+  `kind=writeback`、`source_page="openclaw"`、`status="applied"` 条目
+  (复用 `record_writeback_activity`;`source_ref` 带唯一后缀,同一动作
+  一天多次各成条目);no-op mutation 不留痕,其他用户不留痕。配套地,
+  web_api 每个请求以当前用户 id 启动 `git_backup.start_operation`
+  (`GitActorMiddleware`,G2),git 提交 actor 与留痕簿互证;auth 关闭时
+  actor 为合成账号 `local`。
 
 ### Web Preferences and Profile Codex Home
 

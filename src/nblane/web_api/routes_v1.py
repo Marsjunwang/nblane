@@ -32,8 +32,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.metadata
+import logging
 import os
 import re
+import uuid
 from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
@@ -389,6 +391,8 @@ def app_version() -> str:
 
 router = APIRouter(prefix="/api/v1")
 
+_logger = logging.getLogger(__name__)
+
 
 def _resolve_profile(name: str):
     """Validate *name* and return its profile directory.
@@ -442,6 +446,59 @@ def require_profile_access(
 
 
 PROFILE_DEPENDENCY = [Depends(require_profile_access)]
+
+
+AGENT_ACCOUNT_ID = "openclaw"
+
+
+def _record_agent_writeback(
+    user: CurrentUser,
+    profile: str,
+    *,
+    action: str,
+    note: str,
+    target_owner: str = "profile_context",
+    refs: dict[str, Any] | None = None,
+    changed_paths: list[str | Path] | None = None,
+) -> None:
+    """Trace one completed agent-account mutation in agent-activity.yaml (G1).
+
+    Fires only when the caller is the ``openclaw`` service account — the
+    agent write contract (home-editing-starmap-design §7) makes
+    agent-activity.yaml the audit book for agent writes, and direct API
+    mutations would otherwise leave no trace. Extension path for further
+    non-human accounts: widen the id check (e.g. a role/member predicate).
+
+    Callers invoke this only on the path where the mutation actually
+    changed something (the routes keep their no-op discipline). The trace
+    is best-effort: the mutation's own writes already landed, so a trace
+    failure is logged, never raised into a completed mutation's response.
+    """
+    if user.id != AGENT_ACCOUNT_ID:
+        return
+    try:
+        record_writeback_activity(
+            profile,
+            source_page=AGENT_ACCOUNT_ID,
+            target_owner=target_owner,
+            candidate_type=action,
+            # A unique suffix keeps each mutation a distinct entry (the
+            # writeback id is a digest of these fields; Review/Studio flows
+            # rely on digest stability for idempotent re-recording, agent
+            # mutations need the opposite).
+            source_ref=f"{AGENT_ACCOUNT_ID}:{action}:{uuid.uuid4().hex[:10]}",
+            title=note,
+            refs=refs,
+            changed_paths=changed_paths,
+            status="applied",
+        )
+    except Exception:
+        _logger.warning(
+            "agent writeback trace failed for %s on %s",
+            action,
+            profile,
+            exc_info=True,
+        )
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -697,6 +754,7 @@ def patch_profile_skill_node(
     body: SkillNodePatchRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> SkillNodePatchResponse | JSONResponse:
     """Set one skill node's 三态 status in skill-tree.yaml (G3 write).
 
@@ -793,6 +851,22 @@ def patch_profile_skill_node(
                     pdir / chronicle_core.CHRONICLE_FILENAME
                 ),
             )
+        trace_paths = [pdir / profile_io.SKILL_TREE_FILENAME]
+        if (pdir / "SKILL.md").exists():
+            trace_paths.append(pdir / "SKILL.md")
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="skill_node.patch",
+            target_owner="skill_tree",
+            note=f"skill node {nid}: {previous} → {yaml_status}",
+            refs={
+                "node_id": nid,
+                "previous_status": previous,
+                "status": yaml_status,
+            },
+            changed_paths=trace_paths,
+        )
     response.headers["ETag"] = _skill_tree_etag(pdir)
     return SkillNodePatchResponse(
         ok=True,
@@ -1325,6 +1399,7 @@ def add_profile_kanban_card(
     body: KanbanCardCreateRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> KanbanMutationResponse | JSONResponse:
     """Quick-add one card (only ``title`` is required; default Queue).
 
@@ -1375,6 +1450,15 @@ def add_profile_kanban_card(
     created_id = ensured[target][-1].id
     result = _save_kanban_mutation(pdir, ensured, base, snapshot)
     section, stored = _find_card_by_id(result.sections, created_id)
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="kanban.card.add",
+        target_owner="kanban",
+        note=f"kanban add: {title!r} → {section}",
+        refs={"card_id": stored.id, "section": section},
+        changed_paths=[kanban_path(pdir)],
+    )
     response.headers["ETag"] = _kanban_etag(pdir)
     return KanbanMutationResponse(
         ok=True,
@@ -1391,6 +1475,8 @@ def _mutate_kanban_card_section(
     target: str,
     response: Response,
     if_match: str | None,
+    user: CurrentUser,
+    action: str,
     to_index: int | None = None,
 ) -> KanbanMutationResponse | JSONResponse:
     """Shared move/done mutation: relocate one card to *target*.
@@ -1424,7 +1510,8 @@ def _mutate_kanban_card_section(
         raise ApiError(404, "kanban_card_not_found", match_error)
     from_section, _index, task = hit
     warnings: list[str] = []
-    if from_section == target and to_index is None:
+    no_op = from_section == target and to_index is None
+    if no_op:
         warnings.append(
             f"card {task.title.strip()!r} is already in {target!r}; "
             "no move needed"
@@ -1438,6 +1525,17 @@ def _mutate_kanban_card_section(
         )
     result = _save_kanban_mutation(pdir, moved, base, snapshot)
     section, stored = _find_card_by_id(result.sections, task.id)
+    if not no_op:
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action=action,
+            target_owner="kanban",
+            note=f"{action}: {task.title.strip()!r} → {section}",
+            refs={"card_id": task.id, "from_section": from_section,
+                  "section": section},
+            changed_paths=[kanban_path(pdir)],
+        )
     response.headers["ETag"] = _kanban_etag(pdir)
     return KanbanMutationResponse(
         ok=True,
@@ -1461,6 +1559,7 @@ def move_profile_kanban_card(
     body: KanbanCardMoveRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> KanbanMutationResponse | JSONResponse:
     """Move one card to ``target_section``. Honors ``If-Match`` (412).
 
@@ -1473,7 +1572,8 @@ def move_profile_kanban_card(
     if target is None:
         raise _unknown_kanban_section(body.target_section)
     return _mutate_kanban_card_section(
-        name, card_ref, target, response, if_match, body.to_index
+        name, card_ref, target, response, if_match, user, "kanban.card.move",
+        body.to_index,
     )
 
 
@@ -1488,6 +1588,7 @@ def done_profile_kanban_card(
     card_ref: str,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> KanbanMutationResponse | JSONResponse:
     """Mark one card done by moving it to Done (done flag + completed_on).
 
@@ -1496,7 +1597,8 @@ def done_profile_kanban_card(
     Done answers 200 with an "already there" warning. Honors ``If-Match``.
     """
     return _mutate_kanban_card_section(
-        name, card_ref, KANBAN_DONE, response, if_match
+        name, card_ref, KANBAN_DONE, response, if_match, user,
+        "kanban.card.done",
     )
 
 
@@ -1512,6 +1614,7 @@ def schedule_profile_kanban_card(
     body: KanbanCardScheduleRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> KanbanMutationResponse | JSONResponse:
     """Set or clear one card's planned date range (timeline drag-to-reschedule).
 
@@ -1564,6 +1667,18 @@ def schedule_profile_kanban_card(
     sections[from_section][_index] = scheduled
     result = _save_kanban_mutation(pdir, sections, base, snapshot)
     section, stored = _find_card_by_id(result.sections, task.id)
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="kanban.card.schedule",
+        target_owner="kanban",
+        note=(
+            f"kanban schedule: {task.title.strip()!r} "
+            f"{stored.planned_start or '—'}..{stored.planned_end or '—'}"
+        ),
+        refs={"card_id": task.id, "section": section},
+        changed_paths=[kanban_path(pdir)],
+    )
     response.headers["ETag"] = _kanban_etag(pdir)
     return KanbanMutationResponse(
         ok=True,
@@ -1586,6 +1701,7 @@ def patch_profile_kanban_card(
     body: KanbanCardPatchRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> KanbanMutationResponse | JSONResponse:
     """Edit one card's fields (lane assignment, title, context, why, tags, todos).
 
@@ -1668,6 +1784,18 @@ def patch_profile_kanban_card(
                 "reload before retrying.",
                 _kanban_etag(pdir),
             )
+    trace_paths = [kanban_path(pdir)]
+    if "project_id" in updates:
+        trace_paths.append(pdir / "project-board.yaml")
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="kanban.card.patch",
+        target_owner="kanban",
+        note=f"kanban patch: {task.title.strip()!r} [{', '.join(updates)}]",
+        refs={"card_id": task.id, "section": section},
+        changed_paths=trace_paths,
+    )
     response.headers["ETag"] = _kanban_etag(pdir)
     return KanbanMutationResponse(
         ok=True,
@@ -1690,6 +1818,7 @@ def delete_profile_kanban_card(
     response: Response,
     body: KanbanCardDeleteRequest | None = None,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> KanbanCardDeleteResponse | JSONResponse:
     """Delete one kanban card for good (detail-card danger action).
 
@@ -1735,6 +1864,18 @@ def delete_profile_kanban_card(
                 pdir / chronicle_core.CHRONICLE_FILENAME
             ),
         )
+    trace_paths = [kanban_path(pdir)]
+    if body is not None and body.record_chronicle:
+        trace_paths.append(pdir / chronicle_core.CHRONICLE_FILENAME)
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="kanban.card.delete",
+        target_owner="kanban",
+        note=f"kanban delete: {deleted_title!r}",
+        refs={"card_id": deleted_ref, "section": from_section},
+        changed_paths=trace_paths,
+    )
     response.headers["ETag"] = _kanban_etag(pdir)
     return KanbanCardDeleteResponse(
         ok=True, deleted_ref=deleted_ref, deleted_title=deleted_title
@@ -2261,6 +2402,7 @@ def patch_profile_north_star(
     body: NorthStarPatchRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> NorthStarMutationResponse | JSONResponse:
     """Surgically rewrite the North Star in SKILL.md's Identity section.
 
@@ -2338,6 +2480,18 @@ def patch_profile_north_star(
                 pdir / chronicle_core.CHRONICLE_FILENAME
             ),
         )
+    if outcome.changed:
+        trace_paths = [pdir / "SKILL.md"]
+        if "full" in outcome.changed_keys:
+            trace_paths.append(pdir / chronicle_core.CHRONICLE_FILENAME)
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="north_star.patch",
+            note=f"north-star update [{', '.join(outcome.changed_keys)}]",
+            refs={"changed_keys": list(outcome.changed_keys)},
+            changed_paths=trace_paths,
+        )
     response.headers["ETag"] = _skill_md_etag(pdir)
     return NorthStarMutationResponse(
         ok=True,
@@ -2414,6 +2568,7 @@ def create_profile_goal(
     body: GoalCreateRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> GoalMutationResponse | JSONResponse:
     """Create one goal in goals.yaml and append ``goal.added`` to chronicle.
 
@@ -2469,6 +2624,17 @@ def create_profile_goal(
             pdir / chronicle_core.CHRONICLE_FILENAME
         ),
     )
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="goal.add",
+        note=f"goal add: {goal.title!r} ({goal.id})",
+        refs={"goal_id": goal.id},
+        changed_paths=[
+            pdir / "goals.yaml",
+            pdir / chronicle_core.CHRONICLE_FILENAME,
+        ],
+    )
     response.headers["ETag"] = _goals_etag(pdir)
     return GoalMutationResponse(
         ok=True,
@@ -2496,6 +2662,7 @@ def patch_profile_goal(
     body: GoalPatchRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> GoalMutationResponse | JSONResponse:
     """Edit a goal's title/summary/start/target/status in goals.yaml.
 
@@ -2592,6 +2759,17 @@ def patch_profile_goal(
                 note=goal.title,
                 snapshot=chronicle_snapshot,
             )
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="goal.patch",
+            note=f"goal patch: {goal.title!r} [{', '.join(changed_keys)}]",
+            refs={"goal_id": goal.id, "changed_keys": list(changed_keys)},
+            changed_paths=[
+                pdir / "goals.yaml",
+                pdir / chronicle_core.CHRONICLE_FILENAME,
+            ],
+        )
     response.headers["ETag"] = _goals_etag(pdir)
     return GoalMutationResponse(
         ok=True,
@@ -3173,6 +3351,7 @@ def edit_profile_evidence_entry(
     body: EvidenceEditRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> EvidenceReviewMutationResponse | JSONResponse:
     """Edit whitelist fields on one pool row.
 
@@ -3250,6 +3429,22 @@ def edit_profile_evidence_entry(
         raise ApiError(
             404, "evidence_not_found", f"Unknown evidence entry: {eid}"
         )
+    if changed:
+        trace_paths = [pdir / profile_io.EVIDENCE_POOL_FILENAME]
+        if (pdir / "SKILL.md").exists():
+            trace_paths.append(pdir / "SKILL.md")
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="evidence.edit",
+            target_owner="evidence_pool",
+            note=(
+                f"evidence edit: {eid} "
+                f"[{', '.join(sorted([*cleaned, *bool_flags]))}]"
+            ),
+            refs={"entry_id": eid},
+            changed_paths=trace_paths,
+        )
     response.headers["ETag"] = _evidence_pool_etag(pdir)
     return EvidenceReviewMutationResponse(ok=True, changed=changed, missing=[])
 
@@ -3266,6 +3461,7 @@ def review_profile_evidence_entry(
     body: EvidenceEntryActionRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> EvidenceReviewMutationResponse | JSONResponse:
     """Single-entry review action: accept / reject (deprecate) / restore.
 
@@ -3332,6 +3528,19 @@ def review_profile_evidence_entry(
         raise ApiError(
             404, "evidence_not_found", f"Unknown evidence entry: {eid}"
         )
+    if changed:
+        trace_paths = [pdir / profile_io.EVIDENCE_POOL_FILENAME]
+        if (pdir / "SKILL.md").exists():
+            trace_paths.append(pdir / "SKILL.md")
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="evidence.review",
+            target_owner="evidence_pool",
+            note=f"evidence review: {action} {eid}",
+            refs={"entry_id": eid, "review_action": action},
+            changed_paths=trace_paths,
+        )
     response.headers["ETag"] = _evidence_pool_etag(pdir)
     return EvidenceReviewMutationResponse(ok=True, changed=changed, missing=[])
 
@@ -3354,6 +3563,7 @@ def set_profile_evidence_skill_links(
     body: EvidenceSkillLinksRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> EvidenceSkillLinksResponse | JSONResponse:
     """Reconcile the skill nodes citing one evidence row (link/unlink).
 
@@ -3384,6 +3594,7 @@ def set_profile_evidence_skill_links(
             etag,
         )
     skill_ids = [str(item).strip() for item in body.skill_ids if str(item).strip()]
+    link_state: dict[str, list[str]] = {"before": []}
 
     def _apply(raw: dict[str, Any]) -> None:
         nodes = [
@@ -3391,6 +3602,16 @@ def set_profile_evidence_skill_links(
             for node in (raw.get("nodes") or [])
             if isinstance(node, dict)
         ]
+        link_state["before"] = sorted(
+            str(node.get("id", "") or "").strip()
+            for node in nodes
+            if eid
+            in [
+                str(ref).strip()
+                for ref in (node.get("evidence_refs") or [])
+                if str(ref).strip()
+            ]
+        )
         raw["nodes"] = evidence_review_core.set_evidence_skill_refs(
             nodes, eid, skill_ids
         )
@@ -3413,6 +3634,19 @@ def set_profile_evidence_skill_links(
         )
     if (pdir / "SKILL.md").exists():
         write_generated_blocks(pdir)
+    if link_state["before"] != sorted(skill_ids):
+        trace_paths = [pdir / profile_io.SKILL_TREE_FILENAME]
+        if (pdir / "SKILL.md").exists():
+            trace_paths.append(pdir / "SKILL.md")
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="evidence.skill_links",
+            target_owner="evidence_pool",
+            note=f"evidence skill-links: {eid} → [{', '.join(skill_ids)}]",
+            refs={"entry_id": eid, "skill_ids": list(skill_ids)},
+            changed_paths=trace_paths,
+        )
     response.headers["ETag"] = _skill_tree_etag(pdir)
     return EvidenceSkillLinksResponse(ok=True, entry_id=eid, skill_ids=skill_ids)
 
@@ -3649,7 +3883,9 @@ def draft_profile_crystallize(
     dependencies=PROFILE_DEPENDENCY,
 )
 def apply_profile_crystallize(
-    name: str, body: CrystallizeApplyRequest
+    name: str,
+    body: CrystallizeApplyRequest,
+    user: CurrentUser = Depends(require_user),
 ) -> CrystallizeApplyResponse:
     """Apply a confirmed crystallize draft (wizard step 3).
 
@@ -3676,6 +3912,25 @@ def apply_profile_crystallize(
             "crystallize_apply_failed",
             "; ".join(result["errors"]) or "Crystallize apply failed.",
         )
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="crystallize.apply",
+        target_owner="evidence_pool",
+        note=(
+            f"crystallize apply: {result['crystallized_count']} task(s), "
+            f"new evidence {result['new_evidence_ids']}"
+        ),
+        refs={
+            "task_ids": list(body.task_ids),
+            "new_evidence_ids": list(result["new_evidence_ids"]),
+        },
+        changed_paths=[
+            pdir / profile_io.EVIDENCE_POOL_FILENAME,
+            pdir / profile_io.SKILL_TREE_FILENAME,
+            kanban_path(pdir),
+        ],
+    )
     return CrystallizeApplyResponse(
         ok=True,
         warnings=result["warnings"],
@@ -4746,6 +5001,7 @@ def save_profile_project_case(
     body: ProjectCaseUpdateRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> ProjectCaseMutationResponse | JSONResponse:
     """Save the project basics + ref lists (``None`` fields keep the value).
 
@@ -4794,7 +5050,22 @@ def save_profile_project_case(
         update_project_case(board, case_id, **fields)
     except (KeyError, ValueError) as exc:
         raise ApiError(422, "invalid_project_case", str(exc)) from exc
-    return _synced_case_response(pdir, board, case_id, response, snapshots)
+    saved = _synced_case_response(pdir, board, case_id, response, snapshots)
+    if not isinstance(saved, JSONResponse):
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="project_case.save",
+            target_owner="work",
+            note=f"project save: {case_id} [{', '.join(sorted(fields))}]",
+            refs={"project_id": case_id},
+            changed_paths=[
+                pdir / "project-board.yaml",
+                kanban_path(pdir),
+                pdir / profile_io.EVIDENCE_POOL_FILENAME,
+            ],
+        )
+    return saved
 
 
 @router.post(
@@ -4808,6 +5079,7 @@ def archive_profile_project_case(
     case_id: str,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> ProjectCaseMutationResponse | JSONResponse:
     """Mark one project case archived. Honors ``If-Match`` (412)."""
     checked = _check_board_mutation(name, if_match)
@@ -4816,7 +5088,21 @@ def archive_profile_project_case(
     pdir, board, snapshots = checked
     _find_project_case(board, case_id)
     update_project_case(board, case_id, status="archived")
-    return _synced_case_response(pdir, board, case_id, response, snapshots)
+    saved = _synced_case_response(pdir, board, case_id, response, snapshots)
+    if not isinstance(saved, JSONResponse):
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="project_case.archive",
+            target_owner="work",
+            note=f"project archive: {case_id}",
+            refs={"project_id": case_id},
+            changed_paths=[
+                pdir / "project-board.yaml",
+                kanban_path(pdir),
+            ],
+        )
+    return saved
 
 
 @router.delete(
@@ -4831,6 +5117,7 @@ def delete_profile_project_case(
     body: ProjectCaseDeleteRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> ProjectCaseDeleteResponse | JSONResponse:
     """Delete one project case for good (user-decided, type-the-name confirm).
 
@@ -4914,6 +5201,25 @@ def delete_profile_project_case(
                 pdir / chronicle_core.CHRONICLE_FILENAME
             ),
         )
+    trace_paths = [kanban_path(pdir), pdir / "project-board.yaml"]
+    if body.record_chronicle:
+        trace_paths.append(pdir / chronicle_core.CHRONICLE_FILENAME)
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="project_case.delete",
+        target_owner="work",
+        note=(
+            f"project delete: {case.title!r} "
+            f"({tasks_unassigned} task(s) unassigned)"
+        ),
+        refs={
+            "project_id": case.id,
+            "tasks_unassigned": tasks_unassigned,
+            "evidence_refs_kept": evidence_refs_kept,
+        },
+        changed_paths=trace_paths,
+    )
     response.headers["ETag"] = _project_board_etag(pdir)
     return ProjectCaseDeleteResponse(
         ok=True,
@@ -5603,6 +5909,7 @@ def add_profile_checkin(
     body: CheckinCreateRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> CheckinMutationResponse | JSONResponse:
     """Append one habit check-in to the activity log (agent-facing hook).
 
@@ -5665,8 +5972,21 @@ def add_profile_checkin(
             _activity_log_etag(pdir),
         )
     response.headers["ETag"] = _activity_log_etag(pdir)
+    entry_dict = entry.to_dict()
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="checkin.add",
+        target_owner="work",
+        note=f"checkin: {habit_ref} ({entry_dict.get('date', '')})",
+        refs={
+            "checkin_id": str(entry_dict.get("id", "") or ""),
+            "habit": habit_ref,
+        },
+        changed_paths=[pdir / activity_log.ACTIVITY_LOG_FILENAME],
+    )
     return CheckinMutationResponse(
-        ok=True, checkin=CheckinModel(**entry.to_dict())
+        ok=True, checkin=CheckinModel(**entry_dict)
     )
 
 
@@ -5681,6 +6001,7 @@ def delete_profile_checkin(
     checkin_id: str,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> CheckinDeleteResponse | JSONResponse:
     """Remove one check-in row from the activity log (销印).
 
@@ -5724,6 +6045,15 @@ def delete_profile_checkin(
             "checkin_not_found",
             f"Unknown check-in id for profile {pdir.name}: {checkin_id}",
         )
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="checkin.delete",
+        target_owner="work",
+        note=f"checkin delete: {checkin_id}",
+        refs={"checkin_id": checkin_id},
+        changed_paths=[pdir / activity_log.ACTIVITY_LOG_FILENAME],
+    )
     response.headers["ETag"] = _activity_log_etag(pdir)
     return CheckinDeleteResponse(ok=True, checkin_id=checkin_id)
 
@@ -5766,6 +6096,7 @@ def archive_profile_habit(
     body: HabitArchiveRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> HabitArchiveResponse | JSONResponse:
     """Archive or unarchive one habit (``archived`` flag in activity-log.yaml).
 
@@ -5808,6 +6139,18 @@ def archive_profile_habit(
                 "reload before retrying.",
                 _activity_log_etag(pdir),
             )
+        _record_agent_writeback(
+            user,
+            pdir.name,
+            action="habit.archive",
+            target_owner="work",
+            note=(
+                f"habit {'archive' if body.archived else 'unarchive'}: "
+                f"{habit.title!r}"
+            ),
+            refs={"habit_id": habit.id, "archived": body.archived},
+            changed_paths=[pdir / activity_log.ACTIVITY_LOG_FILENAME],
+        )
     response.headers["ETag"] = _activity_log_etag(pdir)
     return HabitArchiveResponse(
         ok=True,
@@ -5835,6 +6178,7 @@ def delete_profile_habit(
     response: Response,
     body: HabitDeleteRequest | None = None,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> HabitDeleteResponse | JSONResponse:
     """Delete one habit and every check-in referencing it (confirmed).
 
@@ -5898,6 +6242,21 @@ def delete_profile_habit(
                 pdir / chronicle_core.CHRONICLE_FILENAME
             ),
         )
+    trace_paths = [pdir / activity_log.ACTIVITY_LOG_FILENAME]
+    if body is not None and body.record_chronicle:
+        trace_paths.append(pdir / chronicle_core.CHRONICLE_FILENAME)
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="habit.delete",
+        target_owner="work",
+        note=(
+            f"habit delete: {habit.title!r} "
+            f"({checkins_removed} check-ins removed)"
+        ),
+        refs={"habit_id": habit.id, "checkins_removed": checkins_removed},
+        changed_paths=trace_paths,
+    )
     response.headers["ETag"] = _activity_log_etag(pdir)
     return HabitDeleteResponse(
         ok=True,
@@ -6067,6 +6426,7 @@ def instantiate_profile_plan_template(
     body: PlanTemplateInstantiateRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
 ) -> PlanTemplateInstantiateResponse | JSONResponse:
     """Instantiate one habit-plan template into a project case + habit.
 
@@ -6175,6 +6535,26 @@ def instantiate_profile_plan_template(
         _task_section_index(pdir),
         _live_section_tasks(pdir),
         _archive_tasks(pdir),
+    )
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="plan_template.instantiate",
+        note=(
+            f"plan instantiate: {case.title!r} "
+            f"(template {template_id}, habit {habit.id})"
+        ),
+        refs={
+            "template_id": template_id,
+            "project_id": case.id,
+            "habit_id": habit.id,
+            "created_habit": created_habit,
+        },
+        changed_paths=[
+            pdir / "project-board.yaml",
+            pdir / activity_log.ACTIVITY_LOG_FILENAME,
+            pdir / plan_templates.PLAN_TEMPLATES_FILENAME,
+        ],
     )
     response.headers["ETag"] = _plan_templates_etag(pdir)
     return PlanTemplateInstantiateResponse(

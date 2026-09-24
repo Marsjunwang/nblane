@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from nblane.web_api.assistant import router as assistant_router
-from nblane.web_api.auth import LoginRateLimiter
+from nblane.web_api.auth import GitActorMiddleware, LoginRateLimiter
 from nblane.web_api.auth import router as auth_router
 from nblane.web_api.routes_v1 import (
     ApiError,
@@ -38,6 +38,7 @@ def create_app(
 ) -> FastAPI:
     """Build the nblane API application (API + built SPA in one process)."""
     app = FastAPI(title="nblane API", version=app_version())
+    app.add_middleware(GitActorMiddleware)
     app.state.login_rate_limiter = login_rate_limiter or LoginRateLimiter()
     app.add_exception_handler(ApiError, api_error_handler)
     # Unify 422 bodies: pydantic validation failures get the same
