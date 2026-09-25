@@ -162,7 +162,8 @@ class TestAssistantProbes(unittest.TestCase):
             payload = client.get("/api/v1/system/assistant").json()
         self.assertEqual(payload["automations"], {"total": 1, "enabled": 1})
 
-    def test_probe_timeouts_yield_null_fields(self) -> None:        client = make_client(runner=make_runner(fail=True))
+    def test_probe_timeouts_yield_null_fields(self) -> None:
+        client = make_client(runner=make_runner(fail=True))
         with patch.dict(os.environ, {"NBLANE_AUTH_FILE": ""}):
             payload = client.get("/api/v1/system/assistant").json()
         self.assertTrue(payload["available"])
