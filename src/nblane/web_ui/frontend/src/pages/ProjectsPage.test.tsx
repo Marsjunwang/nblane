@@ -254,9 +254,12 @@ describe('ProjectsPage board view', () => {
     expect(screen.getByTestId('lane-column-p1-queue')).toBeInTheDocument();
     expect(screen.getByTestId('lane-column-p1-doing')).toBeInTheDocument();
 
-    // Someday renders as a dashed badge card inside the Queue column.
+    // Someday renders as a dashed badge card inside the Queue column,
+    // with the two exits into the daily loop on the card itself.
     const someday = screen.getByTestId('someday-card-kb_3');
     expect(someday).toHaveTextContent('someday');
+    expect(within(someday).getByTestId('someday-queue-kb_3')).toHaveTextContent('列入 Queue');
+    expect(within(someday).getByTestId('someday-done-kb_3')).toHaveTextContent('标记 Done');
     expect(screen.getByTestId('lane-column-p1-queue')).toContainElement(someday);
 
     // Done fold count includes archived tasks.
@@ -949,14 +952,15 @@ describe('ProjectsPage selection & views', () => {
     expect(await screen.findByTestId('timeline-view')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-month-axis')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-today-line')).toBeInTheDocument();
-    // kb_2 has started_on → a bar; kb_1 has no dates → 未排期 row note.
-    expect(screen.getByTestId('timeline-bar-kb_2')).toBeInTheDocument();
+    // kb_2 started 2026-09-10 → spans 14 days to today → sinks to a 期间带
+    // (P1 分层); kb_1 has no dates → 未排期 row note.
+    expect(screen.getByTestId('timeline-period-kb_2')).toBeInTheDocument();
     expect(screen.getByTestId('unscheduled-p1')).toHaveTextContent('读 VLA 综述');
     // Habit strip with this week's done dot.
     expect(screen.getByTestId('timeline-habit-exercise')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-habit-dot-exercise-2026-09-23')).toBeInTheDocument();
-    // Clicking a bar selects the task (shared detail card).
-    fireEvent.click(screen.getByTestId('timeline-bar-kb_2'));
+    // Clicking a period band selects the task (shared detail card).
+    fireEvent.click(screen.getByTestId('timeline-period-kb_2'));
     expect(await screen.findByTestId('task-detail-card')).toHaveTextContent('完成技能树重构');
   });
 
@@ -1141,6 +1145,30 @@ describe('ProjectsPage mutations', () => {
     });
     // Mutations use the kanban-file ETag, never the board ETag.
     expect((moveCall?.[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+  });
+
+  it('promotes a someday badge into Queue or Done without opening the detail card', async () => {
+    const fetchMock = stubFetch();
+    renderPage();
+    fireEvent.click(await screen.findByTestId('someday-queue-kb_3'));
+
+    expect(await screen.findByText('已列入 Queue')).toBeInTheDocument();
+    const moveCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).endsWith('/kanban/cards/kb_3/move') && init?.method === 'POST',
+    );
+    expect(moveCall).toBeDefined();
+    expect(JSON.parse(String(moveCall?.[1]?.body))).toEqual({ target_section: 'Queue' });
+    expect((moveCall?.[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    expect(lastSearch).not.toContain('task=');
+
+    fireEvent.click(screen.getByTestId('someday-done-kb_3'));
+    expect(await screen.findByText('已标记完成')).toBeInTheDocument();
+    const doneCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).endsWith('/kanban/cards/kb_3/done') && init?.method === 'POST',
+    );
+    expect(doneCall).toBeDefined();
+    expect((doneCall?.[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    expect(lastSearch).not.toContain('task=');
   });
 
   it('check-in posts without If-Match on first use, then caches the ETag', async () => {
@@ -1640,5 +1668,193 @@ describe('ProjectsPage habit phase plans', () => {
     expect(alert).toHaveTextContent('weekly_tasks must cover exactly 4 weeks');
     // The modal stays open so the user can fix and retry.
     expect(screen.getByTestId('new-habit-plan-modal-exercise')).toBeInTheDocument();
+  });
+});
+
+// --- Timeline P1: 分层 / 归档泳道 / 折叠 / 虚位 / 空行 / 撞期 / URL --------
+
+function makeP1Project(overrides: Record<string, unknown>) {
+  return {
+    id: '',
+    title: '',
+    status: 'active',
+    kind: 'work',
+    visibility: 'private',
+    summary: '',
+    time_range: '',
+    goal_refs: ['g1'],
+    milestones: [],
+    queue: [],
+    doing: [],
+    someday: [],
+    column_counts: {},
+    done_count: 0,
+    archived_done_count: 0,
+    evidence_ref_count: 0,
+    last_activity: '',
+    habit_id: '',
+    ...overrides,
+  };
+}
+
+const BOARD_P1 = {
+  profile: 'alice',
+  today: '2026-09-25',
+  north_star: '',
+  goals: [
+    {
+      id: 'g1',
+      title: '目标',
+      status: 'active',
+      summary: '',
+      target: '',
+      projects: [
+        makeP1Project({
+          id: 'p_long',
+          title: '长项目',
+          time_range: '2026-08-01/2026-11-30',
+          queue: [
+            // 45d span → sinks to a 期间带.
+            makeTask({ id: 't_long', title: '长任务', planned_start: '2026-09-01', planned_end: '2026-10-15', project_id: 'p_long' }),
+            // 5d + 7d future bars overlapping 09-30→10-02 → 撞期.
+            makeTask({ id: 't_short', title: '短任务', planned_start: '2026-09-28', planned_end: '2026-10-02', project_id: 'p_long' }),
+            makeTask({ id: 't_clash', title: '撞期任务', planned_start: '2026-09-30', planned_end: '2026-10-06', project_id: 'p_long' }),
+          ],
+          someday: [
+            // 虚位 whose activation date is today → already 朱砂 expired.
+            makeTask({ id: 't_seat', title: '虚位任务', section: 'Someday / Maybe', column: 'someday', planned_start: '2026-09-25', project_id: 'p_long' }),
+          ],
+        }),
+        // Nothing inside the window → 空行瘦身.
+        makeP1Project({ id: 'p_empty', title: '空项目', time_range: '2026-01-01/2026-02-01' }),
+      ],
+    },
+  ],
+  ungrouped_projects: [
+    makeP1Project({
+      id: 'p_arch',
+      title: '旧项目',
+      status: 'archived',
+      goal_refs: [],
+      time_range: '2026-06-01/2026-08-31',
+      queue: [
+        makeTask({ id: 't_arch', title: '旧任务', planned_start: '2026-09-26', planned_end: '2026-09-30', project_id: 'p_arch' }),
+      ],
+    }),
+  ],
+  unassigned_tasks: [],
+  habits: [],
+  stats: {},
+};
+
+function stubP1Fetch() {
+  return stubFetch((url) => {
+    if (url.includes('/profiles/alice/projects-board')) {
+      return new Response(JSON.stringify(BOARD_P1), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+      });
+    }
+    return undefined as unknown as Response;
+  });
+}
+
+describe('ProjectsPage timeline P1', () => {
+  it('sinks ≥14d bars to 期间带 and keeps short bars on sub-lanes', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+
+    expect(await screen.findByTestId('timeline-period-t_long')).toBeInTheDocument();
+    expect(screen.getByTestId('timeline-bar-t_short')).toBeInTheDocument();
+    // Someday seat: dashed 虚位, expired (planned_start == today → 朱砂).
+    expect(screen.getByTestId('timeline-someday-t_seat')).toHaveAttribute('data-expired', 'true');
+  });
+
+  it('marks future-zone schedule clashes with the 朱砂 stroke flag', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+
+    expect(await screen.findByTestId('timeline-bar-t_short')).toHaveAttribute('data-clash', 'true');
+    expect(screen.getByTestId('timeline-bar-t_clash')).toHaveAttribute('data-clash', 'true');
+    // The period band never flashes 朱砂 even though it overlaps both.
+    expect(screen.getByTestId('timeline-period-t_long')).not.toHaveAttribute('data-clash');
+  });
+
+  it('slims lanes with nothing in the window and says so on the label', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+
+    expect(await screen.findByTestId('timeline-note-p_empty')).toHaveTextContent('本窗口无活动');
+    // The busy lane shows no such note.
+    expect(screen.queryByTestId('timeline-note-p_long')).not.toBeInTheDocument();
+  });
+
+  it('renders archived projects as a read-only 归档 section behind a toggle', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+
+    const section = await screen.findByTestId('timeline-group-archived');
+    expect(within(section).getByTestId('timeline-badge-p_arch')).toHaveTextContent('归档');
+    // 整行降饱和 + 无地色带, bars muted (pointer drag disabled → no onPointerDown).
+    expect(within(section).getByTestId('timeline-bar-t_arch')).toBeInTheDocument();
+    expect(within(section).queryByTestId('project-range-p_arch')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('timeline-archived-toggle'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('timeline-group-archived')).not.toBeInTheDocument(),
+    );
+    expect(window.localStorage.getItem('nblane.timeline.archived')).toBe('0');
+  });
+
+  it('collapses a row to envelope + ticks + count, persisted per case id', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+
+    const row = await screen.findByTestId('timeline-row-p_long');
+    fireEvent.click(screen.getByTestId('timeline-collapse-p_long'));
+
+    expect(await within(row).findByTestId('collapsed-envelope')).toBeInTheDocument();
+    // 2 short bars + 1 期间带 + 1 虚位 seat = 4 ticks, 「4 任务」.
+    expect(within(row).getAllByTestId('collapsed-tick')).toHaveLength(4);
+    expect(within(row).getByTestId('collapsed-count')).toHaveTextContent('4 任务');
+    // Bars leave the sub-lanes while collapsed.
+    expect(within(row).queryByTestId('timeline-bar-t_short')).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem('nblane.timeline.collapsed') ?? '[]')).toEqual([
+      'p_long',
+    ]);
+
+    fireEvent.click(screen.getByTestId('timeline-collapse-p_long'));
+    expect(await within(row).findByTestId('timeline-bar-t_short')).toBeInTheDocument();
+    expect(window.localStorage.getItem('nblane.timeline.collapsed')).toBe('[]');
+  });
+
+  it('round-trips zoom/window through the URL and resets to defaults', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+
+    // Default 半年窗 (2026-09-25 − 136d → time_range right extension 11-30).
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+    expect(lastSearch).toContain('tz=half');
+
+    // Focus writes a custom window into the URL.
+    fireEvent.click(screen.getByTestId('timeline-focus-p_long'));
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-07-26 → 2026-12-06'));
+    expect(lastSearch).toContain('tws=2026-07-26');
+    expect(lastSearch).toContain('twe=2026-12-06');
+
+    // 重置视图: back to the default window; window params leave the URL.
+    fireEvent.click(screen.getByTestId('timeline-reset-view'));
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+    expect(lastSearch).toContain('tz=half');
+    expect(lastSearch).not.toContain('tws=');
+  });
+
+  it('restores the zoom preset from the URL on entry', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline&tz=month');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+    // 月窗: today − 23d = 2026-09-02; right extension to the time_range end.
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-09-02 → 2026-11-30'));
   });
 });

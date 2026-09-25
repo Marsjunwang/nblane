@@ -37,6 +37,19 @@ import {
   LANE_GAP,
   ROW_PAD_Y,
   MIN_ROW_HEIGHT,
+  collapsedSummary,
+  decodeTimelineParams,
+  detectScheduleClashes,
+  encodeTimelineParams,
+  isPeriodBand,
+  laneIsEmptyInWindow,
+  loadArchivedVisible,
+  loadCollapsedRows,
+  saveArchivedVisible,
+  saveCollapsedRows,
+  somedaySeatRange,
+  TIMELINE_ARCHIVED_KEY,
+  TIMELINE_COLLAPSED_KEY,
 } from './timelineMath';
 
 describe('timelineMath date primitives', () => {
@@ -577,5 +590,200 @@ describe('timelineMath focusWindowForProject (聚焦)', () => {
         '2026-09-25',
       ),
     ).toBeNull();
+  });
+});
+
+describe('timelineMath 长/短任务分层 (period bands)', () => {
+  it('sinks spans of 14+ days to 期间带, keeps shorter ones as bars', () => {
+    expect(isPeriodBand({ start: '2026-09-01', end: '2026-09-13' })).toBe(false); // 13d
+    expect(isPeriodBand({ start: '2026-09-01', end: '2026-09-14' })).toBe(true); // 14d
+    expect(isPeriodBand({ start: '2026-09-01', end: '2026-12-31' })).toBe(true);
+  });
+
+  it('anchors someday seats at planned_start with planned_end span', () => {
+    expect(somedaySeatRange({ planned_start: '2026-10-01', planned_end: '2026-10-05' })).toEqual({
+      start: '2026-10-01',
+      end: '2026-10-05',
+    });
+    expect(somedaySeatRange({ planned_start: '2026-10-01', planned_end: null })).toEqual({
+      start: '2026-10-01',
+      end: '2026-10-01',
+    });
+    expect(somedaySeatRange({ planned_start: '2026-10-05', planned_end: '2026-10-01' })).toEqual({
+      start: '2026-10-05',
+      end: '2026-10-05',
+    });
+    expect(somedaySeatRange({ planned_start: null, planned_end: '2026-10-05' })).toBeNull();
+    expect(somedaySeatRange({ planned_start: 'bad', planned_end: null })).toBeNull();
+  });
+});
+
+describe('timelineMath collapsedSummary (折叠行)', () => {
+  it('envelopes min start → max end and collects sorted event ticks', () => {
+    const summary = collapsedSummary([
+      { range: { start: '2026-09-10', end: '2026-09-20' }, event: '2026-09-20' },
+      { range: { start: '2026-09-01', end: '2026-09-05' }, event: '2026-09-05' },
+      { range: { start: '2026-09-03', end: '2026-09-30' }, event: 'bad-date' },
+    ]);
+    expect(summary.envelope).toEqual({ start: '2026-09-01', end: '2026-09-30' });
+    expect(summary.ticks).toEqual(['2026-09-05', '2026-09-20', '2026-09-30']);
+  });
+
+  it('returns a null envelope for an empty lane', () => {
+    expect(collapsedSummary([])).toEqual({ envelope: null, ticks: [] });
+  });
+});
+
+describe('timelineMath detectScheduleClashes (撞期预警)', () => {
+  const today = '2026-09-25';
+  const item = (id: string, start: string, end: string) => ({
+    id,
+    title: `任务${id}`,
+    range: { start, end },
+  });
+
+  it('flags same-lane overlaps that reach today or the future', () => {
+    const clashes = detectScheduleClashes(
+      [item('a', '2026-09-20', '2026-10-05'), item('b', '2026-10-01', '2026-10-10')],
+      today,
+    );
+    expect(clashes.get('a')).toEqual(['任务b']);
+    expect(clashes.get('b')).toEqual(['任务a']);
+  });
+
+  it('ignores overlaps that end before today (pure history)', () => {
+    const clashes = detectScheduleClashes(
+      [item('a', '2026-09-01', '2026-09-20'), item('b', '2026-09-10', '2026-09-24')],
+      today,
+    );
+    expect(clashes.size).toBe(0);
+  });
+
+  it('ignores disjoint and merely touching spans', () => {
+    const clashes = detectScheduleClashes(
+      [
+        item('a', '2026-09-26', '2026-09-30'),
+        item('b', '2026-10-01', '2026-10-05'), // touches a.end? no: 09-30 → 10-01 adjacent
+        item('c', '2026-11-01', '2026-11-05'),
+      ],
+      today,
+    );
+    expect(clashes.size).toBe(0);
+  });
+
+  it('collects multiple clash partners per task without duplicates', () => {
+    const clashes = detectScheduleClashes(
+      [
+        item('a', '2026-09-26', '2026-10-10'),
+        item('b', '2026-10-01', '2026-10-03'),
+        item('c', '2026-10-02', '2026-10-04'),
+      ],
+      today,
+    );
+    expect(clashes.get('a')).toEqual(['任务b', '任务c']);
+    expect(clashes.get('b')).toEqual(['任务a', '任务c']);
+  });
+});
+
+describe('timelineMath laneIsEmptyInWindow (空行瘦身)', () => {
+  const scale = { start: '2026-09-01', end: '2026-09-30', dayWidth: 10 };
+
+  it('slims lanes with no bars, no bands, no ground, no in-window milestones', () => {
+    expect(
+      laneIsEmptyInWindow({
+        entryCount: 0,
+        periodCount: 0,
+        ground: null,
+        milestoneDates: ['2026-08-01', null, 'bad'],
+        scale,
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps lanes tall when anything lands in the window', () => {
+    const base = { entryCount: 0, periodCount: 0, ground: null, milestoneDates: [], scale };
+    expect(laneIsEmptyInWindow({ ...base, entryCount: 1 })).toBe(false);
+    expect(laneIsEmptyInWindow({ ...base, periodCount: 1 })).toBe(false);
+    expect(laneIsEmptyInWindow({ ...base, ground: { start: '2026-09-01', end: '2026-09-30' } })).toBe(false);
+    expect(laneIsEmptyInWindow({ ...base, milestoneDates: ['2026-09-15'] })).toBe(false);
+  });
+});
+
+describe('timelineMath collapsed/archived storage', () => {
+  it('round-trips collapsed lane ids and survives junk', () => {
+    const storage = window.localStorage;
+    storage.removeItem(TIMELINE_COLLAPSED_KEY);
+    expect(loadCollapsedRows(storage).size).toBe(0);
+    saveCollapsedRows(storage, new Set(['p1', 'p2']));
+    expect([...loadCollapsedRows(storage)].sort()).toEqual(['p1', 'p2']);
+    storage.setItem(TIMELINE_COLLAPSED_KEY, '{junk');
+    expect(loadCollapsedRows(storage).size).toBe(0);
+    storage.removeItem(TIMELINE_COLLAPSED_KEY);
+  });
+
+  it('defaults the archived toggle ON and honors a stored 0', () => {
+    const storage = window.localStorage;
+    storage.removeItem(TIMELINE_ARCHIVED_KEY);
+    expect(loadArchivedVisible(storage)).toBe(true);
+    saveArchivedVisible(storage, false);
+    expect(loadArchivedVisible(storage)).toBe(false);
+    saveArchivedVisible(storage, true);
+    expect(loadArchivedVisible(storage)).toBe(true);
+    storage.removeItem(TIMELINE_ARCHIVED_KEY);
+  });
+});
+
+describe('timelineMath URL 视图状态', () => {
+  it('decodes only the params that are present', () => {
+    expect(decodeTimelineParams(new URLSearchParams(''))).toEqual({});
+    const decoded = decodeTimelineParams(
+      new URLSearchParams('tz=quarter&tws=2026-09-01&twe=2026-11-30&tproj=p1,p2&tarch=0&thist=0'),
+    );
+    expect(decoded.zoom).toBe('quarter');
+    expect(decoded.window).toEqual({ start: '2026-09-01', end: '2026-11-30' });
+    expect([...(decoded.projects ?? [])]).toEqual(['p1', 'p2']);
+    expect(decoded.archived).toBe(false);
+    expect(decoded.history).toBe(false);
+  });
+
+  it('rejects junk zoom, inverted windows, and distinguishes empty filter from absent', () => {
+    const junk = decodeTimelineParams(
+      new URLSearchParams('tz=year&tws=2026-12-01&twe=2026-01-01'),
+    );
+    expect(junk.zoom).toBeUndefined();
+    expect(junk.window).toBeUndefined();
+    const empty = decodeTimelineParams(new URLSearchParams('tproj='));
+    expect(empty.projects).toEqual(new Set());
+  });
+
+  it('encodes defaults implicitly and restores them verbatim', () => {
+    const encoded = encodeTimelineParams({
+      zoom: 'half',
+      window: null,
+      selectedProjects: null,
+      archived: true,
+      history: true,
+    });
+    expect(encoded).toEqual({ tz: 'half', tws: null, twe: null, tproj: null, tarch: null, thist: null });
+
+    const full = encodeTimelineParams({
+      zoom: 'month',
+      window: { start: '2026-09-01', end: '2026-09-30' },
+      selectedProjects: new Set(['p2', 'p1']),
+      archived: false,
+      history: false,
+    });
+    const decoded = decodeTimelineParams(
+      new URLSearchParams(
+        Object.entries(full)
+          .filter((kv): kv is [string, string] => kv[1] !== null)
+          .map(([k, v]) => [k, v]),
+      ),
+    );
+    expect(decoded.zoom).toBe('month');
+    expect(decoded.window).toEqual({ start: '2026-09-01', end: '2026-09-30' });
+    expect([...(decoded.projects ?? [])].sort()).toEqual(['p1', 'p2']);
+    expect(decoded.archived).toBe(false);
+    expect(decoded.history).toBe(false);
   });
 });

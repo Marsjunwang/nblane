@@ -22,10 +22,24 @@
 // 日课 dedupe: habit rows render once, in the top 日课 section — habit-plan
 // projects are filtered out of the lane groups, so there is nothing inline
 // to duplicate.
+//
+// P1 (2026-09): 长/短任务分层 — ≥14d task bars sink to 期间带 (fainter than
+// the 地色带, pinned at the baseline, no sub-lane, no label, hover 铭文卡);
+// sub-lane heights compress (刻痕 10px / task 20px / gap 2px). 归档项目 render
+// as desaturated read-only lanes after the active groups (toolbar toggle,
+// localStorage). Rows collapse to an envelope band + per-task waveform ticks
+// (localStorage per case id). Wheel pans (Shift+wheel / trackpad = horizontal),
+// blank-area drag pans, 重置视图 restores defaults, and zoom/window/filter/
+// archived/history state round-trips through the URL. Future-zone schedule
+// clashes get a 朱砂 stroke + 铭文卡 line; someday seats render as dashed
+// 虚位 marks (朱砂 dashed once their planned_start has passed). Lanes with
+// nothing in the window slim to one text line.
 
 import {
   ActionIcon,
+  Badge,
   Box,
+  Button,
   Group,
   MultiSelect,
   ScrollArea,
@@ -35,8 +49,9 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
-import { IconFocus2 } from '@tabler/icons-react';
+import { IconChevronDown, IconChevronRight, IconFocus2, IconRestore } from '@tabler/icons-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import type {
   KanbanSection,
@@ -62,28 +77,44 @@ import {
   barStatus,
   clampDayWidth,
   clampRangeToScale,
+  collapsedSummary,
+  COLLAPSED_ROW_HEIGHT,
   computeScale,
   dateToX,
   daysBetween,
+  decodeTimelineParams,
+  detectScheduleClashes,
+  EMPTY_ROW_HEIGHT,
+  encodeTimelineParams,
   estimateLabelWidth,
   filterGroupsBySelection,
   focusWindowForProject,
   groundBandHeight,
   historyBarRange,
   isOverdue,
+  isPeriodBand,
   labelPlacement,
   labelsVisible,
+  LABEL_INSIDE_MIN_WIDTH,
+  laneIsEmptyInWindow,
   layoutLane,
+  loadArchivedVisible,
+  loadCollapsedRows,
   loadProjectFilter,
   monthTicks,
+  PERIOD_BAND_HEIGHT,
   projectRange,
   rightSpaces,
+  saveArchivedVisible,
+  saveCollapsedRows,
   saveProjectFilter,
   scaleWidth,
   shiftDate,
+  somedaySeatRange,
   taskBarRange,
   TASK_BAR_HEIGHT,
   thinTicks,
+  TIMELINE_FILTER_KEY,
 } from './timelineMath';
 import { useTimelineDrag } from './useTimelineDrag';
 import './TimelineView.css';
@@ -99,12 +130,16 @@ const STATUS_LABELS: Record<string, string> = {
 
 type LaneItem =
   | { kind: 'task'; task: ProjectsBoardTask }
+  | { kind: 'someday'; task: ProjectsBoardTask }
   | { kind: 'history'; task: TimelineHistoryTask };
 
 export interface TimelineViewProps {
   profile: string;
   board: ProjectsBoardResponse;
   groups: LaneGroup[];
+  /** Archived cases (status=archived) — rendered as read-only lanes after the
+   * active groups when the 归档项目 toggle is on. */
+  archivedProjects: ProjectsBoardProject[];
   habitRows: HabitRow[];
   unassigned: ProjectsBoardTask[];
   kanbanEtag: string;
@@ -120,11 +155,21 @@ export interface TimelineViewProps {
 function RowLabel({
   title,
   meta,
+  note,
+  badge,
+  collapsed,
+  onToggleCollapse,
   onFocus,
   focusTestId,
 }: {
   title: string;
   meta?: string;
+  /** Extra dim line (本窗口无活动). */
+  note?: string;
+  /** Grey status badge next to the title (归档). */
+  badge?: string;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   onFocus?: () => void;
   focusTestId?: string;
 }) {
@@ -145,16 +190,52 @@ function RowLabel({
       }}
     >
       <Group gap={4} wrap="nowrap" justify="space-between">
-        <Box style={{ minWidth: 0 }}>
-          <Text size="sm" fw={600} lineClamp={1} style={{ color: boardPalette.titleText }}>
-            {title}
-          </Text>
-          {meta && (
-            <Text size="xs" lineClamp={1} style={{ color: boardPalette.dim }}>
-              {meta}
-            </Text>
+        <Group gap={2} wrap="nowrap" style={{ minWidth: 0 }}>
+          {onToggleCollapse && (
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              aria-label={collapsed ? `展开 ${title}` : `收起 ${title}`}
+              data-testid={collapseTestId(focusTestId)}
+              onClick={onToggleCollapse}
+              style={{ color: boardPalette.dim, flexShrink: 0 }}
+            >
+              {collapsed ? <IconChevronRight size={14} /> : <IconChevronDown size={14} />}
+            </ActionIcon>
           )}
-        </Box>
+          <Box style={{ minWidth: 0 }}>
+            <Group gap={6} wrap="nowrap">
+              <Text size="sm" fw={600} lineClamp={1} style={{ color: boardPalette.titleText }}>
+                {title}
+              </Text>
+              {badge && (
+                <Badge
+                  size="xs"
+                  variant="outline"
+                  data-testid={badgeTestId(focusTestId)}
+                  style={{ borderColor: boardPalette.dim, color: boardPalette.dim, flexShrink: 0 }}
+                >
+                  {badge}
+                </Badge>
+              )}
+            </Group>
+            {meta && (
+              <Text size="xs" lineClamp={1} style={{ color: boardPalette.dim }}>
+                {meta}
+              </Text>
+            )}
+            {note && (
+              <Text
+                size="xs"
+                lineClamp={1}
+                data-testid={noteTestId(focusTestId)}
+                style={{ color: boardPalette.dim, opacity: 0.75 }}
+              >
+                {note}
+              </Text>
+            )}
+          </Box>
+        </Group>
         {onFocus && (
           <Tooltip label="聚焦该项目时间范围" withinPortal>
             <ActionIcon
@@ -172,6 +253,17 @@ function RowLabel({
       </Group>
     </Box>
   );
+}
+
+// Derived testids keep row-scoped queries working for collapse/note/badge.
+function collapseTestId(focusTestId?: string): string | undefined {
+  return focusTestId?.replace('timeline-focus-', 'timeline-collapse-');
+}
+function badgeTestId(focusTestId?: string): string | undefined {
+  return focusTestId?.replace('timeline-focus-', 'timeline-badge-');
+}
+function noteTestId(focusTestId?: string): string | undefined {
+  return focusTestId?.replace('timeline-focus-', 'timeline-note-');
 }
 
 function MilestoneDiamond({
@@ -265,6 +357,8 @@ function TaskBar({
   showLabels,
   projectTitle,
   today,
+  clashWith,
+  muted,
   onSelect,
   onDragStart,
 }: {
@@ -278,26 +372,38 @@ function TaskBar({
   showLabels: boolean;
   projectTitle: string;
   today: string;
+  /** Titles of same-lane bars whose schedule clashes in the future zone. */
+  clashWith?: string[];
+  /** 归档泳道: everything 淡月白, read-only (no drag). */
+  muted?: boolean;
   onSelect: (taskId: string) => void;
   onDragStart: (event: React.PointerEvent, task: ProjectsBoardTask, range: BarRange) => void;
 }) {
   const width = Math.max((daysBetween(range.start, range.end) + 1) * scale.dayWidth, 6);
   const status = barStatus(task);
   const overdue = isOverdue(task, today);
+  const clash = (clashWith?.length ?? 0) > 0;
   const placement = showLabels
     ? labelPlacement(width, estimateLabelWidth(task.title), rightSpace)
     : 'none';
   const dashed = status === 'queue';
   const border = selected
     ? `2px solid ${boardPalette.selectedBorder}`
-    : overdue
-      ? `1px ${dashed ? 'dashed' : 'solid'} ${boardPalette.overdue}`
-      : status === 'queue'
-        ? `1px dashed ${boardPalette.dim}`
-        : status === 'done'
-          ? '1px solid rgba(242, 237, 224, 0.45)'
-          : `1px solid ${boardPalette.gold}`;
+    : muted
+      ? '1px solid rgba(176, 167, 140, 0.4)'
+      : overdue || clash
+        ? `1px ${dashed ? 'dashed' : 'solid'} ${boardPalette.overdue}`
+        : status === 'queue'
+          ? `1px dashed ${boardPalette.dim}`
+          : status === 'done'
+            ? '1px solid rgba(242, 237, 224, 0.45)'
+            : `1px solid ${boardPalette.gold}`;
   const statusLabel = task.column === 'someday' ? '也许' : (STATUS_LABELS[status] ?? status);
+  const inscriptionLines = [
+    overdue ? `${statusLabel} · 已逾期` : statusLabel,
+    ...(clash ? [`与 ${clashWith!.join('、')} 撞期`] : []),
+    projectTitle,
+  ].filter(Boolean);
   const bar = (
     <Box
       role="button"
@@ -305,6 +411,7 @@ function TaskBar({
       aria-label={`时间轴任务 ${task.title}`}
       title={placement === 'none' ? undefined : `${task.title} · ${range.start} → ${range.end}`}
       data-testid={`timeline-bar-${task.id}`}
+      data-clash={clash || undefined}
       onClick={() => onSelect(task.id)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -312,7 +419,7 @@ function TaskBar({
           onSelect(task.id);
         }
       }}
-      onPointerDown={(event) => onDragStart(event, task, range)}
+      onPointerDown={muted ? undefined : (event) => onDragStart(event, task, range)}
       style={{
         position: 'absolute',
         left: dateToX(range.start, scale),
@@ -321,11 +428,11 @@ function TaskBar({
         height: TASK_BAR_HEIGHT,
         borderRadius: 3,
         transform: previewDelta ? `translateX(${previewDelta * scale.dayWidth}px)` : undefined,
-        cursor: 'grab',
+        cursor: muted ? 'pointer' : 'grab',
         touchAction: 'pan-y',
-        background: status === 'doing' ? 'rgba(220, 174, 85, 0.12)' : 'transparent',
+        background: !muted && status === 'doing' ? 'rgba(220, 174, 85, 0.12)' : 'transparent',
         border,
-        opacity: status === 'done' ? 0.6 : 1,
+        opacity: muted ? 0.55 : status === 'done' ? 0.6 : 1,
       }}
     >
       {placement === 'inside' && (
@@ -368,15 +475,13 @@ function TaskBar({
       )}
     </Box>
   );
-  if (placement === 'none') {
+  if (placement === 'none' || clash) {
+    // Clash bars keep their on-bar label but still need the 铭文卡 to name
+    // the clashing partners on hover.
     return (
       <Tooltip
         label={
-          <BarInscription
-            title={task.title}
-            range={range}
-            lines={[overdue ? `${statusLabel} · 已逾期` : statusLabel, projectTitle].filter(Boolean)}
-          />
+          <BarInscription title={task.title} range={range} lines={inscriptionLines} />
         }
         withinPortal
         styles={inscriptionTooltipStyles}
@@ -391,7 +496,9 @@ function TaskBar({
 /**
  * 刻痕 history bar (Done/archived task): 月白, half height, no fill,
  * read-only (no drag); archive entries are 淡月白 (dimmer). Selection
- * brightens the stroke.
+ * brightens the stroke. Labels follow the same labelPlacement rule as task
+ * bars (P1: 归档刻痕不再当无标签处理) — the 7px stroke is too thin to embed
+ * text, so 'inside' degrades to the right-hang slot when it fits.
  */
 function HistoryBar({
   task,
@@ -399,6 +506,8 @@ function HistoryBar({
   scale,
   selected,
   top,
+  rightSpace,
+  showLabels,
   projectTitle,
   onSelect,
 }: {
@@ -407,11 +516,22 @@ function HistoryBar({
   scale: TimelineScale;
   selected: boolean;
   top: number;
+  rightSpace: number;
+  showLabels: boolean;
   projectTitle: string;
   onSelect: (taskId: string) => void;
 }) {
   const width = Math.max((daysBetween(range.start, range.end) + 1) * scale.dayWidth, 6);
   const archived = task.archived === true;
+  // 刻痕 embeds nothing: cap barWidth below LABEL_INSIDE_MIN_WIDTH so the
+  // shared rule only ever answers right/none here.
+  const placement = showLabels
+    ? labelPlacement(
+        Math.min(width, LABEL_INSIDE_MIN_WIDTH - 1),
+        estimateLabelWidth(task.title),
+        rightSpace,
+      )
+    : 'none';
   return (
     <Tooltip
       label={
@@ -452,34 +572,246 @@ function HistoryBar({
               : '1px solid rgba(242, 237, 224, 0.45)',
           opacity: selected ? 1 : archived ? 0.45 : 0.6,
         }}
+      >
+        {placement === 'right' && (
+          <Text
+            component="span"
+            data-testid={`timeline-history-label-${task.id}`}
+            style={{
+              position: 'absolute',
+              left: width + 4,
+              // Center the 10px label on the 7px stroke.
+              top: -3,
+              fontSize: 10,
+              lineHeight: '13px',
+              color: 'rgba(176, 167, 140, 0.8)',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            {task.title}
+          </Text>
+        )}
+      </Box>
+    </Tooltip>
+  );
+}
+
+/**
+ * 期间带 (P1 分层): task bars spanning ≥14 days sink to the baseline as a
+ * translucent band one notch fainter than the 地色带 — no sub-lane, no label,
+ * no drag; hover keeps the 铭文卡, click still selects.
+ */
+function PeriodBand({
+  task,
+  range,
+  scale,
+  selected,
+  rowHeight,
+  groundHeight,
+  muted,
+  projectTitle,
+  onSelect,
+}: {
+  task: ProjectsBoardTask;
+  range: BarRange;
+  scale: TimelineScale;
+  selected: boolean;
+  rowHeight: number;
+  /** 0 when the lane has no 地色带 — the band then hugs the baseline itself. */
+  groundHeight: number;
+  muted?: boolean;
+  projectTitle: string;
+  onSelect: (taskId: string) => void;
+}) {
+  const width = Math.max((daysBetween(range.start, range.end) + 1) * scale.dayWidth, 6);
+  const top = rowHeight - groundHeight - (groundHeight > 0 ? 4 : 3) - PERIOD_BAND_HEIGHT;
+  return (
+    <Tooltip
+      label={
+        <BarInscription
+          title={task.title}
+          range={range}
+          lines={['期间带', projectTitle].filter(Boolean)}
+        />
+      }
+      withinPortal
+      styles={inscriptionTooltipStyles}
+    >
+      <Box
+        role="button"
+        tabIndex={0}
+        aria-label={`期间带 ${task.title}`}
+        data-testid={`timeline-period-${task.id}`}
+        onClick={() => onSelect(task.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelect(task.id);
+          }
+        }}
+        style={{
+          position: 'absolute',
+          left: dateToX(range.start, scale),
+          top,
+          width,
+          height: PERIOD_BAND_HEIGHT,
+          borderRadius: 3,
+          cursor: 'pointer',
+          background: muted ? 'rgba(176, 167, 140, 0.05)' : 'rgba(220, 174, 85, 0.035)',
+          border: selected
+            ? `1px solid ${boardPalette.selectedBorder}`
+            : muted
+              ? '1px solid rgba(176, 167, 140, 0.12)'
+              : '1px solid rgba(220, 174, 85, 0.07)',
+        }}
       />
     </Tooltip>
   );
 }
 
-/** Build the stacking pool for one lane: placed task bars + visible history 刻痕. */
+/**
+ * Someday 虚位: a dashed thin seat at the task's planned activation window
+ * plus an S marker. 过期 seats (planned_start already past) flip to 朱砂
+ * dashed. Read-only; click selects, hover shows the 铭文卡.
+ */
+function SomedayBar({
+  task,
+  range,
+  scale,
+  selected,
+  top,
+  today,
+  muted,
+  projectTitle,
+  onSelect,
+}: {
+  task: ProjectsBoardTask;
+  range: BarRange;
+  scale: TimelineScale;
+  selected: boolean;
+  top: number;
+  today: string;
+  muted?: boolean;
+  projectTitle: string;
+  onSelect: (taskId: string) => void;
+}) {
+  const width = Math.max((daysBetween(range.start, range.end) + 1) * scale.dayWidth, 6);
+  // 过期: the activation date has arrived (or passed) and the seat is still
+  // someday — planned_start <= today flips the dashes to 朱砂.
+  const expired = !muted && !!today && range.start <= today;
+  const stroke = muted ? 'rgba(176, 167, 140, 0.45)' : expired ? boardPalette.overdue : boardPalette.dim;
+  return (
+    <Tooltip
+      label={
+        <BarInscription
+          title={task.title}
+          range={range}
+          lines={[`虚位 · 期望激活 ${range.start}${expired ? ' · 已过期' : ''}`, projectTitle].filter(
+            Boolean,
+          )}
+        />
+      }
+      withinPortal
+      styles={inscriptionTooltipStyles}
+    >
+      <Box
+        role="button"
+        tabIndex={0}
+        aria-label={`虚位任务 ${task.title}`}
+        data-testid={`timeline-someday-${task.id}`}
+        data-expired={expired || undefined}
+        onClick={() => onSelect(task.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelect(task.id);
+          }
+        }}
+        style={{
+          position: 'absolute',
+          left: dateToX(range.start, scale),
+          top,
+          width,
+          height: 8,
+          borderRadius: 2,
+          cursor: 'pointer',
+          background: 'transparent',
+          border: `1px dashed ${selected ? boardPalette.selectedBorder : stroke}`,
+          opacity: expired ? 0.85 : 0.7,
+        }}
+      >
+        <Text
+          component="span"
+          style={{
+            position: 'absolute',
+            left: 2,
+            top: -8,
+            fontSize: 8,
+            lineHeight: '8px',
+            color: stroke,
+            pointerEvents: 'none',
+          }}
+        >
+          S
+        </Text>
+      </Box>
+    </Tooltip>
+  );
+}
+
+/** Build the stacking pool for one lane: placed task bars + visible history
+ * 刻痕. ≥14d bars split out as 期间带 (baseline band, no sub-lane, no label). */
 function laneInputs(
   tasks: ProjectsBoardTask[],
   history: { task: TimelineHistoryTask; range: BarRange }[],
   showHistory: boolean,
   today: string,
   scale: TimelineScale,
-): { inputs: LaneLayoutInput<LaneItem>[]; unscheduled: ProjectsBoardTask[] } {
+): {
+  inputs: LaneLayoutInput<LaneItem>[];
+  periods: { task: ProjectsBoardTask; range: BarRange }[];
+  unscheduled: ProjectsBoardTask[];
+} {
   const inputs: LaneLayoutInput<LaneItem>[] = [];
+  const periods: { task: ProjectsBoardTask; range: BarRange }[] = [];
   const unscheduled: ProjectsBoardTask[] = [];
   for (const task of tasks) {
     const bar = taskBarRange(task, today);
     const clipped = bar ? clampRangeToScale(bar, scale) : null;
-    if (clipped) {
-      inputs.push({ item: { kind: 'task', task }, range: clipped, tall: true });
-    } else {
+    if (!clipped) {
       // No anchor date (未排期) or dated fully outside the current window.
       unscheduled.push(task);
+      continue;
+    }
+    if (bar && isPeriodBand(bar)) {
+      periods.push({ task, range: clipped });
+    } else {
+      inputs.push({ item: { kind: 'task', task }, range: clipped, tall: true });
     }
   }
   if (showHistory) {
     for (const { task, range } of history) {
       inputs.push({ item: { kind: 'history', task }, range, tall: false });
+    }
+  }
+  return { inputs, periods, unscheduled };
+}
+
+/** Someday seats (虚位): dashed thin markers at planned_start, short lanes. */
+function somedayInputs(
+  tasks: ProjectsBoardTask[],
+  scale: TimelineScale,
+): { inputs: LaneLayoutInput<LaneItem>[]; unscheduled: ProjectsBoardTask[] } {
+  const inputs: LaneLayoutInput<LaneItem>[] = [];
+  const unscheduled: ProjectsBoardTask[] = [];
+  for (const task of tasks) {
+    const seat = somedaySeatRange(task);
+    const clipped = seat ? clampRangeToScale(seat, scale) : null;
+    if (clipped) {
+      inputs.push({ item: { kind: 'someday', task }, range: clipped, tall: false });
+    } else {
+      unscheduled.push(task);
     }
   }
   return { inputs, unscheduled };
@@ -493,6 +825,8 @@ function LaneBars({
   previewTaskId,
   previewDelta,
   showLabels,
+  clashes,
+  muted,
   projectTitle,
   onSelectTask,
   onDragStart,
@@ -504,6 +838,10 @@ function LaneBars({
   previewTaskId: string | null;
   previewDelta: number;
   showLabels: boolean;
+  /** Future-zone schedule clashes: taskId → clashing titles. */
+  clashes?: Map<string, string[]>;
+  /** 归档泳道: desaturated read-only bars. */
+  muted?: boolean;
   projectTitle: string;
   onSelectTask: (taskId: string) => void;
   onDragStart: (event: React.PointerEvent, task: ProjectsBoardTask, range: BarRange) => void;
@@ -524,9 +862,24 @@ function LaneBars({
             top={entry.top}
             rightSpace={spaces[index]}
             showLabels={showLabels}
+            clashWith={clashes?.get(entry.item.task.id)}
+            muted={muted}
             projectTitle={projectTitle}
             onSelect={onSelectTask}
             onDragStart={onDragStart}
+          />
+        ) : entry.item.kind === 'someday' ? (
+          <SomedayBar
+            key={entry.item.task.id}
+            task={entry.item.task}
+            range={entry.range}
+            scale={scale}
+            today={today}
+            selected={selectedTaskId === entry.item.task.id}
+            top={entry.top}
+            muted={muted}
+            projectTitle={projectTitle}
+            onSelect={onSelectTask}
           />
         ) : (
           <HistoryBar
@@ -536,11 +889,101 @@ function LaneBars({
             scale={scale}
             selected={selectedTaskId === entry.item.task.id}
             top={entry.top}
+            rightSpace={spaces[index]}
+            showLabels={showLabels}
             projectTitle={projectTitle}
             onSelect={onSelectTask}
           />
         ),
       )}
+    </>
+  );
+}
+
+/** 折叠行内容: 包络带 + per-task 波形 tick + 「N 任务」计数; 里程碑菱形保留. */
+function CollapsedLaneContent({
+  entries,
+  periods,
+  milestones,
+  scale,
+  today,
+}: {
+  entries: LaneLayoutEntry<LaneItem>[];
+  periods: { task: ProjectsBoardTask; range: BarRange }[];
+  milestones: ProjectsBoardMilestone[];
+  scale: TimelineScale;
+  today: string;
+}) {
+  const eventOf = (entry: LaneLayoutEntry<LaneItem>): string =>
+    entry.item.kind === 'task'
+      ? entry.item.task.completed_on || entry.item.task.planned_end || entry.range.end
+      : entry.item.kind === 'someday'
+        ? entry.range.start
+        : entry.range.end;
+  const summary = collapsedSummary([
+    ...entries.map((entry) => ({ range: entry.range, event: eventOf(entry) })),
+    ...periods.map(({ task, range }) => ({
+      range,
+      event: task.completed_on || task.planned_end || range.end,
+    })),
+  ]);
+  const taskCount =
+    entries.filter((entry) => entry.item.kind !== 'history').length + periods.length;
+  return (
+    <>
+      {summary.envelope && (
+        <Box
+          data-testid="collapsed-envelope"
+          style={{
+            position: 'absolute',
+            left: dateToX(summary.envelope.start, scale),
+            top: COLLAPSED_ROW_HEIGHT / 2 - 3,
+            width:
+              (daysBetween(summary.envelope.start, summary.envelope.end) + 1) * scale.dayWidth,
+            height: 6,
+            borderRadius: 3,
+            background: 'rgba(242, 237, 224, 0.07)',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      {summary.ticks.map((tick, index) => (
+        <Box
+          key={`${tick}-${index}`}
+          data-testid="collapsed-tick"
+          style={{
+            position: 'absolute',
+            left: dateToX(tick, scale) + scale.dayWidth / 2 - 1,
+            top: COLLAPSED_ROW_HEIGHT / 2 - 5,
+            width: 2,
+            height: 10,
+            background: 'rgba(242, 237, 224, 0.65)',
+            pointerEvents: 'none',
+          }}
+        />
+      ))}
+      {milestones.map((milestone) => (
+        <MilestoneDiamond
+          key={milestone.id}
+          milestone={milestone}
+          scale={scale}
+          today={today}
+          top={COLLAPSED_ROW_HEIGHT - 14}
+        />
+      ))}
+      <Text
+        size="xs"
+        data-testid="collapsed-count"
+        style={{
+          position: 'absolute',
+          right: 8,
+          top: COLLAPSED_ROW_HEIGHT / 2 - 9,
+          color: boardPalette.dim,
+          pointerEvents: 'none',
+        }}
+      >
+        {taskCount} 任务
+      </Text>
     </>
   );
 }
@@ -552,6 +995,9 @@ function ProjectRow({
   history,
   showHistory,
   showLabels,
+  archivedRow,
+  collapsed,
+  onToggleCollapse,
   selectedTaskId,
   previewTaskId,
   previewDelta,
@@ -565,6 +1011,10 @@ function ProjectRow({
   history: { task: TimelineHistoryTask; range: BarRange }[];
   showHistory: boolean;
   showLabels: boolean;
+  /** 归档泳道: 整行降饱和 + 只读 + 无地色带. */
+  archivedRow?: boolean;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   selectedTaskId: string;
   previewTaskId: string | null;
   previewDelta: number;
@@ -573,16 +1023,56 @@ function ProjectRow({
   onFocus: (project: ProjectsBoardProject) => void;
 }) {
   const range = projectRange(project.time_range ?? '');
-  const clippedRange = range ? clampRangeToScale(range, scale) : null;
-  const tasks = [...(project.queue ?? []), ...(project.doing ?? []), ...(project.someday ?? [])];
-  const { inputs, unscheduled } = laneInputs(tasks, history, showHistory, today, scale);
-  const layout = layoutLane(inputs);
-  const rowHeight = layout.rowHeight;
+  const clippedRange = archivedRow ? null : range ? clampRangeToScale(range, scale) : null;
+  const tasks = [...(project.queue ?? []), ...(project.doing ?? [])];
+  const { inputs, periods, unscheduled } = laneInputs(tasks, history, showHistory, today, scale);
+  const someday = somedayInputs(project.someday ?? [], scale);
+  const layout = layoutLane([...inputs, ...someday.inputs]);
+  const unscheduledAll = [...unscheduled, ...someday.unscheduled];
+  // 撞期预警: same-lane queue/doing short bars overlapping at/after today.
+  // Period bands stay background — they never flash 朱砂.
+  const clashes = detectScheduleClashes(
+    layout.entries
+      .filter((entry) => entry.item.kind === 'task')
+      .map((entry) => ({
+        id: entry.item.task.id,
+        title: entry.item.task.title,
+        range: entry.range,
+      })),
+    today,
+  );
+  const milestones = project.milestones ?? [];
+  // 空行瘦身: nothing in the window → one text line + a dim note. Archived
+  // lanes never slim (their quiet is stated by the badge, not by height).
+  const empty =
+    !archivedRow &&
+    laneIsEmptyInWindow({
+      entryCount: layout.entries.length,
+      periodCount: periods.length,
+      ground: clippedRange,
+      milestoneDates: milestones.map((milestone) => milestone.date),
+      scale,
+    });
+  const rowHeight = collapsed
+    ? COLLAPSED_ROW_HEIGHT
+    : empty
+      ? EMPTY_ROW_HEIGHT
+      : layout.rowHeight;
+  const groundHeight = clippedRange ? groundBandHeight(rowHeight) : 0;
   return (
-    <Group wrap="nowrap" gap={0} data-testid={`timeline-row-${project.id}`}>
+    <Group
+      wrap="nowrap"
+      gap={0}
+      data-testid={`timeline-row-${project.id}`}
+      data-archived={archivedRow || undefined}
+    >
       <RowLabel
         title={project.title || project.id}
         meta={`${KIND_LABELS[project.kind ?? ''] ?? project.kind} · Done ${project.done_count}`}
+        note={empty ? '本窗口无活动' : undefined}
+        badge={archivedRow ? '归档' : undefined}
+        collapsed={collapsed}
+        onToggleCollapse={onToggleCollapse}
         onFocus={() => onFocus(project)}
         focusTestId={`timeline-focus-${project.id}`}
       />
@@ -594,64 +1084,93 @@ function ProjectRow({
           borderBottom: `1px solid ${boardPalette.border}`,
         }}
       >
-        {clippedRange && (
-          <Box
-            data-testid={`project-range-${project.id}`}
-            style={{
-              position: 'absolute',
-              left: dateToX(clippedRange.start, scale),
-              // 衬底细带: pinned to the row baseline, never grows with 错峰
-              // sub-lanes — the time_range stays a ground tint, not a slab.
-              top: rowHeight - groundBandHeight(rowHeight) - 3,
-              width: (daysBetween(clippedRange.start, clippedRange.end) + 1) * scale.dayWidth,
-              height: groundBandHeight(rowHeight),
-              borderRadius: 3,
-              background: 'rgba(220, 174, 85, 0.05)',
-              border: '1px solid rgba(220, 174, 85, 0.1)',
-              // Milestones sit on the same baseline and must stay visible.
-              pointerEvents: 'none',
-            }}
-          />
-        )}
-        <LaneBars
-          entries={layout.entries}
-          scale={scale}
-          today={today}
-          selectedTaskId={selectedTaskId}
-          previewTaskId={previewTaskId}
-          previewDelta={previewDelta}
-          showLabels={showLabels}
-          projectTitle={project.title || project.id}
-          onSelectTask={onSelectTask}
-          onDragStart={onDragStart}
-        />
-        {(project.milestones ?? []).map((milestone) => (
-          <MilestoneDiamond
-            key={milestone.id}
-            milestone={milestone}
+        {collapsed ? (
+          <CollapsedLaneContent
+            entries={layout.entries}
+            periods={periods}
+            milestones={milestones}
             scale={scale}
             today={today}
-            top={rowHeight - 14}
           />
-        ))}
-        {unscheduled.length > 0 && (
-          <Text
-            size="xs"
-            lineClamp={1}
-            data-testid={`unscheduled-${project.id}`}
-            title={unscheduled.map((task) => task.title).join('、')}
-            style={{
-              position: 'absolute',
-              right: 8,
-              top: rowHeight / 2 - 9,
-              maxWidth: '40%',
-              color: boardPalette.dim,
-              // Never intercept bar drags/clicks underneath.
-              pointerEvents: 'none',
-            }}
-          >
-            未排期 ×{unscheduled.length}: {unscheduled.map((task) => task.title).join('、')}
-          </Text>
+        ) : (
+          <>
+            {clippedRange && (
+              <Box
+                data-testid={`project-range-${project.id}`}
+                style={{
+                  position: 'absolute',
+                  left: dateToX(clippedRange.start, scale),
+                  // 衬底细带: pinned to the row baseline, never grows with 错峰
+                  // sub-lanes — the time_range stays a ground tint, not a slab.
+                  top: rowHeight - groundHeight - 3,
+                  width: (daysBetween(clippedRange.start, clippedRange.end) + 1) * scale.dayWidth,
+                  height: groundHeight,
+                  borderRadius: 3,
+                  background: 'rgba(220, 174, 85, 0.05)',
+                  border: '1px solid rgba(220, 174, 85, 0.1)',
+                  // Milestones sit on the same baseline and must stay visible.
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+            {periods.map(({ task, range: periodRange }) => (
+              <PeriodBand
+                key={task.id}
+                task={task}
+                range={periodRange}
+                scale={scale}
+                selected={selectedTaskId === task.id}
+                rowHeight={rowHeight}
+                groundHeight={groundHeight}
+                muted={archivedRow}
+                projectTitle={project.title || project.id}
+                onSelect={onSelectTask}
+              />
+            ))}
+            <LaneBars
+              entries={layout.entries}
+              scale={scale}
+              today={today}
+              selectedTaskId={selectedTaskId}
+              previewTaskId={previewTaskId}
+              previewDelta={previewDelta}
+              showLabels={showLabels}
+              clashes={clashes}
+              muted={archivedRow}
+              projectTitle={project.title || project.id}
+              onSelectTask={onSelectTask}
+              onDragStart={onDragStart}
+            />
+            {milestones.map((milestone) => (
+              <MilestoneDiamond
+                key={milestone.id}
+                milestone={milestone}
+                scale={scale}
+                today={today}
+                top={rowHeight - 14}
+              />
+            ))}
+            {unscheduledAll.length > 0 && (
+              <Text
+                size="xs"
+                lineClamp={1}
+                data-testid={`unscheduled-${project.id}`}
+                title={unscheduledAll.map((task) => task.title).join('、')}
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  top: rowHeight / 2 - 9,
+                  maxWidth: '40%',
+                  color: boardPalette.dim,
+                  // Never intercept bar drags/clicks underneath.
+                  pointerEvents: 'none',
+                }}
+              >
+                未排期 ×{unscheduledAll.length}:{' '}
+                {unscheduledAll.map((task) => task.title).join('、')}
+              </Text>
+            )}
+          </>
         )}
       </Box>
     </Group>
@@ -744,6 +1263,7 @@ export function TimelineView({
   profile,
   board,
   groups,
+  archivedProjects,
   habitRows,
   unassigned,
   kanbanEtag,
@@ -754,13 +1274,40 @@ export function TimelineView({
   onDragError,
 }: TimelineViewProps) {
   const today = board.today || '';
-  const [showHistory, setShowHistory] = useState(true);
-  const [zoom, setZoom] = useState<TimelineZoom>('half');
+  // URL 视图状态: present params win on entry; absent ones fall back to
+  // localStorage prefs / defaults. State is decoded once — later param
+  // changes come from our own sync effect below.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialUrl] = useState(() => decodeTimelineParams(searchParams));
+  const [showHistory, setShowHistory] = useState(initialUrl.history ?? true);
+  const [showArchived, setShowArchived] = useState(
+    initialUrl.archived ?? loadArchivedVisible(window.localStorage),
+  );
+  const [zoom, setZoom] = useState<TimelineZoom>(initialUrl.zoom ?? 'half');
   // Custom window: set by 聚焦 and by Ctrl+wheel zoom (the window span IS the
   // zoom level — dayWidth stays fit-to-viewport, so zooming out reveals a
   // longer span instead of compressing bars into a sliver).
-  const [customWindow, setCustomWindow] = useState<BarRange | null>(null);
-  const [filterSelection, setFilterSelection] = useState<Set<string> | null>(null);
+  const [customWindow, setCustomWindow] = useState<BarRange | null>(initialUrl.window ?? null);
+  const [filterSelection, setFilterSelection] = useState<Set<string> | null>(
+    initialUrl.projects ?? null,
+  );
+  // 折叠行: collapsed lane ids, localStorage per case id.
+  const [collapsedRows, setCollapsedRows] = useState<Set<string>>(() =>
+    loadCollapsedRows(window.localStorage),
+  );
+
+  const toggleCollapsed = (projectId: string) => {
+    setCollapsedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      saveCollapsedRows(window.localStorage, next);
+      return next;
+    });
+  };
 
   const historyTasks = useMemo(
     () => collectHistoryTasks(kanbanSections, kanbanArchive),
@@ -829,6 +1376,14 @@ export function TimelineView({
       return;
     }
     const onWheel = (event: WheelEvent) => {
+      // Figma 惯例: plain wheel = vertical scroll (native), Shift+wheel =
+      // horizontal pan (trackpad two-finger swipes arrive as deltaX and pan
+      // natively), Ctrl+wheel/pinch = stepless zoom.
+      if (event.shiftKey && !event.ctrlKey && !event.metaKey && event.deltaX === 0) {
+        event.preventDefault();
+        viewport.scrollLeft += event.deltaY;
+        return;
+      }
       if (!event.ctrlKey && !event.metaKey) {
         return;
       }
@@ -864,6 +1419,51 @@ export function TimelineView({
     }
   }, [scale]);
 
+  // 空白处按住拖拽 = 水平平移 (grab cursor). Bars/labels/buttons keep their
+  // own gestures — the pan only starts on bare ground.
+  const [panning, setPanning] = useState(false);
+  const panGesture = useRef<{ startX: number; scrollLeft: number; pointerId: number } | null>(
+    null,
+  );
+  const startPan = (event: React.PointerEvent) => {
+    if (event.button !== 0 || drag.active) {
+      return;
+    }
+    const target = event.target as HTMLElement;
+    if (target.closest('[role="button"], button, a, input, [role="switch"]')) {
+      return;
+    }
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    panGesture.current = {
+      startX: event.clientX,
+      scrollLeft: viewport.scrollLeft,
+      pointerId: event.pointerId,
+    };
+    const onMove = (moveEvent: PointerEvent) => {
+      const gesture = panGesture.current;
+      if (!gesture || moveEvent.pointerId !== gesture.pointerId) {
+        return;
+      }
+      if (!panning) {
+        setPanning(true);
+      }
+      viewport.scrollLeft = gesture.scrollLeft - (moveEvent.clientX - gesture.startX);
+    };
+    const finish = () => {
+      panGesture.current = null;
+      setPanning(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  };
+
   // On window (re)scale — preset switch, focus, data change — scroll so the
   // today line sits ~75% across the viewport; outside the window (聚焦到
   // 过去/未来) pin the left edge instead. Wheel zoom only changes dayWidth
@@ -894,6 +1494,51 @@ export function TimelineView({
     setCustomWindow(window);
   };
 
+  // 重置视图: back to the default 半年窗 + 全项目 + 历史开 + 归档开, and
+  // drop the stored prefs so a refresh stays on the default too.
+  const resetView = () => {
+    setZoom('half');
+    setCustomWindow(null);
+    setFilterSelection(null);
+    setShowHistory(true);
+    setShowArchived(true);
+    try {
+      window.localStorage.removeItem(TIMELINE_FILTER_KEY);
+      saveArchivedVisible(window.localStorage, true);
+    } catch {
+      // storage unavailable — the in-memory reset still applies
+    }
+  };
+
+  // URL sync: zoom/window/filter/archived/history ride the searchParams so a
+  // refresh or a shared link restores the same view. Replace (not push) —
+  // view tweaks must not flood the history stack.
+  useEffect(() => {
+    const allSelected = allProjectIds.every((id) => selectedProjects.has(id));
+    const updates = encodeTimelineParams({
+      zoom,
+      window: customWindow,
+      selectedProjects: allSelected ? null : selectedProjects,
+      archived: showArchived,
+      history: showHistory,
+    });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, value] of Object.entries(updates)) {
+          if (value === null) {
+            next.delete(key);
+          } else {
+            next.set(key, value);
+          }
+        }
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, customWindow, selectedProjects, allProjectIds, showArchived, showHistory]);
+
   // History bars grouped by owning lane (project_id); unassigned ones land
   // on the 未归属 row.
   const historyByProject = useMemo(() => {
@@ -919,13 +1564,19 @@ export function TimelineView({
   }, [historyTasks, scale]);
 
   const unassignedLane = useMemo(() => {
-    const { inputs, unscheduled } = laneInputs(unassigned, historyByProject.loose, showHistory, today, scale);
-    return { layout: layoutLane(inputs), unscheduled };
+    const { inputs, periods, unscheduled } = laneInputs(
+      unassigned,
+      historyByProject.loose,
+      showHistory,
+      today,
+      scale,
+    );
+    return { layout: layoutLane(inputs), periods, unscheduled };
   }, [unassigned, historyByProject.loose, showHistory, today, scale]);
 
   return (
     <Stack gap="xs" data-testid="timeline-view">
-      {/* Toolbar: 历史 layer toggle, zoom presets, 项目筛选. */}
+      {/* Toolbar: 历史/归档 toggles, zoom presets, 项目筛选, 重置视图. */}
       <Group gap="md" wrap="wrap" data-testid="timeline-toolbar">
         <Switch
           size="sm"
@@ -933,6 +1584,17 @@ export function TimelineView({
           checked={showHistory}
           onChange={(event) => setShowHistory(event.currentTarget.checked)}
           data-testid="timeline-history-toggle"
+          styles={{ label: { color: boardPalette.dim } }}
+        />
+        <Switch
+          size="sm"
+          label="归档项目"
+          checked={showArchived}
+          onChange={(event) => {
+            setShowArchived(event.currentTarget.checked);
+            saveArchivedVisible(window.localStorage, event.currentTarget.checked);
+          }}
+          data-testid="timeline-archived-toggle"
           styles={{ label: { color: boardPalette.dim } }}
         />
         <SegmentedControl
@@ -980,10 +1642,28 @@ export function TimelineView({
         <Text size="xs" style={{ color: boardPalette.dim }}>
           {scale.start} → {scale.end}
         </Text>
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          leftSection={<IconRestore size={14} />}
+          onClick={resetView}
+          data-testid="timeline-reset-view"
+          style={{ color: boardPalette.dim }}
+        >
+          重置视图
+        </Button>
       </Group>
 
       <ScrollArea viewportRef={viewportRef}>
-        <Box style={{ position: 'relative', minWidth: LABEL_WIDTH + width }}>
+        <Box
+          onPointerDown={startPan}
+          style={{
+            position: 'relative',
+            minWidth: LABEL_WIDTH + width,
+            cursor: panning ? 'grabbing' : undefined,
+            userSelect: panning ? 'none' : undefined,
+          }}
+        >
           {/* Month axis */}
           <Group wrap="nowrap" gap={0}>
             <Box w={LABEL_WIDTH} miw={LABEL_WIDTH} />
@@ -1075,6 +1755,8 @@ export function TimelineView({
                   history={historyByProject.byProject.get(project.id) ?? []}
                   showHistory={showHistory}
                   showLabels={showLabels}
+                  collapsed={collapsedRows.has(project.id)}
+                  onToggleCollapse={() => toggleCollapsed(project.id)}
                   selectedTaskId={selectedTaskId}
                   previewTaskId={drag.preview?.taskId ?? null}
                   previewDelta={drag.preview?.deltaDays ?? 0}
@@ -1085,6 +1767,51 @@ export function TimelineView({
               ))}
             </Stack>
           ))}
+
+          {/* 归档项目泳道: after the active groups, desaturated + read-only. */}
+          {showArchived && archivedProjects.length > 0 && (
+            <Stack gap={0} data-testid="timeline-group-archived">
+              <Group wrap="nowrap" gap={0}>
+                <Box
+                  w={LABEL_WIDTH}
+                  miw={LABEL_WIDTH}
+                  pl="sm"
+                  py={4}
+                  style={{
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 2,
+                    background: boardPalette.ground,
+                  }}
+                >
+                  <Text fw={700} size="sm" style={{ color: boardPalette.dim }}>
+                    归档
+                  </Text>
+                </Box>
+                <Box style={{ flex: 1, borderBottom: `1px solid ${boardPalette.border}` }} />
+              </Group>
+              {archivedProjects.map((project) => (
+                <ProjectRow
+                  key={project.id}
+                  project={project}
+                  scale={scale}
+                  today={today}
+                  history={historyByProject.byProject.get(project.id) ?? []}
+                  showHistory={showHistory}
+                  showLabels={showLabels}
+                  archivedRow
+                  collapsed={collapsedRows.has(project.id)}
+                  onToggleCollapse={() => toggleCollapsed(project.id)}
+                  selectedTaskId={selectedTaskId}
+                  previewTaskId={null}
+                  previewDelta={0}
+                  onSelectTask={onSelectTask}
+                  onDragStart={drag.startDrag}
+                  onFocus={focusProject}
+                />
+              ))}
+            </Stack>
+          )}
 
           {unassigned.length > 0 && (
             <Group wrap="nowrap" gap={0} data-testid="timeline-unassigned">
@@ -1097,6 +1824,19 @@ export function TimelineView({
                   borderBottom: `1px dashed ${boardPalette.gold}`,
                 }}
               >
+                {unassignedLane.periods.map(({ task, range: periodRange }) => (
+                  <PeriodBand
+                    key={task.id}
+                    task={task}
+                    range={periodRange}
+                    scale={scale}
+                    selected={selectedTaskId === task.id}
+                    rowHeight={unassignedLane.layout.rowHeight}
+                    groundHeight={0}
+                    projectTitle=""
+                    onSelect={onSelectTask}
+                  />
+                ))}
                 <LaneBars
                   entries={unassignedLane.layout.entries}
                   scale={scale}

@@ -369,12 +369,16 @@ export function scaleWidth(scale: TimelineScale): number {
 
 export const TASK_BAR_HEIGHT = 14;
 export const HISTORY_BAR_HEIGHT = 7;
-/** Sub-lane heights: 刻痕-only lanes compress; task lanes keep breathing room. */
-export const TASK_LANE_HEIGHT = 24;
-export const HISTORY_LANE_HEIGHT = 14;
+/** Sub-lane heights (P1 行高压缩): 刻痕-only lanes compress; task lanes keep
+ * just enough room for the 14px bar. */
+export const TASK_LANE_HEIGHT = 20;
+export const HISTORY_LANE_HEIGHT = 10;
 export const LANE_GAP = 2;
-export const ROW_PAD_Y = 4;
-export const MIN_ROW_HEIGHT = 30;
+export const ROW_PAD_Y = 2;
+export const MIN_ROW_HEIGHT = 24;
+/** Collapsed lanes and 本窗口无活动 lanes both settle at one text line. */
+export const COLLAPSED_ROW_HEIGHT = 24;
+export const EMPTY_ROW_HEIGHT = 24;
 
 export interface LaneLayoutInput<T> {
   item: T;
@@ -624,4 +628,259 @@ export function focusWindowForProject(
   }
   const pad = Math.max(1, Math.round((daysBetween(range.start, range.end) + 1) * 0.05));
   return { start: shiftDate(range.start, -pad), end: shiftDate(range.end, pad) };
+}
+
+// ---------------------------------------------------------------------------
+// P1: 长/短任务分层 (period bands)
+// ---------------------------------------------------------------------------
+
+/** Bars spanning at least this many days sink to the baseline as 期间带. */
+export const PERIOD_BAND_MIN_DAYS = 14;
+/** 期间带 thickness — one notch fainter/thinner than the 地色带. */
+export const PERIOD_BAND_HEIGHT = 6;
+
+export function isPeriodBand(range: BarRange): boolean {
+  return daysBetween(range.start, range.end) + 1 >= PERIOD_BAND_MIN_DAYS;
+}
+
+/**
+ * A someday seat (虚位): anchored at `planned_start`, spanning to
+ * `planned_end` when present, else a one-day marker. Someday tasks without a
+ * planned_start stay in the row's 未排期 list.
+ */
+export function somedaySeatRange(
+  task: Pick<ProjectsBoardTask, 'planned_start' | 'planned_end'>,
+): BarRange | null {
+  const start = task.planned_start || '';
+  if (!start || Number.isNaN(parseDate(start))) {
+    return null;
+  }
+  let end = task.planned_end || start;
+  if (Number.isNaN(parseDate(end)) || parseDate(end) < parseDate(start)) {
+    end = start;
+  }
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
+// P1: 折叠行 (collapsed lane summary)
+// ---------------------------------------------------------------------------
+
+export interface CollapsedSummary {
+  /** 包络带: earliest start → latest end across every item; null when empty. */
+  envelope: BarRange | null;
+  /** One 2px tick per item, at its 完成/发生 date, sorted ascending. */
+  ticks: string[];
+}
+
+/**
+ * Collapsed-row content: envelope band + per-item waveform ticks. `event` is
+ * the item's occurrence date (completed/planned end, or the range end for
+ * history 刻痕); malformed events fall back to the range end.
+ */
+export function collapsedSummary(items: { range: BarRange; event?: string }[]): CollapsedSummary {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  const ticks: string[] = [];
+  for (const item of items) {
+    min = Math.min(min, parseDate(item.range.start));
+    max = Math.max(max, parseDate(item.range.end));
+    const event = item.event && !Number.isNaN(parseDate(item.event)) ? item.event : item.range.end;
+    ticks.push(event);
+  }
+  ticks.sort();
+  return {
+    envelope: Number.isFinite(min) ? { start: formatDate(min), end: formatDate(max) } : null,
+    ticks,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// P1: 撞期预警 (future schedule clashes)
+// ---------------------------------------------------------------------------
+
+export interface ClashInput {
+  id: string;
+  title: string;
+  range: BarRange;
+}
+
+/**
+ * Same-lane Doing/Queue clashes in the future zone: two bars clash when
+ * their inclusive-day spans overlap AND the overlap reaches `today` or later
+ * (past overlaps are just history). Returns taskId → clashing titles.
+ */
+export function detectScheduleClashes(items: ClashInput[], today: string): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  const push = (id: string, title: string) => {
+    const list = result.get(id) ?? [];
+    if (!list.includes(title)) {
+      list.push(title);
+      result.set(id, list);
+    }
+  };
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      const a = items[i];
+      const b = items[j];
+      const overlapStart = a.range.start > b.range.start ? a.range.start : b.range.start;
+      const overlapEnd = a.range.end < b.range.end ? a.range.end : b.range.end;
+      if (overlapStart > overlapEnd || overlapEnd < today) {
+        continue;
+      }
+      push(a.id, b.title);
+      push(b.id, a.title);
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// P1: 空行瘦身
+// ---------------------------------------------------------------------------
+
+/**
+ * An active lane slims to one text line when nothing lands in the window:
+ * no bars, no period bands, no 地色带, no milestone dated inside the scale.
+ */
+export function laneIsEmptyInWindow(options: {
+  entryCount: number;
+  periodCount: number;
+  ground: BarRange | null;
+  milestoneDates: (string | null | undefined)[];
+  scale: TimelineScale;
+}): boolean {
+  if (options.entryCount > 0 || options.periodCount > 0 || options.ground) {
+    return false;
+  }
+  return !options.milestoneDates.some(
+    (date) =>
+      !!date &&
+      !Number.isNaN(parseDate(date)) &&
+      date >= options.scale.start &&
+      date <= options.scale.end,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// P1: 折叠 + 归档开关 localStorage
+// ---------------------------------------------------------------------------
+
+/** localStorage key for collapsed lane ids (array of project case ids). */
+export const TIMELINE_COLLAPSED_KEY = 'nblane.timeline.collapsed';
+
+export function loadCollapsedRows(storage: Storage): Set<string> {
+  const raw = storage.getItem(TIMELINE_COLLAPSED_KEY);
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+      }
+    } catch {
+      // junk — fall through to none-collapsed
+    }
+  }
+  return new Set();
+}
+
+export function saveCollapsedRows(storage: Storage, collapsed: ReadonlySet<string>): void {
+  try {
+    storage.setItem(TIMELINE_COLLAPSED_KEY, JSON.stringify([...collapsed]));
+  } catch {
+    // storage full / unavailable — collapsing still works for the session
+  }
+}
+
+/** localStorage key for the 归档项目 toggle (default ON). */
+export const TIMELINE_ARCHIVED_KEY = 'nblane.timeline.archived';
+
+export function loadArchivedVisible(storage: Storage): boolean {
+  return storage.getItem(TIMELINE_ARCHIVED_KEY) !== '0';
+}
+
+export function saveArchivedVisible(storage: Storage, visible: boolean): void {
+  try {
+    storage.setItem(TIMELINE_ARCHIVED_KEY, visible ? '1' : '0');
+  } catch {
+    // storage full / unavailable
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P1: URL 视图状态 (shareable / refresh-safe)
+// ---------------------------------------------------------------------------
+
+/**
+ * Decoded timeline URL params — every field optional; absent keys mean
+ * "fall back to localStorage prefs / defaults".
+ */
+export interface TimelineUrlState {
+  zoom?: TimelineZoom;
+  window?: BarRange;
+  /** Present (even empty) when the param exists; absent = use stored filter. */
+  projects?: Set<string>;
+  archived?: boolean;
+  history?: boolean;
+}
+
+const ZOOM_VALUES = new Set<string>(['week', 'month', 'quarter', 'half', 'all']);
+
+export function decodeTimelineParams(params: URLSearchParams): TimelineUrlState {
+  const state: TimelineUrlState = {};
+  const zoom = params.get('tz');
+  if (zoom && ZOOM_VALUES.has(zoom)) {
+    state.zoom = zoom as TimelineZoom;
+  }
+  const windowStart = params.get('tws');
+  const windowEnd = params.get('twe');
+  if (
+    windowStart &&
+    windowEnd &&
+    !Number.isNaN(parseDate(windowStart)) &&
+    !Number.isNaN(parseDate(windowEnd)) &&
+    windowStart <= windowEnd
+  ) {
+    state.window = { start: windowStart, end: windowEnd };
+  }
+  if (params.has('tproj')) {
+    const raw = params.get('tproj') ?? '';
+    state.projects = new Set(raw ? raw.split(',').filter(Boolean) : []);
+  }
+  const archived = params.get('tarch');
+  if (archived === '0' || archived === '1') {
+    state.archived = archived !== '0';
+  }
+  const history = params.get('thist');
+  if (history === '0' || history === '1') {
+    state.history = history !== '0';
+  }
+  return state;
+}
+
+/**
+ * Serialize the current view state into param updates (null = delete the
+ * key). Defaults stay implicit: 归档/历史 only write when turned OFF, the
+ * project filter only when it narrows below 全选, window only when custom.
+ */
+export function encodeTimelineParams(state: {
+  zoom: TimelineZoom;
+  window: BarRange | null;
+  /** null (or a superset of all ids) = 全选 → param omitted. */
+  selectedProjects: ReadonlySet<string> | null;
+  archived: boolean;
+  history: boolean;
+}): Record<string, string | null> {
+  const updates: Record<string, string | null> = { tz: state.zoom };
+  if (state.window) {
+    updates.tws = state.window.start;
+    updates.twe = state.window.end;
+  } else {
+    updates.tws = null;
+    updates.twe = null;
+  }
+  updates.tproj = state.selectedProjects ? [...state.selectedProjects].sort().join(',') : null;
+  updates.tarch = state.archived ? null : '0';
+  updates.thist = state.history ? null : '0';
+  return updates;
 }

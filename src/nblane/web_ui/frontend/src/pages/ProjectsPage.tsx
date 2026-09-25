@@ -309,6 +309,7 @@ export function ProjectsPage() {
           profile={name}
           board={data}
           groups={groups}
+          archivedProjects={archived}
           habitRows={habitRows}
           unassigned={data.unassigned_tasks ?? []}
           kanbanEtag={kanban.data?.etag ?? ''}
