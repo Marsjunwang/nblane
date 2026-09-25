@@ -1,7 +1,7 @@
 // Tests for TaskDetailCard edit mode (编辑): the PATCH /kanban/cards/{ref}
 // form for title/context/why/project_id/tags under the kanban.md ETag.
 
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { cleanNotifications } from '@mantine/notifications';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -284,6 +284,73 @@ describe('TaskDetailCard 排期与标记完成', () => {
       ([input, init]) => init?.method === 'POST' && String(input).endsWith('/done'),
     )!;
     expect((call[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+  });
+});
+
+describe('TaskDetailCard 以后再说 (shelve to Someday)', () => {
+  afterEach(() => {
+    cleanNotifications();
+    vi.unstubAllGlobals();
+  });
+
+  const SOMEDAY_TASK: ProjectsBoardTask = {
+    ...TASK,
+    section: 'Someday / Maybe',
+    column: 'someday',
+  } as ProjectsBoardTask;
+
+  it('shows the button for a Queue card but hides it for a Someday card', () => {
+    renderCard();
+    expect(screen.getByTestId('detail-someday')).toBeInTheDocument();
+    expect(screen.getByTestId('detail-someday')).toHaveTextContent('以后再说');
+
+    cleanup();
+    renderCard(SOMEDAY_TASK);
+    expect(screen.queryByTestId('detail-someday')).not.toBeInTheDocument();
+    // The other section moves still show for a someday card.
+    expect(screen.getByText('移至 Queue')).toBeInTheDocument();
+    expect(screen.getByText('移至 Doing')).toBeInTheDocument();
+  });
+
+  it('click POSTs a move to the full Someday / Maybe section with If-Match and toasts', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST' && url.includes('/kanban/cards/') && url.endsWith('/move')) {
+        return jsonResponse(200, {
+          ok: true,
+          card: { ...TASK, section: 'Someday / Maybe' },
+          section: 'Someday / Maybe',
+          warnings: [],
+          merged_external: false,
+          merge_notices: [],
+        });
+      }
+      return jsonResponse(404, { code: 'not_found', message: url });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(
+      <TaskDetailCard
+        profile="alice"
+        task={TASK}
+        project={PROJECT}
+        projects={[PROJECT]}
+        habits={[]}
+        today="2026-09-23"
+        kanbanEtag={KANBAN_ETAG}
+        onClose={() => {}}
+        onRefresh={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('detail-someday'));
+
+    expect(await screen.findByText('已移到以后再说')).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(
+      ([input, init]) => init?.method === 'POST' && String(input).endsWith('/move'),
+    )!;
+    expect(String(call[0])).toContain(`/profiles/alice/kanban/cards/${TASK.id}/move`);
+    expect((call[1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ target_section: 'Someday / Maybe' });
   });
 });
 

@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import type { ProjectsBoardTask } from '../../api/types';
 import { boardPalette } from './palette';
+import { isSomedayDue } from './somedayDue';
 
 export function splitTags(tags: string): string[] {
   return tags
@@ -16,7 +17,9 @@ export function splitTags(tags: string): string[] {
  * One task card on a project lane. Someday tasks render as a dashed,
  * half-transparent card with a gold badge (badge, not a column — locked
  * Phase 2 design decision) and never join the drag sort. The badge carries
- * the two exits into the daily loop: list into Queue, or mark Done.
+ * the two exits into the daily loop: list into Queue, or mark Done. When the
+ * card's planned_start (期望激活日) has arrived, the badge swaps to a 朱砂
+ * outline reading 「该激活了」(stroke only — overdue is never a fill).
  */
 export function TaskCardBody({
   task,
@@ -25,6 +28,7 @@ export function TaskCardBody({
   onPromoteQueue,
   onMarkDone,
   actionPending = false,
+  today = '',
 }: {
   task: ProjectsBoardTask;
   someday?: boolean;
@@ -34,11 +38,15 @@ export function TaskCardBody({
   /** L1: mark this someday card Done without passing through Queue. */
   onMarkDone?: () => void;
   actionPending?: boolean;
+  /** Board's today (yyyy-mm-dd); drives the 到期 someday badge. */
+  today?: string;
 }) {
   const tags = splitTags(task.tags ?? '');
   const todos = task.todos ?? [];
   const todoTotal = todos.length;
   const todoDone = todos.filter((todo) => todo.done).length;
+  // 期望激活日已到的 someday 卡:朱砂描边 + 「该激活了」,其余照旧金框。
+  const due = someday && isSomedayDue(task.planned_start, today);
   return (
     <Card
       radius="sm"
@@ -67,9 +75,14 @@ export function TaskCardBody({
           <Badge
             size="sm"
             variant="outline"
-            style={{ borderColor: boardPalette.gold, color: boardPalette.goldText, flexShrink: 0 }}
+            data-testid={`someday-badge-${task.id}`}
+            style={
+              due
+                ? { borderColor: boardPalette.overdue, color: boardPalette.overdue, flexShrink: 0 }
+                : { borderColor: boardPalette.gold, color: boardPalette.goldText, flexShrink: 0 }
+            }
           >
-            someday
+            {due ? '该激活了' : 'someday'}
           </Badge>
         )}
       </Group>

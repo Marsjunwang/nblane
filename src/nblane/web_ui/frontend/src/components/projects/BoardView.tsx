@@ -96,6 +96,7 @@ export function BoardView({
               kanbanEtag={kanbanEtag}
               kanbanSections={kanbanSections}
               projectBoardEtag={projectBoardEtag}
+              today={today}
               selectedTaskId={selectedTaskId}
               onSelectTask={onSelectTask}
               onEditProject={onEditProject}
@@ -111,6 +112,7 @@ export function BoardView({
           tasks={unassigned}
           kanbanEtag={kanbanEtag}
           kanbanSections={kanbanSections}
+          today={today}
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
           onRefresh={onRefresh}

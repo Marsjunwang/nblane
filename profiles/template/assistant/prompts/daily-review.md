@@ -32,6 +32,11 @@
    - 对今天完成的在看卡片：「把 X 移到 Done？」→ 确认后
      `nblane_api --profile <profile> post /profiles/<profile>/kanban/cards/<卡片id>/done`
      → 回执新状态。
+   - 到期 someday 提醒：从第 2 步的 board 数据找出「Someday / Maybe」区里
+     排期（planned_start，即期望激活日）已到期的卡，逐条列给主人：
+     「Someday 的 Z 排期已到，要激活入 Queue 吗？」→ 主人回「好」后
+     `nblane_api --profile <profile> post /profiles/<profile>/kanban/cards/<卡片id>/move '{"target_section":"Queue"}'`
+     → 回执新状态（排期保留，不主动清除）。
    - 对已在 Done 且未结晶的卡片：「给 Done 的 Y 起结晶草稿？」→ 确认后
      `nblane_api --profile <profile> post /profiles/<profile>/crystallize/draft '{"task_ids":["<任务id>"]}'`
      （规则版同步返回，无需 LLM）→ **先把草稿全文回显给主人** → 主人再次

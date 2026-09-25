@@ -190,6 +190,7 @@ export function TaskLaneDnd({
   someday = [],
   kanbanEtag,
   kanbanSections,
+  today = '',
   selectedTaskId,
   onSelectTask,
   onRefresh,
@@ -203,6 +204,8 @@ export function TaskLaneDnd({
   kanbanEtag: string;
   /** Full kanban.md sections (for lane-local → section-global index translation). */
   kanbanSections: KanbanSection[] | undefined;
+  /** Board's today (yyyy-mm-dd); drives the 到期 someday badge. */
+  today?: string;
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onRefresh: () => void;
@@ -475,6 +478,7 @@ export function TaskLaneDnd({
                       someday
                       selected={selectedTaskId === task.id}
                       actionPending={dragDisabled}
+                      today={today}
                       onPromoteQueue={() => promoteSomeday(task, 'queue')}
                       onMarkDone={() => promoteSomeday(task, 'done')}
                     />
@@ -574,6 +578,7 @@ export function ProjectLane({
   kanbanEtag,
   kanbanSections,
   projectBoardEtag,
+  today = '',
   selectedTaskId,
   onSelectTask,
   onEditProject,
@@ -585,6 +590,8 @@ export function ProjectLane({
   kanbanSections: KanbanSection[] | undefined;
   /** project-board.yaml ETag for the quick-add case-task endpoint. */
   projectBoardEtag: string;
+  /** Board's today (yyyy-mm-dd); drives the 到期 someday badge. */
+  today?: string;
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onEditProject: (projectId: string) => void;
@@ -692,6 +699,7 @@ export function ProjectLane({
         someday={project.someday ?? []}
         kanbanEtag={kanbanEtag}
         kanbanSections={kanbanSections}
+        today={today}
         selectedTaskId={selectedTaskId}
         onSelectTask={onSelectTask}
         onRefresh={onRefresh}
@@ -707,6 +715,7 @@ export function UnassignedLane({
   tasks,
   kanbanEtag,
   kanbanSections,
+  today = '',
   selectedTaskId,
   onSelectTask,
   onRefresh,
@@ -715,6 +724,8 @@ export function UnassignedLane({
   tasks: ProjectsBoardTask[];
   kanbanEtag: string;
   kanbanSections: KanbanSection[] | undefined;
+  /** Board's today (yyyy-mm-dd); drives the 到期 someday badge. */
+  today?: string;
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onRefresh: () => void;
@@ -765,6 +776,7 @@ export function UnassignedLane({
         someday={tasks.filter((task) => task.column === 'someday')}
         kanbanEtag={kanbanEtag}
         kanbanSections={kanbanSections}
+        today={today}
         selectedTaskId={selectedTaskId}
         onSelectTask={onSelectTask}
         onRefresh={onRefresh}

@@ -1,6 +1,7 @@
 // 铭文详情卡 — task detail overlay for the unified /projects page. Opens on
 // `?task=<id>`, reuses the InscriptionCard shell, and carries the action row:
-// section moves, planned-date scheduling (timeline-drag fallback), habit
+// section moves (Doing / Queue / 反向搁置「以后再说」→ Someday / Maybe),
+// planned-date scheduling (timeline-drag fallback), habit
 // check-in, crystallize hand-off, 归属变更 (PATCH project_id — the only
 // cross-lane assignment path; board DnD stays in-lane), an edit mode
 // (编辑) for title/context/why/project_id/tags via PATCH /kanban/cards/{ref}
@@ -300,6 +301,23 @@ export function TaskDetailCard({
             message: `「${task.title}」已入 Done。`,
           }),
         onError: onError('操作失败'),
+      },
+    );
+
+  // 反向搁置:back into the Someday / Maybe section (full name, as accepted
+  // by resolve_kanban_section). planned_start survives the move — for a
+  // someday card it reads as the 期望激活日.
+  const runShelve = () =>
+    moveCard.mutate(
+      { cardRef: cardRefOf(task), targetSection: 'Someday / Maybe', etag: kanbanEtag },
+      {
+        onSuccess: () =>
+          notifications.show({
+            color: 'green',
+            title: '已移到以后再说',
+            message: `「${task.title}」排期保留为期望激活日。`,
+          }),
+        onError: onError('移动失败'),
       },
     );
 
@@ -654,6 +672,17 @@ export function TaskDetailCard({
                 onClick={() => runMove('Queue')}
               >
                 移至 Queue
+              </Button>
+            )}
+            {task.column !== 'someday' && !task.done && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                disabled={mutating}
+                onClick={runShelve}
+                data-testid="detail-someday"
+              >
+                以后再说
               </Button>
             )}
             {!task.done && (
