@@ -1,14 +1,19 @@
 // 大事记 (chronicle) view — the S-shaped boustrophedon (牛耕式) read of the
 // SAME data as the swimlane timeline (queue/doing/done/someday/归档), newest
 // on top, read direction alternating per row. Five strokes on one axis per
-// row: 月白刻点=done · 描金短条=doing · 虚框短条=queue · 金虚点=someday
-// (过期转朱砂) · `///` 断轴 for >21d empty stretches (click expands, never
-// persisted). Elbow connectors drop between rows with a dim-gold ▼; date
-// anchors sit at both row ends; labels alternate above/below with full
-// collision layout (对侧 → 缩字号 → 隐藏). Vertical wheel pans time,
-// Ctrl+wheel zooms the per-row span anchored at the cursor date. Read-only:
-// hover/click any mark opens the 铭文卡 with a 去编辑 jump to the kanban
-// view. No milestones, no zebra striping, no per-row ground blocks.
+// row: 月白刻点=done (刻点顶部带项目图形 glyph) · 描金短条=doing · 虚框短条
+// =queue · 金虚点=someday (过期转朱砂) · `///` 断轴 for ANY >21d empty
+// stretch — between events AND leading/trailing against the domain, so a
+// legally empty window renders as a chain of break rows (a fully covered row
+// collapses to a thin 断行 strip). Click a break to expand it (session-only,
+// never persisted). Elbow connectors drop between rows with a dim-gold ▼;
+// date anchors sit at both row ends. Labels live on FOUR tiers (above×2 +
+// below×2) and degrade 截断 → 缩字号 before clustering into 「+N」 chips
+// (hover lists every name — nothing hides silently). Same-day done marks fan
+// out ordered by started_on (earliest at the point, mirrored rows flip).
+// Vertical wheel pans time, Ctrl+wheel zooms the per-row span anchored at
+// the cursor date. Read-only: hover/click any mark opens the 铭文卡 with a
+// 去编辑 jump to the kanban view. No milestones, no zebra, no ground blocks.
 
 import { Box, Button, Group, MultiSelect, Popover, Stack, Text, Tooltip } from '@mantine/core';
 import { IconRestore } from '@tabler/icons-react';
@@ -25,7 +30,13 @@ import type {
 import { inscription } from '../../theme';
 import type { LaneGroup } from './lanes';
 import { boardPalette } from './palette';
-import type { ChronicleEvent, RowScale } from './chronicleMath';
+import type {
+  ChronicleEvent,
+  ChronicleLabelPlacement,
+  LabelSide,
+  LabelTier,
+  RowScale,
+} from './chronicleMath';
 import {
   buildChronicleRows,
   buildRowScale,
@@ -36,6 +47,7 @@ import {
   clampChronicleSpan,
   clipRangeToRow,
   collectChronicleEvents,
+  CHRONICLE_COLLAPSED_ROW_HEIGHT,
   CHRONICLE_DEFAULT_SPAN,
   CHRONICLE_ELBOW_HEIGHT,
   CHRONICLE_ROW_HEIGHT,
@@ -44,15 +56,16 @@ import {
   detectBreaks,
   encodeChronicleParams,
   filterChronicleEvents,
+  LABEL_TRUNCATE_KEEP,
   layoutChronicleLabels,
   panChronicle,
+  sameDayFanOffsets,
   zoomChronicle,
-  type ChronicleLabelPlacement,
 } from './chronicleMath';
 import { daysBetween, loadProjectFilter, saveProjectFilter, TIMELINE_FILTER_KEY } from './timelineMath';
 
-// Row geometry (px). Row band 120 = inside the 110–130 设计定稿 window.
-const AXIS_Y = 58;
+// Row geometry (px). Two label tiers per side at ~24px pitch around the axis.
+const AXIS_Y = 70;
 const AXIS_COLOR = '#3a4d6e';
 const DIM_DEEP = '#8d8570';
 const MOON = boardPalette.text;
@@ -61,6 +74,20 @@ const GOLD_TEXT = boardPalette.goldText;
 const CINNABAR = boardPalette.overdue;
 const PLOT_X = 34;
 const RIGHT_RESERVE = 64;
+
+/** Label block top for a side/tier; each block is ~24px (title + date lines). */
+function labelTop(side: LabelSide, tier: LabelTier): number {
+  return side === 'above' ? (tier === 0 ? 28 : 2) : tier === 0 ? 84 : 110;
+}
+
+/** Connector line from the label block to the axis. */
+function connectorStyle(side: LabelSide, tier: LabelTier): { top: number; height: number } {
+  if (side === 'above') {
+    const top = labelTop(side, tier) + 24;
+    return { top, height: AXIS_Y - 5 - top };
+  }
+  return { top: AXIS_Y + 8, height: labelTop(side, tier) - (AXIS_Y + 8) };
+}
 
 const STATUS_LABELS: Record<ChronicleEvent['kind'], string> = {
   queue: '排队',
@@ -113,22 +140,23 @@ function placeEvents(events: ChronicleEvent[], scale: RowScale): PlacedEvent[] {
       const pb = b.event.kind === 'done' || b.event.kind === 'someday' ? 1 : 0;
       return pa - pb;
     });
-  // Fan out same-day point marks (several finishes on one date stack exactly):
-  // nudge each later mark a few px right so every one keeps its own hit area.
+  // 同日完成扇排: done events sharing one completion date fan out around the
+  // point ordered by started_on (earliest at the point; mirrored rows flip).
   // The label anchor (cx) stays on the true date.
-  const seen = new Map<number, number>();
+  const fan = sameDayFanOffsets(
+    placed
+      .filter((entry) => entry.event.kind === 'done')
+      .map((entry) => ({
+        id: entry.event.id,
+        date: entry.event.start,
+        startedOn: entry.event.startedOn,
+      })),
+    { mirror: !scale.row.ltr, step: 10 },
+  );
   for (const entry of placed) {
-    if (entry.event.kind !== 'done' && entry.event.kind !== 'someday') {
-      continue;
-    }
-    const key = Math.round(entry.cx);
-    const count = seen.get(key) ?? 0;
-    seen.set(key, count + 1);
-    if (count > 0) {
-      // 10px matches the 10px hit wrapper so fanned marks never overlap.
-      entry.x0 += count * 10;
-      entry.x1 += count * 10;
-    }
+    const dx = fan.get(entry.event.id) ?? 0;
+    entry.x0 += dx;
+    entry.x1 += dx;
   }
   return placed;
 }
@@ -185,7 +213,7 @@ function ChronicleInscription({
 
 const LABEL_FONT = '"Songti SC", "SimSun", "Noto Serif SC", serif';
 
-/** One event mark on the axis (刻点 / 描金条 / 虚框条 / 虚位点) + its label. */
+/** One event mark on the axis (刻点+glyph / 描金条 / 虚框条 / 虚位点) + its label. */
 function EventMark({
   placed,
   placement,
@@ -212,23 +240,46 @@ function EventMark({
   const opacity = faded ? 0.55 : 1;
   const x = Math.min(placed.x0, placed.x1);
   const width = Math.abs(placed.x1 - placed.x0);
-  // Inner mark coordinates are WRAPPER-relative: point marks get a 10px hit
-  // wrapper centered on the date (axis crosses it at local y=10); range bars
-  // get a wrapper padded 2px around the bar.
+  const isPoint = event.kind === 'done' || event.kind === 'someday';
+  // Inner mark coordinates are WRAPPER-relative. Point marks get a 10px hit
+  // wrapper; the done wrapper reaches up to carry the project glyph above
+  // the 刻点. Range bars get a wrapper padded 2px around the bar.
   let mark: React.ReactNode = null;
   if (event.kind === 'done') {
     mark = (
-      <Box
-        style={{
-          position: 'absolute',
-          left: 4,
-          top: 2,
-          width: 2,
-          height: 16,
-          background: MOON,
-          opacity: faded ? 0.55 : 0.85,
-        }}
-      />
+      <>
+        {event.glyph && (
+          <Text
+            component="span"
+            data-testid={`chronicle-glyph-${event.id}`}
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              textAlign: 'center',
+              fontSize: 9,
+              lineHeight: '11px',
+              color: MOON,
+              opacity: faded ? 0.45 : 0.8,
+              pointerEvents: 'none',
+            }}
+          >
+            {event.glyph}
+          </Text>
+        )}
+        <Box
+          style={{
+            position: 'absolute',
+            left: 4,
+            top: 10,
+            width: 2,
+            height: 14,
+            background: MOON,
+            opacity: faded ? 0.55 : 0.85,
+          }}
+        />
+      </>
     );
   } else if (event.kind === 'doing') {
     mark = (
@@ -280,29 +331,34 @@ function EventMark({
   }
 
   const side = placement?.side ?? 'above';
-  const size = placement?.size ?? 'normal';
-  const titleFont = size === 'small' ? 10 : 11.5;
-  const dateFont = size === 'small' ? 8.5 : 9.5;
+  const tier = placement?.tier ?? 0;
+  const titleFont = placement?.size === 'small' ? 8.5 : 11.5;
+  const dateFont = placement?.size === 'small' ? 8 : 9.5;
   const labelCx = placement?.cx ?? placed.cx;
-  const label = placement && placement.size !== 'hidden' && (
+  const displayTitle =
+    placement?.truncated && event.title.length > LABEL_TRUNCATE_KEEP
+      ? `${event.title.slice(0, LABEL_TRUNCATE_KEEP)}…`
+      : event.title;
+  const label = placement && (
     <>
       <Box
         style={{
           position: 'absolute',
           left: labelCx,
-          top: side === 'above' ? AXIS_Y - 18 : AXIS_Y + 9,
           width: 1,
-          height: 9,
           background: AXIS_COLOR,
           pointerEvents: 'none',
+          ...connectorStyle(side, tier),
         }}
       />
       <Box
         data-testid={`chronicle-label-${event.id}`}
+        data-tier={tier}
+        data-size={placement.size}
         style={{
           position: 'absolute',
           left: labelCx,
-          top: side === 'above' ? 10 : AXIS_Y + 20,
+          top: labelTop(side, tier),
           transform: 'translateX(-50%)',
           textAlign: 'center',
           whiteSpace: 'nowrap',
@@ -331,7 +387,7 @@ function EventMark({
                 }
               }}
               style={{
-                fontSize: titleFont - 2,
+                fontSize: Math.max(titleFont - 2, 8),
                 color: faded ? DIM_DEEP : GOLD,
                 cursor: 'pointer',
                 marginRight: 3,
@@ -341,7 +397,7 @@ function EventMark({
               [{event.badge}]
             </Text>
           )}
-          {event.title}
+          {displayTitle}
         </Text>
         <Text component="div" style={{ fontSize: dateFont, lineHeight: 1.3, color: boardPalette.dim }}>
           {event.dateLabel}
@@ -390,11 +446,10 @@ function EventMark({
             }}
             style={{
               position: 'absolute',
-              left: event.kind === 'done' || event.kind === 'someday' ? x - 5 : x - 2,
-              top: AXIS_Y - 10,
-              width:
-                event.kind === 'done' || event.kind === 'someday' ? 10 : Math.max(width, 4) + 4,
-              height: 20,
+              left: isPoint ? x - 5 : x - 2,
+              top: event.kind === 'done' ? AXIS_Y - 17 : AXIS_Y - 10,
+              width: isPoint ? 10 : Math.max(width, 4) + 4,
+              height: event.kind === 'done' ? 27 : 20,
               cursor: 'pointer',
             }}
           >
@@ -415,6 +470,114 @@ function EventMark({
       </Popover>
       {label}
     </>
+  );
+}
+
+/** 「+N」 chip: the last-resort label bucket; hover lists every member name. */
+function LabelChip({
+  cx,
+  side,
+  tier,
+  members,
+  projectTitles,
+  onOpenMember,
+  onScheduleClose,
+  chipOpen,
+  onOpenChip,
+}: {
+  cx: number;
+  side: LabelSide;
+  tier: LabelTier;
+  members: { event: ChronicleEvent }[];
+  projectTitles: Map<string, string>;
+  onOpenMember: (id: string) => void;
+  onScheduleClose: () => void;
+  chipOpen: boolean;
+  onOpenChip: () => void;
+}) {
+  return (
+    <Popover
+      opened={chipOpen}
+      onClose={onScheduleClose}
+      position={side === 'above' ? 'top' : 'bottom'}
+      withArrow
+      withinPortal
+      shadow="md"
+      width={260}
+      styles={{
+        dropdown: {
+          background: inscription.background,
+          border: `1px solid ${inscription.borderColor}`,
+        },
+        arrow: { borderColor: inscription.borderColor },
+      }}
+    >
+      <Popover.Target>
+        <Box
+          role="button"
+          tabIndex={0}
+          aria-label={`还有 ${members.length} 个事件`}
+          data-testid={`chronicle-chip-${members[0]?.event.id ?? 'empty'}`}
+          onMouseEnter={onOpenChip}
+          onMouseLeave={onScheduleClose}
+          onClick={(clickEvent) => {
+            clickEvent.stopPropagation();
+            onOpenChip();
+          }}
+          style={{
+            position: 'absolute',
+            left: cx - 15,
+            top: labelTop(side, tier) + 4,
+            width: 30,
+            height: 16,
+            borderRadius: 8,
+            border: `1px dashed ${GOLD}`,
+            color: GOLD_TEXT,
+            fontSize: 9.5,
+            lineHeight: '15px',
+            textAlign: 'center',
+            cursor: 'pointer',
+            userSelect: 'none',
+            background: 'rgba(220, 174, 85, 0.08)',
+          }}
+        >
+          +{members.length}
+        </Box>
+      </Popover.Target>
+      <Popover.Dropdown
+        onMouseEnter={onOpenChip}
+        onMouseLeave={onScheduleClose}
+        style={{ cursor: 'auto' }}
+      >
+        <Stack gap={2} data-testid="chronicle-chip-list">
+          {members.map(({ event }) => (
+            <Text
+              key={event.id}
+              size="xs"
+              role="button"
+              tabIndex={0}
+              data-testid={`chronicle-chip-member-${event.id}`}
+              onClick={() => onOpenMember(event.id)}
+              onKeyDown={(keyEvent) => {
+                if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+                  keyEvent.preventDefault();
+                  onOpenMember(event.id);
+                }
+              }}
+              style={{
+                color: inscription.bodyColor,
+                fontFamily: inscription.bodyFontFamily,
+                cursor: 'pointer',
+              }}
+            >
+              {event.badge ? `[${event.badge}] ` : ''}
+              {event.title} · {event.dateLabel}
+              {projectTitles.get(event.projectId) ? `(${projectTitles.get(event.projectId)})` : ''}
+            </Text>
+          ))}
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
   );
 }
 
@@ -493,7 +656,6 @@ export function ChronicleView({
       ),
     [laneProjects, unassigned, kanbanSections, kanbanArchive, today, selectedForEvents],
   );
-  const breaks = useMemo(() => detectBreaks(events), [events]);
 
   // Canvas size drives both the plot width and the adaptive row count.
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -521,6 +683,16 @@ export function ChronicleView({
     () => buildChronicleRows(anchor, span, rowCount),
     [anchor, span, rowCount],
   );
+  // 断轴无处不在: breaks are measured against the whole visible domain —
+  // interior gaps AND leading/trailing emptiness (empty window → break rows).
+  const domain = useMemo(
+    () =>
+      rows.length > 0
+        ? { start: rows[rows.length - 1].start, end: rows[0].end }
+        : { start: anchor, end: anchor },
+    [rows, anchor],
+  );
+  const breaks = useMemo(() => detectBreaks(events, domain), [events, domain]);
   const rowScales = useMemo(
     () =>
       rows.map((row) =>
@@ -626,6 +798,15 @@ export function ChronicleView({
 
   const canvasW = PLOT_X + plotW + 40;
   const mmdd = (date: string) => date.slice(5);
+  const expandBreak = (key: string) =>
+    setExpandedBreaks((prev) => new Set(prev).add(key));
+
+  const breakTooltipStyles = {
+    tooltip: {
+      background: inscription.background,
+      border: `1px solid ${inscription.borderColor}`,
+    },
+  } as const;
 
   return (
     <Stack gap="xs" data-testid="chronicle-view">
@@ -662,7 +843,7 @@ export function ChronicleView({
           每行 {span} 天 · {rows.length > 0 ? `${rows[rows.length - 1].start} → ${rows[0].end}` : ''}
         </Text>
         <Text size="xs" style={{ color: DIM_DEEP }}>
-          刻点=完成 · 金条=进行 · 虚框=排期 · 虚点=虚位 · ///=断轴 · ▲=今天
+          刻点=完成(顶部图形=项目 ●◆■▲★✦◈✚) · 金条=进行 · 虚框=排期 · 虚点=虚位 · ///=断轴 · ▲=今天
         </Text>
         <Button
           variant="subtle"
@@ -686,27 +867,108 @@ export function ChronicleView({
       >
         {rows.map((row, rowIndex) => {
           const scale = rowScales[rowIndex];
+          // 断行: a break covering the whole row collapses it to a thin strip.
+          const onlySeg = scale.segments.length === 1 ? scale.segments[0] : null;
+          const collapsed =
+            !!onlySeg && onlySeg.gap && onlySeg.start === row.start && onlySeg.end === row.end;
+          const elbow =
+            rowIndex < rows.length - 1 &&
+            (() => {
+              const rightSide = row.index % 2 === 0;
+              const xd = rightSide ? PLOT_X + plotW + 24 : 12;
+              const edge = rightSide ? PLOT_X + plotW : PLOT_X;
+              const d = rightSide
+                ? `M${edge} 4 H${xd - 10} Q${xd} 4 ${xd} 14 V22 Q${xd} 32 ${xd - 10} 32 H${edge}`
+                : `M${edge} 4 H${xd + 10} Q${xd} 4 ${xd} 14 V22 Q${xd} 32 ${xd + 10} 32 H${edge}`;
+              return (
+                <svg
+                  data-testid={`chronicle-elbow-${row.index}`}
+                  width={canvasW}
+                  height={CHRONICLE_ELBOW_HEIGHT}
+                  style={{ display: 'block', margin: '-2px 0' }}
+                >
+                  <path d={d} fill="none" stroke={AXIS_COLOR} strokeWidth={1.4} />
+                  <path d={`M${xd - 6} 14 h12 l-6 10 z`} fill={GOLD} fillOpacity={0.55} />
+                </svg>
+              );
+            })();
+
+          if (collapsed) {
+            return (
+              <Box key={row.index}>
+                <Tooltip
+                  label={`${onlySeg.start} → ${onlySeg.end} · ${onlySeg.breakDays} 天无事件,点击展开`}
+                  withinPortal
+                  styles={breakTooltipStyles}
+                >
+                  <Box
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`断行 ${onlySeg.start} → ${onlySeg.end}`}
+                    data-testid={`chronicle-row-${row.index}`}
+                    data-collapsed
+                    onClick={() => expandBreak(onlySeg.breakKey!)}
+                    onKeyDown={(keyEvent) => {
+                      if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+                        keyEvent.preventDefault();
+                        expandBreak(onlySeg.breakKey!);
+                      }
+                    }}
+                    style={{
+                      position: 'relative',
+                      height: CHRONICLE_COLLAPSED_ROW_HEIGHT,
+                      margin: `0 ${PLOT_X}px 0 ${PLOT_X}px`,
+                      width: plotW,
+                      borderTop: `1px dashed ${AXIS_COLOR}`,
+                      color: DIM_DEEP,
+                      fontSize: 10,
+                      lineHeight: `${CHRONICLE_COLLAPSED_ROW_HEIGHT - 2}px`,
+                      textAlign: 'center',
+                      fontFamily: LABEL_FONT,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    /// {onlySeg.breakDays} 天 · {onlySeg.start} → {onlySeg.end}
+                  </Box>
+                </Tooltip>
+                {elbow}
+              </Box>
+            );
+          }
+
           const placed = placeEvents(events, scale);
+          const placedById = new Map(placed.map((entry) => [entry.event.id, entry]));
           const todayX = today ? chronicleDateToX(scale, today) : null;
-          const labelItems = [
-            ...(todayX != null
-              ? [
-                  {
-                    id: '__today__',
-                    x: todayX,
-                    width: 64,
-                    pinnedSide: 'above' as const,
-                  },
-                ]
-              : []),
-            ...placed.map((entry) => ({
-              id: entry.event.id,
-              x: entry.cx,
-              width: chronicleLabelWidth(entry.event.title, entry.event.badge, entry.event.dateLabel),
-            })),
-          ];
-          const placements = layoutChronicleLabels(labelItems, { plotX: PLOT_X, plotW });
-          const placementById = new Map(placements.map((entry) => [entry.id, entry]));
+          const layout = layoutChronicleLabels(
+            [
+              ...(todayX != null
+                ? [
+                    {
+                      id: '__today__',
+                      x: todayX,
+                      width: 64,
+                      title: '今天',
+                      badge: '',
+                      dateLabel: mmdd(today),
+                      pinnedSide: 'above' as const,
+                    },
+                  ]
+                : []),
+              ...placed.map((entry) => ({
+                id: entry.event.id,
+                x: entry.cx,
+                width: chronicleLabelWidth(entry.event.title, entry.event.badge, entry.event.dateLabel),
+                title: entry.event.title,
+                badge: entry.event.badge,
+                dateLabel: entry.event.dateLabel,
+              })),
+            ],
+            { plotX: PLOT_X, plotW },
+          );
+          const placementById = new Map(layout.placements.map((entry) => [entry.id, entry]));
           const todayPlacement = placementById.get('__today__');
           const gaps = scale.segments.filter((seg) => seg.gap);
           const anchorLeft = row.ltr ? row.start : row.end;
@@ -736,25 +998,18 @@ export function ChronicleView({
                       key={seg.breakKey}
                       label={`${seg.start} → ${seg.end} · ${seg.breakDays} 天无事件,点击展开`}
                       withinPortal
-                      styles={{
-                        tooltip: {
-                          background: inscription.background,
-                          border: `1px solid ${inscription.borderColor}`,
-                        },
-                      }}
+                      styles={breakTooltipStyles}
                     >
                       <Box
                         role="button"
                         tabIndex={0}
                         aria-label={`断轴 ${seg.start} → ${seg.end}`}
                         data-testid={`chronicle-break-${seg.breakKey}`}
-                        onClick={() =>
-                          setExpandedBreaks((prev) => new Set(prev).add(seg.breakKey!))
-                        }
+                        onClick={() => expandBreak(seg.breakKey!)}
                         onKeyDown={(keyEvent) => {
                           if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
                             keyEvent.preventDefault();
-                            setExpandedBreaks((prev) => new Set(prev).add(seg.breakKey!));
+                            expandBreak(seg.breakKey!);
                           }
                         }}
                         style={{
@@ -798,7 +1053,7 @@ export function ChronicleView({
                   style={{
                     position: 'absolute',
                     left: PLOT_X + 24,
-                    top: CHRONICLE_ROW_HEIGHT - 16,
+                    top: CHRONICLE_ROW_HEIGHT - 14,
                     transform: 'translateX(-50%)',
                     fontSize: 10,
                     color: DIM_DEEP,
@@ -813,7 +1068,7 @@ export function ChronicleView({
                   style={{
                     position: 'absolute',
                     left: PLOT_X + plotW - 24,
-                    top: CHRONICLE_ROW_HEIGHT - 16,
+                    top: CHRONICLE_ROW_HEIGHT - 14,
                     transform: 'translateX(-50%)',
                     fontSize: 10,
                     color: DIM_DEEP,
@@ -843,6 +1098,23 @@ export function ChronicleView({
                     }
                   />
                 ))}
+                {/* 「+N」 chips: the overflow bucket, hover lists every name. */}
+                {layout.chips.map((chip) => (
+                  <LabelChip
+                    key={chip.id}
+                    cx={chip.cx}
+                    side={chip.side}
+                    tier={chip.tier}
+                    members={chip.memberIds
+                      .map((id) => placedById.get(id))
+                      .filter((entry): entry is PlacedEvent => !!entry)}
+                    projectTitles={projectTitles}
+                    chipOpen={openCardId === `${rowIndex}:${chip.id}`}
+                    onOpenChip={() => openCard(`${rowIndex}:${chip.id}`)}
+                    onOpenMember={(id) => openCard(`${rowIndex}:${id}`)}
+                    onScheduleClose={scheduleClose}
+                  />
+                ))}
                 {/* 今天: 朱砂三角 + label (collision-pinned above) */}
                 {todayX != null && (
                   <>
@@ -866,7 +1138,7 @@ export function ChronicleView({
                         style={{
                           position: 'absolute',
                           left: todayPlacement.cx,
-                          top: 12,
+                          top: labelTop('above', 0) + 2,
                           transform: 'translateX(-50%)',
                           fontSize: 10,
                           color: CINNABAR,
@@ -883,30 +1155,7 @@ export function ChronicleView({
               </Box>
               {/* 行间弯头: row i's oldest end drops to row i+1's newest end
                   (same side by construction); dim-gold ▼ mid-drop. */}
-              {rowIndex < rows.length - 1 &&
-                (() => {
-                  const rightSide = row.index % 2 === 0;
-                  const xd = rightSide ? PLOT_X + plotW + 24 : 12;
-                  const edge = rightSide ? PLOT_X + plotW : PLOT_X;
-                  const d = rightSide
-                    ? `M${edge} 4 H${xd - 10} Q${xd} 4 ${xd} 14 V22 Q${xd} 32 ${xd - 10} 32 H${edge}`
-                    : `M${edge} 4 H${xd + 10} Q${xd} 4 ${xd} 14 V22 Q${xd} 32 ${xd + 10} 32 H${edge}`;
-                  return (
-                    <svg
-                      data-testid={`chronicle-elbow-${row.index}`}
-                      width={canvasW}
-                      height={CHRONICLE_ELBOW_HEIGHT}
-                      style={{ display: 'block', margin: '-2px 0' }}
-                    >
-                      <path d={d} fill="none" stroke={AXIS_COLOR} strokeWidth={1.4} />
-                      <path
-                        d={`M${xd - 6} 14 h12 l-6 10 z`}
-                        fill={GOLD}
-                        fillOpacity={0.55}
-                      />
-                    </svg>
-                  );
-                })()}
+              {elbow}
             </Box>
           );
         })}

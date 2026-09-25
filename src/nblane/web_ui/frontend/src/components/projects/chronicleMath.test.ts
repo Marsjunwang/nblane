@@ -26,8 +26,13 @@ import {
   layoutChronicleLabels,
   panChronicle,
   projectBadge,
+  projectGlyph,
+  PROJECT_GLYPHS,
+  sameDayFanOffsets,
   zoomChronicle,
   type ChronicleEvent,
+  type ChronicleLabelItem,
+  type ChronicleLabelLayout,
 } from './chronicleMath';
 import { daysBetween, shiftDate } from './timelineMath';
 
@@ -161,7 +166,9 @@ describe('chronicleMath event collection', () => {
     expect(byId.get('s1')).toMatchObject({ kind: 'someday', start: '2026-11-01', overdue: false });
     expect(byId.get('done-1')).toMatchObject({ kind: 'done', start: '2026-09-12', archived: false });
     expect(byId.get('arch-1')).toMatchObject({ kind: 'done', archived: true });
-    expect(byId.get('u1')).toMatchObject({ kind: 'doing', projectId: '', badge: '' });
+    expect(byId.get('u1')).toMatchObject({ kind: 'doing', projectId: '', badge: '', glyph: '' });
+    expect(byId.get('d1')).toMatchObject({ startedOn: '2026-09-08', glyph: projectGlyph('p1') });
+    expect(byId.get('done-1')!.glyph).toBe(projectGlyph('p1'));
   });
 
   it('flips someday to 朱砂 once planned_start has arrived', () => {
@@ -203,33 +210,68 @@ describe('chronicleMath break detection', () => {
     end,
     overdue: false,
     dateLabel: start,
+    startedOn: null,
+    glyph: '',
   });
 
-  it('returns nothing without events or with only small gaps', () => {
-    expect(detectBreaks([])).toEqual([]);
-    expect(detectBreaks([ev('a', '2026-09-01'), ev('b', '2026-09-20')])).toEqual([]); // 18 empty days
+  it('returns nothing when the whole domain fits under the threshold', () => {
+    expect(detectBreaks([], { start: '2026-09-01', end: '2026-09-20' })).toEqual([]);
+  });
+
+  it('collapses a legally empty domain into one break (全空窗口)', () => {
+    const breaks = detectBreaks([], { start: '2026-01-01', end: '2026-12-31' });
+    expect(breaks).toHaveLength(1);
+    expect(breaks[0]).toMatchObject({ start: '2026-01-01', end: '2026-12-31', days: 365 });
   });
 
   it('compresses interior gaps longer than the threshold', () => {
-    const breaks = detectBreaks([ev('a', '2026-05-04'), ev('b', '2026-06-16')]);
+    const breaks = detectBreaks(
+      [ev('a', '2026-05-04'), ev('b', '2026-06-16')],
+      { start: '2026-05-01', end: '2026-06-20' },
+    );
     expect(breaks).toHaveLength(1);
     expect(breaks[0]).toMatchObject({ start: '2026-05-05', end: '2026-06-15', days: 42 });
     expect(breaks[0].days).toBeGreaterThan(BREAK_MIN_GAP_DAYS);
   });
 
   it('merges overlapping/adjacent spans before measuring gaps', () => {
-    const breaks = detectBreaks([
-      ev('a', '2026-05-01', '2026-05-10'),
-      ev('b', '2026-05-10', '2026-05-20'), // adjacent — no break between
-      ev('c', '2026-08-01'),
-    ]);
+    const breaks = detectBreaks(
+      [
+        ev('a', '2026-05-01', '2026-05-10'),
+        ev('b', '2026-05-10', '2026-05-20'), // adjacent — no break between
+        ev('c', '2026-08-01'),
+      ],
+      { start: '2026-05-01', end: '2026-08-05' },
+    );
     expect(breaks).toHaveLength(1);
     expect(breaks[0]).toMatchObject({ start: '2026-05-21', end: '2026-07-31' });
   });
 
-  it('never breaks leading/trailing emptiness', () => {
-    const breaks = detectBreaks([ev('a', '2026-09-10'), ev('b', '2026-09-15')]);
-    expect(breaks).toEqual([]);
+  it('breaks leading and trailing emptiness against the domain', () => {
+    const breaks = detectBreaks(
+      [ev('a', '2026-09-10'), ev('b', '2026-09-15')],
+      { start: '2026-06-01', end: '2026-12-31' },
+    );
+    expect(breaks).toHaveLength(2);
+    expect(breaks[0]).toMatchObject({ start: '2026-06-01', end: '2026-09-09' });
+    expect(breaks[1]).toMatchObject({ start: '2026-09-16', end: '2026-12-31' });
+  });
+
+  it('leaves edge stretches at or under the threshold unbroken', () => {
+    const breaks = detectBreaks(
+      [ev('a', '2026-09-01'), ev('b', '2026-09-20')],
+      { start: '2026-08-15', end: '2026-10-05' },
+    );
+    expect(breaks).toEqual([]); // 17/18/15-day stretches all ≤ 21
+  });
+
+  it('clips event spans to the domain before measuring edges', () => {
+    const breaks = detectBreaks(
+      [ev('a', '2025-12-01', '2026-02-01'), ev('b', '2026-06-25')],
+      { start: '2026-01-01', end: '2026-06-30' },
+    );
+    expect(breaks).toHaveLength(1);
+    expect(breaks[0]).toMatchObject({ start: '2026-02-02', end: '2026-06-24' });
   });
 });
 
@@ -265,7 +307,7 @@ describe('chronicleMath row scale (date ↔ x)', () => {
     { start: '2026-07-01', end: '2026-07-01' },
     { start: '2026-09-20', end: '2026-09-20' },
   ];
-  const [longBreak] = detectBreaks(breakEvents);
+  const [longBreak] = detectBreaks(breakEvents, { start: '2026-06-29', end: '2026-09-25' });
 
   it('compresses breaks into fixed-width blocks with a sane inverse', () => {
     expect(longBreak).toMatchObject({ start: '2026-07-02', end: '2026-09-19' });
@@ -317,63 +359,137 @@ describe('chronicleMath adaptive row count', () => {
   });
 });
 
-describe('chronicleMath label collision layout', () => {
+describe('chronicleMath label collision layout v2', () => {
   const opts = { plotX: 0, plotW: 1000, pad: 6 };
-  const item = (id: string, x: number, width = 100, pinnedSide?: 'above' | 'below') => ({
+  const item = (
+    id: string,
+    x: number,
+    width = 100,
+    extra: Partial<ChronicleLabelItem> = {},
+  ): ChronicleLabelItem => ({
     id,
     x,
     width,
-    pinnedSide,
+    title: id,
+    badge: '',
+    dateLabel: '06-16',
+    ...extra,
+  });
+  const byId = (layout: ChronicleLabelLayout, id: string) =>
+    layout.placements.find((p) => p.id === id);
+
+  it('places sparse labels on the near above tier at full size', () => {
+    const layout = layoutChronicleLabels([item('a', 100), item('b', 500)], opts);
+    expect(byId(layout, 'a')).toMatchObject({ cx: 100, side: 'above', tier: 0, size: 'normal', truncated: false });
+    expect(byId(layout, 'b')).toMatchObject({ side: 'above', tier: 0 });
+    expect(layout.chips).toEqual([]);
   });
 
-  it('places sparse labels above at full size', () => {
-    const placed = layoutChronicleLabels([item('a', 100), item('b', 500)], opts);
-    expect(placed).toEqual([
-      { id: 'a', cx: 100, side: 'above', size: 'normal' },
-      { id: 'b', cx: 500, side: 'above', size: 'normal' },
-    ]);
-  });
-
-  it('pushes colliding labels to the other side', () => {
-    const placed = layoutChronicleLabels([item('a', 100), item('b', 130)], opts);
-    expect(placed.find((p) => p.id === 'a')).toMatchObject({ side: 'above', size: 'normal' });
-    expect(placed.find((p) => p.id === 'b')).toMatchObject({ side: 'below', size: 'normal' });
-  });
-
-  it('shrinks one font notch when both sides collide at full size', () => {
-    // a above + b below at the same x; c fits neither side at full width but
-    // squeezes in one notch smaller.
-    const placed = layoutChronicleLabels(
-      [item('a', 0, 100), item('b', 0, 100), item('c', 98, 90)],
-      { plotX: -200, plotW: 1400, pad: 2 },
+  it('walks all four tiers before degrading the label', () => {
+    const layout = layoutChronicleLabels(
+      [item('a', 100), item('b', 100), item('c', 100), item('d', 100)],
+      opts,
     );
-    expect(placed.find((p) => p.id === 'a')).toMatchObject({ side: 'above', size: 'normal' });
-    expect(placed.find((p) => p.id === 'b')).toMatchObject({ side: 'below', size: 'normal' });
-    expect(placed.find((p) => p.id === 'c')).toMatchObject({ side: 'above', size: 'small' });
+    expect(byId(layout, 'a')).toMatchObject({ side: 'above', tier: 0 });
+    expect(byId(layout, 'b')).toMatchObject({ side: 'below', tier: 0 });
+    expect(byId(layout, 'c')).toMatchObject({ side: 'above', tier: 1 });
+    expect(byId(layout, 'd')).toMatchObject({ side: 'below', tier: 1 });
   });
 
-  it('hides labels that fit nowhere (铭文卡 covers them)', () => {
-    const items = Array.from({ length: 8 }, (_, i) => item(`l${i}`, 300 + i * 4, 120));
-    const placed = layoutChronicleLabels(items, opts);
-    expect(placed.some((p) => p.size === 'hidden')).toBe(true);
+  it('truncates a long title (≥6 字保首) before shrinking the font', () => {
+    // Four narrow sentries fill every tier around x=100; the wide candidate
+    // only fits once its 13-char title truncates to 6+… (full width would
+    // still overlap the sentry intervals).
+    const sentries = ['s1', 's2', 's3', 's4'].map((id) => item(id, 100, 60));
+    const longTitle = '这是一个非常长的任务标题啊';
+    const wide = item('w', 190, chronicleLabelWidth(longTitle, '', '06-16'), { title: longTitle });
+    const layout = layoutChronicleLabels([...sentries, wide], opts);
+    expect(byId(layout, 'w')).toMatchObject({ truncated: true, size: 'normal' });
+  });
+
+  it('shrinks one font notch when even the truncated title collides', () => {
+    const sentries = ['s1', 's2', 's3', 's4'].map((id) => item(id, 100, 60));
+    const longTitle = '这是一个非常长的任务标题啊';
+    const wide = item('w', 178, chronicleLabelWidth(longTitle, '', '06-16'), { title: longTitle });
+    const layout = layoutChronicleLabels([...sentries, wide], opts);
+    expect(byId(layout, 'w')).toMatchObject({ truncated: true, size: 'small' });
+  });
+
+  it('clusters the overflow into +N chips instead of hiding names', () => {
+    const items = Array.from({ length: 8 }, (_, i) => item(`l${i}`, 300 + i * 4, 100));
+    const layout = layoutChronicleLabels(items, opts);
+    expect(layout.placements).toHaveLength(4);
+    expect(layout.chips).toHaveLength(1);
+    expect(layout.chips[0].memberIds).toEqual(['l4', 'l5', 'l6', 'l7']);
   });
 
   it('keeps the pinned today marker above and routes others around it', () => {
-    const placed = layoutChronicleLabels([item('today', 400, 90, 'above'), item('x', 410)], opts);
-    expect(placed.find((p) => p.id === 'today')).toMatchObject({ side: 'above', size: 'normal' });
-    expect(placed.find((p) => p.id === 'x')).toMatchObject({ side: 'below' });
+    const layout = layoutChronicleLabels(
+      [item('today', 400, 90, { pinnedSide: 'above' }), item('x', 410)],
+      opts,
+    );
+    expect(byId(layout, 'today')).toMatchObject({ side: 'above', tier: 0, size: 'normal' });
+    expect(byId(layout, 'x')).toMatchObject({ side: 'below', tier: 0 });
   });
 
   it('clamps edge labels inside the plot', () => {
-    const placed = layoutChronicleLabels([item('a', 0, 100), item('b', 1000, 100)], opts);
-    expect(placed.find((p) => p.id === 'a')!.cx).toBeGreaterThanOrEqual(50);
-    expect(placed.find((p) => p.id === 'b')!.cx).toBeLessThanOrEqual(950);
+    const layout = layoutChronicleLabels([item('a', 0), item('b', 1000)], opts);
+    expect(byId(layout, 'a')!.cx).toBeGreaterThanOrEqual(50);
+    expect(byId(layout, 'b')!.cx).toBeLessThanOrEqual(950);
   });
 
   it('estimates label width from the longer of title and date lines', () => {
     const wide = chronicleLabelWidth('整理机器人架构', '学习', '05-04');
     const narrow = chronicleLabelWidth('ok', '', '09-08 → 09-25');
     expect(wide).toBeGreaterThan(narrow);
+  });
+});
+
+describe('chronicleMath project glyphs', () => {
+  it('assigns a deterministic glyph from the fixed set', () => {
+    expect(PROJECT_GLYPHS).toContain(projectGlyph('project:vla'));
+    expect(projectGlyph('project:vla')).toBe(projectGlyph('project:vla'));
+    expect(projectGlyph('')).toBe('');
+    // The hash actually spreads across the set.
+    const distinct = new Set(['a', 'b', 'c', 'd', 'e', 'f'].map(projectGlyph));
+    expect(distinct.size).toBeGreaterThan(3);
+  });
+});
+
+describe('chronicleMath same-day done fan', () => {
+  const trio = () => [
+    { id: 'b', date: '2026-06-16', startedOn: '2026-06-05' },
+    { id: 'a', date: '2026-06-16', startedOn: '2026-06-01' },
+    { id: 'c', date: '2026-06-16', startedOn: null },
+  ];
+
+  it('orders the fan by started_on, earliest at the point, missing dates last', () => {
+    const offsets = sameDayFanOffsets(trio(), { mirror: false, step: 10 });
+    expect(offsets.get('a')).toBe(0);
+    expect(offsets.get('b')).toBe(10);
+    expect(offsets.get('c')).toBe(-10);
+  });
+
+  it('mirrors the fan on mirrored rows', () => {
+    const offsets = sameDayFanOffsets(trio(), { mirror: true, step: 10 });
+    expect(offsets.get('a')).toBe(0);
+    expect(offsets.get('b')).toBe(-10);
+    expect(offsets.get('c')).toBe(10);
+  });
+
+  it('leaves singleton days untouched and breaks started_on ties by id', () => {
+    expect(
+      sameDayFanOffsets([{ id: 'x', date: '2026-06-16', startedOn: null }], { mirror: false }).size,
+    ).toBe(0);
+    const ties = sameDayFanOffsets(
+      [
+        { id: 'b', date: '2026-06-16', startedOn: '2026-06-01' },
+        { id: 'a', date: '2026-06-16', startedOn: '2026-06-01' },
+      ],
+      { mirror: false, step: 10 },
+    );
+    expect(ties.get('a')).toBe(0);
+    expect(ties.get('b')).toBe(10);
   });
 });
 
