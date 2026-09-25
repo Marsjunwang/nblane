@@ -42,7 +42,6 @@ import {
   Button,
   Group,
   MultiSelect,
-  ScrollArea,
   SegmentedControl,
   Stack,
   Switch,
@@ -50,7 +49,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { IconChevronDown, IconChevronRight, IconFocus2, IconRestore } from '@tabler/icons-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import type {
@@ -75,7 +74,6 @@ import type {
 } from './timelineMath';
 import {
   barStatus,
-  clampDayWidth,
   clampRangeToScale,
   collapsedSummary,
   COLLAPSED_ROW_HEIGHT,
@@ -102,6 +100,7 @@ import {
   loadCollapsedRows,
   loadProjectFilter,
   monthTicks,
+  panWindow,
   PERIOD_BAND_HEIGHT,
   projectRange,
   rightSpaces,
@@ -1366,30 +1365,50 @@ export function TimelineView({
     onError: onDragError,
   });
 
-  // Ctrl+wheel / pinch: stepless zoom anchored at the cursor date. The window
-  // span scales around the anchor (its relative position inside the window is
-  // preserved); dayWidth re-derives from the viewport fit (clamped 1–40px).
-  const pendingScrollRef = useRef<number | null>(null);
+  // 窗口平移模型 (2026-09-25 hotfix): the window span always fits the
+  // viewport (dayWidth = fitWidth/span), so the content is never DOM-
+  // scrollable horizontally and scrollLeft-based panning was a no-op.
+  // Panning moves the WINDOW itself: presets materialize their implicit
+  // window on first pan (preset highlight drops), and panWindow clamps the
+  // result loosely so a fling can't strand the view in empty time.
+  const panRemainder = useRef(0);
+  const panBy = (days: number) => {
+    if (!days) {
+      return;
+    }
+    setCustomWindow((prev) => panWindow(prev ?? { start: scale.start, end: scale.end }, days, today));
+  };
+
+  // Plain wheel = page scroll (bubbles untouched); Shift+wheel / trackpad
+  // horizontal = window pan (~10% span per notch, sub-notch deltas
+  // accumulate); Ctrl+wheel / pinch = stepless zoom anchored at the cursor
+  // date (the anchor's relative position inside the window is preserved).
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
     }
     const onWheel = (event: WheelEvent) => {
-      // Figma 惯例: plain wheel = vertical scroll (native), Shift+wheel =
-      // horizontal pan (trackpad two-finger swipes arrive as deltaX and pan
-      // natively), Ctrl+wheel/pinch = stepless zoom.
-      if (event.shiftKey && !event.ctrlKey && !event.metaKey && event.deltaX === 0) {
-        event.preventDefault();
-        viewport.scrollLeft += event.deltaY;
-        return;
-      }
       if (!event.ctrlKey && !event.metaKey) {
+        const horizontal = event.shiftKey
+          ? event.deltaY
+          : Math.abs(event.deltaX) > Math.abs(event.deltaY)
+            ? event.deltaX
+            : 0;
+        if (!horizontal) {
+          return;
+        }
+        event.preventDefault();
+        const span = daysBetween(scale.start, scale.end) + 1;
+        panRemainder.current += (horizontal / 100) * span * 0.1;
+        const days = Math.trunc(panRemainder.current);
+        panRemainder.current -= days;
+        panBy(days);
         return;
       }
       event.preventDefault();
       const mouseX = event.clientX - viewport.getBoundingClientRect().left;
-      const axisX = viewport.scrollLeft + mouseX - LABEL_WIDTH;
+      const axisX = mouseX - LABEL_WIDTH;
       const oldSpan = daysBetween(scale.start, scale.end) + 1;
       const newSpan = Math.round(
         Math.min(Math.max(oldSpan * Math.exp(event.deltaY * 0.0022), 2), 5000),
@@ -1402,29 +1421,19 @@ export function TimelineView({
       const startOffset = Math.round(anchorDays - ratio * (newSpan - 1));
       const start = shiftDate(scale.start, startOffset);
       const end = shiftDate(start, newSpan - 1);
-      const fitWidth = viewport.clientWidth - LABEL_WIDTH;
-      const newDayWidth = clampDayWidth(fitWidth > 0 ? fitWidth / newSpan : scale.dayWidth);
-      pendingScrollRef.current = ratio * newSpan * newDayWidth + LABEL_WIDTH - mouseX;
       setCustomWindow({ start, end });
     };
     viewport.addEventListener('wheel', onWheel, { passive: false });
     return () => viewport.removeEventListener('wheel', onWheel);
-  }, [scale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scale, today]);
 
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (viewport && pendingScrollRef.current != null) {
-      viewport.scrollLeft = Math.max(0, pendingScrollRef.current);
-      pendingScrollRef.current = null;
-    }
-  }, [scale]);
-
-  // 空白处按住拖拽 = 水平平移 (grab cursor). Bars/labels/buttons keep their
-  // own gestures — the pan only starts on bare ground.
+  // 空白处按住拖拽 = 窗口平移 (grab cursor; dx → 天数按 dayWidth 换算).
+  // Bars/labels/buttons keep their own gestures — the pan only starts on
+  // bare ground, and the window snapshot at gesture start keeps the
+  // mapping 1:1 with the cursor.
   const [panning, setPanning] = useState(false);
-  const panGesture = useRef<{ startX: number; scrollLeft: number; pointerId: number } | null>(
-    null,
-  );
+  const panGesture = useRef<{ startX: number; window: BarRange; pointerId: number } | null>(null);
   const startPan = (event: React.PointerEvent) => {
     if (event.button !== 0 || drag.active) {
       return;
@@ -1433,13 +1442,9 @@ export function TimelineView({
     if (target.closest('[role="button"], button, a, input, [role="switch"]')) {
       return;
     }
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
     panGesture.current = {
       startX: event.clientX,
-      scrollLeft: viewport.scrollLeft,
+      window: customWindow ?? { start: scale.start, end: scale.end },
       pointerId: event.pointerId,
     };
     const onMove = (moveEvent: PointerEvent) => {
@@ -1447,10 +1452,12 @@ export function TimelineView({
       if (!gesture || moveEvent.pointerId !== gesture.pointerId) {
         return;
       }
-      if (!panning) {
-        setPanning(true);
+      const days = Math.round((gesture.startX - moveEvent.clientX) / scale.dayWidth);
+      if (!days) {
+        return;
       }
-      viewport.scrollLeft = gesture.scrollLeft - (moveEvent.clientX - gesture.startX);
+      setPanning(true);
+      setCustomWindow(panWindow(gesture.window, days, today));
     };
     const finish = () => {
       panGesture.current = null;
@@ -1464,15 +1471,17 @@ export function TimelineView({
     window.addEventListener('pointercancel', finish);
   };
 
-  // On window (re)scale — preset switch, focus, data change — scroll so the
-  // today line sits ~75% across the viewport; outside the window (聚焦到
-  // 过去/未来) pin the left edge instead. Wheel zoom only changes dayWidth
-  // and never retriggers this (anchor math above owns the scroll there).
+  // Today-at-75% horizontal centering: only meaningful when the content can
+  // overflow horizontally (全部 zoom over a huge extent → dayWidth floors at
+  // 1px). Runs ONLY on first load / preset switch / focus / reset — panning
+  // and Ctrl+wheel never retrigger it (they own the window/scroll state).
+  const centerOnScale = useRef(true);
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport || !today) {
+    if (!viewport || !today || !centerOnScale.current) {
       return;
     }
+    centerOnScale.current = false;
     const inWindow = today >= scale.start && today <= scale.end;
     const target = inWindow
       ? dateToX(today, scale) + LABEL_WIDTH - viewport.clientWidth * 0.75
@@ -1484,6 +1493,7 @@ export function TimelineView({
   const applyPreset = (value: string) => {
     setZoom(value as TimelineZoom);
     setCustomWindow(null);
+    centerOnScale.current = true;
   };
 
   const focusProject = (project: ProjectsBoardProject) => {
@@ -1492,6 +1502,7 @@ export function TimelineView({
       return;
     }
     setCustomWindow(window);
+    centerOnScale.current = true;
   };
 
   // 重置视图: back to the default 半年窗 + 全项目 + 历史开 + 归档开, and
@@ -1502,6 +1513,7 @@ export function TimelineView({
     setFilterSelection(null);
     setShowHistory(true);
     setShowArchived(true);
+    centerOnScale.current = true;
     try {
       window.localStorage.removeItem(TIMELINE_FILTER_KEY);
       saveArchivedVisible(window.localStorage, true);
@@ -1654,7 +1666,15 @@ export function TimelineView({
         </Button>
       </Group>
 
-      <ScrollArea viewportRef={viewportRef}>
+      {/* Plain scrollport, not ScrollArea: overflowY hidden means the
+          timeline never owns the vertical wheel — it chains straight to the
+          page (scrollLeft panning is gone; horizontal scroll only survives
+          for the 全部-zoom dayWidth-floor overflow edge). */}
+      <Box
+        ref={viewportRef}
+        data-testid="timeline-scrollport"
+        style={{ overflowX: 'auto', overflowY: 'hidden' }}
+      >
         <Box
           onPointerDown={startPan}
           style={{
@@ -1886,7 +1906,7 @@ export function TimelineView({
             />
           )}
         </Box>
-      </ScrollArea>
+      </Box>
     </Stack>
   );
 }

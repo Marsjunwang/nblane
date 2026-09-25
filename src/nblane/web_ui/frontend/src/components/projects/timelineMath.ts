@@ -662,6 +662,32 @@ export function somedaySeatRange(
   return { start, end };
 }
 
+/**
+ * 窗口平移: shift the whole window by whole days. Panning moves the window
+ * itself — the content always fits the viewport (dayWidth = fitWidth/span),
+ * so DOM scrolling is a no-op and the window IS the pan state. Clamped
+ * loosely to the sane domain (2015 → today + 2y) so a fling can never
+ * strand the view in the void; clamping shifts back, never squashes.
+ */
+export function panWindow(window: BarRange, days: number, today: string): BarRange {
+  if (!days) {
+    return window;
+  }
+  let start = shiftDate(window.start, days);
+  let end = shiftDate(window.end, days);
+  const min = DIRTY_MIN;
+  const max = formatDate(parseDate(today) + 366 * 2 * DAY_MS);
+  if (start < min) {
+    end = shiftDate(end, daysBetween(start, min));
+    start = min;
+  }
+  if (end > max) {
+    start = shiftDate(start, daysBetween(end, max));
+    end = max;
+  }
+  return { start, end };
+}
+
 // ---------------------------------------------------------------------------
 // P1: 折叠行 (collapsed lane summary)
 // ---------------------------------------------------------------------------

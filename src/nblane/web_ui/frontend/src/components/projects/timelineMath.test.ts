@@ -22,6 +22,7 @@ import {
   layoutLane,
   loadProjectFilter,
   monthTicks,
+  panWindow,
   parseDate,
   projectRange,
   rightSpaces,
@@ -785,5 +786,36 @@ describe('timelineMath URL 视图状态', () => {
     expect([...(decoded.projects ?? [])].sort()).toEqual(['p1', 'p2']);
     expect(decoded.archived).toBe(false);
     expect(decoded.history).toBe(false);
+  });
+});
+
+describe('timelineMath panWindow (窗口平移)', () => {
+  const today = '2026-09-25';
+
+  it('shifts the whole window by whole days', () => {
+    expect(panWindow({ start: '2026-09-01', end: '2026-09-30' }, 10, today)).toEqual({
+      start: '2026-09-11',
+      end: '2026-10-10',
+    });
+    expect(panWindow({ start: '2026-09-01', end: '2026-09-30' }, -10, today)).toEqual({
+      start: '2026-08-22',
+      end: '2026-09-20',
+    });
+  });
+
+  it('is a no-op for zero days', () => {
+    const window = { start: '2026-09-01', end: '2026-09-30' };
+    expect(panWindow(window, 0, today)).toBe(window);
+  });
+
+  it('clamps loosely to the sane domain without squashing the span', () => {
+    // Far left: pinned at 2015-01-01, 30-day span preserved.
+    const left = panWindow({ start: '2026-09-01', end: '2026-09-30' }, -5000, today);
+    expect(left.start).toBe('2015-01-01');
+    expect(daysBetween(left.start, left.end)).toBe(29);
+    // Far right: pinned at today + 2×366d (2028-09-26).
+    const right = panWindow({ start: '2026-09-01', end: '2026-09-30' }, 5000, today);
+    expect(right.end).toBe('2028-09-26');
+    expect(daysBetween(right.start, right.end)).toBe(29);
   });
 });

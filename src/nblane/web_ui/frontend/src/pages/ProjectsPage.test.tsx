@@ -1866,3 +1866,34 @@ describe('ProjectsPage timeline P1', () => {
     await waitFor(() => expect(toolbar).toHaveTextContent('2026-09-02 → 2026-11-30'));
   });
 });
+
+describe('ProjectsPage timeline 窗口平移 (hotfix)', () => {
+  it('shift+wheel pans the window itself and syncs the URL', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+
+    fireEvent.wheel(screen.getByTestId('timeline-scrollport'), { deltaY: 120, shiftKey: true });
+    // Span 203d; 120/100 × 203 × 0.1 = 24.36 → trunc 24 → window +24d.
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-06-05 → 2026-12-24'));
+    expect(lastSearch).toContain('tws=2026-06-05');
+    expect(lastSearch).toContain('twe=2026-12-24');
+
+    // Panning back lands on the preset window again.
+    fireEvent.wheel(screen.getByTestId('timeline-scrollport'), { deltaY: -120, shiftKey: true });
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+  });
+
+  it('plain wheel never pans the window (vertical scroll passes through)', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+
+    fireEvent.wheel(screen.getByTestId('timeline-scrollport'), { deltaY: 240 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30');
+    expect(lastSearch).not.toContain('tws=');
+  });
+});
