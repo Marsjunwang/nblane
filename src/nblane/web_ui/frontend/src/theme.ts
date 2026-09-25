@@ -98,4 +98,6 @@ export const boardPalette = {
   selectedBorder: chrome.goldText,
   /** Today line (dashed gold). */
   todayLine: chrome.goldText,
+  /** 淡朱砂 — overdue task stroke only (克制使用, never a fill). */
+  overdue: '#b0544a',
 } as const;

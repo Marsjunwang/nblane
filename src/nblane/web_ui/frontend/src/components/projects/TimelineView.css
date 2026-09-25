@@ -1,0 +1,9 @@
+/* 聚焦 button: faint at rest, revealed on row-label hover. */
+.timeline-focus-btn {
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+.timeline-row-label:hover .timeline-focus-btn,
+.timeline-focus-btn:hover {
+  opacity: 1;
+}

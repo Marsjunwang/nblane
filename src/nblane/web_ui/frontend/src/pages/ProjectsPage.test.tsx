@@ -231,6 +231,7 @@ function renderPage(route = '/p/alice/projects') {
 afterEach(() => {
   cleanNotifications();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe('ProjectsPage board view', () => {
@@ -957,6 +958,57 @@ describe('ProjectsPage selection & views', () => {
     // Clicking a bar selects the task (shared detail card).
     fireEvent.click(screen.getByTestId('timeline-bar-kb_2'));
     expect(await screen.findByTestId('task-detail-card')).toHaveTextContent('完成技能树重构');
+  });
+
+  it('timeline filter hides unchecked project rows (and their empty group header)', async () => {
+    stubFetch();
+    renderPage('/p/alice/projects?view=timeline');
+    expect(await screen.findByTestId('timeline-row-p1')).toBeInTheDocument();
+    expect(screen.getByTestId('timeline-group-g1')).toBeInTheDocument();
+
+    // Uncheck 知识补全 in the project multi-select (options stay listed so
+    // they can be toggled back on).
+    const filter = screen.getByTestId('timeline-project-filter');
+    fireEvent.mouseDown(filter);
+    fireEvent.click(filter);
+    await waitFor(() => {
+      expect(
+        Array.from(document.querySelectorAll('[role="option"]')).some(
+          (el) => el.textContent === '知识补全',
+        ),
+      ).toBe(true);
+    });
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find(
+      (el) => el.textContent === '知识补全',
+    ) as HTMLElement;
+    fireEvent.click(option);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('timeline-row-p1')).not.toBeInTheDocument(),
+    );
+    // g1 had only p1 — the group header goes with it.
+    expect(screen.queryByTestId('timeline-group-g1')).not.toBeInTheDocument();
+    // 日课 rows are immune to the project filter.
+    expect(screen.getByTestId('timeline-habit-exercise')).toBeInTheDocument();
+    // The selection persists (localStorage) for the next visit.
+    expect(window.localStorage.getItem('nblane.timeline.projects')).toBe('[]');
+  });
+
+  it('timeline focus button zooms to the project span; 全部 restores', async () => {
+    stubFetch();
+    renderPage('/p/alice/projects?view=timeline');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+    // Default 半年 window: 2026-09-23 − 136d → +45d.
+    expect(toolbar).toHaveTextContent('2026-05-10 → 2026-11-07');
+
+    // p1 has no time_range; focus falls back to its task span (kb_2:
+    // 2026-09-10 → today) padded 1 day on both ends.
+    fireEvent.click(screen.getByTestId('timeline-focus-p1'));
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-09-09 → 2026-09-24'));
+
+    // 全部 preset clears the focus window and refits the full extent.
+    fireEvent.click(within(screen.getByTestId('timeline-zoom-toggle')).getByText('全部'));
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-09-10 → 2026-10-07'));
   });
 
   it('redirects /kanban and /project-board to /projects preserving the query', async () => {
