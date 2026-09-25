@@ -880,6 +880,97 @@ export function sameDayFanOffsets(
 }
 
 // ---------------------------------------------------------------------------
+// 键盘导航 (蛇形阅读顺序 + 选中移动 + 邻居窗口)
+// ---------------------------------------------------------------------------
+
+export interface ReadingOrderEntry {
+  id: string;
+  rowIndex: number;
+  /** Ordering date — the event's newest day (end for ranges). */
+  date: string;
+  startedOn?: string | null;
+}
+
+/**
+ * 蛇形阅读顺序 (最新 → 最久): rows top-down (rowIndex asc IS time
+ * descending, rows tile contiguously), within a row newest date first — that
+ * IS the row's read direction on both mirrored and normal rows. Ties break
+ * by started_on (earliest first, matching the same-day fan; nulls last) then
+ * id, so the walk is deterministic. Chip members are just placed events —
+ * they ride the same sequence as independent nodes. Events appearing in
+ * several rows (a long bar) dedupe to their newest-row occurrence.
+ */
+export function buildReadingOrder(entries: ReadingOrderEntry[]): string[] {
+  const seen = new Set<string>();
+  return entries
+    .filter((entry) => {
+      if (seen.has(entry.id)) {
+        return false;
+      }
+      seen.add(entry.id);
+      return true;
+    })
+    .sort((a, b) => {
+      if (a.rowIndex !== b.rowIndex) {
+        return a.rowIndex - b.rowIndex;
+      }
+      if (a.date !== b.date) {
+        return a.date < b.date ? 1 : -1;
+      }
+      if ((a.startedOn ? 1 : 0) !== (b.startedOn ? 1 : 0)) {
+        return a.startedOn ? -1 : 1;
+      }
+      if (a.startedOn && b.startedOn && a.startedOn !== b.startedOn) {
+        return a.startedOn < b.startedOn ? -1 : 1;
+      }
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    })
+    .map((entry) => entry.id);
+}
+
+/**
+ * Move the selection along the reading order. `delta` +1 = 向过去, −1 =
+ * 向现在. No selection (or an id that fell out of view) selects the FIRST
+ * (newest) event regardless of direction; the walk clamps at both ends.
+ */
+export function moveReadingSelection(
+  order: string[],
+  currentId: string | null,
+  delta: number,
+): string | null {
+  if (order.length === 0) {
+    return null;
+  }
+  if (currentId == null) {
+    return order[0];
+  }
+  const index = order.indexOf(currentId);
+  if (index < 0) {
+    return order[0];
+  }
+  return order[Math.min(Math.max(index + (delta > 0 ? 1 : -1), 0), order.length - 1)];
+}
+
+/**
+ * Inspector neighbor window: up to `count` events BEFORE (newer, 前) and
+ * AFTER (older, 后) the current one in reading order.
+ */
+export function neighborWindow(
+  order: string[],
+  currentId: string,
+  count: number = 3,
+): { before: string[]; after: string[] } {
+  const index = order.indexOf(currentId);
+  if (index < 0) {
+    return { before: [], after: [] };
+  }
+  return {
+    before: order.slice(Math.max(0, index - count), index),
+    after: order.slice(index + 1, index + 1 + count),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // URL 视图状态 (view=story 还原)
 // ---------------------------------------------------------------------------
 

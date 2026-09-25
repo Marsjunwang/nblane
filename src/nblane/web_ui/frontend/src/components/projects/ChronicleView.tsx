@@ -39,6 +39,7 @@ import type {
 } from './chronicleMath';
 import {
   buildChronicleRows,
+  buildReadingOrder,
   buildRowScale,
   chronicleDateToX,
   chronicleLabelWidth,
@@ -58,6 +59,8 @@ import {
   filterChronicleEvents,
   LABEL_TRUNCATE_KEEP,
   layoutChronicleLabels,
+  moveReadingSelection,
+  neighborWindow,
   panChronicle,
   sameDayFanOffsets,
   zoomChronicle,
@@ -219,7 +222,9 @@ function EventMark({
   placement,
   projectTitle,
   cardOpen,
+  selected,
   onOpenCard,
+  onSelect,
   onScheduleClose,
   onToggleProject,
   projectFiltered,
@@ -229,7 +234,10 @@ function EventMark({
   placement: ChronicleLabelPlacement | undefined;
   projectTitle: string;
   cardOpen: boolean;
+  /** 键盘/画布选中态: 描金高亮. */
+  selected: boolean;
   onOpenCard: () => void;
+  onSelect: () => void;
   onScheduleClose: () => void;
   onToggleProject: (projectId: string) => void;
   projectFiltered: boolean;
@@ -432,15 +440,19 @@ function EventMark({
             data-testid={`chronicle-event-${event.id}`}
             data-kind={event.kind}
             data-archived={faded || undefined}
+            data-selected={selected || undefined}
             onMouseEnter={onOpenCard}
             onMouseLeave={onScheduleClose}
             onClick={(clickEvent) => {
               clickEvent.stopPropagation();
+              onSelect();
               onOpenCard();
             }}
             onKeyDown={(keyEvent) => {
               if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
                 keyEvent.preventDefault();
+                keyEvent.stopPropagation();
+                onSelect();
                 onOpenCard();
               }
             }}
@@ -451,6 +463,8 @@ function EventMark({
               width: isPoint ? 10 : Math.max(width, 4) + 4,
               height: event.kind === 'done' ? 27 : 20,
               cursor: 'pointer',
+              borderRadius: 6,
+              boxShadow: selected ? `0 0 0 1.5px ${GOLD}, 0 0 6px rgba(220, 174, 85, 0.45)` : undefined,
             }}
           >
             {mark}
@@ -581,6 +595,164 @@ function LabelChip({
   );
 }
 
+/** One inspector neighbor row (or the highlighted current row). */
+function InspectorRow({
+  event,
+  projectTitle,
+  current,
+  onJump,
+}: {
+  event: ChronicleEvent;
+  projectTitle: string;
+  current: boolean;
+  onJump: (id: string) => void;
+}) {
+  return (
+    <Group
+      gap={6}
+      wrap="nowrap"
+      role="button"
+      tabIndex={0}
+      data-testid={`chronicle-inspector-row-${event.id}`}
+      data-current={current || undefined}
+      title={projectTitle ? `${event.title} · ${projectTitle}` : event.title}
+      onClick={() => onJump(event.id)}
+      onKeyDown={(keyEvent) => {
+        if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+          keyEvent.preventDefault();
+          onJump(event.id);
+        }
+      }}
+      style={{
+        padding: '2px 6px',
+        borderRadius: 4,
+        cursor: 'pointer',
+        background: current ? 'rgba(220, 174, 85, 0.12)' : undefined,
+        boxShadow: current ? `inset 2px 0 0 ${GOLD}` : undefined,
+      }}
+    >
+      <Text
+        component="span"
+        style={{ width: 12, fontSize: 9, color: MOON, opacity: event.archived ? 0.45 : 0.8 }}
+      >
+        {event.glyph}
+      </Text>
+      <Text
+        component="span"
+        lineClamp={1}
+        style={{
+          flex: 1,
+          fontSize: 11,
+          fontFamily: LABEL_FONT,
+          color: current ? GOLD_TEXT : event.archived ? boardPalette.dim : inscription.bodyColor,
+        }}
+      >
+        {event.badge ? `[${event.badge}] ` : ''}
+        {event.title}
+      </Text>
+      <Text
+        component="span"
+        style={{ fontSize: 9.5, color: boardPalette.dim, fontFamily: LABEL_FONT, flexShrink: 0 }}
+      >
+        {event.dateLabel}
+      </Text>
+    </Group>
+  );
+}
+
+/**
+ * 上下文小窗 (inspector): fixed bottom-right floating panel, 石刻风 (ground
+ * 底 + 细金边,半透不挡轴). Shows the selected event's mini 铭文卡 plus the
+ * reading-order neighbors (前 3 / 后 3, current row highlighted); clicking a
+ * neighbor jumps the selection. Auto-hides with no selection.
+ */
+function ChronicleInspector({
+  event,
+  projectTitle,
+  before,
+  after,
+  eventById,
+  projectTitles,
+  onJump,
+}: {
+  event: ChronicleEvent;
+  projectTitle: string;
+  before: string[];
+  after: string[];
+  eventById: Map<string, ChronicleEvent>;
+  projectTitles: Map<string, string>;
+  onJump: (id: string) => void;
+}) {
+  const statusLine = [
+    STATUS_LABELS[event.kind],
+    event.overdue ? '已过期' : '',
+    event.archived ? '归档' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const neighbors = [...before, event.id, ...after];
+  return (
+    <Box
+      data-testid="chronicle-inspector"
+      style={{
+        position: 'fixed',
+        right: 20,
+        bottom: 20,
+        width: 320,
+        zIndex: 300,
+        background: boardPalette.ground,
+        border: `1px solid ${inscription.borderColor}`,
+        borderRadius: 10,
+        padding: '10px 12px',
+        boxShadow: '0 6px 24px rgba(0, 0, 0, 0.45)',
+        opacity: 0.96,
+      }}
+    >
+      <Text size="xs" mb={6} style={{ color: DIM_DEEP, fontSize: 10 }} data-testid="chronicle-inspector-hint">
+        ←/→ 或 j/k 移动 · Enter 详情 · Esc 关闭
+      </Text>
+      <Stack gap={2} mb={6}>
+        <Text
+          size="sm"
+          fw={600}
+          lineClamp={1}
+          style={{ color: inscription.titleColor, fontFamily: inscription.titleFontFamily }}
+        >
+          {event.glyph ? `${event.glyph} ` : ''}
+          {event.badge ? `[${event.badge}] ` : ''}
+          {event.title}
+        </Text>
+        {projectTitle && (
+          <Text size="xs" style={{ color: inscription.accentColor }}>
+            {projectTitle}
+            {event.archived ? '（归档）' : ''}
+          </Text>
+        )}
+        <Text size="xs" style={{ color: inscription.bodyColor, fontFamily: inscription.bodyFontFamily }}>
+          {event.start === event.end ? event.start : `${event.start} → ${event.end}`} · {statusLine}
+        </Text>
+      </Stack>
+      <Stack gap={1} data-testid="chronicle-inspector-neighbors">
+        {neighbors.map((id) => {
+          const neighbor = eventById.get(id);
+          if (!neighbor) {
+            return null;
+          }
+          return (
+            <InspectorRow
+              key={id}
+              event={neighbor}
+              projectTitle={projectTitles.get(neighbor.projectId) ?? ''}
+              current={id === event.id}
+              onJump={onJump}
+            />
+          );
+        })}
+      </Stack>
+    </Box>
+  );
+}
+
 export function ChronicleView({
   board,
   groups,
@@ -700,6 +872,126 @@ export function ChronicleView({
       ),
     [rows, breaks, plotW, expandedBreaks],
   );
+
+  // Per-row placed events, hoisted so the keyboard reading order and the row
+  // render share one computation.
+  const placedByRow = useMemo(
+    () => rowScales.map((scale) => placeEvents(events, scale)),
+    [rowScales, events],
+  );
+  const eventById = useMemo(
+    () => new Map(events.map((event) => [event.id, event])),
+    [events],
+  );
+
+  // 键盘导航: 蛇形阅读顺序 (最新→最久, chip 成员是独立节点), selection is
+  // an event id; the ring/Enter row comes from its newest-row occurrence.
+  const readingOrder = useMemo(
+    () =>
+      buildReadingOrder(
+        placedByRow.flatMap((placed, rowIndex) =>
+          placed.map((entry) => ({
+            id: entry.event.id,
+            rowIndex,
+            date: entry.event.end,
+            startedOn: entry.event.startedOn,
+          })),
+        ),
+      ),
+    [placedByRow],
+  );
+  const selectionRowById = useMemo(() => {
+    const map = new Map<string, number>();
+    placedByRow.forEach((placed, rowIndex) => {
+      for (const entry of placed) {
+        if (!map.has(entry.event.id)) {
+          map.set(entry.event.id, rowIndex);
+        }
+      }
+    });
+    return map;
+  }, [placedByRow]);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // Prune a selection that fell out of the visible data (pan/zoom/filter).
+  useEffect(() => {
+    if (selectedEventId && !readingOrder.includes(selectedEventId)) {
+      setSelectedEventId(null);
+    }
+  }, [readingOrder, selectedEventId]);
+  // 自动滚动到可见 (the chronicle rarely overflows, but the contract stands).
+  useEffect(() => {
+    if (!selectedEventId) {
+      return;
+    }
+    const element = viewportRef.current?.querySelector<HTMLElement>(
+      `[data-testid="chronicle-event-${selectedEventId}"]`,
+    );
+    element?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [selectedEventId]);
+
+  const moveSelection = (delta: number) => {
+    setSelectedEventId(moveReadingSelection(readingOrder, selectedEventId, delta));
+  };
+
+  // Keyboard: ←/↑/k = 向现在, →/↓/j = 向过去 (方向沿阅读路径,不是屏幕左右);
+  // Enter opens the 铭文卡, Esc cancels. No selection + any direction key
+  // selects the first (newest) event.
+  const onViewportKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      setOpenCardId(null);
+      setSelectedEventId(null);
+      return;
+    }
+    if (event.key === 'Enter') {
+      if (selectedEventId) {
+        event.preventDefault();
+        openCard(`${selectionRowById.get(selectedEventId) ?? 0}:${selectedEventId}`);
+      }
+      return;
+    }
+    const delta =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'j'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'k'
+          ? -1
+          : 0;
+    if (!delta) {
+      return;
+    }
+    event.preventDefault();
+    moveSelection(delta);
+  };
+
+  // 画布任意处点击 = 选中最近事件并接管键盘 (marks stopPropagation, so this
+  // only fires on bare ground / labels).
+  const onViewportClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    viewport.focus();
+    const rect = viewport.getBoundingClientRect();
+    const unit = CHRONICLE_ROW_HEIGHT + CHRONICLE_ELBOW_HEIGHT;
+    const rowIndex = Math.min(
+      Math.max(Math.floor((event.clientY - rect.top) / unit), 0),
+      placedByRow.length - 1,
+    );
+    const placed = placedByRow[rowIndex] ?? [];
+    if (placed.length === 0) {
+      return;
+    }
+    const x = event.clientX - rect.left;
+    let best = placed[0];
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const entry of placed) {
+      const distance = Math.abs(entry.cx - x);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = entry;
+      }
+    }
+    setSelectedEventId(best.event.id);
+  };
 
   // Latest-layout ref for the wheel handler (bound once, reads live state).
   const liveRef = useRef({ span, anchor, rowScales, today });
@@ -857,13 +1149,17 @@ export function ChronicleView({
         </Button>
       </Group>
 
-      {/* The chronicle owns the vertical wheel (pan) — no page scroll chaining. */}
+      {/* The chronicle owns the vertical wheel (pan) — no page scroll chaining.
+          Keyboard: ←/↑/k 向现在, →/↓/j 向过去, Enter 铭文卡, Esc 取消. */}
       <Box
         ref={viewportRef}
         data-testid="chronicle-scrollport"
+        tabIndex={0}
         h="calc(100vh - 236px)"
         mih={320}
-        style={{ overflow: 'hidden', position: 'relative' }}
+        onKeyDown={onViewportKeyDown}
+        onClick={onViewportClick}
+        style={{ overflow: 'hidden', position: 'relative', outline: 'none' }}
       >
         {rows.map((row, rowIndex) => {
           const scale = rowScales[rowIndex];
@@ -939,7 +1235,7 @@ export function ChronicleView({
             );
           }
 
-          const placed = placeEvents(events, scale);
+          const placed = placedByRow[rowIndex];
           const placedById = new Map(placed.map((entry) => [entry.event.id, entry]));
           const todayX = today ? chronicleDateToX(scale, today) : null;
           const layout = layoutChronicleLabels(
@@ -1087,7 +1383,9 @@ export function ChronicleView({
                     placement={placementById.get(entry.event.id)}
                     projectTitle={projectTitles.get(entry.event.projectId) ?? ''}
                     cardOpen={openCardId === `${rowIndex}:${entry.event.id}`}
+                    selected={selectedEventId === entry.event.id}
                     onOpenCard={() => openCard(`${rowIndex}:${entry.event.id}`)}
+                    onSelect={() => setSelectedEventId(entry.event.id)}
                     onScheduleClose={scheduleClose}
                     onToggleProject={toggleProject}
                     onEditTask={onEditTask}
@@ -1160,6 +1458,30 @@ export function ChronicleView({
           );
         })}
       </Box>
+
+      {/* 上下文小窗: 选中事件时出现,无选中自动收起。 */}
+      {selectedEventId &&
+        (() => {
+          const selected = eventById.get(selectedEventId);
+          if (!selected) {
+            return null;
+          }
+          const { before, after } = neighborWindow(readingOrder, selectedEventId, 3);
+          return (
+            <ChronicleInspector
+              event={selected}
+              projectTitle={projectTitles.get(selected.projectId) ?? ''}
+              before={before}
+              after={after}
+              eventById={eventById}
+              projectTitles={projectTitles}
+              onJump={(id) => {
+                setSelectedEventId(id);
+                viewportRef.current?.focus();
+              }}
+            />
+          );
+        })()}
     </Stack>
   );
 }

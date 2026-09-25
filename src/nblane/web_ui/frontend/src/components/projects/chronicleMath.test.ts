@@ -23,7 +23,10 @@ import {
   detectBreaks,
   encodeChronicleParams,
   filterChronicleEvents,
+  buildReadingOrder,
   layoutChronicleLabels,
+  moveReadingSelection,
+  neighborWindow,
   panChronicle,
   projectBadge,
   projectGlyph,
@@ -490,6 +493,69 @@ describe('chronicleMath same-day done fan', () => {
     );
     expect(ties.get('a')).toBe(0);
     expect(ties.get('b')).toBe(10);
+  });
+});
+
+describe('chronicleMath reading order (键盘导航)', () => {
+  const entry = (
+    id: string,
+    rowIndex: number,
+    date: string,
+    startedOn: string | null = null,
+  ) => ({ id, rowIndex, date, startedOn });
+
+  it('walks rows newest-first and each row newest-date-first (翻转行同序)', () => {
+    // Row 0 mirrored (newest at left), row 1 ltr — date-desc within the row
+    // IS the read direction on both.
+    const order = buildReadingOrder([
+      entry('r0-new', 0, '2026-09-20'),
+      entry('r0-old', 0, '2026-08-01'),
+      entry('r1-new', 1, '2026-07-20'),
+      entry('r1-old', 1, '2026-06-01'),
+    ]);
+    expect(order).toEqual(['r0-new', 'r0-old', 'r1-new', 'r1-old']);
+  });
+
+  it('includes chip members as independent nodes and dedupes cross-row bars', () => {
+    const order = buildReadingOrder([
+      entry('bar', 0, '2026-09-25'), // a doing bar clipped into row 0 …
+      entry('chip-member', 0, '2026-09-24'),
+      entry('bar', 1, '2026-09-25'), // … and row 1 — kept once, in row 0
+      entry('r1', 1, '2026-07-01'),
+    ]);
+    expect(order).toEqual(['bar', 'chip-member', 'r1']);
+  });
+
+  it('breaks same-date ties by started_on (fan order), then id', () => {
+    const order = buildReadingOrder([
+      entry('b', 0, '2026-06-16', '2026-06-05'),
+      entry('a', 0, '2026-06-16', '2026-06-01'),
+      entry('c', 0, '2026-06-16'),
+    ]);
+    expect(order).toEqual(['a', 'b', 'c']);
+  });
+
+  it('moves along the order with clamped boundaries', () => {
+    const order = ['e1', 'e2', 'e3'];
+    expect(moveReadingSelection(order, null, 1)).toBe('e1'); // 无选中 → 第一个
+    expect(moveReadingSelection(order, null, -1)).toBe('e1');
+    expect(moveReadingSelection(order, 'e1', -1)).toBe('e1'); // 首端钳制
+    expect(moveReadingSelection(order, 'e1', 1)).toBe('e2');
+    expect(moveReadingSelection(order, 'e2', 1)).toBe('e3');
+    expect(moveReadingSelection(order, 'e3', 1)).toBe('e3'); // 尾端钳制
+    expect(moveReadingSelection(order, 'gone', 1)).toBe('e1'); // 掉出视图 → 第一个
+    expect(moveReadingSelection([], null, 1)).toBeNull();
+  });
+
+  it('computes the inspector neighbor window (前 3 / 后 3)', () => {
+    const order = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8'];
+    expect(neighborWindow(order, 'e4')).toEqual({
+      before: ['e1', 'e2', 'e3'],
+      after: ['e5', 'e6', 'e7'],
+    });
+    expect(neighborWindow(order, 'e1')).toEqual({ before: [], after: ['e2', 'e3', 'e4'] });
+    expect(neighborWindow(order, 'e8')).toEqual({ before: ['e5', 'e6', 'e7'], after: [] });
+    expect(neighborWindow(order, 'gone')).toEqual({ before: [], after: [] });
   });
 });
 
